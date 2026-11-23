@@ -1,0 +1,15 @@
+# BLASTP 2.17.0+
+# Query: qseg low complexity
+# Database: User specified sequence set (Input: tests/db_search/x16_taxid.faa)
+# BLASTP 2.17.0+
+# Query: qp1 query protein one
+# Database: User specified sequence set (Input: tests/db_search/x16_taxid.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+qp1	st2	100.000	135	0	0	6	140	1	135	1.63e-107	369
+qp1	st2	50.000	10	5	0	90	99	58	67	3.1	13.2
+qp1	st2	50.000	10	5	0	63	72	85	94	3.1	13.2
+qp1	st1	100.000	130	0	0	1	130	1	130	7.83e-105	360
+qp1	st1	50.000	10	5	0	90	99	63	72	3.1	13.2
+qp1	st1	50.000	10	5	0	63	72	90	99	3.1	13.2
+# BLAST processed 2 queries

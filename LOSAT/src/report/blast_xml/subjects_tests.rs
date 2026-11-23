@@ -20,6 +20,7 @@ fn the_hit_of_a_subject_whose_lookup_throws_raises_the_lookup_exception() {
             )],
             ..Default::default()
         }],
+        utf8: false,
     };
     let failure = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
     let exception = failure.exception().unwrap();

@@ -17,8 +17,10 @@ import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
 import {
   chooseRun,
+  commandPattern,
   described,
   fasta,
+  madeName,
   openFiles,
   openParameters,
   openSearch,
@@ -255,8 +257,8 @@ test('several runs; the next search is edited while one runs; separate searches 
   // The page goes to the results of the first run of the group.
   await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('run-3-option')).toHaveCount(1);
-  await expect(page.getByTestId('run-2-option')).toContainText('query.fa vs a.fa');
-  await expect(page.getByTestId('run-3-option')).toContainText('query.fa vs b.fa');
+  await expect(page.getByTestId('run-2-option')).toContainText('pasted text vs a.fa');
+  await expect(page.getByTestId('run-3-option')).toContainText('pasted text vs b.fa');
   await expect(page.getByTestId('results-run-options')).toContainText('group run 1 of 2');
   await pickRun(page, 3);
   await expect(page.getByTestId('results-run-options')).toContainText('-evalue 1e-3');
@@ -301,7 +303,7 @@ test('several runs; the next search is edited while one runs; separate searches 
     await waitStatus(page, 3, 'completed');
   }
   const last = await result(page, BUILD_HAS_ENGINE ? 5 : 3, 6);
-  expect(last.command).toBe('losat tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
+  expect(last.command).toMatch(commandPattern('losat tblastx -query ', { source: madeName(BUILD_HAS_ENGINE ? 5 : 3, 'tblastx', 'query') }, ' -subject b.fa -evalue 1e-3 -outfmt 6'));
 });
 
 test('cancel a running search; the next one runs', async ({ page }) => {
@@ -387,8 +389,8 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await submit(page);
   await waitStatus(page, 1, 'completed');
   await expect(page.getByTestId('results-run-options')).toContainText('-subject_loc 5-60');
-  expect((await result(page, 1, 6)).command).toBe(
-    'losat blastn -query query.fa -subject subject.fa -query_loc 3-20 -subject_loc 5-60 -outfmt 6',
+  expect((await result(page, 1, 6)).command).toMatch(
+    commandPattern('losat blastn -query ', { source: madeName(1, 'blastn', 'query') }, ' -subject ', { source: madeName(1, 'blastn', 'subject') }, ' -query_loc 3-20 -subject_loc 5-60 -outfmt 6'),
   );
 });
 
@@ -414,7 +416,9 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  expect((await result(page, 1, 7)).command).toBe('losat tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
+  expect((await result(page, 1, 7)).command).toMatch(
+    commandPattern('losat tblastx -query ', { source: madeName(1, 'tblastx', 'query') }, ' -subject ', { source: madeName(1, 'tblastx', 'subject') }, ' -db_gencode 11 -outfmt 7'),
+  );
   // The run's mark is one of its words; the approved exception is in the run's details and in
   // the mark's title, not in the mark (the maintainer, 2026-11-04).
   await chooseRun(page, 1);
@@ -656,9 +660,13 @@ test("a negative value is shown as the option's value in the run's options and c
   await expect(page.getByTestId('results-run-options')).toHaveText('-penalty -3');
   await expect(names('results-run-options')).toHaveText(['-penalty']);
   await page.getByTestId('results-view-details').click();
-  await expect(page.getByTestId('run-argv')).toHaveText('blastn -query query.fa -subject subject.fa -penalty -3');
+  await expect(page.getByTestId('run-argv')).toHaveText(
+    commandPattern('blastn -query ', { source: madeName(1, 'blastn', 'query') }, ' -subject ', { source: madeName(1, 'blastn', 'subject') }, ' -penalty -3'),
+  );
   await expect(names('run-argv')).toHaveText(['-query', '-subject', '-penalty']);
-  await expect(page.getByTestId('run-command-6')).toHaveText('losat blastn -query query.fa -subject subject.fa -penalty -3 -outfmt 6');
+  await expect(page.getByTestId('run-command-6')).toHaveText(
+    commandPattern('losat blastn -query ', { source: madeName(1, 'blastn', 'query') }, ' -subject ', { source: madeName(1, 'blastn', 'subject') }, ' -penalty -3 -outfmt 6'),
+  );
   await expect(names('run-command-6')).toHaveText(['-query', '-subject', '-penalty', '-outfmt']);
 });
 
@@ -762,7 +770,9 @@ test("records left out and a subrange stay through a mode that reads the role wi
   await waitStatus(page, 1, 'completed');
   await chooseRun(page, 1);
   await expect(page.getByTestId('results-run-options')).toContainText('-query_loc 2-12');
-  expect((await result(page, 1, 6)).command).toBe('losat blastn -query query.fa -subject subject.fa -query_loc 2-12 -outfmt 6');
+  expect((await result(page, 1, 6)).command).toMatch(
+    commandPattern('losat blastn -query ', { source: madeName(1, 'blastn', 'query') }, ' -subject ', { source: madeName(1, 'blastn', 'subject') }, ' -query_loc 2-12 -outfmt 6'),
+  );
 });
 
 // An input without a sequence is run as the command line runs it (rc 0 and a warning), and the results say

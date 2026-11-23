@@ -543,7 +543,7 @@ fn a_pssm_whose_scores_can_add_up_to_2_30_is_refused() {
             SeqData::Iupacaa(letters) | SeqData::Ncbieaa(letters) | SeqData::Ncbistdaa(letters) => {
                 *letters = vec![letters[0]; columns];
             }
-            SeqData::Other(_) => unreachable!("the test's PSSM is NCBIstdaa"),
+            _ => unreachable!("the test's PSSM is NCBIstdaa"),
         }
         psi_search_of(pssm)
     };
@@ -664,12 +664,16 @@ fn empty_annotations_give_no_messages() {
 
 // The review of PS4a, S2 and N3: the record's local id is the Seq-id's `GetSeqIdString()`
 // (NCBI 2.17.0: `local id 5` shows as `5`, `local id -3` as `-3`, in `qseqid` and the warnings).
+// The record's Seq-id is the Bioseq's, with or without `-parse_deflines` (review of PS15b-1, B2:
+// NCBI's Seq-aligns of `local id 5` write `local id 5`, not `local str "5"`).
 #[test]
 fn the_local_id_is_the_seq_id_string() {
     for (id, shown) in [
         (ObjectId::Str(b"myq".to_vec()), "myq"),
         (ObjectId::Id(5), "5"),
         (ObjectId::Id(-3), "-3"),
+        (ObjectId::Id(0), "0"),
+        (ObjectId::Id(i32::MAX), "2147483647"),
     ] {
         let mut pssm = rnd();
         pssm.pssm
@@ -677,11 +681,25 @@ fn the_local_id_is_the_seq_id_string() {
             .as_mut()
             .and_then(SeqEntry::seq_mut)
             .unwrap()
-            .ids = vec![ParsedSeqId::Local(id)];
+            .ids = vec![ParsedSeqId::Local(id.clone())];
         let search = psi_search_of(pssm).unwrap();
         assert_eq!(search.query.local_id, shown);
         assert!(search.query.believed().is_none());
+        assert_eq!(search.query.warning_id(), shown.as_bytes());
         assert!(search.query_record(true).believed().is_some());
+        let parsed = ParsedSeqId::Local(id);
+        for record in [search.query_record(false), search.query_record(true)] {
+            // The Seq-id object that the Seq-aligns write (`SeqId::write`).
+            let written = match record.seq_id() {
+                crate::report::seqid::SeqId::Db(id) => id.clone(),
+                crate::report::seqid::SeqId::Local(text) => {
+                    ParsedSeqId::Local(ObjectId::Str(text.as_bytes().to_vec()))
+                }
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(written, parsed);
+        }
+        assert_eq!(search.query_seq_loc_id(), Some(&parsed));
     }
 }
 

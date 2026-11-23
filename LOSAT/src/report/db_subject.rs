@@ -56,6 +56,11 @@ pub struct ParsedSubject {
     /// (`FoundInstead::Sequence`, `Nothing`): NCBI's scope can read it for this one where it has
     /// read it before (`also_held`, `pssm_read`).
     also_held: Option<DbSequence>,
+    /// The sequence (`DbSequence`) that the lookup of the Seq-align id gives first where that is
+    /// another one whose header record holds a UTF8String where a VisibleString is expected, read
+    /// before the run posted NCBI's warning (`scope_utf8`): NCBI's scope reads that header
+    /// wherever it resolves the id, and the warning comes there (`fetched`, `pssm_read`).
+    scope_utf8: Option<DbSequence>,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
     /// The name of the organism of the subject Bioseq's first source, from which NCBI makes its
@@ -425,6 +430,7 @@ impl ParsedSubject {
             found_instead: None,
             weak_match: None,
             also_held: None,
+            scope_utf8: None,
             show_gis: false,
             source: SourceTaxname::Unnamed,
             record: false,
@@ -453,6 +459,7 @@ impl ParsedSubject {
                     ids: ids.ids.clone(),
                     ..BlastDefline::default()
                 }],
+                utf8: false,
             },
             alignment_id: ids.best.clone(),
             target: 0,
@@ -460,6 +467,7 @@ impl ParsedSubject {
             found_instead: None,
             weak_match: None,
             also_held: None,
+            scope_utf8: None,
             show_gis: false,
             source: SourceTaxname::Unnamed,
             record: true,
@@ -509,6 +517,26 @@ impl ParsedSubject {
     pub fn also_held(mut self, holder: Option<DbSequence>) -> Self {
         self.also_held = holder;
         self
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393-406
+    /// The subject with `other`, the sequence whose header the lookup of the Seq-align id reads
+    /// first where it holds a UTF8String where a VisibleString is expected (its version check of
+    /// an accession, or the sequence it gives first where that is another one;
+    /// `common::database::HeaderReader`): NCBI's data loader reads that header (`x_GetOid`'s
+    /// `GetSeqIDs` of the first OID) wherever its scope resolves the id, and posts the warning
+    /// there where the run has not (probe of line RG item T5d fix 3): the load of the id in LOSAT's
+    /// model of the loads (`common::database::load_read_texts`: a batch's prefetch, a report that
+    /// reads its subjects one by one, psiblast's PSSM).
+    pub fn scope_utf8(mut self, other: Option<DbSequence>) -> Self {
+        self.scope_utf8 = other;
+        self
+    }
+
+    /// `scope_utf8`: the other sequence whose header NCBI reads with its warning where it
+    /// resolves this subject's Seq-align id.
+    pub fn scope_utf8_read(&self) -> Option<DbSequence> {
+        self.scope_utf8
     }
 
     /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
@@ -2737,6 +2765,18 @@ impl HitLoads {
     /// reach is not prefetched either (NCBI's application ends before it, `CATCH_ALL`).
     pub fn reaches(&self, report: usize) -> bool {
         self.reached.is_none_or(|reached| report < reached)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp (`SeqidToOid`,
+    // cited at `common::database::HeaderReader::found_instead`): the lookup of a Seq-align id reads
+    // the headers of its candidates (the version check) before it throws on a volume's file.
+    /// Whether a report's load reaches the subject `key`, which makes the lookup of its Seq-align id
+    /// (`HitLoad::Loaded` or `HitLoad::Throws`, not `HitLoad::Unread`): the lookup that throws has
+    /// read the headers of the candidates before it, and posts NCBI's warning of a UTF8String
+    /// header among them (`ParsedSubject::scope_utf8_read`, `common::database::load_read_texts`),
+    /// though nothing of the subject is loaded (`loaded`: no taxonomy text, no definition line).
+    pub fn reached(&self, key: usize) -> bool {
+        self.load(key) != HitLoad::Unread
     }
 
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).

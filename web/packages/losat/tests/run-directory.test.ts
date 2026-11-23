@@ -4,11 +4,14 @@
 import { describe, expect, it } from 'vitest';
 import { FILE_FD_BASE, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
 
-const ERRNO = { SUCCESS: 0, BADF: 8, INVAL: 28, IO: 29, ISDIR: 31, NAMETOOLONG: 37, NOENT: 44, NOTDIR: 54, ROFS: 69, NOTCAPABLE: 76 };
+const ERRNO = { SUCCESS: 0, BADF: 8, EXIST: 20, INVAL: 28, IO: 29, ISDIR: 31, NAMETOOLONG: 37, NOENT: 44, NOTDIR: 54, ROFS: 69, NOTCAPABLE: 76 };
 const RIGHT_FD_READ = 1n << 1n;
 const RIGHT_FD_WRITE = 1n << 6n;
 const OFLAGS_CREAT = 1;
+const OFLAGS_DIRECTORY = 2;
 const OFLAGS_TRUNC = 8;
+const FILETYPE_DIRECTORY = 3;
+const FILETYPE_REGULAR_FILE = 4;
 
 type Call = (...args: Array<number | bigint>) => number;
 
@@ -47,6 +50,8 @@ function guest(directory: RunDirectory) {
     'fd_close',
     'fd_advise',
     'fd_readdir',
+    'fd_fdstat_set_flags',
+    'fd_sync',
   ]) {
     base[name] = () => ERRNO.BADF;
   }
@@ -67,6 +72,11 @@ function guest(directory: RunDirectory) {
     view,
     open(name: string, oflags = 0, rights = RIGHT_FD_READ): { errno: number; fd: number } {
       const errno = wasi.path_open!(PREOPEN_FD, 0, ...path(name), oflags, rights, 0n, 0, OUT);
+      return { errno, fd: view().getUint32(OUT, true) };
+    },
+    /** `path_open` of `name` relative to the open descriptor `dirfd`. */
+    openFrom(dirfd: number, name: string): { errno: number; fd: number } {
+      const errno = wasi.path_open!(dirfd, 0, ...path(name), 0, RIGHT_FD_READ, 0n, 0, OUT);
       return { errno, fd: view().getUint32(OUT, true) };
     },
     stat(name: string): { errno: number; type: number; size: bigint } {
@@ -166,7 +176,6 @@ describe("the run's working directory", () => {
     expect(g.stat('.')).toMatchObject({ errno: 0, type: 3 });
     expect(g.stat('db/nt.pin').errno).toBe(ERRNO.NOENT);
     expect(g.open('nt.nal').errno).toBe(ERRNO.NOENT);
-    expect(g.open('db').errno).toBe(ERRNO.ISDIR);
     // Out of the directory: WASI's capability, as the command line's sandbox would refuse.
     expect(g.open('../etc/passwd').errno).toBe(ERRNO.NOTCAPABLE);
     // A path is looked up one name after another, as the OS looks it up: `..` after a name that is not there, or
@@ -181,6 +190,102 @@ describe("the run's working directory", () => {
     // No file of the directory is a link.
     g.view().setUint16(1024, 0x6264, true); // "db"
     expect(g.wasi.path_readlink!(PREOPEN_FD, 1024, 2, 0, 0, 2048)).toBe(ERRNO.INVAL);
+  });
+
+  // Measured 2026-11-23 with the command line: `windowmasker -ustat counts/u4.ascii -in fa` with `fa` a folder prints "basic_filebuf::xsgetn
+  // error reading the file: Is a directory" (exit 3): on Linux the open of a folder for reading succeeds and its read fails with EISDIR.
+  it('opens a folder for reading as Linux does, and fails its reads with EISDIR', () => {
+    const { directory, reader } = directoryOf({ 'fa/dm2L_3k.fa': 'ACGT', 'fa/sub/x': 'x', 'ids.txt': 'P1\n' });
+    const g = guest(directory);
+    for (const name of ['fa', 'fa/', './fa', 'fa/sub/..', '.']) {
+      const opened = g.open(name);
+      expect(opened.errno, name).toBe(ERRNO.SUCCESS);
+      expect(opened.fd).toBeGreaterThanOrEqual(FILE_FD_BASE);
+      expect(g.wasi.fd_close!(opened.fd)).toBe(ERRNO.SUCCESS);
+    }
+    const { fd } = g.open('fa');
+    expect(g.read(fd, 10).errno).toBe(ERRNO.ISDIR);
+    expect(g.pread(fd, 10, 0n).errno).toBe(ERRNO.ISDIR);
+    // No byte of any file was read from a Blob.
+    expect(reader.reads).toEqual([]);
+    // The stat calls say directory, and the descriptor is a directory's.
+    expect(g.wasi.fd_filestat_get!(fd, 2048)).toBe(ERRNO.SUCCESS);
+    expect(g.view().getUint8(2048 + 16)).toBe(FILETYPE_DIRECTORY);
+    expect(g.wasi.fd_fdstat_get!(fd, 2048)).toBe(ERRNO.SUCCESS);
+    expect(g.view().getUint8(2048)).toBe(FILETYPE_DIRECTORY);
+    // Writes are not allowed on a descriptor that is open for reading; seeks and syncs are.
+    expect(g.wasi.fd_write!(fd, 0, 0, 0)).toBe(ERRNO.BADF);
+    expect(g.seek(fd, 0n, 0)).toEqual({ errno: 0, at: 0n });
+    expect(g.wasi.fd_sync!(fd)).toBe(ERRNO.SUCCESS);
+    // Paths are looked up from it, as the OS looks up a path from an open folder: and a file of it is opened.
+    const inside = g.openFrom(fd, 'dm2L_3k.fa');
+    expect(inside.errno).toBe(ERRNO.SUCCESS);
+    expect(g.read(inside.fd, 4)).toEqual({ errno: 0, bytes: 'ACGT' });
+    expect(g.openFrom(fd, 'sub/x').errno).toBe(ERRNO.SUCCESS);
+    expect(g.openFrom(fd, '../ids.txt').errno).toBe(ERRNO.SUCCESS);
+    expect(g.openFrom(fd, '../../x').errno).toBe(ERRNO.NOTCAPABLE);
+    expect(g.openFrom(fd, 'nope').errno).toBe(ERRNO.NOENT);
+    // The descriptor ends with the close, and with the run.
+    expect(g.wasi.fd_close!(fd)).toBe(ERRNO.SUCCESS);
+    expect(g.read(fd, 1).errno).toBe(ERRNO.BADF);
+    expect(g.wasi.fd_close!(fd)).toBe(ERRNO.BADF);
+    const again = g.open('fa').fd;
+    directory.open([]);
+    expect(g.read(again, 1).errno).toBe(ERRNO.BADF);
+  });
+
+  it('still refuses to open a folder for writing, with O_CREAT or O_TRUNC, or as a file', () => {
+    const { directory } = directoryOf({ 'db/nt.nin': 'x' });
+    const g = guest(directory);
+    expect(g.open('db', 0, RIGHT_FD_READ | RIGHT_FD_WRITE).errno).toBe(ERRNO.ISDIR);
+    expect(g.open('db', OFLAGS_TRUNC).errno).toBe(ERRNO.ISDIR);
+    expect(g.open('db', OFLAGS_CREAT, RIGHT_FD_WRITE).errno).toBe(ERRNO.ISDIR);
+    expect(g.open('db', OFLAGS_CREAT | 4).errno).toBe(ERRNO.EXIST);
+    // O_DIRECTORY on a folder opens it; on a file, ENOTDIR.
+    expect(g.open('db', OFLAGS_DIRECTORY).errno).toBe(ERRNO.SUCCESS);
+    expect(g.open('db/nt.nin', OFLAGS_DIRECTORY).errno).toBe(ERRNO.NOTDIR);
+    // The stat of a folder by its path is unchanged: directory.
+    expect(g.stat('db')).toMatchObject({ errno: 0, type: FILETYPE_DIRECTORY });
+    expect(g.stat('db/nt.nin')).toMatchObject({ errno: 0, type: FILETYPE_REGULAR_FILE });
+  });
+
+  it('lists the entries of a folder descriptor: `.`, `..`, then its files and folders', () => {
+    const { directory } = directoryOf({ 'fa/b.fa': 'x', 'fa/a.fa': 'x', 'fa/sub/x': 'x', 'top': 'x' });
+    const g = guest(directory);
+    const names = (fd: number, room: number, cookie = 0n) => {
+      expect(g.wasi.fd_readdir!(fd, 8192, room, cookie, 2048)).toBe(ERRNO.SUCCESS);
+      const used = g.view().getUint32(2048, true);
+      const found: Array<{ name: string; type: number; next: bigint }> = [];
+      for (let at = 8192; at + 24 <= 8192 + used; ) {
+        const length = g.view().getUint32(at + 16, true);
+        if (at + 24 + length > 8192 + used) break;
+        found.push({
+          name: new TextDecoder().decode(new Uint8Array(g.view().buffer, at + 24, length)),
+          type: g.view().getUint8(at + 20),
+          next: g.view().getBigUint64(at, true),
+        });
+        at += 24 + length;
+      }
+      return { used, found };
+    };
+    const folder = g.open('fa').fd;
+    const all = names(folder, 4096);
+    expect(all.found.map((entry) => [entry.name, entry.type])).toEqual([
+      ['.', FILETYPE_DIRECTORY],
+      ['..', FILETYPE_DIRECTORY],
+      ['a.fa', FILETYPE_REGULAR_FILE],
+      ['b.fa', FILETYPE_REGULAR_FILE],
+      ['sub', FILETYPE_DIRECTORY],
+    ]);
+    // Less than the buffer is used: that is the end. A buffer that is too small is filled, and the cookie goes on.
+    expect(all.used).toBeLessThan(4096);
+    const small = names(folder, 60);
+    expect(small.used).toBe(60);
+    expect(small.found.map((entry) => entry.name)).toEqual(['.', '..']);
+    expect(names(folder, 4096, small.found.at(-1)!.next).found.map((entry) => entry.name)).toEqual(['a.fa', 'b.fa', 'sub']);
+    expect(names(g.open('.').fd, 4096).found.map((entry) => entry.name)).toEqual(['.', '..', 'fa', 'top']);
+    // A file is no directory.
+    expect(g.wasi.fd_readdir!(g.open('top').fd, 8192, 100, 0n, 2048)).toBe(ERRNO.NOTDIR);
   });
 
   it('is read-only', () => {

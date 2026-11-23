@@ -345,6 +345,68 @@ fn errors_are_ncbis_classes_and_what_the_search_does_not_take_is_kept() {
     ));
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:346-358,400-405
+// The nucleotide codings that makeprofiledb's database writer converts (row PS10d: IUPACna, a
+// StringStore; NCBI2na and NCBI4na, OCTET STRINGs) are typed: read from ASN.1 text and from ASN.1
+// binary, and written by the typed writer as the generic writer writes the value it read before
+// (the same bytes in text and in binary).
+#[test]
+fn nucleotide_seq_data_is_typed_and_written_as_the_generic_writer_writes_it() {
+    use crate::report::serial::asn_ber::AsnBinaryEncoder;
+    use crate::report::serial::encoder::Encoder;
+    use crate::report::serial::pssm::{write_value, SeqData};
+    let binary = |value: &PssmWithParameters| {
+        let mut out = Vec::new();
+        let mut enc = AsnBinaryEncoder::new(&mut out);
+        write_value(&mut enc, value);
+        assert_eq!(enc.error(), None);
+        drop(enc);
+        out
+    };
+    fn data_of(value: &mut PssmWithParameters) -> &mut Option<SeqData> {
+        &mut value
+            .pssm
+            .query
+            .as_mut()
+            .and_then(SeqEntry::seq_mut)
+            .unwrap()
+            .inst
+            .seq_data
+    }
+    for (data, typed, generic) in [
+        (
+            "seq-data iupacna \"ACGTn\"",
+            SeqData::Iupacna(b"ACGTn".to_vec()),
+            Value::Str(b"ACGTn".to_vec()),
+        ),
+        (
+            "seq-data ncbi2na '1B'H",
+            SeqData::Ncbi2na(vec![0x1b]),
+            Value::Octets(vec![0x1b]),
+        ),
+        (
+            "seq-data ncbi4na '1248F0'H",
+            SeqData::Ncbi4na(vec![0x12, 0x48, 0xf0]),
+            Value::Octets(vec![0x12, 0x48, 0xf0]),
+        ),
+    ] {
+        let text = SMALL_PSSM.replace("seq-data ncbistdaa '0C'H", data);
+        let mut read = read_pssm_with_parameters(text.as_bytes()).unwrap();
+        assert_eq!(data_of(&mut read).as_ref(), Some(&typed), "{data}");
+        assert_eq!(asn_text(&read).unwrap(), text.as_bytes(), "{data}");
+        let mut as_generic = read.clone();
+        let (_, tag, _) = typed.variant();
+        *data_of(&mut as_generic) = Some(SeqData::Other(Value::Choice(
+            u16::from(tag),
+            Box::new(generic),
+        )));
+        assert_eq!(asn_text(&as_generic).unwrap(), text.as_bytes(), "{data}");
+        let ber = binary(&read);
+        assert_eq!(ber, binary(&as_generic), "{data}");
+        assert_eq!(read_pssm_binary(&ber).result.unwrap(), read, "{data}");
+    }
+}
+
 // Every member NCBI's object keeps is kept and written back (psiblast `-in_pssm` with
 // `-out_pssm` writes the object it read: NCBI 2.17.0 probes of PS5b and SURVEY_D3 c01-c19 of line
 // RG series F; the generic writer, line RG item D3-2), and an empty `descr` is NCBI's error

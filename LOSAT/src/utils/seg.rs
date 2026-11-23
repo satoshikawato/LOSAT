@@ -299,7 +299,7 @@ fn get_prob(sv: &[i32], window_length: i32) -> f64 {
     let totseq = (window_length as f64) * K_LN20;
 
     let ans1 = ln_ass(sv, alphasize);
-    // NCBI: guard ans2 computation with ans1 > -100000 and sv[0] != INT4_MIN
+    // NCBI guards `ans2` computation on `ans1 > -100000` and `sv[0]` not equal to `INT4_MIN`.
     let ans2 = if ans1 > -100000.0 {
         ln_perm(sv, window_length)
     } else {
@@ -533,7 +533,8 @@ impl SegMasker {
     pub fn new(window: usize, locut: f64, hicut: f64) -> Self {
         let params = SegParams::new(window, locut, hicut);
 
-        // downset = (window+1)/2 - 1, upset = window - downset
+        // Split the window around the center residue: `downset` is one less than half the window
+        // rounded up, and `upset` is the remaining length of `window`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2050-2051
         let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;
@@ -770,7 +771,7 @@ impl SegMasker {
                     (leftend, rightend) = masker.trim_segment(seq, leftend, rightend);
 
                     // NCBI recursion for trigger window in left trim:
-                    //   if (i+upset-1 < leftend) { recurse on [lend..rend] }
+                    // when `i + upset - 1 < leftend`, recurse on `[lend..rend]`.
                     if i + masker.upset - 1 < leftend {
                         let lend = loi - masker.downset;
                         if lend < leftend {

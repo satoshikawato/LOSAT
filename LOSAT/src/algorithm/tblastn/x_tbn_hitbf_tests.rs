@@ -35,7 +35,8 @@ fn reference(cell: (i32, bool), s: i32, offset: i32, window: i32, word_size: i32
 // values as on `(last_hit, flag)` cells, on random tables of the values a packed table holds
 // (`search_init::x_packs`: last_hit from 0 to 2^31 - 1, windows from wordsize + 1 to 2^28,
 // offsets from the window to INT4_MAX / 4 + 2 x 5,000,000 + 2 x the window), the cells set
-// next to each test's boundary as in the test below.
+// next to each test's boundary as in the test below. LOSAT_X_TBNHITSTEP: `x_hits_steps` on
+// either layout takes the same hits and leaves the same values as well.
 #[test]
 fn x_hits_bf_on_packed_cells_equals_pair_cells() {
     let mut rng = Rng(0x7b1f_5eed_a6a6_0002);
@@ -88,13 +89,22 @@ fn x_hits_bf_on_packed_cells_equals_pair_cells() {
             }
             pairs.push(BlastOffsetPair { q_off: q, s_off: s });
         }
+        let mut pair_steps = pair.clone();
+        let mut packed_steps = packed.clone();
         let mut done = 0;
         while done < pairs.len() {
             let a = x_hits_bf(&mut pair, offset, window, word_size, &pairs[done..]);
             let b = x_hits_bf(&mut packed, offset, window, word_size, &pairs[done..]);
-            assert_eq!(a, b, "round {round}: hits taken");
+            let c = x_hits_steps(&mut pair_steps, offset, window, word_size, &pairs[done..]);
+            let d = x_hits_steps(&mut packed_steps, offset, window, word_size, &pairs[done..]);
+            assert_eq!([a, a, a], [b, c, d], "round {round}: hits taken");
             let cells: Vec<(i32, bool)> = packed.iter().map(|cell| cell.get()).collect();
             assert_eq!(cells, pair, "round {round}: cells");
+            assert_eq!(pair_steps, pair, "round {round}: cells of the steps");
+            assert_eq!(
+                packed_steps, packed,
+                "round {round}: packed cells of the steps"
+            );
             taken[0] += a as u64;
             done += a;
             if let Some(pair_at) = pairs.get(done) {
@@ -104,6 +114,8 @@ fn x_hits_bf_on_packed_cells_equals_pair_cells() {
                 let next = (pair_at.s_off as i32) + offset;
                 pair[cell] = (next, false);
                 packed[cell].set(next, false);
+                pair_steps[cell] = (next, false);
+                packed_steps[cell].set(next, false);
                 done += 1;
             }
         }
@@ -115,7 +127,8 @@ fn x_hits_bf_on_packed_cells_equals_pair_cells() {
 // i32::MAX, offsets from 0 to i32::MAX (with wrapping sums), last_hit values at and next to each
 // test's boundary (diff = window, window - 1, wordsize, wordsize - 1, and the wrap of
 // diff - wordsize), flag-1 cells; every outcome reached, and the count it returns is the first
-// hit the reference leaves to the per-hit body.
+// hit the reference leaves to the per-hit body. `x_hits_steps` (LOSAT_X_TBNHITSTEP) on the same
+// tables gives the same.
 #[test]
 fn x_hits_bf_takes_the_reference_outcomes() {
     let mut rng = Rng(0x7b1f_5eed_a6a6_0001);
@@ -198,9 +211,13 @@ fn x_hits_bf_takes_the_reference_outcomes() {
                 }
             }
         }
+        let mut steps = table.clone();
         let got = x_hits_bf(&mut table, offset, window, word_size, &pairs);
         assert_eq!(got, stop, "round {round}: stop");
         assert_eq!(table, expected, "round {round}: table");
+        let got = x_hits_steps(&mut steps, offset, window, word_size, &pairs);
+        assert_eq!(got, stop, "round {round}: stop of the steps");
+        assert_eq!(steps, expected, "round {round}: table of the steps");
     }
     assert!(taken.iter().all(|&count| count > 0), "outcomes {taken:?}");
     assert!(edges.iter().all(|&count| count > 0), "boundaries {edges:?}");
@@ -221,4 +238,6 @@ fn an_empty_table_takes_no_hit() {
     let pairs = [BlastOffsetPair { q_off: 1, s_off: 0 }];
     assert_eq!(x_hits_bf::<(i32, bool)>(&mut [], 40, 40, 3, &pairs), 0);
     assert_eq!(x_hits_bf::<u32>(&mut [], 40, 40, 3, &pairs), 0);
+    assert_eq!(x_hits_steps::<(i32, bool)>(&mut [], 40, 40, 3, &pairs), 0);
+    assert_eq!(x_hits_steps::<u32>(&mut [], 40, 40, 3, &pairs), 0);
 }

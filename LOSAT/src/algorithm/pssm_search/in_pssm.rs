@@ -21,7 +21,7 @@ use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
 use crate::ncbi_exception::{NcbiException, Severity};
-use crate::report::serial::asn_types::{ReadError, Value};
+use crate::report::serial::asn_types::ReadError;
 use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::ParsedSeqId;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
@@ -121,6 +121,22 @@ pub(crate) struct PssmReader<'a> {
     /// The run's BLAST archive (outfmt 11), which saves each of the reader's posts as one message
     /// of its severity (`diag_log::Posts::write`); `None` without one.
     pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+/// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
+/// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
+/// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, tblastn's and psiblast's
+/// `-in_pssm` of a missing file with `-subject` and with `-db`), as for the files that
+/// `report::archive::error_lines` takes as the subjects' (`subject_file`).
+pub(crate) fn file_error_in_run(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::cli::NativeError>()
+        .is_some_and(|native| {
+            native
+                .message
+                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
+        })
 }
 
 impl PssmReader<'static> {
@@ -387,14 +403,19 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
                 push(&mut residues, position, letter);
             }
         }
-        Some(SeqData::Other(_)) | None => {}
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => {}
     }
     residues
 }
 
 /// The query record of the PSSM's Bioseq (`PsiSearch::query`, the reasons in
-/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), other ids are
-/// believed; a Bioseq without one (only where the object manager stops the run first,
+/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), which an
+/// integer keeps as the Bioseq's Seq-id for the Seq-aligns (`FastaRecord::keeping_bioseq_ids`:
+/// `local id 5`, where the record's local id is a string); other ids are believed; a Bioseq
+/// without one (only where the object manager stops the run first,
 /// `stopped_as_query_joins_scope`) has no id.
 fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRecord {
     match ids {
@@ -402,7 +423,9 @@ fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRe
         [ParsedSeqId::Local(ObjectId::Str(id))] => {
             FastaRecord::new(String::from_utf8_lossy(id).into_owned(), title, letters)
         }
-        [ParsedSeqId::Local(ObjectId::Id(id))] => FastaRecord::new(id.to_string(), title, letters),
+        [ParsedSeqId::Local(ObjectId::Id(id))] => {
+            FastaRecord::new(id.to_string(), title, letters).keeping_bioseq_ids(ids.to_vec())
+        }
         _ => FastaRecord::new(String::new(), title, letters).believing(ids.to_vec()),
     }
 }
@@ -447,6 +470,8 @@ fn stopped_as_query_joins_scope(
         setup_messages: Vec::new(),
         warning_title: Some(Vec::new()),
         request: None,
+        archive_pssm: None,
+        archive_matrix_name_unwritable: false,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -577,11 +602,12 @@ pub(crate) fn psi_search_and_object_of(
             defline_reads_annot,
         ));
     };
-    if let Some(SeqData::Other(Value::Choice(variant, _))) = &query.inst.seq_data {
-        let name = crate::report::serial::asn_types::members(
-            crate::report::serial::asn_types::table::named::SEQ_DATA,
-        )[usize::from(*variant)]
-        .name();
+    if let Some(
+        data
+        @ (SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_)),
+    ) = &query.inst.seq_data
+    {
+        let (name, _, _) = data.variant();
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
         )));
@@ -957,6 +983,8 @@ pub(crate) fn psi_search_and_object_of(
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        archive_pssm: None,
+        archive_matrix_name_unwritable: false,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -1141,6 +1169,25 @@ pub(crate) struct InPssmFile {
     pub(crate) object: PssmWithParameters,
     pub(crate) computed: bool,
     pub(crate) valid: bool,
+}
+
+impl InPssmFile {
+    /// Whether NCBI cannot write the object's parameters: a PSSM of frequency ratios only without
+    /// `params.rpsdbparams` gets those parameters from `CPsiBlastImpl`'s constructor (the gap
+    /// costs, `PsiBlastAddAncillaryPssmData`) without the matrix name, and the object stream
+    /// stops with "cannot write unassigned member matrixName" (a C++ exception, rc 255) wherever
+    /// it writes the object: `-out_pssm` (`algorithm::psiblast::in_pssm_files`) and the archive's
+    /// request (`-outfmt 11`, `algorithm::psiblast::in_pssm`). The one owner of that condition.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:426-433
+    pub(crate) fn matrix_name_unwritable(&self) -> bool {
+        self.computed
+            && self
+                .object
+                .params
+                .as_ref()
+                .is_none_or(|params| params.rpsdbparams.is_none())
+    }
 }
 
 /// The scores and gapped values that `CPsiBlastImpl`'s constructor sets in a PSSM of frequency

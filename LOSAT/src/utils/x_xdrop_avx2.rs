@@ -192,8 +192,9 @@ pub(super) const FE: u8 = 16;
 pub(super) const FF: u8 = 32;
 /// G: the lane mask only on the last block of a row (32 and 16 lanes).
 pub(super) const FG: u8 = 64;
-/// The masks with instances: none, all, all but one item (A..G).
-pub(super) const FNMASKS: [u8; 9] = [0, 127, 126, 125, 123, 119, 111, 95, 63];
+/// The masks with instances (r3b, around A+D+F+G = 105 after the r3a timing): none, all, 105, 105
+/// without one of A, D, F, G, 105 with one of B, C, E, and G, A+G, D+G, F+G.
+pub(super) const FNMASKS: [u8; 14] = [0, 127, 105, 104, 97, 73, 41, 107, 109, 121, 64, 65, 72, 96];
 
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_FNFRAME) the mask for a call: F is dropped for an
 /// alphabet of more than 16 letters; a mask without instances is 0.
@@ -213,13 +214,18 @@ macro_rules! align8_fm {
     ($tb:literal, $fm:expr, $($arg:expr),* $(,)?) => {
         match $fm {
             127 => align8::<$tb, true, false, 127>($($arg),*),
-            126 => align8::<$tb, true, false, 126>($($arg),*),
-            125 => align8::<$tb, true, false, 125>($($arg),*),
-            123 => align8::<$tb, true, false, 123>($($arg),*),
-            119 => align8::<$tb, true, false, 119>($($arg),*),
-            111 => align8::<$tb, true, false, 111>($($arg),*),
-            95 => align8::<$tb, true, false, 95>($($arg),*),
-            63 => align8::<$tb, true, false, 63>($($arg),*),
+            105 => align8::<$tb, true, false, 105>($($arg),*),
+            104 => align8::<$tb, true, false, 104>($($arg),*),
+            97 => align8::<$tb, true, false, 97>($($arg),*),
+            73 => align8::<$tb, true, false, 73>($($arg),*),
+            41 => align8::<$tb, true, false, 41>($($arg),*),
+            107 => align8::<$tb, true, false, 107>($($arg),*),
+            109 => align8::<$tb, true, false, 109>($($arg),*),
+            121 => align8::<$tb, true, false, 121>($($arg),*),
+            64 => align8::<$tb, true, false, 64>($($arg),*),
+            65 => align8::<$tb, true, false, 65>($($arg),*),
+            72 => align8::<$tb, true, false, 72>($($arg),*),
+            96 => align8::<$tb, true, false, 96>($($arg),*),
             _ => align8::<$tb, true, false, 0>($($arg),*),
         }
     };

@@ -183,19 +183,6 @@ fn argument_dependencies_follow_ncbis_order() {
     assert!(crate::cli::try_parse_from(argv).is_ok());
 }
 
-/// `MakedbArgs` with makeblastdb's defaults and `-dbtype prot`, without the parser's checks.
-fn parse_makedb_words_for_test() -> MakedbArgs {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Wrap {
-        #[command(flatten)]
-        args: MakedbArgs,
-    }
-    Wrap::try_parse_from(["makeblastdb", "--dbtype", "prot"])
-        .unwrap()
-        .args
-}
-
 #[test]
 fn input_names_split_at_spaces_and_quotes() {
     assert_eq!(split_quoted("a.fa"), ["a.fa"]);

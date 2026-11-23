@@ -275,6 +275,10 @@ impl std::error::Error for ArgvError {}
 
 /// Who reads a command line through `read_argv`, which decides what NCBI's toolkit words do there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "each variant names the NCBI application start that the caller runs"
+)]
 pub(crate) enum Caller {
     /// A caller that runs no NCBI application start (the engine's own argv: BLASTN's repeat
     /// search, the tests): `-logfile`, `-conffile` and `-dryrun` are refused

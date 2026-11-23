@@ -103,6 +103,9 @@ pub(super) fn metadata(
             let mut stream = cout(stdout, NcbiStdio::cout());
             write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
         }
+        // Refused when `-out` was opened (`super::output_refusal`); never a failed write of
+        // NCBI's serializer.
+        OutputFile::Refused(reason) => return diag.refuse(&super::output_refusal(&reason)),
     };
     diag.write_text(&posts);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247

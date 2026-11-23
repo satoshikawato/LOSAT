@@ -27,7 +27,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, query_coverage_per_hsp, taxdb_warning_line, union_length, TabularHsp,
+    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularHsp,
     TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::lower_bound::lower_bound_by;
@@ -49,7 +49,7 @@ pub(crate) struct BlastnTabular<'a> {
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
     /// An ungapped search (`-ungapped`), whose Seq-aligns are Dense-diags (`qcovhsp`,
-    /// `report::tabular::query_coverage_per_hsp`).
+    /// `report::tabular::QueryCoveragePerHsp`).
     pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
     pub database: &'a str,
@@ -247,6 +247,13 @@ pub(crate) fn write_blastn_tabular(
                     }
                 }));
             }
+            // The subject's `qcovhsp` rule: its rows only divide.
+            let qcovhsp = QueryCoveragePerHsp::of_subject(
+                tab.ungapped,
+                hsp_list.hsps.len(),
+                searched_length as i32,
+                query_length as i32,
+            );
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
@@ -278,14 +285,7 @@ pub(crate) fn write_blastn_tabular(
                 let span = (hsp.q_end - hsp.q_start + 1) as i32;
                 let row = tabular_hsp(
                     hsp,
-                    query_coverage_per_hsp(
-                        tab.ungapped,
-                        hsp_list.hsps.len(),
-                        span,
-                        searched_length as i32,
-                        span,
-                        query_length as i32,
-                    ),
+                    qcovhsp.of_hsp(span, span),
                     needs
                         .rows
                         .then_some((query_row.as_slice(), subject_row.as_slice())),
@@ -318,7 +318,7 @@ pub(crate) fn write_blastn_tabular(
 }
 
 /// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// its `qcovhsp` (`report::tabular::query_coverage_per_hsp`), `rows` when a field shows them.
+/// its `qcovhsp` (`report::tabular::QueryCoveragePerHsp`), `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1091
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1121

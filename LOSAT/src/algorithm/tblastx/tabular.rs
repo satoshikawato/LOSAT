@@ -32,7 +32,7 @@ use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, query_coverage_per_hsp, taxdb_warning_line, union_length, TabularField,
+    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,
     TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
@@ -340,6 +340,18 @@ pub(super) fn write_tblastx_tabular(
                 .as_ref()
                 .map(|values| values.nucleotide_subject(names, -1, -1));
             let subject_record_length = i32::try_from(record_length(s_idx))?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1225
+            // The subject's `qcovhsp` rule (an ungapped search; its rows only divide): the HSP's
+            // residues in its query frame against the length that `BlastHitList2SeqAlign_OMF`
+            // gives, the searched query's in nucleotides (`query.GetSeqLength`), about a third of
+            // the HSP's nucleotide coverage, as NCBI writes it; a subject's single HSP has the
+            // Seq-align's nucleotide span over `qlen`.
+            let qcovhsp = QueryCoveragePerHsp::of_subject(
+                true,
+                group.len(),
+                i32::try_from(searched_length)?,
+                i32::try_from(query_length)?,
+            );
             for &hsp_index in group {
                 let hsp = &hits[hsp_index];
                 let hit = &hsp.hit;
@@ -446,19 +458,9 @@ pub(super) fn write_tblastx_tabular(
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),
                     end_gaps: true,
                     stored_gaps: [&[], &[]],
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1225
-                    // An ungapped search: the HSP's residues in its query frame against the
-                    // length that `BlastHitList2SeqAlign_OMF` gives, the searched query's in
-                    // nucleotides (`query.GetSeqLength`), about a third of the HSP's nucleotide
-                    // coverage, as NCBI writes it; a subject's single HSP has the Seq-align's
-                    // nucleotide span over `qlen`.
-                    qcovhsp: query_coverage_per_hsp(
-                        true,
-                        group.len(),
+                    qcovhsp: qcovhsp.of_hsp(
                         i32::try_from(hit.sort_query_end - hit.sort_query_offset)?,
-                        i32::try_from(searched_length)?,
                         i32::try_from(q_high - q_low + 1)?,
-                        i32::try_from(query_length)?,
                     ),
                 };
                 // One printed row is one HSP; the probe marks it without changing it.

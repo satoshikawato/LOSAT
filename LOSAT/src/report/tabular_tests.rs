@@ -262,6 +262,20 @@ fn coverage_merges_touching_ranges() {
 // (q_plain, 142 residues, with -query_loc 1-1000000), the review's probe D without the range and
 // gapped. BLASTX: tab.bx.cov.6 (qn2, 135 letters; a gapped search counts a frame's residues
 // against a third of them), with -query_loc a range of 300 as given.
+/// The `qcovhsp` of one HSP: its subject's rule (`QueryCoveragePerHsp::of_subject`), then the
+/// row's division.
+fn query_coverage_per_hsp(
+    ungapped: bool,
+    hsps: usize,
+    span: i32,
+    context_length: i32,
+    seqalign_span: i32,
+    query_length: i32,
+) -> i32 {
+    QueryCoveragePerHsp::of_subject(ungapped, hsps, context_length, query_length)
+        .of_hsp(span, seqalign_span)
+}
+
 #[test]
 fn query_coverage_per_hsp_reads_the_seq_align_that_the_formatter_gets() {
     // A subject's single ungapped HSP counts against the range as given; several, or a gapped

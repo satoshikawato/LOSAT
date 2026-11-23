@@ -251,7 +251,7 @@ impl Encoder for JsonEncoder<'_> {
     fn null(&mut self) {
         self.unwritten("a NULL value");
     }
-    fn null_element(&mut self) {
+    fn null_element(&mut self, _element_type: &str) {
         if self.error.is_none() {
             self.error = Some(SerialError::NullElement);
         }

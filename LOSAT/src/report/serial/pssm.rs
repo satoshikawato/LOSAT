@@ -507,7 +507,7 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
                     write_generic(enc, named::SEQDESC, value);
                 }
                 // NCBI's throw (`encoder::NullElement`), before the element's separator.
-                Seqdesc::Empty => enc.null_element(),
+                Seqdesc::Empty => enc.null_element("Seqdesc"),
             }
         }
         enc.end_list();

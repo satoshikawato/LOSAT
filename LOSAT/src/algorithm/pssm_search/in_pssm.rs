@@ -560,11 +560,16 @@ pub(crate) fn psi_search_and_object_of(
     // diagnostic stream it can leave failed, its exceptions), after the reader and the subjects and
     // before NCBI reads anything else of the PSSM; the run writes them where NCBI does
     // (`PsiSearch::write_annot_posts`). What NCBI does not do the same way on every run (memory
-    // addresses, crashes, undefined behaviour) is refused here, before any output. With `-db` no
+    // addresses, crashes, undefined behaviour) is refused at the same place, as the run's stop
+    // (`annot_index::Abort::Refused`): after psiblast's prolog of its format, which NCBI writes
+    // before it reads the entry (NCBI BLAST+ 2.17.0, probe D3c-3c `probeC`: the prolog, then the
+    // report of memory addresses or the crash), before any output of tblastn's. With `-db` no
     // other sequence is in NCBI's scope before the query (`PssmReader::database`).
     let program = reader.program.to_ascii_lowercase();
     let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
-        .map_err(|refusal| reader.refuse(refusal.text()))?;
+        .unwrap_or_else(|refusal| {
+            super::annot_index::AnnotOutcome::refused(reader.refuse(refusal.text()).to_string())
+        });
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (c++/src/app/blast/tblastn_app.cpp:228)
     // A query Seq-entry set that the object manager took ends the run here: `GetSeq()` of a set is
     // NCBI's `CInvalidChoiceSelection` (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 `r4/probe` s06, s07,

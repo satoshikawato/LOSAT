@@ -1289,11 +1289,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # An RPS row runs with BLASTDB the inflated database (`inflate_rps`), its files rows as any other.
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
 
-    def in_losat_words(ncbi: bytes, output: bool = True) -> bytes:
-        """NCBI's frozen bytes in LOSAT's words (AGENTS.md rule 8, `losat_wording`). A row that keeps the
-        database's directory as `{db_dir}` is mapped with this run's directory in the token's place, as
-        NCBI's run wrote it: the mapping re-wraps an ASN.1 text string by its length."""
-        words = losat_wording.losat_output_bytes if output else losat_wording.losat_bytes
+    def in_losat_words(ncbi: bytes) -> bytes:
+        """NCBI's frozen bytes (standard output or error) in LOSAT's words (AGENTS.md rule 8,
+        `losat_wording.losat_output_bytes`: standard error's posts of a binary archive's stream move with the
+        archive's longer `ident`). A row that keeps the database's directory as `{db_dir}` is mapped with this
+        run's directory in the token's place, as NCBI's run wrote it: the mapping re-wraps an ASN.1 text string
+        by its length."""
+        words = losat_wording.losat_output_bytes
         if db_dir is None or not rps_dir_token(row):
             return words(ncbi)
         path = str(db_dir).encode()
@@ -1349,7 +1351,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
     expected_out_losat = in_losat_words(out)
-    expected_err_losat = in_losat_words(err, output=False)
+    expected_err_losat = in_losat_words(err)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \

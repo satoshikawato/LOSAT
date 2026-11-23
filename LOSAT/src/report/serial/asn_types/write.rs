@@ -27,8 +27,9 @@ enum Step<'a> {
     EndMember,
     EndSequence,
     Element,
-    /// An element of a list of `CRef<>`s that holds no object (`Encoder::null_element`).
-    NullElement,
+    /// An element of a list of `CRef<>`s of the type (the list's element type) that holds no
+    /// object (`Encoder::null_element`).
+    NullElement(u16),
     EndList,
     EndVariant,
     EndNamed,
@@ -60,7 +61,7 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
             Step::EndMember => enc.end_member(),
             Step::EndSequence => enc.end_sequence(),
             Step::Element => enc.element(),
-            Step::NullElement => enc.null_element(),
+            Step::NullElement(element) => enc.null_element(type_info(element).name()),
             Step::EndList => enc.end_list(),
             Step::EndVariant => enc.end_variant(),
             Step::EndNamed => enc.end_named(),
@@ -213,7 +214,7 @@ fn write_elements<'a, E: Encoder>(
         Value::List(items) => {
             for item in items.iter().rev() {
                 if refs && matches!(item, Value::Null) {
-                    todo.push(Step::NullElement);
+                    todo.push(Step::NullElement(element));
                     continue;
                 }
                 todo.push(Step::Value(element, item));

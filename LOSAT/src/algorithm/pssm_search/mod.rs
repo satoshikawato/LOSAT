@@ -477,14 +477,9 @@ impl PsiSearch {
         }
     }
 
-    /// The exception with which NCBI's object manager ends the run (`CATCH_ALL`'s report).
+    /// The exception with which NCBI's object manager ends the run (`CATCH_ALL`'s report), or
+    /// LOSAT's refusal at that place (`annot_index::Abort::Refused`).
     pub(crate) fn annot_abort(&self) -> Option<anyhow::Error> {
-        self.annot.abort.as_ref().map(|abort| {
-            crate::cli::NativeError {
-                exit: abort.exit,
-                message: abort.message.clone(),
-            }
-            .into()
-        })
+        self.annot.abort.as_ref().map(annot_index::Abort::error)
     }
 }

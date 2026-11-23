@@ -1,6 +1,16 @@
 use super::*;
 use crate::report::serial::asn_types::Value;
 
+/// The text of the stop `abort`: NCBI's report, or LOSAT's refusal.
+fn abort_text(abort: &super::super::annot_index::Abort) -> String {
+    match abort {
+        super::super::annot_index::Abort::Native { message, .. } => {
+            String::from_utf8(message.clone()).unwrap()
+        }
+        super::super::annot_index::Abort::Refused(text) => text.clone(),
+    }
+}
+
 /// A stream that gives `self.0` and then fails, as a directory given as the standard input
 /// does at once (`read`: EISDIR).
 struct FailsAfter(&'static [u8]);
@@ -222,7 +232,7 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
             let abort = search.annot.abort.as_ref().unwrap();
             (
                 String::from_utf8(search.annot.posts.text()).unwrap(),
-                String::from_utf8(abort.message.clone()).unwrap(),
+                abort_text(abort),
             )
         })
     };
@@ -288,9 +298,7 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
                 .annot
                 .abort
                 .as_ref()
-                .map_or_else(String::new, |abort| {
-                    String::from_utf8(abort.message.clone()).unwrap()
-                })
+                .map_or_else(String::new, abort_text)
         })
     };
     let ids =
@@ -300,9 +308,11 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
         error.contains("duplicate Bioseq id emb|AAA00001.1| present in\n  seq1: emb|AAA00001.1| | emb|AAA00001.1|\n  seq2: emb|AAA00001.1| | emb|AAA00001.1|\n"),
         "{error}"
     );
-    let refusal = two(ids, false).unwrap_err().to_string();
+    // LOSAT's refusal stops the run at the same place (`annot_index::Abort::Refused`).
+    let refusal = two(ids, false).unwrap();
     assert!(
-        refusal.contains("may write as a subject record spelled it"),
+        refusal.contains("may write as a subject record spelled it")
+            && refusal.ends_with("is not supported by LOSAT's PSIBLAST"),
         "{refusal}"
     );
     // Two versions are two handles: no exception.
@@ -378,12 +388,14 @@ fn ncbis_unit_test_pssms_are_read_or_refused() {
     }
     let search = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz")).unwrap();
     assert!(search.request.is_none() && !search.joins_scope());
-    let abort = search.annot.abort.as_ref().unwrap();
-    assert_eq!(abort.exit, 255);
     assert_eq!(
-        abort.message,
-        b"Error: CSeq_entry::GetSeq(): Invalid choice selection: \
+        search.annot.abort,
+        Some(super::super::annot_index::Abort::Native {
+            exit: 255,
+            message: b"Error: CSeq_entry::GetSeq(): Invalid choice selection: \
           NCBI-Seqset::Seq-entry.not set\n\n"
+                .to_vec()
+        })
     );
 }
 

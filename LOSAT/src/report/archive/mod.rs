@@ -714,7 +714,7 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
-    fn null_element(&mut self) {}
+    fn null_element(&mut self, _: &str) {}
     fn utf8_str(&mut self, _: &[u8]) {}
     fn delayed(&mut self, _: &[u8]) {}
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
@@ -740,13 +740,14 @@ pub(crate) fn seq_id_written_as_is(
 /// first); in ASN.1 binary the last two and a NaN or infinite REAL (`SerialError::NonFiniteReal`);
 /// in ASN.1 text a member of a binary file that NCBI re-reads with a message (`unread_delayed`).
 /// NCBI BLAST+ 2.17.0 writes them all (probe XA of the review fixes of line PS item PS15b-1,
-/// 2026-11-23); ASN.1 text writes the rest as NCBI does. In every stream, a list element stated
-/// as `NULL` (`Encoder::null_element`): NCBI's stream throws there in the middle of the archive
-/// (`encoder::NullElement`), which LOSAT's archive does not write yet (its search strategy
-/// does, `writer::write_strategy_request`).
+/// 2026-11-23); ASN.1 text writes the rest as NCBI does. It also finds a list element stated as
+/// `NULL` (`Encoder::null_element`, `null_element`), where every stream of NCBI's throws in the
+/// middle of the archive, as LOSAT's does through `Traced` (`encoder::NullElement`,
+/// `writer::write_archive`).
 struct PssmGaps {
     encoding: ArchiveEncoding,
     gap: Option<&'static str>,
+    null_element: bool,
 }
 
 impl PssmGaps {
@@ -794,15 +795,8 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn null(&mut self) {
         self.note("a NULL", &[ArchiveEncoding::Xml]);
     }
-    fn null_element(&mut self) {
-        self.note(
-            "a list element stated as NULL",
-            &[
-                ArchiveEncoding::Xml,
-                ArchiveEncoding::Binary,
-                ArchiveEncoding::Text,
-            ],
-        );
+    fn null_element(&mut self, _: &str) {
+        self.null_element = true;
     }
     fn utf8_str(&mut self, _: &[u8]) {
         self.note(
@@ -842,9 +836,24 @@ pub(crate) fn pssm_unwritten(
     let mut check = PssmGaps {
         encoding,
         gap: None,
+        null_element: false,
     };
     crate::report::serial::pssm::write_value(&mut check, pssm);
     check.gap
+}
+
+/// Whether `pssm` holds a list element stated as `NULL` (`PssmGaps::null_element`), where the
+/// archive's stream throws (`writer::RequestInputs::written_as_is`).
+pub(crate) fn pssm_holds_null_element(
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> bool {
+    let mut check = PssmGaps {
+        encoding: ArchiveEncoding::Nothing,
+        gap: None,
+        null_element: false,
+    };
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.null_element
 }
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
@@ -914,9 +923,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // several lines (an exception's chain), and the macro of an invalid input posts the user
     // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
     // second one.
+    // The post of a stream's failure that `cli::NativeError::null_element` writes before
+    // `CATCH_ALL`'s report (`encoder::NullElement::post`) is a post of its own too.
     let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
-    let text = &native.message[..native
-        .message
+    let (stream_post, report) =
+        crate::report::serial::encoder::NullElement::split_post(&native.message);
+    let text = &report[..report
         .iter()
         .rposition(|&byte| byte != b'\n')
         .map_or(0, |last| last + 1)];
@@ -925,7 +937,9 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         _ => (text, None),
     };
     Some(
-        std::iter::once(first)
+        stream_post
+            .into_iter()
+            .chain(std::iter::once(first))
             .chain(refer)
             .filter_map(|part| {
                 let text = crate::report::diag_log::sanitize(part);

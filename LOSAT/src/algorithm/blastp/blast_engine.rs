@@ -8206,14 +8206,19 @@ impl<'a> CallRequests<'a> {
     /// it (every batch before the formats; the batch an NCBI error belongs to), so they are
     /// written now (`write_through`), before the output of the call's end, and the place is
     /// marked. NCBI's posts of the bytes that ASN.1 text replaced in them wait for the starts of
-    /// their batches (`take_posts`, `write_request_posts`).
+    /// their batches (`take_posts`, `write_request_posts`). A request whose stream throws (an
+    /// element stated as `NULL` in a PSSM query, `encoder::NullElement`) ends the call there too:
+    /// NCBI's error follows it, so the place is marked before the error returns (`release`).
     fn end_at(&self, through: usize) -> Result<()> {
-        self.write_through(through)?;
+        let written = self.write_through(through);
+        if matches!(&written, Err(error) if !error.is::<crate::cli::NativeError>()) {
+            return written;
+        }
         *self
             .through
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(through);
-        Ok(())
+        written
     }
 
     /// Takes NCBI's posts of the bytes replaced in the requests written of the call's batches,

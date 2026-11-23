@@ -276,6 +276,42 @@ impl<I: Input> ObjectStream<I> {
         (value, std::mem::take(&mut reader.posts))
     }
 
+    /// One value of the type `ty` at the stream's position, inside an object that a hand grammar
+    /// reads over the same input (rpsbproc's archive reader, `rpsbproc::archive`), with the
+    /// messages posted. NCBI reads the whole object with its typed reader; the value is read as
+    /// that reader reads it, below the frames of `root` (the object's named frame) and of `steps`
+    /// (a member or variant frame for each name, an element frame for each `E`), which its posts'
+    /// stack traces name. The frames of the classes and containers between them (which show in
+    /// no trace) are not there: a failure that leaves the value ends the object, whose reader
+    /// only asks whether it is LOSAT's refusal (`ReadError::Unsupported`).
+    pub(crate) fn read_value(
+        &mut self,
+        ty: u16,
+        root: &'static str,
+        steps: &[StackStep<'static>],
+    ) -> Read<Value> {
+        let reader = &mut self.reader;
+        reader.frames.clear();
+        reader.open.clear();
+        reader.push(FrameKind::Named, Some(root), false);
+        for step in steps {
+            match *step {
+                StackStep::Member(name) => {
+                    reader.push(FrameKind::ClassMember, None, false);
+                    reader.set_member(name);
+                }
+                StackStep::Element => reader.push(FrameKind::ArrayElement, None, false),
+            }
+        }
+        let value = reader.value(ty, false).map_err(ReadError::from);
+        (value, std::mem::take(&mut reader.posts))
+    }
+
+    /// The primitives of the stream, for the hand grammar that reads around `read_value`.
+    pub(crate) fn input_mut(&mut self) -> &mut I {
+        &mut self.reader.inp
+    }
+
     /// `EndOfData()`: whether no object follows (`Input::end_of_data`), which a reader of objects
     /// one after another asks before each (a binary object that is not a SEQUENCE ends inside its
     /// frames, where the end of the input is NCBI's `CSerialException`).

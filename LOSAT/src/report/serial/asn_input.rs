@@ -175,6 +175,13 @@ impl Names {
         input: "file",
         allocator: "makeblastdb",
     };
+    /// The input of `losat rpsbproc`: `Blast4-archive` objects in ASN.1 text (`rpsbproc::archive`).
+    pub(crate) const ARCHIVE: Names = Names {
+        document: "archive",
+        reader: "rpsbproc",
+        input: "input",
+        allocator: "NCBI's rpsbproc",
+    };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
     pub(crate) const DELAYED: Names = Names {

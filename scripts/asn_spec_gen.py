@@ -4,7 +4,8 @@
 A maintainer tool: LOSAT's build does not run it, and users need nothing of it. It reads NCBI's
 ASN.1 modules (`c++/src/objects/**/*.asn`) and the storage overrides of their `.def` files, takes
 the closure of the types that a root type reaches (by default NCBI-ScoreMat's
-`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`), and writes the table that
+`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`, and NCBI-Blast4's
+`Blast4-archive`, the input of `losat rpsbproc`), and writes the table that
 LOSAT's generic ASN.1 text reader runs on (`report::serial::asn_types`). Its companion check,
 `asn_spec_check.py`, compares the table with the type information that NCBI's datatool generated
 (`*_.cpp`, `*_.hpp`) and must pass whenever the table is regenerated.
@@ -498,12 +499,15 @@ class Table:
                 "INTEGER": ("Integer", ""), "BOOLEAN": ("Boolean", ""), "NULL": ("Null", ""),
                 "REAL": ("Real", ""), "VisibleString": ("String", "Visible"),
                 "UTF8String": ("String", "Utf8"), "StringStore": ("String", "Store"),
-                "OCTET STRING": ("Octets", ""),
+                "OCTET STRING": ("Octets", ""), "BigInt": ("Integer", ""),
             }
             if typ.name not in kinds:
                 raise ValueError(f"{path}: the primitive {typ.name} is not supported")
             kind, string = kinds[typ.name]
-            entry = Entry(-1, kind, string=string or "Visible", storage=storage or "Int4")
+            # `BigInt` is datatool's `CBigIntDataType`, an `Int8` (`CStdTypeInfo<Int8>`, read with
+            # `ReadInt8`: serial/datatool/statictype.cpp:995-1005).
+            default = "Int8" if typ.name == "BigInt" else "Int4"
+            entry = Entry(-1, kind, string=string or "Visible", storage=storage or default)
             return entry
         if isinstance(typ, Named):
             return Entry(-1, "Enumerated", values=typ.values, integer=typ.integer)
@@ -704,7 +708,7 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     return "\n".join(out)
 
 
-DEFAULT_ROOTS = [("NCBI-ScoreMat", "PssmWithParameters")]
+DEFAULT_ROOTS = [("NCBI-ScoreMat", "PssmWithParameters"), ("NCBI-Blast4", "Blast4-archive")]
 
 
 def build_table(source: Path, roots: list[tuple[str, str]]) -> Table:

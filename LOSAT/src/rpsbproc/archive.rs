@@ -9,27 +9,36 @@
 //! mandatory member, a `,` before `}`, a value of the wrong form, the end of the text inside the
 //! object, anything after the last object that is not an object) ends the input: the objects
 //! before it are processed and the run ends normally. The grammar below follows the ASN.1
-//! modules for every type that the reader descends into (names, order, OPTIONAL and DEFAULT
-//! members, CHOICE variants, ENUMERATED values). The values that rpsbproc does not use are
-//! read as values (`Reader::skip_value`) where their type is large, only inside types whose
-//! grammar is checked; inside such a skipped value LOSAT accepts what NCBI's typed reader may
-//! refuse (the members and variants of: the request bodies other than `queue-search`, the
-//! `Seqdesc` variants other than `title` and `user`, `Seq-annot`, `Int-fuzz`, the `Seq-loc`
-//! variants other than `int` and `packed-int` (in a `Std-seg` also `null`, `empty`, `whole` and
-//! `pnt`), the `Seq-align` members `bounds` and `ext`, the segments other than `denseg`, `std`
-//! and `packed`, the large `Blast4-value` variants, the `phi-alignments`,
-//! `pssm` and `simple-results` of the results, the `Seq-ext` variants other than `delta` and
-//! the `loc` items of a `delta`, and `Seq-hist` and `gap` data).
+//! modules for every type that it descends into (names, order, OPTIONAL and DEFAULT members,
+//! CHOICE variants, ENUMERATED values); the values that rpsbproc does not use are read by the
+//! typed reader of the type table (`ArchiveStream::typed_member`: the request bodies other than
+//! `queue-search`, the `Seqdesc` variants other than `title` and `user`, `Seq-annot`, `Int-fuzz`,
+//! the `Seq-loc` variants that the grammar does not read, the `Seq-align` members `bounds` and
+//! `ext`, the segments other than `denseg`, `std` and `packed`, the large `Blast4-value`
+//! variants, the `phi-alignments`, `pssm` and `simple-results` of the results, the `Seq-ext`
+//! variants other than `delta` and the `loc` items of a `delta`, `Seq-hist` and `gap` data), over
+//! the same lexical reader.
 //!
-//! What LOSAT does not read is noted while the object is read and refused once the object is
-//! read whole (`ArchiveStream::next_archive`): NCBI may still fail to read the object, which then
-//! ends the input without an error.
+//! A byte outside 0x20..0x7E in a VisibleString is read as `#`, with NCBI's post of it
+//! (`Bad char`, 803.7, the stack trace of the string), as NCBI's reader does by default
+//! (`eFNP_ReplaceAndWarn` of the parameter `[SERIAL] WRONG_CHARS_READ`, a registry entry, which
+//! the application start rejects in a file and in `NCBI_CONFIG__SERIAL__WRONG_CHARS_READ`); a
+//! UTF8String keeps its bytes. The grammar names its members and variants on the lexical
+//! reader's trail (`asn_text_reader::Trail`), which gives the trace of its strings and the frames
+//! below which the typed reader reads. The posts of an object come before rpsbproc uses it
+//! (`ArchiveRead`).
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:291-308
 
 use std::io::Read;
 
+use crate::report::serial::asn_input::{Input, Names, TextInput};
 use crate::report::serial::asn_text_reader::{
     AsnTextError, AsnTextErrorKind, Reader, Result, StreamSource,
 };
+use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
+use crate::report::serial::asn_types::{self, table::named};
+use crate::report::serial::encoder::StackStep;
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -248,10 +257,28 @@ pub(crate) struct Mask {
     pub(crate) first: Option<MaskLocation>,
 }
 
-/// The objects of one input stream.
+/// The objects of one input stream: the hand grammar below over the lexical reader of the typed
+/// reader's input (`ObjectStream::input_mut`), which reads the values that the grammar does not
+/// take (`typed_member`).
 pub(crate) struct ArchiveStream<R: Read> {
-    reader: Reader<StreamSource<R>>,
+    objects: ObjectStream<TextInput<StreamSource<R>>>,
+    /// What NCBI's reader posts while it reads the object, in order: the hand grammar's posts
+    /// (`Trail::replaced`) and the typed reader's.
+    posts: Vec<Post>,
     done: bool,
+}
+
+/// What reading one object gives (`ArchiveStream::next_archive`): the object, the end of the input
+/// (`Ok(None)`) or LOSAT's refusal, and the messages that NCBI's reader posts while it reads the
+/// object, which come before rpsbproc uses it (also when the object then fails to read).
+pub(crate) type ArchiveRead = (
+    std::result::Result<Option<Archive>, AsnTextError>,
+    Vec<Post>,
+);
+
+/// The name of the root type (`SkipFileHeader`'s check, the first name of the stack traces).
+fn blast4_archive() -> &'static str {
+    asn_types::type_info(named::BLAST4_ARCHIVE).name()
 }
 
 /// The `Blast4-request-body` variants.
@@ -445,6 +472,12 @@ const SEQ_ALIGN_SEGS: [&str; 7] = [
     "dendiag", "denseg", "std", "packed", "disc", "spliced", "sparse",
 ];
 
+/// The type of `Seq-align.segs` (a CHOICE without a name of its own) in the type table.
+fn seq_align_segs() -> u16 {
+    let members = asn_types::members(named::SEQ_ALIGN);
+    members[asn_types::member_index(named::SEQ_ALIGN, "segs")].ty
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-29
 const SEQ_ALIGN_TYPE: [(&str, i32); 6] = [
     ("not-set", 0),
@@ -459,41 +492,42 @@ impl<R: Read> ArchiveStream<R> {
     /// The objects of `input`, whose first bytes `first` were already taken from it (the bytes
     /// after the white space that rpsbproc skips to tell ASN.1 from XML).
     pub(crate) fn new(input: R, first: &[u8]) -> Self {
+        let mut objects = ObjectStream::text(StreamSource::new(input, first), Names::ARCHIVE);
+        objects.input_mut().r.trail.root = blast4_archive();
         ArchiveStream {
-            reader: Reader::new(StreamSource::new(input, first), "archive", "rpsbproc")
-                .refuse_invisible_bytes()
-                .defer_refusals(),
+            objects,
+            posts: Vec::new(),
             done: false,
         }
+    }
+
+    /// The lexical reader.
+    #[inline]
+    fn r(&mut self) -> &mut Reader<StreamSource<R>> {
+        &mut self.objects.input_mut().r
     }
 
     /// The bytes the stream keeps.
     #[cfg(test)]
     pub(crate) fn buffered(&self) -> usize {
-        self.reader.src.buffered()
+        self.objects.input().r.src.buffered()
     }
 
     /// Reads one byte per fill from now on (`StreamSource::fill_one_byte_at_a_time`).
     #[cfg(test)]
     pub(crate) fn fill_one_byte_at_a_time(&mut self) {
-        self.reader.src.fill_one_byte_at_a_time();
+        self.r().src.fill_one_byte_at_a_time();
     }
 
-    /// The next object: `Ok(None)` when NCBI's reader fails at it (the end of the input), the
-    /// object when it reads, or the refusal of what LOSAT does not read in it.
-    pub(crate) fn next_archive(&mut self) -> std::result::Result<Option<Archive>, AsnTextError> {
+    /// The next object, with the messages posted while it was read: `Ok(None)` when NCBI's
+    /// reader fails at it (the end of the input), the object when it reads, or the refusal of
+    /// what LOSAT does not read in it.
+    pub(crate) fn next_archive(&mut self) -> ArchiveRead {
         if self.done {
-            return Ok(None);
+            return (Ok(None), Vec::new());
         }
-        self.reader.refusal = None;
-        match self.archive_object() {
-            Ok(archive) => match self.reader.refusal.take() {
-                Some(refusal) => {
-                    self.done = true;
-                    Err(refusal)
-                }
-                None => Ok(Some(archive)),
-            },
+        let result = match self.archive_object() {
+            Ok(archive) => Ok(Some(archive)),
             Err(error) => {
                 self.done = true;
                 match error.kind {
@@ -501,33 +535,70 @@ impl<R: Read> ArchiveStream<R> {
                     AsnTextErrorKind::Unsupported => Err(error),
                 }
             }
+        };
+        self.take_replaced();
+        (result, std::mem::take(&mut self.posts))
+    }
+
+    /// The posts of the hand grammar's strings so far, after those posted before them.
+    fn take_replaced(&mut self) {
+        let replaced = std::mem::take(&mut self.r().trail.replaced);
+        self.posts.extend(replaced.into_iter().map(Post::BadChar));
+    }
+
+    /// The value of the member or variant whose step the trail ends with, of the SEQUENCE or
+    /// CHOICE `parent` of the type table, read by the typed reader as NCBI's reader reads it:
+    /// rpsbproc does not use it, and NCBI's reader fails, posts and reads on in it as in any value
+    /// of its object. Its failure ends the input (NCBI's rpsbproc stops at any exception of its
+    /// reader), except LOSAT's refusal.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:780-792
+    #[cold]
+    #[inline(never)]
+    fn typed_member(&mut self, parent: u16) -> Result<()> {
+        self.take_replaced();
+        let steps = std::mem::take(&mut self.r().trail.steps);
+        let Some(StackStep::Member(name)) = steps.last() else {
+            unreachable!("a member or variant is being read");
+        };
+        let ty = asn_types::members(parent)[asn_types::member_index(parent, name)].ty;
+        let root = self.r().trail.root;
+        let (value, posts) = self.objects.read_value(ty, root, &steps);
+        self.r().trail.steps = steps;
+        self.posts.extend(posts);
+        match value {
+            Ok(_) => Ok(()),
+            Err(ReadError::Unsupported(what)) => Err(self.r().not_supported(&format!(
+                "an archive value that LOSAT's reader does not read ({what})"
+            ))),
+            Err(_) => Err(self.r().error("the typed reader failed")),
         }
     }
 
     fn real(&mut self) -> Result<f64> {
-        self.reader.real()
+        self.r().real()
     }
 
     fn string(&mut self) -> Result<Vec<u8>> {
-        self.reader.string()
+        self.r().string()
     }
 
-    fn skip_value(&mut self) -> Result<()> {
-        self.reader.skip_value()
-    }
-
-    /// `ReadFileHeader` and the type check of the root reader, then the object.
+    /// `ReadFileHeader` and the type check of the root reader, then the object. Each object is
+    /// read by a new object stream of NCBI's (`ObjStreamIn`), whose line count starts again at the
+    /// byte after the last one the object before it took (`ObjectStream`, `Input::new_object`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:892-898
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/objutils.hpp:75-83
     fn archive_object(&mut self) -> Result<Archive> {
-        let r = &mut self.reader;
+        self.objects.input_mut().new_object();
+        let r = self.r();
+        r.trail.steps.clear();
         let id = r.file_header()?;
-        if !id.is_empty() && r.bytes(id) != b"Blast4-archive" {
+        if !id.is_empty() && r.bytes(id) != r.trail.root.as_bytes() {
             return Err(r.error("incompatible type"));
         }
         let mut members = r.begin_members()?;
         let (mut request, mut results) = (None, None);
         while let Some(index) = self
-            .reader
+            .r()
             .next_member(&mut members, &["request", "results", "messages"])?
         {
             match index {
@@ -537,7 +608,7 @@ impl<R: Read> ArchiveStream<R> {
             }
         }
         let (Some((ident, body)), Some(results)) = (request, results) else {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         };
         Ok(Archive {
             ident,
@@ -548,23 +619,23 @@ impl<R: Read> ArchiveStream<R> {
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:56-63
     fn request(&mut self) -> Result<(Option<Vec<u8>>, RequestBody)> {
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut ident, mut body) = (None, None);
-        while let Some(index) = self.reader.next_member(&mut members, &["ident", "body"])? {
+        while let Some(index) = self.r().next_member(&mut members, &["ident", "body"])? {
             match index {
                 0 => ident = Some(self.string()?),
                 _ => {
-                    let variant = self.reader.choice(&REQUEST_BODY)?;
+                    let variant = self.r().choice(&REQUEST_BODY)?;
                     body = Some(if variant == 8 {
                         RequestBody::QueueSearch(self.queue_search()?)
                     } else {
-                        self.skip_value()?;
+                        self.typed_member(named::BLAST4_REQUEST_BODY)?;
                         RequestBody::Other
                     });
                 }
             }
         }
-        let body = body.ok_or_else(|| self.reader.error("member body missing"))?;
+        let body = body.ok_or_else(|| self.r().error("member body missing"))?;
         Ok((ident, body))
     }
 
@@ -582,7 +653,7 @@ impl<R: Read> ArchiveStream<R> {
             "program-options",
             "format-options",
         ];
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut program, mut service, mut queries, mut subject) = (None, None, None, None);
         let mut search = QueueSearch {
             program: Vec::new(),
@@ -592,27 +663,27 @@ impl<R: Read> ArchiveStream<R> {
             matrix_name: None,
             evalue_threshold: None,
         };
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             match index {
                 0 => program = Some(self.string()?),
                 1 => service = Some(self.string()?),
                 2 => {
                     const QUERIES: [&str; 3] = ["pssm", "seq-loc-list", "bioseq-set"];
-                    let variant = self.reader.choice(&QUERIES)?;
+                    let variant = self.r().choice(&QUERIES)?;
                     queries = Some(if variant == 2 {
                         Queries::BioseqSet(self.bioseq_set()?)
                     } else {
-                        self.skip_value()?;
+                        self.typed_member(named::BLAST4_QUERIES)?;
                         Queries::Other
                     });
                 }
                 3 => {
                     const SUBJECT: [&str; 3] = ["database", "sequences", "seq-loc-list"];
-                    let variant = self.reader.choice(&SUBJECT)?;
+                    let variant = self.r().choice(&SUBJECT)?;
                     subject = Some(if variant == 0 {
                         Subject::Database(self.string()?)
                     } else {
-                        self.skip_value()?;
+                        self.typed_member(named::BLAST4_SUBJECT)?;
                         Subject::Other(SUBJECT[variant])
                     });
                 }
@@ -633,7 +704,7 @@ impl<R: Read> ArchiveStream<R> {
         let (Some(program), Some(_), Some(queries), Some(subject)) =
             (program, service, queries, subject)
         else {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         };
         search.program = program;
         search.queries = queries;
@@ -647,18 +718,18 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
     fn parameters(&mut self) -> Result<(Option<ParamValue>, Option<ParamValue>)> {
         let (mut matrix, mut evalue) = (None, None);
-        let mut block_start = self.reader.start_block()?;
-        while self.reader.next_element(&mut block_start)? {
-            let mut members = self.reader.begin_members()?;
+        let mut items = self.r().begin_list()?;
+        while self.r().next_item(&mut items)? {
+            let mut members = self.r().begin_members()?;
             let (mut name, mut value) = (None, None);
-            while let Some(index) = self.reader.next_member(&mut members, &["name", "value"])? {
+            while let Some(index) = self.r().next_member(&mut members, &["name", "value"])? {
                 match index {
                     0 => name = Some(self.string()?),
                     _ => value = Some(self.blast4_value()?),
                 }
             }
             let (Some(name), Some(value)) = (name, value) else {
-                return Err(self.reader.error("a mandatory member is missing"));
+                return Err(self.r().error("a mandatory member is missing"));
             };
             if name == b"MatrixName" && matrix.is_none() {
                 matrix = Some(value);
@@ -666,43 +737,43 @@ impl<R: Read> ArchiveStream<R> {
                 evalue = Some(value);
             }
         }
-        self.reader.end_block()?;
+        self.r().end_block()?;
         Ok((matrix, evalue))
     }
 
     /// A `Blast4-value` (the variants listed at `BLAST4_VALUE`).
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:375-378
     fn blast4_value(&mut self) -> Result<ParamValue> {
-        let variant = self.reader.choice(&BLAST4_VALUE)?;
+        let variant = self.r().choice(&BLAST4_VALUE)?;
         let name = BLAST4_VALUE[variant];
         match name {
             "big-integer" => {
-                self.reader.int8()?;
+                self.r().int8()?;
             }
             "boolean" => {
-                self.reader.boolean()?;
+                self.r().boolean()?;
             }
             "cutoff" => {
                 return Ok(ParamValue::Cutoff(
-                    if self.reader.choice(&["e-value", "raw-score"])? == 0 {
+                    if self.r().choice(&["e-value", "raw-score"])? == 0 {
                         Cutoff::EValue(self.real()?)
                     } else {
-                        self.reader.int4()?;
+                        self.r().int4()?;
                         Cutoff::RawScore
                     },
                 ));
             }
             "integer" => {
-                self.reader.int4()?;
+                self.r().int4()?;
             }
             "real" => {
                 self.real()?;
             }
             "strand-type" => {
-                self.reader.enumerated(&BLAST4_STRAND_TYPE)?;
+                self.r().enumerated(&BLAST4_STRAND_TYPE)?;
             }
             "string" => return Ok(ParamValue::String(self.string()?)),
-            _ => self.skip_value()?,
+            _ => self.typed_member(named::BLAST4_VALUE)?,
         }
         Ok(ParamValue::Other(name))
     }
@@ -720,78 +791,78 @@ impl<R: Read> ArchiveStream<R> {
             "simple-results",
         ];
         let mut results = Results::default();
-        let mut members = self.reader.begin_members()?;
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members()?;
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             match index {
                 0 => results.alignments = Some(self.seq_align_set()?),
                 2 => {
                     let mut masks = Vec::new();
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
                         masks.push(self.blast4_mask()?);
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                     results.masks = Some(masks);
                 }
                 3 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        let mut members = self.reader.begin_members()?;
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        let mut members = self.r().begin_members()?;
                         let mut seen = 0;
                         while let Some(index) = self
-                            .reader
+                            .r()
                             .next_member(&mut members, &["lambda", "k", "h", "gapped"])?
                         {
                             seen += 1;
                             if index == 3 {
-                                self.reader.boolean()?;
+                                self.r().boolean()?;
                             } else {
                                 self.real()?;
                             }
                         }
                         if seen != 4 {
-                            return Err(self.reader.error("a mandatory member is missing"));
+                            return Err(self.r().error("a mandatory member is missing"));
                         }
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
                 4 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
                         self.string()?;
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
-                _ => self.skip_value()?,
+                _ => self.typed_member(named::BLAST4_GET_SEARCH_RESULTS_REPLY)?,
             }
         }
         Ok(results)
     }
 
     fn blast4_mask(&mut self) -> Result<Mask> {
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut first, mut locations, mut frame) = (None, false, false);
         while let Some(index) = self
-            .reader
+            .r()
             .next_member(&mut members, &["locations", "frame"])?
         {
             if index == 0 {
                 locations = true;
-                let mut block_start = self.reader.start_block()?;
-                while self.reader.next_element(&mut block_start)? {
+                let mut items = self.r().begin_list()?;
+                while self.r().next_item(&mut items)? {
                     let location = self.mask_location()?;
                     if first.is_none() {
                         first = Some(location);
                     }
                 }
-                self.reader.end_block()?;
+                self.r().end_block()?;
             } else {
                 frame = true;
-                self.reader.enumerated(&BLAST4_FRAME_TYPE)?;
+                self.r().enumerated(&BLAST4_FRAME_TYPE)?;
             }
         }
         if !(locations && frame) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(Mask { first })
     }
@@ -800,7 +871,7 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-101
     // `from` and `to` are `TSeqPos` (unsigned) in NCBI's classes.
     fn mask_location(&mut self) -> Result<MaskLocation> {
-        let variant = self.reader.choice(&SEQ_LOC)?;
+        let variant = self.r().choice(&SEQ_LOC)?;
         match SEQ_LOC[variant] {
             "int" => {
                 self.seq_interval()?;
@@ -808,15 +879,15 @@ impl<R: Read> ArchiveStream<R> {
             }
             "packed-int" => {
                 let mut ids = Vec::new();
-                let mut block_start = self.reader.start_block()?;
-                while self.reader.next_element(&mut block_start)? {
+                let mut items = self.r().begin_list()?;
+                while self.r().next_item(&mut items)? {
                     ids.push(self.seq_interval()?);
                 }
-                self.reader.end_block()?;
+                self.r().end_block()?;
                 Ok(MaskLocation::PackedInt(ids))
             }
             name => {
-                self.skip_value()?;
+                self.typed_member(named::SEQ_LOC)?;
                 Ok(MaskLocation::Other(name))
             }
         }
@@ -830,15 +901,15 @@ impl<R: Read> ArchiveStream<R> {
     /// A `Seq-interval`.
     fn interval(&mut self) -> Result<Interval> {
         const NAMES: [&str; 6] = ["from", "to", "strand", "id", "fuzz-from", "fuzz-to"];
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut from, mut to, mut strand, mut id) = (None, None, None, None);
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             match index {
-                0 => from = Some(self.reader.uint4()?),
-                1 => to = Some(self.reader.uint4()?),
-                2 => strand = Some(self.reader.enumerated(&NA_STRAND)?.1),
-                3 => id = Some(self.reader.seq_id()?),
-                _ => self.skip_value()?,
+                0 => from = Some(self.r().uint4()?),
+                1 => to = Some(self.r().uint4()?),
+                2 => strand = Some(self.r().enumerated(&NA_STRAND)?.1),
+                3 => id = Some(self.r().seq_id()?),
+                _ => self.typed_member(named::SEQ_INTERVAL)?,
             }
         }
         match (from, to, id) {
@@ -848,7 +919,7 @@ impl<R: Read> ArchiveStream<R> {
                 strand,
                 id,
             }),
-            _ => Err(self.reader.error("a mandatory member is missing")),
+            _ => Err(self.r().error("a mandatory member is missing")),
         }
     }
 
@@ -861,28 +932,28 @@ impl<R: Read> ArchiveStream<R> {
             "dim", "numseg", "ids", "starts", "present", "lens", "strands", "scores",
         ];
         let mut seen = [false; 8];
-        let mut members = self.reader.begin_members()?;
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members()?;
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             seen[index] = true;
             match index {
                 0 | 1 => {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                 }
                 4 => {
-                    self.reader.octets()?;
+                    self.r().octets()?;
                 }
                 _ => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
                         match index {
                             2 => {
-                                self.reader.seq_id()?;
+                                self.r().seq_id()?;
                             }
                             3 | 5 => {
-                                self.reader.uint4()?;
+                                self.r().uint4()?;
                             }
                             6 => {
-                                self.reader.enumerated(&NA_STRAND)?;
+                                self.r().enumerated(&NA_STRAND)?;
                             }
                             _ => {
                                 let mut scratch = Align {
@@ -897,12 +968,12 @@ impl<R: Read> ArchiveStream<R> {
                             }
                         }
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
             }
         }
         if !(seen[1] && seen[2] && seen[3] && seen[4] && seen[5]) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(())
     }
@@ -918,8 +989,8 @@ impl<R: Read> ArchiveStream<R> {
             hit_id: None,
             segs: Vec::new(),
         };
-        let mut block_start = self.reader.start_block()?;
-        while self.reader.next_element(&mut block_start)? {
+        let mut items = self.r().begin_list()?;
+        while self.r().next_item(&mut items)? {
             let first = align.segs.is_empty();
             let mut pair = StdPair {
                 query: StdLoc::Missing,
@@ -927,17 +998,17 @@ impl<R: Read> ArchiveStream<R> {
             };
             let mut ids_found = false;
             let mut loc = false;
-            let mut members = self.reader.begin_members()?;
-            while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+            let mut members = self.r().begin_members()?;
+            while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
                 match index {
                     0 => {
-                        self.reader.int4()?;
+                        self.r().int4()?;
                     }
                     1 => {
-                        let mut ids_start = self.reader.start_block()?;
+                        let mut id_items = self.r().begin_list()?;
                         let mut count = 0usize;
-                        while self.reader.next_element(&mut ids_start)? {
-                            let id = self.reader.seq_id()?;
+                        while self.r().next_item(&mut id_items)? {
+                            let id = self.r().seq_id()?;
                             if count == 0 && matches!(align.query_id, QueryRowId::Missing) {
                                 align.query_id = QueryRowId::Id(id);
                             } else if count == 1 && first {
@@ -946,13 +1017,13 @@ impl<R: Read> ArchiveStream<R> {
                             count += 1;
                         }
                         ids_found = count > 0;
-                        self.reader.end_block()?;
+                        self.r().end_block()?;
                     }
                     2 => {
                         loc = true;
-                        let mut loc_start = self.reader.start_block()?;
+                        let mut loc_items = self.r().begin_list()?;
                         let mut count = 0usize;
-                        while self.reader.next_element(&mut loc_start)? {
+                        while self.r().next_item(&mut loc_items)? {
                             let wanted = count == 0
                                 && !ids_found
                                 && matches!(align.query_id, QueryRowId::Missing);
@@ -971,7 +1042,7 @@ impl<R: Read> ArchiveStream<R> {
                             }
                             count += 1;
                         }
-                        self.reader.end_block()?;
+                        self.r().end_block()?;
                     }
                     _ => {
                         let mut scratch = Align {
@@ -982,20 +1053,20 @@ impl<R: Read> ArchiveStream<R> {
                             num_ident: None,
                             score_of_other_type: None,
                         };
-                        let mut scores_start = self.reader.start_block()?;
-                        while self.reader.next_element(&mut scores_start)? {
+                        let mut score_items = self.r().begin_list()?;
+                        while self.r().next_item(&mut score_items)? {
                             self.align_score(&mut scratch)?;
                         }
-                        self.reader.end_block()?;
+                        self.r().end_block()?;
                     }
                 }
             }
             if !loc {
-                return Err(self.reader.error("a mandatory member is missing"));
+                return Err(self.r().error("a mandatory member is missing"));
             }
             align.segs.push(pair);
         }
-        self.reader.end_block()?;
+        self.r().end_block()?;
         Ok(align)
     }
 
@@ -1005,16 +1076,16 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:103-107
     // `point` is `TSeqPos` (unsigned) in NCBI's class.
     fn std_loc(&mut self, keep_id: bool) -> Result<(StdLoc, Option<ParsedSeqId>, &'static str)> {
-        let variant = self.reader.choice(&SEQ_LOC)?;
+        let variant = self.r().choice(&SEQ_LOC)?;
         let name = SEQ_LOC[variant];
         let keep = |id: ParsedSeqId| keep_id.then_some(id);
         let (location, id) = match name {
             "null" => {
-                self.reader.null()?;
+                self.r().null()?;
                 (StdLoc::Null, None)
             }
-            "empty" => (StdLoc::Empty, keep(self.reader.seq_id()?)),
-            "whole" => (StdLoc::Whole, keep(self.reader.seq_id()?)),
+            "empty" => (StdLoc::Empty, keep(self.r().seq_id()?)),
+            "whole" => (StdLoc::Whole, keep(self.r().seq_id()?)),
             "int" => {
                 let Interval {
                     from,
@@ -1026,23 +1097,23 @@ impl<R: Read> ArchiveStream<R> {
             }
             "pnt" => {
                 const NAMES: [&str; 4] = ["point", "strand", "id", "fuzz"];
-                let mut members = self.reader.begin_members()?;
+                let mut members = self.r().begin_members()?;
                 let (mut point, mut strand, mut id) = (None, None, None);
-                while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+                while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
                     match index {
-                        0 => point = Some(self.reader.uint4()?),
-                        1 => strand = Some(self.reader.enumerated(&NA_STRAND)?.1),
-                        2 => id = Some(self.reader.seq_id()?),
-                        _ => self.skip_value()?,
+                        0 => point = Some(self.r().uint4()?),
+                        1 => strand = Some(self.r().enumerated(&NA_STRAND)?.1),
+                        2 => id = Some(self.r().seq_id()?),
+                        _ => self.typed_member(named::SEQ_POINT)?,
                     }
                 }
                 let (Some(point), Some(id)) = (point, id) else {
-                    return Err(self.reader.error("a mandatory member is missing"));
+                    return Err(self.r().error("a mandatory member is missing"));
                 };
                 (StdLoc::Pnt { point, strand }, keep(id))
             }
             _ => {
-                self.skip_value()?;
+                self.typed_member(named::SEQ_LOC)?;
                 (StdLoc::Other, None)
             }
         };
@@ -1051,26 +1122,23 @@ impl<R: Read> ArchiveStream<R> {
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:332-337
     fn messages(&mut self) -> Result<()> {
-        let mut block_start = self.reader.start_block()?;
-        while self.reader.next_element(&mut block_start)? {
-            let mut members = self.reader.begin_members()?;
+        let mut items = self.r().begin_list()?;
+        while self.r().next_item(&mut items)? {
+            let mut members = self.r().begin_members()?;
             let mut code = false;
-            while let Some(index) = self
-                .reader
-                .next_member(&mut members, &["code", "message"])?
-            {
+            while let Some(index) = self.r().next_member(&mut members, &["code", "message"])? {
                 if index == 0 {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                     code = true;
                 } else {
                     self.string()?;
                 }
             }
             if !code {
-                return Err(self.reader.error("member code missing"));
+                return Err(self.r().error("member code missing"));
             }
         }
-        self.reader.end_block()
+        self.r().end_block()
     }
 
     /// A `Bioseq-set`: its `seq-set`.
@@ -1079,27 +1147,27 @@ impl<R: Read> ArchiveStream<R> {
         const NAMES: [&str; 9] = [
             "id", "coll", "level", "class", "release", "date", "descr", "seq-set", "annot",
         ];
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let mut entries = None;
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             match index {
                 0 => {
-                    self.reader.object_id()?;
+                    self.r().object_id()?;
                 }
                 1 => {
-                    self.reader.dbtag()?;
+                    self.r().dbtag()?;
                 }
                 2 => {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                 }
                 3 => {
-                    self.reader.enumerated(&BIOSEQ_SET_CLASS)?;
+                    self.r().enumerated(&BIOSEQ_SET_CLASS)?;
                 }
                 4 => {
                     self.string()?;
                 }
                 5 => {
-                    self.reader.date()?;
+                    self.r().date()?;
                 }
                 6 => {
                     let mut ignored = Query::default();
@@ -1107,41 +1175,41 @@ impl<R: Read> ArchiveStream<R> {
                 }
                 7 => {
                     let mut list = Vec::new();
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        list.push(if self.reader.choice(&["seq", "set"])? == 0 {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        list.push(if self.r().choice(&["seq", "set"])? == 0 {
                             SeqEntry::Seq(self.bioseq()?)
                         } else {
                             self.bioseq_set()?;
                             SeqEntry::Set
                         });
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                     entries = Some(list);
                 }
-                _ => self.skip_value()?,
+                _ => self.typed_member(named::BIOSEQ_SET)?,
             }
         }
-        entries.ok_or_else(|| self.reader.error("member seq-set missing"))
+        entries.ok_or_else(|| self.r().error("member seq-set missing"))
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
     fn bioseq(&mut self) -> Result<Query> {
         let mut query = Query::default();
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut ids, mut inst) = (false, false);
         while let Some(index) = self
-            .reader
+            .r()
             .next_member(&mut members, &["id", "descr", "inst", "annot"])?
         {
             match index {
                 0 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        let id = self.reader.seq_id()?;
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        let id = self.r().seq_id()?;
                         query.ids.push(id);
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                     ids = true;
                 }
                 1 => self.seq_descr(&mut query)?,
@@ -1151,12 +1219,12 @@ impl<R: Read> ArchiveStream<R> {
                 }
                 _ => {
                     query.has_annot = true;
-                    self.skip_value()?;
+                    self.typed_member(named::BIOSEQ)?;
                 }
             }
         }
         if !(ids && inst) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(query)
     }
@@ -1169,10 +1237,10 @@ impl<R: Read> ArchiveStream<R> {
     // the application start rejects, `ApplicationStart::settings`.)
     fn seq_descr(&mut self, query: &mut Query) -> Result<()> {
         let mut count = 0usize;
-        let mut block_start = self.reader.start_block()?;
-        while self.reader.next_element(&mut block_start)? {
+        let mut items = self.r().begin_list()?;
+        while self.r().next_item(&mut items)? {
             count += 1;
-            let variant = self.reader.choice(&SEQDESC)?;
+            let variant = self.r().choice(&SEQDESC)?;
             match SEQDESC[variant] {
                 "title" => {
                     let title = self.string()?;
@@ -1186,12 +1254,12 @@ impl<R: Read> ArchiveStream<R> {
                             Some("a CFastaReader user object whose DefLine is not a string");
                     }
                 }
-                _ => self.skip_value()?,
+                _ => self.typed_member(named::SEQDESC)?,
             }
         }
-        self.reader.end_block()?;
+        self.r().end_block()?;
         if count == 0 {
-            return Err(self.reader.error("empty Seq-descr is not allowed"));
+            return Err(self.r().error("empty Seq-descr is not allowed"));
         }
         Ok(())
     }
@@ -1206,11 +1274,11 @@ impl<R: Read> ArchiveStream<R> {
     // `top`: the object is a descriptor's (whose `CFastaReader` DefLine rpsbproc reads). Returns
     // whether it is a `CFastaReader` object with a `DefLine` field whose value is not a string.
     fn user_object(&mut self, top: bool) -> Result<bool> {
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut fasta_reader, mut type_seen, mut data_seen, mut bad_defline) =
             (false, false, false, false);
         while let Some(index) = self
-            .reader
+            .r()
             .next_member(&mut members, &["class", "type", "data"])?
         {
             match index {
@@ -1219,22 +1287,22 @@ impl<R: Read> ArchiveStream<R> {
                 }
                 1 => {
                     type_seen = true;
-                    let id = self.reader.object_id()?;
+                    let id = self.r().object_id()?;
                     fasta_reader =
                         top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
                 }
                 _ => {
                     data_seen = true;
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
                         bad_defline |= self.user_field(fasta_reader)?;
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
             }
         }
         if !(type_seen && data_seen) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(bad_defline)
     }
@@ -1246,67 +1314,68 @@ impl<R: Read> ArchiveStream<R> {
             "str", "int", "real", "bool", "os", "object", "strs", "ints", "reals", "oss", "fields",
             "objects",
         ];
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut defline, mut label, mut data, mut bad_defline) = (false, false, false, false);
         while let Some(index) = self
-            .reader
+            .r()
             .next_member(&mut members, &["label", "num", "data"])?
         {
             match index {
                 0 => {
                     label = true;
-                    defline = matches!(self.reader.object_id()?, ObjectId::Str(text) if text == b"DefLine");
+                    defline =
+                        matches!(self.r().object_id()?, ObjectId::Str(text) if text == b"DefLine");
                 }
                 1 => {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                 }
                 _ => {
                     data = true;
-                    let variant = self.reader.choice(&FIELD_DATA)?;
+                    let variant = self.r().choice(&FIELD_DATA)?;
                     bad_defline = fasta_reader && defline && variant != 0;
                     match FIELD_DATA[variant] {
                         "str" => {
-                            self.reader.utf8_string()?;
+                            self.r().utf8_string()?;
                         }
                         "int" => {
-                            self.reader.int4()?;
+                            self.r().int4()?;
                         }
                         "real" => {
                             self.real()?;
                         }
                         "bool" => {
-                            self.reader.boolean()?;
+                            self.r().boolean()?;
                         }
                         "os" => {
-                            self.reader.octets()?;
+                            self.r().octets()?;
                         }
                         "object" => {
                             self.user_object(false)?;
                         }
-                        "strs" => self.reader.each(|reader| reader.utf8_string().map(drop))?,
-                        "ints" => self.reader.each(|reader| reader.int4().map(drop))?,
-                        "reals" => self.reader.each(|reader| reader.real().map(drop))?,
-                        "oss" => self.reader.each(|reader| reader.octets().map(drop))?,
+                        "strs" => self.r().each(|reader| reader.utf8_string().map(drop))?,
+                        "ints" => self.r().each(|reader| reader.int4().map(drop))?,
+                        "reals" => self.r().each(|reader| reader.real().map(drop))?,
+                        "oss" => self.r().each(|reader| reader.octets().map(drop))?,
                         "fields" => {
-                            let mut block_start = self.reader.start_block()?;
-                            while self.reader.next_element(&mut block_start)? {
+                            let mut items = self.r().begin_list()?;
+                            while self.r().next_item(&mut items)? {
                                 self.user_field(false)?;
                             }
-                            self.reader.end_block()?;
+                            self.r().end_block()?;
                         }
                         _ => {
-                            let mut block_start = self.reader.start_block()?;
-                            while self.reader.next_element(&mut block_start)? {
+                            let mut items = self.r().begin_list()?;
+                            while self.r().next_item(&mut items)? {
                                 self.user_object(false)?;
                             }
-                            self.reader.end_block()?;
+                            self.r().end_block()?;
                         }
                     }
                 }
             }
         }
         if !(label && data) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(bad_defline)
     }
@@ -1317,47 +1386,47 @@ impl<R: Read> ArchiveStream<R> {
         const NAMES: [&str; 9] = [
             "repr", "mol", "length", "fuzz", "topology", "strand", "seq-data", "ext", "hist",
         ];
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let (mut repr, mut mol) = (false, false);
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             match index {
                 0 => {
-                    self.reader.enumerated(&SEQ_INST_REPR)?;
+                    self.r().enumerated(&SEQ_INST_REPR)?;
                     repr = true;
                 }
                 1 => {
-                    query.mol = self.reader.enumerated(&SEQ_INST_MOL)?.1;
+                    query.mol = self.r().enumerated(&SEQ_INST_MOL)?.1;
                     mol = true;
                 }
-                2 => query.length = Some(self.reader.uint4()?),
+                2 => query.length = Some(self.r().uint4()?),
                 4 => {
-                    self.reader.enumerated(&SEQ_INST_TOPOLOGY)?;
+                    self.r().enumerated(&SEQ_INST_TOPOLOGY)?;
                 }
                 5 => {
-                    self.reader.enumerated(&SEQ_INST_STRAND)?;
+                    self.r().enumerated(&SEQ_INST_STRAND)?;
                 }
                 6 => query.seq_data = Some(self.seq_data()?),
                 7 => self.seq_ext(query)?,
-                _ => self.skip_value()?,
+                _ => self.typed_member(named::SEQ_INST)?,
             }
         }
         if !(repr && mol) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(())
     }
 
     /// A `Seq-data`: its variant and its letters (or bytes).
     fn seq_data(&mut self) -> Result<(&'static str, Vec<u8>)> {
-        let variant = self.reader.choice(&SEQ_DATA)?;
+        let variant = self.r().choice(&SEQ_DATA)?;
         let name = SEQ_DATA[variant];
         let data = match name {
             "iupacna" | "iupacaa" | "ncbieaa" => self.string()?,
             "gap" => {
-                self.skip_value()?;
+                self.typed_member(named::SEQ_DATA)?;
                 Vec::new()
             }
-            _ => self.reader.octets()?,
+            _ => self.r().octets()?,
         };
         Ok((name, data))
     }
@@ -1371,27 +1440,27 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:151,193-194
     fn seq_ext(&mut self, query: &mut Query) -> Result<()> {
         const NAMES: [&str; 4] = ["seg", "ref", "map", "delta"];
-        if self.reader.choice(&NAMES)? != 3 {
-            return self.skip_value();
+        if self.r().choice(&NAMES)? != 3 {
+            return self.typed_member(named::SEQ_EXT);
         }
-        let mut block_start = self.reader.start_block()?;
-        while self.reader.next_element(&mut block_start)? {
-            if self.reader.choice(&["loc", "literal"])? == 0 {
-                self.skip_value()?;
+        let mut items = self.r().begin_list()?;
+        while self.r().next_item(&mut items)? {
+            if self.r().choice(&["loc", "literal"])? == 0 {
+                self.typed_member(named::DELTA_SEQ)?;
                 continue;
             }
-            let mut members = self.reader.begin_members()?;
+            let mut members = self.r().begin_members()?;
             let mut length = false;
             while let Some(index) = self
-                .reader
+                .r()
                 .next_member(&mut members, &["length", "fuzz", "seq-data"])?
             {
                 match index {
                     0 => {
-                        self.reader.uint4()?;
+                        self.r().uint4()?;
                         length = true;
                     }
-                    1 => self.skip_value()?,
+                    1 => self.typed_member(named::SEQ_LITERAL)?,
                     _ => {
                         let data = self.seq_data()?;
                         if data.0 != "gap" {
@@ -1401,20 +1470,20 @@ impl<R: Read> ArchiveStream<R> {
                 }
             }
             if !length {
-                return Err(self.reader.error("a mandatory member is missing"));
+                return Err(self.r().error("a mandatory member is missing"));
             }
         }
-        self.reader.end_block()
+        self.r().end_block()
     }
 
     /// A `Seq-align-set` (SET OF Seq-align).
     fn seq_align_set(&mut self) -> Result<Vec<Align>> {
         let mut aligns = Vec::new();
-        let mut block_start = self.reader.start_block()?;
-        while self.reader.next_element(&mut block_start)? {
+        let mut items = self.r().begin_list()?;
+        while self.r().next_item(&mut items)? {
             aligns.push(self.seq_align()?);
         }
-        self.reader.end_block()?;
+        self.r().end_block()?;
         Ok(aligns)
     }
 
@@ -1430,26 +1499,26 @@ impl<R: Read> ArchiveStream<R> {
             score_of_other_type: None,
         };
         let (mut kind, mut segs) = (false, false);
-        let mut members = self.reader.begin_members()?;
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members()?;
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             match index {
                 0 => {
-                    self.reader.enumerated(&SEQ_ALIGN_TYPE)?;
+                    self.r().enumerated(&SEQ_ALIGN_TYPE)?;
                     kind = true;
                 }
                 1 => {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                 }
                 2 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
                         self.align_score(&mut align)?;
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
                 3 => {
                     segs = true;
-                    let variant = self.reader.choice(&SEQ_ALIGN_SEGS)?;
+                    let variant = self.r().choice(&SEQ_ALIGN_SEGS)?;
                     align.segs = match variant {
                         1 => Segs::Denseg(self.dense_seg()?),
                         2 => Segs::Std(Box::new(self.std_segs()?)),
@@ -1458,23 +1527,23 @@ impl<R: Read> ArchiveStream<R> {
                             Segs::Other("packed")
                         }
                         _ => {
-                            self.skip_value()?;
+                            self.typed_member(seq_align_segs())?;
                             Segs::Other(SEQ_ALIGN_SEGS[variant])
                         }
                     };
                 }
                 5 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        self.reader.object_id()?;
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        self.r().object_id()?;
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
-                _ => self.skip_value()?,
+                _ => self.typed_member(named::SEQ_ALIGN)?,
             }
         }
         if !(kind && segs) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(align)
     }
@@ -1483,12 +1552,12 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:283-289
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:214-262
     fn align_score(&mut self, align: &mut Align) -> Result<()> {
-        let mut members = self.reader.begin_members()?;
+        let mut members = self.r().begin_members()?;
         let mut name: Option<&'static str> = None;
         let mut value_seen = false;
-        while let Some(index) = self.reader.next_member(&mut members, &["id", "value"])? {
+        while let Some(index) = self.r().next_member(&mut members, &["id", "value"])? {
             if index == 0 {
-                name = match self.reader.object_id()? {
+                name = match self.r().object_id()? {
                     ObjectId::Str(text) => match text.as_slice() {
                         b"score" => Some("score"),
                         b"e_value" => Some("e_value"),
@@ -1501,14 +1570,14 @@ impl<R: Read> ArchiveStream<R> {
                 continue;
             }
             value_seen = true;
-            let is_real = self.reader.choice(&["real", "int"])? == 0;
+            let is_real = self.r().choice(&["real", "int"])? == 0;
             let wants_real = matches!(name, Some("e_value" | "bit_score"));
             match (name, is_real) {
                 (None, true) => {
                     self.real()?;
                 }
                 (None, false) => {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                 }
                 (Some(name), true) if wants_real => {
                     let value = self.real()?;
@@ -1519,7 +1588,7 @@ impl<R: Read> ArchiveStream<R> {
                     }
                 }
                 (Some(name), false) if !wants_real => {
-                    let value = self.reader.int4()?;
+                    let value = self.r().int4()?;
                     if name == "score" {
                         align.score = Some(value);
                     } else {
@@ -1530,7 +1599,7 @@ impl<R: Read> ArchiveStream<R> {
                     if is_real {
                         self.real()?;
                     } else {
-                        self.reader.int4()?;
+                        self.r().int4()?;
                     }
                     if align.score_of_other_type.is_none() {
                         align.score_of_other_type = Some(name);
@@ -1539,7 +1608,7 @@ impl<R: Read> ArchiveStream<R> {
             }
         }
         if !value_seen {
-            return Err(self.reader.error("member value missing"));
+            return Err(self.r().error("member value missing"));
         }
         Ok(())
     }
@@ -1556,41 +1625,41 @@ impl<R: Read> ArchiveStream<R> {
             lens: Vec::new(),
         };
         let mut seen = [false; 7];
-        let mut members = self.reader.begin_members()?;
-        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members()?;
+        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
             seen[index] = true;
             match index {
                 0 | 1 => {
-                    self.reader.int4()?;
+                    self.r().int4()?;
                 }
                 2 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        let id = self.reader.seq_id()?;
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        let id = self.r().seq_id()?;
                         seg.ids.push(id);
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
                 3 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        seg.starts.push(self.reader.int4()?);
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        seg.starts.push(self.r().int4()?);
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
                 4 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        seg.lens.push(self.reader.uint4()?);
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        seg.lens.push(self.r().uint4()?);
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
                 5 => {
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        self.reader.enumerated(&NA_STRAND)?;
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
+                        self.r().enumerated(&NA_STRAND)?;
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
                 _ => {
                     let mut scratch = Align {
@@ -1601,16 +1670,16 @@ impl<R: Read> ArchiveStream<R> {
                         num_ident: None,
                         score_of_other_type: None,
                     };
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
+                    let mut items = self.r().begin_list()?;
+                    while self.r().next_item(&mut items)? {
                         self.align_score(&mut scratch)?;
                     }
-                    self.reader.end_block()?;
+                    self.r().end_block()?;
                 }
             }
         }
         if !(seen[1] && seen[2] && seen[3] && seen[4]) {
-            return Err(self.reader.error("a mandatory member is missing"));
+            return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(seg)
     }

@@ -962,7 +962,14 @@ fn run_sessions<R: Read>(
         if report.stopped() {
             return Outcome::Exit(E_OK);
         }
-        let archive = match stream.next_archive() {
+        let (archive, posts) = stream.next_archive();
+        // NCBI's reader posts while it reads the object, before rpsbproc uses it (also when it
+        // then fails to read it); rpsbproc sets no prefix for the posts (`Post::line`).
+        for post in &posts {
+            report.before_post();
+            report.diag.post_bytes(&post.line(None));
+        }
+        let archive = match archive {
             Ok(Some(archive)) => archive,
             Ok(None) => break,
             Err(refusal) => return Outcome::refused(refusal.message),

@@ -477,6 +477,7 @@ impl<E: Encoder> Traced<E> {
 }
 
 /// A frame of NCBI's object stack that shows in its path (`object_stack_trace`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackStep<'a> {
     /// `eFrameClassMember` or `eFrameChoiceVariant` with its member's name.
     Member(&'a str),

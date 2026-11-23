@@ -118,6 +118,41 @@ pub struct MakedbArgs {
     pub randomize: bool,
 }
 
+impl MakedbArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, makeblastdb's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(MakedbArgs {
+            input: args.option_or_default("in")?,
+            input_type: args.option_or_default("input_type")?,
+            dbtype: args.option_or_default("dbtype")?,
+            title: args.given_option("title")?,
+            out: args.given_option("out")?,
+            blastdb_version: args.option_or_default("blastdb_version")?,
+            max_file_sz: args.option_or_default("max_file_sz")?,
+            metadata_output_prefix: args.given_option("metadata_output_prefix")?,
+            logfile: args.given_option("logfile")?,
+            hash_index: args.flag("hash_index"),
+            taxid: args.given_option("taxid")?,
+            taxid_map: args.given_option("taxid_map")?,
+            mask_data: args.given_option("mask_data")?,
+            mask_id: args.given_option("mask_id")?,
+            mask_desc: args.given_option("mask_desc")?,
+            gi_mask: args.flag("gi_mask"),
+            gi_mask_name: args.given_option("gi_mask_name")?,
+            parse_seqids: args.flag("parse_seqids"),
+            oid_masks: args.given_option("oid_masks")?,
+            randomize: args.flag("randomize"),
+        })
+    }
+}
+
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
 #[derive(Debug)]

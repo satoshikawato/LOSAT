@@ -15,7 +15,7 @@ use clap::FromArgMatches;
 
 use super::{Cli, Commands};
 use crate::blastinput::ncbi_environment::{preparse, DiagTarget, Preparsed};
-use crate::ncbi_app::args::{is_file_argument, refusal, Args, Refusal};
+use crate::ncbi_app::args::{is_file_argument, refusal, Args, NotConverted, Refusal};
 use crate::ncbi_app::{Diag, ReadEnd, Tool};
 
 /// A `Tool` of a program on clap: NCBI's frozen `-help` text, no diagnostic prefix, no
@@ -247,6 +247,58 @@ fn conversion_error(tool: &Tool, error: &clap::Error) -> String {
     }
 }
 
+// No NCBI counterpart: NCBI's `CArgs` is the program's arguments; LOSAT's programs read theirs into
+// their own option types (line RG DECISIONS K4i-3-1).
+/// The options of `tool`'s arguments `args` (each program's `from_args`); `dry_run` for a caller
+/// that ends before LOSAT's refusals, which reads a value that LOSAT refuses for not being UTF-8 as
+/// its lossy text (`Args::with_lossy_text`). A key that the option's type does not hold is LOSAT's
+/// error (`conversion_error`).
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "line RG item K4i-3c: clap converts the programs' arguments until the next commit"
+    )
+)]
+pub(crate) fn options(tool: &Tool, args: &Args, dry_run: bool) -> Result<Commands, String> {
+    use crate::algorithm::{
+        blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
+    };
+    let lossy;
+    let args = match dry_run {
+        true => {
+            lossy = args.with_lossy_text(|name| refuses_bytes(tool, name));
+            &lossy
+        }
+        false => args,
+    };
+    let options = match tool.program {
+        "blastx" => blastx::BlastxArgs::from_args(args).map(Commands::Blastx),
+        "blastn" => blastn::BlastnArgs::from_args(args).map(Commands::Blastn),
+        "blastp" => blastp::BlastpArgs::from_args(args).map(Commands::Blastp),
+        "tblastx" => tblastx::TblastxArgs::from_args(args).map(Commands::Tblastx),
+        "tblastn" => tblastn::TblastnArgs::from_args(args).map(Commands::Tblastn),
+        "psiblast" => psiblast::PsiblastArgs::from_args(args).map(Commands::Psiblast),
+        "rpsblast" => rpsblast::RpsblastArgs::from_args(args).map(Commands::Rpsblast),
+        "rpstblastn" => rpstblastn::RpstblastnArgs::from_args(args).map(Commands::Rpstblastn),
+        "makeblastdb" => {
+            crate::writedb::makeblastdb::MakedbArgs::from_args(args).map(Commands::Makedb)
+        }
+        "rpsbproc" => crate::rpsbproc::RpsbprocArgs::from_args(args).map(Commands::Rpsbproc),
+        program => unreachable!("{program} is not on the reader"),
+    };
+    options.map_err(|NotConverted { name }| not_converted(tool, name))
+}
+
+/// LOSAT's error where a program's option type does not hold the value of `-name` that NCBI's
+/// reader read (`options`).
+fn not_converted(tool: &Tool, name: &str) -> String {
+    format!(
+        "LOSAT's {} does not convert the value of -{name} that NCBI's argument reader read",
+        tool.refusal_name
+    )
+}
+
 /// Why a command line was not read into a program's arguments (`read_argv`, `try_parse_from`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArgvError {
@@ -367,3 +419,7 @@ pub(crate) fn read_argv(
     }
     convert(tool, &args, dry_run).map_err(ArgvError::Refused)
 }
+
+#[cfg(test)]
+#[path = "options_tests.rs"]
+mod options_tests;

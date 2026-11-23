@@ -305,6 +305,77 @@ pub struct PsiblastArgs {
 }
 
 impl PsiblastArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, psiblast's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(PsiblastArgs {
+            query: args.option_or_default("query")?,
+            subject: args.given_option("subject")?,
+            db: args.given_option("db")?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            dbsize: args.given_option("dbsize")?,
+            show_gis: args.flag("show_gis"),
+            parse_deflines: args.flag("parse_deflines"),
+            searchsp: args.given_option("searchsp")?,
+            sum_stats: args.given_option("sum_stats")?,
+            evalue: args.given_option("evalue")?,
+            threshold: args.given_option("threshold")?,
+            word_size: args.given_option("word_size")?,
+            num_threads: args.option_or_default("num_threads")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: crate::blastinput::report_counts::FormattingArgs::from_args(args)?,
+            max_hsps_per_subject: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            culling_limit: args.given_option("culling_limit")?,
+            best_hit_overhang: args.given_option("best_hit_overhang")?,
+            best_hit_score_edge: args.given_option("best_hit_score_edge")?,
+            subject_besthit: args.flag("subject_besthit"),
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            gap_trigger: args.option_or_default("gap_trigger")?,
+            window_size: args.given_option("window_size")?,
+            matrix: args.given_option("matrix")?,
+            gap_open: args.given_option("gapopen")?,
+            gap_extend: args.given_option("gapextend")?,
+            comp_based_stats: args.option_or_default("comp_based_stats")?,
+            seg: args.given_option("seg")?,
+            soft_masking: args.given_option("soft_masking")?,
+            lcase_masking: args.flag("lcase_masking"),
+            use_sw_tback: args.flag("use_sw_tback"),
+            query_loc: args.given_option("query_loc")?,
+            subject_loc: args.given_option("subject_loc")?,
+            outfmt: args.option_or_default("outfmt")?,
+            num_iterations: args.option_or_default("num_iterations")?,
+            pseudocount: args.option_or_default("pseudocount")?,
+            inclusion_ethresh: args.option_or_default("inclusion_ethresh")?,
+            out_pssm: args.given_option("out_pssm")?,
+            out_ascii_pssm: args.given_option("out_ascii_pssm")?,
+            save_pssm_after_last_round: args.flag("save_pssm_after_last_round"),
+            save_each_pssm: args.flag("save_each_pssm"),
+            in_pssm: args.given_option("in_pssm")?,
+            in_msa: args.given_option("in_msa")?,
+            msa_master_idx: args.given_option("msa_master_idx")?,
+            ignore_msa_master: args.flag("ignore_msa_master"),
+            first_query_ordinal: Default::default(),
+            scope_refusal: Default::default(),
+            pssm_versions: Default::default(),
+            pssm_check: Default::default(),
+        })
+    }
+}
+
+impl PsiblastArgs {
     /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
     /// (the output formats of the later items of the series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {

@@ -281,6 +281,79 @@ pub struct BlastxArgs {
     pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
 }
 
+impl BlastxArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, blastx's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(BlastxArgs {
+            query: args.option_or_default("query")?,
+            subject: args.given_option("subject")?,
+            subject_loc: args.given_option("subject_loc")?,
+            db: args.given_option("db")?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
+            dbsize: args.given_option("dbsize")?,
+            show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
+            parse_deflines: args.flag("parse_deflines"),
+            searchsp: args.given_option("searchsp")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            task: args.option_or_default("task")?,
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:157-158
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1454
+            // NCBI's XML gives `-evalue` no default (its search sets `BLAST_EXPECT_VALUE`, 10,
+            // where the option is not given): the one default that LOSAT writes itself.
+            evalue: args.given_option("evalue")?.unwrap_or(10.0),
+            word_size: args.given_option("word_size")?,
+            max_hsps: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            sum_stats: args.given_option("sum_stats")?,
+            gap_open: args.given_option("gapopen")?,
+            gap_extend: args.given_option("gapextend")?,
+            max_intron_length: args.option_or_default("max_intron_length")?,
+            seg: args.option_or_default("seg")?,
+            soft_masking: args.option_or_default("soft_masking")?,
+            matrix: args.given_option("matrix")?,
+            threshold: args.given_option("threshold")?,
+            window_size: args.given_option("window_size")?,
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            culling_limit: args.given_option("culling_limit")?,
+            best_hit_overhang: args.given_option("best_hit_overhang")?,
+            best_hit_score_edge: args.given_option("best_hit_score_edge")?,
+            subject_besthit: args.flag("subject_besthit"),
+            ungapped: args.flag("ungapped"),
+            lcase_masking: args.flag("lcase_masking"),
+            use_sw_tback: args.flag("use_sw_tback"),
+            strand: args.option_or_default("strand")?,
+            query_loc: args.given_option("query_loc")?,
+            query_gencode: args.option_or_default("query_gencode")?,
+            outfmt: args.option_or_default("outfmt")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: crate::blastinput::report_counts::FormattingArgs::from_args(args)?,
+            num_threads: args.option_or_default("num_threads")?,
+            mt_mode: args.given_option("mt_mode")?,
+            comp_based_stats: args.option_or_default("comp_based_stats")?,
+            rpstblastn: Default::default(),
+            request_inputs: Default::default(),
+            taxdb_setting: Default::default(),
+            matrix_search: Default::default(),
+            first_query_ordinal: Default::default(),
+            scope_refusal: Default::default(),
+        })
+    }
+}
+
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
 /// DECISIONS 38 D1): the user's nucleotide queries, in BLASTX's query batches with BLASTX's frames,
 /// masks and statistics, against a profile database, whose results BLASTX's reports write. A run

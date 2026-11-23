@@ -275,6 +275,76 @@ pub struct TblastxArgs {
     pub matrix_file: Option<std::path::PathBuf>,
 }
 
+impl TblastxArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, tblastx's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(TblastxArgs {
+            query: args.option_or_default("query")?,
+            subject: args.given_option("subject")?,
+            db: args.given_option("db")?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
+            dbsize: args.given_option("dbsize")?,
+            show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
+            parse_deflines: args.flag("parse_deflines"),
+            id_scope: Default::default(),
+            searchsp: args.given_option("searchsp")?,
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:157-158
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1454
+            // NCBI's XML gives `-evalue` no default (its search sets `BLAST_EXPECT_VALUE`, 10,
+            // where the option is not given): the one default that LOSAT writes itself.
+            evalue: args.given_option("evalue")?.unwrap_or(10.0),
+            threshold: args.given_option("threshold")?,
+            matrix: args.given_option("matrix")?,
+            word_size: args.given_option("word_size")?,
+            num_threads: args.option_or_default("num_threads")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            query_gencode: args.option_or_default("query_gencode")?,
+            db_gencode: args.option_or_default("db_gencode")?,
+            max_intron_length: args.given_option("max_intron_length")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: crate::blastinput::report_counts::FormattingArgs::from_args(args)?,
+            report_counts: Default::default(),
+            html_links: Default::default(),
+            max_hsps: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            seg: args.option_or_default("seg")?,
+            soft_masking: args.given_option("soft_masking")?,
+            sum_stats: args.given_option("sum_stats")?,
+            lcase_masking: args.flag("lcase_masking"),
+            strand: args.option_or_default("strand")?,
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            window_size: args.given_option("window_size")?,
+            outfmt: args.option_or_default("outfmt")?,
+            culling_limit: args.given_option("culling_limit")?,
+            best_hit_overhang: args.given_option("best_hit_overhang")?,
+            best_hit_score_edge: args.given_option("best_hit_score_edge")?,
+            subject_besthit: args.flag("subject_besthit"),
+            query_loc: args.given_option("query_loc")?,
+            subject_loc: args.given_option("subject_loc")?,
+            archive: Default::default(),
+            strategy: Default::default(),
+            tabular_taxdb: Default::default(),
+            subject_taxdb: Default::default(),
+            taxdb_setting: Default::default(),
+            first_query_ordinal: Default::default(),
+            scope_refusal: Default::default(),
+            matrix_file: Default::default(),
+        })
+    }
+}
+
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TblastxMatrix {

@@ -125,6 +125,53 @@ pub struct RpstblastnArgs {
 }
 
 impl RpstblastnArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, rpstblastn's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(RpstblastnArgs {
+            query: args.option_or_default("query")?,
+            query_gencode: args.option_or_default("query_gencode")?,
+            query_loc: args.given_option("query_loc")?,
+            strand: args.option_or_default("strand")?,
+            db: args.given_option("db")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            evalue: args.given_option("evalue")?,
+            comp_based_stats: args.option_or_default("comp_based_stats")?,
+            outfmt: args.option_or_default("outfmt")?,
+            show_gis: args.flag("show_gis"),
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: FormattingArgs::from_args(args)?,
+            seg: args.given_option("seg")?,
+            soft_masking: args.given_option("soft_masking")?,
+            lcase_masking: args.flag("lcase_masking"),
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            max_hsps_per_subject: args.given_option("max_hsps")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            dbsize: args.given_option("dbsize")?,
+            searchsp: args.given_option("searchsp")?,
+            sum_stats: args.given_option("sum_stats")?,
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            window_size: args.given_option("window_size")?,
+            ungapped: args.flag("ungapped"),
+            parse_deflines: args.flag("parse_deflines"),
+            num_threads: args.option_or_default("num_threads")?,
+            mt_mode: args.given_option("mt_mode")?,
+            use_sw_tback: args.flag("use_sw_tback"),
+        })
+    }
+}
+
+impl RpstblastnArgs {
     /// The RPS search of the arguments (what BLASTX's arguments do not hold), after NCBI's reading
     /// of `-outfmt`, which comes before its option handlers. LOSAT's refusals of options come once
     /// per run before the first byte, after NCBI's own errors of the options and the database

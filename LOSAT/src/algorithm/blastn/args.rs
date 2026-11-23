@@ -506,6 +506,101 @@ pub struct BlastnArgs {
 }
 
 impl BlastnArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, blastn's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(BlastnArgs {
+            query: args.option_or_default("query")?,
+            subject: args.given_option("subject")?,
+            db: args.given_option("db")?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
+            db_mask_resolved: Default::default(),
+            megablast_index_loaded: Default::default(),
+            dbsize: args.given_option("dbsize")?,
+            show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
+            parse_deflines: args.flag("parse_deflines"),
+            id_scope: Default::default(),
+            searchsp: args.given_option("searchsp")?,
+            task: args.option_or_default("task")?,
+            template_type: args.given_option("template_type")?,
+            template_length: args.given_option("template_length")?,
+            word_size: args.given_option("word_size")?,
+            num_threads: args.option_or_default("num_threads")?,
+            mt_mode: args.given_option("mt_mode")?,
+            use_index: args.given_option("use_index")?,
+            index_name: args.given_option("index_name")?,
+            evalue: args.given_option("evalue")?,
+            percent_identity: args.given_option("perc_identity")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: crate::blastinput::report_counts::FormattingArgs::from_args(args)?,
+            report_counts: Default::default(),
+            html_links: Default::default(),
+            limit_lookup: false,
+            max_db_word_count: 30u8,
+            max_hsps_per_subject: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            min_diag_separation: 0usize,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            reward: args.given_option("reward")?,
+            penalty: args.given_option("penalty")?,
+            gap_open: args.given_option("gapopen")?,
+            gap_extend: args.given_option("gapextend")?,
+            dust_filtering: args.given_option("dust")?,
+            dust: DustSpec::Yes,
+            lcase_masking: args.flag("lcase_masking"),
+            soft_masking: args.given_option("soft_masking")?,
+            filtering_db: args.given_option("filtering_db")?,
+            repeat_filter: Default::default(),
+            window_masker_taxid: args.given_option("window_masker_taxid")?,
+            window_masker_db: args.given_option("window_masker_db")?,
+            window_masker: Default::default(),
+            window_masker_counts: Default::default(),
+            window_masker_registry: Default::default(),
+            tabular_taxdb: Default::default(),
+            subject_taxdb: Default::default(),
+            taxdb_setting: Default::default(),
+            strand: args.option_or_default("strand")?,
+            query_loc: args.given_option("query_loc")?,
+            subject_loc: args.given_option("subject_loc")?,
+            subject_besthit: args.flag("subject_besthit"),
+            culling_limit: args.given_option("culling_limit")?,
+            best_hit_overhang: args.given_option("best_hit_overhang")?,
+            best_hit_score_edge: args.given_option("best_hit_score_edge")?,
+            ungapped: args.flag("ungapped"),
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            no_greedy: args.flag("no_greedy"),
+            min_raw_gapped_score: args.given_option("min_raw_gapped_score")?,
+            window_size: args.given_option("window_size")?,
+            off_diagonal_range: args.given_option("off_diagonal_range")?,
+            verbose: false,
+            scan_step: 0usize,
+            outfmt: args.option_or_default("outfmt")?,
+            archive: Default::default(),
+            strategy: Default::default(),
+            command_line: Default::default(),
+            progress_bar: Default::default(),
+            one_query_batch: Default::default(),
+            hits_only: Default::default(),
+            first_query_ordinal: Default::default(),
+            scope_refusal: Default::default(),
+        })
+    }
+}
+
+impl BlastnArgs {
     /// The `-subject` path (empty before NCBI's check that it is given).
     pub fn subject_path(&self) -> &std::path::Path {
         self.subject.as_deref().unwrap_or(std::path::Path::new(""))
@@ -676,6 +771,15 @@ pub fn blastn_template_type(value: &str) -> Result<DiscWordType, String> {
         "optimal" => Ok(DiscWordType::Optimal),
         "coding_and_optimal" => Ok(DiscWordType::TwoTemplates),
         _ => Err("expected one of coding, coding_and_optimal, optimal".into()),
+    }
+}
+
+/// `-template_type`'s templates (`blastn_template_type` of the value, which NCBI's reader checked
+/// against its set).
+impl crate::ncbi_app::args::OptionValue for DiscWordType {
+    const KINDS: &'static [crate::ncbi_app::args::Kind] = &[crate::ncbi_app::args::Kind::Text];
+    fn of(value: &std::ffi::OsStr, _: Option<crate::ncbi_app::args::Number>) -> Option<Self> {
+        blastn_template_type(value.to_str()?).ok()
     }
 }
 

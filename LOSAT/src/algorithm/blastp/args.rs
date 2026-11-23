@@ -461,6 +461,79 @@ pub struct BlastpArgs {
     pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
 }
 
+impl BlastpArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, blastp's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(BlastpArgs {
+            query: args.option_or_default("query")?,
+            subject: args.given_option("subject")?,
+            db: args.given_option("db")?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
+            dbsize: args.given_option("dbsize")?,
+            show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
+            parse_deflines: args.flag("parse_deflines"),
+            id_scope: Default::default(),
+            searchsp: args.given_option("searchsp")?,
+            task: args.option_or_default("task")?,
+            evalue: args.given_option("evalue")?,
+            threshold: args.given_option("threshold")?,
+            word_size: args.given_option("word_size")?,
+            num_threads: args.option_or_default("num_threads")?,
+            mt_mode: args.given_option("mt_mode")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: crate::blastinput::report_counts::FormattingArgs::from_args(args)?,
+            max_hsps_per_subject: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            culling_limit: args.given_option("culling_limit")?,
+            best_hit_overhang: args.given_option("best_hit_overhang")?,
+            best_hit_score_edge: args.given_option("best_hit_score_edge")?,
+            subject_besthit: args.flag("subject_besthit"),
+            ungapped: args.flag("ungapped"),
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            window_size: args.given_option("window_size")?,
+            matrix: args.given_option("matrix")?,
+            gap_open: args.given_option("gapopen")?,
+            gap_extend: args.given_option("gapextend")?,
+            comp_based_stats: args.option_or_default("comp_based_stats")?,
+            seg: args.given_option("seg")?,
+            soft_masking: args.given_option("soft_masking")?,
+            lcase_masking: args.flag("lcase_masking"),
+            use_sw_tback: args.flag("use_sw_tback"),
+            query_loc: args.given_option("query_loc")?,
+            subject_loc: args.given_option("subject_loc")?,
+            outfmt: args.option_or_default("outfmt")?,
+            archive: Default::default(),
+            strategy: Default::default(),
+            request_inputs: Default::default(),
+            app: Default::default(),
+            taxdb_setting: Default::default(),
+            matrix_search: Default::default(),
+            inclusion_ethresh: Default::default(),
+            gap_trigger: Default::default(),
+            sum_stats: Default::default(),
+            first_query_ordinal: Default::default(),
+            scope_refusal: Default::default(),
+            psiblast_pssm: Default::default(),
+            rps: Default::default(),
+        })
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-402
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:56-82
 // The options of a task before the command line's values (BLAST_EXPECT_VALUE 10,

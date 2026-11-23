@@ -154,6 +154,50 @@ pub struct RpsblastArgs {
     pub mt_mode: Option<u8>,
 }
 
+impl RpsblastArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, rpsblast's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(RpsblastArgs {
+            query: args.option_or_default("query")?,
+            db: args.given_option("db")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            evalue: args.given_option("evalue")?,
+            dbsize: args.given_option("dbsize")?,
+            searchsp: args.given_option("searchsp")?,
+            comp_based_stats: args.option_or_default("comp_based_stats")?,
+            outfmt: args.option_or_default("outfmt")?,
+            show_gis: args.flag("show_gis"),
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: FormattingArgs::from_args(args)?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            max_hsps_per_subject: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            sum_stats: args.given_option("sum_stats")?,
+            use_sw_tback: args.flag("use_sw_tback"),
+            seg: args.given_option("seg")?,
+            soft_masking: args.given_option("soft_masking")?,
+            window_size: args.given_option("window_size")?,
+            lcase_masking: args.flag("lcase_masking"),
+            query_loc: args.given_option("query_loc")?,
+            parse_deflines: args.flag("parse_deflines"),
+            num_threads: args.option_or_default("num_threads")?,
+            mt_mode: args.given_option("mt_mode")?,
+        })
+    }
+}
+
 /// The composition-based statistics mode of a `-comp_based_stats` value as RPS-BLAST reads it:
 /// its first letter only, `D`/`d` and any unknown letter as 0, `T`/`t` as 1.
 ///

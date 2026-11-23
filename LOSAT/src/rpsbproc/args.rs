@@ -87,6 +87,29 @@ pub struct RpsbprocArgs {
 }
 
 impl RpsbprocArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, rpsbproc's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(RpsbprocArgs {
+            infile: args.given_option("i")?,
+            outfile: args.given_option("o")?,
+            evalue: args.option_or_default("e")?,
+            data_mode: args.option_or_default("m")?,
+            target_data: args.option_or_default("t")?,
+            data_path: args.given_option("d")?,
+            show_families: args.flag("f"),
+            quiet: args.flag("q"),
+        })
+    }
+}
+
+impl RpsbprocArgs {
     /// `-m`.
     pub(crate) fn mode(&self) -> DataMode {
         match self.data_mode.as_str() {

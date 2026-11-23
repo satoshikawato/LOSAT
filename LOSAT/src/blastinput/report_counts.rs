@@ -38,6 +38,24 @@ pub struct FormattingArgs {
 }
 
 impl FormattingArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(FormattingArgs {
+            line_length: args.given_option("line_length")?,
+            sort_hits: args.given_option("sorthits")?,
+            sort_hsps: args.given_option("sorthsps")?,
+        })
+    }
+}
+
+impl FormattingArgs {
     /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length`, or NCBI's
     /// `kDfltLineLength` (`report::pairwise::DEFAULT_LINE_LENGTH`).
     pub fn line_length(&self) -> usize {

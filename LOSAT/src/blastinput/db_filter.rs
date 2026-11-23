@@ -85,6 +85,28 @@ pub struct DbFilterArgs {
     pub no_taxid_expansion: bool,
 }
 
+impl DbFilterArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(DbFilterArgs {
+            seqidlist: args.given_option("seqidlist")?,
+            negative_seqidlist: args.given_option("negative_seqidlist")?,
+            taxids: args.given_option("taxids")?,
+            taxidlist: args.given_option("taxidlist")?,
+            negative_taxids: args.given_option("negative_taxids")?,
+            negative_taxidlist: args.given_option("negative_taxidlist")?,
+            no_taxid_expansion: args.flag("no_taxid_expansion"),
+        })
+    }
+}
+
 /// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's
 /// ABI v1, which keeps its own parser (`web_v1_argv`; the other readers are NCBI's).
 #[cfg(any(target_arch = "wasm32", test))]

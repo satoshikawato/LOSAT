@@ -3564,14 +3564,9 @@ fn build_pairwise_hits(
             positives: Some(positives),
             gaps: Some(gaps),
             subject_length: Some(subjects[s_idx].aa_len),
-            // The title after its first word, as the other programs give it; the reports take the
-            // subject's title bytes by subject index (`write_blastp_pairwise_report`).
-            subject_title: shown_subjects.title(s_idx).and_then(|title| {
-                title
-                    .iter()
-                    .position(|&byte| byte == b' ')
-                    .map(|space| String::from_utf8_lossy(&title[space + 1..]).into_owned())
-            }),
+            subject_title: shown_subjects
+                .title(s_idx)
+                .and_then(crate::blastinput::fasta_reader::hit_subject_title),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182

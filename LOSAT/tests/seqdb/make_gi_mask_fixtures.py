@@ -43,8 +43,8 @@ Output files:
                               `refuse` (LOSAT refuses the input: two algorithms with one name that
                               would write one data file at the same time, through two streams of
                               NCBI's; see gi_mask.rs), `parser` (an
-                              argument rule: LOSAT's parser refuses the words, exit status 2, where
-                              NCBI's prints its usage). `setup`: space separated, `-` for none:
+                              argument rule of NCBI's argument reader, which LOSAT reads with too:
+                              makeblastdb's usage and posts, exit status 1, compared as `same`). `setup`: space separated, `-` for none:
                               `F` copies in/F, `F>G` copies in/F to G, `F^N>G` writes the first N
                               FASTA records of in/F to G, `F=>G` copies in/F to G with `{C}`
                               replaced by the case directory (a file of a database, not an input:

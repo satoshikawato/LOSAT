@@ -1118,11 +1118,11 @@ impl<'a> XTwoHit<'a> {
                 )
             };
             let Some(result) = result else {
-                anyhow::bail!(
-                    "TBLASTN -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                return Err(Self::x_word_past_letters(
+                    self.window,
                     pair.q_off,
-                    pair.s_off
-                );
+                    pair.s_off,
+                ));
             };
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
@@ -1191,12 +1191,11 @@ impl<'a> XTwoHit<'a> {
                 )
             };
             let Some(result) = result else {
-                anyhow::bail!(
-                    "TBLASTN -window_size {}: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                return Err(Self::x_word_past_letters(
                     self.window,
                     pair.q_off,
-                    pair.s_off
-                );
+                    pair.s_off,
+                ));
             };
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
@@ -1215,6 +1214,17 @@ impl<'a> XTwoHit<'a> {
             );
         }
         Ok(())
+    }
+
+    // No NCBI counterpart: LOSAT's internal error for a word past the letters, which NCBI's scan
+    // does not give (the one-hit loops of window 0 and below 0). Out of line and by value, so that
+    // the loops keep no copy of a pair for it.
+    #[cold]
+    #[inline(never)]
+    fn x_word_past_letters(window: i32, q_off: u32, s_off: u32) -> anyhow::Error {
+        anyhow::anyhow!(
+            "TBLASTN -window_size {window}: the word at query offset {q_off} and subject offset {s_off} is past the letters (internal error)"
+        )
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's

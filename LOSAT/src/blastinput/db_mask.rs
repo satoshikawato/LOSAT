@@ -30,8 +30,7 @@ use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
-// The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
-// text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+// NCBI's argument reader reports the exclusions (`cli::reader`).
 /// The two options of a program whose database arguments support masking (BLASTN).
 #[derive(clap::Args, Debug, Clone, Default)]
 pub struct DbMaskArgs {
@@ -39,7 +38,6 @@ pub struct DbMaskArgs {
     #[arg(
         long = "db_soft_mask",
         value_name = "filtering_algorithm",
-        conflicts_with_all = ["subject", "subject_loc", "db_hard_mask"],
         help = "Filtering algorithm ID to apply to the BLAST database as soft masking"
     )]
     pub db_soft_mask: Option<String>,
@@ -47,7 +45,6 @@ pub struct DbMaskArgs {
     #[arg(
         long = "db_hard_mask",
         value_name = "filtering_algorithm",
-        conflicts_with_all = ["subject", "subject_loc"],
         help = "Filtering algorithm ID to apply to the BLAST database as hard masking"
     )]
     pub db_hard_mask: Option<String>,

@@ -716,7 +716,7 @@ fn run_as(running: &str, options: &[&str]) -> TblastxArgs {
         path.to_str().unwrap(),
     ];
     argv.extend_from_slice(options);
-    let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).unwrap();
+    let cli = crate::cli::try_parse_from(argv).unwrap();
     let command =
         crate::report::archive::read::import::apply(cli.command, None, &mut Vec::new()).unwrap();
     let crate::cli::Commands::Tblastx(args) = command else {

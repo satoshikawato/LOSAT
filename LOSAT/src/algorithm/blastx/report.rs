@@ -1250,19 +1250,14 @@ pub(super) fn pairwise_hits(
                             {
                                 None
                             }
-                            // The library's `Hit::subject_title` (no report reads it): the title
-                            // after its first word, `protein product` of an empty one.
+                            // The library's `Hit::subject_title` (no report reads it),
+                            // `protein product` of an empty title.
                             ShownSubjects::Fasta { .. } if subject.title.is_empty() => {
                                 Some("protein product".to_owned())
                             }
-                            ShownSubjects::Fasta { .. } => subject
-                                .title
-                                .iter()
-                                .position(|&byte| byte == b' ')
-                                .map(|space| {
-                                    String::from_utf8_lossy(&subject.title[space + 1..])
-                                        .into_owned()
-                                }),
+                            ShownSubjects::Fasta { .. } => {
+                                crate::blastinput::fasta_reader::hit_subject_title(&subject.title)
+                            }
                             ShownSubjects::Database { .. } => None,
                         },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),

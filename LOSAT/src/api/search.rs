@@ -10,6 +10,7 @@
 use super::error::Error;
 use super::input::{Inputs, QueryFile};
 use super::program::Program;
+use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::cli::{Cli, Commands};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
@@ -74,6 +75,18 @@ pub struct Search {
 }
 
 impl Search {
+    /// A search of `argv` that `validate` has not checked: the tests of a call's reading of an argv
+    /// that only its start can make fail (`start_tests`: an argument error with `-logfile`, which
+    /// `validate` reports as without one).
+    #[cfg(test)]
+    pub(crate) fn unchecked(program: Program, argv: &[&str]) -> Search {
+        Search {
+            program,
+            argv: argv.iter().map(|word| word.to_string()).collect(),
+            out: None,
+        }
+    }
+
     /// The program.
     pub fn program(&self) -> Program {
         self.program
@@ -102,10 +115,12 @@ impl Search {
 
     /// The parsed arguments of the search's argv with an `-import_search_strategy` (the file
     /// itself is the engine's import's, `Search::read_strategy`) and neither `-query`
-    /// nor `-subject`: the command line's import without overrides.
+    /// nor `-subject`: the command line's import without overrides. The posts of an argument
+    /// error go to `target` (`Search::command`).
     pub(crate) fn strategy_command(
         &self,
         out: Option<&std::path::Path>,
+        target: &DiagTarget,
     ) -> Result<Commands, Error> {
         let argv: Vec<String> = self
             .argv
@@ -117,7 +132,7 @@ impl Search {
             ])
             .collect();
         let query = (QUERY, std::ffi::OsStr::new("-"));
-        parse_words(self.program, &argv, query, None, out)
+        parse_words(self.program, &argv, query, None, out, target)
     }
 
     /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
@@ -133,7 +148,7 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (cited at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `ncbi_app::constraint::Constraint::MaxFileNameLength`)
     /// The search of `run_to_file`, whose `-out` is `path`: the parser checks it as the command
     /// line's `-out` (a file name of 256 bytes or more is NCBI's `Illegal value`, dry run or not),
     /// and the arguments carry it to the search, which makes the file where the command line makes
@@ -153,14 +168,19 @@ impl Search {
     /// `-subject`, `-query_loc` excludes `-in_pssm` and `-in_msa`, `-msa_master_idx` needs
     /// `-in_msa`), so this can fail with the parser's message where `validate`, which knows no
     /// inputs, could not. A PSSM query is psiblast's and tblastn's only, an alignment query
-    /// psiblast's, and each a file (not `-`).
-    pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
+    /// psiblast's, and each a file (not `-`). The posts of an argument error go to `target`, the
+    /// call's `-logfile` target (`CallStart::new`), as the command line's go to its own.
+    pub(crate) fn command(
+        &self,
+        inputs: Inputs<'_>,
+        target: &DiagTarget,
+    ) -> Result<Commands, Error> {
         // A strategy's arguments are the import's (`Search::read_strategy`), set on the program's
         // defaults; the search's `-out` is the only word of its own that they take.
         if let Some(strategy) = inputs.strategy {
             if self.out.is_some() {
                 // The parser checks the name of `-out` as for any search.
-                self.strategy_command(self.out.as_deref())?;
+                self.strategy_command(self.out.as_deref(), target)?;
             }
             return strategy.command(self);
         }
@@ -212,6 +232,7 @@ impl Search {
             query,
             [subject_flag, inputs.subject_name],
             self.out.as_deref(),
+            target,
         )
     }
 }
@@ -253,7 +274,14 @@ fn parse_for_some_inputs(program: Program, argv: &[String]) -> Result<Commands, 
     let mut first_error = None;
     for query in queries {
         for subject_flag in [SUBJECT, DATABASE] {
-            match parse(program, argv, query, [subject_flag, "subject"], None) {
+            match parse(
+                program,
+                argv,
+                query,
+                [subject_flag, "subject"],
+                None,
+                &DiagTarget::Stderr,
+            ) {
                 Ok(commands) => return Ok(commands),
                 Err(error) => {
                     first_error.get_or_insert(error);
@@ -272,6 +300,7 @@ fn parse(
     query: (&str, &std::ffi::OsStr),
     subject: [&str; 2],
     out: Option<&std::path::Path>,
+    target: &DiagTarget,
 ) -> Result<Commands, Error> {
     for word in argv {
         let key = key(word);
@@ -282,7 +311,7 @@ fn parse(
             ).into()));
         }
     }
-    parse_words(program, argv, query, Some(subject), out)
+    parse_words(program, argv, query, Some(subject), out, target)
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> <query_flag> <query>
@@ -297,6 +326,7 @@ fn parse_words(
     (query_flag, query): (&str, &std::ffi::OsStr),
     subject: Option<[&str; 2]>,
     out: Option<&std::path::Path>,
+    target: &DiagTarget,
 ) -> Result<Commands, Error> {
     let words = [
         std::ffi::OsStr::new("losat"),
@@ -320,8 +350,9 @@ fn parse_words(
             .map(|word| word.to_os_string())
             .chain(out)
             .chain(argv.iter().map(std::ffi::OsString::from)),
+        target,
     )
-    .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
+    .map_err(Error::of_argv)?;
     Ok(cli.command)
 }
 

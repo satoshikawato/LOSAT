@@ -33,6 +33,19 @@ pub(crate) const NCBISTDAA_TO_AMINOACID: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNP
 /// `BLAST_SCORE_MAX` (`INT2_MAX`, blast_stat.h:122): the largest score of one letter pair.
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:115-119
+/// The PSSM engine's error of a PSSM of frequency ratios only whose columns are not its query
+/// buffer's length (the Seq-inst's), `RATIOS_LENGTH_HOST_MEMORY` aside.
+const RATIOS_COLUMNS_ERROR: &str =
+    "Number of columns returned by IPssmInputFreqRatiosFreqRatios does not match query length";
+
+/// The Seq-inst length of a PSSM of frequency ratios only from which NCBI's query buffer (that
+/// many bytes and more) is allocated or not depending on the host's memory: 1 GiB, LOSAT's bound
+/// of what NCBI may or may not hold at once, as for rpsbproc's strings of a query
+/// (`rpsbproc::offline`, line PS DECISIONS 37 and 40). NCBI BLAST+ 2.17.0 ran out of memory (exit
+/// status 4) under a 3 GB address-space limit from 2^31 - 5 on (line PS item PS7c, probes s1).
+const RATIOS_LENGTH_HOST_MEMORY: i64 = 1 << 30;
+
 /// No NCBI counterpart: LOSAT's bound on the sum of a PSSM's columns' largest positive scores
 /// (`read_in_pssm`'s range rule), half of `Int4`'s range as NCBI's `MININT`.
 const PSSM_SCORE_SUM_LIMIT: i64 = 1 << 30;
@@ -792,10 +805,36 @@ pub(crate) fn psi_search_and_object_of(
     // format, `-db` and `-subject`, psiblast and tblastn, valgrind clean). With one letter less
     // or two more, or a short `length`, NCBI writes or reads out of bounds or crashes (below).
     let one_over = length >= 1 && letters.len() as i64 == length + 1;
-    if letters.is_empty() || (letters.len() as i64 != length && !one_over) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:466-484
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:97-125
+    // A PSSM of frequency ratios only: the PSSM engine takes the query buffer's length (the
+    // Seq-inst's) and stops with its error where the PSSM's columns (its letters) are not that
+    // many, after the query set-up, whose copy stays inside the buffer for a `length` of one
+    // less than the letters or more (NCBI BLAST+ 2.17.0, line PS item PS7c, review S1: valgrind
+    // clean for 29, 1000 of 30 letters and 397, 399 of 398; every other length up to 65,536 the same
+    // error). A shorter `length` writes past the buffer (valgrind's invalid write for 27 and 28
+    // of 30 and 396 of 398; NCBI crashes for 0 and 1), and one of `RATIOS_LENGTH_HOST_MEMORY` or
+    // more asks for a buffer whose allocation depends on the host's memory: both refused below.
+    let ratios_length_error = ratios_only
+        && reads_values
+        && !letters.is_empty()
+        && letters.len() as i64 != length
+        && length >= letters.len() as i64 - 1
+        && (1..RATIOS_LENGTH_HOST_MEMORY).contains(&length);
+    if ratios_only && reads_values && !letters.is_empty() && letters.len() as i64 != length && !ratios_length_error {
+        return Err(reader.refuse(if length < letters.len() as i64 - 1 {
+            "a PSSM of frequency ratios only whose query has at least two letters more than its Seq-inst's length (NCBI BLAST+ 2.17.0 writes outside its query buffer)".to_string()
+        } else {
+            format!("a PSSM of frequency ratios only whose Seq-inst's length is {length} (NCBI BLAST+ 2.17.0's query buffer of that length, {RATIOS_LENGTH_HOST_MEMORY} letters or more, is allocated or not depending on the host's memory)")
+        }));
+    }
+    if letters.is_empty() || (letters.len() as i64 != length && !one_over && !ratios_length_error) {
         return Err(reader.refuse(
             "a PSSM query whose letters are missing or of another length than its Seq-inst (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one letter more than the Seq-inst's length)",
         ));
+    }
+    if ratios_length_error {
+        scores_error = Some(RATIOS_COLUMNS_ERROR.to_string());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
     // NCBI only asserts the sizes (its release build reads or writes past the matrix): LOSAT
@@ -892,12 +931,7 @@ pub(crate) fn psi_search_and_object_of(
     // columns and letters; the PSSM object that the run writes keeps all of them.
     let mut bioseq = residues.bioseq;
     let mut query_tail = Vec::new();
-    if one_over {
-        if ratios_only && reads_values {
-            return Err(reader.refuse(
-                "a PSSM of frequency ratios only whose query has one letter more than its Seq-inst's length (NCBI BLAST+ 2.17.0's PSSM engine then computes the scores of all the letters)",
-            ));
-        }
+    if one_over && !ratios_length_error {
         let keep = length as usize;
         query_tail = letters.split_off(keep);
         rows.truncate(keep);
@@ -907,7 +941,7 @@ pub(crate) fn psi_search_and_object_of(
         }
     }
     let mut computed = None;
-    if ratios_only && reads_values {
+    if ratios_only && reads_values && !ratios_length_error {
         match scores_from_freq_ratios(&letters, &freq_ratios, reader)? {
             Ok((scores, gapped)) => {
                 rows = scores;

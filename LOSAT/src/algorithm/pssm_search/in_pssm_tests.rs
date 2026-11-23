@@ -1213,3 +1213,46 @@ fn a_query_with_one_letter_more_than_its_length_is_searched_as_its_first_letters
     let full = read_pssm_binary(&base).result.unwrap();
     assert_eq!(file.object.pssm.num_columns, full.pssm.num_columns);
 }
+
+// Line PS item PS7c (review S1): a PSSM of frequency ratios only whose Seq-inst `length` is not
+// its letters. From one less than the letters up (below 1 GiB) NCBI BLAST+ 2.17.0's PSSM engine
+// stops with its error (probes s1: 29, 31, 32, 60, 255, 1000 and 65,536 for 30 letters, valgrind
+// clean for 29 and 1000); a shorter `length` writes past NCBI's query buffer (valgrind: 27 and 28;
+// a crash for 0 and 1), and a longer one asks for a buffer whose allocation depends on the host's
+// memory: both refused.
+#[test]
+fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_in_its_buffer() {
+    use crate::report::serial::pssm::SeqEntry;
+    let with_length = |length: u32| {
+        let mut pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+            "pssm/ps5_ratio30_noparams.asn.gz",
+        ))
+        .unwrap();
+        let Some(SeqEntry::Seq(query)) = pssm.pssm.query.as_mut() else {
+            panic!("the PSSM's query");
+        };
+        assert_eq!(query.inst.length, Some(30));
+        query.inst.length = Some(length);
+        psi_search_and_object(pssm, PssmReader::PSIBLAST)
+    };
+    for length in [29, 31, 32, 60, 255, 1000, 65_536] {
+        let (search, file) = with_length(length).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            search.scores_error.as_deref(),
+            Some(RATIOS_COLUMNS_ERROR),
+            "{length}"
+        );
+        assert!(!file.valid, "{length}");
+    }
+    for (length, words) in [
+        (28, "at least two letters more"),
+        (0, "at least two letters more"),
+        (1 << 30, "depending on the host's memory"),
+        (u32::MAX, "depending on the host's memory"),
+    ] {
+        let Err(error) = with_length(length) else {
+            panic!("{length}");
+        };
+        assert!(error.to_string().contains(words), "{length}: {error}");
+    }
+}

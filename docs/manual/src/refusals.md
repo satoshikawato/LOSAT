@@ -53,7 +53,7 @@ There is one section for each program, and one for the five search programs toge
 | `-gilist`, `-negative_gilist` | Five search programs, `psiblast` | Out of scope (GI lists) |
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | `psiblast`, `rpsblast`, `rpstblastn`; strategy files in binary or XML form | Not yet supported (text strategy files run in the five search programs) |
-| `-html` | `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` with `-outfmt 1` to `4`; `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
+| `-html` | `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
@@ -67,10 +67,9 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-html` with `-outfmt 1` to `4` | Refused: not yet supported. With `-outfmt 0` and `18`, `-html` writes the HTML report as NCBI does; the other formats are the same as without it. |
 | `-import_search_strategy` with a strategy file in binary or XML form | Refused: not yet supported. Strategy files in text form, the form that `-export_search_strategy` writes, work. |
 | `-import_search_strategy` with queries given as a list of locations, a GI list, a PHI-BLAST pattern, or a PSI-BLAST, RPS-BLAST or PSSM search | Refused: not yet supported. |
-| `-import_search_strategy` with an option that the program does not have or refuses on its command line | Refused (for example `-html` with `-outfmt 1` to `4`, or composition-based statistics in `blastn`). The strategy's options that the program's command line runs run as there, the database mask, `-subject_besthit`, `-filtering_db` and the MegaBLAST index included. |
+| `-import_search_strategy` with an option that the program does not have or refuses on its command line | Refused (for example composition-based statistics in `blastn`). The strategy's options that the program's command line runs run as there, the database mask, `-subject_besthit`, `-filtering_db` and the MegaBLAST index included. |
 | `-import_search_strategy` with a MegaBLAST database index (`-use_index true`, in the strategy or on the command line) outside a `blastn` search of a database | Refused: not yet supported. |
 | `-import_search_strategy` with the strategy of another program | Refused, except `blastn` and `blastx` running a `tblastx` strategy and `tblastx` running a `blastn` or `blastx` one, which run as NCBI runs them. Between the other programs NCBI stops with an error or reads the query as the wrong molecule. |
 | `-import_search_strategy` with a negative `WindowSize` (a hand-edited strategy: `-window_size` takes 0 or more) | Runs as NCBI runs it, in the five programs: the one-hit search over NCBI's diagonal table, which passes from one subject to the next, so LOSAT writes NCBI's `-num_threads 1` result at every thread count, and the refusals of `-window_size 0` apply to it too. `blastp` refuses it with a subject longer than 5,000,000 residues (NCBI searches such a subject in parts), and with queries in more than one query batch where its search is ungapped, a batch has no searched query, or a later batch fails. |
@@ -453,7 +452,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 - `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
-- `-html` with `-outfmt 1` to `4`, and in `psiblast`, `rpsblast` and `rpstblastn`.
+- `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

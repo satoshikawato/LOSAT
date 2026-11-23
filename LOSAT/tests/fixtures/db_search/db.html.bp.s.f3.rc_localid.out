@@ -1,0 +1,121 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+../../../../fasta/html/ps_spec.faa).
+           4 sequences; 820 total letters
+
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1</a>s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+http://local.example/Subject_3?db=&taxid=0&p=https:&t=Subject_3</a>s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 
+http://local.example/Subject_2?db=&taxid=0&p=https:&t=Subject_2</a>s2 long title words long title words long title words long title ...  <a href=#Subject_2>159</a>     2e-53 
+http://local.example/Subject_4?db=&taxid=0&p=https:&t=Subject_4</a>s4 plain title for the third subject                                  <a href=#Subject_4>138</a>     1e-45 
+
+
+
+Query_1    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+Subject_3  1                                                      ........DL  10
+Subject_3  136                  .G.S.L..                                      143
+Subject_2  1    ..T...V...GIR.A.V......FS.Q...YC....G.T.NL............LAA...  60
+
+Query_1    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+Subject_3  11   ..A........V........P......S...................I....S.....S.  70
+Subject_2  61   .....S..V.....C.KY..L.....VVW......S....ADR.....Y.VT..SLL.L.  120
+
+Query_1    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+Subject_3  71   A...............K.......Q....H......RR.........Q......L....G  130
+Subject_4  50                                        L....YNGK.               59
+
+Query_1    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+Subject_3  131  ..S.....SP.P.S......                                          150
+Subject_4  6                             ....G...L.GTQ.G..H.......E....NQ...  40
+
+Query_1    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+Subject_4  41   ..L......L....Y.GK........S....R.....R.......ER...R.S.DA...   99
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20736
+
+
+  Database: User specified sequence set (Input:
+../../../../fasta/html/ps_spec.faa).
+    Posted date:  Unknown
+  Number of letters in database: 820
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

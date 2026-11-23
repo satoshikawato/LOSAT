@@ -94,7 +94,7 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 - With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.
+- `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.
 
 ## Examples
 

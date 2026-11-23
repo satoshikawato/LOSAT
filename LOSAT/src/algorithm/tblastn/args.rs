@@ -64,8 +64,7 @@ pub struct TblastnArgs {
     )]
     pub show_gis: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
-    // not write it yet (`blastinput::app::html_format_check`).
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
     #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
     pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
@@ -580,13 +579,6 @@ impl TblastnArgs {
         // (`blastinput::report_counts`), with the handler's warnings. The formats of a
         // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
         let own_outfmt = [choice.number];
-        for &number in outfmts.unwrap_or(&own_outfmt) {
-            crate::blastinput::app::html_format_check(
-                number,
-                crate::blastinput::app::Program::Tblastn,
-                self.html,
-            )?;
-        }
         let html = crate::blastinput::app::html_links(
             self.html,
             crate::blastinput::app::Program::Tblastn,

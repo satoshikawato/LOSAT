@@ -906,6 +906,7 @@ fn add_to_database(
                 ids: query.ids.clone(),
                 ..BlastDefline::default()
             }],
+            utf8: false,
         },
     };
     if !params.user_taxids {

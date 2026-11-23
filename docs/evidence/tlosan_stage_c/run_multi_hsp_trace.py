@@ -38,8 +38,7 @@ def main() -> None:
     def filler(length: int) -> str:
         return ''.join(randomizer.choice('ACGT') for _ in range(length))
     # Pinned NCBI c++/src/algo/blast/core/blast_engine.c:804-850:
-    #     s_BlastSearchEngineOneContext(...);
-    # }
+    # Runs preliminary search per context via `s_BlastSearchEngineOneContext`.
     mode = sys.argv[2] if len(sys.argv) == 3 else ''
     assert mode in ('', '--six-frame', '--no-fence'), 'usage: run_multi_hsp_trace.py NEW_OUTPUT_DIR [--six-frame|--no-fence]'
     if mode == '--six-frame':
@@ -52,7 +51,7 @@ def main() -> None:
     (output / 'query.faa').write_bytes(query)
     (output / 'subjects.fna').write_text('>' + subject_id + '\n' + subject + '\n')
     # Pinned NCBI c++/src/algo/blast/core/blast_traceback.c:1644-1684:
-    # Blast_TracebackFromHSPList(...); if (fence_hit) retry on full subject.
+    # Runs traceback via `Blast_TracebackFromHSPList` and retries on the full subject when a fence is hit.
     command = [str(NCBI), '-task', 'tblastn', '-query', str(output / 'query.faa'),
                '-subject', str(output / 'subjects.fna'), '-db_gencode', '1',
                '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13',

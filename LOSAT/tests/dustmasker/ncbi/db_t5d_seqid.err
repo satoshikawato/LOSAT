@@ -1,0 +1,3 @@
+Error: (CSerialException::eFormatError) byte 47: unexpected tag: OctetString (4), should be: VisibleString (26) ( at [].[].local.str)
+Error: (CSerialException::eFormatError) error while reading seqid ( at Blast-def-line-set.[].[].seqid.[].[].local.str)
+Error: (106.16) Application's execution failed (CSerialException::eFormatError) byte 47: unexpected tag: OctetString (4), should be: VisibleString (26) ( at [].[].local.str)

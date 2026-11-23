@@ -2323,8 +2323,8 @@ pub(crate) fn blastp_family_program(program: &str) -> &str {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:125-138
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5088-5340 (WrapIt, fWrap_FlatFile)
-// enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
-// if (score >= best_score && score_pos > pos0) { best_pos = score_pos; best_score = score; }
+// Breakpoint priority (`EScore`): forced < punctuation < comma < space < newline;
+// keep the rightmost candidate position past the line start with score at least the best seen.
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:288-293
 // `NStr::Wrap` measures the `std::string` in bytes, so a line can end inside a UTF-8
 // sequence (`\xe6\xbc` and `\xa2` on two lines). Each line and its newline are NCBI's
@@ -2424,8 +2424,8 @@ pub(crate) fn write_flatfile_wrapped_with<W: Write + ?Sized>(
                 column += 1;
             }
             // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
-            // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
-            // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
+            // When the remaining bytes fit on the line, extend the break to the end and mark
+            // backspace processing so backspaces erase their preceding characters.
             if best_score != 4 && column <= width && best != bytes.len() {
                 best = bytes.len();
                 has_backspace = true;
@@ -2649,7 +2649,7 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
 fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
-    // m_Outfile << "\n\n" << "***** " << kNoHitsFound << " *****\n\n\n";
+    // Write `kNoHitsFound` between `"***** "` and `" *****"`, after two newlines and followed by three newlines.
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer, "***** No hits found *****")?;
@@ -3471,7 +3471,8 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         if self.config.program == "psiblast" {
             writeln!(writer, "Results from round 1")?;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
+        // Emit two blank lines before the query header.
         writeln!(writer)?;
         writeln!(writer)?;
         // The title's bytes by query index (`query_name` is BLASTX's).
@@ -5453,7 +5454,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
+        // Emit two blank lines before the query header.
         writeln!(writer)?;
         writeln!(writer)?;
         write_blastp_query_header(
@@ -5611,14 +5613,14 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3578-3604,2122-2149:
-// out << " Identities = ..." << " Positives = ..." << " Gaps = ...";
+// Format the identities, positives, and gaps summary line.
 // TBLASTN reports one translated subject frame, without a query frame.
 fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Result<()> {
     let h = &hit.hit;
     let bits = format_bitscore_ncbi(h.bit_score);
     let evalue = format_evalue_ncbi(h.e_value);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3599-3604:
-    // else if (comp_adj_method == 2) out << ", Method: Compositional matrix adjust.";
+    // Append the composition-adjustment method suffix for methods 1 and 2.
     let method = match hit.comp_adjust_method {
         Some(1) => ", Method: Composition-based stats.",
         Some(2) => ", Method: Compositional matrix adjust.",

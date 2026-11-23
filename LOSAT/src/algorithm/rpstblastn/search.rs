@@ -834,6 +834,7 @@ impl WindowBatch {
             prepared: self.prepared.x_for_results(),
             parameters,
             search_skipped: false,
+            fetched_utf8: None,
             request_space: self.request_space,
             unlisted_subject_row_throws: self
                 .unlisted
@@ -924,6 +925,7 @@ fn unsearched_batch(
         prepared: prepared.x_for_results(),
         parameters,
         search_skipped: true,
+        fetched_utf8: None,
         request_space: None,
         unlisted: Vec::new(),
         unlisted_subject_row_throws: false,

@@ -1,0 +1,179 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: nhd_utf8
+           3 sequences; 1,080 total letters
+
+
+
+Query= q0
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+hd0 record 0 of the T5d databases                                     665     0.0  
+
+
+>hd0 record 0 of the T5d databases
+Length=360
+
+ Score = 665 bits (360),  Expect = 0.0
+ Identities = 360/360 (100%), Gaps = 0/360 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTTTTAATAAACCGGATATTATGGGTCATCAGAATGCTAGCCAGCAGTGGACCTGTAAT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TGTTTTAATAAACCGGATATTATGGGTCATCAGAATGCTAGCCAGCAGTGGACCTGTAAT  60
+
+Query  61   CAGCGTCTGATTTATGATATGATGTTTCCGTATTGGGATCGTCAGTGTTTTTATCAGGCT  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CAGCGTCTGATTTATGATATGATGTTTCCGTATTGGGATCGTCAGTGTTTTTATCAGGCT  120
+
+Query  121  TGGACCAGCATGAGCCGTTATATTTTTGTGGGTAATCCGGCTGTGAAAACCTGTGTGCGT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TGGACCAGCATGAGCCGTTATATTTTTGTGGGTAATCCGGCTGTGAAAACCTGTGTGCGT  180
+
+Query  181  AAAGTGCGTCATTTTTATAAAGTGGCTCTGGATCGTGGTATGATTTGGATTCGTAATATG  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAGTGCGTCATTTTTATAAAGTGGCTCTGGATCGTGGTATGATTTGGATTCGTAATATG  240
+
+Query  241  ACCGCTAAAAGCTGGCCGCTGCAGAAAGGTCAGTGTATGCAGGAAAATCGTAGCCGTAGC  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  ACCGCTAAAAGCTGGCCGCTGCAGAAAGGTCAGTGTATGCAGGAAAATCGTAGCCGTAGC  300
+
+Query  301  TATGGTCGTGCTACCCATGGTCATTGTGATGAAATTGAAAATTTTACCACCTATATTCTG  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  TATGGTCGTGCTACCCATGGTCATTGTGATGAAATTGAAAATTTTACCACCTATATTCTG  360
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 363312
+
+
+Query= q1
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+hd1 record 1 of the T5d databases                                     665     0.0  
+
+
+>hd1 record 1 of the T5d databases
+Length=360
+
+ Score = 665 bits (360),  Expect = 0.0
+ Identities = 360/360 (100%), Gaps = 0/360 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGTTGTCGTAAACATTGGGATTGGTATCGTCAGTGGTGTGCTGCTGATAAAAAAGATCTG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    CGTTGTCGTAAACATTGGGATTGGTATCGTCAGTGGTGTGCTGCTGATAAAAAAGATCTG  60
+
+Query  61   AATACCCGTCCGATGAGCGGTAGCAATAGCGAACAGAGCCCGAAATATCGTCATGATAGC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AATACCCGTCCGATGAGCGGTAGCAATAGCGAACAGAGCCCGAAATATCGTCATGATAGC  120
+
+Query  121  ACCATTGGTGATATTCCGTGGTGGGGTCTGAAATGGTATGAATGGGATGAAGTGAGCTGG  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  ACCATTGGTGATATTCCGTGGTGGGGTCTGAAATGGTATGAATGGGATGAAGTGAGCTGG  180
+
+Query  181  TGTCTGGCTTGGTATTTTAGCTATGGTCAGACCGGTTTTGATTTTATTAGCGTGTTTGAA  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  TGTCTGGCTTGGTATTTTAGCTATGGTCAGACCGGTTTTGATTTTATTAGCGTGTTTGAA  240
+
+Query  241  GAAGTGGCTCAGTATACCATTCGTATGATTCATTGGAAAACCCCGACCGCTAATCAGCAG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  GAAGTGGCTCAGTATACCATTCGTATGATTCATTGGAAAACCCCGACCGCTAATCAGCAG  300
+
+Query  301  GAAAATCATGTGCATATTTTTGGTAAATTTGCTAAAGGTGCTCTGGCTGATTTTTGTGTG  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  GAAAATCATGTGCATATTTTTGGTAAATTTGCTAAAGGTGCTCTGGCTGATTTTTGTGTG  360
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 363312
+
+
+Query= q2
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+hd2 record 2 of the T5d databases                                     665     0.0  
+
+
+>hd2 record 2 of the T5d databases
+Length=360
+
+ Score = 665 bits (360),  Expect = 0.0
+ Identities = 360/360 (100%), Gaps = 0/360 (0%)
+ Strand=Plus/Plus
+
+Query  1    ACCGGTGTGTATGCTCATGGTATTGATATGTTTGGTGATACCAGCGCTCATGCTCCGTAT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ACCGGTGTGTATGCTCATGGTATTGATATGTTTGGTGATACCAGCGCTCATGCTCCGTAT  60
+
+Query  61   GCTTATAATAAAGCTGTGATTCCGATGTGGaaaaaaaTTAATGATCATACCCGTCCGCTG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   GCTTATAATAAAGCTGTGATTCCGATGTGGAAAAAAATTAATGATCATACCCGTCCGCTG  120
+
+Query  121  GAAAATCGTCGTGCTATGGTGATGTGGCCGGCTTTTCATTGGATTGAACTGGCTGATGAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  GAAAATCGTCGTGCTATGGTGATGTGGCCGGCTTTTCATTGGATTGAACTGGCTGATGAT  180
+
+Query  181  CGTGATTGGAATCATACCGAAAAAATGGGTATGAGCATGCGTGATAGCAGCCAGCTGACC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  CGTGATTGGAATCATACCGAAAAAATGGGTATGAGCATGCGTGATAGCAGCCAGCTGACC  240
+
+Query  241  GATGGTAATCCGTATAAAGGTATTCCGATGCCGAAACATATTCTGCAGCGTCATCCGTAT  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  GATGGTAATCCGTATAAAGGTATTCCGATGCCGAAACATATTCTGCAGCGTCATCCGTAT  300
+
+Query  301  aaaaaaaaTAGCAGCAAAGAAAATAGCCAGGTGGCTTATGATATTGTGATTATGCATTTT  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  AAAAAAAATAGCAGCAAAGAAAATAGCCAGGTGGCTTATGATATTGTGATTATGCATTTT  360
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 363312
+
+
+  Database: nhd_utf8
+    Posted date:  Nov 17, 2026  1:31 AM
+  Number of letters in database: 1,080
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

@@ -585,6 +585,16 @@ pub(super) fn write_blastx_tabular(
                         // follow the rows before it, before those of the row's own lookups.
                         // A row that reads a subject whose load throws outside the subject block
                         // ends the run (`TabularWriter::ends_run`).
+                        if let Some(reads) = reads.as_mut() {
+                            if fetch.reads(hsp.identity) {
+                                reads.subject_read(
+                                    0,
+                                    list.oid as u32,
+                                    &mut *writer,
+                                    &mut *stderr,
+                                )?;
+                            }
+                        }
                         if let Some(end) = table.ends_run(
                             &tabular_subject,
                             crate::blastinput::app::Program::Blastx,
@@ -595,16 +605,6 @@ pub(super) fn write_blastx_tabular(
                                     reads.end_run();
                                 }
                             }));
-                        }
-                        if let Some(reads) = reads.as_mut() {
-                            if fetch.reads(hsp.identity) && !tabular_subject.throws() {
-                                reads.subject_read(
-                                    0,
-                                    list.oid as u32,
-                                    &mut *writer,
-                                    &mut *stderr,
-                                )?;
-                            }
                         }
                         // The texts of the row's lookups of the taxonomy database
                         // (`x_SetTaxInfoAll`, `x_SetTaxInfo`) follow the rows before it.

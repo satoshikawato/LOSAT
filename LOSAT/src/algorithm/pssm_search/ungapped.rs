@@ -7,7 +7,7 @@
 
 use super::rows::PssmRows;
 use crate::algorithm::blastp::extension::{
-    BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult, BlastpUngappedData,
+    BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult, BlastpUngappedData, ChunkLetters,
 };
 
 /// `s_BlastPSSMExtendRight`: (the best score, its length, `s_last_off`).
@@ -190,6 +190,135 @@ pub(crate) fn pssm_extend_two_hit<R: PssmRows>(
         },
         right_extend,
         s_last_off,
+    }
+}
+
+/// `pssm_extend_two_hit` of a hit whose first hit (`s_left_off`) lies before its chunk, on the
+/// letters around the chunk (`ChunkLetters`, whose type doc gives NCBI's reads there).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1157, :995 and :948
+#[cold]
+#[inline(never)]
+pub(crate) fn pssm_extend_two_hit_outside<R: PssmRows>(
+    rows: &R,
+    chunk: ChunkLetters<'_>,
+    s_left_off: i32,
+    s_right_off: i32,
+    q_right_off: i32,
+    dropoff: i32,
+    word_size: i32,
+) -> BlastpTwoHitUngappedResult {
+    let mut left_score = 0i32;
+    let mut right_d = 0i32;
+    let mut score = 0i32;
+    for i in 0..word_size {
+        score += rows.row((q_right_off + i) as usize)[chunk.at(s_right_off + i) as usize];
+        if score > left_score {
+            left_score = score;
+            right_d = i + 1;
+        }
+    }
+    let q_right_off = q_right_off + right_d;
+    let s_right_off = s_right_off + right_d;
+    let mut right_extend = false;
+    let mut s_last_off = s_right_off;
+    // Down to the chunk's first letter, none where the word's best end is at or before it.
+    let (left_score, left_d) = pssm_extend_left(
+        rows,
+        chunk.chunk_onward(),
+        s_right_off - 1,
+        q_right_off - 1,
+        dropoff,
+        0,
+    );
+    let mut right_score = 0i32;
+    let mut right_d = 0i32;
+    if left_d >= (s_right_off - s_left_off) {
+        right_extend = true;
+        let lead = chunk.lead as i32;
+        let (score, length, last) = pssm_extend_right(
+            rows,
+            chunk.to_chunk_end(),
+            lead + s_right_off,
+            q_right_off,
+            dropoff,
+            left_score,
+        );
+        right_score = score;
+        right_d = length;
+        s_last_off = last - lead;
+    }
+    BlastpTwoHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_right_off - left_d,
+            s_start: s_right_off - left_d,
+            length: left_d + right_d,
+            score: left_score.max(right_score),
+        },
+        right_extend,
+        s_last_off,
+    }
+}
+
+/// `pssm_extend_one_hit` of a word (at `s_off`) that starts before its chunk, on the letters
+/// around the chunk (`ChunkLetters`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1036-1085, :995 and :948
+#[cold]
+#[inline(never)]
+pub(crate) fn pssm_extend_one_hit_outside<R: PssmRows>(
+    rows: &R,
+    chunk: ChunkLetters<'_>,
+    s_off: i32,
+    q_off: i32,
+    dropoff: i32,
+    word_size: i32,
+) -> BlastpOneHitUngappedResult {
+    let lead = chunk.lead as i32;
+    let mut score = 0i32;
+    let mut sum = 0i32;
+    let mut q_left_off = q_off;
+    let mut q_right_off = q_off + word_size;
+    let mut q_best_left_off = q_off;
+    for i in 0..word_size {
+        sum += rows.row((q_off + i) as usize)[chunk.at(s_off + i) as usize];
+        if sum > score {
+            score = sum;
+            q_best_left_off = q_left_off;
+            q_right_off = q_off + i;
+        } else if sum <= 0 {
+            sum = 0;
+            q_left_off = q_off + i + 1;
+        }
+    }
+    let init_hit_width = q_right_off - q_left_off + 1;
+    let q_left_off = q_best_left_off;
+    let s_left_off = q_left_off + (s_off - q_off);
+    let s_right_off = q_right_off + (s_off - q_off);
+    let (left_score, left_disp) = pssm_extend_left(
+        rows,
+        chunk.chunk_onward(),
+        s_left_off - 1,
+        q_left_off - 1,
+        dropoff,
+        score,
+    );
+    let (total_score, right_disp, s_last_off) = pssm_extend_right(
+        rows,
+        chunk.to_chunk_end(),
+        lead + s_right_off + 1,
+        q_right_off + 1,
+        dropoff,
+        left_score,
+    );
+    BlastpOneHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_left_off - left_disp,
+            s_start: s_left_off - left_disp,
+            length: left_disp + right_disp + init_hit_width,
+            score: total_score,
+        },
+        s_last_off: s_last_off - lead,
     }
 }
 

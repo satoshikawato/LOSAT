@@ -363,11 +363,12 @@ impl RpsTraceback<'_> {
                     continue;
                 }
                 k_mark = Some(list.oid);
-                let matrix = profile.matrix(&scratch.pssm);
+                // `trace_reads` refuses a start at or past the `L_pin` rows before the alignment
+                // reads them (read D), so the alignment reads the rescaled matrix as it is.
                 let reads = profile.trace_reads(ProfileRead::Start);
                 let (hsps, _) = trace_hsps(
                     &TraceHsps {
-                        rows: &matrix,
+                        rows: &scratch.pssm,
                         query_nomask: consensus,
                         query_length: length,
                         tree_query_bound: length as i32 + 1,

@@ -110,24 +110,20 @@ fn the_redos_reads_name_the_copy_or_the_start_and_the_first_stays() {
 }
 
 // blast_traceback.c:509-512 (cited at `ProfileTraceReads::starts`), read D without
-// composition-based statistics: rpsblast's matrix of L_pin rows (a row past it, or a start at or
-// past L_pin) and rpstblastn's mapped rows (the start at or past L_pin, its own arm).
+// composition-based statistics: rpsblast's matrix of L_pin rows (a start at or past L_pin; the
+// first read kept) and rpstblastn's mapped rows (the start at or past L_pin, its own arm).
 #[test]
 fn an_alignment_from_l_pin_on_is_refused() {
     let own = letters(6);
     let profile = TracebackProfile::new(0, &OFFSETS, &own, "RPSBLAST");
-    let pssm = QueryPssm {
-        rows: vec![[1; BLASTAA_SIZE]; 6],
-    };
-    let matrix = profile.matrix(&pssm);
-    assert_eq!(matrix.len(), 6);
-    assert_eq!(matrix.row(5), &[1; BLASTAA_SIZE]);
-    assert_eq!(profile.fault(), None);
     let reads = profile.trace_reads(ProfileRead::Start);
     assert!(reads.starts(5));
-    assert_eq!(matrix.row(6), &[0; BLASTAA_SIZE]);
+    assert_eq!(profile.fault(), None);
+    assert!(!reads.starts(6));
     assert_eq!(profile.fault(), Some(ProfileRead::Start));
     assert!(!reads.starts(0));
+    let error = profile.check().unwrap_err().to_string();
+    assert!(error.contains("traceback starts an alignment past the consensus, is not supported by LOSAT's RPSBLAST"), "{error}");
     let profile = TracebackProfile::new(0, &OFFSETS, &own, "RPSTBLASTN");
     let reads = profile.trace_reads(ProfileRead::StartInMapping);
     assert!(!reads.starts(6));

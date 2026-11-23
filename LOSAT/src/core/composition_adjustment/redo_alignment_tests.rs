@@ -1123,30 +1123,31 @@ fn the_walk_on_a_profile_copy_reports_reads_past_it() {
 // word L - 7 on.
 #[test]
 fn the_copy_words_are_missing_only_at_their_start() {
+    let short = BlastCompoSequenceData::from_ncbistdaa(&ncbistdaa("IVLARI"));
     let read_past = Cell::new(false);
-    let none = CopyWords {
-        words: None,
-        start: 0,
-        read_past: &read_past,
-    };
-    assert!(none.missing(20));
+    let none = NearIdenticalCopy::new(&short, &[], &read_past);
+    assert!(none.words_from(0).missing(20));
     assert!(!read_past.get());
-    let later = CopyWords { start: 3, ..none };
+    let later = none.words_from(3);
     assert!(!later.missing(20));
     assert_eq!(later.word(0), 0);
     assert!(read_past.get());
     let letters = ncbistdaa("IVLARIDDRL");
+    let query = BlastCompoSequenceData::from_ncbistdaa(&letters);
     let words = build_query_word_hashes(&letters);
     assert_eq!(words.len(), 3);
     let read_past = Cell::new(false);
-    let table = CopyWords {
-        words: Some(&words),
-        start: 1,
-        read_past: &read_past,
-    };
+    let copy = NearIdenticalCopy::new(&query, &words, &read_past);
+    let table = copy.words_from(1);
+    assert!(!table.missing(20));
     assert_eq!(table.word(1), words[2]);
     assert!(!read_past.get());
     table.word(2);
+    assert!(read_past.get());
+    // From a start past the table every word is past it.
+    let read_past = Cell::new(false);
+    let copy = NearIdenticalCopy::new(&query, &words, &read_past);
+    assert_eq!(copy.words_from(4).word(0), 0);
     assert!(read_past.get());
 }
 

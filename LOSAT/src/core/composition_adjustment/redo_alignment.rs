@@ -1733,7 +1733,6 @@ impl<'a> NearIdenticalCopy<'a> {
     fn letters(self) -> CopyLetters<'a> {
         CopyLetters {
             bytes: self.bytes,
-            start: 0,
             len: self.length,
             read_past: self.read_past,
         }
@@ -1742,18 +1741,29 @@ impl<'a> NearIdenticalCopy<'a> {
     /// The table from word `start` (NCBI's `query_words + start`).
     fn words_from(self, start: usize) -> CopyWords<'a> {
         CopyWords {
-            words: self.words,
-            start,
+            words: self
+                .words
+                .and_then(|words| words.get(start..))
+                .unwrap_or(&[]),
+            null: self.words.is_none() && start == 0,
             read_past: self.read_past,
         }
     }
 }
 
-/// Letters of a `NearIdenticalCopy` from `start` (its block's index), `len` of them.
+/// A read of the walk past a `NearIdenticalCopy` (its letters or its words): recorded in
+/// `read_past`, out of the walk's loops.
+#[cold]
+#[inline(never)]
+fn copy_read_past(read_past: &Cell<bool>) {
+    read_past.set(true);
+}
+
+/// Letters of a `NearIdenticalCopy` from a start: `bytes` the block's bytes from there (none when
+/// the start lies past the block), `len` the letters the walk takes.
 #[derive(Clone, Copy)]
 struct CopyLetters<'a> {
     bytes: &'a [u8],
-    start: usize,
     len: usize,
     read_past: &'a Cell<bool>,
 }
@@ -1766,10 +1776,10 @@ impl WalkLetters for CopyLetters<'_> {
 
     #[inline]
     fn at(self, i: usize) -> u8 {
-        match self.bytes.get(self.start + i) {
+        match self.bytes.get(i) {
             Some(&letter) => letter,
             None => {
-                self.read_past.set(true);
+                copy_read_past(self.read_past);
                 0
             }
         }
@@ -1778,7 +1788,7 @@ impl WalkLetters for CopyLetters<'_> {
     #[inline]
     fn range(self, from: usize, to: usize) -> Self {
         Self {
-            start: self.start + from,
+            bytes: self.bytes.get(from..).unwrap_or(&[]),
             len: to - from,
             ..self
         }
@@ -1791,11 +1801,12 @@ impl WalkLetters for CopyLetters<'_> {
     }
 }
 
-/// Words of a `NearIdenticalCopy` from word `start`.
+/// Words of a `NearIdenticalCopy` from a word start: `words` the table from there (none when the
+/// table is null or ends before it), `null` whether NCBI's pointer is the null table itself.
 #[derive(Clone, Copy)]
 struct CopyWords<'a> {
-    words: Option<&'a [u64]>,
-    start: usize,
+    words: &'a [u64],
+    null: bool,
     read_past: &'a Cell<bool>,
 }
 
@@ -1804,15 +1815,15 @@ impl WalkWords for CopyWords<'_> {
     // Only a null table at offset 0 is a null pointer; a null table plus a start passes the test.
     #[inline]
     fn missing(self, _query_len: usize) -> bool {
-        self.words.is_none() && self.start == 0
+        self.null
     }
 
     #[inline]
     fn word(self, i: usize) -> u64 {
-        match self.words.and_then(|words| words.get(self.start + i)) {
+        match self.words.get(i) {
             Some(&word) => word,
             None => {
-                self.read_past.set(true);
+                copy_read_past(self.read_past);
                 0
             }
         }

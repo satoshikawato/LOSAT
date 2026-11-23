@@ -20,8 +20,9 @@
 //!   its words (seven fewer than `L_pin`; `redo_fault`, the walk's reads are
 //!   `RedoRun::with_profile_reads`').
 //! - D, the start of an alignment at or past the `L_pin` rows of NCBI's heap matrix (the redo;
-//!   rpsblast's rescaled matrix without composition-based statistics, also the rows that the
-//!   offsets of an HSP whose starts are both 0 read: `ProfileMatrix`).
+//!   rpsblast's rescaled matrix without composition-based statistics, `trace_reads`: an
+//!   alignment that starts below `L_pin` reads only rows below `L_pin`, so the traceback reads
+//!   that matrix as it is).
 //! - E, the identities and positives of a traced alignment without composition-based statistics:
 //!   a profile letter of 28 or more in a substituted column reads past NCBI's 28 score-matrix
 //!   rows (`trace_reads`).
@@ -42,7 +43,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 
 use crate::algorithm::pssm_search::redo1::RedoFault;
-use crate::algorithm::pssm_search::rows::{PssmRows, QueryPssm};
+use crate::algorithm::pssm_search::rows::PssmRows;
 use crate::algorithm::pssm_search::traceback0::TraceReads;
 use crate::common::GapEditOp;
 use crate::core::blast_util::BLASTAA_SIZE;
@@ -94,6 +95,8 @@ pub(crate) struct TracebackProfile<'a> {
     start: usize,
     /// `L_rps`, its `.rps` columns (its rows without the sentinel row).
     columns: usize,
+    /// `R`, the volume's rows (its last offset).
+    num_rows: usize,
     /// Its `.psq` letters (`L_pin` of them).
     letters: &'a [u8],
     /// The first letter of 28 or more.
@@ -113,11 +116,9 @@ impl<'a> TracebackProfile<'a> {
             oid,
             start: offsets[oid_index] as usize,
             columns: (offsets[oid_index + 1] - offsets[oid_index] - 1) as usize,
+            num_rows: offsets[offsets.len() - 1] as usize,
             letters,
-            first_wide: letters
-                .iter()
-                .copied()
-                .find(|&letter| usize::from(letter) >= BLASTAA_SIZE),
+            first_wide: first_wide(letters),
             program,
             fault: OnceLock::new(),
         }
@@ -174,10 +175,10 @@ impl<'a> TracebackProfile<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:968-982
-    /// Whether NCBI's `R + 1` row pointers (of a volume of `num_rows` rows `R`) hold the profile's
-    /// `L_pin` from its offset (read A).
-    fn rows_in_pointers(&self, num_rows: usize) -> bool {
-        self.start + self.length() <= num_rows + 1
+    /// Whether NCBI's `R + 1` row pointers (of a volume of `R` rows) hold the profile's `L_pin`
+    /// from its offset (read A).
+    fn rows_in_pointers(&self) -> bool {
+        self.start + self.length() <= self.num_rows + 1
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4719-4730
@@ -197,7 +198,7 @@ impl<'a> TracebackProfile<'a> {
             return Ok(Cow::Borrowed(&rows[self.start..end]));
         }
         match row_after_letters(row_after, alphabet) {
-            Some(after) if self.rows_in_pointers(rows.len()) => {
+            Some(after) if self.rows_in_pointers() => {
                 let mut owned = rows[self.start..].to_vec();
                 owned.push(after);
                 Ok(Cow::Owned(owned))
@@ -218,7 +219,7 @@ impl<'a> TracebackProfile<'a> {
         bytes: &mut Vec<u8>,
         out: &mut Vec<[f64; BLASTAA_SIZE]>,
     ) -> Result<()> {
-        if !self.rows_in_pointers(files.rows().len()) {
+        if !self.rows_in_pointers() {
             return self.refuse(ProfileRead::Rows);
         }
         let mapped = files
@@ -255,16 +256,6 @@ impl<'a> TracebackProfile<'a> {
         }
     }
 
-    /// rpsblast's rescaled matrix of `L_pin` rows (`RPSRescalePssm`'s heap matrix) as the
-    /// traceback without composition-based statistics reads it: a row at or past `L_pin` is
-    /// read D.
-    pub(crate) fn matrix<'m>(&'m self, rows: &'m QueryPssm) -> ProfileMatrix<'m> {
-        ProfileMatrix {
-            rows,
-            profile: self,
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1194-1198
     /// rpstblastn's rows without composition-based statistics: NCBI's `.rps` row pointers from
     /// the profile's offset, `L_pin` the traceback's length; a row past the volume's `rows` is
@@ -272,12 +263,14 @@ impl<'a> TracebackProfile<'a> {
     pub(crate) fn mapped_rows<'m>(
         &'m self,
         rows: &'m [[i32; BLASTAA_SIZE]],
-        row_after: &[Option<i32>; BLASTAA_SIZE],
+        row_after: &'m [Option<i32>; BLASTAA_SIZE],
         alphabet: usize,
     ) -> MappedRows<'m> {
         MappedRows {
-            rows,
-            row_after: row_after_letters(row_after, alphabet),
+            rows: rows.get(self.start..).unwrap_or(&[]),
+            row_after,
+            alphabet,
+            after: OnceLock::new(),
             profile: self,
         }
     }
@@ -293,6 +286,21 @@ impl<'a> TracebackProfile<'a> {
     }
 }
 
+/// The first of `letters` of 28 or more: their largest letter first (a loop that compiles to
+/// vector maxima, once per HSP list), the first such letter only when there is one.
+fn first_wide(letters: &[u8]) -> Option<u8> {
+    let largest = letters
+        .iter()
+        .fold(0u8, |largest, &letter| largest.max(letter));
+    if usize::from(largest) < BLASTAA_SIZE {
+        return None;
+    }
+    letters
+        .iter()
+        .copied()
+        .find(|&letter| usize::from(letter) >= BLASTAA_SIZE)
+}
+
 /// NCBI's row after the rows as `alphabet` columns are read (`None` where one lies past the file's
 /// last page); the other columns 0.
 fn row_after_letters(
@@ -305,50 +313,42 @@ fn row_after_letters(
     Some(std::array::from_fn(|letter| row_after[letter].unwrap_or(0)))
 }
 
-/// `TracebackProfile::matrix`.
-pub(crate) struct ProfileMatrix<'m> {
-    rows: &'m QueryPssm,
+/// `TracebackProfile::mapped_rows`.
+pub(crate) struct MappedRows<'m> {
+    /// The volume's rows from the profile's offset.
+    rows: &'m [[i32; BLASTAA_SIZE]],
+    row_after: &'m [Option<i32>; BLASTAA_SIZE],
+    alphabet: usize,
+    /// NCBI's row after the rows as `alphabet` columns are read, made when first read.
+    after: OnceLock<Option<[i32; BLASTAA_SIZE]>>,
     profile: &'m TracebackProfile<'m>,
 }
 
-impl PssmRows for ProfileMatrix<'_> {
-    #[inline(always)]
-    fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {
-        match self.rows.rows.get(pos) {
-            Some(row) => row,
-            None => {
-                self.profile.record(ProfileRead::Start);
+impl MappedRows<'_> {
+    /// Row `pos` from the offset at or past the volume's rows: NCBI's row after the rows, or
+    /// read A. Out of the gapped alignment's loop, which reads a profile's own rows.
+    #[cold]
+    #[inline(never)]
+    fn past_rows(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {
+        let after = self
+            .after
+            .get_or_init(|| row_after_letters(self.row_after, self.alphabet));
+        match after {
+            Some(row) if pos == self.rows.len() => row,
+            _ => {
+                self.profile.record(ProfileRead::Rows);
                 &ZERO_ROW
             }
         }
     }
-
-    #[inline(always)]
-    fn len(&self) -> usize {
-        self.rows.rows.len()
-    }
-}
-
-/// `TracebackProfile::mapped_rows`.
-pub(crate) struct MappedRows<'m> {
-    rows: &'m [[i32; BLASTAA_SIZE]],
-    row_after: Option<[i32; BLASTAA_SIZE]>,
-    profile: &'m TracebackProfile<'m>,
 }
 
 impl PssmRows for MappedRows<'_> {
     #[inline(always)]
     fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE] {
-        let index = self.profile.start + pos;
-        if let Some(row) = self.rows.get(index) {
-            return row;
-        }
-        match &self.row_after {
-            Some(row) if index == self.rows.len() => row,
-            _ => {
-                self.profile.record(ProfileRead::Rows);
-                &ZERO_ROW
-            }
+        match self.rows.get(pos) {
+            Some(row) => row,
+            None => self.past_rows(pos),
         }
     }
 

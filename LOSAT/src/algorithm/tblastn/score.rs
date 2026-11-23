@@ -16,7 +16,8 @@
 
 use super::search_init::{XTwoHit, XUngapWalks};
 use crate::algorithm::blastp::extension::{
-    extend_one_hit_for, BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult,
+    extend_one_hit_for, extend_one_hit_outside, BlastpOneHitUngappedResult,
+    BlastpTwoHitUngappedResult, ChunkLetters,
 };
 use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
@@ -29,7 +30,10 @@ use crate::algorithm::pssm_search::gapalign::{
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
 use crate::algorithm::pssm_search::rows::{PssmRows, QueryPssm};
-use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
+use crate::algorithm::pssm_search::ungapped::{
+    pssm_extend_one_hit, pssm_extend_one_hit_outside, pssm_extend_two_hit,
+    pssm_extend_two_hit_outside,
+};
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::BLASTAA_SIZE;
 use anyhow::Result;
@@ -129,6 +133,20 @@ pub(super) trait TbnScore: Copy + Send + Sync {
         s_off: usize,
         dropoff: i32,
         word_size: usize,
+        matrix: ScoringMatrix,
+    ) -> Option<BlastpOneHitUngappedResult>;
+
+    /// `one_hit` of a word before its chunk (`s_off` below 0, masks stored out of order), on the
+    /// letters around the chunk (`XTwoHit::x_one_hit_around`).
+    #[allow(clippy::too_many_arguments)]
+    fn one_hit_around(
+        self,
+        query: &[u8],
+        chunk: ChunkLetters<'_>,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+        word_size: i32,
         matrix: ScoringMatrix,
     ) -> Option<BlastpOneHitUngappedResult>;
 
@@ -318,6 +336,23 @@ impl TbnScore for MatrixScore {
         matrix: ScoringMatrix,
     ) -> Option<BlastpOneHitUngappedResult> {
         extend_one_hit_for(matrix, query, subject, q_off, s_off, dropoff, word_size)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791 (cited at
+    // `blastp::extension::extend_one_hit_outside`)
+    fn one_hit_around(
+        self,
+        query: &[u8],
+        chunk: ChunkLetters<'_>,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+        word_size: i32,
+        matrix: ScoringMatrix,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        Some(extend_one_hit_outside(
+            matrix, query, chunk, q_off, s_off, dropoff, word_size,
+        ))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3953:
@@ -547,6 +582,28 @@ impl<'a> TbnScore for PssmScore<'a> {
         ))
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791 (cited at
+    // `pssm_search::ungapped::pssm_extend_one_hit_outside`)
+    fn one_hit_around(
+        self,
+        _query: &[u8],
+        chunk: ChunkLetters<'_>,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+        word_size: i32,
+        _matrix: ScoringMatrix,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        Some(pssm_extend_one_hit_outside(
+            &XOneHitRows(self.0),
+            chunk,
+            s_off,
+            q_off,
+            dropoff,
+            word_size,
+        ))
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4245-4347 (cited at
     // `pssm_search::gapalign::pssm_score_only_gapped_alignment`; `subject->length` is the unit's
     // letters, the slice)
@@ -692,6 +749,26 @@ impl XUngapWalks for XPssmWalks<'_> {
             word_size as i32,
         )))
     }
+
+    fn two_hit_around(
+        self,
+        chunk: ChunkLetters<'_>,
+        s_left_off: i32,
+        s_right_off: i32,
+        q_right_off: i32,
+        dropoff: i32,
+        word_size: i32,
+    ) -> Option<BlastpTwoHitUngappedResult> {
+        Some(pssm_extend_two_hit_outside(
+            self.0,
+            chunk,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        ))
+    }
 }
 
 /// The matrix has no walks of its own here (`MatrixScore::x_walks`).
@@ -706,6 +783,18 @@ impl XUngapWalks for std::convert::Infallible {
         _dropoff: i32,
         _word_size: usize,
     ) -> Option<Option<BlastpTwoHitUngappedResult>> {
+        match self {}
+    }
+
+    fn two_hit_around(
+        self,
+        _chunk: ChunkLetters<'_>,
+        _s_left_off: i32,
+        _s_right_off: i32,
+        _q_right_off: i32,
+        _dropoff: i32,
+        _word_size: i32,
+    ) -> Option<BlastpTwoHitUngappedResult> {
         match self {}
     }
 }

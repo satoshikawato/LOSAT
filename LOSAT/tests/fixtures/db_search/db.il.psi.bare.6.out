@@ -1,0 +1,56 @@
+q0	gi|101|ref|NP_000101.1|;gi|102|sp|P10102.1|	1.35e-77	214
+q0	gi|101|ref|NP_000101.1|;gi|102|sp|P10102.1|	1.52e-74	206
+
+Search has CONVERGED!
+q1	gi|103|ref|NP_000103.1|	1.50e-76	211
+q1	gi|103|ref|NP_000103.1|	6.63e-67	186
+
+Search has CONVERGED!
+q2	gi|104|ref|NP_000104.1|;gi|105|ref|XP_000105.1|	2.88e-77	212
+q2	gi|104|ref|NP_000104.1|;gi|105|ref|XP_000105.1|	1.58e-76	210
+
+Search has CONVERGED!
+q3	sp|P20106.1|N6_HUMAN	2.27e-77	213
+q3	sp|P20106.1|N6_HUMAN	1.15e-80	221
+
+Search has CONVERGED!
+q4	gb|AAA00107.1|	1.38e-76	211
+q4	gb|AAA00107.1|	9.59e-77	211
+
+Search has CONVERGED!
+q5	gi|108|gb|AAA00108.1|;sp|Q30109.1|N9_MOUSE	7.96e-77	211
+q5	gi|108|gb|AAA00108.1|;sp|Q30109.1|N9_MOUSE	8.30e-77	211
+
+Search has CONVERGED!
+q6	loc7	5.35e-76	210
+q6	loc7	1.48e-81	224
+
+Search has CONVERGED!
+q7	gi|110|pdb|1ABC|A	1.55e-76	211
+q7	gi|110|pdb|1ABC|A	1.74e-72	200
+
+Search has CONVERGED!
+q8	gi|111|ref|NP_000111.1|	3.88e-77	213
+q8	gi|111|ref|NP_000111.1|	3.02e-75	208
+
+Search has CONVERGED!
+q9	ref|NP_000112.1|	2.67e-78	215
+q9	ref|NP_000112.1|	2.92e-75	208
+
+Search has CONVERGED!
+q10	gi|113|ref|NP_000113.1|;ref|NP_000114.1|;gi|115|gb|AAA00115.1|	2.40e-77	213
+q10	gi|113|ref|NP_000113.1|;ref|NP_000114.1|;gi|115|gb|AAA00115.1|	6.25e-70	194
+
+Search has CONVERGED!
+q11	gi|116|ref|NP_000116.1|	6.51e-78	214
+q11	gi|116|ref|NP_000116.1|	3.14e-70	195
+
+Search has CONVERGED!
+q12	gi|117|ref|NP_000117.1|	3.19e-78	215
+q12	gi|117|ref|NP_000117.1|	1.53e-79	218
+
+Search has CONVERGED!
+q13	gi|118|ref|NP_000118.1|	7.56e-75	206
+q13	gi|118|ref|NP_000118.1|	2.82e-65	182
+
+Search has CONVERGED!

@@ -620,6 +620,7 @@ fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
+        html: false,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,

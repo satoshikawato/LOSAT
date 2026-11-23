@@ -1,5 +1,6 @@
 //! makeblastdb's output file stream: an output-only `std::ofstream` as makeblastdb 2.17.0 (the
-//! official Linux x64 release) has it.
+//! official Linux x64 release) has it; blast_formatter's `-out` file of the same release is one
+//! too (`blast_formatter::archive`), whose formatter makes it throw on `badbit` (`exceptions`).
 //!
 //! makeblastdb writes every database file (`.phr`, `.psq`, `.pin`, the ISAM files, `.pos`,
 //! `.pot`, `.pto`, the alias file, the metadata file ...) through an `ofstream` whose state it
@@ -64,6 +65,18 @@
 //!   `failbit` set (both as the standard says); with `badbit` set it also sets `failbit`
 //!   (observed behaviour, not in the standard's text).
 //! * `endl` is `put('\n')` and then `flush`, each with its own sentry.
+//! * `exceptions(mask)` sets the mask and then calls `clear(rdstate())`; `clear` and `setstate`
+//!   throw `ios_base::failure` when the new state has a bit of the mask (the standard's text). The
+//!   model records the throw ([`Stream::take_thrown`]); an operation that throws ends there, as
+//!   each operation here ends with its state change. makeblastdb sets no mask.
+//!
+//! blast_formatter's standard output (`cout`, synchronized with the C library's `stdout`) follows
+//! the same rules for `write` and `flush` with a put area one byte longer than the block size of
+//! the standard output (`fstat`'s `st_blksize`: a write is held while the bytes held stay within
+//! that size), which [`Stream::with_put_area`] sets: observed with blast_formatter 2.17.0 on
+//! `/dev/full` and on a pipe (block size 4096: a Seq-annot of 2390 bytes fails at its close, one of
+//! 4845 bytes in its write; line RG item F3, agent C6, 2026-11-23,
+//! `remaining-gaps-20261112/F/f3/tmp/c6/pc`). That stream is never closed.
 //!
 //! `close(2)` is reported on Unix (rustix's `try_close`); other targets close by dropping the
 //! file and never see a close error.
@@ -78,6 +91,12 @@ pub(crate) const BUFSIZ: usize = 8192;
 
 /// The bytes the put area holds: `BUFSIZ` less one.
 const PUT_AREA: usize = BUFSIZ - 1;
+
+/// `what()` of the `ios_base::failure` that `clear` throws, as the release's runtime words it
+/// (observed: NCBI BLAST+ 2.17.0 blast_formatter, the official Linux x64 release, with `-out
+/// /dev/full` and with its standard output on `/dev/full`; line RG item F3, agent C6, 2026-11-23,
+/// `remaining-gaps-20261112/F/f3/tmp/c6/pb`).
+pub(crate) const IOS_FAILURE_WHAT: &str = "basic_ios::clear: iostream error";
 
 /// The stream state (`std::ios_base::iostate`): `goodbit`, `badbit` and `failbit`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,6 +133,13 @@ pub(crate) trait RawFile: Sized {
 
 /// A file on disk.
 pub(crate) struct DiskFile(File);
+
+impl From<File> for DiskFile {
+    /// A file already created or truncated (`ncbi_app::files::open_output_file`).
+    fn from(file: File) -> Self {
+        DiskFile(file)
+    }
+}
 
 impl RawFile for DiskFile {
     fn open(path: &Path) -> io::Result<Self> {
@@ -158,6 +184,8 @@ struct FileBuf<F: RawFile> {
     file: Option<F>,
     /// The bytes held; `len()` is `b` of the rules.
     held: Vec<u8>,
+    /// The size of the put area: `PUT_AREA`, or the standard output's (`Stream::with_put_area`).
+    put_area: usize,
 }
 
 impl<F: RawFile> FileBuf<F> {
@@ -195,7 +223,7 @@ impl<F: RawFile> FileBuf<F> {
         let Some(file) = self.file.as_mut() else {
             return data.is_empty();
         };
-        if data.len() < PUT_AREA - self.held.len().min(PUT_AREA) {
+        if data.len() < self.put_area - self.held.len().min(self.put_area) {
             self.held.extend_from_slice(data);
             return true;
         }
@@ -213,7 +241,7 @@ impl<F: RawFile> FileBuf<F> {
         let Some(file) = self.file.as_mut() else {
             return false;
         };
-        let overflow = self.held.len() >= PUT_AREA;
+        let overflow = self.held.len() >= self.put_area;
         self.held.push(byte);
         if !overflow {
             return true;
@@ -267,6 +295,10 @@ impl<F: RawFile> FileBuf<F> {
 /// An output-only `std::ofstream` of makeblastdb 2.17.0 (Linux x64).
 pub(crate) struct Stream<F: RawFile> {
     state: IoState,
+    /// `exceptions()`.
+    exceptions: IoState,
+    /// Whether a state change met `exceptions` since [`Stream::take_thrown`] was last asked.
+    thrown: bool,
     buf: FileBuf<F>,
 }
 
@@ -276,11 +308,20 @@ pub(crate) type OfStream = Stream<DiskFile>;
 impl<F: RawFile> Stream<F> {
     /// A stream with no file.
     pub(crate) fn new() -> Self {
+        Self::with_put_area(PUT_AREA)
+    }
+
+    /// A stream with no file whose put area holds `put_area` bytes (the rules with that size in
+    /// place of 8191: blast_formatter's standard output).
+    pub(crate) fn with_put_area(put_area: usize) -> Self {
         Stream {
             state: IoState::GOOD,
+            exceptions: IoState::GOOD,
+            thrown: false,
             buf: FileBuf {
                 file: None,
-                held: Vec::with_capacity(BUFSIZ),
+                held: Vec::with_capacity(put_area.min(1 << 16)),
+                put_area,
             },
         }
     }
@@ -307,7 +348,7 @@ impl<F: RawFile> Stream<F> {
             Ok(file) => {
                 self.buf.file = Some(file);
                 self.buf.held.clear();
-                self.state = IoState::GOOD;
+                self.clear(IoState::GOOD);
             }
             Err(_) => self.setstate(IoState::FAIL),
         }
@@ -320,11 +361,33 @@ impl<F: RawFile> Stream<F> {
     /// `clear(state)`.
     pub(crate) fn clear(&mut self, state: IoState) {
         self.state = state;
+        self.check_exceptions();
     }
 
     /// `setstate(state)`.
     pub(crate) fn setstate(&mut self, state: IoState) {
         self.state = self.state | state;
+        self.check_exceptions();
+    }
+
+    /// `exceptions(mask)`: the mask set, then `clear(rdstate())`, which throws when the state
+    /// already has a bit of `mask`.
+    pub(crate) fn set_exceptions(&mut self, mask: IoState) {
+        self.exceptions = mask;
+        self.clear(self.state);
+    }
+
+    /// Whether the stream threw `ios_base::failure` since the last call (a state change that met
+    /// `exceptions`), which is then forgotten.
+    pub(crate) fn take_thrown(&mut self) -> bool {
+        std::mem::take(&mut self.thrown)
+    }
+
+    /// The throw of `clear`: the state has a bit of `exceptions`.
+    fn check_exceptions(&mut self) {
+        if self.state.0 & self.exceptions.0 != 0 {
+            self.thrown = true;
+        }
     }
 
     /// `fail()`: `failbit` or `badbit`.

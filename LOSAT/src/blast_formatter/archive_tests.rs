@@ -165,14 +165,77 @@ fn the_other_formats_are_refused_after_ncbi_s_checks() {
     );
 }
 
-#[test]
-fn bl2seq_legacy_is_refused_for_subject_archives_as_by_the_search_programs() {
-    // The variable is read through `check_search_environment`; its refusal is the search
-    // programs' text with blast_formatter's name.
-    let error = crate::blastinput::app::check_search_environment(PROGRAM, true);
-    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        assert!(error.unwrap_err().to_string().contains("BLAST_FORMATTER"));
-    } else {
-        assert!(error.is_ok());
+/// A standard output on which every write fails, as on a full device.
+struct FullDevice;
+
+impl std::io::Write for FullDevice {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
     }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// `run_archive` with its standard output on `FullDevice`.
+fn run_archive_full(words: &[&str]) -> (i32, String) {
+    let archive = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/blast_formatter/in/bn.asn"
+    ))
+    .unwrap();
+    let mut line: Vec<OsString> = vec!["-archive".into(), "-".into()];
+    line.extend(words.iter().map(OsString::from));
+    let mut err = Vec::new();
+    let status = super::super::run_with(&line, &mut &archive[..], &mut FullDevice, &mut err);
+    (status, String::from_utf8(err).unwrap())
+}
+
+#[test]
+fn a_failed_standard_output_ends_the_run_as_ncbi_s_runtime_does() {
+    // The diagnostics on `cerr`: the close's post flushes `cout` through the tie, which throws
+    // inside the destructor (`std::terminate`, exit status 134 in a shell; the library returns
+    // -6 and the command line aborts).
+    for outfmt in ["8", "9", "12"] {
+        assert_eq!(
+            run_archive_full(&["-outfmt", outfmt]),
+            (
+                -6,
+                "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  \
+                 basic_ios::clear: iostream error\n"
+                    .to_string()
+            ),
+            "outfmt {outfmt}"
+        );
+    }
+    // Without the tie (`-logfile`): the one Seq-annot fits in the C library's buffer, its close
+    // fails and posts where the diagnostics go; nothing writes to the stream after it.
+    assert_eq!(
+        run_archive_full(&["-outfmt", "8", "-logfile", "/dev/null"]),
+        (0, String::new())
+    );
+}
+
+#[test]
+fn the_formatter_s_constructor_throws_on_a_stream_that_failed() {
+    let mut output = Output {
+        stdout: Some(Box::leak(Box::new(FullDevice))),
+        stream: None,
+        formatting: false,
+    };
+    output.open(OsStr::new("-")).unwrap();
+    output.begin_object().unwrap();
+    let (stream, is_stdout) = output.opened();
+    assert!(is_stdout);
+    stream.write(b"x");
+    stream.flush();
+    assert!(stream.take_thrown());
+    output.end_object();
+    // The next object's formatter: `BLAST failed to write output`, exit status 6.
+    let (status, message) = native(output.begin_object().unwrap_err());
+    assert_eq!(
+        (status, message.as_str()),
+        (6, "BLAST failed to write output\n")
+    );
 }

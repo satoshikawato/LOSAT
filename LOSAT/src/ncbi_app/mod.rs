@@ -95,6 +95,13 @@ impl Diag<'_> {
         self.target.write_text(text, self.stderr);
     }
 
+    /// Whether the diagnostics go to `cerr` itself, which is tied to `cout`: each post flushes the
+    /// standard output first (a `-logfile` file, also `/dev/stderr`, is written through a file
+    /// handle of its own, without the tie).
+    pub(crate) fn tied_to_cout(&self) -> bool {
+        matches!(self.target, DiagTarget::Stderr)
+    }
+
     /// Starts keeping a copy of the texts that `write_text` writes (the posts of a read that
     /// NCBI repeats where LOSAT reads once: windowmasker's `-mk_counts`).
     pub(crate) fn start_record(&mut self) {

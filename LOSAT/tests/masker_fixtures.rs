@@ -379,14 +379,21 @@ fn counts_directory(program: &str, case: &Case) -> bool {
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
 /// output and error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8:
 /// `-xmlhelp`'s version of the program, the prefixes). A row that LOSAT refuses by name has its
-/// message in `refused/<name>.err` (no standard output, exit status 1); NCBI's bytes of that row
-/// stay in `ncbi/` as the record of what NCBI does.
+/// message in `refused/<name>.err` (no standard output, exit status 1), and a row of
+/// `REFUSED_ROWS` that says what NCBI's record of it must show; NCBI's bytes of that row stay in
+/// `ncbi/` as that record.
 fn expected_row(program: &str, name: &str) -> Streams {
     if let Ok(err) = fs::read(
         fixtures(program)
             .join("refused")
             .join(format!("{name}.err")),
     ) {
+        let refused = refused_row(program, name);
+        assert!(
+            refused.fits(&fixtures(program), &err),
+            "{program} {name}: NCBI's record or LOSAT's message is not the one of a refusal of {}",
+            refused.kind
+        );
         return (Vec::new(), err, 1);
     }
     let file = |extension: &str| {
@@ -417,6 +424,113 @@ fn expected_row(program: &str, name: &str) -> Streams {
         losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )
+}
+
+/// A row that LOSAT refuses by name (`refused/<name>.err`): the kind of its refusal, the exit
+/// status and a text of NCBI's frozen record that show what NCBI's run depends on there, and a
+/// text of LOSAT's message. A row cannot move to `refused/` over a result of NCBI's that LOSAT
+/// should reproduce without a row here that says why.
+struct RefusedRow {
+    program: &'static str,
+    name: &'static str,
+    kind: &'static str,
+    ncbi_status: i32,
+    ncbi_err: &'static str,
+    losat_err: &'static str,
+}
+
+/// The rows that LOSAT refuses by name.
+const REFUSED_ROWS: [RefusedRow; 3] = [
+    // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
+    // failure under `unshare -rn`).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_database",
+        kind: "Database",
+        ncbi_status: 255,
+        ncbi_err: "s_InitializeSubject",
+        losat_err: "asks NCBI's servers",
+    },
+    // A stored Fatal message: NCBI's post carries a stack trace of its own binary.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_fatal_message",
+        kind: "FatalMessage",
+        ncbi_status: 255,
+        ncbi_err: "Note[F]",
+        losat_err: "severity Fatal",
+    },
+    // An output format outside what LOSAT's blast_formatter writes (8, 9 and 12): NCBI writes it.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_of6",
+        kind: "OutputFormat",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "output format 6 is not supported",
+    },
+];
+
+/// The row of `REFUSED_ROWS` for `name` of `program`.
+fn refused_row(program: &str, name: &str) -> &'static RefusedRow {
+    REFUSED_ROWS
+        .iter()
+        .find(|row| row.program == program && row.name == name)
+        .unwrap_or_else(|| panic!("{program} {name}: refused/ without a row of REFUSED_ROWS"))
+}
+
+impl RefusedRow {
+    /// Whether NCBI's frozen record of the row in `dir` and LOSAT's message `err` are those of
+    /// the refusal.
+    fn fits(&self, dir: &Path, err: &[u8]) -> bool {
+        let ncbi = |extension: &str| {
+            fs::read(dir.join("ncbi").join(format!("{}.{extension}", self.name))).unwrap()
+        };
+        let status: i32 = String::from_utf8(ncbi("rc"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let ncbi_err = String::from_utf8_lossy(&ncbi("err")).into_owned();
+        let err = String::from_utf8_lossy(err);
+        status == self.ncbi_status
+            && ncbi_err.contains(self.ncbi_err)
+            && err.starts_with("Error: ")
+            && err.contains(self.losat_err)
+    }
+}
+
+#[test]
+fn every_refused_row_names_its_refusal_and_ncbi_s_record_fits_it() {
+    for program in [
+        "dustmasker",
+        "segmasker",
+        "windowmasker",
+        "convert2blastmask",
+        "blast_formatter",
+    ] {
+        let Ok(entries) = fs::read_dir(fixtures(program).join("refused")) else {
+            continue;
+        };
+        for entry in entries {
+            let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+            let name = file.strip_suffix(".err").expect("refused/<name>.err");
+            let err = fs::read(fixtures(program).join("refused").join(&file)).unwrap();
+            let row = refused_row(program, name);
+            assert!(row.fits(&fixtures(program), &err), "{program} {name}");
+        }
+    }
+    for row in &REFUSED_ROWS {
+        assert!(
+            fixtures(row.program)
+                .join("refused")
+                .join(format!("{}.err", row.name))
+                .is_file(),
+            "{} {}: a row of REFUSED_ROWS without its refused/ file",
+            row.program,
+            row.name
+        );
+    }
 }
 
 /// Whether `case` of `program` runs on this platform: a row that writes its output to a device
@@ -590,6 +704,62 @@ fn convert2blastmask_gives_ncbis_bytes() {
 fn blast_formatter_gives_ncbis_bytes() {
     let differ = rows_that_differ("blast_formatter");
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
+/// blast_formatter's standard output on a full device and on a closed pipe: NCBI's runtime
+/// aborts (`std::terminate` inside the serial stream's destructor, its post's flush of `cout`
+/// through `cerr`'s tie: exit status 134 by SIGABRT, the runtime's report on the standard error,
+/// no post; probes of line RG item F3, agent C6, 2026-11-23, NCBI BLAST+ 2.17.0, the official
+/// Linux x64 release: every archive of the table with outfmt 8, 9 and 12).
+#[cfg(target_os = "linux")]
+#[test]
+fn blast_formatter_standard_output_failure_aborts() {
+    use std::os::unix::process::ExitStatusExt;
+    let want: &[u8] = b"terminate called after throwing an instance of 'std::__ios_failure'\n  \
+        what():  basic_ios::clear: iostream error\n";
+    let dir = fixtures("blast_formatter");
+    for (archive, outfmt) in [("db", "8"), ("bn", "12")] {
+        let words = format!("{archive}.asn -outfmt {outfmt}");
+        let case = Case {
+            name: "standard_output_failure".to_string(),
+            words: vec![
+                "-archive".to_string(),
+                dir.join("in")
+                    .join(format!("{archive}.asn"))
+                    .display()
+                    .to_string(),
+                "-outfmt".to_string(),
+                outfmt.to_string(),
+            ],
+            stdin: None,
+            variables: Vec::new(),
+        };
+        let binary = Path::new(env!("CARGO_BIN_EXE_losat"));
+        let full = fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        for (what, stdout) in [
+            ("/dev/full", Stdio::from(full)),
+            ("a closed pipe", Stdio::from(writer)),
+        ] {
+            // Out of the fixtures, where an abort may leave a core file.
+            let output = command(binary, "blast_formatter", &case)
+                .current_dir(env!("CARGO_TARGET_TMPDIR"))
+                .stdout(stdout)
+                .stderr(Stdio::piped())
+                .output()
+                .unwrap();
+            assert_eq!(
+                (output.status.signal(), output.stderr.as_slice()),
+                (Some(6), want),
+                "{words} on {what}: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
 
 // `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and

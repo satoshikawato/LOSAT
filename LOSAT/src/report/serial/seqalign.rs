@@ -1716,7 +1716,9 @@ impl std::error::Error for SeqAlignError {}
 /// from `hsps` (in NCBI's Seq-align order: subject by subject in hit-list order, each
 /// subject's HSPs sorted by e-value) and the `subjects` they index. Returns false and
 /// appends nothing when the query has no Seq-align (`results.HasAlignments()` is false:
-/// NCBI writes nothing for it). On an error, `buf` is left as it was.
+/// NCBI writes nothing for it). On an error, `buf` is left as it was. The tests' document of a
+/// query (the programs write it with `write_query_to`).
+#[cfg(test)]
 pub fn write_query(
     format: SerialFormat,
     run: &RunRecord<'_>,
@@ -1791,34 +1793,19 @@ pub(crate) fn write_query_to(
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
-    buf.clear();
-    match write_query(format, run, query, subjects, hsps, buf) {
-        Ok(true) => writer.write_all(buf)?,
-        Ok(false) => {}
-        Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
-            let document = QueryDocument {
-                run,
-                query,
-                subjects,
-                hsps,
-            };
-            // The prefix of the posts: `options::RequestKind::application`, the one table of
-            // the applications' names.
-            let prefix =
-                crate::report::archive::options::RequestKind::from(run.program).application();
-            write_document_posting(
-                format,
-                byte,
-                &document,
-                Some(prefix),
-                buf,
-                writer,
-                diagnostics,
-            )?;
-        }
-        Err(error) => return Err(error.into()),
+    if !has_alignments(run, hsps) {
+        return Ok(());
     }
-    Ok(())
+    let document = QueryDocument {
+        run,
+        query,
+        subjects,
+        hsps,
+    };
+    // The prefix of the posts: `options::RequestKind::application`, the one table of the
+    // applications' names.
+    let prefix = crate::report::archive::options::RequestKind::from(run.program).application();
+    write_document_to(format, &document, Some(prefix), buf, writer, diagnostics)
 }
 
 /// Writes the Seq-annot of `document` (`write_document`) to `writer` through `buf`, which is
@@ -1901,7 +1888,7 @@ impl SeqAnnotDocument for QueryDocument<'_, '_> {
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:843-861
 #[cold]
 #[inline(never)]
-fn write_document_posting<D: SeqAnnotDocument>(
+pub(crate) fn write_document_posting<D: SeqAnnotDocument>(
     format: SerialFormat,
     byte: u8,
     document: &D,

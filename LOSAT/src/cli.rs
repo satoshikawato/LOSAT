@@ -1554,6 +1554,34 @@ impl NativeError {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// `CATCH_ALL`'s report of an `ios::failure` (a stream that throws on `badbit`, as the
+    /// formatters set theirs, blast_format.cpp:118-119): "BLAST failed to write output", exit
+    /// status 6. The one producer of the text.
+    pub(crate) fn write_failure() -> NativeError {
+        NativeError {
+            exit: 6,
+            message: b"BLAST failed to write output\n".to_vec(),
+        }
+    }
+
+    /// The end of NCBI's program where its stream's `ios::failure` leaves a destructor or is
+    /// thrown while another unwinds: `std::terminate`, whose C++ runtime writes this report on the
+    /// standard error and aborts (SIGABRT, exit status 134 in a shell; observed with NCBI BLAST+
+    /// 2.17.0, the official Linux x64 release: blastx's tabular formats, blast_formatter's
+    /// standard output on a full device or a closed pipe). `exit_on_native_error` aborts.
+    pub(crate) fn ios_failure_abort() -> NativeError {
+        NativeError {
+            exit: -6,
+            message: format!(
+                "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  \
+                 {}\n",
+                crate::writedb::ofstream::IOS_FAILURE_WHAT
+            )
+            .into_bytes(),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
     /// `CATCH_ALL`'s report of a `std::bad_alloc` (a string or byte block of a PSSM file in ASN.1
     /// binary whose length passes every allocation, `report::serial::asn_input::reserve`): exit
@@ -1624,11 +1652,7 @@ impl ReportStream {
         let flushed = std::io::Write::flush(self);
         let badbit = result.as_ref().is_err_and(BadbitInsertion::is);
         if (self.failed || badbit) && throws {
-            return Err(NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".into(),
-            }
-            .into());
+            return Err(NativeError::write_failure().into());
         }
         result?;
         flushed.context("failed to write the output")

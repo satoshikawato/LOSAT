@@ -275,6 +275,18 @@ impl Encoder for JsonEncoder<'_> {
         }
     }
 
+    fn buffered(&self) -> usize {
+        self.out.len()
+    }
+
+    /// The JSON stream never looks back at what it wrote: every byte is final, and all of them
+    /// go (with what preceded the document in `out`).
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, _all: bool) -> std::io::Result<()> {
+        sink.write_all(self.out)?;
+        self.out.clear();
+        Ok(())
+    }
+
     fn error(&self) -> Option<SerialError> {
         self.error
     }

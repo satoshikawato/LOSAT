@@ -1,1 +1,1 @@
-Error: a BLAST archive with a stored message of severity Fatal, on which NCBI BLAST+ aborts, is not supported by LOSAT's BLAST_FORMATTER
+Error: a BLAST archive with a stored message of severity Fatal, on which NCBI BLAST+ stops with exit status 255 and a stack trace of its own binary, is not supported by LOSAT's BLAST_FORMATTER

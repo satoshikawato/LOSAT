@@ -105,11 +105,7 @@ pub fn side_file_open_error() -> anyhow::Error {
 /// before stay, the master file stays empty). The same error is made by all five programs and
 /// by BLASTX's hold, so that a full disk gives one answer.
 pub fn side_file_write_error() -> anyhow::Error {
-    crate::cli::NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
+    crate::cli::NativeError::write_failure().into()
 }
 
 /// The files of a 13 / 14 run: `create(n)` opens the file of the n-th report (`<base>_<n>.xml` or

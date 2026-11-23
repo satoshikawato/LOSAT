@@ -55,12 +55,18 @@ static TOOL: Tool = Tool {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
 /// Runs `blast_formatter` with `words` (the command line after `losat blast_formatter`), after
-/// its application start `start`, on the process's standard streams; the exit status.
+/// its application start `start`, on the process's standard streams; the exit status. A negative
+/// status is NCBI's `std::terminate` (`cli::NativeError::ios_failure_abort`, its report already
+/// written): the process aborts, as NCBI's does (SIGABRT).
 pub(crate) fn run(
     words: &[OsString],
     start: &crate::blastinput::ncbi_environment::ApplicationStart,
 ) -> i32 {
-    crate::ncbi_app::run(&TOOL, words, start, run_body)
+    let status = crate::ncbi_app::run(&TOOL, words, start, run_body);
+    if status < 0 {
+        std::process::abort();
+    }
+    status
 }
 
 /// The run of one command line with `input` as its standard input, its output on `out` and its

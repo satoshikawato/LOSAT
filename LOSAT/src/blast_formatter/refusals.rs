@@ -5,7 +5,8 @@
 //! results of `-rid` from NCBI's servers and asks them for the sequences of a database it does
 //! not open (LOSAT's search programs refuse `-remote` alike, line RG DECISIONS 7 and F3-5), and
 //! on some archives that its own programs do not write it reads memory the archive does not
-//! decide or aborts.
+//! decide or aborts; on a stored message of severity Fatal it stops with a stack trace of its own
+//! binary.
 
 use crate::ncbi_app::Diag;
 
@@ -93,7 +94,8 @@ impl Refusal {
             ),
             Refusal::FatalMessage => format!(
                 "a BLAST archive with a stored message of severity Fatal, on which NCBI BLAST+ \
-                 aborts, is not supported by LOSAT's {}",
+                 stops with exit status 255 and a stack trace of its own binary, is not supported \
+                 by LOSAT's {}",
                 super::PROGRAM
             ),
             Refusal::Prefetch => format!(

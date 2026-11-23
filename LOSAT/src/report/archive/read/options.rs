@@ -66,6 +66,30 @@ impl EProgram {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-75
+    /// The program's value in NCBI's `EProgram` (`eBlastn` 1 to `eMapper` 16), which the Blast
+    /// Type of a Seq-annot writes.
+    pub(crate) fn number(self) -> i32 {
+        match self {
+            EProgram::Blastn => 1,
+            EProgram::Blastp => 2,
+            EProgram::Blastx => 3,
+            EProgram::Tblastn => 4,
+            EProgram::Tblastx => 5,
+            EProgram::RpsBlast => 6,
+            EProgram::RpsTblastn => 7,
+            EProgram::Megablast => 8,
+            EProgram::DiscMegablast => 9,
+            EProgram::PsiBlast => 10,
+            EProgram::PsiTblastn => 11,
+            EProgram::PhiBlastp => 12,
+            EProgram::PhiBlastn => 13,
+            EProgram::DeltaBlast => 14,
+            EProgram::VecScreen => 15,
+            EProgram::Mapper => 16,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:43-44
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:708-755
     /// `Blast_QueryIsNucleotide` of the options' program type (`EProgramToEBlastProgramType`): the
@@ -495,8 +519,10 @@ pub fn compute_program(program: &[u8], service: &[u8]) -> Result<EProgram, NcbiE
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:757-810
-/// `ProgramNameToEnum` of the name that `ComputeProgram` made (lower case already).
-fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
+/// `ProgramNameToEnum` of a program name: the name that `ComputeProgram` made (lower case
+/// already), and the program name of blast_formatter's formatter (`blast_formatter::
+/// search_program::blast_type`).
+pub(crate) fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
     let lower = name.to_ascii_lowercase();
     Ok(
         if lower.starts_with(b"blastn") || lower.starts_with(b"rmblastn") {

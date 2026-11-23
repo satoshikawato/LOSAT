@@ -339,9 +339,11 @@ pub(crate) trait Input {
     const ENCODING: Encoding;
     /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
     fn position(&self) -> StreamPosition;
-    /// The state of a new object stream at the next byte (each object of a file is read by a
-    /// stream of its own in NCBI: its line count, or its byte count and data limits, start
-    /// again).
+    /// The state of the stream at the next object: in binary a new object stream (its byte count
+    /// and data limits start again); in text the stream goes on (its line count too: NCBI's
+    /// archive reader keeps one object stream for all the objects of the file, and its posts
+    /// name the line of the file; `TextInput::restart_lines` for a program that reads each object
+    /// with a stream of its own).
     fn new_object(&mut self);
     /// `EndOfData()`: whether no object follows (binary: no byte left; text: nothing but white
     /// space and comments, or what `SkipWhiteSpace` stops at): blast_formatter's archive reader
@@ -476,6 +478,12 @@ const SKIP_BYTE_BLOCK: ThrowSite =
 const EXPECT_CHOICE: ThrowSite = asn_site(203, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::Expect");
 
 impl<S: AsnSource> TextInput<S> {
+    /// The line count of a new `CObjectIStreamAsn` (line 1), for a program that reads each object
+    /// of a file with a stream of its own (makeblastdb's mask data, `writedb::mask_info`).
+    pub(crate) fn restart_lines(&mut self) {
+        self.r.line = 1;
+    }
+
     /// The text input over `src`, which LOSAT's own messages call by `names` (`Reader::new`).
     pub(crate) fn new(src: S, names: Names) -> Self {
         TextInput {
@@ -609,11 +617,11 @@ impl<S: AsnSource> Input for TextInput<S> {
         StreamPosition::Line(self.r.line as u64)
     }
 
-    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started. The
-    /// bytes before it are not read again (a stream keeps about one object, not the objects
-    /// before it).
+    /// The state of `CObjectIStreamAsn` at the next object: no block started, the line count
+    /// going on (observed: blast_formatter 2.17.0 posts a bad byte of the second object of an
+    /// archive with the line of the file, line RG item F3, agent C6, 2026-11-23). The bytes
+    /// before it are not read again (a stream keeps about one object, not the objects before it).
     fn new_object(&mut self) {
-        self.r.line = 1;
         self.block_start = false;
         self.r.src.release_before(self.r.pos);
     }

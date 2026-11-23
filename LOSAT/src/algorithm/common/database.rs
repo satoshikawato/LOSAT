@@ -128,30 +128,32 @@ fn apply_list(
     let mut warnings = Vec::new();
     let restricted = db.restrict(list, &mut warnings);
     let prefix = program.to_ascii_lowercase();
-    // The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
     for warning in warnings {
-        let line = match warning {
-            crate::seqdb::ListWarning::Log(text) => text,
-            crate::seqdb::ListWarning::Posted(text) => {
-                format!("Warning: [{prefix}] {text}").into_bytes()
-            }
-            crate::seqdb::ListWarning::Error(text) => {
-                [format!("Error: [{prefix}] ").as_bytes(), &text].concat()
-            }
-            crate::seqdb::ListWarning::SeqId(warning) => {
-                let mut line = Vec::new();
-                crate::writedb::fasta_source::defline_ids::post_seq_id_warning_of(
-                    &prefix,
-                    warning,
-                    &mut |text| line.extend_from_slice(text),
-                );
-                line
-            }
-        };
-        diagnostics.write_all(&line)?;
-        diagnostics.write_all(b"\n")?;
+        diagnostics.write_all(&list_warning_line(warning, Some(&prefix)))?;
     }
     restricted.map_err(|error| database_error(error, program))
+}
+
+/// A warning of `SeqDb::restrict` as NCBI posts it, with its line feed: after the diagnostic
+/// prefix `[prefix] ` of the application, or none where it sets none (blast_formatter's `Run`).
+/// The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
+pub(crate) fn list_warning_line(
+    warning: crate::seqdb::ListWarning,
+    prefix: Option<&str>,
+) -> Vec<u8> {
+    let tag = prefix.map(|p| format!("[{p}] ")).unwrap_or_default();
+    let mut line = match warning {
+        crate::seqdb::ListWarning::Log(text) => text,
+        crate::seqdb::ListWarning::Posted(text) => format!("Warning: {tag}{text}").into_bytes(),
+        crate::seqdb::ListWarning::Error(text) => {
+            [format!("Error: {tag}").as_bytes(), &text].concat()
+        }
+        crate::seqdb::ListWarning::SeqId(warning) => {
+            crate::writedb::fasta_source::defline_ids::seq_id_warning_line(prefix, warning)
+        }
+    };
+    line.push(b'\n');
+    line
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy

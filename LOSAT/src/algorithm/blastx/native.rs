@@ -86,11 +86,7 @@ pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
 pub(super) fn output_error(_: io::Error) -> anyhow::Error {
-    NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
+    NativeError::write_failure().into()
 }
 /// The error of writing one batch's archive: the encoder's refusal of a byte NCBI writes as `#`
 /// (`SerialError`; a document with such a byte is written through `Traced`, `write_archive`, so
@@ -150,7 +146,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // not an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
-        NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
+        NativeError::ios_failure_abort().into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {
         output_error(io::Error::new(e.kind(), e.to_string()))
     } else {

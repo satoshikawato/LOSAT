@@ -364,7 +364,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let x_drop_ungapped = args.xdrop_ungap.unwrap_or(defaults.x_drop_ungapped);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:876-877
-    // 0 and below are the options' unset value (the handles' `SetCutoffScore(0)`,
+    // 0 and below are the options' unset value (the handles' `SetCutoffScore` of 0,
     // blast_nucl_options.cpp:243,263).
     let min_raw_gapped_score = args.min_raw_gapped_score.filter(|&score| score > 0);
 
@@ -930,7 +930,7 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     pool: &SearchPool<'_>,
 ) -> Result<(Vec<Vec<MaskedInterval>>, Vec<Vec<(usize, usize)>>), MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
-    // After DUST, and `query.SetMaskedRegions(mqr)` (winmask_filter.cpp:311) replaces the
+    // After DUST, and `SetMaskedRegions` of the query with `mqr` (winmask_filter.cpp:311) replaces the
     // query's masks: DUST's and the lower case are not made.
     if let Some(window_masker) = &args.window_masker {
         let minus = QueryStrand::from_option(&args.strand) == QueryStrand::Minus;
@@ -982,7 +982,7 @@ pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
-    // A chunk's query data is made with the options (`MakeLocalQueryData(m_Options)`), so its
+    // A chunk's query data is made with the options (`MakeLocalQueryData` with `m_Options`), so its
     // query source calculates the masks of the chunk's parts again, WindowMasker last.
     if args.window_masker.is_some() {
         return query_masks(args, parts, &mut [], pool).map(|(masks, _)| masks);

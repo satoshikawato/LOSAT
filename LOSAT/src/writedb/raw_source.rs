@@ -194,11 +194,12 @@ impl<'a> RawSeqDbSource<'a> {
     // registered before; `other`'s name is its id, and its description is not passed on.
     //
     // With `-randomize` the copy walks the OIDs the input includes in the order `std::shuffle`
-    // leaves them with a `std::mt19937` seeded with `time(nullptr)` (`crate::utils::std_shuffle`;
-    // the number of OIDs that ends NCBI's list is the end of the walk here).
+    // leaves them with a `std::mt19937` seeded with the seconds of the clock (`time` with a null
+    // pointer; `crate::utils::std_shuffle`; the number of OIDs that ends NCBI's list is the end of
+    // the walk here).
     /// The constructor: registers the masking algorithms of `db` on the output `outdb`, in the
     /// order of their ids, lists the columns of `db` and, with `-randomize`, shuffles the order
-    /// of the copy with the seed `randomize` (`time(nullptr)` modulo 2^32).
+    /// of the copy with the seed `randomize` (the seconds of the clock, modulo 2^32).
     pub(crate) fn new(
         db: &'a SeqDb,
         outdb: &mut BuildDatabase<'_>,
@@ -241,7 +242,7 @@ impl<'a> RawSeqDbSource<'a> {
         &self.columns
     }
 
-    /// `GetColumnMetaData(GetColumnId(title))` of the column `index` of
+    /// `GetColumnMetaData` of the `GetColumnId` of a title, for the column `index` of
     /// [`Self::column_titles`].
     pub(crate) fn column_meta_data(
         &self,

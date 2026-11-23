@@ -15,23 +15,25 @@ pub(crate) enum Constraint {
     /// `CArgAllow_Strings`: one of the values, compared with case, listed in the order of its
     /// `std::set`.
     Strings(Span),
-    /// `CArgAllowValuesGreaterThanOrEqual(min)`.
+    /// `CArgAllowValuesGreaterThanOrEqual` with `min`.
     AtLeast(f64),
-    /// `CArgAllowValuesLessThanOrEqual(max)`.
+    /// `CArgAllowValuesLessThanOrEqual` with `max`.
     AtMost(f64),
-    /// `CArgAllowValuesBetween(min, max, inclusive)`.
+    /// `CArgAllowValuesBetween` with `min`, `max` and `inclusive`.
     Between { min: f64, max: f64, inclusive: bool },
-    /// `CArgAllow_Doubles(min, max)`.
+    /// `CArgAllow_Doubles` with `min` and `max`.
     Doubles { min: f64, max: f64 },
-    /// `CArgAllow_Integers(min, max)`.
+    /// `CArgAllow_Integers` with `min` and `max`.
     Integers { min: i64, max: i64 },
     /// `CArgAllowStringSet`: one of the values, in the order of its `set<string>`.
     StringSet(Span),
     /// `CArgAllowIntegerSet`: one of the values, in the order of its `set<int>`.
     IntegerSet(Span),
-    /// `CArgAllowGeneticCodeInteger`: a genetic code of NCBI's tables.
-    GeneticCode,
-    /// `CArgAllowMaximumFileNameLength(max)`: a file name shorter than `max` bytes.
+    /// `CArgAllowGeneticCodeInteger`: a genetic code of NCBI's tables, or code 32 where LOSAT adds
+    /// it (`with_32`, PD-TLOSAN-LOCAL-GENCODE-32: tblastn's `-db_gencode`). The usage text is
+    /// NCBI's either way.
+    GeneticCode { with_32: bool },
+    /// `CArgAllowMaximumFileNameLength` with `max`: a file name shorter than `max` bytes.
     MaxFileNameLength(u32),
 }
 
@@ -47,19 +49,29 @@ pub(crate) fn is_genetic_code(code: i32) -> bool {
     GENETIC_CODES.contains(&code)
 }
 
+// No NCBI counterpart: PD-TLOSAN-LOCAL-GENCODE-32 (gc.prt ID 32, which LOSAT's TBLASTN translates
+// with).
+/// The genetic codes of `Constraint::GeneticCode { with_32 }`, in increasing order.
+pub(crate) fn genetic_codes(with_32: bool) -> Vec<u32> {
+    let codes = GENETIC_CODES.iter().copied().chain(with_32.then_some(32));
+    let mut codes: Vec<u32> = codes.filter_map(|code| u32::try_from(code).ok()).collect();
+    codes.sort_unstable();
+    codes
+}
+
 impl Constraint {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1231-1242
     // The reader calls `Verify` inside a `try`: an exception counts as a refused value.
-    /// `Verify(value)` of the constraint, on the value's text; an exception that NCBI's `Verify`
-    /// throws (a value that its conversion does not read) is a value it does not allow.
-    pub(crate) fn verify(self, value: &str) -> bool {
-        let bytes = value.as_bytes();
+    /// `Verify` of the constraint, on the value's bytes as the command line gives them; an
+    /// exception that NCBI's `Verify` throws (a value that its conversion does not read) is a
+    /// value it does not allow.
+    pub(crate) fn verify(self, bytes: &[u8]) -> bool {
         let blast_double = || crate::ncbi_str::string_to_double(bytes).ok();
         match self {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4605-4609
             // A lookup of the value in the set, with case.
             Constraint::Strings(values) | Constraint::StringSet(values) => {
-                strings(values).any(|allowed| allowed == value)
+                strings(values).any(|allowed| allowed.as_bytes() == bytes)
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:111-113
             // BLAST's bounds read the value with `NStr::StringToDouble` (default flags), then
@@ -88,17 +100,17 @@ impl Constraint {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
             // Read with `s_StringToInt8`, then inside the closed interval.
             Constraint::Integers { min, max } => {
-                string_to_int8(value).is_ok_and(|number| min <= number && number <= max)
+                string_to_int8(bytes).is_ok_and(|number| min <= number && number <= max)
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222, 239
             // Read with `NStr::StringToInt`, then looked up in the set.
             Constraint::IntegerSet(values) => crate::ncbi_str::string_to_int(bytes, 0)
                 .is_ok_and(|number| integers(values).contains(&number)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1002-1007
-            // Read with `NStr::StringToInt`, then looked up among the genetic codes.
-            Constraint::GeneticCode => {
-                crate::ncbi_str::string_to_int(bytes, 0).is_ok_and(is_genetic_code)
-            }
+            // Read with `NStr::StringToInt`, then looked up among the genetic codes (and code 32
+            // where LOSAT adds it).
+            Constraint::GeneticCode { with_32 } => crate::ncbi_str::string_to_int(bytes, 0)
+                .is_ok_and(|code| is_genetic_code(code) || (with_32 && code == 32)),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:85-88
             // The length of the file name part of the path, below the maximum.
             Constraint::MaxFileNameLength(max) => {
@@ -171,7 +183,7 @@ impl Constraint {
             Constraint::StringSet(values) => permissible_values(strings(values)),
             Constraint::IntegerSet(values) => permissible_values(integers(values).iter()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1010-1012
-            Constraint::GeneticCode => "values between: 1-6, 9-16, 21-31, 33".to_string(),
+            Constraint::GeneticCode { .. } => "values between: 1-6, 9-16, 21-31, 33".to_string(),
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:91-93
             Constraint::MaxFileNameLength(max) => format!("file name length < {max}"),
         }
@@ -179,7 +191,7 @@ impl Constraint {
 }
 
 /// The values of a set of strings (rows of `STRING_VALUES`).
-fn strings(values: Span) -> impl Iterator<Item = &'static str> {
+pub(super) fn strings(values: Span) -> impl Iterator<Item = &'static str> {
     values
         .of(&super::STRING_VALUES)
         .iter()
@@ -201,7 +213,7 @@ fn permissible_values<T: std::fmt::Display>(values: impl Iterator<Item = T>) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2339
-/// `NStr::DoubleToString(value)`: with no precision and the default flags, C's `%g`
+/// `NStr::DoubleToString` of `value`: with no precision and the default flags, C's `%g`
 /// (`report::sam::push_g`).
 fn double_to_string(value: f64) -> String {
     let mut out = Vec::new();
@@ -210,13 +222,12 @@ fn double_to_string(value: f64) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129
-/// `s_StringToInt8(value)`, NCBI's reading of an integer argument (`CArg_Int8`, `CArg_Integer`)
+/// `s_StringToInt8` of `value`, NCBI's reading of an integer argument (`CArg_Int8`, `CArg_Integer`)
 /// and of `CArgAllow_Integers`: decimal, then, for a value that starts with `0x` or `0X`, base 16,
 /// whose exception is then the one thrown (`0x` alone reads 0). The one reading of it, for this
 /// reader and for the programs on clap (`blastinput::value_parsers::ncbi_int8`).
-pub(crate) fn string_to_int8(value: &str) -> Result<i64, crate::ncbi_exception::NcbiException> {
+pub(crate) fn string_to_int8(bytes: &[u8]) -> Result<i64, crate::ncbi_exception::NcbiException> {
     use crate::ncbi_str::{string_to_int8, string_to_int8_base};
-    let bytes = value.as_bytes();
     match string_to_int8(bytes, 0) {
         Err(_)
             if bytes
@@ -232,10 +243,10 @@ pub(crate) fn string_to_int8(value: &str) -> Result<i64, crate::ncbi_exception::
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-312
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-363
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
-/// The length of `CFile(path).GetName()`: the text after the last separator once the trailing
-/// directory separators are removed (a path of one separator, or a disk name, keeps them). On Unix
-/// `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on Windows they are `/\`
-/// and `:/\`, with the disk name `C:`. The one reading of it, for this reader and for the
+/// The length of the `GetName()` of a `CFile` of `path`: the text after the last separator once the
+/// trailing directory separators are removed (a path of one separator, or a disk name, keeps them).
+/// On Unix `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on Windows they
+/// are `/\` and `:/\`, with the disk name `C:`. The one reading of it, for this reader and for the
 /// programs on clap (`blastinput::value_parsers`, `CArgAllowMaximumFileNameLength` of `-out`).
 pub(crate) fn file_name_length(path: &[u8]) -> usize {
     let (dir_separators, all_separators): (&[u8], &[u8]) = if cfg!(windows) {

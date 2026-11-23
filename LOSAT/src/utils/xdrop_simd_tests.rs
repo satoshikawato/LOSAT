@@ -589,9 +589,10 @@ fn rows_that_do_not_fit_go_to_the_next_chunk() {
     X_TEST_SHIFT.with(|c| c.set(None));
     assert!(t.x_walk_start().is_none());
     let row = |t: &mut XTrace, n: usize, cells: usize, v: u8| {
-        let p = t.x_row(n);
+        // `x_row` returns null only for `n == 0` (an empty `XTrace`); these rows ask `n >= 1`.
+        let p = std::ptr::NonNull::new(t.x_row(n)).expect("x_row gave a row");
         // SAFETY: `x_row` gave room for `n >= cells` bytes at `p`.
-        unsafe { std::ptr::write_bytes(p, v, cells) };
+        unsafe { std::ptr::write_bytes(p.as_ptr(), v, cells) };
         t.x_row_done(false, v as usize, cells)
     };
     let r1 = row(&mut t, 300, 200, 1);
@@ -662,9 +663,9 @@ fn rows_that_do_not_fit_go_to_the_next_chunk() {
     row(&mut t, 300, 300, 6);
     assert_eq!(t.x_test_layout(false), vec![(0, 0, 6, 300)]);
     // a step of 255 or more forward takes the long form too
-    let p = t.x_row(10);
+    let p = std::ptr::NonNull::new(t.x_row(10)).expect("x_row gave a row");
     // SAFETY: `x_row` gave room for 10 bytes at `p`.
-    unsafe { std::ptr::write_bytes(p, 7, 10) };
+    unsafe { std::ptr::write_bytes(p.as_ptr(), 7, 10) };
     t.x_row_done(false, 306, 10);
     assert_eq!(
         t.x_test_layout(false),
@@ -769,7 +770,7 @@ fn trace_chunks_keep_every_result() {
 
 // No NCBI counterpart: a BLASTNA-like problem for the 32-bit lanes' tests: row letters 0..3
 // (the packed subject of `s_BlastAlignPackedNucl`), column letters 0..3 with some N (14) and,
-// in some problems, a gap letter (15), whose row and column hold `INT4_MIN / 2` as NCBI's
+// in some problems, a gap letter (15), whose row and column hold half of `INT4_MIN` as NCBI's
 // matrix does (`blast_stat.c` `BlastScoreBlkNuclMatrixCreate`); `scale` multiplies the scores.
 pub(super) fn nucleotide_problem(rng: &mut Rng, scale: i32, len: usize) -> Problem {
     let n = 16;
@@ -1267,7 +1268,7 @@ fn large_x_drop_takes_the_wide_lanes() {
 }
 
 // The decline for a -32768 table entry (`x32_amb_of`) is what keeps such a call exact: with a
-// gap opening of 40,000 and an X-drop of 1e6, a BLASTNA gap letter (`INT4_MIN / 2`, -32768 in
+// gap opening of 40,000 and an X-drop of 1e6, a BLASTNA gap letter (half of `INT4_MIN`, -32768 in
 // the 16-bit tables) third in the columns gives the diagonal `H - 2^30` in the scalar loops, so
 // the cell takes a gap (`H - 40,001`) and the 37 matches after it (+37,000) do not reach the
 // best again, while with -32768 in its place they would (the scalar loops on the clamped

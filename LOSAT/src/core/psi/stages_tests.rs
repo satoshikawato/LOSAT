@@ -57,7 +57,7 @@ fn blosum62() -> PsiScoreBlk {
         .unwrap()
 }
 
-/// psiblast's request without `-out_ascii_pssm` (`PSIDiagnosticsRequestNewEx(FALSE)`).
+/// psiblast's request without `-out_ascii_pssm` (`PSIDiagnosticsRequestNewEx` with `FALSE`).
 const REQUEST: PsiDiagnosticsRequest = PsiDiagnosticsRequest {
     information_content: false,
     weighted_residue_frequencies: false,

@@ -3,6 +3,7 @@
 //! (`NcbiGetlineEOL`, c++/src/corelib/ncbistre.cpp) reads from them, on each platform NCBI
 //! builds for.
 
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -12,7 +13,7 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 /// The exception of a file argument whose stream does not open.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-621
-fn not_accessible(name: &str, value: &str) -> ArgException {
+fn not_accessible(name: &str, value: &[u8]) -> ArgException {
     ArgException::new(
         "eNoFile",
         arg_message(name, "File is not accessible", value),
@@ -175,7 +176,8 @@ impl<R: Read> Read for TextReader<R> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-720 (`-` is `cin`, set to the
-// text mode on Windows: `NcbiSys_setmode(NcbiSys_fileno(stdin), ... O_TEXT)`)
+// text mode on Windows: `NcbiSys_setmode` on the file number of stdin (`NcbiSys_fileno`), with
+// `O_TEXT`)
 /// The standard input of a run (`cin`): the process's on the command line, the caller's reader
 /// in the library API (`api::run_dustmasker`, `api::run_blastdbcmd`), read in the text mode of
 /// LOSAT's platform. It is one stream for the whole run, as `cin` is: a second argument `-`
@@ -231,15 +233,15 @@ pub(crate) fn open_input_file<'a>(
     let source = if value == "-" {
         Source::Stdin(stdin)
     } else if value.is_empty() {
-        return Err(not_accessible(name, value));
+        return Err(not_accessible(name, value.as_bytes()));
     } else {
-        let file = File::open(value).map_err(|_| not_accessible(name, value))?;
+        let file = File::open(value).map_err(|_| not_accessible(name, value.as_bytes()))?;
         Source::File(TextReader::new(file, LineEnds::HOST))
     };
     Ok(InputFile { source })
 }
 
-/// The file `path` opened as a program's own `CNcbiIfstream(path)` opens it (not an argument's
+/// The file `path` opened as a program's own `CNcbiIfstream` of `path` opens it (not an argument's
 /// stream): read in the text mode of LOSAT's platform; `Err` when it does not open (on Linux a
 /// directory opens, and its reads fail).
 pub(crate) fn open_text_file(path: &str) -> std::io::Result<Box<dyn Read>> {
@@ -260,17 +262,20 @@ pub(crate) fn read_input_file(
         return Ok(Vec::new());
     }
     let mut file =
-        open_input_file(name, value, stdin).map_err(|error| error.message().to_string())?;
+        open_input_file(name, value, stdin).map_err(|error| error.message_text().into_owned())?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|_| not_accessible(name, value).message().to_string())?;
+    file.read_to_end(&mut bytes).map_err(|_| {
+        not_accessible(name, value.as_bytes())
+            .message_text()
+            .into_owned()
+    })?;
     Ok(bytes)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:90-104
-// The loops of blastdbcmd that read lines so skip the empty ones (`if ( !line.empty() )`,
-// blastdbcmd.cpp:333, 385, 450, 497): on macOS a line then ends at any `\r` or `\n`, and the
+// The loops of blastdbcmd that read lines so skip the empty ones (a test that the line is not
+// empty, blastdbcmd.cpp:333, 385, 450, 497): on macOS a line then ends at any `\r` or `\n`, and the
 // `\r\n` that NCBI takes for one end leaves no other line.
 /// The lines of an input file (`bytes` as `read_input_file` gives them) that the loops of
 /// `NcbiGetlineEOL` read on `platform`, without the empty ones.
@@ -418,23 +423,24 @@ impl Write for Ostream<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
-/// `AsOutputFile()` of the argument `name` whose value is `value`: `-` is `stdout`, the empty
-/// name opens nothing, and another name makes or empties the file (`IOS_BASE::out`, without
-/// `fCreatePath`). `Err` is NCBI's `eNoFile`.
+/// `AsOutputFile()` of the argument `name` whose value is `value`, the name's bytes: `-` is
+/// `stdout`, the empty name opens nothing, and another name makes or empties the file
+/// (`IOS_BASE::out`, without `fCreatePath`). `Err` is NCBI's `eNoFile`, which quotes the bytes.
 pub(crate) fn open_output_file<'a>(
     name: &str,
-    value: &str,
+    value: &OsStr,
     stdout: &'a mut dyn Write,
 ) -> Result<OutputFile<'a>, ArgException> {
     if value == "-" {
         return Ok(OutputFile::Stdout(stdout));
     }
+    let bytes = value.as_encoded_bytes();
     if value.is_empty() {
-        return Err(not_accessible(name, value));
+        return Err(not_accessible(name, bytes));
     }
     File::create(value)
         .map(OutputFile::File)
-        .map_err(|_| not_accessible(name, value))
+        .map_err(|_| not_accessible(name, bytes))
 }
 
 #[cfg(test)]

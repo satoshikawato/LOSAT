@@ -1,5 +1,18 @@
 use super::*;
 
+// No NCBI counterpart: the size of LOSAT's record of an outfmt 0 HSP, one per reported HSP
+// until the report is written. It is not larger than on dev ed9178f49 (376 bytes on 64-bit
+// targets): the masks of the rows are not kept per HSP (line RG T4a1; the rows hold them in
+// lower case, `query_anchored::output_seq`). A boxed list per masked HSP had made it 384 bytes
+// and raised max RSS by up to 2 % (3,000 BLASTX HSPs). On 32-bit targets (wasm32) nothing is
+// pinned.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn pairwise_hit_is_no_larger_than_on_dev() {
+    let size = std::mem::size_of::<PairwiseHit>();
+    assert!(size <= 376, "{size}");
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
 // (cited at `write_blastp_database_header_spacing`)
 // The `Database:` lines of a FASTA subject set print NCBI's `Int8` counts whole: a set of
@@ -30,6 +43,104 @@ fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
         epilog.contains("  Number of letters in database: 6,000,000,000\n  Number of sequences in database:  2\n"),
         "{epilog}"
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395 (cited at
+// `write_prolog`): the prolog's two `NcbiEndl`, each a newline and a flush.
+// Which programs' prologs flush after each of these two newlines (`write_prolog`'s
+// `endl_flushes`, each program's flushes of dev; review note N3 of line RG T4a1): the prologs
+// of blastx, rpstblastn, tblastn (also with `-in_pssm`), tblastx and the blastn tasks other
+// than megablast do; those of blastp's driver (blastp, psiblast, rpsblast) and of megablast
+// flush nowhere in the prolog.
+#[test]
+fn the_prologs_that_flush_after_their_two_newlines() {
+    /// Keeps what is written and the number of bytes written at each flush.
+    #[derive(Default)]
+    struct Flushes(Vec<u8>, Vec<usize>);
+    impl Write for Flushes {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.1.push(self.0.len());
+            Ok(())
+        }
+    }
+    type Prolog<'a> = Box<dyn Fn(&mut Flushes) -> io::Result<()> + 'a>;
+    let version = "2.17.0+";
+    let report = BlastpPairwiseReport {
+        version: version.into(),
+        database_name: "d".into(),
+        database_num_sequences: 1,
+        database_total_letters: 10,
+        matrix_name: Some("BLOSUM62".into()),
+        gap_open: 11,
+        gap_extend: 1,
+        word_threshold: 12.0,
+        window_size: 40,
+        gapped_karlin: Default::default(),
+        gumbel: None,
+        gapped: true,
+        show_linked_set_size: false,
+        num_descriptions: 500,
+        num_alignments: 250,
+    };
+    let blastp = |program: &'static str| -> Prolog<'_> {
+        Box::new(move |out: &mut Flushes| {
+            write_blastp_pairwise_prolog(out, version, program, b"d", 1, 10, None)
+        })
+    };
+    let blastn = |megablast: bool| -> Prolog<'_> {
+        Box::new(move |out: &mut Flushes| {
+            let intro = BlastnIntro {
+                megablast,
+                indexed_megablast: false,
+                matrix_only: false,
+            };
+            write_blastn_pairwise_prolog(out, version, intro, b"d", 1, 10, None)
+        })
+    };
+    let tblastn = |program: &'static str| -> Prolog<'_> {
+        Box::new(move |out: &mut Flushes| {
+            write_tblastn_pairwise_prolog(out, program, version, b"d", 1, 10, None)
+        })
+    };
+    let blastx = |program: &'static str| -> Prolog<'_> {
+        let report = &report;
+        Box::new(move |out: &mut Flushes| write_blastx_prolog(out, program, report, None))
+    };
+    let prologs: [(&str, Prolog<'_>, bool); 10] = [
+        ("blastp", blastp("blastp"), false),
+        ("psiblast", blastp("psiblast"), false),
+        ("rpsblast", blastp("rpsblast"), false),
+        ("megablast", blastn(true), false),
+        ("blastn", blastn(false), true),
+        (
+            "tblastx",
+            Box::new(|out: &mut Flushes| {
+                write_tblastx_pairwise_prolog(out, version, b"d", 1, 10, None)
+            }),
+            true,
+        ),
+        ("tblastn", tblastn("TBLASTN"), true),
+        ("psitblastn", tblastn("PSITBLASTN"), true),
+        ("blastx", blastx("BLASTX"), true),
+        ("rpstblastn", blastx("RPSTBLASTN"), true),
+    ];
+    for (program, prolog, endl_flushes) in &prologs {
+        let mut out = Flushes::default();
+        prolog(&mut out).unwrap();
+        // The version line, then the two newlines.
+        let line = out.0.iter().position(|&byte| byte == b'\n').unwrap() + 1;
+        assert_eq!(&out.0[line..line + 2], b"\n\n", "{program}");
+        let flushes = if *endl_flushes {
+            vec![line + 1, line + 2]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(out.1, flushes, "{program}");
+    }
 }
 
 /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
@@ -507,6 +618,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
             "ACDEW",
             [&[], &[]],
             Default::default(),
+            None,
             &config,
         )
         .unwrap();
@@ -556,6 +668,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
         "MQ",
         [&[], &[]],
         Default::default(),
+        None,
         &config,
     )
     .unwrap();
@@ -708,6 +821,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
                 "MRKVL",
                 [&[], &[]],
                 Default::default(),
+                None,
                 &PairwiseConfig {
                     program: "blastp".into(),
                     ..config(line_length)
@@ -758,6 +872,7 @@ fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
             &letters,
             [&[], &[]],
             Default::default(),
+            None,
             &PairwiseConfig {
                 line_length,
                 program: "blastp".into(),
@@ -986,7 +1101,7 @@ fn matrix_only_hsp_header_is_the_raw_score() {
 }
 
 // NCBI 2.17.0 (line RG X6 probe `f_rm_sub_0`, ws:~/losat-bench/work/rgx6/s2): the outfmt 0
-// prolog of matrix-only scoring (`write_matrix_only_pairwise_intro`, blast_format.cpp:376-395),
+// prolog of matrix-only scoring (`write_prolog` with `disable_ka_stats`, blast_format.cpp:376-395),
 // and megablast's reference after the RMBlast lines for `-task megablast`.
 #[test]
 fn matrix_only_prolog_is_rmblastns() {
@@ -997,6 +1112,7 @@ fn matrix_only_prolog_is_rmblastns() {
             "2.17.0+",
             BlastnIntro {
                 megablast,
+                indexed_megablast: false,
                 matrix_only: true,
             },
             b"User specified sequence set (Input: s1.fa)",
@@ -1091,6 +1207,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         version: "2.17.0+".to_string(),
         intro: BlastnIntro {
             megablast: true,
+            indexed_megablast: false,
             matrix_only: false,
         },
         database_name: b"subjects".to_vec(),

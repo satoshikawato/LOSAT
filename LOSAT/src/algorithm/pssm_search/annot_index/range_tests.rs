@@ -3,6 +3,7 @@
 
 use super::super::view::V;
 use super::{Handle, HandleRange, HandleRangeMap, LiveHandles, Mode, Range, MAX, UNKNOWN};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
@@ -90,7 +91,11 @@ fn a_handle_range_becomes_circular() {
 }
 
 fn location(text: &str) -> Value {
-    let (value, posts) = read_document(format!("Seq-loc ::= {text}").as_bytes(), named::SEQ_LOC);
+    let (value, posts) = read_document(
+        format!("Seq-loc ::= {text}").as_bytes(),
+        named::SEQ_LOC,
+        Names::PSSM,
+    );
     assert!(posts.is_empty());
     value.unwrap()
 }
@@ -471,7 +476,8 @@ fn seq_ids_are_one_handle_as_ncbi_trees_take_them() {
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (cited at
-// `HandleRangeMap::ncbi_order`): `m_Packed - 1` as an unsigned number, then the info's address.
+// `HandleRangeMap::ncbi_order`): one less than `m_Packed`, as an unsigned number, then the info's
+// address.
 #[test]
 fn a_map_iterates_its_seq_ids_by_packed_number() {
     let m = map(

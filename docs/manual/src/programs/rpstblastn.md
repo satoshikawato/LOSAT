@@ -28,6 +28,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-query_gencode N` | 1 | Genetic code used to translate the query |
 | `-evalue E` | 10 | Report hits with an E-value up to this |
 | `-comp_based_stats MODE` | 1 | Composition-based statistics (see below) |
+| `-use_sw_tback` | off | Align each profile's matches again with Smith-Waterman (with `-comp_based_stats` 1 to 3) |
 | `-outfmt FORMAT` | 0 | Output format |
 | `-out FILE` | standard output | Output file |
 | `-max_target_seqs N` | 500 | Number of profiles to keep per query |
@@ -35,7 +36,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-qcov_hsp_perc P` | | Minimum percent of the query covered by an alignment |
 | `-seg yes\|no\|"W L H"` | no | Filter low-complexity regions of the translated query |
 | `-lcase_masking` | off | Treat lower-case query letters as masked |
-| `-window_size N` | | Two-hit window; 0 selects the one-hit method |
+| `-window_size N` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-dbsize N`, `-searchsp N` | | Set the effective database length or search space |
 | `-num_threads N` | 1 | Number of threads; 0 means one per volume |
 | `-mt_mode N` | 0 | Split by volume (0) or by query (1); the output does not depend on it |
@@ -74,7 +75,6 @@ Not yet supported: `-html`; `rpstblastn` in the library API and in LOSAT Web.
 
 Also refused:
 
-- `-use_sw_tback` with composition-based statistics.
 - `-query_gencode 32`.
 - `-ungapped` without composition-based statistics, where NCBI's `rpstblastn` crashes after the search. With them, you get NCBI's own error.
 - `-sum_stats true`, because NCBI's result then depends on memory contents or crashes.

@@ -12,6 +12,7 @@
 //! reader reads it, as one database (`SeqDb::open_in`).
 
 mod args;
+mod bioseq;
 mod fasta;
 mod format;
 mod letters;
@@ -95,7 +96,9 @@ fn run_body(
         Ok(out) => out,
         Err(error) => {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-            diag.post(&format!("Command line argument error: {}", error.message()));
+            diag.post_bytes(
+                &[b"Command line argument error: ".as_slice(), error.message()].concat(),
+            );
             return 1;
         }
     };

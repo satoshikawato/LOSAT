@@ -52,10 +52,8 @@ pub(super) fn tax_id_list(
         (None, Some(file)) => {
             let Ok(bytes) = read_input_file("taxidlist", file, stdin) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-                diag.post(&format!(
-                    "Command line argument error: {}",
-                    arg_message("taxidlist", "File is not accessible", file)
-                ));
+                let message = arg_message("taxidlist", "File is not accessible", file.as_bytes());
+                diag.post_bytes(&[b"Command line argument error: ".as_slice(), &message].concat());
                 return Err(Ended(1));
             };
             input_lines(&bytes, LineEnds::HOST)
@@ -156,7 +154,8 @@ struct TaxFields {
 // `%%x`); a `%` that ends the format reads the string's NUL and adds `%` and a NUL byte;
 // any other letter adds itself and its `%` as text.
 impl TaxFields {
-    /// `CPrintTaxFields(out, fmt)`; `Err` for NCBI's `Invalid format options for tax_info.`
+    /// `CPrintTaxFields` with `out` and `fmt`; `Err` for NCBI's
+    /// `Invalid format options for tax_info.`
     fn parse(fmt: &[u8]) -> Result<Self, ()> {
         let at = |i: usize| fmt.get(i).copied().unwrap_or(0);
         let mut fields = Vec::new();

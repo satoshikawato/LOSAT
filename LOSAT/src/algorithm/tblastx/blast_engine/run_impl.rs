@@ -993,21 +993,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
-    // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if stream.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119;
+    // `cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -1254,10 +1243,8 @@ fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
@@ -1966,8 +1953,8 @@ fn write_pairwise_prologs(
                         crate::wording::REPORT_VERSION,
                         tblastx_database_name(args).as_bytes(),
                         records.len() as i64,
-                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
-                        // (Int8) (*iter)->length`).
+                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181: `m_iTotalLength` grows by
+                        // the `length` of each element, cast to `Int8`).
                         match x_stored {
                             Some((stores, _)) => {
                                 stores.iter().map(|store| store.len() as i64).sum()
@@ -2526,6 +2513,8 @@ fn write_tblastx_outputs(
                                     }
                                     None => {
                                         let mut buffer = Vec::new();
+                                        let mut row_masks =
+                                            crate::report::query_anchored::HspMasks::default();
                                         window
                                             .iter()
                                             .enumerate()
@@ -2534,6 +2523,7 @@ fn write_tblastx_outputs(
                                                     hsp,
                                                     identities.map(|identities| identities[index]),
                                                     &mut buffer,
+                                                    &mut row_masks,
                                                 )
                                             })
                                             .collect()
@@ -2951,7 +2941,7 @@ fn run_in_pool(
         reads: std::cell::RefCell::default(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     let no_batch = query_runs.input_records.is_empty() && matches!(reading, QueryReading::End);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the length
@@ -2961,9 +2951,11 @@ fn run_in_pool(
     // when it sets up a batch; a run without a batch reads no matrix. LOSAT refuses a run with
     // a batch before its first byte.
     if !no_batch && args.scoring_matrix() == TblastxMatrix::Aborts {
-        anyhow::bail!(
-            "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's TBLASTX",
-            args.matrix_name()
+        return Err(
+            crate::algorithm::tblastx::args::identity_named_matrix_refusal(
+                args.matrix_name(),
+                "TBLASTX",
+            ),
         );
     }
     // The same abort after NCBI reads the file of a name that its tables do not have
@@ -3560,21 +3552,16 @@ fn run_batch_loop(
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            let mut message = format!("{ENGINE_ERROR} ");
-            for record in batch_queries {
-                message.push_str("Error: Unknown error code -1 ");
-                if record.seq().is_empty() {
-                    message.push_str("Warning: ");
-                    message.push_str(NO_DATA_MESSAGE);
-                    message.push(' ');
-                }
-            }
-            message.push('\n');
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: message.into(),
-            }
-            .into());
+            let text = crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(
+                batch_queries.iter().map(|record| {
+                    if record.seq().is_empty() {
+                        vec![crate::blastinput::query_batch::NO_DATA_MESSAGE.to_string()]
+                    } else {
+                        Vec::new()
+                    }
+                }),
+            );
+            return Err(crate::blastinput::app::engine_error(&text));
         }
         // The batch of LOSAT's refusal (`scope_refusal` above): NCBI's error of the set-up of its
         // records that are first in the scope (`set_up`, which ends before the search; the

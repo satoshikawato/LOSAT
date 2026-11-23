@@ -50,11 +50,11 @@ pub(super) struct Record {
 
 /// How a run stops early.
 pub(super) enum Failure {
-    /// An NCBI exception that leaves `Run`: `NCBI_REPORT_EXCEPTION_X(16, "Application's
-    /// execution failed", e)`, exit status 3.
+    /// An NCBI exception that leaves `Run`: reported by `NCBI_REPORT_EXCEPTION_X` (subcode 16,
+    /// title "Application's execution failed"), exit status 3.
     Ncbi(NcbiException),
-    /// A `std::exception` that leaves `Run`: `ERR_POST_X(7, "Application's execution failed: "
-    /// << e.what())`, exit status 3.
+    /// A `std::exception` that leaves `Run`: posted by `ERR_POST_X` (subcode 7) as "Application's
+    /// execution failed: " and `e.what()`, exit status 3.
     Std(String),
     /// A case LOSAT does not reproduce.
     Refused(String),
@@ -254,7 +254,7 @@ fn reader<'a>(
     }
 }
 
-/// `CMaskBDBReader(name)` of a nucleotide database (`seqmasks_io::bdb_reader`).
+/// `CMaskBDBReader` of `name`, a nucleotide database (`seqmasks_io::bdb_reader`).
 struct DatabaseSource {
     reader: MaskBdbReader,
 }

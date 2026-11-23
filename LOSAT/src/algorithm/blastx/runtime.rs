@@ -39,6 +39,32 @@ fn query_extent(
     )
 }
 
+/// The stream of the preliminary stage of a batch or of a query chunk (`queries`: its query
+/// information), with the writer that the options choose: culling (`-culling_limit`), the best hit
+/// writer (`-best_hit_overhang` / `-best_hit_score_edge`, which exclude culling) or NCBI's
+/// collector; each of `prelim_hitlist_size` lists per query.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:297-363
+fn prelim_stream(options: &ResolvedOptions, queries: &PreparedQueryBatch) -> HspStream {
+    let max = prelim_hitlist_size(options);
+    if options.culling_limit > 0 {
+        HspStream::with_culling(
+            queries.contexts.iter().map(|c| c.length as i32).collect(),
+            options.culling_limit,
+            max,
+        )
+    } else if let Some(params) = options.best_hit {
+        let frames = super::besthit::QueryFrames::of(&queries.contexts);
+        HspStream::with_best_hit(
+            super::besthit::BestHitWriter::new(params, frames, max),
+            queries.original_lengths.len(),
+            max,
+        )
+    } else {
+        HspStream::new(queries.original_lengths.len(), max)
+    }
+}
+
 pub struct BatchResults {
     pub query_ordinal: usize,
     pub queries: Vec<Vec<HspList>>,
@@ -721,40 +747,15 @@ impl PreliminarySink for Runtime<'_> {
         _params: &[ContextParameters],
     ) -> Result<()> {
         self.ordinal = ordinal;
-        self.stream = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                batch.contexts.iter().map(|c| c.length as i32).collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                batch.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
+        self.stream = Some(prelim_stream(self.options, batch));
         Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:185-210 (a
+    // chunk's stream and writer are set up with the chunk's own query information)
     fn chunk_start(&mut self, chunk: &QueryChunk) -> Result<()> {
-        self.chunk = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                chunk
-                    .prepared
-                    .contexts
-                    .iter()
-                    .map(|c| c.length as i32)
-                    .collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                chunk.prepared.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
+        self.chunk = Some(prelim_stream(self.options, &chunk.prepared));
         Ok(())
     }
 
@@ -853,6 +854,11 @@ impl PreliminarySink for Runtime<'_> {
         use super::x_timing::End as XEnd;
         let x_t = super::x_timing::lap();
         let mut x_t_finish = None;
+        // `-use_sw_tback` with `-ungapped`: NCBI's traceback crashes at the redo's set-up of every
+        // batch it searches (`kappa::sw_ungapped_refusal`).
+        if self.options.use_sw_tback && !self.options.gapped {
+            return Err(super::kappa::sw_ungapped_refusal());
+        }
         let mut stream = self.stream.take().expect("batch stream");
 
         let mut full = params.to_vec();
@@ -880,8 +886,11 @@ impl PreliminarySink for Runtime<'_> {
         // stream before the redo or the traceback reads it. An ungapped search fetches no protein
         // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
         // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
-        // (`FetchExcluded::refusal`).
-        if self.options.gapped {
+        // (`FetchExcluded::refusal`). The Smith-Waterman redo (`-use_sw_tback`, `sw_redo`) keeps
+        // such lists in the stream as markers, which clear its batch's status
+        // (`kappa_batch`).
+        let sw_redo = self.options.use_sw_tback && self.options.gapped;
+        if self.options.gapped && !sw_redo {
             if let Some(excluded) = self
                 .subjects
                 .seqdb()
@@ -904,7 +913,9 @@ impl PreliminarySink for Runtime<'_> {
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3281-3296
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3120-3132
-        let mut inactive_heaps: Vec<_> = if self.options.composition != 0 {
+        // The redo runs with composition-based statistics or with the Smith-Waterman traceback.
+        let redo = self.options.composition != 0 || sw_redo;
+        let mut inactive_heaps: Vec<_> = if redo {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -915,7 +926,7 @@ impl PreliminarySink for Runtime<'_> {
             self.observer.heap(q, "INIT", 0.0, 0, -1, 0, heap);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3281-3296
-        let mut heaps: Vec<_> = if self.options.composition != 0 {
+        let mut heaps: Vec<_> = if redo {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -930,7 +941,7 @@ impl PreliminarySink for Runtime<'_> {
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3120-3132
 
-        let mut kappa = if self.options.composition != 0 {
+        let mut kappa = if redo {
             Some(KappaState::new(batch, &full, self.options)?)
         } else {
             None
@@ -941,7 +952,7 @@ impl PreliminarySink for Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1688-1707
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream_mt_utils.c:145-170
         let mut result_batches = Vec::new();
-        if !self.options.gapped || self.options.composition == 0 {
+        if !self.options.gapped || !redo {
             loop {
                 let lists = stream.batch_read_observed(self.observer);
                 if lists.is_empty() {
@@ -963,7 +974,7 @@ impl PreliminarySink for Runtime<'_> {
                 }
             }
         } else if let Some(state) = &mut kappa {
-            x_t_finish = self.kappa_redo_batch(KappaBatch {
+            let kappa_batch = KappaBatch {
                 batch,
                 full: &full,
                 state,
@@ -971,7 +982,12 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
-            })?;
+            };
+            x_t_finish = if sw_redo {
+                self.kappa_redo_batch::<true>(kappa_batch)?
+            } else {
+                self.kappa_redo_batch::<false>(kappa_batch)?
+            };
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1500-1508
@@ -1015,6 +1031,13 @@ impl PreliminarySink for Runtime<'_> {
                 self.options.culling_limit,
                 prelim_hitlist_size(self.options),
                 self.observer,
+            );
+        } else if let Some(params) = self.options.best_hit {
+            super::besthit::traceback_pipe(
+                &mut queries,
+                &super::besthit::QueryFrames::of(&batch.contexts),
+                params,
+                prelim_hitlist_size(self.options),
             );
         }
         for query in &mut queries {
@@ -1117,7 +1140,7 @@ fn finalize_redone(
         options,
         subject.len() as i32,
         db_length,
-        if options.composition != 0 { 32.0 } else { 1.0 },
+        super::kappa::redo_scale(options),
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
     let observe_reap = !linked.hsps.is_empty();

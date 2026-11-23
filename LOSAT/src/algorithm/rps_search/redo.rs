@@ -14,7 +14,8 @@
 //! item PS12b): NCBI's `one_query` is the query's translation buffer, the redo's subject is
 //! translated (`subject_is_translated`: windows in the frames, `RedoMatch::redo_windows` with a
 //! `FrameSubject`), its subject length for the e-values is `s_GetSubjectLength`'s and every list
-//! writes `kbp_gap[0]`'s K, the one the query's batch may print.
+//! writes `kbp_gap[0]`'s K, the one the query's batch may print. With `-use_sw_tback` both
+//! programs' redo is the Smith-Waterman redo of the same windows (item PS12c for rpstblastn).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1238-1260
 
@@ -30,6 +31,7 @@ use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
 use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, RedoSubject, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
+use crate::common::GapEditOp;
 use crate::core::composition_adjustment::compo_scale::{PosMatrixInfo, RedoInstance};
 use crate::core::psi::PsiScoreBlk;
 use crate::seqdb::rps::RpsVolumeFiles;
@@ -61,8 +63,10 @@ pub(crate) struct RpsRedoParams<'a> {
     pub(crate) gap_extend: i32,
     pub(crate) x_drop_final_bits: f64,
     /// `-use_sw_tback`: NCBI's Smith-Waterman redo of each profile
-    /// (`RedoMatch::redo_match_smith_waterman`). The redo runs with composition-based statistics
-    /// 1 to 3 only; without them NCBI's RPS traceback does not read the flag
+    /// (`RedoSubject::redo_smith_waterman`: `RedoMatch::redo_match_smith_waterman` of rpsblast's
+    /// query, `RedoMatch::redo_windows_smith_waterman` of rpstblastn's frames). The redo runs
+    /// with composition-based statistics 1 to 3 only; without them NCBI's RPS traceback does not
+    /// read the flag
     /// (`s_RPSComputeTraceback` takes no Smith-Waterman path and `kSmithWaterman` asks for the
     /// other mode).
     ///
@@ -122,7 +126,8 @@ impl RpsTraceback<'_> {
         // (`BlastCompo_HeapWouldInsert`). NCBI's redo of each profile makes its own
         // (`BlastCompo_HeapInitialize` with the hit list size and the inclusion threshold) and
         // never inserts into it: RPS-BLAST's redo has no sequence source and leaves the match
-        // before the insertion, so the heap stays empty and asks only `n < heapThreshold`.
+        // before the insertion, so the heap stays empty and asks only whether `n` is below
+        // `heapThreshold`.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3702-3709
@@ -214,14 +219,14 @@ impl RpsTraceback<'_> {
                 // rpsblast and rpstblastn refuse `-sum_stats true`.
                 link: None,
             };
-            // rpstblastn refuses `-use_sw_tback` with composition-based statistics (series PR,
-            // item PS12c).
-            debug_assert!(!(S::Instance::SUBJECT_IS_TRANSLATED && redo.smith_waterman));
-            let redone = if redo.smith_waterman && !S::Instance::SUBJECT_IS_TRANSLATED {
+            // The Smith-Waterman redo of a protein query (rpsblast) or of a translated query's
+            // frames (rpstblastn, series PR, item PS12c).
+            let redone = if redo.smith_waterman {
                 let heap = sw_heap.get_or_insert_with(|| {
                     BlastCompoHeap::new(self.hitlist_size, PSI_INCLUSION_ETHRESH)
                 });
-                redo_match.redo_match_smith_waterman(
+                kind.redo_smith_waterman(
+                    &redo_match,
                     &mut run,
                     &mut scratch.sw,
                     heap,
@@ -241,9 +246,15 @@ impl RpsTraceback<'_> {
                 );
             }
             let redone = redone.map_err(|SwEndless| {
-                anyhow::anyhow!(
-                    "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's {program}"
-                )
+                if S::Instance::SUBJECT_IS_TRANSLATED {
+                    anyhow::anyhow!(
+                        "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs in a window of a query frame and its first position scores the window's first letter above 0) is not supported by LOSAT's {program}"
+                    )
+                } else {
+                    anyhow::anyhow!(
+                        "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's {program}"
+                    )
+                }
             })?;
             scratch.pssm.rows = matrix.rows;
             scratch.gap = gap;
@@ -261,6 +272,21 @@ impl RpsTraceback<'_> {
             if hsp_list.hsps.is_empty() {
                 continue;
             }
+            // An alignment of the Smith-Waterman redo of a translated query that starts with a
+            // gap (series PR, item PS12c, review B1): the first segment of its Std-seg has no
+            // location in that row, so `CSeq_align::GetSeqRange` cannot take the row's id there
+            // and throws on the row; NCBI's prefetch warns and outfmt 0 to 5 and 13 to 16 stop
+            // there (PD-LOSAT-NCBI-DEFECTS, rule 2). LOSAT refuses such a profile until item
+            // PS12d writes those reports. The X-drop redo's alignments start with a substitution.
+            // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
+            if S::Instance::SUBJECT_IS_TRANSLATED
+                && redo.smith_waterman
+                && hsp_list.hsps.iter().any(starts_with_gap)
+            {
+                anyhow::bail!(
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) gives an alignment that starts with a gap, of which NCBI BLAST+ 2.17.0's reports cannot take the range (they warn, and outfmt 0 to 5 and 13 to 16 stop there), is not supported by LOSAT's {program}"
+                );
+            }
             hit_list
                 .get_or_insert_with(|| BlastpHitList::new(self.hitlist_size))
                 .update(hsp_list);
@@ -270,4 +296,13 @@ impl RpsTraceback<'_> {
         }
         Ok(RpsTraced { hit_list, k_mark })
     }
+}
+
+/// Whether the alignment `hsp` starts with a gap in one of its rows (its edit script's first
+/// operation is not a substitution).
+fn starts_with_gap(hsp: &crate::algorithm::blastp::hsp::BlastpHsp) -> bool {
+    matches!(
+        hsp.gap_info.as_deref().and_then(<[GapEditOp]>::first),
+        Some(GapEditOp::Ins(_) | GapEditOp::Del(_))
+    )
 }

@@ -1122,7 +1122,6 @@ pub(super) fn sum_stats_hit_cutoff(
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
         gapped_params,
     )
-    .max(1)
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
@@ -1158,7 +1157,7 @@ impl BlastpSumStats {
         }
     }
 
-    /// `cutoff_score = MIN(new_cutoff, cutoff_score)` for each valid context.
+    /// Sets `cutoff_score` to the smaller of `new_cutoff` and `cutoff_score` for each valid context.
     pub(super) fn lower_hit_cutoffs(
         &self,
         contexts: &[QueryContext],
@@ -1942,19 +1941,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
     // ungapped search, `prelim_kernel::BlastpPrelimKernel::ungapped_subject`).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
-    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
-    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
-    // and NCBI's blastp dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
-    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
-    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // smaller -evalue such as 1e308 runs.
-    if args.evalue >= f64::MAX {
-        bail!(
-            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s blastp crashes on some inputs, is not supported by LOSAT's {program}",
-            args.evalue
-        );
-    }
+    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
+    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    crate::blastinput::protein_options_check::check_evalue_limit(
+        args.evalue,
+        args.comp_based_stats.is_enabled(),
+        program,
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
@@ -2308,7 +2301,7 @@ fn write_blastp_outfmt7_header<W: Write>(
         version_str
     )?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1297-1298
-    // psiblast's tabular reports carry their round (`x_PrintTabularReport(results, itr_num)`,
+    // psiblast's tabular reports carry their round (`x_PrintTabularReport` of `results` and `itr_num`,
     // blast_format.cpp:1458): 1, or the round of the round driver (`psi_round`).
     if let Some(iteration) = iteration {
         writeln!(writer, "# Iteration: {iteration}")?;
@@ -2696,50 +2689,79 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4318
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
-/// The outfmt 0 rows `hits` with the columns of their query rows that a SEG mask of
-/// `masks` (`query_record_masks`) covers in lowercase. A mask that covers the whole query is
-/// not shown; a mask position outside the aligned range is the first or last column
-/// (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
-fn mask_query_rows(hits: &mut [PairwiseHit], masks: &[Vec<(i32, i32)>]) {
+/// The outfmt 0 rows `hits` (the report's copies; the library API's records keep their letters)
+/// with their masks in lower case (`HspMasks::lower_row`): a query row's SEG masks of
+/// `query_masks` (`query_record_masks`), a subject row's runs of each list of `subject_masks`
+/// (the record's lower-case runs with `-lcase_masking`, `x_soft_subject::x_subject_masks`; a
+/// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
+/// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
+/// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
+fn set_row_masks(
+    hits: &mut [PairwiseHit],
+    query_masks: Option<&[Vec<(i32, i32)>]>,
+    subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+) {
+    let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
-        let query_masks = &masks[hit.hit.q_idx as usize];
-        if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
-            let mut bytes = std::mem::take(row).into_bytes();
-            // The 0-based query position of each column that holds a residue.
-            let first = hit.hit.q_start as i32 - 1;
-            let last = hit.hit.q_end as i32 - 1;
-            // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap residue).
-            let mut columns = Vec::with_capacity(bytes.len());
-            for (column, &residue) in bytes.iter().enumerate() {
-                if residue != b'-'
-                    || hit
-                        .query_stored_gaps
-                        .binary_search(&(column as u32))
-                        .is_ok()
-                {
-                    columns.push(column);
-                }
-            }
-            let width = bytes.len();
-            let column_of = |position: i32| -> usize {
-                if position < first {
-                    0
-                } else if position > last {
-                    width - 1
-                } else {
-                    columns[(position - first) as usize]
-                }
-            };
-            for &(from, to) in query_masks {
-                if to < first || from > last {
-                    continue;
-                }
-                let (start, stop) = (column_of(from), column_of(to));
-                for residue in &mut bytes[start..=stop] {
-                    *residue = residue.to_ascii_lowercase();
-                }
-            }
-            *row = String::from_utf8(bytes).expect("ASCII alignment row");
+        let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
+        // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
+        // starts) has no mask.
+        if let Some(shown) = hit
+            .query_seq
+            .as_mut()
+            .filter(|row| !query.is_empty() && !row.is_empty())
+        {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
+            masks.set_row(
+                0,
+                0,
+                row,
+                // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap
+                // residue).
+                |column| {
+                    row[column] != b'-'
+                        || hit
+                            .query_stored_gaps
+                            .binary_search(&(column as u32))
+                            .is_ok()
+                },
+                (hit.hit.q_start as u32 - 1, hit.hit.q_end as u32 - 1),
+                true,
+                1,
+                query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+            masks.lower_row(0, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
+        }
+        let key = (hit.hit.q_idx, hit.hit.s_idx);
+        let mut runs = subject_masks
+            .iter()
+            .filter_map(|masks| masks.get(&key))
+            .flatten()
+            .peekable();
+        if let Some(shown) = hit
+            .subject_seq
+            .as_mut()
+            .filter(|row| !row.is_empty() && runs.peek().is_some())
+        {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
+            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
+            let stored = &hit.subject_stored_gaps;
+            masks.set_row(
+                1,
+                0,
+                row,
+                |column| row[column] != b'-' || stored.contains(&(column as u32)),
+                (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+                true,
+                1,
+                runs.map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+            masks.lower_row(1, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
         }
     }
 }
@@ -3462,8 +3484,9 @@ fn build_pairwise_hits(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
-            // The linked set's size with psiblast's `-sum_stats true` (`Expect(n)` of the
-            // alignment, showalign.cpp:3595-3598); an HSP outside a set has no "sum_n" score.
+            // The linked set's size with psiblast's `-sum_stats true` (the number in parentheses
+            // after the alignment's `Expect`, showalign.cpp:3595-3598); an HSP outside a set has
+            // no "sum_n" score.
             sum_n: (num > 1).then_some(num),
             subject_stored_gaps,
             query_stored_gaps,
@@ -4387,23 +4410,10 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
-    // report's where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts
-    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3). An insertion
-    // of the report that sets the stream's `badbit` throws the same way (`cli::BadbitInsertion`).
-    let badbit = result.as_ref().is_err_and(crate::cli::BadbitInsertion::is);
-    if (stream.failed || badbit) && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // report's where NCBI's buffer writes it (`cli::ReportStream::finish`).
+    stream.finish(result, pairwise || tax_report)
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -4513,7 +4523,7 @@ fn read_cli_subjects(
         },
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
+    // `Reset` of `m_Subjects` with a new `blast::CObjMgr_QueryFactory` of `subjects` (blast_args.cpp:2557)
     // fails for a subject input without records.
     if subjects.records.is_empty() {
         return Err(app::empty_subjects_error());
@@ -4524,10 +4534,8 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it
@@ -6749,7 +6757,7 @@ fn search(
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
-        // A reader at the end of its input reads no batch (`!input.End()`): the reports of
+        // A reader at the end of its input reads no batch (its `End()` is true): the reports of
         // no query (an empty pipe, or `-query -` after `-subject -`).
         write_reports_without_queries(&args, subject_source, subject_label, outputs)?;
     }
@@ -7554,7 +7562,7 @@ fn write_reports_without_queries(
         .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
-        // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
+        // of line alone: `m_Outfile` gets `m_BlastXMLIncremental->m_SerialXmlEnd` and `endl`, with the
         // end of the document empty (blast_format.cpp:2242-2243).
         // The archive writes one document per batch: none without a query batch.
         if blastp_seqalign_format(format.outfmt).is_some() || blastp_is_archive(format.outfmt) {
@@ -7640,6 +7648,7 @@ fn write_reports_without_queries(
                         None
                     },
                     gapped: !args.ungapped,
+                    show_linked_set_size: false,
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
@@ -9767,7 +9776,7 @@ fn run_call(
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
     // updated as the subjects came; `-best_hit_*`: `s_BlastHSPBestHitFinal` from the best hit
-    // lists (hspfilter_besthit.c:190-221; `besthit.rs`). A query chunk's lists leave below as the
+    // lists (hspfilter_besthit.c:194-231; `besthit.rs`). A query chunk's lists leave below as the
     // collector's do.
     if let Some(filter) = prelim_filter.take() {
         filter.finish(&mut x_compact_hit_lists);

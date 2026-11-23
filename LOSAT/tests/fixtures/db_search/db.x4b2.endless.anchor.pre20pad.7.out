@@ -1,0 +1,51 @@
+# BLASTX 2.17.0+
+# Query: pre20_nt the first 20 letters of qok1 in frame +1
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+pre20_nt	sok1	95.000	20	1	0	1	60	1	20	7.03e-10	40.4
+# BLASTX 2.17.0+
+# Query: nohit01 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit02 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit03 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit04 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit05 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit06 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit07 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit08 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit09 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit10 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: nohit11 CCCCGGGGAACC repeated
+# Database: User specified sequence set (Input: tests/fasta/x4/sw_endless_subjects.faa)
+# 0 hits found
+# BLAST processed 12 queries

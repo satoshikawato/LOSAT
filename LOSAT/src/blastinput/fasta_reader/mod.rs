@@ -807,7 +807,7 @@ pub enum QueryEnd {
 /// records (written later, batch by batch, by the caller).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-171
-/// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
+/// The `catch` of `const exception&` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
     read_queries_with(source, |_, _| {})

@@ -38,10 +38,11 @@ fn hsp(frame: i32, q: (usize, usize), s: (usize, usize), ops: Option<Vec<GapEdit
     }
 }
 
-// seqinfosrc_seqdb.cpp:121-133 (cited at `shown_subject_masks`): a stored mask is shown
+// seqinfosrc_seqdb.cpp:121-133 (cited at `subject_mask_regions`): a stored mask is shown
 // when it holds a letter and meets the closed range `[offset, end]` of an HSP (the end one
 // past the HSP); overlapping and nested masks (hand-made masks of the M4a-2 edge databases)
-// are merged for the display. A subject set's merged lowercase is kept as it is.
+// stay as they are, in their order (`x_FillLocList` places each). A subject set's merged
+// lowercase is kept as it is.
 #[test]
 fn database_masks_meeting_an_hsp_are_shown() {
     let masks = [
@@ -57,7 +58,10 @@ fn database_masks_meeting_an_hsp_are_shown() {
         hsp(1, (0, 10), (199, 250), None),
         hsp(1, (0, 10), (700, 760), None),
     ];
-    assert!(shown_subject_masks(&masks[..1], &hsps).is_empty());
+    let shown = |masks: &[MaskedInterval], hsps: &[BlastnHsp]| {
+        subject_mask_regions(masks, hsps).collect::<Vec<_>>()
+    };
+    assert!(shown(&masks[..1], &hsps).is_empty());
     let hsps = [
         hsp(1, (0, 10), (199, 250), None),
         hsp(1, (0, 10), (699, 701), None),
@@ -65,20 +69,22 @@ fn database_masks_meeting_an_hsp_are_shown() {
     // 100-200, 150-250 and 250-260 meet the first HSP, 600-700 the second; the empty 300-300
     // and 900-950 none.
     assert_eq!(
-        shown_subject_masks(&masks, &hsps),
-        [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
+        shown(&masks, &hsps),
+        [
+            MaskedInterval::new(600, 700),
+            MaskedInterval::new(100, 200),
+            MaskedInterval::new(150, 250),
+            MaskedInterval::new(250, 260)
+        ]
     );
     // Merged lowercase runs are kept as they are.
     let runs = merged(&masks);
     assert_eq!(
-        shown_subject_masks(&runs, &hsps),
+        shown(&runs, &hsps),
         [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
     );
     let hsps = [hsp(1, (0, 10), (940, 960), None)];
-    assert_eq!(
-        shown_subject_masks(&runs, &hsps),
-        [MaskedInterval::new(900, 950)]
-    );
+    assert_eq!(shown(&runs, &hsps), [MaskedInterval::new(900, 950)]);
 }
 
 #[test]
@@ -285,7 +291,10 @@ fn rows_into_reused_buffers_equal_displayed_rows() {
 #[test]
 fn masked_positions_are_lowercase_in_the_row_direction() {
     let mut row = b"AC-GT".to_vec();
-    lowercase_masked(&mut row, 10, -1, &[MaskedInterval { start: 7, end: 9 }]);
+    let mut masks = crate::report::query_anchored::HspMasks::default();
+    let shown = subject_mask_seek([MaskedInterval { start: 7, end: 9 }].into_iter());
+    set_subject_row_masks(&mut masks, &row, 10, -1, &shown);
+    masks.lower_row(1, &mut row);
     assert_eq!(row, b"Ac-gT");
 }
 

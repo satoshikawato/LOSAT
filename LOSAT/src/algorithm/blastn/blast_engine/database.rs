@@ -450,9 +450,9 @@ impl BlastnDatabase {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:643-651
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:664-668
     /// The volumes that NCBI's loader of a new-style MegaBLAST index finds for the `-db` value
-    /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths(vols, true)` of the database opened
+    /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths` of `vols` with `true`, on the database opened
     /// again by that name, as given, on the search path of this one), each with its number of
-    /// sequences (`CSeqDB(volume).GetNumOIDs()`, the volume's in this database). Where that
+    /// sequences (`GetNumOIDs` of the `CSeqDB` of the volume, the volume's in this database). Where that
     /// name does not open (a `-db` value with white space other than spaces at its ends, which
     /// the search trims and the loader keeps), the database reader's exception, or `None` where
     /// LOSAT does not know its place or the name opens other volumes than this database's.
@@ -486,7 +486,7 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
-    /// `SeqDB_ResolveDbPath(file)` on this database's search path: the path of the first
+    /// `SeqDB_ResolveDbPath` of `file` on this database's search path: the path of the first
     /// directory that holds the regular file `file` (an absolute `file` as it is), `None` for
     /// NCBI's empty string.
     pub(super) fn resolve_db_path(&self, file: &str) -> Option<String> {
@@ -880,6 +880,38 @@ impl BlastnDatabase {
         Ok(())
     }
 
+    /// The stored masks of the database sequences `ordinals` for the algorithm `algo_id`, read
+    /// in blocks of at most `MASK_BLOCK_SEQS` sequences (`stored_masks`), each sequence's given to
+    /// `each` with its ordinal id: the masked letters of a MegaBLAST index volume's search with
+    /// `-db_hard_mask` (`mb_index_seeds::IndexSeeds::volume_masks`). A sequence whose masks do not
+    /// read is left out; its own search reads them again and reports the error.
+    pub(super) fn masks_of(
+        &self,
+        ordinals: std::ops::Range<u32>,
+        algo_id: i32,
+        mut each: impl FnMut(u32, &[(u32, u32)]),
+    ) {
+        let mut masks = MaskBlock::default();
+        let mut ordinal = ordinals.start;
+        while ordinal < ordinals.end {
+            let end = ordinals.end.min(ordinal.saturating_add(MASK_BLOCK_SEQS));
+            let Some(block) = self.db.x_block_range(ordinal, end) else {
+                break;
+            };
+            if block.is_empty() {
+                break;
+            }
+            for at in ordinal..ordinal + block.len() {
+                if let Ok(stored) =
+                    self.stored_masks(block, at, algo_id, &mut masks, shared::search_read_error_of)
+                {
+                    each(at, stored);
+                }
+            }
+            ordinal += block.len();
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
     /// The stored masks of database sequence `ordinal` for the algorithm `algo_id`, in the order
     /// they are stored (`[start, end)`), which the reports of a masked search show in lowercase
@@ -945,6 +977,9 @@ impl BlastnDatabase {
         }
     }
 }
+
+/// The sequences of one read of masks in `BlastnDatabase::masks_of` (its blobs are held at once).
+const MASK_BLOCK_SEQS: u32 = 1 << 16;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1665-1673

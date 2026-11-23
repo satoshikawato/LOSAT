@@ -1,0 +1,1219 @@
+//! The seed search of one MegaBLAST index volume for one query batch (`CDbIndex::Search`):
+//! the seeds of the one-hit search (`CSearch<LEGACY, ONE_HIT>`) or of the two-hit search
+//! (`CSearch<LEGACY, TWO_HIT>`, `-window_size` above 0) of every sequence chunk of the volume,
+//! kept as NCBI's search results (`CDbIndex::CSearchResults`) for BLASTN's indexed word finder.
+//!
+//! For each lookup segment of the query (its unmasked intervals, in order) the search walks the
+//! Nmers of the segment (`CNmerIterator`), and for each Nmer the stored positions of its list
+//! (`CPreOrderedOffsetIterator`: a larger word size visits fewer of them) as roots, kept per
+//! local id (`CSeedRoots`). Then, per local id, each root is extended left and right by exact
+//! match on the packed sequences and tracked on its diagonal (`CTrackedSeeds`); a seed of at
+//! least the word size (the two-hit search: one that follows an earlier hit on its diagonal within
+//! the window, or of twice the word size) is saved by the left end of its exact run into the list
+//! of its chunk (`SaveSeed`, `MapSubjOff`). Lists keep NCBI's order of saves, which the word finder reads in
+//! order. The arithmetic is NCBI's: `TSeqPos` and `TWord` are 32-bit and wrap, `unsigned long`
+//! is 64-bit.
+//!
+//! With `-db_hard_mask` (the Owner's answer C of 2026-11-22 to Q-HARDIDX, approved exception 24
+//! of PD-LOSAT-NCBI-DEFECTS) a masked letter of the subject matches no query letter: a root whose
+//! Nmer holds one is no root, an extension stops before one, and the two-hit search pairs no two
+//! hits of a diagonal with a masked letter between them, so that each seed lies in one unmasked
+//! stretch and no masked letter decides a seed (NCBI's search reads the index's letters, masked or
+//! not). A local id without masked letters is searched as without the option.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:99-1441
+
+use std::sync::atomic::AtomicU32;
+
+use super::volume::IndexVolume;
+use super::{code_bits, Word, CR};
+
+/// `TSeqPos`.
+type SeqPos = u32;
+
+/// `CDbIndex::SSearchOptions`: the word size and the two-hit window (0 for the one-hit search).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SearchOptions {
+    pub(crate) word_size: u64,
+    pub(crate) two_hits: u64,
+}
+
+/// An initial hit that the search saves (`BLAST_SaveInitialHit` of `hitlist`, `q_off`, `s_off` and
+/// a null last argument): the left end of the seed in the concatenated query and in its chunk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Seed {
+    pub(crate) q_off: u32,
+    pub(crate) s_off: u32,
+}
+
+/// `CDbIndex::CSearchResults` of a search: the seeds of each chunk of the volume (1-based
+/// chunk ids, the sentinel chunk included), and the first chunk of each sequence.
+#[derive(Debug)]
+pub(crate) struct VolumeSeeds {
+    word_size: u64,
+    /// `map_`: the first chunk of each sequence (`stop - start` words).
+    map: Vec<Word>,
+    /// `results_`, by chunk id less one (`start_` is 0).
+    results: Vec<Option<Vec<Seed>>>,
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/dbindex.hpp:497-614
+impl VolumeSeeds {
+    /// `GetResults` of `seq`: the seeds of chunk id `seq`.
+    fn by_id(&self, seq: u32) -> Option<&[Seed]> {
+        if seq == 0 {
+            return None;
+        }
+        self.results.get(seq as usize - 1)?.as_deref()
+    }
+
+    /// `MapSubject` of `subj` and `chunk`: the chunk id of chunk `chunk` of sequence `subj`, 0 for
+    /// a sequence past the volume's.
+    fn map_subject(&self, subj: u32, chunk: u32) -> u32 {
+        match self.map.get(subj as usize) {
+            Some(&first) => first.wrapping_add(chunk),
+            None => 0,
+        }
+    }
+
+    /// `GetResults` of `subj` and `chunk`: the seeds of chunk `chunk` of the volume's sequence
+    /// `subj` (`None`: none).
+    pub(crate) fn seeds(&self, subj: u32, chunk: u32) -> Option<&[Seed]> {
+        self.by_id(self.map_subject(subj, chunk))
+    }
+
+    /// Whether chunk `chunk` of the volume's sequence `subj` is a later sequence's chunk in the
+    /// index: a database sequence with more chunks than the index's (an index not made from the
+    /// database) then reads a later sequence's seeds, which NCBI's `GetResults` moves out of that
+    /// sequence's list, so what that sequence finds depends on the order of the search threads.
+    /// (Past the last sequence's chunks NCBI's `GetResults` finds no list.)
+    pub(crate) fn chunk_of_a_later_sequence(&self, subj: u32, chunk: u32) -> bool {
+        match (self.map.get(subj as usize), self.map.get(subj as usize + 1)) {
+            (Some(&first), Some(&next)) => u64::from(first) + u64::from(chunk) >= u64::from(next),
+            _ => false,
+        }
+    }
+
+    /// `CheckResults` of `subj`: whether a chunk of the volume's sequence `subj` has seeds; the
+    /// chunk ids from the sequence's first to the next sequence's (to the last chunk for the
+    /// last sequence, and from id 0 for a sequence without chunks).
+    pub(crate) fn has_seeds(&self, subj: u32) -> bool {
+        if subj as usize >= self.map.len() {
+            return false;
+        }
+        let start = self.map_subject(subj, 0);
+        let mut end = self.map_subject(subj.wrapping_add(1), 0);
+        if end == 0 {
+            end = (self.results.len() as u32).wrapping_add(1);
+        }
+        (start..end).any(|seq| self.by_id(seq).is_some())
+    }
+
+    /// `GetWordSize()`: the word size of the search.
+    pub(crate) fn word_size(&self) -> u64 {
+        self.word_size
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:248-259
+    /// The results after BLASTN's word finder has moved each list out (`BlastInitHitListMove`
+    /// leaves each list empty but in place): the same chunks have lists, of no seeds.
+    pub(crate) fn consumed(&self) -> VolumeSeeds {
+        VolumeSeeds {
+            word_size: self.word_size,
+            map: self.map.clone(),
+            results: self
+                .results
+                .iter()
+                .map(|list| list.as_ref().map(|_| Vec::new()))
+                .collect(),
+        }
+    }
+
+    /// The results of a volume of `sequences` sequences of one chunk each and no seeds, for the
+    /// tests of the search's users.
+    #[cfg(test)]
+    pub(crate) fn empty_for_tests(sequences: u32) -> VolumeSeeds {
+        VolumeSeeds {
+            word_size: 28,
+            map: (1..=sequences).collect(),
+            results: vec![None; sequences as usize],
+        }
+    }
+}
+
+/// A volume of a search (`SVolumeDescriptor`): its path, its first OID, its number of OIDs, and
+/// whether it is an index volume (else a database volume without an index, which the search
+/// scans).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct IndexedVolume {
+    pub(crate) path: String,
+    pub(crate) start_oid: u32,
+    pub(crate) n_oids: u32,
+    pub(crate) has_index: bool,
+}
+
+/// `SVolResults` of an index volume (`CIndexedDb_New::results_holder_`): how many search threads
+/// still need its results (`ref_count`), and the results that a search left for later ones (in
+/// the state the word finder left them: [`VolumeSeeds::consumed`]).
+#[derive(Debug, Default)]
+pub(crate) struct HeldResults {
+    pub(crate) ref_count: i64,
+    pub(crate) results: Option<std::sync::Arc<VolumeSeeds>>,
+}
+
+/// The MegaBLAST index that a BLASTN search uses: its volumes in OID order (`CIndexedDb_New`'s
+/// `volumes_`, each index volume of each database volume with an index and each database volume
+/// without one; or `CIndexedDb_Old`'s index volumes, whose OIDs follow one another from 0).
+#[derive(Debug)]
+pub(crate) struct LoadedIndex {
+    pub(crate) old_style: bool,
+    pub(crate) volumes: Vec<IndexedVolume>,
+    /// The searches of the index so far (`DoPreSearch` calls: one a query batch or query chunk
+    /// with a valid context).
+    pub(crate) searches: AtomicU32,
+    /// `results_holder_` of a new-style index, one for each volume, across its searches.
+    pub(crate) held: std::sync::Mutex<Vec<HeldResults>>,
+}
+
+impl LoadedIndex {
+    /// The index of `volumes` (`old_style`: `CIndexedDb_Old`'s; else `CIndexedDb_New`'s), before
+    /// its first search.
+    pub(crate) fn new(old_style: bool, volumes: Vec<IndexedVolume>) -> Self {
+        LoadedIndex {
+            old_style,
+            held: std::sync::Mutex::new(volumes.iter().map(|_| HeldResults::default()).collect()),
+            volumes,
+            searches: AtomicU32::new(0),
+        }
+    }
+
+    /// Whether some database volume has no index (NCBI's `partial` of a new-style index: the
+    /// lookup table `eMixedMBLookupTable`, a mixed search).
+    pub(crate) fn mixed(&self) -> bool {
+        self.volumes.iter().any(|volume| !volume.has_index)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:208-232
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:497-505
+    /// The volume of OID `oid` and the OID in it: the last volume that starts at or before it
+    /// (`FindVolume`), or for an old-style index the first volume that ends after it
+    /// (`LocateIndex`), the first volume with `oid` itself when none does (its `assert` is not in
+    /// NCBI's release build).
+    pub(crate) fn locate(&self, oid: u32) -> (usize, u32) {
+        if self.old_style {
+            match self
+                .volumes
+                .iter()
+                .position(|volume| volume.start_oid.wrapping_add(volume.n_oids) > oid)
+            {
+                Some(at) => (at, oid.wrapping_sub(self.volumes[at].start_oid)),
+                None => (0, oid),
+            }
+        } else {
+            let at = self
+                .volumes
+                .partition_point(|volume| volume.start_oid <= oid)
+                .saturating_sub(1);
+            (at, oid.wrapping_sub(self.volumes[at].start_oid))
+        }
+    }
+}
+
+/// A corrupt index volume: a list or an offset that points outside the volume's sections (NCBI
+/// reads past them).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Corrupt;
+
+/// `SSeedRoot`: a query offset (the last base of its Nmer), a subject offset (with
+/// `min_offset` added, or a boundary code before the root that it qualifies), and the query
+/// segment.
+#[derive(Clone, Copy, Debug)]
+struct SeedRoot {
+    qoff: SeqPos,
+    soff: SeqPos,
+    qstart: SeqPos,
+    qstop: SeqPos,
+}
+
+/// `STrackedSeed<ONE_HIT>`, and `STrackedSeed<TWO_HIT>`'s `second_hit_` (the query end of the
+/// earlier hit on the seed's diagonal; 0 for none, and in the one-hit search).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TrackedSeed {
+    qoff: SeqPos,
+    soff: SeqPos,
+    len: SeqPos,
+    qright: SeqPos,
+    second_hit: SeqPos,
+}
+
+impl TrackedSeed {
+    /// The `STrackedSeed` constructor of `qoff`, `soff`, `len` and `qright`.
+    fn new(qoff: SeqPos, soff: SeqPos, len: SeqPos, qright: SeqPos) -> Self {
+        TrackedSeed {
+            qoff,
+            soff,
+            len,
+            qright,
+            second_hit: 0,
+        }
+    }
+}
+
+/// `CTrackedSeeds<NHITS>` of one local id: the tracked seeds in diagonal order with the
+/// cursor `it_` (an index into `seeds`; `std::list` inserts before it and erases at it), and the
+/// saved seeds of each chunk of the local id.
+struct TrackedSeeds {
+    seeds: Vec<TrackedSeed>,
+    it: usize,
+    hitlists: Vec<Option<Vec<Seed>>>,
+}
+
+/// The subject map of a volume as the search reads it (`CSubjectMap`).
+struct SubjectMap<'a> {
+    lid_map: &'a [Word],
+    chunks: &'a [Word],
+    offset_bits: u32,
+    offset_mask: Word,
+    stride: u64,
+    min_offset: u64,
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/dbindex.hpp:1105-1222
+impl SubjectMap<'_> {
+    /// `NumSubjects()`: one more than the number of local ids.
+    fn num_subjects(&self) -> usize {
+        1 + self.lid_map.len() / 4
+    }
+
+    /// `GetNumChunks` of `lid`.
+    fn num_chunks(&self, lid: usize) -> usize {
+        self.lid_map[4 * lid + 1].wrapping_sub(self.lid_map[4 * lid]) as usize
+    }
+
+    /// `SetSubjInfo` of `lid`: the local id's first and one past its last byte.
+    fn subj_info(&self, lid: usize) -> (Word, Word) {
+        (self.lid_map[4 * lid + 2], self.lid_map[4 * lid + 3])
+    }
+
+    /// `DecodeOffset` of `offset`: the local id and its position (with `min_offset` added).
+    fn decode_offset(&self, offset: Word) -> (u32, SeqPos) {
+        let offset = offset.wrapping_sub(self.min_offset as Word);
+        (
+            offset >> self.offset_bits,
+            (self.min_offset + u64::from(offset & self.offset_mask) * self.stride) as SeqPos,
+        )
+    }
+
+    /// `MapSubjOff` of `lid` and `soff`: the chunk of the local id (relative) whose data hold
+    /// position `soff` (the last one that starts at or before it) and the position in that chunk.
+    fn map_subj_off(&self, lid: usize, soff: SeqPos) -> Result<(usize, SeqPos), Corrupt> {
+        let start = self.lid_map[4 * lid] as usize;
+        let end = self.lid_map[4 * lid + 1] as usize;
+        let lid_start = self.lid_map[4 * lid + 2];
+        let abs_offset = lid_start.wrapping_add(soff / CR as u32);
+        let chunks = &self.chunks[start..end];
+        let at = chunks.partition_point(|&chunk| chunk <= abs_offset);
+        if at == 0 {
+            return Err(Corrupt);
+        }
+        let res = at - 1;
+        let chunk_off = u64::from(soff)
+            .wrapping_sub(u64::from(chunks[res].wrapping_sub(lid_start)) * CR)
+            as SeqPos;
+        Ok((res, chunk_off))
+    }
+}
+
+/// `CPreOrderedOffsetIterator`: the offsets of one Nmer's list, pass by pass.
+struct OffsetIter {
+    /// The index in the offset lists of the word read last (`curr_`), `None` for an empty list.
+    curr: Option<usize>,
+    offset: Word,
+    more: u64,
+    modulus: u64,
+    boundary: bool,
+    min_offset: u64,
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/dbindex_sp.hpp:214-276
+impl OffsetIter {
+    /// `Reset(offset_data, key, ws)`.
+    fn new(search: &Search<'_>, key: Word) -> Result<OffsetIter, Corrupt> {
+        let h = search.hkey_width - 1;
+        let s = search.stride;
+        let w = search.ws_hint;
+        let mut more = w.wrapping_sub(h) / s;
+        let modulus = search.options.word_size.wrapping_sub(h) / s;
+        let cache = *search.hash_table.get(key as usize).ok_or(Corrupt)?;
+        let curr = if cache != 0 {
+            Some(cache as usize - 1)
+        } else {
+            more = 0;
+            None
+        };
+        Ok(OffsetIter {
+            curr,
+            offset: 0,
+            more,
+            modulus,
+            boundary: false,
+            min_offset: search.min_offset,
+        })
+    }
+
+    /// `More()`.
+    fn more(&self) -> bool {
+        self.more != 0
+    }
+
+    /// `Next()`: the next offset of the current pass (`offset`), or the end of the pass.
+    fn next(&mut self, offsets: &[Word]) -> Result<bool, Corrupt> {
+        let Some(curr) = self.curr else {
+            return Ok(false);
+        };
+        let curr = curr + 1;
+        self.curr = Some(curr);
+        self.offset = *offsets.get(curr).ok_or(Corrupt)?;
+        if self.offset == 0 {
+            self.more = 0;
+            return Ok(false);
+        }
+        if u64::from(self.offset) < self.min_offset {
+            self.boundary = true;
+            Ok(true)
+        } else if self.boundary {
+            self.boundary = false;
+            Ok(true)
+        } else if u64::from(self.offset) % self.more == 0 {
+            Ok(true)
+        } else {
+            self.more = if self.more <= self.modulus {
+                0
+            } else {
+                self.more - 1
+            };
+            self.curr = Some(curr - 1);
+            Ok(false)
+        }
+    }
+}
+
+/// `CSearch<LEGACY, NHITS>`'s state.
+struct Search<'a> {
+    hash_table: &'a [Word],
+    offsets: &'a [Word],
+    seq_store: &'a [u8],
+    /// `IndexVolume::seq_store_padding`.
+    store_padding: usize,
+    map: SubjectMap<'a>,
+    hkey_width: u64,
+    stride: u64,
+    ws_hint: u64,
+    min_offset: u64,
+    code_bits: u64,
+    query: &'a [u8],
+    options: SearchOptions,
+    /// `CTrackedSeeds<TWO_HIT>`'s `contig_len_`: twice the word size (`unsigned long`).
+    contig_len: u64,
+    seeds: Vec<TrackedSeeds>,
+    /// `subject_`, `subj_start_`, `subj_end_`.
+    subject: usize,
+    subj_start: Word,
+    subj_end: Word,
+    qoff: SeqPos,
+    soff: SeqPos,
+    qstart: SeqPos,
+    qstop: SeqPos,
+    /// `roots_`: the roots of each local id (and of one more), in the order added, and their
+    /// total.
+    roots: Vec<Vec<SeedRoot>>,
+    total_roots: u64,
+    /// `-db_hard_mask`: the masked letters of the volume (`[start, end)` of the packed sequences'
+    /// letters, sorted and merged), each local id's slice of them, and the current local id's
+    /// slice and first letter.
+    masked: Vec<(u64, u64)>,
+    lid_masks: Vec<(usize, usize)>,
+    mask_lo: usize,
+    mask_hi: usize,
+    mask_base: u64,
+}
+
+/// The masked letters `masks` of the sequences of `volume` (`search`) as letters of its packed
+/// sequences (from each sequence's first chunk's data), sorted and merged, and for each local id
+/// of `map` the part of them that its extensions read. A sequence without chunks has no letters
+/// there. Kept out of line: inlined, this setup of a volume spilled registers in the search's
+/// per-root loop (+0.5 % instructions of a search without masks, D5b-5 A/B).
+#[inline(never)]
+fn volume_masked_letters(
+    volume: &IndexVolume,
+    map: &SubjectMap<'_>,
+    masks: &[(u32, Vec<(u32, u32)>)],
+) -> (Vec<(u64, u64)>, Vec<(usize, usize)>) {
+    let (subjects, chunks) = (volume.subjects(), volume.chunks());
+    let mut letters: Vec<(u64, u64)> = Vec::new();
+    for (seq, ranges) in masks {
+        let seq = *seq as usize;
+        let Some(&first) = subjects.get(seq) else {
+            continue;
+        };
+        if first == 0 || subjects.get(seq + 1) == Some(&first) {
+            continue;
+        }
+        let Some(&data) = chunks.get(first as usize - 1) else {
+            continue;
+        };
+        let base = u64::from(data) * CR;
+        letters.extend(
+            ranges
+                .iter()
+                .filter(|&&(start, end)| start < end)
+                .map(|&(start, end)| (base + u64::from(start), base + u64::from(end))),
+        );
+    }
+    letters.sort_unstable();
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(letters.len());
+    for (start, end) in letters {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let lid_masks = (0..map.num_subjects() - 1)
+        .map(|lid| {
+            // The letters that the local id's extensions read (`subj_end_` bounds them loosely).
+            let (start, end) = map.subj_info(lid);
+            let (from, to) = (u64::from(start) * CR, u64::from(end) * CR);
+            let lo = merged.partition_point(|&(_, stop)| stop <= from);
+            (lo, merged.partition_point(|&(begin, _)| begin < to).max(lo))
+        })
+        .collect();
+    (merged, lid_masks)
+}
+
+/// `CSeedRoots::LIMIT_ROOTS`: the roots kept before the seeds are computed from them.
+// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:281-283
+const LIMIT_ROOTS: u64 = 16 * 1024 * 1024;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1411-1437
+/// `CDbIndex::Search` of `query`, `locs` and `options`: the seeds of `volume` (the one-hit
+/// search, or the two-hit search of `options.two_hits` above 0) for the query batch `query` (the
+/// concatenated query in BLASTNA, NCBI's `query->sequence`) and its lookup segments `segments`
+/// (`[start, stop)` in the concatenated query, in NCBI's order), with the masked letters `masks`
+/// of `-db_hard_mask` (none without it): each sequence of the volume that has some (numbered from
+/// 0 in the volume) and its masks (`[start, end)` letters of the sequence).
+pub(crate) fn search(
+    volume: &IndexVolume,
+    query: &[u8],
+    segments: &[(u32, u32)],
+    options: SearchOptions,
+    masks: &[(u32, Vec<(u32, u32)>)],
+) -> Result<VolumeSeeds, Corrupt> {
+    let map = SubjectMap {
+        lid_map: volume.lid_map(),
+        chunks: volume.chunks(),
+        offset_bits: volume.offset_bits,
+        offset_mask: (1u32 << volume.offset_bits) - 1,
+        stride: volume.stride,
+        min_offset: volume.min_offset(),
+    };
+    let num_lids = map.num_subjects() - 1;
+    let (masked, lid_masks) = volume_masked_letters(volume, &map, masks);
+    let seeds = (0..num_lids)
+        .map(|lid| TrackedSeeds {
+            seeds: Vec::new(),
+            it: 0,
+            hitlists: vec![None; map.num_chunks(lid)],
+        })
+        .collect();
+    let mut search = Search {
+        hash_table: volume.hash_table(),
+        offsets: volume.offsets(),
+        seq_store: volume.seq_store(),
+        store_padding: volume.seq_store_padding(),
+        hkey_width: volume.hkey_width,
+        stride: volume.stride,
+        ws_hint: volume.ws_hint,
+        min_offset: volume.min_offset(),
+        code_bits: code_bits(volume.stride),
+        roots: vec![Vec::new(); map.num_subjects()],
+        masked,
+        lid_masks,
+        mask_lo: 0,
+        mask_hi: 0,
+        mask_base: 0,
+        map,
+        query,
+        options,
+        contig_len: options.word_size.wrapping_mul(2),
+        seeds,
+        subject: 0,
+        subj_start: 0,
+        subj_end: 0,
+        qoff: 0,
+        soff: 0,
+        qstart: 0,
+        qstop: 0,
+        total_roots: 0,
+    };
+    // `operator()`: each segment, then the seeds of the roots left.
+    for &(start, stop) in segments {
+        search.qstart = start;
+        search.qstop = stop;
+        search.search_int()?;
+    }
+    search.compute_seeds()?;
+    let chunks = volume.chunks().len();
+    let mut results: Vec<Option<Vec<Seed>>> = vec![None; chunks];
+    let mut k = 1usize;
+    for lid in 0..num_lids {
+        search.finalize(lid)?;
+        for hitlist in std::mem::take(&mut search.seeds[lid].hitlists) {
+            // `SetResults` of `k` keeps only the ids of the volume's chunks.
+            if let Some(slot) = results.get_mut(k - 1) {
+                *slot = hitlist;
+            }
+            k += 1;
+        }
+    }
+    let n_seqs = volume.stop.wrapping_sub(volume.start) as usize;
+    Ok(VolumeSeeds {
+        word_size: options.word_size,
+        map: volume.subjects()[..n_seqs.min(volume.subjects().len())].to_vec(),
+        results,
+    })
+}
+
+impl Search<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:99-180
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1260-1307
+    /// `SearchInt()`: the roots of the Nmers of the segment `[qstart, qstop)`; the seeds are
+    /// computed (and the roots dropped) whenever more than `LIMIT_ROOTS` are kept, after a
+    /// query position.
+    fn search_int(&mut self) -> Result<(), Corrupt> {
+        let hkey_width = self.hkey_width;
+        let hkey_mask: Word = ((1u64 << (2 * hkey_width)) - 1) as Word;
+        let (start, stop) = (self.qstart, self.qstop);
+        let mut nmer: Word = 0;
+        let mut count: u64 = 0;
+        let mut pos = start;
+        while pos < stop {
+            let letter = Word::from(*self.query.get(pos as usize).ok_or(Corrupt)?);
+            pos += 1;
+            if letter >= 4 {
+                count = 0;
+                nmer = 0;
+                continue;
+            }
+            nmer = ((nmer << 2) & hkey_mask) + letter;
+            count += 1;
+            if count < hkey_width {
+                continue;
+            }
+            let mut off_it = OffsetIter::new(self, nmer)?;
+            self.qoff = pos - 1;
+            let offsets = self.offsets;
+            while off_it.more() {
+                self.subject = 0;
+                while off_it.next(offsets)? {
+                    let offset = off_it.offset;
+                    if u64::from(offset) < self.min_offset {
+                        // The offset that a boundary code qualifies; a list that ends after the
+                        // code is corrupt (NCBI's iterator then reads the next list with a pass
+                        // of 0, a division by zero).
+                        if !off_it.next(offsets)? {
+                            return Err(Corrupt);
+                        }
+                        let soff = self.decode_offset(off_it.offset)?;
+                        let r1 = SeedRoot {
+                            qoff: self.qoff,
+                            soff: offset,
+                            qstart: self.qstart,
+                            qstop: self.qstop,
+                        };
+                        let r2 = SeedRoot { soff, ..r1 };
+                        let roots = &mut self.roots[self.subject];
+                        roots.push(r1);
+                        roots.push(r2);
+                        self.total_roots += 2;
+                    } else {
+                        let soff = self.decode_offset(offset)?;
+                        self.roots[self.subject].push(SeedRoot {
+                            qoff: self.qoff,
+                            soff,
+                            qstart: self.qstart,
+                            qstop: self.qstop,
+                        });
+                        self.total_roots += 1;
+                    }
+                }
+            }
+            if self.total_roots > LIMIT_ROOTS {
+                let (old_qstart, old_qstop) = (self.qstart, self.qstop);
+                self.compute_seeds()?;
+                for roots in &mut self.roots {
+                    *roots = Vec::new();
+                }
+                self.total_roots = 0;
+                self.qstart = old_qstart;
+                self.qstop = old_qstop;
+            }
+        }
+        Ok(())
+    }
+
+    /// `DecodeOffset` of `offset`, in `CSearch`: the position, with the local id kept as the
+    /// current subject (whose roots can be kept: the local ids and one more).
+    fn decode_offset(&mut self, offset: Word) -> Result<SeqPos, Corrupt> {
+        let (lid, soff) = self.map.decode_offset(offset);
+        if lid as usize >= self.roots.len() {
+            return Err(Corrupt);
+        }
+        self.subject = lid as usize;
+        Ok(soff)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1224-1257
+    /// `ComputeSeeds()`: each local id's roots in order, from the query offset 0.
+    fn compute_seeds(&mut self) -> Result<(), Corrupt> {
+        for lid in 0..self.seeds.len() {
+            self.subject = lid;
+            (self.subj_start, self.subj_end) = self.map.subj_info(lid);
+            (self.mask_lo, self.mask_hi) = self.lid_masks[lid];
+            self.mask_base = u64::from(self.subj_start) * CR;
+            let roots = std::mem::take(&mut self.roots[lid]);
+            if !roots.is_empty() {
+                self.qoff = 0;
+                if self.mask_lo < self.mask_hi {
+                    self.process_roots::<true>(&roots)?;
+                } else {
+                    self.process_roots::<false>(&roots)?;
+                }
+            }
+            self.seeds[lid].it = 0;
+        }
+        Ok(())
+    }
+
+    /// Each root of `roots` of the current local id in order; `MASKED`: the local id has masked
+    /// letters (`-db_hard_mask`).
+    fn process_roots<const MASKED: bool>(&mut self, roots: &[SeedRoot]) -> Result<(), Corrupt> {
+        let mut j = 0;
+        while j < roots.len() {
+            j += self.process_root::<MASKED>(&roots[j..])?;
+        }
+        Ok(())
+    }
+
+    /// With `-db_hard_mask`: `None` when the Nmer whose last letter is `last` (of the current
+    /// local id) holds a masked letter, which matches no query letter; else the letters before its
+    /// first letter and after its last letter up to the nearest masked letter (`!0`: none on that
+    /// side), which its extensions do not pass.
+    fn room(&self, last: SeqPos) -> Option<(SeqPos, SeqPos)> {
+        let masks = &self.masked[self.mask_lo..self.mask_hi];
+        let last = self.mask_base + u64::from(last);
+        let first = last.saturating_sub(self.hkey_width - 1);
+        let at = masks.partition_point(|&(_, end)| end <= first);
+        let right = match masks.get(at) {
+            Some(&(start, _)) if start <= last => return None,
+            Some(&(start, _)) => SeqPos::try_from(start - last - 1).unwrap_or(!0),
+            None => !0,
+        };
+        let left = match at.checked_sub(1) {
+            Some(before) => SeqPos::try_from(first - masks[before].1).unwrap_or(!0),
+            None => !0,
+        };
+        Some((left, right))
+    }
+
+    /// With `-db_hard_mask`: whether a masked letter of the current local id lies after letter
+    /// `after` and before letter `before`.
+    fn masked_between(&self, after: SeqPos, before: SeqPos) -> bool {
+        let masks = &self.masked[self.mask_lo..self.mask_hi];
+        let after = self.mask_base + u64::from(after) + 1;
+        let before = self.mask_base + u64::from(before);
+        let at = masks.partition_point(|&(_, end)| end <= after);
+        masks
+            .get(at)
+            .is_some_and(|&(start, _)| start.max(after) < before)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1194-1221
+    /// `ProcessRoot` of `seeds` and `root`: a new query offset, or a subject offset below the last
+    /// one, starts the tracked seeds over; a boundary code takes the root after it. Returns the
+    /// roots read. `MASKED`: a root whose Nmer holds a masked letter is passed over as if the
+    /// list did not hold it, and the others' extensions stop before the masked letters.
+    fn process_root<const MASKED: bool>(&mut self, roots: &[SeedRoot]) -> Result<usize, Corrupt> {
+        let root = roots[0];
+        let mut room: (SeqPos, SeqPos) = (!0, !0);
+        if MASKED {
+            let (read, real) = if u64::from(root.soff) < self.min_offset {
+                (2, *roots.get(1).ok_or(Corrupt)?)
+            } else {
+                (1, root)
+            };
+            match self.room(real.soff.wrapping_sub(self.min_offset as SeqPos)) {
+                Some(found) => room = found,
+                None => return Ok(read),
+            }
+        }
+        if self.qoff != root.qoff {
+            self.seeds[self.subject].it = 0;
+            self.qoff = root.qoff;
+        } else if u64::from(root.soff) >= self.min_offset && root.soff < self.soff {
+            self.seeds[self.subject].it = 0;
+        }
+        self.qstart = root.qstart;
+        self.qstop = root.qstop;
+        let min_offset = self.min_offset as SeqPos;
+        if u64::from(root.soff) < self.min_offset {
+            let real = *roots.get(1).ok_or(Corrupt)?;
+            self.process_boundary_offset::<MASKED>(
+                real.soff.wrapping_sub(min_offset),
+                root.soff,
+                room,
+            )?;
+            self.soff = real.soff;
+            Ok(2)
+        } else {
+            self.process_offset::<MASKED>(root.soff.wrapping_sub(min_offset), room)?;
+            self.soff = root.soff;
+            Ok(1)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1177-1191
+    /// `ProcessOffset` of `offset`: a seed of the Nmer at the current query offset and subject
+    /// position `offset`, extended both ways when no tracked seed of its diagonal covers it, and
+    /// tracked when it reaches the word size; the extensions at most `room` (`process_root`).
+    fn process_offset<const MASKED: bool>(
+        &mut self,
+        offset: Word,
+        room: (SeqPos, SeqPos),
+    ) -> Result<(), Corrupt> {
+        let mut seed = TrackedSeed::new(self.qoff, offset, self.hkey_width as SeqPos, self.qoff);
+        if self.eval_and_update::<MASKED>(&mut seed)? {
+            self.extend_left(&mut seed, room.0)?;
+            self.extend_right(&mut seed, room.1)?;
+            if u64::from(seed.len) >= self.options.word_size {
+                self.append_simple(seed);
+            }
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1142-1174
+    /// `ProcessBoundaryOffset` of `offset` and `bounds`: a seed next to the end of a valid interval
+    /// of the subject, extended at most to the distances that `bounds` codes (left in the high
+    /// bits, right in the low `code_bits`; 0 for more than the code holds) and `room`
+    /// (`process_root`).
+    fn process_boundary_offset<const MASKED: bool>(
+        &mut self,
+        offset: Word,
+        bounds: Word,
+        room: (SeqPos, SeqPos),
+    ) -> Result<(), Corrupt> {
+        let nmaxleft = (u64::from(bounds) >> self.code_bits) as SeqPos;
+        let nmaxright = (bounds & ((1u32 << self.code_bits) - 1)) as SeqPos;
+        let mut seed = TrackedSeed::new(self.qoff, offset, self.hkey_width as SeqPos, self.qoff);
+        self.eval_and_update::<MASKED>(&mut seed)?;
+        if nmaxleft > 0 {
+            self.extend_left(&mut seed, (nmaxleft - 1).min(room.0))?;
+        } else {
+            self.extend_left(&mut seed, room.0)?;
+        }
+        if nmaxright > 0 {
+            self.extend_right(&mut seed, (nmaxright - 1).min(room.1))?;
+        } else {
+            self.extend_right(&mut seed, room.1)?;
+        }
+        if nmaxleft > 0 && nmaxright == 0 && u64::from(seed.len) < self.options.word_size {
+            seed.len = 0;
+            self.append_simple(seed);
+        } else {
+            self.append(seed);
+        }
+        Ok(())
+    }
+
+    /// The packed byte `at` of the sequences.
+    fn store(&self, at: i64) -> Result<u8, Corrupt> {
+        let at = usize::try_from(at).map_err(|_| Corrupt)?;
+        match self.seq_store.get(at) {
+            Some(&byte) => Ok(byte),
+            // The zero bytes of the mapping after the end of the file.
+            None if at < self.seq_store.len() + self.store_padding => Ok(0),
+            None => Err(Corrupt),
+        }
+    }
+
+    /// The query letter `at`.
+    fn letter(&self, at: i64) -> Result<u8, Corrupt> {
+        usize::try_from(at)
+            .ok()
+            .and_then(|at| self.query.get(at))
+            .copied()
+            .ok_or(Corrupt)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:998-1066
+    /// `ExtendLeft` of `seed` and `nmax`: the exact match to the left of the seed's Nmer, at most
+    /// `word_size - hkey_width` bases and `nmax`, bounded by the segment's start and the local
+    /// id's first byte: the bases of the Nmer's first byte, then whole bytes, then bases.
+    fn extend_left(&self, seed: &mut TrackedSeed, nmax: SeqPos) -> Result<(), Corrupt> {
+        let cr = CR as i64;
+        let hkey_width = self.hkey_width;
+        let sstart = i64::from(self.subj_start);
+        let first = u64::from(seed.soff).wrapping_sub(hkey_width - 1);
+        let mut spos = sstart + (first / CR) as i64;
+        let mut qpos = i64::from(seed.qoff) - (hkey_width as i64 - 1);
+        let mut incomplete = (first % CR) as u32;
+        let qstart = i64::from(self.qstart);
+        let limit = self.options.word_size.wrapping_sub(hkey_width);
+        let mut nmax = if u64::from(nmax) < limit {
+            nmax
+        } else {
+            limit as SeqPos
+        };
+        while nmax > 0 && incomplete > 0 && qpos > qstart {
+            let shift = 2 * (CR as u32 - incomplete);
+            incomplete -= 1;
+            let sbyte = (self.store(spos)? >> shift) & 0x3;
+            qpos -= 1;
+            if self.letter(qpos)? != sbyte {
+                return Ok(());
+            }
+            nmax -= 1;
+            seed.len = seed.len.wrapping_add(1);
+        }
+        nmax = nmax.min((qpos - qstart) as SeqPos);
+        nmax = nmax.min((cr * (spos - sstart)) as SeqPos);
+        spos -= 1;
+        while u64::from(nmax) >= CR {
+            let sbyte = self.store(spos)?;
+            spos -= 1;
+            let mut qbyte: u8 = 0;
+            let mut i = 0u32;
+            let mut ambig = false;
+            while i < CR as u32 {
+                qpos -= 1;
+                let letter = self.letter(qpos)?;
+                qbyte = qbyte.wrapping_add(letter.wrapping_shl(2 * i));
+                if letter > 3 {
+                    spos += 1;
+                    qpos += i64::from(i) + 1;
+                    nmax = i;
+                    ambig = true;
+                    break;
+                }
+                i += 1;
+            }
+            if ambig {
+                break;
+            }
+            if sbyte != qbyte {
+                spos += 1;
+                qpos += i64::from(i);
+                break;
+            }
+            nmax -= CR as SeqPos;
+            seed.len = seed.len.wrapping_add(CR as SeqPos);
+        }
+        let mut i = 0u32;
+        while nmax > 0 {
+            let sbyte = (self.store(spos)? >> (2 * i)) & 0x3;
+            i += 1;
+            qpos -= 1;
+            if sbyte != self.letter(qpos)? {
+                return Ok(());
+            }
+            seed.len = seed.len.wrapping_add(1);
+            nmax -= 1;
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:1070-1139
+    /// `ExtendRight` of `seed` and `nmax`: the exact match to the right of the seed's Nmer, at most
+    /// `nmax` bases, bounded by the segment's end and the local id's last byte: the bases of the
+    /// Nmer's last byte, then whole bytes, then bases.
+    fn extend_right(&self, seed: &mut TrackedSeed, mut nmax: SeqPos) -> Result<(), Corrupt> {
+        let cr = CR as i64;
+        let send = i64::from(self.subj_end);
+        let mut spos = i64::from(self.subj_start) + i64::from(seed.soff / CR as u32);
+        let qend = i64::from(self.qstop);
+        let mut qpos = i64::from(seed.qoff) + 1;
+        let mut incomplete = seed.soff % CR as u32;
+        while nmax > 0 {
+            incomplete += 1;
+            if incomplete.is_multiple_of(CR as u32) || qpos >= qend {
+                break;
+            }
+            let sbyte = (self.store(spos)? >> (6 - 2 * incomplete)) & 0x3;
+            let letter = self.letter(qpos)?;
+            qpos += 1;
+            if letter != sbyte {
+                return Ok(());
+            }
+            seed.len = seed.len.wrapping_add(1);
+            seed.qright = seed.qright.wrapping_add(1);
+            nmax -= 1;
+        }
+        spos += 1;
+        nmax = nmax.min((qend - qpos) as SeqPos);
+        // `(send - spos) * CR` is an `unsigned long`: a negative difference bounds nothing.
+        let store_bases = ((send - spos) as u64).wrapping_mul(CR);
+        if u64::from(nmax) > store_bases {
+            nmax = store_bases as SeqPos;
+        }
+        while u64::from(nmax) >= CR {
+            let sbyte = self.store(spos)?;
+            spos += 1;
+            let mut qbyte: u8 = 0;
+            let mut ambig = false;
+            for i in 0..CR as u32 {
+                let letter = self.letter(qpos)?;
+                if letter > 3 {
+                    nmax = i;
+                    qpos -= i64::from(i);
+                    spos -= 1;
+                    ambig = true;
+                    break;
+                }
+                qbyte = (qbyte << 2).wrapping_add(letter);
+                qpos += 1;
+            }
+            if ambig {
+                break;
+            }
+            if sbyte != qbyte {
+                spos -= 1;
+                qpos -= cr;
+                break;
+            }
+            seed.len = seed.len.wrapping_add(CR as SeqPos);
+            seed.qright = seed.qright.wrapping_add(CR as SeqPos);
+            nmax -= CR as SeqPos;
+        }
+        let mut i = 2 * (CR as u32 - 1);
+        while nmax > 0 {
+            nmax -= 1;
+            let sbyte = (self.store(spos)? >> i) & 0x3;
+            let letter = self.letter(qpos)?;
+            qpos += 1;
+            if sbyte != letter {
+                break;
+            }
+            seed.len = seed.len.wrapping_add(1);
+            seed.qright = seed.qright.wrapping_add(1);
+            i = i.wrapping_sub(2);
+        }
+        Ok(())
+    }
+
+    /// `EvalAndUpdate` of `seed` for the search's kind of tracked seeds.
+    fn eval_and_update<const MASKED: bool>(
+        &mut self,
+        seed: &mut TrackedSeed,
+    ) -> Result<bool, Corrupt> {
+        if self.options.two_hits == 0 {
+            self.eval_and_update_one_hit(seed)
+        } else {
+            self.eval_and_update_two_hits::<MASKED>(seed)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:703-727
+    /// `CTrackedSeeds<ONE_HIT>::EvalAndUpdate` of `seed`: the tracked seeds before the seed's
+    /// diagonal are passed (those that end before its query offset saved and dropped); false
+    /// when a tracked seed lies on its diagonal (the cursor then after it).
+    fn eval_and_update_one_hit(&mut self, seed: &TrackedSeed) -> Result<bool, Corrupt> {
+        let lid = self.subject;
+        loop {
+            let tracked = &mut self.seeds[lid];
+            let Some(&it) = tracked.seeds.get(tracked.it) else {
+                return Ok(true);
+            };
+            let step = seed.qoff.wrapping_sub(it.qoff);
+            let it_soff_corr = it.soff.wrapping_add(step);
+            if it_soff_corr > seed.soff {
+                return Ok(true);
+            }
+            if it.qright < seed.qoff {
+                let at = tracked.it;
+                tracked.seeds.remove(at);
+                self.save_seed(&it)?;
+            } else {
+                tracked.it += 1;
+                if it_soff_corr == seed.soff {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:815-845
+    /// `CTrackedSeeds<TWO_HIT>::EvalAndUpdate` of `seed`: the tracked seeds before the seed's
+    /// diagonal are passed; one that ends more than the seed's length, the window and three
+    /// strides before the seed's end is checked (saved if it qualifies) and dropped; one that
+    /// ends before the seed's query offset is dropped if it qualifies and is saved, else it gives
+    /// the seed its earlier hit when it lies on the seed's diagonal with a positive length; false
+    /// when a tracked seed that reaches the seed's query offset lies on its diagonal (the cursor
+    /// then after it). The sums are NCBI's: `TSeqPos` wraps at 32 bits before the `unsigned
+    /// long` window and stride are added. `MASKED`: no earlier hit with a masked letter between
+    /// its end and the seed's Nmer is the seed's (`-db_hard_mask`, a hit of another stretch).
+    fn eval_and_update_two_hits<const MASKED: bool>(
+        &mut self,
+        seed: &mut TrackedSeed,
+    ) -> Result<bool, Corrupt> {
+        let lid = self.subject;
+        let reach = self
+            .options
+            .two_hits
+            .wrapping_add(self.stride.wrapping_mul(3));
+        loop {
+            let tracked = &mut self.seeds[lid];
+            let Some(&it) = tracked.seeds.get(tracked.it) else {
+                return Ok(true);
+            };
+            let step = seed.qoff.wrapping_sub(it.qoff);
+            let it_soff_corr = it.soff.wrapping_add(step);
+            if it_soff_corr > seed.soff {
+                return Ok(true);
+            }
+            if u64::from(it.qright.wrapping_add(seed.len)).wrapping_add(reach)
+                < u64::from(seed.qright)
+            {
+                let at = tracked.it;
+                tracked.seeds.remove(at);
+                self.check_and_save_seed(&it)?;
+            } else if it.qright < seed.qoff {
+                if self.check_and_save_seed(&it)? {
+                    let tracked = &mut self.seeds[lid];
+                    let at = tracked.it;
+                    tracked.seeds.remove(at);
+                } else {
+                    if it_soff_corr == seed.soff
+                        && it.len > 0
+                        && !(MASKED
+                            && self.masked_between(
+                                it.soff.wrapping_add(it.qright.wrapping_sub(it.qoff)),
+                                seed.soff.wrapping_sub(self.hkey_width as SeqPos - 1),
+                            ))
+                    {
+                        seed.second_hit = it.qright;
+                    }
+                    self.seeds[lid].it += 1;
+                }
+            } else {
+                tracked.it += 1;
+                if it_soff_corr == seed.soff {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:790-801
+    /// `CheckAndSaveSeed` of `seed` in the two-hit search: a seed whose earlier hit ends at least
+    /// its length, and at most its length and the window, before its end, or a seed of at least
+    /// twice the word size, is saved (true).
+    fn check_and_save_seed(&mut self, seed: &TrackedSeed) -> Result<bool, Corrupt> {
+        let after_hit = seed.second_hit.wrapping_add(seed.len);
+        if (seed.second_hit > 0
+            && seed.qright >= after_hit
+            && u64::from(seed.qright) <= u64::from(after_hit).wrapping_add(self.options.two_hits))
+            || u64::from(seed.len) >= self.contig_len
+        {
+            self.save_seed(seed)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:600-604
+    /// `AppendSimple` of `seed`: tracked before the cursor.
+    fn append_simple(&mut self, seed: TrackedSeed) {
+        let tracked = &mut self.seeds[self.subject];
+        tracked.seeds.insert(tracked.it, seed);
+        tracked.it += 1;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:606-640
+    /// `Append` of `seed` and `word_size`: a seed on the diagonal of the tracked seed before the
+    /// cursor shortens it to the seed's right end (dropping it below the word size) when it ends
+    /// further; any other seed of the word size is tracked before the cursor.
+    fn append(&mut self, seed: TrackedSeed) {
+        let word_size = self.options.word_size;
+        let tracked = &mut self.seeds[self.subject];
+        if tracked.it > 0 {
+            let prev = tracked.it - 1;
+            let tmp = &mut tracked.seeds[prev];
+            let step = seed.qoff.wrapping_sub(tmp.qoff);
+            let bs_soff_corr = tmp.soff.wrapping_add(step);
+            if bs_soff_corr == seed.soff {
+                if seed.qright < tmp.qright {
+                    if tmp.len > 0 {
+                        tmp.len = tmp.len.wrapping_sub(tmp.qright.wrapping_sub(seed.qright));
+                    }
+                    if u64::from(tmp.len) < word_size {
+                        tracked.seeds.remove(prev);
+                        tracked.it -= 1;
+                    } else {
+                        tmp.qright = seed.qright;
+                    }
+                }
+            } else if u64::from(seed.len) >= word_size {
+                tracked.seeds.insert(tracked.it, seed);
+                tracked.it += 1;
+            }
+        } else if u64::from(seed.len) >= word_size {
+            tracked.seeds.insert(tracked.it, seed);
+            tracked.it += 1;
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:578-600
+    /// `SaveSeed` of `seed` for the current local id: a seed of positive length at the left end of
+    /// its run, into the list of its chunk.
+    fn save_seed(&mut self, seed: &TrackedSeed) -> Result<(), Corrupt> {
+        if seed.len == 0 {
+            return Ok(());
+        }
+        let qoff = seed.qright.wrapping_sub(seed.len).wrapping_add(1);
+        let soff = seed.soff.wrapping_sub(seed.qoff.wrapping_sub(qoff));
+        let lid = self.subject;
+        let (chunk, chunk_off) = self.map.map_subj_off(lid, soff)?;
+        let hitlist = self.seeds[lid]
+            .hitlists
+            .get_mut(chunk)
+            .ok_or(Corrupt)?
+            .get_or_insert_with(Vec::new);
+        hitlist.push(Seed {
+            q_off: qoff,
+            s_off: chunk_off,
+        });
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:693-699
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:805-811
+    /// `Finalize()` of local id `lid`: every tracked seed in order saved (the one-hit search) or
+    /// checked and saved if it qualifies (the two-hit search).
+    fn finalize(&mut self, lid: usize) -> Result<(), Corrupt> {
+        self.subject = lid;
+        let seeds = std::mem::take(&mut self.seeds[lid].seeds);
+        for seed in &seeds {
+            if self.options.two_hits == 0 {
+                self.save_seed(seed)?;
+            } else {
+                self.check_and_save_seed(seed)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "search_tests.rs"]
+mod tests;

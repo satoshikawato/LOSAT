@@ -65,6 +65,12 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `CWriteDB::CreateUserColumn` in 2007): six proteins and the user column `comedy`, whose data
   file is the big-endian `.pab` alone; no masks. Its `.pnd .pni .psd .psi` and `.pog` files are
   left out.
+- `db/seqn.{nin,nsq,nhr,nni,nnd}` and `db/seqp.{pin,psq,phr,pni,pnd}`: copies of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/seqn` and `seqp` (598d8ae6; version 4, GIs with
+  DDBJ, GenBank and other accessions), whose `GetBioseq` and `GetHdr` texts NCBI's cases GetBioseqN,
+  GetBioseqP, GetHdrN and GetHdrP expect (`LOSAT/tests/blastdbcmd_retrieve.rs`, `-outfmt %b` and
+  `%d`). Their string-id ISAM files (`.nsd .nsi .psd .psi`), the `.nhd .nhi .phd .phi` and `.nog .pog`
+  files are left out: the cases look the sequences up by GI.
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
 - `expected/mask_*.masks.tsv`: rows `algorithm<TAB>oid<TAB>ranges` from
@@ -143,6 +149,37 @@ without a masked sequence. A rebuild changes the dates stored in the index and c
 `src/writedb/mask_data/tests_cli.rs` runs the cases through the command line (`makeblastdb::run_with`) and
 compares the exit status, the log and the standard error of each with NCBI's, and every file of the database.
 `mask_parse/expected_stdout.tsv` holds the log of each run of `mask_parse/expected.tsv` the same way.
+
+## GI-indexed masks (`gi_mask/`)
+
+`make_gi_mask_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-20, makeblastdb, dustmasker, segmasker and
+convert2blastmask 2.17.0 with `BLAST_USAGE_REPORT=false`) writes the inputs (`gi_mask/in/`: FASTA files from fixed
+seeds, their masks, one hand-written mask file) and runs makeblastdb on each row of `gi_mask/cases.tsv` (name, what
+LOSAT does, setup, the words after `makeblastdb`) in a directory of its own, as `losat makeblastdb -gi_mask` is
+tested: `-gi_mask` and `-gi_mask_name` on single-volume (version 5 and 4) and multi-volume databases, nucleotide and
+protein, the argument rules, masks of sequences without a GI, ranges past a sequence's end, `-logfile`, a missing
+directory, a rebuild in the same directory, duplicate GIs of version 4, 1 to 1100 GIs (pages of 512), data volumes
+cut by `-max_file_sz`, descriptions that pad the index header, two algorithms of one name (one that writes nothing,
+data volumes written one after the other, and the refused cases that write one data file at the same time), and
+`-input_type blastdb` from `gi_mask/in/src4.*` (a version 4 database with a mask column that makeblastdb wrote; the
+"bytes-total" of each metadata file a run writes is checked to be the sum of the sizes of the files it lists). Each
+run's exit status, standard output and error
+(the run directory, time and seconds masked as `<C>`, `<T>`, `<S>`) and its files with their sizes are in
+`gi_mask/expected/<case>.{rc,stdout,stderr,files}`; `gi_mask/db/<case>/` keeps the files that `-gi_mask` writes or
+changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
+These are NCBI's bytes but in one place, the script's `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS approved
+exception 25, the Owner's decision of 2026-11-20): for a database of one volume NCBI's alias file names the database
+itself by its absolute path (`DBLIST <C>/db`), which no program can open, and makeblastdb ends with `DB alias files
+are mutually recursive` (exit status 2, no metadata file). LOSAT names the volume by its file name (`DBLIST db`). So
+after each such run the script changes that line in the run directory (before the next case of a chain runs) and,
+where NCBI ended on that error, takes the run as the successful run it then is: the line leaves the standard error
+(or the `-logfile` file), the exit status is 0, and the metadata file is NCBI's `blastdbcmd -metadata` of the
+database. `gi_mask/in/ncbi_single.nal` is NCBI's own alias file of that kind (`{C}` for its directory), which the
+cases `x10_*` put beside a database (setup `F=>G`) as an earlier run of NCBI's leaves it.
+`tests/makeblastdb_gi_mask.rs` runs every case through the `losat` binary and compares them;
+`src/writedb/gi_mask_tests.rs` writes every GI mask of `db/` again from the records, GIs, description and dates it
+holds and compares the six files byte for byte (but a name that the alias file lists twice, case `x12`). A rerun changes the dates of the `.gmi`/`.gni`, mask column and
+alias files.
 
 ## Masks ordered by address, and the errors that come first (`mask_order/`)
 

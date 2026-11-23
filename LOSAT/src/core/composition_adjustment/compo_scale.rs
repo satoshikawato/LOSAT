@@ -25,7 +25,8 @@ pub(crate) const COMPO_SCORE_MIN: i32 = i16::MIN as i32;
 /// second redo (line PS `DECISIONS.md` 11 and 63; series PR, item PS11c-3). `XDropRedo` is
 /// psiblast's and rpsblast's redo (`Blast_RedoOneMatch`), `SwRedo` rpsblast's `-use_sw_tback`
 /// (`Blast_RedoOneMatchSmithWaterman`), `FrameRedo` rpstblastn's (`Blast_RedoOneMatch` with a
-/// translated subject: series PR, item PS12b).
+/// translated subject: series PR, item PS12b) and `SwFrameRedo` rpstblastn's `-use_sw_tback`
+/// (`Blast_RedoOneMatchSmithWaterman` with a translated subject: item PS12c).
 pub(crate) trait RedoInstance {
     /// NCBI's `subject_is_translated` of the redo (`s_GetAlignParams`): the subject is the six
     /// frames of a translated sequence, each alignment in its frame.
@@ -44,9 +45,16 @@ pub(crate) enum SwRedo {}
 /// user query's frames.
 pub(crate) enum FrameRedo {}
 
+/// The Smith-Waterman redo of a translated subject (`RedoInstance`): rpstblastn's
+/// `-use_sw_tback`.
+pub(crate) enum SwFrameRedo {}
+
 impl RedoInstance for XDropRedo {}
 impl RedoInstance for SwRedo {}
 impl RedoInstance for FrameRedo {
+    const SUBJECT_IS_TRANSLATED: bool = true;
+}
+impl RedoInstance for SwFrameRedo {
     const SUBJECT_IS_TRANSLATED: bool = true;
 }
 
@@ -54,7 +62,7 @@ impl RedoInstance for FrameRedo {
 const TRUE_CHAR_POSITIONS: [usize; 20] = [
     1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
 ];
-/// Whether a letter is one of the 20 true amino acids (`alphaConvert[j] >= 0`).
+/// Whether a letter is one of the 20 true amino acids (`alphaConvert[j]` is not negative).
 const TRUE_AMINO_ACID: [bool; BLASTAA_SIZE] = {
     let mut table = [false; BLASTAA_SIZE];
     let mut i = 0;
@@ -300,7 +308,8 @@ pub(crate) fn pssm_composition_based_stats<C: RedoInstance>(
 ) -> f64 {
     let probs = pssm_score_probs::<C>(&info.start_matrix, subject_prob);
     let ratio = lambda_ratio::<C>(probs, info.ungapped_lambda, false);
-    // The ratio is at least 0.5 (`LambdaRatioLowerBound`), so NCBI's `*LambdaRatio > 0` holds.
+    // The ratio is at least 0.5 (`LambdaRatioLowerBound`), so NCBI's check that `LambdaRatio` is
+    // above zero holds.
     let scaled_lambda = info.ungapped_lambda / ratio;
     scale_pssm::<C>(
         matrix,

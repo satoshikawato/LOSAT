@@ -615,7 +615,7 @@ impl Lookup {
                 query,
                 batch.lookup_segments.clone(),
                 contexts,
-                // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), converted as
+                // `lookup->threshold` is `opt->threshold` cast to `Int4` (blast_aalookup.c:241), converted as
                 // the x86-64 build does (`INT_MIN` past `Int4`).
                 crate::core::blast_util::ncbi_int4_from_double(options.threshold),
                 pooled,

@@ -1972,7 +1972,7 @@ impl<'a> TabularWriter<'a> {
                 lists
             });
             // `x_SetSubjectIds` clears the lists and pushes the lists of the definition lines
-            // before the one that throws; `SetSubjectId(list)` of the catch pushes the Seq-align id
+            // before the one that throws; `SetSubjectId` of `list` in the catch pushes the Seq-align id
             // (tabular.cpp:1374-1378).
             if stage == FailedStage::SubjectIds {
                 lists.iter_mut().for_each(Vec::clear);

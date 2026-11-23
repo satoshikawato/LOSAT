@@ -124,29 +124,41 @@ pub(super) struct PreparedXml {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
-/// The `Statistics` of every query, with the gapped Karlin block of the scoring; the unsearched
-/// values for a query without a valid context.
+/// The `Statistics` of every query, with the gapped Karlin block of the scoring (an ungapped
+/// search: the query's own ungapped block, `ungapped_karlin`); the unsearched values for a query
+/// without a valid context.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:241-248
+/// The XML's Karlin-Altschul values are those of the query's gapped block, or of its ungapped
+/// block when it has no gapped one. An ungapped search makes no gapped block, so its statistics
+/// are the ungapped block's (XML2's are read the same way, data4xml2format.cpp:258-273).
 pub(super) fn query_stats(
     parameters: &LocalSubjectParameters,
     query_validity: &[bool],
     scoring: LocalStageDScoring,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
 ) -> Vec<XmlStats> {
-    let gapped = lookup_protein_params(&ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
+    let gapped = scoring.gapped.then(|| {
+        lookup_protein_params(&ProteinScoringSpec {
+            matrix: scoring.matrix,
+            gap_open: scoring.gap_open,
+            gap_extend: scoring.gap_extend,
+        })
     });
     query_validity
         .iter()
         .enumerate()
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
-            Some(length) if valid => XmlStats {
-                hsp_len: length.length_adjustment as i32,
-                eff_space: length.eff_searchsp,
-                kappa: gapped.k,
-                lambda: gapped.lambda,
-                entropy: gapped.h,
-            },
+            Some(length) if valid => {
+                let karlin = gapped.unwrap_or(ungapped_karlin[q_idx]);
+                XmlStats {
+                    hsp_len: length.length_adjustment as i32,
+                    eff_space: length.eff_searchsp,
+                    kappa: karlin.k,
+                    lambda: karlin.lambda,
+                    entropy: karlin.h,
+                }
+            }
             _ => XmlStats::NONE,
         })
         .collect()
@@ -161,6 +173,7 @@ pub(super) fn prepare(
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     parameters: &LocalSubjectParameters,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
     query_validity: &[bool],
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
@@ -180,7 +193,7 @@ pub(super) fn prepare(
     // A matrix name that the formatting table does not know stops a run with queries before its
     // reports (`stage_e_report::xml_matrix_failure`, `render`): here only a run without a query.
     let positives = FormattingMatrix::new(matrix_name);
-    let stats = query_stats(parameters, query_validity, scoring);
+    let stats = query_stats(parameters, query_validity, scoring, ungapped_karlin);
     let has_hits = |hitlist: &KappaResultHitList| {
         hitlist
             .lists()
@@ -334,7 +347,7 @@ pub(super) fn prepare(
 
 /// The masked regions of a query in NCBI's form (`Blast_GetSeqLocInfoVector`): the SEG (and
 /// lower-case) intervals of the searched letters (half-open, not yet joined), joined where
-/// they overlap (`BlastSeqLocCombine(filter_out, 0)`, blast_filter.c:1256; adjacent intervals
+/// they overlap (`BlastSeqLocCombine` of `filter_out` with 0, blast_filter.c:1256; adjacent intervals
 /// stay apart), other than an empty one and the whole searched interval, as inclusive
 /// positions in the record (`offset` is the interval's start), frame 0.
 fn query_masks(
@@ -564,7 +577,6 @@ impl PreparedXml {
                                     hsp.s_start,
                                     hsp.s_end,
                                     &payload.edit_script,
-                                    &[],
                                     &mut qrow,
                                     &mut srow,
                                 )?;

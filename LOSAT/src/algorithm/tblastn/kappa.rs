@@ -234,6 +234,10 @@ pub(super) fn postredo_converted_stats(
     postredo_converted_stats_with_matrix(converted, query_sequence, target, ScoringMatrix::Blosum62)
 }
 
+/// The counts of a converted HSP: identities, positives, alignment length, mismatches, gap opens
+/// and gap letters.
+pub(super) type ConvertedStats = (usize, usize, usize, usize, usize, usize);
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:767-811;
 // blast_traceback.c:650-662; objtools/align_format/tabular.cpp:1003-1021:
 // identity uses aligned residues; positives use the selected scoring matrix.
@@ -242,15 +246,27 @@ pub(super) fn postredo_converted_stats_with_matrix(
     query_sequence: &[u8],
     target: &mut TargetTranslation<'_>,
     matrix: ScoringMatrix,
-) -> Result<(usize, usize, usize, usize, usize, usize)> {
+) -> Result<ConvertedStats> {
     let hsp = &converted.hsp;
     let (subject, _, subject_base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
     let subject_start = super::search_gapped::window_index(hsp.s_start, subject_base)
         .context("TBLASTN positive subject offset before translation range")?;
+    converted_stats_in_window(converted, query_sequence, subject, subject_start, matrix)
+}
+
+/// `postredo_converted_stats_with_matrix` on the subject's window `subject`, the HSP's first
+/// residue at `subject_start`.
+fn converted_stats_in_window(
+    converted: &ConvertedKappaHsp,
+    query_sequence: &[u8],
+    subject: &[u8],
+    subject_start: usize,
+    matrix: ScoringMatrix,
+) -> Result<ConvertedStats> {
     let (ident, positive, mismatch, gap_opens, gap_letters) = stats_from_edit_ops_protein(
         query_sequence,
         subject,
-        usize::try_from(hsp.q_start)?,
+        usize::try_from(converted.hsp.q_start)?,
         subject_start,
         &converted.edit_script,
         matrix,
@@ -268,6 +284,78 @@ pub(super) fn postredo_converted_stats_with_matrix(
         gap_opens,
         gap_letters,
     ))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:983-1021
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2122-2149
+// NCBI's reports count the identities and positives again on the rows' letters, whose subject
+// row is translated again from its codons (`stage_e_report::aligned_sequences`); the search's
+// translation and the rows differ only where an ambiguous codon's residues are D/N, E/Q or I/L:
+// X in the search, B, Z or J in the rows. The Seq-aligns keep the search's counts.
+/// The counts of `converted` on `report_query` (`postredo_converted_stats_with_matrix`) and its
+/// report counts (identities, mismatches) from one read of the subject's window: each subject
+/// residue that the search reads as X and the reports show as another letter
+/// (`TargetTranslation::shown_residue`) is compared as shown. The reports' positives are counted
+/// on the rows by each report (`report::row_letters::display_positives`, the XML's
+/// `FormattingMatrix`), with matrices of their own, so they are not kept here.
+pub(super) fn report_converted_stats(
+    converted: &ConvertedKappaHsp,
+    report_query: &[u8],
+    target: &mut TargetTranslation<'_>,
+    matrix: ScoringMatrix,
+) -> Result<(ConvertedStats, (usize, usize))> {
+    const X: u8 = 21;
+    let hsp = &converted.hsp;
+    // The (query, subject residue) pairs of the substitutions whose subject residue is X.
+    let mut read_as_x = Vec::new();
+    let stats = {
+        let (subject, _, base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
+        let mut si = super::search_gapped::window_index(hsp.s_start, base)
+            .context("TBLASTN positive subject offset before translation range")?;
+        let stats = converted_stats_in_window(converted, report_query, subject, si, matrix)?;
+        let end = si + usize::try_from(hsp.s_end - hsp.s_start)?;
+        if !subject
+            .get(si..end)
+            .context("TBLASTN report HSP past its translation")?
+            .contains(&X)
+        {
+            return Ok((stats, (stats.0, stats.3)));
+        }
+        let mut qi = usize::try_from(hsp.q_start)?;
+        for op in &converted.edit_script {
+            let num = op.num() as usize;
+            match op {
+                GapEditOp::Sub(_) => {
+                    for _ in 0..num {
+                        if subject[si] == X {
+                            read_as_x.push((qi, usize::try_from(base + si as isize)?));
+                        }
+                        qi += 1;
+                        si += 1;
+                    }
+                }
+                GapEditOp::Del(_) => si += num,
+                GapEditOp::Ins(_) => qi += num,
+            }
+        }
+        stats
+    };
+    let (mut ident, mut mismatches) = (stats.0, stats.3);
+    let mut buffer = Vec::new();
+    for (qi, offset) in read_as_x {
+        let shown = target.shown_residue(hsp.frame, offset, &mut buffer)?;
+        if shown == X {
+            continue;
+        }
+        let q = *report_query
+            .get(qi)
+            .context("TBLASTN report query offset overflow")?;
+        let was_ident = q == X;
+        let is_ident = q == shown;
+        ident = ident + usize::from(is_ident) - usize::from(was_ident);
+        mismatches = mismatches + usize::from(was_ident) - usize::from(is_ident);
+    }
+    Ok((stats, (ident, mismatches)))
 }
 
 /// NCBI's engine positives of an HSP of a redone match (`BlastHSP::num_positives`, which the
@@ -393,11 +481,45 @@ fn tblastn_redo_one_alignment_callback(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2389-2394
-const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
+pub(super) const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
     calc_lambda: Some(redo_calc_lambda),
     get_range: translated_subject_get_range,
     redo_one_alignment: tblastn_redo_one_alignment_callback,
 };
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:795-800
+/// The incoming alignments of a match (`s_ResultHspToDistinctAlign`): its preliminary HSPs in
+/// order, each score times the redo's scale (`localScalingFactor`, `score_divisor`), each naming
+/// its preliminary HSP. The X-drop redo (`redo_preliminary_match`) and the Smith-Waterman redo
+/// (`match_redo::SmithWatermanRedo`) start from this list.
+#[inline(always)]
+pub(super) fn incoming_alignments(
+    preliminary_hits: &[GappedHsp],
+    query_context: i32,
+    score_divisor: f64,
+) -> Option<Box<BlastCompoAlignment>> {
+    let mut incoming = None;
+    let mut tail = &mut incoming;
+    for (index, hit) in preliminary_hits.iter().enumerate() {
+        let node = blast_compo_alignment_new(
+            ((hit.score as f64) * score_divisor) as i32,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            hit.q_start,
+            hit.q_end,
+            query_context,
+            hit.s_start,
+            hit.s_end,
+            i32::from(hit.frame),
+            Some(BlastCompoAlignmentContext::PreliminaryHspIndex(index)),
+        );
+        *tail = Some(node);
+        tail = &mut tail
+            .as_mut()
+            .expect("TBLASTN incoming alignment inserted")
+            .next;
+    }
+    incoming
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3639
 #[allow(dead_code)] // The public TBLASTN path stays gated until D and E complete.
@@ -421,26 +543,7 @@ pub(super) fn redo_preliminary_match<'s>(
     if params.compo_adjust_mode == BlastCompoAdjustMode::NoCompositionBasedStats {
         bail!("TBLASTN Kappa redo requires composition mode");
     }
-    let mut incoming = None;
-    let mut tail = &mut incoming;
-    for (index, hit) in preliminary_hits.iter().enumerate() {
-        let node = blast_compo_alignment_new(
-            ((hit.score as f64) * params.score_divisor) as i32,
-            EMatrixAdjustRule::DontAdjustMatrix,
-            hit.q_start,
-            hit.q_end,
-            query_context,
-            hit.s_start,
-            hit.s_end,
-            i32::from(hit.frame),
-            Some(BlastCompoAlignmentContext::PreliminaryHspIndex(index)),
-        );
-        *tail = Some(node);
-        tail = &mut tail
-            .as_mut()
-            .expect("TBLASTN incoming alignment inserted")
-            .next;
-    }
+    let incoming = incoming_alignments(preliminary_hits, query_context, params.score_divisor);
     let matching_seq =
         BlastCompoMatchingSequence::new_translated(0, subject_nt.into(), genetic_code_id)?;
     let context = TblastnRedoContext {

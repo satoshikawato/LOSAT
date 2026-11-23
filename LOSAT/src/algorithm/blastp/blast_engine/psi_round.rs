@@ -558,7 +558,7 @@ fn run_queries(
 /// the factory keeps its local query data, so every round's setup works on the same sequence
 /// block: the hard masks of a round (`BlastSetUp_MaskQuery`, not with `-soft_masking true`)
 /// write X over the letters that the next round filters again, the lower-case mask is taken
-/// out of the block by round 1's filtering (`seqloc_array[context] = NULL`), and the unmasked
+/// out of the block by round 1's filtering (`seqloc_array[context]` set to NULL), and the unmasked
 /// copy that the identities read is made again only by a round that masks letters. A query that
 /// NCBI splits into chunks is the exception: its block is made again from the record in every
 /// round (`RoundQuery::split`).
@@ -703,7 +703,7 @@ fn later_round_report_contexts<'a>(
     std::borrow::Cow::Owned(contexts)
 }
 
-/// `out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl` for every report that is not
+/// `NcbiEndl`, "Search has CONVERGED!" and `NcbiEndl` written to `out_stream` for every report that is not
 /// structured (psiblast's outfmt 0, 6, 7, 10 and 20).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
@@ -784,6 +784,7 @@ fn write_round_epilogs(
             gapped_karlin: crate::stats::lookup_protein_params(&args.scoring),
             gumbel: None,
             gapped: true,
+            show_linked_set_size: false,
             num_descriptions: args.num_descriptions,
             num_alignments: args.num_alignments,
         };

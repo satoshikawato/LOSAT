@@ -279,7 +279,7 @@ fn list_of(text: &[u8], negative: bool) -> SeqidList {
     }
 }
 
-/// The Seq-id strings (`GetSeqIdString(true)`) of the definition lines the restricted
+/// The Seq-id strings (`GetSeqIdString` with true) of the definition lines the restricted
 /// database keeps, per ordinal id.
 fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
     (0..db.num_seqs())
@@ -929,4 +929,22 @@ fn a_meta_page_that_cannot_be_read_gives_mdb_env_opens_text() {
         lmdb_open_error(&file, ReadError::Format("LMDB: x (MDB_INVALID)".into())),
         SeqDbError::NotFound(_)
     ));
+}
+
+#[test]
+fn ordinals_in_names_the_ordinals_of_an_oid_range() {
+    let included = [0u32, 3, 4, 9, 64, 65, 130];
+    let filter = filter_of(140, &included);
+    let map = OidMap(Some(&filter));
+    for from in 0..=140 {
+        for to in 0..=140 {
+            let ordinals = map.ordinals_in(from, to);
+            let expected: Vec<u32> = (0..included.len() as u32)
+                .filter(|&ordinal| (from..to).contains(&included[ordinal as usize]))
+                .collect();
+            assert_eq!(ordinals.collect::<Vec<_>>(), expected, "{from}..{to}");
+        }
+    }
+    assert_eq!(OidMap::unrestricted().ordinals_in(3, 7), 3..7);
+    assert_eq!(OidMap::unrestricted().ordinals_in(7, 3), 7..7);
 }

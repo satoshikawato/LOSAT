@@ -39,23 +39,23 @@
 //!   bucket's chain only (the cell of the same diagonal, a stale cell it takes over, both found
 //!   by walking this chain, or the cell it appends and links at this bucket's head; a take-over
 //!   keeps the cell in its bucket, since the walk visits only this bucket). The clear when the
-//!   offset reaches `INT4_MAX / 4` empties every chain and resets every bound to `i32::MIN`;
+//!   offset reaches `INT4_MAX` divided by 4 empties every chain and resets every bound to `i32::MIN`;
 //!   moving the offset between subjects writes no level; the cells the chain grows by are not
 //!   linked; `copy_hash` copies the bounds with the chains. The bound never decreases between
 //!   clears, so it stays an upper bound when a cell's level is lowered.
 //! - (ii) When `max_level[b] < bound`, a cell that the walk would return has a level
-//!   `L <= max_level[b] < bound`, and it makes the decisions of no cell (`last_hit = 0`,
-//!   `hit_saved = 0`):
+//!   `L <= max_level[b] < bound`, and it makes the decisions of no cell (`last_hit` and
+//!   `hit_saved` both 0):
 //!   - the `last_hit` test: `L < s_off_pos + 1`, so `s_off_pos < L` is false; with no cell
 //!     `s_off_pos < 0` is false (`s_off_pos >= 0`; positions beyond `i32::MAX`, where the
 //!     decisions' `as i32` would wrap, get no bound);
-//!   - with two hits, the window test `hit_saved || s_end_pos > last_hit + window_size`, where
-//!     `s_end_pos = s_off_pos + word_length` at this point: `L < s_end_pos - window_size`
-//!     makes it true whatever `hit_saved` says, and with no cell it is true because
-//!     `s_end_pos > window_size` (the hash offset starts at `window_size` and only grows or
-//!     returns to it, so `s_off_pos >= window_size`; positions where that fails get no
-//!     bound); with one hit (`window_size == 0`) the test is false either way and the
-//!     `check_masks` branch runs;
+//!   - with two hits, the window test (`hit_saved` set, or `s_end_pos` past `last_hit` plus
+//!     `window_size`), where `s_end_pos` is `s_off_pos` plus `word_length` at this point: a level
+//!     `L` below `s_end_pos` minus `window_size` makes it true whatever `hit_saved` says, and with
+//!     no cell it is true because `s_end_pos > window_size` (the hash offset starts at
+//!     `window_size` and only grows or returns to it, so `s_off_pos >= window_size`; positions
+//!     where that fails get no bound); with one hit (`window_size == 0`) the test is false either
+//!     way and the `check_masks` branch runs;
 //!   - nothing else reads what the retrieve returns: `s_l` (`hit_len`) is never read, and
 //!     `last_hit` and `hit_saved` only by these two tests (na_ungapped.c:839, 841; the
 //!     off-diagonal block at 853-886 makes retrieves of its own).
@@ -279,7 +279,7 @@ impl LvSeeds {
         }
     }
 
-    /// The level bound of a seed at `s_off_pos` (`s_off + hash_table->offset`): a cell whose
+    /// The level bound of a seed at `s_off_pos` (`s_off` plus `hash_table->offset`): a cell whose
     /// level lies below it makes the decisions of no cell (module comment, (ii)). In `lo..=hi`
     /// it lies in `1..=i32::MAX` (`s_off_pos + 1 <= i32::MAX`; with two hits and `add < 1`,
     /// `s_off_pos + word_length - window_size >= 1` because `s_end_pos > window_size`).

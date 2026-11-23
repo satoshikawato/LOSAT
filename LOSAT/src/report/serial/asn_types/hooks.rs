@@ -1,11 +1,13 @@
-//! What NCBI's hand-written classes do when the text reader has read one of them (their
+//! What NCBI's hand-written classes do when the reader has read one of them (their
 //! `PostRead`), for the classes of the table whose `PostRead` changes the object or stops the
 //! reader (SURVEY_D3 §2.4 of line RG series F: `CSeq_descr`, `CVariation_ref`; the others keep
 //! caches only), and the Seq-id, which LOSAT keeps in its one Seq-id model (`seqid::model`).
 
-use super::read::{Frame, Post, ReadError};
+use super::read::{Frame, Post};
 use super::table::named;
 use super::{member_index, Value};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::asn_input::{Fail, R, VECTOR_RESERVE_LENGTH_ERROR};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -13,12 +15,12 @@ use crate::seqid::model::{
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527
 // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_seg.hpp:181-182 (the hook is global:
-// `NCBISER_HAVE_GLOBAL_READ_MEMBER_HOOK(CDense_seg, "starts,lens,strands", ...)`)
+// `NCBISER_HAVE_GLOBAL_READ_MEMBER_HOOK` for `CDense_seg` and "starts,lens,strands")
 // `numseg` and `dim` are `int` (Dense_seg_.hpp:92-93), so a negative one is a huge `size_t`, and the
-// product wraps. `reserve` throws `std::length_error("vector::reserve")` above `max_size()`:
+// product wraps. `reserve` throws a `std::length_error` ("vector::reserve") above `max_size()`:
 // PTRDIFF_MAX / 4 = 2^61 - 1 for the 4-byte elements of `starts` and `lens` (NCBI 2.17.0 probes
 // p5: dim 2^30 x numseg 2^31-1 reads on, dim 2^30+1 stops), PTRDIFF_MAX = 2^63 - 1 for the 1-byte
-// `ENa_strand`s of `strands` (Na_strand_.hpp:56, `NCBI_PACKED_ENUM_TYPE(unsigned char)`; the
+// `ENa_strand`s of `strands` (Na_strand_.hpp:56, `NCBI_PACKED_ENUM_TYPE` of `unsigned char`; the
 // mandatory `starts`, reserved first with the same product, stops a larger one before it), which
 // no frame catches (they catch
 // `CException`s): `CATCH_ALL`'s `std::exception` clause reports it, exit status 255. A smaller
@@ -28,11 +30,7 @@ use crate::seqid::model::{
 // here; SeqTable-multi-data's is a variant hook (`pre_read_variant`).
 /// The hook of NCBI's class `ty` before the value of its member at position `member` is read,
 /// with the members `read` so far.
-pub(super) fn pre_read_member(
-    ty: u16,
-    member: usize,
-    read: &[(u16, Value)],
-) -> Result<(), ReadError> {
+pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> R<()> {
     if ty != named::DENSE_SEG {
         return Ok(());
     }
@@ -55,27 +53,28 @@ pub(super) fn pre_read_member(
         _ => return Ok(()),
     };
     if size > max_size {
-        return Err(ReadError::Std("vector::reserve"));
+        return Err(Fail::Std(&VECTOR_RESERVE_LENGTH_ERROR));
     }
     Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:703-765
 // NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_multi_data.hpp:231-232 (the hook
-// is global: `NCBISER_HAVE_GLOBAL_READ_VARIANT_HOOK(CSeqTable_multi_data, "*", ...)`)
+// is global: `NCBISER_HAVE_GLOBAL_READ_VARIANT_HOOK` for `CSeqTable_multi_data` and "*")
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1906-1923
 // The hook runs when the variant has been named, its frame on top of the stack: the multi-data's
 // own choice frame is depth 0, a column's `data` finds its Seq-table at depth 2, an `int-delta`
 // nested 1 to 3 times at 3 to 5, 4 times not (no reserve), an `int-scaled`'s data at 4 (NCBI
 // BLAST+ 2.17.0, line RG D3-1 `om/` cases t62-t65). `num-rows` is an `int` (Seq_table_.hpp): a
 // negative one is a `size_t` above every `max_size()`, and `reserve` throws
-// `std::length_error("vector::reserve")`, which no frame catches (`CATCH_ALL`'s `std::exception`
-// clause, exit status 255: t50, t66, t69); `bit`'s `(size+7)/8` wraps below that size, and any
-// other size is at most 2^31-1 elements, whose `bad_alloc` the hook ignores (LOSAT allocates
-// nothing). (`OBJECTS_SEQ_TABLE_RESERVE` is NCBI's default, true: LOSAT reads no NCBI parameter.)
+// a `std::length_error` ("vector::reserve"), which no frame catches (`CATCH_ALL`'s
+// `std::exception` clause, exit status 255: t50, t66, t69); `bit`'s byte count (the sum of `size`
+// and 7, divided by 8) wraps below that size, and any other size is at most 2^31-1 elements, whose
+// `bad_alloc` the hook ignores (LOSAT allocates nothing). (`OBJECTS_SEQ_TABLE_RESERVE` is NCBI's
+// default, true: LOSAT reads no NCBI parameter.)
 /// The hook of the CHOICE `ty` before the value of its variant at position `variant` is read,
 /// with the reader's frames (the variant's on top).
-pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Result<(), ReadError> {
+pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> R<()> {
     if ty != named::SEQTABLE_MULTI_DATA {
         return Ok(());
     }
@@ -104,7 +103,7 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Res
         }
         if depth >= 2 && frame.ty() == Some(named::SEQ_TABLE) {
             if frame.num_rows().is_some_and(|rows| rows < 0) {
-                return Err(ReadError::Std("vector::reserve"));
+                return Err(Fail::Std(&VECTOR_RESERVE_LENGTH_ERROR));
             }
             return Ok(());
         }
@@ -117,7 +116,7 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Res
 }
 
 /// The hook of the type `ty` after its value was read (not after a skip).
-pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<Value, ReadError> {
+pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> R<Value> {
     match ty {
         named::SEQ_DESCR => seq_descr_post_read(value),
         named::VARIATION_REF => Ok(variation_ref_post_read(value, posts)),
@@ -130,14 +129,24 @@ pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<
 // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless NCBI's environment or configuration file sets
 // it, which LOSAT does not read; NCBI 2.17.0 gives the error with the variable set too, c23 of
 // SURVEY_D3.)
-fn seq_descr_post_read(value: Value) -> Result<Value, ReadError> {
+fn seq_descr_post_read(value: Value) -> R<Value> {
     match &value {
-        Value::List(items) if items.is_empty() => {
-            Err(ReadError::Serial("empty Seq-descr is not allowed".into()))
-        }
+        Value::List(items) if items.is_empty() => Err(Fail::serial(NcbiException::new(
+            SEQ_DESCR_POST_READ,
+            "empty Seq-descr is not allowed",
+        ))),
         _ => Ok(value),
     }
 }
+
+/// `NCBI_THROW` of `CSeq_descr::PostRead` (its message has no stream position; NCBI's callers of
+/// the PSSM reader print their own line for a `CSerialException`, so the site is never printed).
+const SEQ_DESCR_POST_READ: ThrowSite = ThrowSite {
+    file: "src/objects/seq/Seq_descr.cpp",
+    line: 65,
+    kind: "CSerialException::eInvalidData",
+    function: None,
+};
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Variation_ref.cpp:56-151
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/VariantProperties.cpp:50-55

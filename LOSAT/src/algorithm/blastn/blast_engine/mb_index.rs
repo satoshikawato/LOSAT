@@ -10,39 +10,77 @@
 //! loads, the first volume's header does not read, or the word size is below the index's, it
 //! warns that the index will not be used and searches as without `-use_index` (it installs the
 //! indexed search only while `-use_index` still holds), which LOSAT does with NCBI's bytes. When
-//! an index loads, NCBI searches with it, which LOSAT refuses (line RG item D5b;
-//! [`MegablastIndex::check`]), and LOSAT refuses the index files whose reading NCBI leaves
+//! an index loads, NCBI searches with it, as LOSAT does (`mb_index_seeds`, line RG items D5b-2
+//! and D5b-3: also an index of only some database volumes, whose other volumes the search scans,
+//! and the two-hit search; with `-db_hard_mask` the seeds placed into the hard ranges, item D5b-5,
+//! the Owner's answer C to Q-HARDIDX), and LOSAT refuses the index files whose reading NCBI leaves
 //! undefined or crashes on.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
 
 use super::database::BlastnDatabase;
 use crate::algorithm::blastn::args::BlastnArgs;
 use crate::dbindex::format::{volume_name, Header, SuperHeader, VolumeOids};
+use crate::dbindex::search::{IndexedVolume, LoadedIndex};
+use crate::dbindex::volume::IndexVolume;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::diag_log::{ERROR, WARNING};
 
 /// What `-use_index true` gives the search (`megablast_index`).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(super) enum MegablastIndex {
     /// NCBI searches without an index: it was not asked for, or none was used (after NCBI's
     /// warning).
     NotUsed,
-    /// NCBI searches with an index, or reads one in a way that leaves its result undefined:
-    /// LOSAT's refusal, the text after `-use_index true with `.
+    /// NCBI searches with an index that LOSAT does not search with, or reads one in a way that
+    /// leaves its result undefined: LOSAT's refusal, the text after `-use_index true with `.
     Refused(String),
+    /// NCBI searches with this index (`GetMBIndexLoaded`).
+    Used(Arc<LoadedIndex>),
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2632 (cited at
+// `report::archive::options::algorithm_options`)
+/// The program options of a search with an index: `CMbIndexArgs` set `ForceMbIndex` TRUE, which
+/// stays when the index loads (the archive and the search strategy record FALSE for an index
+/// that does not load, `algorithm_options`); set in the run's options handle, which the archive
+/// and the search strategy share, before the batches.
+pub(super) fn note_index_use(
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+) -> Result<()> {
+    let options = match (archive, strategy) {
+        (Some(handle), _) => handle.options(),
+        (None, Some(strategy)) => strategy.options(),
+        (None, None) => return Ok(()),
+    };
+    options.set_search_sets(
+        vec![crate::report::archive::options::Param {
+            name: "ForceMbIndex",
+            value: crate::report::archive::options::ParamValue::Boolean(true),
+        }],
+        Vec::new(),
+    )
+}
+
+/// LOSAT's refusal `-use_index true with {what}`.
+pub(super) fn refusal(what: &str) -> anyhow::Error {
+    anyhow::anyhow!("-use_index true with {what} is not supported by LOSAT's BLASTN")
 }
 
 impl MegablastIndex {
-    /// LOSAT's refusal of a search that NCBI runs with a MegaBLAST database index.
-    pub(super) fn check(&self) -> Result<()> {
+    /// The index that the search uses, or LOSAT's refusal of a search that NCBI runs with an
+    /// index LOSAT does not search with (the loader's refusals). With `-db_hard_mask` the search
+    /// places the index's seeds into the hard ranges (`mb_index_seeds::HardSeeds`; item D5b-5,
+    /// the Owner's answer C to Q-HARDIDX).
+    pub(super) fn check(&self) -> Result<Option<Arc<LoadedIndex>>> {
         match self {
-            Self::NotUsed => Ok(()),
-            Self::Refused(what) => {
-                anyhow::bail!("-use_index true with {what} is not supported by LOSAT's BLASTN")
-            }
+            Self::NotUsed => Ok(None),
+            Self::Refused(what) => Err(refusal(what)),
+            Self::Used(index) => Ok(Some(Arc::clone(index))),
         }
     }
 }
@@ -50,7 +88,7 @@ impl MegablastIndex {
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:216-221
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:429-463
 /// `-use_index true` of a megablast search of `-db` (`BlastnArgs::megablast_index_name`): NCBI's
-/// loader, its error lines (`ERR_POST(Error ...)`) and its warning when it uses no index, each
+/// loader, its error lines (`ERR_POST` at the error level) and its warning when it uses no index, each
 /// one diagnostic (the archive saves each as one message, the warnings with code 1 and the error
 /// lines with code 2). With a template (`-template_type` and `-template_length`, which require
 /// each other) NCBI looks for no index.
@@ -74,9 +112,13 @@ pub(super) fn megablast_index(
         let result = loader.db_index_init(index_name, old_style, word_size);
         (loader.posts, result)
     };
-    let text = match result {
-        Init::NotUsed(text) => text,
-        Init::Used(what) => return Ok(MegablastIndex::Refused(what)),
+    let index = match result {
+        Init::NotUsed(text) => Err(text),
+        Init::Used(loaded) => match loaded.into_index() {
+            Ok(index) => Ok(index),
+            Err(what) => return Ok(MegablastIndex::Refused(what)),
+        },
+        Init::Refused(what) => return Ok(MegablastIndex::Refused(what)),
     };
     for post in posts {
         let mut error = |text: &[u8]| {
@@ -92,7 +134,12 @@ pub(super) fn megablast_index(
             }
         }
     }
-    // `ERR_POST_EX(1, 1, Warning << errstr << " Database index will not be used.")`.
+    let text = match index {
+        Ok(index) => return Ok(MegablastIndex::Used(Arc::new(index))),
+        Err(text) => text,
+    };
+    // The warning that `ERR_POST_EX` posts (code 1, subcode 1): `errstr`, then
+    // " Database index will not be used.".
     let warning = [
         b"Warning: (1.1) [blastn] ".as_slice(),
         &text,
@@ -122,9 +169,10 @@ fn write_post(
 enum Init {
     /// NCBI's text of why no index is used (`errstr`, NCBI's words).
     NotUsed(Vec<u8>),
-    /// NCBI searches with an index (or its reading is undefined, or it crashes): LOSAT's
-    /// refusal.
-    Used(String),
+    /// NCBI searches with this index.
+    Used(Loaded),
+    /// NCBI's reading of the index is undefined, or it crashes: LOSAT's refusal.
+    Refused(String),
 }
 
 /// NCBI's error lines (without `Error: [blastn] `).
@@ -149,9 +197,61 @@ enum Failed {
     Refused(String),
 }
 
-/// What a loader found: the index volume whose header `s_CheckMinWordSize` reads.
+/// What a loader found: the index volume whose header `s_CheckMinWordSize` reads, and the
+/// volumes (`volumes_` of `CIndexedDb_New`: each index volume of an indexed database volume
+/// with its number of sequences, or the path and the sequences of a database volume without an
+/// index; the index volumes of `CIndexedDb_Old`, whose numbers of sequences their headers give).
 struct Loaded {
     first: String,
+    old_style: bool,
+    volumes: Vec<Entry>,
+}
+
+/// One of `volumes_`: a path, whether it is an index volume, and its number of sequences (of
+/// a new-style volume; an old-style one's is read from its header).
+struct Entry {
+    path: String,
+    has_index: bool,
+    n_oids: u32,
+}
+
+impl Loaded {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:812-857
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1036-1066
+    /// The index the search uses: its volumes with their first OIDs (`GetNextUnusedOID`; an
+    /// old-style one's `seqmap_`, of the span from `StartSeq()` to `StopSeq()` of each header),
+    /// each index volume read as the search reads it (`CDbIndex::Load`, which NCBI runs when the
+    /// search reaches the volume), each database volume without an index kept for the scan (a
+    /// mixed search). `Err`: LOSAT's refusal of a volume that does not read as an index.
+    fn into_index(self) -> Result<LoadedIndex, String> {
+        let mut volumes: Vec<IndexedVolume> = Vec::with_capacity(self.volumes.len());
+        let mut next_oid: u32 = 0;
+        for entry in self.volumes {
+            let n_oids = if !entry.has_index {
+                entry.n_oids
+            } else {
+                let volume = IndexVolume::open(Path::new(&entry.path)).map_err(|why| {
+                    format!(
+                        "a MegaBLAST index volume that LOSAT does not read ({}: {why})",
+                        entry.path
+                    )
+                })?;
+                if self.old_style {
+                    volume.stop.wrapping_sub(volume.start)
+                } else {
+                    entry.n_oids
+                }
+            };
+            volumes.push(IndexedVolume {
+                path: entry.path,
+                start_oid: next_oid,
+                n_oids,
+                has_index: entry.has_index,
+            });
+            next_oid = next_oid.wrapping_add(n_oids);
+        }
+        Ok(LoadedIndex::new(self.old_style, volumes))
+    }
 }
 
 /// The place of NCBI's `CDbIndex_Exception` throws of `eBadOption` in `blast_dbindex.cpp`.
@@ -186,7 +286,7 @@ impl Loader<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1122-1171
-    /// `DbIndexInit(indexname, old_style, partial, word_size)`: the new style (unless
+    /// `DbIndexInit` of `indexname`, `old_style`, `partial` and `word_size`: the new style (unless
     /// `-index_name` asks for the old one), then the old style after a failure, whose
     /// exceptions' texts join with a line feed; a loaded index gets the word size check, whose
     /// text replaces any earlier one.
@@ -194,13 +294,13 @@ impl Loader<'_> {
         let mut result = Vec::new();
         if !old_style {
             match self.new_style(indexname) {
-                Ok(loaded) => return self.check_min_word_size(&loaded, word_size),
+                Ok(loaded) => return self.check_min_word_size(loaded, word_size),
                 Err(Failed::Ncbi(e)) => result = e.ncbi_what(),
-                Err(Failed::Refused(what)) => return Init::Used(what),
+                Err(Failed::Refused(what)) => return Init::Refused(what),
             }
         }
         match self.old_style(indexname) {
-            Ok(loaded) => self.check_min_word_size(&loaded, word_size),
+            Ok(loaded) => self.check_min_word_size(loaded, word_size),
             Err(Failed::Ncbi(e)) => {
                 result.push(b'\n');
                 result.extend_from_slice(&e.ncbi_what());
@@ -208,13 +308,13 @@ impl Loader<'_> {
                 // index will not be used.".
                 Init::NotUsed(result)
             }
-            Err(Failed::Refused(what)) => Init::Used(what),
+            Err(Failed::Refused(what)) => Init::Refused(what),
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:753-803
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:631-651
-    /// `CIndexedDb_New(indexname, partial)`: the database of the `-db` value (its names split
+    /// `CIndexedDb_New` of `indexname` and `partial`: the database of the `-db` value (its names split
     /// at single spaces and joined again by `SeqDB_CombineAndQuote`, which drops only leading
     /// spaces that `CSeqDB` ignores anyway), its volumes in `FindVolumePaths` order, each with
     /// `AddIndexInfo`; an exception when no volume has an index, or the database reader's when
@@ -232,11 +332,11 @@ impl Loader<'_> {
             })?;
         // `volumes_`: each index volume of an indexed database volume, or the database
         // volume's own path for one without an index.
-        let mut entries: Vec<(String, bool)> = Vec::new();
+        let mut entries: Vec<Entry> = Vec::new();
         for (vol_name, dbnseq) in &volumes {
             self.add_index_info(vol_name, *dbnseq, &mut entries)?;
         }
-        if !entries.iter().any(|(_, has_index)| *has_index) {
+        if !entries.iter().any(|entry| entry.has_index) {
             return Err(Failed::Ncbi(NcbiException::new(
                 NO_VOLUME_INDEX,
                 "no database volume has an index",
@@ -246,12 +346,14 @@ impl Loader<'_> {
         // first database volume without an index, which does not read as an index header
         // ("Failed to read ...": no index is used, Q-FIRSTVOL).
         Ok(Loaded {
-            first: entries.swap_remove(0).0,
+            first: entries[0].path.clone(),
+            old_style: false,
+            volumes: entries,
         })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:664-750
-    /// `AddIndexInfo(vol_name, partial)` of the database volume `vol_name` of `dbnseq`
+    /// `AddIndexInfo` (with `partial`) of the database volume `vol_name` of `dbnseq`
     /// sequences: its index volumes into `entries` when its index is used, else the volume
     /// itself after NCBI's error lines (a missing or unreadable super header is posted at the
     /// level `Info`, which is not shown). A volume without sequences whose super header lists
@@ -260,23 +362,31 @@ impl Loader<'_> {
         &mut self,
         vol_name: &str,
         dbnseq: u32,
-        entries: &mut Vec<(String, bool)>,
+        entries: &mut Vec<Entry>,
     ) -> Result<(), Failed> {
         let resolved = self.resolve_volume_index(vol_name, dbnseq)?;
         match resolved {
-            Some(names) => entries.extend(names.into_iter().map(|name| (name, true))),
-            None => entries.push((vol_name.to_string(), false)),
+            Some(names) => entries.extend(names.into_iter().map(|(path, n_oids)| Entry {
+                path,
+                has_index: true,
+                n_oids,
+            })),
+            None => entries.push(Entry {
+                path: vol_name.to_string(),
+                has_index: false,
+                n_oids: dbnseq,
+            }),
         }
         Ok(())
     }
 
-    /// `AddIndexInfo`'s checks of the index of `vol_name`: its index volumes, or `None` (not
-    /// resolved) after the error line of the check that failed.
+    /// `AddIndexInfo`'s checks of the index of `vol_name`: its index volumes with their numbers
+    /// of sequences, or `None` (not resolved) after the error line of the check that failed.
     fn resolve_volume_index(
         &mut self,
         vol_name: &str,
         dbnseq: u32,
-    ) -> Result<Option<Vec<String>>, Failed> {
+    ) -> Result<Option<Vec<(String, u32)>>, Failed> {
         let Some(shdr) = SuperHeader::load(Path::new(&format!("{vol_name}.shd"))) else {
             return Ok(None);
         };
@@ -317,7 +427,7 @@ impl Loader<'_> {
                 ));
                 return Ok(None);
             }
-            names.push(name);
+            names.push((name, idxvol_oids));
             total_idxvol_oids += u64::from(idxvol_oids);
         }
         if u64::from(dbnseq) != total_idxvol_oids {
@@ -332,7 +442,7 @@ impl Loader<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:944-1028
-    /// `CIndexedDb_Old(indexnames)`: the names (separated by runs of spaces) in
+    /// `CIndexedDb_Old` of `indexnames`: the names (separated by runs of spaces) in
     /// `SeqDB_CompareVolume` order, each `base[,ignored[,first[,last]]]` (volumes 0 to 99 by
     /// default, `atoi` of the numbers), the volumes `<base>.NN.idx` found on the search path
     /// (`SeqDB_ResolveDbPath`), an error line for each volume missing between two found ones;
@@ -349,9 +459,10 @@ impl Loader<'_> {
                 if start_vol > stop_vol {
                     continue;
                 }
-                // `for (long i = start_vol; (unsigned long)i <= stop_vol; ++i)`: a last volume
-                // of `ULONG_MAX`, or one past `LONG_MAX` after a first one below it, never ends
-                // the loop (the `long` overflows).
+                // NCBI's loop counts `i` (a `long`) up by one from `start_vol` while `i` cast to
+                // `unsigned long` is at most `stop_vol`: a last volume of `ULONG_MAX`, or one
+                // past `LONG_MAX` after a first one below it, never ends the loop (the `long`
+                // overflows).
                 if stop_vol == u64::MAX
                     || (stop_vol > i64::MAX as u64 && start_vol <= i64::MAX as u64)
                 {
@@ -381,8 +492,19 @@ impl Loader<'_> {
                 }
             }
         }
-        match index_names.into_iter().next() {
-            Some(first) => Ok(Loaded { first }),
+        match index_names.first() {
+            Some(first) => Ok(Loaded {
+                first: first.clone(),
+                old_style: true,
+                volumes: index_names
+                    .into_iter()
+                    .map(|path| Entry {
+                        path,
+                        has_index: true,
+                        n_oids: 0,
+                    })
+                    .collect(),
+            }),
             None => Err(Failed::Ncbi(NcbiException::new(
                 NO_INDEX_FILE,
                 format!("no index file specified or index '{indexnames}*' not found."),
@@ -393,19 +515,19 @@ impl Loader<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1098-1120
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:453-457
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:200-204
-    /// `s_CheckMinWordSize(word_size)` of a loaded index: the minimum of the index volume
+    /// `s_CheckMinWordSize` of `word_size` on a loaded index: the minimum of the index volume
     /// `loaded.first`. A word size below it resets the index, and a header that does not read
     /// gives NCBI's "Failed to read" text with the index still loaded; after either text NCBI
     /// clears `-use_index` and so never installs the indexed search. An empty volume crashes
     /// NCBI's reading.
-    fn check_min_word_size(&self, loaded: &Loaded, word_size: usize) -> Init {
+    fn check_min_word_size(&self, loaded: Loaded, word_size: usize) -> Init {
         let min_ws = match min_index_word_size(Path::new(&loaded.first)) {
             MinWordSize::Read(min_ws) => min_ws,
             MinWordSize::Unreadable => {
                 return Init::NotUsed(b"Failed to read index MegaBLAST db min word size.".to_vec())
             }
             MinWordSize::Empty => {
-                return Init::Used(format!(
+                return Init::Refused(format!(
                     "an empty MegaBLAST index volume ({})",
                     loaded.first
                 ))
@@ -417,7 +539,7 @@ impl Loader<'_> {
                     .into_bytes(),
             );
         }
-        Init::Used(format!("a MegaBLAST database index ({})", loaded.first))
+        Init::Used(loaded)
     }
 }
 
@@ -433,7 +555,7 @@ enum MinWordSize {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:906-942
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5747-5771
-/// `s_GetMinimumSupportedWordSizeByIndex(fname)`: the header of the file `fname` as `CMemoryFile`
+/// `s_GetMinimumSupportedWordSizeByIndex` of `fname`: the header of the file `fname` as `CMemoryFile`
 /// maps it. The mapping throws for a path that is not a regular file (after links) or does not
 /// open, maps an empty file as nothing, and reads zeros past the end of a file shorter than the
 /// header; the header check throws for a word size field over 15. The path is examined before it

@@ -24,9 +24,12 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask` and `-gi_mask_name`
-//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
-//! files of the metadata file (`metadata::metadata_user_path`).
+//! `-parse_seqids`. With `-gi_mask` (and `-gi_mask_name`) the masks go instead to the GI-indexed
+//! files of each algorithm (`gi_mask`), and the database gets an alias file that names them.
+//! `losat makeblastdb` refuses no option of makeblastdb 2.17.0 by name today (no row of
+//! `ncbi_app::args::refusal`); `-oid_masks` writes the OID mask files (`oid_list`);
+//! `-metadata_output_prefix` names the files of the metadata file
+//! (`metadata::metadata_user_path`).
 //!
 //! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each
 //! sequence in the form of the sequence file with its definition lines (and their PIG), the
@@ -44,6 +47,7 @@ pub(crate) mod dir_entry;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
+pub(crate) mod gi_mask;
 pub mod header;
 pub(crate) mod id_set;
 pub(crate) mod isam;
@@ -106,9 +110,9 @@ pub enum WriteDbError {
     /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a
     /// build that would otherwise succeed; a mask column created after the first volume): "losat
     /// makeblastdb: " and the message, exit status 1, like `MakedbError::Unsupported`. Both end
-    /// the build as an error of NCBI's build at that point does (`EndBuild(true)`: its files are
-    /// removed); a registration after the first volume (makeblastdb registers every algorithm
-    /// before the input) is refused before anything changes and leaves the build open.
+    /// the build as an error of NCBI's build at that point does (`EndBuild` with `erase` true: its
+    /// files are removed); a registration after the first volume (makeblastdb registers every
+    /// algorithm before the input) is refused before anything changes and leaves the build open.
     Unsupported(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
@@ -156,7 +160,7 @@ impl WriteDbError {
             WriteDbError::Exception(e) => text("Error: ", &e.what()),
             WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
             WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
-            WriteDbError::OutOfMemory => b"BLAST ran out of memory".to_vec(),
+            WriteDbError::OutOfMemory => crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),
             WriteDbError::Io { path, source } => [
                 b"Error: ".as_slice(),
                 &crate::utils::os_bytes::path_bytes(path),

@@ -627,6 +627,86 @@ fn residues_are_read_as_ncbis_reader_reads_them() {
     }
 }
 
+// The hit records that the library API and the Web adapter hand out show the query row's masks
+// (`-lcase_masking`) in lower case, as outfmt 0 writes the row (`report::query_row_masks`,
+// `x_OutputSeq`), in each frame of the query; the subject rows show none. The rows are those that
+// the release before T4a1 (1ede53b7b) shows in outfmt 0 for the same search: a minus frame's mask
+// shows one residue less (`query_dna_masks`).
+#[test]
+fn hit_records_keep_the_query_masks_in_lower_case() {
+    let nucleotides =
+        "ATGAAAACCGCTTACATCGCTAAACAGCGTCAGATCTCTTTCGTTAAATCTCACTTCTCTCGTCAGCTGGAAGAACGTCTGG\
+        GTCTGATCGAAGTTCAGGCTCCGATCCTGTCTCGTGTT";
+    // Nucleotides 31 to 48 in lower case.
+    let masked: Vec<u8> = nucleotides
+        .bytes()
+        .enumerate()
+        .map(|(index, letter)| {
+            if (30..48).contains(&index) {
+                letter.to_ascii_lowercase()
+            } else {
+                letter
+            }
+        })
+        .collect();
+    let query = TempFasta::new("tblastx_lcase_query.fna", &[("q1", &masked)]);
+    let subject = TempFasta::new(
+        "tblastx_lcase_subject.fna",
+        &[("s1", nucleotides.as_bytes())],
+    );
+    let argv = [
+        "losat",
+        "tblastx",
+        "-query",
+        "q",
+        "-subject",
+        "s",
+        "-lcase_masking",
+        "-seg",
+        "no",
+    ];
+    let cli: Cli = try_parse_from(argv).expect("tblastx argv");
+    let args = match cli.command {
+        Commands::Tblastx(args) => args,
+        _ => unreachable!("tblastx subcommand"),
+    };
+    let (queries, subjects) = (queries(&query.0), subjects(&subject.0));
+    let run = run_formats(&["0"], true, |outputs| {
+        run_local_tblastx(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            outputs,
+        )
+    });
+    let report = String::from_utf8(run.outputs[0].clone()).expect("UTF-8 report");
+    for (frame, shown) in [
+        (1, "MKTAYIAKQRqisfvkSHFSRQLEERLGLIEVQAPILSRV"),
+        (2, "*KPLTSLNSvrslslnLTSLVSWKNVWV*SKFRLRSCLV"),
+        (3, "ENRLHR*TAsdlfr*iSLLSSAGRTSGSDRSSGSDPVSC"),
+        (-1, "NTRQDRSLNFDQTQTFFQLTREVRfnerdLTLFSDVSGFH"),
+        (-2, "TRDRIGA*TSIRPRRSSS*REK*dltkei*RCLAM*AVF"),
+        (-3, "HETGSEPELRSDPDVLPADERSEi*rkrsDAV*RCKRFS"),
+    ] {
+        let hit = run
+            .hits
+            .iter()
+            .find(|hit| {
+                (hit.query_frame, hit.subject_frame) == (Some(frame), Some(frame))
+                    && hit.hit.length == shown.len()
+            })
+            .unwrap_or_else(|| panic!("the HSP of frame {frame}"));
+        assert_eq!(hit.query_seq.as_deref(), Some(shown), "frame {frame}");
+        assert_eq!(
+            hit.subject_seq.as_deref(),
+            Some(shown.to_ascii_uppercase().as_str()),
+            "frame {frame}"
+        );
+        assert!(report.contains(shown), "frame {frame}: {report}");
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1951-1957, 1975-1991
 // (`-strand` of a nucleotide query: `both`, `plus` or `minus`)
 // The command line checks `-strand` at parsing; `run_local` takes the arguments as a struct, so it

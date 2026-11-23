@@ -31,10 +31,11 @@ pub(crate) struct SuperHeader {
 const SUPER_HEADER_SIZE: u64 = 16;
 
 impl SuperHeader {
-    /// `CIndexSuperHeader<INDEX_FORMAT_VERSION_1>::Save(fname)`: the endianness (0, little),
-    /// the format version (1), the number of sequences and the number of volumes, each a 32-bit
-    /// word. `std::ofstream` reports no failure here (`CheckStream` tests `bad()` only, and a
-    /// stream that did not open is only `fail()`), so none is returned.
+    /// `Save` of the `CIndexSuperHeader` of index format version 1 (`INDEX_FORMAT_VERSION_1`) to
+    /// `fname`: the endianness (0, little), the format version (1), the number of sequences and the
+    /// number of volumes, each a 32-bit word. `std::ofstream` reports no failure here
+    /// (`CheckStream` tests `bad()` only, and a stream that did not open is only `fail()`), so none
+    /// is returned.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:196-203
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:241-252
     pub(crate) fn save(&self, fname: &str) {
@@ -48,7 +49,7 @@ impl SuperHeader {
         let _ = out.flush();
     }
 
-    /// `GetIndexSuperHeader(fname)`: the super header in the file `fname`, or `None` where NCBI
+    /// `GetIndexSuperHeader` of `fname`: the super header in the file `fname`, or `None` where NCBI
     /// throws (its loader only posts that at the level `Info`, which is not shown, and takes the
     /// database volume as one without an index). NCBI reads a super header only from a readable
     /// regular file (`CFile::Exists`, `CheckAccess`) whose first word is 0 (little-endian, the
@@ -148,7 +149,7 @@ impl Header {
         Ok(())
     }
 
-    /// `ReadIndexHeader<false>(map)` of the mapped bytes `map` (the version byte is not read):
+    /// `ReadIndexHeader<false>` of the mapped bytes `map` (the version byte is not read):
     /// the words after the version and the width, or `None` where `CheckIndexEndianness`
     /// throws (an Nmer length over 15). A mapping shorter than the header reads zeros past the
     /// end of the file (the rest of the mapped page), which `map` gets here.
@@ -185,7 +186,7 @@ impl Header {
     }
 }
 
-/// What `GetIdxVolNumOIDs(fname)` gives for an index volume.
+/// What `GetIdxVolNumOIDs` of `fname` gives for an index volume.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum VolumeOids {
     /// The number of sequences of the volume, `stop - start` of its header (32-bit, wrapping).
@@ -198,7 +199,7 @@ pub(crate) enum VolumeOids {
     Undefined,
 }
 
-/// `GetIdxVolNumOIDs(fname)`: the number of sequences of the index volume `fname` from its
+/// `GetIdxVolNumOIDs` of `fname`: the number of sequences of the index volume `fname` from its
 /// header, read from a stream that `CheckStream` checks for its end after the first seven words
 /// and after the start word and the next.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:232-245

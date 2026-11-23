@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "fail",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "fail",
+  "number-of-letters": 284,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-21T03:21:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49846,
+  "bytes-to-cache": 391,
+  "files": [
+    "fail.pdb",
+    "fail.phr",
+    "fail.pin",
+    "fail.pog",
+    "fail.pos",
+    "fail.pot",
+    "fail.psq",
+    "fail.ptf",
+    "fail.pto"
+  ]
+}

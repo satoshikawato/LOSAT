@@ -18,6 +18,7 @@
 
 use crate::ncbi_exception::ThrowSite;
 use crate::ncbi_str::{is_space, string_to_double_posix, NCBI_NAN};
+use crate::rpsbproc::HOST_DEPENDENT_BYTES;
 use std::io::Read;
 use std::ops::Range;
 
@@ -51,8 +52,9 @@ pub struct AsnTextError {
 /// What NCBI throws for an [`AsnTextError`]: the place of the throw and the form of its message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NcbiThrow {
-    /// `ThrowError(flag, message)` of the object stream (`ThrowError1`, objistr.cpp:828-853): a
-    /// `CSerialException` whose message is the stream's position, `line N: `, then the error's.
+    /// `ThrowError` of the object stream with a flag and a message (`ThrowError1`,
+    /// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position,
+    /// `line N: `, then the error's.
     Stream(ThrowSite),
     /// `NCBI_THROW` of a `CSerialException` with the error's message as it is (the values of an
     /// enumerated type: `FindValue`, `FindName`).
@@ -80,7 +82,7 @@ const FORMAT_ERROR: &str = "CSerialException::eFormatError";
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243 (cited at the module and at
 // `Reader::skip_white_space`)
-/// `SkipWhiteSpace`'s `ThrowError(fEOF, e.what())` ([`NcbiThrow::WhiteSpaceEof`]).
+/// `SkipWhiteSpace`'s `ThrowError` with `fEOF` and `e.what()` ([`NcbiThrow::WhiteSpaceEof`]).
 pub(crate) const SKIP_WHITE_SPACE_EOF: ThrowSite = asn_site(
     239,
     "CSerialException::eEOF",
@@ -100,6 +102,19 @@ const UNENDED_STRING: ThrowSite =
     asn_site(869, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::UnendedString");
 const NEXT_ELEMENT: ThrowSite =
     asn_site(1220, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::NextElement");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:315-329
+const READ_NUMBER: ThrowSite = asn_site(319, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadNumber");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857
+const READ_DOUBLE_OVERFLOW: ThrowSite = asn_site(
+    822,
+    "CSerialException::eOverflow",
+    "ncbi::CObjectIStreamAsn::ReadDouble",
+);
+const READ_DOUBLE_BAD: ThrowSite =
+    asn_site(828, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadDouble");
+const READ_DOUBLE: ThrowSite = asn_site(836, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadDouble");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1482-1508
+const GET_HEX_CHAR: ThrowSite = asn_site(1504, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::GetHexChar");
 /// `UnexpectedMember` (objistrasn.cpp:1306-1314).
 pub(crate) const UNEXPECTED_MEMBER: ThrowSite = asn_site(
     1313,
@@ -108,7 +123,7 @@ pub(crate) const UNEXPECTED_MEMBER: ThrowSite = asn_site(
 );
 // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:123-160
 // (NCBI's report of these two names no function.)
-const FIND_VALUE: ThrowSite = ThrowSite {
+pub(crate) const FIND_VALUE: ThrowSite = ThrowSite {
     file: "src/serial/enumerated.cpp",
     line: 133,
     kind: "CSerialException::eInvalidData",
@@ -139,7 +154,7 @@ pub(crate) const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
     function: Some("ncbi::CIStreamBuffer::NumberOverflow"),
 };
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:420-436 (`FillBuffer` at the end of a
-// file: `NCBI_THROW(CEofException,eEof,m_Error)`, the error "end of file")
+// file: `NCBI_THROW` of a `CEofException` with `eEof` and `m_Error`, the error "end of file")
 /// The `CEofException` of NCBI's input buffer at the end of the input: what `SkipWhiteSpace`
 /// quotes ([`SKIP_WHITE_SPACE_EOF`]).
 pub(crate) const FILL_BUFFER_EOF: ThrowSite = ThrowSite {
@@ -211,6 +226,43 @@ pub(crate) trait AsnSource {
     /// The reader will not ask for a byte before `pos` again (a stream may drop them).
     #[inline]
     fn release_before(&mut self, _pos: usize) {}
+    /// Keeps the bytes from `start` on (`None`: no more), whatever `release_before` says, until
+    /// they are taken with `bytes` (the bytes of a delayed member, `Input::delay_start`).
+    #[inline]
+    fn hold(&mut self, _start: Option<usize>) {}
+    /// Appends the `count` bytes from `pos` on to `out` (fewer when the text ends first) and
+    /// returns how many it appended. `out` grows as the bytes come, so a length that the input
+    /// does not hold costs no more than what NCBI reserves for it on every host, and a source may
+    /// read a long value straight into `out` instead of keeping it as well.
+    fn read_into(&mut self, pos: usize, count: u64, out: &mut Vec<u8>) -> u64 {
+        read_kept(self, pos, count, out)
+    }
+}
+
+/// `AsnSource::read_into` through the bytes the source keeps (`rest`, `fill`).
+fn read_kept<S: AsnSource + ?Sized>(
+    src: &mut S,
+    mut pos: usize,
+    count: u64,
+    out: &mut Vec<u8>,
+) -> u64 {
+    let mut done = 0;
+    while done < count {
+        let rest = src.rest(pos);
+        if rest.is_empty() {
+            if !src.fill(pos) {
+                break;
+            }
+            continue;
+        }
+        let take = rest
+            .len()
+            .min(usize::try_from(count - done).unwrap_or(usize::MAX));
+        out.extend_from_slice(&rest[..take]);
+        pos += take;
+        done += take as u64;
+    }
+    done
 }
 
 /// A text held whole in memory.
@@ -243,8 +295,9 @@ impl AsnSource for SliceSource<'_> {
 }
 
 /// A text read from a stream in blocks. It keeps the bytes from the last position given to
-/// `release_before` on (dropping the bytes before it once they make up most of the buffer), so
-/// its memory is about the largest value read between two releases, not the whole text.
+/// `release_before` on (dropping the bytes before it, when it reads the next block, once they
+/// make up most of the buffer), so its memory is about the largest value read between two
+/// releases, not the whole text.
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:125-139
 // NCBI's object stream reads its input in blocks too and gives the bytes it did not use back
 // to the stream when an object ends, so the next object is read from the byte after the last
@@ -255,9 +308,14 @@ pub(crate) struct StreamSource<R: Read> {
     /// The position of `buf[0]`.
     base: usize,
     eof: bool,
-    /// The block each read fills before its bytes are appended to `buf` (allocated once, so a
-    /// short read costs only the bytes it gives).
-    scratch: Box<[u8]>,
+    /// The first byte that `release_before` keeps (`AsnSource::hold`).
+    held: Option<usize>,
+    /// The last position given to `release_before`: the bytes before it may be dropped when the
+    /// next block is read (`fill_to`), so a release, once per element, is a store.
+    released: usize,
+    /// The bytes that one fill reads: a block (`STREAM_BLOCK`). The tests also read one byte per
+    /// fill (`fill_one_byte_at_a_time`), so that the kept bytes end at every byte of a text.
+    fill_size: usize,
 }
 
 /// The size of one read from the stream.
@@ -272,8 +330,17 @@ impl<R: Read> StreamSource<R> {
             buf: first.to_vec(),
             base: 0,
             eof: false,
-            scratch: vec![0; STREAM_BLOCK].into_boxed_slice(),
+            held: None,
+            released: 0,
+            fill_size: STREAM_BLOCK,
         }
+    }
+
+    /// Reads one byte per fill from now on (the tests of the readers at the end of the kept
+    /// bytes).
+    #[cfg(test)]
+    pub(crate) fn fill_one_byte_at_a_time(&mut self) {
+        self.fill_size = 1;
     }
 
     /// The bytes kept.
@@ -282,25 +349,37 @@ impl<R: Read> StreamSource<R> {
         self.buf.len()
     }
 
-    /// Reads blocks until `pos` is in the buffer or the stream ends. A read error ends the
-    /// text, as a failed read ends an `istream` (its bad bit, which the object stream reads as
-    /// the end of its input).
+    /// Reads blocks until `pos` is in the buffer or the stream ends, after dropping the released
+    /// bytes once they are most of a buffer of more than a few blocks (each byte is moved at
+    /// most once on average). A read error ends the text, as a failed read ends an `istream` (its
+    /// bad bit, which the object stream reads as the end of its input).
     #[cold]
     fn fill_to(&mut self, pos: usize) -> Option<u8> {
         assert!(pos >= self.base, "a released byte was asked for");
+        let keep = self
+            .held
+            .map_or(self.released, |held| held.min(self.released));
+        // (`read_into` may have dropped the bytes up to the end of a long value since the last
+        // release: nothing more to drop then.)
+        let dead = keep.saturating_sub(self.base);
+        if dead > 4 * STREAM_BLOCK && dead * 2 > self.buf.len() {
+            self.buf.drain(..dead);
+            self.base = keep;
+        }
         while pos - self.base >= self.buf.len() {
             if self.eof {
                 return None;
             }
-            let read = loop {
-                match self.input.read(&mut self.scratch) {
-                    Ok(read) => break read,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => break 0,
-                }
-            };
-            self.buf.extend_from_slice(&self.scratch[..read]);
-            if read == 0 {
+            // A block comes straight into the room after the kept bytes (`take` stops at its
+            // end), not through a block of its own and a copy. Fewer bytes than `fill_size` is the
+            // end of the stream; a read error ends the text, as in `read_into`.
+            self.buf.reserve(self.fill_size);
+            let before = self.buf.len();
+            let failed = std::io::Read::by_ref(&mut self.input)
+                .take(self.fill_size as u64)
+                .read_to_end(&mut self.buf)
+                .is_err();
+            if failed || self.buf.len() - before < self.fill_size {
                 self.eof = true;
             }
         }
@@ -326,15 +405,56 @@ impl<R: Read> AsnSource for StreamSource<R> {
         &self.buf[range.start - self.base..range.end - self.base]
     }
 
+    /// The bytes before `pos` are dropped when the next block is read (`fill_to`).
     #[inline]
     fn release_before(&mut self, pos: usize) {
-        let dead = pos - self.base;
-        // Drop the read bytes once they are most of a buffer of more than a few blocks: each
-        // byte is moved at most once on average.
-        if dead > 4 * STREAM_BLOCK && dead * 2 > self.buf.len() {
-            self.buf.drain(..dead);
-            self.base = pos;
+        self.released = pos;
+    }
+
+    #[inline]
+    fn hold(&mut self, start: Option<usize>) {
+        self.held = start;
+    }
+
+    /// The kept bytes, then (when nothing is held) the rest straight from the stream into `out`:
+    /// the bytes before the end of the value are not asked for again, so they are dropped, and a
+    /// long value is not kept twice.
+    fn read_into(&mut self, pos: usize, count: u64, out: &mut Vec<u8>) -> u64 {
+        let rest = self.rest(pos);
+        let kept = rest.len().min(usize::try_from(count).unwrap_or(usize::MAX));
+        out.extend_from_slice(&rest[..kept]);
+        let mut done = kept as u64;
+        if done == count || self.held.is_some() || self.eof {
+            if done < count {
+                done += read_kept(self, pos + kept, count - done, out);
+            }
+            return done;
         }
+        let pos = pos + kept;
+        self.buf.clear();
+        self.base = pos;
+        // NCBI reserves the count before it reads the bytes (`asn_input::reserve`); below the
+        // allocations that depend on the host, so does LOSAT, and the bytes come into one block of
+        // that size, not into one that doubles as it fills.
+        if let Ok(wanted) = usize::try_from(count - done) {
+            if (wanted as u64) < HOST_DEPENDENT_BYTES {
+                // A reserve that fails leaves `out` to grow as the bytes come.
+                let _ = out.try_reserve_exact(wanted);
+            }
+        }
+        let before = out.len();
+        // `take` stops at `count`; a read error ends the text, as in `fill_to`.
+        let ended = std::io::Read::by_ref(&mut self.input)
+            .take(count - done)
+            .read_to_end(out)
+            .is_err();
+        let read = (out.len() - before) as u64;
+        done += read;
+        self.base = pos + read as usize;
+        if ended || done < count {
+            self.eof = true;
+        }
+        done
     }
 }
 
@@ -389,6 +509,15 @@ pub(crate) struct Reader<S: AsnSource> {
 pub(crate) enum MemberId {
     Name(Range<usize>),
     Tag(Range<usize>),
+}
+
+/// What `ReadEnum` reads ([`Reader::enum_word`]).
+#[derive(Debug)]
+pub(crate) enum EnumWord {
+    /// An identifier: its positions in the text.
+    Name(Range<usize>),
+    /// A number.
+    Number(i32),
 }
 
 /// `CObjectIStream::EPointerType`: what `ReadPointerType` finds where NCBI's object stream reads a
@@ -534,7 +663,7 @@ impl<S: AsnSource> Reader<S> {
         self.src.bytes(range)
     }
 
-    /// `SkipEndOfLine(c)` after the end-of-line byte `c` was taken.
+    /// `SkipEndOfLine` of `c` after the end-of-line byte `c` was taken.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     pub(crate) fn skip_end_of_line(&mut self, c: u8) {
         self.line += 1;
@@ -642,7 +771,7 @@ impl<S: AsnSource> Reader<S> {
                     }
                 }
                 Some(b'-') => match self.src.byte_at(pos + 1) {
-                    // The end of the text after a `-`: `PeekChar(1)` fails at the `-`.
+                    // The end of the text after a `-`: `PeekChar` one byte ahead fails at the `-`.
                     None => break,
                     Some(b'-') => match self.comment_at(pos + 2) {
                         Some((end, end_lines)) => (pos, lines) = (end, lines + end_lines),
@@ -703,7 +832,7 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `SkipEndOfLine(c)` at `pos`, after the end-of-line byte `c`, without its line count:
+    /// `SkipEndOfLine` of `c` at `pos`, after the end-of-line byte `c`, without its line count:
     /// the position after the complement of `c` when it follows.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     #[inline]
@@ -715,7 +844,7 @@ impl<S: AsnSource> Reader<S> {
         pos
     }
 
-    /// `Expect(c, true)`.
+    /// `Expect` of `c`, with its flag true.
     pub(crate) fn expect(&mut self, c: u8) -> Result<()> {
         self.pos = self.expect_at(self.pos, c)?;
         Ok(())
@@ -742,8 +871,8 @@ impl<S: AsnSource> Reader<S> {
         )
     }
 
-    /// `ScanEndOfId(is_id)` at the current byte: the byte, then the identifier bytes and the `-`
-    /// before one; empty when `is_id` is false. Returns the positions of the identifier.
+    /// `ScanEndOfId` with `is_id` at the current byte: the byte, then the identifier bytes and the
+    /// `-` before one; empty when `is_id` is false. Returns the positions of the identifier.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:276-290
     pub(crate) fn scan_end_of_id(&mut self, is_id: bool) -> Result<Range<usize>> {
         let start = self.pos;
@@ -754,7 +883,7 @@ impl<S: AsnSource> Reader<S> {
         Ok(start..self.pos)
     }
 
-    /// `ScanEndOfId(true)` at `start`: the end of the identifier that starts there.
+    /// `ScanEndOfId` with `true` at `start`: the end of the identifier that starts there.
     #[inline]
     fn end_of_id_at(&mut self, start: usize) -> Result<usize> {
         let mut pos = start + 1;
@@ -775,8 +904,8 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadMemberId(SkipWhiteSpace())`: a member or variant name, bare (from a lower-case letter)
-    /// or between `[` and `]` on one line (the positions of the text between them).
+    /// `ReadMemberId` after `SkipWhiteSpace`: a member or variant name, bare (from a lower-case
+    /// letter) or between `[` and `]` on one line (the positions of the text between them).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:343-363
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:394-397
     // An id in brackets that starts with a digit names the member or variant by its tag
@@ -791,7 +920,7 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadMemberId(SkipWhiteSpace())`, a name or a tag (`member_id_range`).
+    /// `ReadMemberId` after `SkipWhiteSpace`, a name or a tag (`member_id_range`).
     pub(crate) fn member_or_tag(&mut self) -> Result<MemberId> {
         let (pos, id) = self.member_or_tag_at(self.pos)?;
         self.pos = pos;
@@ -847,7 +976,7 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadFileHeader`: the type name before `::=` (empty when there is none), the `::=` taken.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:292-313,709-721
-    // A type name in brackets stops before its `]` (`SkipChars(i)`), so the `::=` test that
+    // A type name in brackets stops before its `]` (`SkipChars` by `i`), so the `::=` test that
     // follows always fails.
     pub(crate) fn file_header(&mut self) -> Result<Range<usize>> {
         let c = self.skip_white_space()?;
@@ -879,11 +1008,12 @@ impl<S: AsnSource> Reader<S> {
         Ok(id)
     }
 
-    /// `ReadTypeId(SkipWhiteSpace())` (cited at `file_header`), as `ReadOtherPointer` reads the
-    /// type name after a `:` (objistrasn.cpp:1643-1646): a name from a letter or `_` (empty
+    /// `ReadTypeId` after `SkipWhiteSpace` (cited at `file_header`), as `ReadOtherPointer` reads
+    /// the type name after a `:` (objistrasn.cpp:1643-1646): a name from a letter or `_` (empty
     /// otherwise), or the text between `[` and `]` on one line, which NCBI takes without its last
-    /// byte (`CTempString(ptr + 1, i - 2)`), leaving the `]` unread (`SkipChars(i)`). `None` for
-    /// `[]`, whose length `i - 2` is `(size_t)-1`.
+    /// byte (a `CTempString` that starts at `ptr` plus 1 and is `i` less 2 bytes long), leaving
+    /// the `]` unread (`SkipChars` by `i`). `None` for `[]`, whose length, `i` less 2, wraps to the
+    /// largest `size_t`.
     pub(crate) fn type_id(&mut self) -> Result<Option<Range<usize>>> {
         let c = self.skip_white_space()?;
         if c != b'[' {
@@ -1019,46 +1149,57 @@ impl<S: AsnSource> Reader<S> {
         self.end_block()
     }
 
-    /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4` / `ReadInt8`): an optional sign and digits,
-    /// in `min..=max`.
+    /// `GetInt4`, `GetUint4` (`signed` false: only `+`, a `-` is "bad number" even for `-0`) and
+    /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4`, `ReadUint4`, `ReadInt8`): the digits checked
+    /// against `max` as NCBI checks them (the digit that overflows is taken first). The one port
+    /// of NCBI's text numbers, for the archive reader and the object streams (`asn_input`).
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    pub(crate) fn integer(&mut self, min: i128, max: i128) -> Result<i128> {
+    // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
+    pub(crate) fn get_number(&mut self, max: u64, signed: bool) -> Result<i64> {
+        // The position is kept in a local and written once (`white_space_at`).
         let (pos, c) = self.white_space_at(self.pos)?;
-        let (mut pos, mut c) = self.ws_at(pos, c)?;
-        let negative = c == b'-';
-        if c == b'-' || c == b'+' {
-            pos += 1;
+        // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
+        let (pos, mut c) = self.ws_at(pos, c)?;
+        let mut pos = pos + 1;
+        let mut negative = false;
+        if (signed && c == b'-') || c == b'+' {
+            negative = c == b'-';
             c = self.char_at(pos)?;
+            pos += 1;
         }
         if !c.is_ascii_digit() {
             self.pos = pos;
             return Err(self.bad_number());
         }
-        let limit = max.max(-min);
-        let mut n: i128 = 0;
+        let mut n = u64::from(c - b'0');
+        let before_mul = max / 10;
+        let limit_add = max % 10 + u64::from(negative);
         let mut overflow = false;
-        let (end, _) = self.src.scan(pos, |c| {
-            if !c.is_ascii_digit() {
+        let (end, _) = self.src.scan(pos, |d| {
+            if !d.is_ascii_digit() {
                 return false;
             }
-            let next = n * 10 + i128::from(c - b'0');
-            if next > limit {
+            let d = u64::from(d - b'0');
+            if n > before_mul || (n == before_mul && d > limit_add) {
                 overflow = true;
                 return false;
             }
-            n = next;
+            n = n * 10 + d;
             true
         });
-        // An overflow stops at the digit that makes it, not taken.
-        self.pos = end;
         if overflow {
+            // The digit that overflows is taken before the check.
+            self.pos = end + 1;
             return Err(self.number_overflow());
         }
-        let n = if negative { -n } else { n };
-        if n < min || n > max {
-            return Err(self.number_overflow());
-        }
-        Ok(n)
+        self.pos = end;
+        // `-Int4(n)` of n = 2^31 is the least Int4 (and likewise in 64 bits).
+        Ok(if negative {
+            (n as i64).wrapping_neg()
+        } else {
+            n as i64
+        })
     }
 
     /// `PeekChar()` at `pos`: the end of the text is [`AsnTextErrorKind::Eof`] at `pos`.
@@ -1113,56 +1254,19 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
+    /// `ReadInt4` ([`get_number`](Self::get_number)).
     pub(crate) fn int4(&mut self) -> Result<i32> {
-        Ok(self.integer(i32::MIN.into(), i32::MAX.into())? as i32)
+        Ok(self.get_number(i32::MAX as u64, true)? as i32)
     }
 
-    /// `ReadUint4`: `GetUint4` after `SkipWhiteSpace`, an optional `+` and digits; a `-` is not a
-    /// sign there (`'-' - '0'` is more than 9: "bad number", even for `-0`).
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:672-700
+    /// `ReadUint4` ([`get_number`](Self::get_number)).
     pub(crate) fn uint4(&mut self) -> Result<u32> {
-        let (pos, c) = self.white_space_at(self.pos)?;
-        let (mut pos, mut c) = self.ws_at(pos, c)?;
-        if c == b'+' {
-            pos += 1;
-            c = self.char_at(pos)?;
-        }
-        if !c.is_ascii_digit() {
-            self.pos = pos;
-            return Err(self.bad_number());
-        }
-        let mut n: u32 = 0;
-        let mut overflow = false;
-        let (end, _) = self.src.scan(pos, |c| {
-            if !c.is_ascii_digit() {
-                return false;
-            }
-            match n
-                .checked_mul(10)
-                .and_then(|n| n.checked_add(u32::from(c - b'0')))
-            {
-                Some(next) => {
-                    n = next;
-                    true
-                }
-                None => {
-                    overflow = true;
-                    false
-                }
-            }
-        });
-        if overflow {
-            // `GetUint4` takes the digit before it checks the overflow.
-            self.pos = end + 1;
-            return Err(self.number_overflow());
-        }
-        self.pos = end;
-        Ok(n)
+        Ok(self.get_number(u64::from(u32::MAX), false)? as u32)
     }
 
+    /// `ReadInt8` ([`get_number`](Self::get_number)).
     pub(crate) fn int8(&mut self) -> Result<i64> {
-        Ok(self.integer(i64::MIN.into(), i64::MAX.into())? as i64)
+        self.get_number(i64::MAX as u64, true)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:739-764
@@ -1216,7 +1320,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `ReadPointerType`: `NULL`, `@` or `:` (taken), or the value of the declared type (nothing
-    /// taken), after `SkipWhiteSpace` (`PeekChar(true)`).
+    /// taken), after `SkipWhiteSpace` (`PeekChar` with `true`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1606-1630
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:161-164
     pub(crate) fn pointer_type(&mut self) -> Result<PointerType> {
@@ -1237,6 +1341,21 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
+    /// The name or number that `ReadEnum` reads after `SkipWhiteSpace`: an identifier when the
+    /// byte there is a lower-case letter, else a number (`ReadInt4`). The one reader of both for
+    /// the archive reader and the object streams (`asn_input`), which look it up in their values.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
+    pub(crate) fn enum_word(&mut self) -> Result<EnumWord> {
+        let (pos, c) = self.white_space_at(self.pos)?;
+        if !c.is_ascii_lowercase() {
+            self.pos = pos;
+            return Ok(EnumWord::Number(self.int4()?));
+        }
+        let end = self.end_of_id_at(pos)?;
+        self.pos = end;
+        Ok(EnumWord::Name(pos..end))
+    }
+
     /// `ReadEnum` of an ENUMERATED type with the values `values`: a name or a number.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
     pub(crate) fn enumerated(
@@ -1252,37 +1371,22 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadEnum` of an INTEGER with the named values `values` (`IsInteger()`): a name, or any
-    /// number.
-    pub(crate) fn named_integer(&mut self, values: &[(&'static str, i32)]) -> Result<i32> {
-        Ok(match self.enum_item(values)? {
-            Ok((_, value)) => value,
-            Err(value) => value,
-        })
-    }
-
     /// The item of `values` named or numbered by the text, or the number that is none of them
     /// (a name that is none of them is an error).
     fn enum_item(
         &mut self,
         values: &[(&'static str, i32)],
     ) -> Result<std::result::Result<(&'static str, i32), i32>> {
-        let (pos, c) = self.white_space_at(self.pos)?;
-        let end = if c.is_ascii_lowercase() {
-            self.end_of_id_at(pos)?
-        } else {
-            pos
+        let id = match self.enum_word()? {
+            EnumWord::Name(id) => id,
+            EnumWord::Number(value) => {
+                return Ok(values
+                    .iter()
+                    .find(|&&(_, number)| number == value)
+                    .copied()
+                    .ok_or(value));
+            }
         };
-        self.pos = end;
-        let id = pos..end;
-        if id.is_empty() {
-            let value = self.int4()?;
-            return Ok(values
-                .iter()
-                .find(|&&(_, number)| number == value)
-                .copied()
-                .ok_or(value));
-        }
         let text = self.bytes(id);
         match values.iter().find(|&&(name, _)| name.as_bytes() == text) {
             Some(&item) => Ok(Ok(item)),
@@ -1394,7 +1498,7 @@ impl<S: AsnSource> Reader<S> {
     /// PSSM reader, `asn_types::read`, and the mask reader, `writedb::mask_info`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912 (`AppendStringData`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986 (`ReadStringValue`, quoted
-    // at `string`; its `catch ( CEofException& )` calls `UnendedString`)
+    // at `string`; its `catch` of a `CEofException` calls `UnendedString`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1093-1155
     // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163: `valid` stays 0;
     // the fix is `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`, objistr.cpp:302.)
@@ -1509,7 +1613,10 @@ impl<S: AsnSource> Reader<S> {
                 }
                 _ => {
                     self.pos -= 1;
-                    return Err(self.error(format!("bad char in octet string: #{}", c as i8)));
+                    return Err(self.error_at(
+                        NcbiThrow::Stream(GET_HEX_CHAR),
+                        format!("bad char in octet string: #{}", c as i8),
+                    ));
                 }
             };
             match high.take() {
@@ -1521,7 +1628,7 @@ impl<S: AsnSource> Reader<S> {
             out.push(h << 4);
         }
         if self.peek_at(0) != b'H' {
-            return Err(self.error("'H' expected"));
+            return Err(self.expected(b'H'));
         }
         self.pos += 1;
         Ok(out)
@@ -1533,7 +1640,7 @@ impl<S: AsnSource> Reader<S> {
         let (start, c) = self.white_space_at(self.pos)?;
         if c != b'-' && c != b'+' && !c.is_ascii_digit() {
             self.pos = start;
-            return Err(self.error("invalid number"));
+            return Err(self.error_at(NcbiThrow::Stream(READ_NUMBER), "invalid number"));
         }
         let (end, _) = self.src.scan(start + 1, |c| c.is_ascii_digit());
         self.pos = end;
@@ -1551,7 +1658,8 @@ impl<S: AsnSource> Reader<S> {
         })
     }
 
-    /// `CObjectIStreamAsn::ReadDouble`.
+    /// `CObjectIStreamAsn::ReadDouble`: a word, or `{ mantissa, base, exponent }` whose base is
+    /// read with `ReadUint4` (a `CUtilException` for a `-`) and exponent with `ReadInt4`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857
     pub(crate) fn real(&mut self) -> Result<f64> {
         if let Some(word) = self.real_word()? {
@@ -1563,13 +1671,17 @@ impl<S: AsnSource> Reader<S> {
         self.expect(b',')?;
         let exp = self.int4()?;
         self.expect(b'}')?;
-        real_of_parts(mantissa, is_negative, base, exp)
-            .ok_or_else(|| self.error("illegal REAL base (must be 2 or 10)"))
+        real_of_parts(mantissa, is_negative, base, exp).ok_or_else(|| {
+            self.error_at(
+                NcbiThrow::Stream(READ_DOUBLE),
+                "illegal REAL base (must be 2 or 10)",
+            )
+        })
     }
 
     /// The word form of `ReadDouble` (`PLUS-INFINITY`, `MINUS-INFINITY`, `NOT-A-NUMBER` or a
     /// decimal number), or `None` at a `{` (not taken).
-    pub(crate) fn real_word(&mut self) -> Result<Option<f64>> {
+    fn real_word(&mut self) -> Result<Option<f64>> {
         if self.skip_white_space()? == b'{' {
             return Ok(None);
         }
@@ -1589,17 +1701,20 @@ impl<S: AsnSource> Reader<S> {
 
     /// The `{` (at the reader's position) and the mantissa of `ReadDouble`: its value and whether
     /// it starts with `-`.
-    pub(crate) fn real_mantissa(&mut self) -> Result<(f64, bool)> {
+    fn real_mantissa(&mut self) -> Result<(f64, bool)> {
         self.pos += 1;
         let is_negative = self.skip_white_space()? == b'-';
         let mantissa_range = self.number()?;
         if mantissa_range.len() >= 128 - 1 {
-            return Err(self.error("buffer overflow"));
+            return Err(self.error_at(NcbiThrow::Stream(READ_DOUBLE_OVERFLOW), "buffer overflow"));
         }
         let mantissa_length = mantissa_range.len();
         let read = string_to_double_posix(self.bytes(mantissa_range), false);
         if read.end != mantissa_length {
-            return Err(self.error(format!("bad double in line {}", self.line)));
+            return Err(self.error_at(
+                NcbiThrow::Stream(READ_DOUBLE_BAD),
+                format!("bad double in line {}", self.line),
+            ));
         }
         Ok((read.value, is_negative))
     }
@@ -1658,12 +1773,7 @@ impl<S: AsnSource> Reader<S> {
 /// The end of `ReadDouble` (cited at `Reader::real`): the value of the mantissa `mantissa` (read
 /// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
 /// than 2 and 10 ("illegal REAL base").
-pub(crate) fn real_of_parts(
-    mut mantissa: f64,
-    is_negative: bool,
-    base: u32,
-    exp: i32,
-) -> Option<f64> {
+fn real_of_parts(mut mantissa: f64, is_negative: bool, base: u32, exp: i32) -> Option<f64> {
     if base != 2 && base != 10 {
         return None;
     }

@@ -16,10 +16,10 @@
 use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::write_asn_text_double;
 
-/// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
+/// The column after which a VisibleString is wrapped (`WrapAt` at 78 with `true`).
 const STRING_WRAP: usize = 78;
 
-/// The line length from which an OCTET STRING starts a new line (`WrapAt(78, false)`).
+/// The line length from which an OCTET STRING starts a new line (`WrapAt` at 78 with `false`).
 const OCTET_WRAP: usize = 78;
 
 /// The ASN.1 text encoder, appending one document to `out`.
@@ -110,7 +110,7 @@ impl<'b> AsnTextEncoder<'b> {
         self.line_length += bytes.len();
     }
 
-    /// `COStreamBuffer::PutEol(true)`: an end of line and the indentation.
+    /// `COStreamBuffer::PutEol` with its flag true: an end of line and the indentation.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:356-379
     fn eol(&mut self) {
@@ -124,7 +124,7 @@ impl<'b> AsnTextEncoder<'b> {
     /// `CObjectOStreamAsn::StartBlock`.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:539-544
-    /// (`IncIndentLevel(size_t step = 2)`, include/util/strbuffer.hpp.)
+    /// (`IncIndentLevel`, whose `step` defaults to 2, include/util/strbuffer.hpp.)
     fn start_block(&mut self) {
         self.put(b"{");
         self.indent += 2;
@@ -153,8 +153,8 @@ impl<'b> AsnTextEncoder<'b> {
         self.eol();
     }
 
-    /// `COStreamBuffer::WrapAt(lineLength, false)`: an end of line without indentation when the
-    /// line holds `line_length` bytes or more.
+    /// `COStreamBuffer::WrapAt` of `lineLength`, flag false: an end of line without indentation
+    /// when the line holds `line_length` bytes or more.
     fn wrap_at_line_length(&mut self, line_length: usize) {
         if self.line_length >= line_length {
             self.out.push(b'\n');
@@ -162,7 +162,7 @@ impl<'b> AsnTextEncoder<'b> {
         }
     }
 
-    /// `COStreamBuffer::PutEolAtWordEnd(lineLength)`: inserts an end of line (without
+    /// `COStreamBuffer::PutEolAtWordEnd` of `lineLength`: inserts an end of line (without
     /// indentation) before the last white space or `'` of the current line at a column up to
     /// `line_length`, looking back no further than a `"` or an end of line; without one, at
     /// column `line_length`, moved back before any `"` that precedes it (a doubled `""` is
@@ -331,7 +331,7 @@ impl Encoder for AsnTextEncoder<'_> {
         self.write_string::<REPLACE>(value);
     }
 
-    /// `WriteDouble2(data, DBL_DIG)` (`real::write_asn_text_double`).
+    /// `WriteDouble2` of `data` with `DBL_DIG` (`real::write_asn_text_double`).
     fn real(&mut self, value: f64) {
         let before = self.out.len();
         write_asn_text_double(value, self.out);
@@ -374,6 +374,15 @@ impl Encoder for AsnTextEncoder<'_> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733
     fn delayed(&mut self, text: &[u8]) {
         self.out.extend_from_slice(text);
+    }
+
+    fn unread_delayed(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::Unwritten(
+                "a member read from ASN.1 binary into a delay buffer whose value NCBI reads with \
+                 a message or an error",
+            ));
+        }
     }
 
     fn buffered(&self) -> usize {

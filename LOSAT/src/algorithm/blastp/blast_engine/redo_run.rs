@@ -48,6 +48,7 @@ use crate::core::composition_adjustment::adjust_scores::{
     build_matrix_info, BlastCompositionWorkspace, BlastMatrixInfo,
 };
 use crate::core::composition_adjustment::redo_alignment::BlastCompoGappingParams;
+use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 use crate::report::record::ReportNeeds;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
@@ -950,7 +951,7 @@ where
     Ok(())
 }
 
-/// NCBI's error of a query batch whose Smith-Waterman redo (`kappa::smith_waterman::SwRedoFailed`)
+/// NCBI's error of a query batch whose Smith-Waterman redo (`smith_waterman_match::SwRedoFailed`)
 /// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
 /// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
 /// the status again), a status other than 0 at the end fails the batch's traceback, and the
@@ -970,7 +971,7 @@ where
 /// NCBI ends such a batch by `Traceback failed` only when the batch's first query holds no redone
 /// match (`first_query`, the heap of `batch_start`). With a status other than 0 the clean-up frees
 /// the arrays of every query's heap, leaving each heap's count, and then empties the heap of the
-/// first query alone (`s_ClearHeap(redoneMatches_tld[i])`, the address of its element 0):
+/// first query alone (`s_ClearHeap` of `redoneMatches_tld[i]`, the address of its element 0):
 /// `BlastCompo_HeapPop` converts nothing (`array` is NULL) and, when the count is above 0, reads
 /// `heapArray[1]` through the NULL `heapArray` (SIGSEGV, at address 0x28 on ws, 2026-11-18). A
 /// heap's count is above 0 once `BlastCompo_HeapInsert` (blast_kappa.c:3705-3719) has put a match
@@ -989,13 +990,10 @@ where
 #[cold]
 #[inline(never)]
 fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::Error {
-    let error = if first_query.n > 0 {
-        anyhow::anyhow!(
-            "a query batch whose last match fails its Smith-Waterman redo (-use_sw_tback) after a match of the batch's first query was redone and kept, with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
-        )
-    } else {
-        crate::blastinput::app::engine_error("Traceback failed")
-    };
+    let error = crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
+        "blastp",
+        first_query.n > 0,
+    );
     super::database::HeaderReadError {
         query: batch_start,
         error,
@@ -1004,7 +1002,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
+/// (`smith_waterman_match::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
 /// printed the reports of the batches before (`blastp_app.cpp:257-276`, cited at
 /// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
@@ -1017,9 +1015,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 fn sw_endless(batch_start: usize) -> anyhow::Error {
     super::database::HeaderReadError {
         query: batch_start,
-        error: anyhow::anyhow!(
-            "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0) is not supported by LOSAT's BLASTP"
-        ),
+        error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
     }
     .into()
 }
@@ -1028,7 +1024,8 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
 /// `database::exclude_fetched` removed; `batch_heaps`, the heaps of the list's query batch): the
 /// list is freed without a change of the status when the early termination test holds, and
 /// otherwise the excluded fetch sets the status back to 0, which clears an earlier failure of
-/// the batch (`sw_last_failed`). Nothing is fetched, redone or inserted.
+/// the batch: core's rule of every program's redo loop (`SwBatchStatus::reaches_redo`, NCBI's
+/// order of the two steps). Nothing is fetched, redone or inserted.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
@@ -1037,11 +1034,12 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
 fn fetch_excluded_reached(
     mark: &super::database::FetchExcludedMatch,
     batch_heaps: &[BlastCompoHeap],
-    sw_last_failed: &mut bool,
+    sw_status: &mut SwBatchStatus,
 ) {
-    if !blast_compo_early_termination(mark.best_evalue, batch_heaps) {
-        *sw_last_failed = false;
-    }
+    let terminates_early = blast_compo_early_termination(mark.best_evalue, batch_heaps);
+    // The fetch excludes the list's subject, so the list is never redone.
+    let redone = sw_status.reaches_redo(terminates_early, true);
+    debug_assert!(!redone);
 }
 
 /// NCBI's Smith-Waterman redo at the lists of one query whose subjects its fetch excludes
@@ -1055,16 +1053,16 @@ fn fetch_excluded_reached(
 /// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
 /// is NCBI's one-thread status of the batch.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 fn query_fetch_excluded_reached(
     marks: &[super::database::FetchExcludedMatch],
     status_position: Option<usize>,
     batch_heaps: &[BlastCompoHeap],
-    sw_last_failed: &mut bool,
+    sw_status: &mut SwBatchStatus,
 ) {
     let after_status = status_position.map_or(0, |at| at + 1);
     for mark in marks.iter().filter(|mark| mark.position >= after_status) {
-        fetch_excluded_reached(mark, batch_heaps, sw_last_failed);
+        fetch_excluded_reached(mark, batch_heaps, sw_status);
     }
 }
 
@@ -1123,12 +1121,12 @@ where
     let x_block_seg_store = x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
     let mut kappa_subject_range_cache =
         BlastpKappaSubjectRangeCache::new(x_block_seg_store.clone());
-    // `-use_sw_tback` (item X4): the Smith-Waterman redo's memory, and whether the last match
-    // that the redo of the query batch has reached failed (NCBI's `status_code_tld`).
+    // `-use_sw_tback` (item X4): the Smith-Waterman redo's memory, and the status of the query
+    // batch (NCBI's `status_code_tld`: whether the last match that the redo reached failed).
     let mut sw_scratch = args
         .use_sw_tback
         .then(kappa::smith_waterman::SwMatchScratch::new);
-    let mut sw_last_failed = false;
+    let mut sw_status = SwBatchStatus::default();
     // The marks of the lists that the Smith-Waterman redo reaches and whose fetch excludes the
     // subject (`fetch_excluded_reached`), by query; the X-drop redo reads none.
     let mut fetch_excluded = if sw_scratch.is_some() {
@@ -1140,7 +1138,7 @@ where
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
         if batch.start == q_idx {
-            sw_last_failed = false;
+            sw_status = SwBatchStatus::default();
         }
         let excluded_here = fetch_excluded
             .iter()
@@ -1160,7 +1158,7 @@ where
             preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
-            if sw_last_failed && q_idx + 1 == batch.end {
+            if sw_status.failed() && q_idx + 1 == batch.end {
                 return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
             }
             continue;
@@ -1246,7 +1244,7 @@ where
                 // and its status until the next match that the redo reaches; a redo that does not
                 // end in NCBI is refused.
                 let redone_match = &mut redone_matches[q_idx];
-                match kappa::postprocess_preliminary_hits_smith_waterman(
+                let redone = kappa::postprocess_preliminary_hits_smith_waterman(
                     &kappa_preliminary_hits,
                     &query_workspace,
                     &mut composition_workspace,
@@ -1262,22 +1260,14 @@ where
                     needs.seqalign,
                     sw_scratch,
                     &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
-                ) {
-                    Ok(postprocessed) => {
-                        sw_last_failed = false;
-                        x_status_position = Some(x_match_position);
-                        postprocessed
-                    }
-                    Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
-                        sw_last_failed = true;
-                        x_status_position = Some(x_match_position);
-                        continue;
-                    }
-                    Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
-                        return Err(sw_endless(batch.start));
-                    }
-                    Err(error) => return Err(error),
-                }
+                );
+                let Some(postprocessed) = sw_status.redone(redone, || sw_endless(batch.start))?
+                else {
+                    x_status_position = Some(x_match_position);
+                    continue;
+                };
+                x_status_position = Some(x_match_position);
+                postprocessed
             } else {
                 postprocess_preliminary_hits(
                     &kappa_preliminary_hits,
@@ -1311,17 +1301,17 @@ where
             excluded_here,
             x_status_position,
             &redone_matches[batch.clone()],
-            &mut sw_last_failed,
+            &mut sw_status,
         );
         // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
         *x_prelim_freed += 1;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3781
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3781
         // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).
-        if sw_last_failed && q_idx + 1 == batch.end {
+        if sw_status.failed() && q_idx + 1 == batch.end {
             return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
         }
     }

@@ -336,18 +336,18 @@ fn gap_dp_reserve_band(
 ) {
     if last_b_index + num_extra_cells + 3 >= *dp_mem_alloc {
         *dp_mem_alloc = (last_b_index + num_extra_cells + 100).max(2 * *dp_mem_alloc);
-        // `n` is fixed within one extension, so `dp_mem` already holds
-        // `MIN(old dp_mem_alloc, n + 1)` cells and grows only with the count.
+        // `n` is fixed within one extension, so `dp_mem` already holds as many cells as the
+        // smaller of the old `dp_mem_alloc` and one more than `n`, and grows only with the count.
         gap_dp_ensure_cells(dp_mem, *dp_mem_alloc, n);
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:945-958
-// The DP writes a cell before it reads it and never addresses a cell past `N`,
-// so of NCBI's `malloc`/`realloc` block of `dp_mem_alloc` cells only the first
-// `MIN(dp_mem_alloc, N + 1)` are ever touched; NCBI leaves the rest of the block
-// untouched. `dp_mem` holds those cells and grows when a later extension has a
-// longer `N`; `dp_mem_alloc` keeps NCBI's count, which decides the bounds below.
+// The DP writes a cell before it reads it and never addresses a cell past `N`, so of NCBI's
+// `malloc`/`realloc` block of `dp_mem_alloc` cells only the first (the smaller of `dp_mem_alloc`
+// and one more than `N`) are ever touched; NCBI leaves the rest of the block untouched. `dp_mem`
+// holds those cells and grows when a later extension has a longer `N`; `dp_mem_alloc` keeps NCBI's
+// count, which decides the bounds below.
 // Filling every cell of a huge `-xdrop_gap` block took seconds and gigabytes
 // for an output that does not change (TN-4).
 fn gap_dp_ensure_cells(dp_mem: &mut Vec<BlastGapDp>, dp_mem_alloc: usize, n: usize) {
@@ -511,12 +511,12 @@ pub(crate) fn gapped_start_window(sequence: &[u8], start: usize) -> [u8; GAPPED_
 /// `BlastGetStartForGappedAlignment` of a one-hit HSP of negative `Int4` length (`-window_size 0`
 /// with a low `-threshold`: the one-hit extension's best part ends before the last reset of its
 /// running sum), from the bytes of its first window (`query_window`, `subject_window`). NCBI reads
-/// the length as `Uint4`, above `HSP_MAX_WINDOW`, and `q_start + MIN(q_length, s_length)` wraps
-/// back to `q_start + length`, so only the first window is scored: the gapped start is
-/// `q_start + 5` when its sum is above 0, else `q_start`. TBLASTN and BLASTX take it from here;
-/// BLASTP keeps its own copy inline in its gapped stage
-/// (`blastp::blast_engine::blastp_get_start_for_gapped_alignment_int4_length`, out of line it
-/// cost BLASTP's default search 0.6 %).
+/// the length as `Uint4`, above `HSP_MAX_WINDOW`, and the sum of `q_start` and the smaller of
+/// `q_length` and `s_length` wraps back to `q_start` plus the length, so only the first window is
+/// scored: the gapped start is `q_start + 5` when its sum is above 0, else `q_start`. TBLASTN and
+/// BLASTX take it from here; BLASTP keeps its own copy inline in its gapped stage
+/// (`blastp::blast_engine::blastp_get_start_for_gapped_alignment_int4_length`, out of line it cost
+/// BLASTP's default search 0.6 %).
 #[cold]
 #[inline(never)]
 pub(crate) fn gapped_start_int4(
@@ -1767,7 +1767,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
         //
         // Track the C loop variable `b_index` after the inner loop finishes.
         // `ALIGN_EX` uses that exact post-loop value in
-        // `MAX(b_index, b_size) - orig_b_index + 1`.
+        // the larger of `b_index` and `b_size`, minus `orig_b_index`, plus 1.
         let mut row_end_b_index = b_size;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-635
@@ -2465,10 +2465,10 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:555-564
     //
-    // For blastp, `BlastScoringOptionsNew` leaves `reward` at zero, and
-    // `BlastScoringParametersNew` copies that zero into `score_params->reward`, so the
-    // `score += ext * score_params->reward` of the end extension below adds 0 and the score
-    // stored before it is NCBI's.
+    // For blastp, `BlastScoringOptionsNew` leaves `reward` at zero, and `BlastScoringParametersNew`
+    // copies that zero into `score_params->reward`, so the addition of `ext` times
+    // `score_params->reward` to `score` in the end extension below adds 0 and the score stored
+    // before it is NCBI's.
     let gap_ops = match hit.gap_info.as_mut() {
         Some(info) if !info.is_empty() => info,
         _ => return true,
@@ -2597,7 +2597,7 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
         if best_end_esp_index == best_start_esp_index {
             best_end_esp_num += ext;
         }
-        // `score += ext * score_params->reward` adds 0 for blastp (reward is 0, above).
+        // Adding `ext` times `score_params->reward` to `score` adds 0 for blastp (reward is 0, above).
 
         let mut qp = best_q_end;
         let mut sp = best_s_end;
@@ -2616,7 +2616,7 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
             *num += ext as u32;
         }
         best_end_esp_num += ext;
-        // `score += ext * score_params->reward` adds 0 for blastp (reward is 0, above).
+        // Adding `ext` times `score_params->reward` to `score` adds 0 for blastp (reward is 0, above).
     }
 
     hit.q_start = best_q_start + 1;

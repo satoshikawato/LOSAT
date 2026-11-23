@@ -6,7 +6,7 @@
 //! The search is tblastn's (the translation of the subjects, the units, chunks and threads, the
 //! containment trees, the fence retry, the `-db` stream, the hit lists and the reports): only the
 //! source of the scores (`score::PssmScore`), the Karlin-Altschul blocks and the lookup table are
-//! the PSSM's, as NCBI's `eBlastTypePsiTblastn` (`PSSM_QUERY_MASK | eBlastTypeTblastn`) takes
+//! the PSSM's, as NCBI's `eBlastTypePsiTblastn` (`PSSM_QUERY_MASK` OR-ed with `eBlastTypeTblastn`) takes
 //! tblastn's code everywhere except where `Blast_QueryIsPssm` selects the PSSM.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:82-83
@@ -117,6 +117,8 @@ pub(super) fn check_limits(
             "-mt_mode 1 with -num_threads above 1, -db and -in_pssm, with which NCBI BLAST+ 2.17.0's tblastn aborts, is not supported by LOSAT's TBLASTN"
         );
     }
+    // `-use_sw_tback` is refused where the Smith-Waterman redo of the PSSM query reaches a match
+    // (`match_redo::sw_pssm_refusal`), after the prolog: a search without hits ends as NCBI's.
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:791-796 (the tabular
     // formats of tblastn; the pairwise report, `PrintOneResultSet`)
     // The pairwise report and the tabular formats 6, 7 and 10 (their field lists too). A run that

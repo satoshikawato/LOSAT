@@ -61,7 +61,7 @@ pub(super) struct AliasNode {
 
 impl AliasNode {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1578-1583
-    /// The value of `key` in the alias file of this node (`m_Values.find(key)`).
+    /// The value of `key` in the alias file of this node (`find` of `key` in `m_Values`).
     pub fn value(&self, key: &str) -> Option<&[u8]> {
         self.values
             .iter()
@@ -83,11 +83,11 @@ pub(super) struct OidRange {
 
 impl OidRange {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1975-1998
-    // `NStr::StringToUInt` gives a `Uint4` that NCBI stores in an `int`: GCC wraps a value of
-    // 2^31 or more to a negative number (defined since C++20, implementation-defined before).
-    // `first_oid--` of `FIRST_OID 2147483648` decrements `INT_MIN`, which is undefined; NCBI
-    // BLAST+ 2.17.0 gives `INT_MAX` (probe p4a_r2_ao_fo2147483648 of line RG D1a-2), the value of
-    // `wrapping_sub(1)` here, which is also 2^31 - 1 without the wrap.
+    // `NStr::StringToUInt` gives a `Uint4` that NCBI stores in an `int`: GCC wraps a value of 2^31
+    // or more to a negative number (defined since C++20, implementation-defined before). For
+    // `FIRST_OID 2147483648`, `first_oid` holds `INT_MIN` when NCBI decrements it, which is
+    // undefined; NCBI BLAST+ 2.17.0 gives `INT_MAX` (probe p4a_r2_ao_fo2147483648 of line RG
+    // D1a-2), the value of `wrapping_sub(1)` here, which is also 2^31 - 1 without the wrap.
     /// `(begin, end)` as NCBI's `CSeqDB_AliasMask` holds them (`int`): `begin` the 0-based
     /// first OID (0 without `FIRST_OID`), `end` the `LAST_OID` (`INT_MAX` without it), in the
     /// OIDs of the whole volume set. A value of 2^31 or more is negative, as NCBI reads it.
@@ -145,7 +145,7 @@ fn base_name(path: &str) -> &str {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:88-107
-// `CSeqDB_Path::FindBaseName` is `SeqDB_RemoveExtn(SeqDB_RemoveDirName(..))`
+// `CSeqDB_Path::FindBaseName` is `SeqDB_RemoveExtn` of `SeqDB_RemoveDirName` of the path
 // (seqdbgeneral.hpp:975-979): the file name without a final `.pal`, `.nal`,
 // `.pin`, `.nin`, `.pdb` or `.ndb`. `SeqDB_CompareVolume` compares these.
 fn path_base_name(path: &str) -> &str {
@@ -228,7 +228,7 @@ fn delete_trailing_path_separator(path: &str) -> &str {
 // current directory of the process. The warning NCBI posts at the depth
 // limit is not printed. A link whose target is not valid UTF-8 is an
 // explicit error (LOSAT keeps path names as UTF-8 strings).
-/// `CDirEntry::NormalizePath(path, eFollowLinks)`.
+/// `CDirEntry::NormalizePath` of `path` with `eFollowLinks`.
 fn normalize_path(path: &str) -> Result<String, SeqDbError> {
     if path.is_empty() {
         return Ok(String::new());
@@ -304,7 +304,7 @@ fn normalize_path(path: &str) -> Result<String, SeqDbError> {
                     continue;
                 } else if windows && last.contains(disk_separator) {
                     // `pos` receives the result of the comparison, 1, so
-                    // `last.erase(pos + 1)` keeps the first two characters.
+                    // erasing `last` from the character after `pos` keeps the first two characters.
                     if last.is_char_boundary(2) {
                         last.truncate(2);
                     }
@@ -455,7 +455,7 @@ impl SearchPath {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:330-374
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
-    // `fSplit_Tokenize` is `fSplit_MergeDelimiters | fSplit_Truncate`
+    // `fSplit_Tokenize` is `fSplit_MergeDelimiters` and `fSplit_Truncate` together
     // (ncbistr.hpp:2500-2510): empty directories are left out. With
     // `seqtype` the name is a database name and `s_SeqDB_DBExists` looks for
     // its alias file, then for its index file, inside one directory before
@@ -493,7 +493,7 @@ impl SearchPath {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1762-1807
 // `keep_quote` is false for a `DBLIST` and for the names the reader opens
 // (seqdbalias.cpp:85-88), true for the names of the reports (`report_names`).
-// With `keep_quote`, the closing quote stays in the name and NCBI's `i++` also
+// With `keep_quote`, the closing quote stays in the name and NCBI's step of `i` also
 // skips the character after it (`"a"b` gives `"a"` alone).
 fn split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
     let mut dbs = Vec::new();
@@ -549,7 +549,7 @@ pub(crate) fn report_names(dbname: &str) -> Vec<String> {
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:689-710
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:406-436
-// `SEQDB_ISEOL(x)` is `(x) == '\n' || (x) == '\r'` (seqdbgeneral.hpp:192). A
+// `SEQDB_ISEOL` of `x` is true for a newline or a carriage return (seqdbgeneral.hpp:192). A
 // key that appears again replaces the earlier value (seqdbalias.cpp:446-449).
 /// The key / value lines of an alias file, in file order.
 fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -594,8 +594,26 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     values
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:133-140
+// NCBI's reader takes `MASKLIST` (the GI masks of `makeblastdb -gi_mask`) as a value of the alias
+// file and looks at it only after the whole tree is built; the GI-mask reader it then makes
+// opens no file until a mask is asked for (seqdbimpl.cpp:81-91, seqdbgimask.cpp:46-55). So
+// makeblastdb's own reads of a database (the removal of the old one, the metadata of the new
+// one) go through such an alias file as through any other.
+/// What the reader does with an alias file's `MASKLIST`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum MaskList {
+    /// Refused (`UNSUPPORTED_KEYS`): LOSAT's programs that read sequences do not read GI masks.
+    Refuse,
+    /// Passed over, as makeblastdb's reads pass it: the volumes and alias files are what they
+    /// are without it.
+    Pass,
+}
+
 struct Resolver<'a> {
     seqtype: SeqType,
+    /// `MASKLIST`: refused, or passed over by makeblastdb's own reads.
+    masklist: MaskList,
     /// Alias files being expanded, outermost first.
     recurse: Vec<String>,
     /// The directory where a volume named in an alias file is looked for
@@ -687,7 +705,7 @@ impl Resolver<'_> {
             path: path.clone(),
             message,
         };
-        // NCBI maps the alias file (`CSeqDBFileMemMap lease(m_Atlas,path.GetPathS())`,
+        // NCBI maps the alias file (`CSeqDBFileMemMap` made from `m_Atlas` and `path.GetPathS()`,
         // seqdbalias.cpp:662-667); a file that cannot be opened gives the
         // errors of `DbFile::open`.
         let bytes = DbFile::open(&path)?.read_all()?;
@@ -696,6 +714,7 @@ impl Resolver<'_> {
         for (key, value) in &values {
             match key.as_slice() {
                 b"DBLIST" => dblist = value,
+                b"MASKLIST" if self.masklist == MaskList::Pass => {}
                 other => {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
@@ -913,6 +932,7 @@ pub(super) fn resolve_in(
     }
     let mut resolver = Resolver {
         seqtype,
+        masklist: MaskList::Refuse,
         recurse: Vec::new(),
         local_dir: Some(search.cwd.clone()),
         search: Some(search),
@@ -997,15 +1017,18 @@ pub(super) fn resolve_in(
 /// it is): an alias file when `db_base.{p|n}al` exists, else the single
 /// volume `db_base.{p|n}in`. `local_copy` says where the volumes named in an
 /// alias file are looked for; `search` is the search path that a database which is not there
-/// names in NCBI's message (the files are looked for at `db_base` only).
+/// names in NCBI's message (the files are looked for at `db_base` only); `masklist` what is done
+/// with a `MASKLIST`.
 pub(super) fn resolve_one_name(
     db_base: &str,
     seqtype: SeqType,
     local_copy: LocalCopy<'_>,
     search: &SearchPath,
+    masklist: MaskList,
 ) -> Result<AliasTree, SeqDbError> {
     let mut resolver = Resolver {
         seqtype,
+        masklist,
         recurse: Vec::new(),
         local_dir: match local_copy {
             LocalCopy::CurrentDir => std::env::current_dir()
@@ -1061,13 +1084,19 @@ pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::
 //   remove are those the alias file sits beside.
 /// The files of the one database `db_base` for its removal: its volumes
 /// (paths without extension, in NCBI's order) and the paths of the alias
-/// files that name them (`CSeqDB::FindVolumePaths(dbname, seqtype, paths,
-/// &alias_paths)`, with the two differences above).
+/// files that name them (`CSeqDB::FindVolumePaths` with `dbname`, `seqtype`, `paths` and
+/// `alias_paths`, with the two differences above).
 pub(crate) fn find_volume_paths(
     db_base: &str,
     seqtype: SeqType,
 ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
-    let tree = resolve_one_name(db_base, seqtype, LocalCopy::No, &SearchPath::current_dir()?)?;
+    let tree = resolve_one_name(
+        db_base,
+        seqtype,
+        LocalCopy::No,
+        &SearchPath::current_dir()?,
+        MaskList::Pass,
+    )?;
     let mut alias_files = std::collections::BTreeSet::new();
     collect_alias_files(&tree.root, &mut alias_files);
     Ok((tree.volumes, alias_files.into_iter().collect()))
@@ -1076,7 +1105,7 @@ pub(crate) fn find_volume_paths(
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1578-1592
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:480-506
 // `CSeqDB_TitleWalker` (seqdbalias.cpp:1011-1026) passes a volume's title and
-// an alias file's `TITLE` to `SeqDB_JoinDelim(m_Value, value, "; ")`.
+// an alias file's `TITLE` to `SeqDB_JoinDelim`, which joins `m_Value` and `value` with `"; "`.
 /// Appends the title of `node` to `title`: its `TITLE` when it has one, else
 /// the titles below it joined with "; ".
 pub(super) fn walk_title(
@@ -1225,7 +1254,8 @@ pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64))
     .map(|()| length);
     let mut min = i32::MAX;
     let min_seq_length = walk_nodes(root, "MIN_SEQ_LENGTH", &mut |reached| {
-        // `int new_min = NStr::StringToUInt(value)`: a value of 2^31 or more is a negative `int`.
+        // `new_min` (an `int`) is set from `NStr::StringToUInt` of `value`: a value of 2^31 or more
+        // is a negative `int`.
         let new_min = match reached {
             Reached::Value(value) => string_to_uint(value)? as i32,
             Reached::Volume(_) => 0,
@@ -1493,7 +1523,8 @@ fn or_at(words: &mut [u64], bits: &[u64], start: u32) {
     }
 }
 
-/// NCBI's `size_t` of an `int` bound of an OID range (`CSeqDB_BitSet(mask.GetBegin(), ...)`).
+/// NCBI's `size_t` of an `int` bound of an OID range (the `CSeqDB_BitSet` constructor, given
+/// `mask.GetBegin()`).
 fn bound(value: i32) -> u64 {
     i64::from(value) as u64
 }
@@ -1759,7 +1790,7 @@ impl VolumeNode<'_> {
     }
 }
 
-/// `Specialize(volume)` of the tree under `node`; `None` when no branch reaches the volume.
+/// `Specialize` for `volume`, of the tree under `node`; `None` when no branch reaches the volume.
 fn specialize<'a>(node: &'a AliasNode, volume: &str) -> Option<VolumeNode<'a>> {
     let mut clone = VolumeNode {
         name: node.this_name.as_deref(),
@@ -1839,8 +1870,8 @@ pub(super) fn test_read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-958
-// blastdbcmd prints this list under "Volumes:" (`FindVolumePaths(volumes,
-// false)`, blastdbcmd.cpp:568): the volumes of the first two levels of the
+// blastdbcmd prints this list under "Volumes:" (`FindVolumePaths` with `volumes` and
+// false, blastdbcmd.cpp:568): the volumes of the first two levels of the
 // alias tree and the alias files of the third. The tests compare it with what
 // NCBI printed.
 /// What `blastdbcmd -info` lists under "Volumes:" for the database `dbname`.

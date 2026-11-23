@@ -1,18 +1,23 @@
 use super::*;
 use crate::ncbi_app::args::{ArgException, Args, ArgsError};
 
-fn words(line: &[&str]) -> Vec<String> {
-    line.iter().map(|word| word.to_string()).collect()
+fn words(line: &[&str]) -> Vec<std::ffi::OsString> {
+    line.iter().map(std::ffi::OsString::from).collect()
 }
 
 /// The arguments of `line` as NCBI's reader reads blastdbcmd's.
-fn parse(line: &[String]) -> Result<Args, ArgsError> {
+fn parse(line: &[std::ffi::OsString]) -> Result<Args, ArgsError> {
     crate::ncbi_app::args::parse(&super::super::TOOL, line)
 }
 
 fn messages(line: &[&str]) -> (&'static str, Vec<String>) {
     match parse(&words(line)) {
-        Err(ArgsError::Invalid(ArgException { code, messages })) => (code, messages),
+        Err(ArgsError::Invalid(ArgException { code, messages })) => {
+            let texts = messages
+                .into_iter()
+                .map(|message| String::from_utf8(message).unwrap());
+            (code, texts.collect())
+        }
         other => panic!("{line:?}: {other:?}"),
     }
 }
@@ -298,8 +303,8 @@ fn integer_keys_convert_as_ncbi_s_reader() {
         string_to_int8_message("").unwrap_err(),
         "Cannot convert string '' to Int8"
     );
-    // NCBI reads up to a NUL (`while (char ch = str[pos])`, `CHECK_ENDPTR` sees the NUL): a
-    // batch line `12\0x` is 12.
+    // NCBI reads up to a NUL (its loop runs while the character at `str[pos]` is not zero,
+    // `CHECK_ENDPTR` sees the NUL): a batch line `12\0x` is 12.
     assert_eq!(string_to_int8_message("12\u{0}x"), Ok(12));
     assert_eq!(
         string_to_int8_message("\u{0}1").unwrap_err(),

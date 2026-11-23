@@ -15,8 +15,8 @@ fn inflate(compression: Compression, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
     result
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1039 (`NStr::EndsWith(seq_file,
-// ".gz" / ".bz2" / ".zst", NStr::eNocase)`): the suffix in any case, nothing else.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1039 (`NStr::EndsWith` of the file name
+// with each of ".gz", ".bz2" and ".zst", `NStr::eNocase`): the suffix in any case, nothing else.
 #[test]
 fn a_name_announces_its_compression_by_its_suffix_in_any_case() {
     let cases = [
@@ -244,7 +244,7 @@ mod gzip {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1513-1526: the trailer is
-    // skipped (`STREAM->avail_in -= 8`, or `m_SkipInput` for the bytes the input lacks), never
+    // skipped (8 bytes less in `STREAM->avail_in`, or `m_SkipInput` for the bytes the input lacks), never
     // compared. Oracle cases good, badcrc, badlen, cut1-cut8 (built), cut9 and cut12 (buffer
     // error).
     #[test]

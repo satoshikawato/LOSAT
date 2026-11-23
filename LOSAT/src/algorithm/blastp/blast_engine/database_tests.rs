@@ -924,6 +924,8 @@ mod x_db_cut_blocks {
             mask_data: None,
             mask_id: None,
             mask_desc: None,
+            gi_mask: false,
+            gi_mask_name: None,
             randomize: false,
         };
         let now = crate::writedb::time::LocalTime {
@@ -1699,7 +1701,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         native.message
     );
     // The volume is recorded under its directory normalised with symbolic links
-    // followed (seqdbalias.cpp:851-862, `NormalizePath(dir_name, eFollowLinks)`), so
+    // followed (seqdbalias.cpp:851-862, `NormalizePath` of `dir_name` with `eFollowLinks`), so
     // the message names that directory: on macOS the temporary directory under `/var`
     // is shown under `/private/var`.
     assert_eq!(

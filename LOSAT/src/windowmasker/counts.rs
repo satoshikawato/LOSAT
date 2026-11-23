@@ -1,0 +1,492 @@
+//! windowmasker's `-mk_counts` (`CWinMaskCountsGenerator`: the unit counts of the input, file
+//! after file) and `-convert` (`CWinMaskCountsConverter`: a counts file in another format). The
+//! counts generator, the counts writers and the readers are `utils::winmask`'s; here are the
+//! application's parts: the configuration, the input files and their readers, the output that
+//! NCBI's writers open by name (silently, also when they cannot), and the messages.
+
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+
+use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::{input_lines, LineEnds, Ostream};
+use crate::ncbi_app::Diag;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::seqmasks_io::run::post_read_texts;
+use crate::utils::os_bytes::path_from_bytes;
+use crate::utils::winmask::{
+    convert_counts, generate, CountsFormat, CountsWriter, FinalizeError, GenCountsSettings,
+    GenError, GenomeSource, MaskerParams, PctSettings, WinMaskError, DEFAULT_TH,
+};
+
+use super::checkdup::check_duplicates;
+use super::ids::IdLists;
+use super::work::{
+    database_source, fasta_source, open_counts, report, unsupported, winmask_failure, Failure,
+    Record, SequenceSource,
+};
+
+/// Where the counts go (`CSeqMaskerOstat`'s stream).
+enum Sink {
+    /// The standard output (`-out -`).
+    Stdout,
+    /// A file opened by name; after a failed write the rest is lost, as NCBI's `ofstream`
+    /// loses it.
+    File(Option<BufWriter<File>>),
+    /// A name that did not open: NCBI's writer writes to its failed `ofstream`, which loses
+    /// everything without a message.
+    Lost,
+}
+
+/// The counts writer's stream: `sink`, which is `stdout` for the standard output.
+struct SinkStream<'s, 'o> {
+    sink: &'s mut Sink,
+    stdout: &'s mut Ostream<'o>,
+}
+
+impl Write for SinkStream<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.sink {
+            Sink::Stdout => self.stdout.write(buf),
+            Sink::File(file) => {
+                if let Some(writer) = file {
+                    if writer.write_all(buf).is_err() {
+                        *file = None;
+                    }
+                }
+                Ok(buf.len())
+            }
+            Sink::Lost => Ok(buf.len()),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self.sink {
+            Sink::Stdout => self.stdout.flush(),
+            Sink::File(file) => {
+                if let Some(writer) = file {
+                    if writer.flush().is_err() {
+                        *file = None;
+                    }
+                }
+                Ok(())
+            }
+            Sink::Lost => Ok(()),
+        }
+    }
+}
+
+/// The output of a counts writer of `format` made with `-out` `name`
+/// (`CSeqMaskerOstatFactory::create`): the stream constructor for `-`, which the binary
+/// format starts with an extra word on (written to `stdout`, where the next post brings it
+/// out); otherwise the name constructor, whose `ofstream` makes or empties the file at once
+/// (an ascii writer given an empty name writes to the standard output).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:69-77
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_bin.cpp:55-67
+fn open_sink(name: &OsStr, format: CountsFormat, stdout: &mut Ostream<'_>) -> Sink {
+    if name == "-" || (name.is_empty() && format == CountsFormat::Ascii) {
+        if name == "-" {
+            let _ = stdout.write_all(format.stream_prefix());
+        }
+        return Sink::Stdout;
+    }
+    match File::create(name) {
+        Ok(file) => Sink::File(Some(BufWriter::with_capacity(1 << 16, file))),
+        Err(_) => Sink::Lost,
+    }
+}
+
+/// `finalize` of `writer` into `sink` (`stdout` for the standard output), its message
+/// (`optimizing the data structure`) posted. Nothing of the counts is written before the
+/// message, so nothing waits in `stdout` then.
+fn finalize(
+    writer: CountsWriter,
+    sink: &mut Sink,
+    stdout: &mut Ostream<'_>,
+    diag: &mut Diag,
+) -> Result<(), Failure> {
+    let mut stream = SinkStream { sink, stdout };
+    writer
+        .finalize(&mut stream, &mut |line| diag.post(line))
+        .map_err(|error| match error {
+            FinalizeError::Ncbi(exception) => Failure::Ncbi(exception),
+            FinalizeError::Refused(what) => Failure::Refused(unsupported(&what)),
+            FinalizeError::ClosedPipe => Failure::ClosedPipe,
+        })
+}
+
+/// The file list of `-in` (`CWinMaskCountsGenerator::operator()`): the names between commas
+/// (`NStr::Split` without flags: empty names are kept, an empty value has none), or with
+/// `-fa_list` the lines of the file `-in` that are not empty, as the C++ library's `getline`
+/// reads them from a text stream: lines end at `\n`, and a carriage return stays in the name
+/// except where the library reads a text file's `\r\n` as `\n` (Windows); a file that does not
+/// open or read gives no more names.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:228-242
+fn file_list(input: &str, fa_list: bool) -> Vec<Vec<u8>> {
+    if !fa_list {
+        if input.is_empty() {
+            return Vec::new();
+        }
+        return input
+            .split(',')
+            .map(|name| name.as_bytes().to_vec())
+            .collect();
+    }
+    let mut bytes = Vec::new();
+    if let Ok(mut file) = File::open(input) {
+        let _ = std::io::Read::read_to_end(&mut file, &mut bytes);
+    }
+    let text_mode = if cfg!(windows) {
+        LineEnds::Windows
+    } else {
+        LineEnds::Unix
+    };
+    input_lines(&bytes, text_mode)
+        .into_iter()
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
+/// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:636
+/// The first read of a FASTA file that did not open: `CStreamReader` answers `eRW_Error` for a
+/// stream that is not good, and `CBufferedLineReader` throws `CIOException::eRead`.
+fn read_error() -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: "src/util/line_reader.cpp",
+            line: 636,
+            kind: "CIOException::eRead",
+            function: Some("ncbi::CBufferedLineReader::x_ReadBuffer"),
+        },
+        "Read error",
+    )
+}
+
+/// The input of `-mk_counts`: every file of the list, read with `CWinMaskUtil::CInputBioseq_CI`
+/// (a FASTA reader without `-parse_seqids`, or a database reader), each sequence that
+/// `CWinMaskUtil::consider` keeps.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:171-215
+pub(super) struct GenomeInput<'r, 'd, 'w, 'o> {
+    /// The names of the files, as their bytes (a `-fa_list` line is not text).
+    files: Vec<Vec<u8>>,
+    database: bool,
+    lists: &'r IdLists,
+    registry: Result<Option<&'r str>, &'r str>,
+    /// The standard output, which comes out before each post.
+    out: &'d mut Ostream<'o>,
+    diag: &'d mut Diag<'w>,
+    /// What the last read posted (`GenomeSource::repeat_posts`).
+    posts: Vec<u8>,
+}
+
+/// The function that `GenomeInput::each_record` gives each sequence, with the output and the
+/// diagnostics.
+pub(super) type RecordFn<'f> =
+    dyn FnMut(&Record, &mut Ostream<'_>, &mut Diag) -> Result<(), Failure> + 'f;
+
+/// Posts `line` (`LOG_POST`) after the output written so far (NCBI's `cerr` is tied to
+/// `cout`); a closed pipe ends the run there, as SIGPIPE ends NCBI's.
+pub(super) fn post_after_output(
+    out: &mut Ostream<'_>,
+    diag: &mut Diag,
+    line: &[u8],
+) -> Result<(), Failure> {
+    let _ = out.flush();
+    if out.closed() {
+        return Err(Failure::ClosedPipe);
+    }
+    diag.post_bytes(line);
+    Ok(())
+}
+
+impl GenomeInput<'_, '_, '_, '_> {
+    /// One read of every file: `f` gets each sequence that has letters and that the id lists
+    /// keep, with the output and the diagnostics. The posts of the read are kept.
+    pub(super) fn each_record(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
+        self.diag.start_record();
+        let result = self.read_files(f);
+        self.posts = self.diag.take_record();
+        result
+    }
+
+    fn read_files(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
+        for name in &self.files {
+            let mut source: Box<dyn SequenceSource> = if self.database {
+                // Names that are not UTF-8 were refused before (`make_counts`).
+                database_source(&String::from_utf8_lossy(name), self.registry, false)?
+            } else {
+                let file = File::open(path_from_bytes(name.as_slice()))
+                    .map_err(|_| Failure::Ncbi(read_error()))?;
+                fasta_source(file, false)?
+            };
+            if self.lists.match_titles() {
+                source.make_titles();
+            }
+            while let Some(record) = source.next_record(self.out, self.diag)? {
+                post_read_texts::<Failure>(&record.texts, self.out, self.diag)?;
+                if record.iupac.is_empty() || !self.lists.consider(&record) {
+                    continue;
+                }
+                f(&record, self.out, self.diag)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl GenomeSource for GenomeInput<'_, '_, '_, '_> {
+    type Error = Failure;
+
+    fn read(&mut self, f: &mut dyn FnMut(&[u8])) -> Result<(), Failure> {
+        self.each_record(&mut |record, _, _| {
+            f(&record.iupac);
+            Ok(())
+        })
+    }
+
+    fn repeat_posts(&mut self) -> Result<(), Failure> {
+        let _ = self.out.flush();
+        if self.out.closed() {
+            return Err(Failure::ClosedPipe);
+        }
+        let posts = std::mem::take(&mut self.posts);
+        self.diag.write_text(&posts);
+        self.posts = posts;
+        Ok(())
+    }
+
+    fn log(&mut self, line: &str) -> Result<(), Failure> {
+        post_after_output(self.out, self.diag, line.as_bytes())
+    }
+}
+
+/// `-mk_counts`: the configuration's id lists (`lists`, made before), then
+/// `CWinMaskCountsGenerator`; the exit status.
+///
+/// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:146-198
+pub(super) fn mk_counts(
+    args: &Args,
+    settings: &ApplicationSettings,
+    lists: &IdLists,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
+    match mk_counts_run(args, settings, lists, out, diag) {
+        Ok(status) => status,
+        Err(failure) => report(failure, diag),
+    }
+}
+
+/// The settings of the generator from `args`; `to_file` when the counts go to a named file,
+/// whose constructor alone takes the `-t_*_pct` percentages.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:178-224
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:346-353
+fn generator_settings(args: &Args, to_file: bool) -> GenCountsSettings {
+    let unsigned = |name| args.integer(name).map_or(0, |value| value as u32);
+    let mut th = DEFAULT_TH;
+    if to_file {
+        let pct = [
+            args.double("t_low_pct"),
+            args.double("t_extend_pct"),
+            args.double("t_thres_pct"),
+            args.double("t_high_pct"),
+        ];
+        for (slot, value) in th.iter_mut().zip(pct) {
+            if let Some(value) = value {
+                *slot = value;
+            }
+        }
+    }
+    GenCountsSettings {
+        unit_size: args.integer("unit").map_or(0, |value| value as u8),
+        genome_size: args
+            .integer("genome_size")
+            .map_or(0, |value| i64::from(value) as u64),
+        mem: unsigned("mem"),
+        min_count: unsigned("t_low"),
+        max_count: unsigned("t_high"),
+        th,
+    }
+}
+
+fn mk_counts_run(
+    args: &Args,
+    settings: &ApplicationSettings,
+    lists: &IdLists,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> Result<i32, Failure> {
+    let infmt = args.value("infmt").expect("-infmt has a default");
+    if infmt == "seqids" {
+        return Err(Failure::Refused(unsupported(
+            "-mk_counts with -infmt seqids (NCBI BLAST+ fetches each sequence from NCBI over the network)",
+        )));
+    }
+    let mut stdout = Ostream::new(out);
+    let result = make_counts(args, settings, lists, infmt, &mut stdout, diag);
+    output_then(&mut stdout, result)
+}
+
+/// The end of a counts mode that ended with `result`: the output written so far comes out
+/// before the diagnostics of a failure (NCBI's `cerr` is tied to `cout`), and a closed pipe
+/// ends the run there, without them.
+fn output_then(stdout: &mut Ostream<'_>, result: Result<i32, Failure>) -> Result<i32, Failure> {
+    let _ = stdout.flush();
+    if stdout.closed() {
+        return Err(Failure::ClosedPipe);
+    }
+    result
+}
+
+/// `CWinMaskCountsGenerator` of the input `-in` in `-infmt` `infmt`.
+fn make_counts(
+    args: &Args,
+    settings: &ApplicationSettings,
+    lists: &IdLists,
+    infmt: &str,
+    stdout: &mut Ostream<'_>,
+    diag: &mut Diag,
+) -> Result<i32, Failure> {
+    let input = args.value("in").expect("-in has a default");
+    let files = file_list(input, args.boolean("fa_list").unwrap_or(false));
+    let database = infmt == "blastdb";
+    // NCBI's CSeqDB opens a database by the bytes of its name; LOSAT's database reader takes
+    // names of text, so a -fa_list line that is not UTF-8 is refused before anything is written.
+    if database && files.iter().any(|name| std::str::from_utf8(name).is_err()) {
+        return Err(Failure::Refused(unsupported(
+            "-infmt blastdb with a -fa_list line (a database name) that is not UTF-8 text",
+        )));
+    }
+    let output = args.os_value("out").expect("-out has a default");
+    let format = counts_format(args);
+    let mut sink = open_sink(output, format, stdout);
+    let mut writer = CountsWriter::new(format, args.value("meta").unwrap_or_default().as_bytes());
+    let mut source = GenomeInput {
+        files,
+        database,
+        lists,
+        registry: match &settings.blastdb {
+            Ok(value) => Ok(value.as_deref()),
+            Err(reason) => Err(reason.as_str()),
+        },
+        out: &mut *stdout,
+        diag: &mut *diag,
+        posts: Vec::new(),
+    };
+    if args.boolean("checkdup").unwrap_or(false) {
+        check_duplicates(&mut source)?;
+    }
+    let gen_settings = generator_settings(args, output != "-");
+    generate(&gen_settings, &mut source, &mut writer).map_err(|error| match error {
+        GenError::Source(failure) => failure,
+        GenError::EmptyGenome(exception) => Failure::Ncbi(exception),
+        GenError::Refused(what) => Failure::Refused(unsupported(&what)),
+    })?;
+    drop(source);
+    finalize(writer, &mut sink, stdout, diag)?;
+    Ok(0)
+}
+
+/// The counts format of `-sformat` and `-smem` (`CWinMaskConfig::SFormat`).
+fn counts_format(args: &Args) -> CountsFormat {
+    CountsFormat::from_sformat(
+        args.value("sformat").expect("-sformat has a default"),
+        args.integer("smem").expect("-smem has a default"),
+    )
+}
+
+/// `CWinMaskCountsConverter`'s exception for `-in -` at `line` (the stream constructor's for
+/// `-out -`, the name constructor's otherwise).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_counts_converter.cpp:47-82,140-148
+fn input_name_exception(line: u32) -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: "src/algo/winmask/win_mask_counts_converter.cpp",
+            line,
+            kind: "Exception::argument error",
+            function: Some("ncbi::CWinMaskCountsConverter::CWinMaskCountsConverter"),
+        },
+        "input file name must be non-empty",
+    )
+}
+
+/// `-convert`: `CWinMaskCountsConverter` of `-in` to `-out` in `-sformat`; the exit status.
+///
+/// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:121-140
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_counts_converter.cpp:85-136
+pub(super) fn convert(args: &Args, out: &mut dyn Write, diag: &mut Diag) -> i32 {
+    match convert_run(args, out, diag) {
+        Ok(status) => status,
+        Err(failure) => report(failure, diag),
+    }
+}
+
+fn convert_run(args: &Args, out: &mut dyn Write, diag: &mut Diag) -> Result<i32, Failure> {
+    let mut stdout = Ostream::new(out);
+    let result = convert_file(args, &mut stdout, diag);
+    output_then(&mut stdout, result)
+}
+
+/// An error of `-convert` of the counts file `file` (`-in <name>`): LOSAT's refusals in the words
+/// of the conversion, else as [`winmask_failure`] gives it.
+fn convert_failure(file: &str, error: WinMaskError) -> Failure {
+    match error {
+        WinMaskError::PctLine { .. } => {
+            Failure::Refused(unsupported(&format!("-convert of {file}: {error};")))
+        }
+        WinMaskError::UnitSize { unit } => Failure::Refused(unsupported(&format!(
+            "-convert of {file}, whose units of {unit} letters NCBI BLAST+ converts without an error while its reverse complement of a unit shifts the 32-bit unit by 32 bits or more (undefined behaviour in C++),"
+        ))),
+        error => winmask_failure(file, error),
+    }
+}
+
+/// `CWinMaskCountsConverter` of `-in` to `-out`.
+fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
+    let input = args.value("in").expect("-in has a default");
+    let output = args.os_value("out").expect("-out has a default");
+    if input == "-" {
+        let line = if output == "-" { 77 } else { 55 };
+        return Err(Failure::Ncbi(input_name_exception(line)));
+    }
+    diag.post("reading counts...");
+    let file = format!("-in {input}");
+    let istat = open_counts(
+        input,
+        &file,
+        &MaskerParams::default(),
+        &PctSettings::default(),
+        diag,
+    )?;
+    let count_map = istat
+        .count_map()
+        .map_err(|error| convert_failure(&file, error))?;
+    let meta = args.value("meta").unwrap_or_default();
+    let metadata = if meta.is_empty() {
+        istat.note()
+    } else {
+        meta.as_bytes()
+    };
+    let format = counts_format(args);
+    let mut writer = CountsWriter::new(format, metadata);
+    let mut sink = open_sink(output, format, stdout);
+    // The messages come after the output written so far (the binary format's extra word); a
+    // closed pipe ends the run at the first, as SIGPIPE ends NCBI's.
+    let mut closed = false;
+    convert_counts(&istat, count_map, &mut writer, &mut |line| {
+        closed = closed || post_after_output(stdout, diag, line.as_bytes()).is_err();
+    })
+    .map_err(|error| convert_failure(&file, error))?;
+    if closed {
+        return Err(Failure::ClosedPipe);
+    }
+    drop(istat);
+    finalize(writer, &mut sink, stdout, diag)?;
+    Ok(0)
+}

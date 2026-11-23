@@ -43,7 +43,7 @@ use crate::report::tabular::{
 use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTN";
-/// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
+/// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper` of `m_Program`, a space and `version`).
 const PROGRAM_VERSION: &str = concat!("TBLASTN ", crate::wording::report_version!());
 /// The `# PSITBLASTN 2.17.0+` line of a PSSM search (`-in_pssm`, `in_pssm::PROGRAM`).
 const PSI_PROGRAM_VERSION: &str = concat!("PSITBLASTN ", crate::wording::report_version!());
@@ -448,7 +448,6 @@ pub(super) fn write_tblastn_tabular(
                         hsp.s_start,
                         hsp.s_end,
                         &payload.edit_script,
-                        &[],
                         &mut qrow,
                         &mut srow,
                     )?;

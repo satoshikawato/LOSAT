@@ -621,8 +621,13 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
   await expect.poll(() => openKeeperLinks(page), { timeout: 15_000 }).toBe(0);
   await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
   await page.getByTestId('tab-search').click();
+  // The next search, on 3,000 letters of the query with the same 2 threads, ends in seconds. Before, it searched the
+  // whole genomes again and had to end within 120 s, which a shared machine did not always allow: on the CI's WebKit it
+  // was still running at 120 s (dev 2026-11-23, run 45086947705), where it takes 8.5 s alone on a local machine.
+  await page.getByTestId('query-region-start').fill('1');
+  await page.getByTestId('query-region-stop').fill('3000');
   await submit(page);
-  await waitStatus(page, 2, 'completed', 120_000);
+  await waitStatus(page, 2, 'completed', 60_000);
 });
 
 // The third review of D1 and D2, L2 (2026-11-19): a runtime that waits for its keeper after a Cancel (or a renewal, a

@@ -64,6 +64,19 @@ mod database;
 // `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the kernels of a masked database search,
 // chosen once per call in place of the kernel (`prelim_run::run_preliminary_with`).
 mod db_masked;
+// What the replay of the parallel redo's windows (`x_redo_par.rs`, built where they run) reads of
+// the one-thread loop's Smith-Waterman redo: the marks of the lists that the redo's fetch excludes
+// and the loop's reader of a query's marks, the errors of a batch and of a match, and the notes
+// that give an error the warning of a header read before it (the status of a query batch is core's
+// `smith_waterman_match::SwBatchStatus`, which both import).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use {
+    database::{FetchExcludedMatch, FetchNotes},
+    redo_run::{query_fetch_excluded_reached, sw_batch_failed, sw_endless},
+};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;

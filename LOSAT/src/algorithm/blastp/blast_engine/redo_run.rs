@@ -1022,17 +1022,36 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
 
 /// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at the traceback of
 /// every query batch it searches, with hits or without (`smith_waterman_match::sw_ungapped_error`,
-/// BLASTX's and TBLASTN's too; NCBI BLAST+ 2.17.0 from Bioconda, line NP item O4b2-2, 2026-11-23). The
-/// batch whose first query is `batch_start` is the call's first with a valid context (the search
-/// of all queries: an ungapped search plans no blocks and splits no query); the batches before it
-/// have none, and NCBI reports them with their warnings and does not search them. As
-/// [`sw_batch_failed`], the error follows their reports (`database::HeaderReadError`), and a run
-/// without a searched batch ends as NCBI's does. Exit status 1, its message.
+/// BLASTX's and TBLASTN's too; NCBI BLAST+ 2.17.0 from Bioconda, line NP item O4b2-2, 2026-11-23):
+/// at the ungapped finish of the search of all queries (an ungapped search plans no blocks and
+/// splits no query), the error of the call's first query batch with a valid context, and `Ok` for
+/// a call without one or without `use_sw_tback`. The batches before it have no valid context, and
+/// NCBI reports them with their warnings and does not search them. As [`sw_batch_failed`], the
+/// error follows their reports (`database::HeaderReadError`), and a run without a searched batch
+/// ends as NCBI's does. Exit status 1, its message.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+pub(super) fn sw_ungapped_check(
+    use_sw_tback: bool,
+    query_batches: &[crate::blastinput::seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+) -> Result<()> {
+    if !use_sw_tback {
+        return Ok(());
+    }
+    match query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
+    {
+        Some(batch) => Err(sw_ungapped_refusal(batch.searched.start)),
+        None => Ok(()),
+    }
+}
+
+/// The refusal of [`sw_ungapped_check`] at the batch whose first query is `batch_start`.
 #[cold]
 #[inline(never)]
-pub(super) fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
+fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
     super::database::HeaderReadError {
         query: batch_start,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(

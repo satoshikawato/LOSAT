@@ -1962,9 +1962,9 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         }
         // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
         // in the traceback of each query batch it searches, before any match is redone, and LOSAT
-        // refuses there
-        // (`redo_run::sw_ungapped_refusal`, in `run_call`), after the reports of the batches
-        // before, which have no valid context. A run without such a batch ends as NCBI's does.
+        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
+        // batches before, which have no valid context. A run without such a batch ends as NCBI's
+        // does.
         if !args.ungapped && !args.comp_based_stats.is_enabled() {
             bail!(
                 "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
@@ -9977,17 +9977,9 @@ fn run_call(
             sorts_results,
         )?)
     } else if args.ungapped {
-        // `-use_sw_tback`: NCBI's traceback of the first query batch it searches crashes
-        // before it reads a list (`redo_run::sw_ungapped_refusal`).
-        if args.use_sw_tback {
-            if let Some(batch) = query_batches.iter().find(|batch| {
-                !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]
-            }) {
-                return Err(redo_run::sw_ungapped_refusal(batch.searched.start));
-            }
-        }
         // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
         // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
+        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
         let finish = traceback::UngappedFinish {
             contexts: &contexts,
             subjects,

@@ -98,6 +98,9 @@ pub(super) fn fill(
     if !taken {
         return false;
     }
+    if x_popwr_on() {
+        x_populate(t);
+    }
     // SAFETY: `in_range(words, t)` holds.
     let (n_words, ambiguous) = unsafe {
         if t.x_h24 {
@@ -112,6 +115,49 @@ pub(super) fn fill(
     *t.total_positions += n_words;
     *t.ambiguous_skipped += ambiguous;
     true
+}
+
+/// No NCBI counterpart: reads LOSAT_X_MBPOPWR once (PROBE, line FM s3: a switch of the strict set,
+/// on unless it is `0`). It chooses a LOSAT code path and changes no value NCBI computes.
+fn x_popwr_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBPOPWR"))
+}
+
+/// No NCBI counterpart (PROBE, LOSAT_X_MBPOPWR): maps the pages of the fill's four tables with one
+/// `madvise(MADV_POPULATE_WRITE)` each (Linux 5.14 and later; elsewhere, or when the call fails,
+/// the loop's first touches map them as before). The call writes no byte: every element keeps its
+/// value. Without it, the loop's first read of a head maps the kernel's zero page and its write then
+/// faults again to replace it (two faults per page of `hashtable`, `pv_array`, `helper_array`).
+fn x_populate(t: &mut XMbTables<'_>) {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        fn one(p: *mut u8, bytes: usize) {
+            let page = rustix::param::page_size();
+            let start = (p as usize).next_multiple_of(page);
+            let end = (p as usize).saturating_add(bytes) & !(page - 1);
+            if end > start {
+                // SAFETY: `[start, end)` lies inside one live allocation that the fill holds by a
+                // `&mut`; MADV_POPULATE_WRITE only maps its pages, it reads and writes no byte.
+                let _ = unsafe {
+                    rustix::mm::madvise(
+                        start as *mut core::ffi::c_void,
+                        end - start,
+                        rustix::mm::Advice::LinuxPopulateWrite,
+                    )
+                };
+            }
+        }
+        one(t.hashtable.as_mut_ptr().cast(), size_of_val(&*t.hashtable));
+        one(t.next_pos.as_mut_ptr().cast(), size_of_val(&*t.next_pos));
+        one(t.pv_array.as_mut_ptr().cast(), size_of_val(&*t.pv_array));
+        one(
+            t.helper_array.as_mut_ptr().cast(),
+            size_of_val(&*t.helper_array),
+        );
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let _ = t;
 }
 
 /// The bounds the loop relies on (module documentation). A 3-byte table (`x_h24`) holds

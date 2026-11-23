@@ -1953,16 +1953,17 @@ pub(super) fn after_throw(
 
 /// How the pairwise reports of the run's formats `output_formats` read each query's subjects
 /// (`QueryGroup::read_order`): as the first pairwise format's view reads them
-/// (`PairwiseView::reading` of `-sorthits` and `-sorthsps` `sort` and the run's numbers
-/// `counts`; the formats of a run whose loads they make share one view's order,
+/// (`PairwiseView::reading` of `-sorthits` and `-sorthsps` `sort`, the run's numbers `counts`
+/// and `-html`, `html`; the formats of a run whose loads they make share one view's order,
 /// `FormatThrow::and`); `None` without one.
 pub(super) fn pairwise_reading(
     output_formats: &[BlastnOutputFormat],
     sort: crate::report::hit_sort::ReportSort,
     counts: crate::blastinput::report_counts::ReportCounts,
+    html: bool,
 ) -> Option<crate::report::pairwise::PairwiseReading> {
     output_formats.iter().find_map(|format| match format {
-        BlastnOutputFormat::Pairwise(view) => Some(view.reading(sort, counts.shown())),
+        BlastnOutputFormat::Pairwise(view) => Some(view.reading(sort, counts.shown(), html)),
         _ => None,
     })
 }

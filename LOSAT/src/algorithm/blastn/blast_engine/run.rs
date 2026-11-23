@@ -8952,6 +8952,7 @@ fn run_in_pool(
                         &output_formats,
                         args.formatting.report_sort(),
                         args.report_counts,
+                        args.html,
                     ),
                     pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
@@ -9740,6 +9741,7 @@ fn write_reports_untimed(
                         output_formats,
                         args.formatting.report_sort(),
                         args.report_counts,
+                        args.html,
                     ),
                 ),
                 results.batches,

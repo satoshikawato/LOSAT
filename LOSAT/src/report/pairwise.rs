@@ -201,16 +201,18 @@ impl PairwiseView {
     }
 
     /// How a report of this view reads its subjects (`PairwiseReading`): `sort` as it reads it
-    /// (`report_sort`) and what it shows of each query (`shown`, `-num_descriptions` and
-    /// `-num_alignments`).
+    /// (`report_sort`), what it shows of each query (`shown`, `-num_descriptions` and
+    /// `-num_alignments`) and whether it is the `-html` report (`html`).
     pub fn reading(
         self,
         sort: super::hit_sort::ReportSort,
         shown: crate::report::db_subject::Shown,
+        html: bool,
     ) -> PairwiseReading {
         PairwiseReading {
             sort: self.report_sort(sort),
             shown,
+            html,
         }
     }
 
@@ -230,13 +232,15 @@ impl PairwiseView {
 
 /// How a pairwise report (outfmt 0 to 4) reads the subjects of each query, for the models of its
 /// reads made before it is written (`x_pairwise_par::QueryGroup::read_order`): the order of its
-/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`) and what it
-/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`), as its view's writer reads
-/// them (`PairwiseView::reading`).
+/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`), what it
+/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`) and whether it is the
+/// `-html` report (`html`, whose description lines end the run at a subject whose load throws:
+/// `db_subject::PairwiseReads::html`), as its view's writer reads them (`PairwiseView::reading`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PairwiseReading {
     pub sort: super::hit_sort::ReportSort,
     pub shown: crate::report::db_subject::Shown,
+    pub html: bool,
 }
 
 impl PairwiseConfig {
@@ -248,9 +252,9 @@ impl PairwiseConfig {
 
 /// `write_prolog`'s `html` of a report of `-html` links `links` (`None`: the plain report): the
 /// links and the sink of the report's posts (`QueryWarnings::html_posts_sink`: the run's
-/// diagnostics), which a `-html` pairwise report gets at any place among the run's formats
-/// (`query_warnings::report_posts`). One without them is LOSAT's internal error (its posts would
-/// be lost).
+/// diagnostics), which a `-html` report of outfmt 0 to 4 gets at any place among the run's
+/// formats (`query_warnings::report_posts`, `ReportFormat::writes_html_links`). One without them
+/// is LOSAT's internal error (its posts would be lost).
 pub(crate) fn html_with_diagnostics<'w>(
     links: Option<&'w super::html_ids::HtmlLinks>,
     warnings: Option<&'w mut super::query_warnings::QueryWarnings<'_>>,
@@ -3962,6 +3966,27 @@ fn subject_skipped_id(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
+/// The Seq-id text of the Seq-align id of the `-subject` record `s_idx` without and with its
+/// version (`CSeq_id::GetSeqIdString` with false and true, `x_pairwise_par::QuerySections::
+/// alignment_id_texts`): `subject_skipped_id`, and with the version the label of a parsed id
+/// (`seqid::label::content`); the local id `Subject_N` of a record without one has no version.
+fn record_alignment_id_texts(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> [Vec<u8>; 2] {
+    let id = subject_skipped_id(parsed, None, s_idx);
+    let versioned = match parsed.get(s_idx as usize).and_then(Option::as_deref) {
+        Some(subject) => {
+            let mut text = Vec::new();
+            crate::seqid::label::content(subject.alignment_id(), true, &mut text);
+            text
+        }
+        None => id.clone(),
+    };
+    [id, versioned]
+}
+
 /// A description line's label in NCBI's two parts (`x_DisplayDeflineTableBody`): the id text
 /// (`gi|N|` and the id, the `line_length` that NCBI counts before the title; under `-html` the
 /// text of the sequence's link) and the title (`line_component`: the defline, after two spaces
@@ -6012,6 +6037,12 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
         }
         Ok(())
+    }
+
+    // Only `-subject`'s Dense-segs throw (`remaps`), so a `-db` report gives no texts.
+    fn alignment_id_texts(&self, s_idx: u32) -> Option<[Vec<u8>; 2]> {
+        self.remaps()
+            .then(|| record_alignment_id_texts(self.records_parsed, s_idx))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552

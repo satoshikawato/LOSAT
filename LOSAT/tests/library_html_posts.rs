@@ -206,3 +206,167 @@ fn html_posts_child() {
     }
     println!("html posts checked");
 }
+
+/// The variable that makes `later_formats_child` run (`later_formats_post_as_their_runs_alone`).
+const LATER_FORMATS_CHILD: &str = "LOSAT_TEST_HTML_LATER_FORMATS_CHILD";
+
+// Line RG T4b review b N3: in a call of several formats, a `-html` report of outfmt 1 to 4 at any
+// place gets the posts of NCBI's formatter registries (`report::query_warnings::report_posts`,
+// `ReportFormat::writes_html_links`). Here `FMTCFG` names a registry file whose read posts (a
+// repeated key) and `GETURL_DEBUG` is set, the run's directory has no `./.ncbirc`: each format's
+// posts in the call are those of the command line's run of that format alone (its standard
+// error), and each report's bytes those of the call of that format alone, in the five programs.
+// The child process gets the environment (the tests do not change their own).
+#[test]
+fn later_formats_post_as_their_runs_alone() {
+    let directory = std::env::temp_dir().join(format!("losat-html-later-{}", std::process::id()));
+    let run_directory = directory.join("run");
+    std::fs::create_dir_all(&run_directory).unwrap();
+    let registry = directory.join("fmt.rc");
+    std::fs::write(
+        &registry,
+        b"[BLASTFMTUTIL]\nPROTOCOL=https:\nPROTOCOL=https:\n",
+    )
+    .unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "library_html_posts::later_formats_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
+        .env(LATER_FORMATS_CHILD, "1")
+        .env("FMTCFG", &registry)
+        .env("GETURL_DEBUG", "1")
+        .env_remove("NCBI")
+        .current_dir(&run_directory)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("later formats checked"), "{stdout}");
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// The child of `later_formats_post_as_their_runs_alone`: without `LATER_FORMATS_CHILD` it does
+/// nothing.
+#[test]
+fn later_formats_child() {
+    if std::env::var_os(LATER_FORMATS_CHILD).is_none() {
+        return;
+    }
+    // The records as FASTA (`>` and the title; the local ids are made, `Query_1`, `Subject_1`).
+    let fasta = |records: &[FastaRecord]| -> Vec<u8> {
+        records
+            .iter()
+            .flat_map(|record| {
+                [
+                    b">".as_slice(),
+                    &record.title,
+                    b"\n",
+                    &record.sequence,
+                    b"\n",
+                ]
+                .concat()
+            })
+            .collect()
+    };
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let (query, subject) = self_pair(program);
+        std::fs::write("query.fa", fasta(&query)).unwrap();
+        std::fs::write("subject.fa", fasta(&subject)).unwrap();
+        // The command line's standard error of one format alone.
+        let command_line = |outfmt: &str| {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_losat"))
+                .args([
+                    &program.name().to_ascii_lowercase(),
+                    "-query",
+                    "query.fa",
+                    "-subject",
+                    "subject.fa",
+                    "-html",
+                    "-outfmt",
+                    outfmt,
+                ])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{program} outfmt {outfmt}");
+            output.stderr
+        };
+        let search = validate(program, &["-html"]).unwrap();
+        let inputs = Inputs::new(&query, &subject);
+        let alone = |outfmt: &str| {
+            let mut outcome = run_collect(&search, inputs, &[outfmt]).unwrap();
+            (outcome.reports.remove(0).bytes, outcome.diagnostics)
+        };
+        let (one, one_posts) = alone("1");
+        assert!(one.starts_with(b"<HTML>"), "{program}");
+        assert!(
+            String::from_utf8_lossy(&one_posts).contains("PROTOCOL settings"),
+            "{program}: {}",
+            String::from_utf8_lossy(&one_posts)
+        );
+        let lines = |text: &[u8]| {
+            let mut lines: Vec<String> = String::from_utf8_lossy(text)
+                .lines()
+                .map(str::to_string)
+                .collect();
+            lines.sort();
+            lines
+        };
+        for formats in [
+            &["6", "1"][..],
+            &["0", "1"],
+            &["1", "18"],
+            &["3", "0", "4", "2"],
+        ] {
+            let together = run_collect(&search, inputs, formats).unwrap();
+            let mut expected = Vec::new();
+            for (at, &format) in formats.iter().enumerate() {
+                let (bytes, posts) = alone(format);
+                assert_eq!(
+                    String::from_utf8_lossy(&posts),
+                    String::from_utf8_lossy(&command_line(format)),
+                    "{program}: outfmt {format} alone"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&together.reports[at].bytes),
+                    String::from_utf8_lossy(&bytes),
+                    "{program} {formats:?}: outfmt {format}"
+                );
+                expected.extend(posts);
+            }
+            // The reports interleave, and so do their posts: with one pairwise format the call's
+            // posts are its own; with several, the same lines as their calls alone.
+            if formats
+                .iter()
+                .filter(|&&format| format != "6" && format != "18")
+                .count()
+                == 1
+            {
+                assert_eq!(
+                    String::from_utf8_lossy(&together.diagnostics),
+                    String::from_utf8_lossy(&expected),
+                    "{program} {formats:?}"
+                );
+            }
+            assert_eq!(
+                lines(&together.diagnostics),
+                lines(&expected),
+                "{program} {formats:?}"
+            );
+        }
+    }
+    println!("later formats checked");
+}

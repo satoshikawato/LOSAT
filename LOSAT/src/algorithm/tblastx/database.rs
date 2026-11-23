@@ -877,19 +877,20 @@ pub(crate) fn after_throw<'a>(
 
 /// How the pairwise reports of the formats `formats` read each query's subjects, as the first
 /// pairwise format's writer reads them (`PairwiseView::reading` of `-sorthits` and `-sorthsps`
-/// `sort` and the run's numbers `counts`; the formats of a run whose loads they make share one
-/// view's order, `FormatThrow::and`); `None` without one.
+/// `sort`, the run's numbers `counts` and `-html`, `html`; the formats of a run whose loads they
+/// make share one view's order, `FormatThrow::and`); `None` without one.
 pub(crate) fn pairwise_reading(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
     sort: crate::report::hit_sort::ReportSort,
     counts: crate::blastinput::report_counts::ReportCounts,
+    html: bool,
 ) -> Option<crate::report::pairwise::PairwiseReading> {
     let view = formats.iter().find_map(|format| {
         format
             .report_format()
             .and_then(crate::report::pairwise::PairwiseView::of)
     })?;
-    Some(view.reading(sort, counts.shown()))
+    Some(view.reading(sort, counts.shown(), html))
 }
 
 /// What one query's report of the hits `ordered` (in report order) loads where its batch's

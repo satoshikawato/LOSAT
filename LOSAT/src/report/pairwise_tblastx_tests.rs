@@ -1120,6 +1120,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
             hits: vec![vec![0], vec![1]],
             described: vec![0, 1],
             aligned: 2,
+            html: false,
         });
     let loads = HitLoads::of(
         Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),

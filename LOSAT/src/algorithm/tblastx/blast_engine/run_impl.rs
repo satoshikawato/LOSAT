@@ -3399,6 +3399,7 @@ fn run_batch_loop(
         &outputs.formats,
         args.formatting.report_sort(),
         args.report_counts,
+        args.html,
     );
     let pairwise_first = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
@@ -4318,6 +4319,7 @@ impl BatchReports<'_> {
                             &outputs.formats,
                             self.args.formatting.report_sort(),
                             self.args.report_counts,
+                            self.args.html,
                         ),
                     ),
                     &|hsp| {

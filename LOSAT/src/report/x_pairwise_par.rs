@@ -389,6 +389,7 @@ impl<'h> QueryGroup<'h> {
                 .iter()
                 .map(|shown| members.remove(shown).unwrap_or_default())
                 .collect(),
+            html: reading.html,
         }
     }
 }
@@ -441,6 +442,7 @@ pub(crate) fn writer_reads(
             .map(position)
             .collect(),
         aligned: group.aligned(reading.shown.alignments).len(),
+        html: reading.html,
     }
 }
 
@@ -670,6 +672,17 @@ pub(crate) trait QuerySections: Sync {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
+    /// The Seq-id text (`CSeq_id::GetSeqIdString`) of aligned subject `s_idx`'s Seq-align id
+    /// without and with its version, which the `-html` pairwise report compares with the last
+    /// subject whose Dense-segs it made (`html_links_densegs`). `None` (the default) where the
+    /// report's Dense-segs never throw (`subject_densegs` makes nothing there): then that pass
+    /// makes none for the subject.
+    fn alignment_id_texts(&self, _s_idx: u32) -> Option<[Vec<u8>; 2]> {
+        None
+    }
+
     /// The one section of the alignments of the query's aligned subjects (`group`), where
     /// `merges_alignments`.
     fn alignments<W: Write>(
@@ -829,10 +842,16 @@ fn alignment_start<S: QuerySections, W: Write>(
     }
 }
 
-/// The Dense-segs that the `-html` pairwise report (outfmt 0) makes of the HSPs of every aligned
-/// subject of the query (`group`) before its first alignment, for the alignments' links
-/// (`x_PreProcessSeqAlign`, `x_CalcUrlLinksParams`; `alignment_start`); the plain report makes
-/// each at its alignment, the query-anchored section at its merge.
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+/// The Dense-segs that the `-html` pairwise report (outfmt 0) makes of the HSPs of the aligned
+/// subjects of the query (`group`), in their order, before its first alignment, for the
+/// alignments' links (`x_PreProcessSeqAlign`, `x_CalcUrlLinksParams`; `alignment_start`). A
+/// subject is passed over where both texts of the last subject whose Dense-segs were made are
+/// not empty, its text without the version is that subject's and its text with the version is
+/// not (`QuerySections::alignment_id_texts`: another version of one accession); the passed
+/// subject does not become the last one, and its Dense-segs are made at its own alignment, as in
+/// the plain report (line RG T4b review b F1). The plain report makes each at its alignment, the
+/// query-anchored section at its merge.
 fn html_links_densegs<S: QuerySections, W: Write>(
     sections: &S,
     group: &QueryGroup<'_>,
@@ -841,8 +860,17 @@ fn html_links_densegs<S: QuerySections, W: Write>(
     if sections.merges_alignments() {
         return Ok(());
     }
+    let mut last: [Vec<u8>; 2] = Default::default();
     for &s_idx in group.aligned(sections.num_alignments()) {
+        let Some(texts) = sections.alignment_id_texts(s_idx) else {
+            continue;
+        };
+        let [id, versioned] = &last;
+        if !id.is_empty() && !versioned.is_empty() && *id == texts[0] && *versioned != texts[1] {
+            continue;
+        }
         sections.subject_densegs(writer, group, s_idx)?;
+        last = texts;
     }
     Ok(())
 }

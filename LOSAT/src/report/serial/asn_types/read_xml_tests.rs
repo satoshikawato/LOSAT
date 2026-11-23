@@ -278,7 +278,8 @@ fn enumerated_values_and_numbers() {
 
 /// The end of the input: in the root's own frame the end of the data (`CEofException`), below
 /// it the stack's `CSerialException` (`HandleEOF`: the stream's position and the information of
-/// the frame it leaves, here the member `db` whose string the input cuts).
+/// the frame it leaves, here the member `db` whose string the input cuts; that information starts
+/// with a space, objstack.cpp:399-410).
 #[test]
 fn the_end_of_the_input_is_an_error_below_the_root() {
     let document = xml(named::DBTAG, "NCBI-General", DBTAG);
@@ -288,7 +289,7 @@ fn the_end_of_the_input_is_an_error_below_the_root() {
     match read(&document.as_bytes()[..cut], named::DBTAG).0 {
         Err(ReadError::Serial(e)) => assert_eq!(
             String::from_utf8_lossy(e.get_msg()),
-            format!("line {line}: Frame type= eFrameClassMember, Member name= db")
+            format!("line {line}:  Frame type= eFrameClassMember, Member name= db")
         ),
         other => panic!("{other:?}"),
     }

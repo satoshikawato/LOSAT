@@ -18,19 +18,23 @@ use super::{resolved, type_info, Kind, Member, Value, DELAYED};
 use crate::report::serial::asn_input::{Input, R};
 use crate::report::serial::object_frame::FrameKind;
 
-impl<I: Input> TypedReader<I> {
-    /// `read` in the named frames of the type `ty` (`begin_names`: the XML stream's
-    /// `ReadNamedType`, `Input::NAMED_TYPES`; the text and binary streams read without them).
-    #[inline(always)]
-    fn in_names<T>(&mut self, ty: u16, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
-        if !I::NAMED_TYPES {
-            return read(self);
+/// `$read` (an expression of the reader `$r`) in the named frames of the type `$ty`
+/// (`begin_names`: the XML stream's `ReadNamedType`, `Input::NAMED_TYPES`); the text and binary
+/// streams read it alone, as the code was before the XML stream (no closure: a closure's call
+/// left the reads of those streams outlined, +0.8 % instructions in makeblastdb `-mask_data`).
+macro_rules! in_names {
+    ($r:ident, $ty:expr, $read:expr) => {
+        if I::NAMED_TYPES {
+            let count = $r.begin_names($ty, false)?;
+            let result = $read;
+            $r.end_names(count, result)
+        } else {
+            $read
         }
-        let count = self.begin_names(ty, false)?;
-        let result = read(self);
-        self.end_names(count, result)
-    }
+    };
+}
 
+impl<I: Input> TypedReader<I> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
     // the binary stream's, objistrasnb.cpp:1210-1233, is the same with its own `BeginClass`)
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-109
@@ -45,15 +49,23 @@ impl<I: Input> TypedReader<I> {
         ty: u16,
         mut read: impl FnMut(&mut Self, usize, u16) -> R<()>,
     ) -> R<()> {
-        self.in_names(ty, |r| {
-            let ty = alias_target(ty);
-            let Kind::Sequence(span) = type_info(ty).kind else {
-                unreachable!("{} is a SEQUENCE", type_info(ty).name())
-            };
-            r.push(FrameKind::Class, ty, false)?;
-            let result = r.class_contents(span.members(), &mut read);
-            r.pop(result)
-        })
+        in_names!(self, ty, self.class_frame(ty, &mut read))
+    }
+
+    /// The class frame of `class` and its contents.
+    #[inline(always)]
+    fn class_frame(
+        &mut self,
+        ty: u16,
+        read: &mut impl FnMut(&mut Self, usize, u16) -> R<()>,
+    ) -> R<()> {
+        let ty = alias_target(ty);
+        let Kind::Sequence(span) = type_info(ty).kind else {
+            unreachable!("{} is a SEQUENCE", type_info(ty).name())
+        };
+        self.push(FrameKind::Class, ty, false)?;
+        let result = self.class_contents(span.members(), read);
+        self.pop(result)
     }
 
     /// `BeginClass`, the members in their frame, the mandatory members after the last checked,
@@ -127,15 +139,23 @@ impl<I: Input> TypedReader<I> {
         ty: u16,
         read: impl FnOnce(&mut Self, usize, u16) -> R<T>,
     ) -> R<T> {
-        self.in_names(ty, |r| {
-            let ty = alias_target(ty);
-            let Kind::Choice(span) = type_info(ty).kind else {
-                unreachable!("{} is a CHOICE", type_info(ty).name())
-            };
-            r.push(FrameKind::Choice, ty, false)?;
-            let value = r.choice_contents(span.members(), read);
-            r.pop(value)
-        })
+        in_names!(self, ty, self.choice_frame(ty, read))
+    }
+
+    /// The choice frame of `choice` and its contents.
+    #[inline(always)]
+    fn choice_frame<T>(
+        &mut self,
+        ty: u16,
+        read: impl FnOnce(&mut Self, usize, u16) -> R<T>,
+    ) -> R<T> {
+        let ty = alias_target(ty);
+        let Kind::Choice(span) = type_info(ty).kind else {
+            unreachable!("{} is a CHOICE", type_info(ty).name())
+        };
+        self.push(FrameKind::Choice, ty, false)?;
+        let value = self.choice_contents(span.members(), read);
+        self.pop(value)
     }
 
     /// `BeginChoice`, the variant in its frame, `EndChoice`.
@@ -179,18 +199,26 @@ impl<I: Input> TypedReader<I> {
         ty: u16,
         mut read: impl FnMut(&mut Self, Option<u16>) -> R<()>,
     ) -> R<()> {
-        self.in_names(ty, |r| {
-            let ty = alias_target(ty);
-            let Kind::List { element, set, refs } = type_info(ty).kind else {
-                unreachable!("{} is a SEQUENCE OF or SET OF", type_info(ty).name())
-            };
-            if !I::ARRAY_FRAMES {
-                return r.list_contents(element, set, refs, &mut read);
-            }
-            r.push(FrameKind::Array, NO_TYPE, false)?;
-            let result = r.list_contents(element, set, refs, &mut read);
-            r.pop(result)
-        })
+        in_names!(self, ty, self.list_frame(ty, &mut read))
+    }
+
+    /// The array frame of `list` (`Input::ARRAY_FRAMES`) and its contents.
+    #[inline(always)]
+    fn list_frame(
+        &mut self,
+        ty: u16,
+        read: &mut impl FnMut(&mut Self, Option<u16>) -> R<()>,
+    ) -> R<()> {
+        let ty = alias_target(ty);
+        let Kind::List { element, set, refs } = type_info(ty).kind else {
+            unreachable!("{} is a SEQUENCE OF or SET OF", type_info(ty).name())
+        };
+        if !I::ARRAY_FRAMES {
+            return self.list_contents(element, set, refs, read);
+        }
+        self.push(FrameKind::Array, NO_TYPE, false)?;
+        let result = self.list_contents(element, set, refs, read);
+        self.pop(result)
     }
 
     /// `BeginContainer`, the elements in their frame (`Input::element_frame`), `EndContainer`.
@@ -246,7 +274,7 @@ impl<I: Input> TypedReader<I> {
         let Kind::Integer(storage) = resolved(ty).kind else {
             unreachable!("{} is an INTEGER", type_info(ty).name())
         };
-        self.in_names(ty, |r| r.read_integer(storage))
+        in_names!(self, ty, self.read_integer(storage))
     }
 
     /// An ENUMERATED (or INTEGER with named values) of the type `ty`
@@ -256,7 +284,7 @@ impl<I: Input> TypedReader<I> {
         let Kind::Enumerated { integer, values } = resolved(ty).kind else {
             unreachable!("{} is an ENUMERATED", type_info(ty).name())
         };
-        self.in_names(ty, |r| r.enum_number(values.values(), integer, false))
+        in_names!(self, ty, self.enum_number(values.values(), integer, false))
     }
 
     /// A string of the type `ty`, with NCBI's posts (`ReadString`).
@@ -265,7 +293,7 @@ impl<I: Input> TypedReader<I> {
         let Kind::String(kind) = resolved(ty).kind else {
             unreachable!("{} is a string", type_info(ty).name())
         };
-        self.in_names(ty, |r| r.string(kind, false))
+        in_names!(self, ty, self.string(kind, false))
     }
 
     /// A BOOLEAN (`ReadBool`).

@@ -1,52 +1,53 @@
 //! dustmasker's masks of one sequence (`GetDustMasks_SkipNs`): runs of `N` are masked as they
 //! are and the pieces between them go through one `CSymDustMasker` (`utils::dust`).
 
+use crate::utils::byte_search::{equal_bytes_16, gather_high_bits};
 use crate::utils::dust::{DustMasker, NcbiLfgRandom};
 
 /// A masked interval: the first and the last position (`CSymDustMasker::TMaskedInterval`,
 /// two `TSeqPos`).
 pub(super) type Interval = (u32, u32);
 
-// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:184-215
-/// `s_FindSegmentWithLongNs` (with `max_ns` and `seq`): the runs of `N` that start the sequence,
-/// end it, or are longer than `max_ns` (dustmasker's `-window` as given, as an unsigned 32-bit
-/// number). NCBI counts each letter in `Uint4`s: a run starts at its index modulo 2^32 and is as
-/// long as its length modulo 2^32, and a run whose length is a multiple of 2^32 counts as none.
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:188-216
+/// `s_FindSegmentWithLongNs` (with `max_ns` and `seq`): the runs of `N` that start at position 0
+/// (modulo 2^32), end the sequence, or are longer than `max_ns` (dustmasker's `-window` as given,
+/// as an unsigned 32-bit number). NCBI counts each letter in `Uint4`s: a run starts at its index
+/// modulo 2^32 and is as long as its length modulo 2^32, and a run whose length is a multiple of
+/// 2^32 counts as none.
 ///
-/// The letters are read 16 at a time as a mask of their `N`s (`n_mask`). A block that leaves the
-/// state as it was (no `N` after a letter that is not `N`, or only `N` inside a run) is passed
-/// with that one test. In the others, the run that comes into the block is closed and the one
-/// that goes on after it is opened, both at the edges of the mask. The runs that start and end
-/// inside the block are visited only when one of them is kept (`inner_runs`): one longer than
-/// `max_ns` (`RunTest`) or one at position 0.
+/// The letters are read 16 at a time as a mask of their `N`s (`equal_bytes_16`; the last block
+/// filled up with `N`, which only lengthens the run that ends the sequence). A block that leaves
+/// the state as it was (no `N` after a letter that is not `N`, or only `N` inside a run) is passed
+/// with one test of the two words. In the others, the run that comes into the block is closed and
+/// the one that goes on after it is opened, both at the edges of the mask. The runs that start
+/// and end inside the block are visited only when one of them is kept (`inner_runs`): one longer
+/// than `max_ns` (`RunTest`) or one at position 0.
 fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
+    const ALL: u64 = 0x8080_8080_8080_8080;
     let mut runs = Vec::new();
-    let close = |runs: &mut Vec<Interval>, start: usize, end: usize| {
-        let (pos, ns) = (start as u32, (end - start) as u32);
-        if ns > 0 && (ns > max_ns || pos == 0) {
-            runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
-        }
-    };
     let longer = RunTest::new(max_ns);
     // Whether the letters so far end in a run of `N`, and the index where that run starts.
     let mut in_run = false;
     let mut open = 0;
     let (blocks, tail) = seq.as_chunks::<16>();
-    for (index, block) in blocks.iter().enumerate() {
-        let (low, high) = n_mask(block);
-        if !in_run && (low | high) == 0 {
+    let mut last = [b'N'; 16];
+    last[..tail.len()].copy_from_slice(tail);
+    let filled = (!tail.is_empty()).then_some(&last);
+    for (index, block) in blocks.iter().chain(filled).enumerate() {
+        let (low, high) = equal_bytes_16(block, b'N');
+        if !in_run && (low | high) == 0 || in_run && (low & high) == ALL {
             continue;
         }
-        let mask = gather(low) | gather(high) << 8;
-        if in_run && mask == 0xffff {
-            continue;
-        }
+        let mask = gather_high_bits(low) | gather_high_bits(high) << 8;
         let base = index * 16;
         let others = !mask & 0xffff;
         let mut inner = mask;
         if in_run {
+            // A letter that is not `N` ends the run: the block is not all `N`.
             let end = others.trailing_zeros();
-            close(&mut runs, open, base + end as usize);
+            if let Some(run) = kept_run(open, base + end as usize, max_ns) {
+                runs.push(run);
+            }
             inner &= !((1 << end) - 1);
         }
         in_run = mask & 0x8000 != 0;
@@ -60,43 +61,26 @@ fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
             inner_runs(&mut runs, inner, base, max_ns);
         }
     }
-    let base = seq.len() - tail.len();
-    for (offset, &letter) in tail.iter().enumerate() {
-        if letter == b'N' {
-            if !in_run {
-                (in_run, open) = (true, base + offset);
-            }
-        } else if in_run {
-            close(&mut runs, open, base + offset);
-            in_run = false;
-        }
-    }
     if in_run {
-        let (pos, ns) = (open as u32, (seq.len() - open) as u32);
-        if ns > 0 {
-            runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
+        // The run that ends the sequence counts whatever its length (a `max_ns` of 0).
+        if let Some(run) = kept_run(open, seq.len(), 0) {
+            runs.push(run);
         }
     }
     runs
 }
 
-/// The high bit of each byte of `word` that is zero; no other bit is set.
-fn zero_bytes(word: u64) -> u64 {
-    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
-    !(((word & LOW7) + LOW7) | word | LOW7)
+/// The run of `N` from `start` to `end` (indexes of the sequence) as NCBI keeps it: `None` when
+/// its length modulo 2^32 is 0, or when it is not longer than `max_ns` and does not start at
+/// position 0 (modulo 2^32).
+fn kept_run(start: usize, end: usize, max_ns: u32) -> Option<Interval> {
+    let (pos, ns) = (start as u32, (end - start) as u32);
+    (ns > 0 && (ns > max_ns || pos == 0)).then(|| interval(pos, ns))
 }
 
-/// The `N`s of `block` as the high bits of its bytes, 8 letters in each word.
-fn n_mask(block: &[u8; 16]) -> (u64, u64) {
-    const NS: u64 = 0x4e4e_4e4e_4e4e_4e4e;
-    let (low, high) = block.split_at(8);
-    let word = |bytes: &[u8]| u64::from_le_bytes(bytes.try_into().expect("8 letters")) ^ NS;
-    (zero_bytes(word(low)), zero_bytes(word(high)))
-}
-
-/// Bit k of the result is the high bit of byte k of `bits` (`bits` as `zero_bytes` gives).
-fn gather(bits: u64) -> u32 {
-    ((bits >> 7).wrapping_mul(0x0102_0408_1020_4080) >> 56) as u32
+/// The interval of `ns` letters from `pos`, the sum wrapping as NCBI's `TSeqPos`.
+fn interval(pos: u32, ns: u32) -> Interval {
+    (pos, pos.wrapping_add(ns).wrapping_sub(1))
 }
 
 /// Whether a 16-bit mask holds a run of more than `max_ns` set bits: `holds(x)` has bit k set
@@ -128,7 +112,8 @@ impl RunTest {
 
 /// The kept runs of `inner`, a block's mask of `N`s without the runs that cross its edges, the
 /// block starting at `base` (modulo 2^32): the k-th start of a run with the k-th end. A function
-/// of its own, so that the loop over the blocks keeps its registers.
+/// of its own because the block loop with it inlined was not faster (callgrind, ad-RG-KC-2
+/// 2026-11-24).
 #[inline(never)]
 fn inner_runs(runs: &mut Vec<Interval>, inner: u32, base: u32, max_ns: u32) {
     let mut starts = inner & !(inner << 1);
@@ -139,12 +124,12 @@ fn inner_runs(runs: &mut Vec<Interval>, inner: u32, base: u32, max_ns: u32) {
         ends &= ends - 1;
         let pos = base.wrapping_add(start);
         if end - start > max_ns || pos == 0 {
-            runs.push((pos, pos.wrapping_add(end - start - 1)));
+            runs.push(interval(pos, end - start));
         }
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:212-225
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:218-226
 /// `s_InsertMerge` (of `list`, `mask` and `linker`): `mask` extends the last interval when it
 /// starts exactly `linker` (the `-linker` as given, unsigned 32-bit, the sum wrapping as NCBI's)
 /// after its end.
@@ -173,7 +158,7 @@ fn dust(
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:222-276
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:228-270
 /// `GetDustMasks_SkipNs` (of `seq`, `level`, `window` and `linker`): the masks of the IUPAC letters
 /// `seq` (not empty). The masker clamps `level`, `window` and `linker` to its ranges
 /// (`DustMasker::new`, as `CSymDustMasker`'s constructor), while the runs of `N` and the merges

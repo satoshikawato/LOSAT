@@ -67,12 +67,13 @@ fn runs_found_block_by_block_are_those_counted_letter_by_letter() {
             let letter = if next(2) == 0 {
                 b'N'
             } else {
-                b"ACGTn"[next(5) as usize]
+                // Bytes next to `N`'s (0x4e) in value or by its high bit, for the byte test.
+                b"ACGTnOM\xce"[next(8) as usize]
             };
             let length = [0, 1, 2, 3, 5, 7, 15, 16, 17, 31, 32, 33, 40][next(13) as usize];
             seq.extend(std::iter::repeat_n(letter, length));
         }
-        for max_ns in [0, 1, 2, 3, 7, 8, 14, 15, 16, 17, 64, u32::MAX] {
+        for max_ns in (0..=17).chain([64, u32::MAX]) {
             assert_eq!(
                 long_n_runs(max_ns, &seq),
                 long_n_runs_by_letter(max_ns, &seq),
@@ -85,24 +86,30 @@ fn runs_found_block_by_block_are_those_counted_letter_by_letter() {
 
 #[test]
 fn every_block_of_16_letters_gives_the_runs_counted_letter_by_letter() {
-    // Every pattern of `N` in the second block, after a block of `N` (a run that comes in) or of
-    // `A`, with no letter after it or with one `N` or `A`.
+    // Every pattern of `N` in the second block, after a block of `N` (a run that comes in from
+    // position 0), of `A`, or of 10 `A` and 6 `N` (a run that comes in from position 10); then no
+    // letter, `N`, `A`, or a last block of 5 letters with runs in it. Every `max_ns` that gives
+    // `RunTest` its own shifts, and two that no run inside a block reaches.
+    let befores: [&[u8]; 3] = [
+        b"NNNNNNNNNNNNNNNN",
+        b"AAAAAAAAAAAAAAAA",
+        b"AAAAAAAAAANNNNNN",
+    ];
+    let afters: [&[u8]; 4] = [b"", b"N", b"A", b"ANNAN"];
     for pattern in 0..=u16::MAX {
-        for (before, after) in [
-            (b'N', None),
-            (b'A', None),
-            (b'N', Some(b'N')),
-            (b'A', Some(b'A')),
-        ] {
-            let mut seq = vec![before; 16];
-            seq.extend((0..16).map(|k| if pattern >> k & 1 == 1 { b'N' } else { b'C' }));
-            seq.extend(after);
-            for max_ns in [0, 1, 2, 7, 14, 15, 64] {
-                assert_eq!(
-                    long_n_runs(max_ns, &seq),
-                    long_n_runs_by_letter(max_ns, &seq),
-                    "{max_ns} {pattern:#06x} {before} {after:?}"
-                );
+        for before in befores {
+            for after in afters {
+                let mut seq = before.to_vec();
+                seq.extend((0..16).map(|k| if pattern >> k & 1 == 1 { b'N' } else { b'C' }));
+                seq.extend_from_slice(after);
+                for max_ns in (0..=17).chain([64, u32::MAX]) {
+                    assert_eq!(
+                        long_n_runs(max_ns, &seq),
+                        long_n_runs_by_letter(max_ns, &seq),
+                        "{max_ns} {pattern:#06x} {:?}",
+                        String::from_utf8_lossy(&seq)
+                    );
+                }
             }
         }
     }

@@ -2105,19 +2105,10 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
 // populate the counts source, registry, or resolved repeat filter before calling `run_local`.
 #[test]
 fn run_local_refuses_database_and_unresolved_filter_inputs() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let parse = |words: &[&str]| {
-        let mut argv = vec!["test", "-query", "q"];
+        let mut argv = vec!["losat", "blastn", "-query", "q"];
         argv.extend_from_slice(words);
-        crate::cli::try_parse_from::<Options, _, _>(argv)
-            .unwrap()
-            .blastn
+        crate::cli::try_parse_from(argv).unwrap().blastn()
     };
     let call = |args: BlastnArgs, outfmt: &str| {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.86
+- Version: 1.87
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -461,6 +461,11 @@
   exception 25; then 1.83 and exception 27 at the merge of dev 50474994c that brought psiblast line
   item PS10a's 1.82 and exception 26; then 1.86 at the merge of dev 719709924 that
   brought line NP item M4b-AX's 1.83, psiblast line item PS10c's 1.84 and line RG item D1c-1's 1.85)
+  1.87 2026-11-23 (proposed exception 28, pending the Owner's decision: a negative `WindowSize` and a
+  `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.86 of
+  this branch: dev has taken 1.86 to 1.89 and exception 27 meanwhile, so the next merge of dev
+  renumbers F2's two entries)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3394,6 +3399,51 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     the five programs (a search of the subjects once per thread fails it), and
     `a_strategys_subjects_keep_the_threads_of_the_command_line`
     (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
+
+## Proposed exception 28 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.87)
+
+Version 1.87, line RG item F2 fix round 3 (review 3, R3-B2). Proposed under the standing instruction of
+2026-09-29 (restated 2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and
+2026-10-22 「広い型になおしましょう」 and rule 1 above. Status: pending the Owner's decision (the pull request of
+line RG item F2 asks it). Not taken: NCBI's wrapped values (undefined behavior in C, whatever NCBI's build
+gives), a refusal of the values (the searches are valid and their values of a nearby input are
+deterministic), and NCBI's result at several threads (it changes from run to run, below).
+
+28. **A negative `WindowSize` or `LongestIntronLength` of an imported strategy.** The command line takes
+    0 or more for both (`-window_size`, `-max_intron_length`); a hand-edited strategy can carry any `int`,
+    and NCBI runs it with no check.
+    - *Window, arithmetic.* A window of 0 or less runs the one-hit word finder over NCBI's diagonal
+      table, whose state passes from one word finder call to the next: the table's offset grows by the
+      call's subject length plus the window after each call and is cleared at `INT4_MAX / 4`
+      (`Blast_ExtendWordExit`, NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185),
+      and a word is extended where its subject offset passes the diagonal's last hit less the offset
+      (aa_ungapped.c:715-810, na_ungapped.c:640-945). From a window of about -2^29 down, the offset of a
+      search passes the range of `Int4` within a few calls, an overflow of signed values (undefined
+      behavior). NCBI BLAST+ 2.17.0's build wraps: `tblastx` with the strategy `tblastx.db.ss` and
+      `WindowSize` -536870912 reports 11 alignments, -2^30 14, -1.5 x 10^9 43, -2147483647 and -2^31 27,
+      where every window from -1000 to -10^6 (defined arithmetic) reports none (probes
+      `F/f2/tmp/wneg_tblastx/out_<w>.tsv` of line RG item F2). LOSAT computes these sums in 64 bits, their
+      mathematical value, and keeps NCBI's comparisons, its reset and the 31 bits of a diagonal's last hit
+      (a defined truncation): it reports no alignment for those windows, as NCBI does for -10^6. Where
+      NCBI's arithmetic stays in `Int4` (the windows of the frozen rows: -1, -5, -40, -1000, -10^5,
+      -10^6), LOSAT's bytes are NCBI's.
+    - *Window, threads.* NCBI's threads take the subjects (or database chunks) by timing and each keeps
+      its own table, so the state that one search passes to the next depends on the schedule: in our runs
+      of NCBI BLAST+ 2.17.0 with `WindowSize` -40 at 4 and 8 threads (3 runs each), `blastp` gave 2
+      different outputs in 6 runs, `tblastn` 3 and `tblastx` 3, and those of `tblastn` and `tblastx` all
+      differ from their `-num_threads 1` output. LOSAT gives NCBI's `-num_threads 1` output at every
+      thread count: the word finder calls of a negative window run in NCBI's one-thread order on one
+      table (rows `S3.<program>.window_neg40.nt4`, which hold NCBI's `-num_threads 1` bytes).
+    - *Intron length.* `blastx` and `tblastn` with sum statistics subtract 2 from the length and divide
+      by 3 (blast_parameters.c:788-815): for -2^31 and -2^31 + 1 the subtraction passes `Int4`, which
+      NCBI's build wraps to a large positive gap. LOSAT subtracts in 64 bits: the gap is negative, so a
+      gapped search links no HSPs, as NCBI does for -2^31 + 2 and every other negative length
+      (`core::link_hsps::translated_longest_intron`).
+    Evidence: the probes named above; rows `S3.*.window_*` of
+    `LOSAT/tests/fixtures/strategy/import/import_cases.tsv` (NCBI's bytes where its arithmetic is
+    defined), the unit tests of the negative window in the five engines and
+    `the_longest_intron_of_a_translated_search_follows_ncbis_branches`
+    (`LOSAT/src/core/link_hsps_tests.rs`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromText, leftOutIds, leftOutTexts, partText } from '../../src/domain/input-parts';
+import { fromText, leavesOut, leftOutIds, partText, worthSaying } from '../../src/domain/input-parts';
 
 // Line WQA's D22 (2026-11-23): the words that say which records an input leaves out.
 describe('input parts', () => {
@@ -11,19 +11,26 @@ describe('input parts', () => {
   });
 
   it('says the records that a file holds of those it has', () => {
-    expect(partText({ name: 'q.fa', records: 2, leftOut: ['r2'] })).toBe('q.fa: 2 of 3 records (r2 left out)');
-    expect(partText({ name: 'q.fa', records: 1, leftOut: ['r2'] })).toBe('q.fa: 1 of 2 records (r2 left out)');
-    expect(partText({ name: 'b.fa', records: 3, leftOut: [] })).toBe('b.fa: 3 records');
-    expect(partText({ name: 'pasted text', records: 1, leftOut: [] })).toBe('pasted text: 1 record');
+    expect(partText({ name: 'q.fa', records: 2, leftOut: ['r2'] })).toBe('q.fa without r2 (2 of 3 records)');
+    expect(partText({ name: 'q.fa.gz', records: 1, leftOut: ['r1 (#2)'] })).toBe('q.fa.gz without r1 (#2) (1 of 2 records)');
+    expect(partText({ name: 'b.fa', records: 3, leftOut: [] })).toBe('b.fa (3 records)');
+    expect(partText({ name: 'pasted text', records: 1, leftOut: [] })).toBe('pasted text (1 record)');
   });
 
-  it('tells what an input is made of, and only the parts that leave records out as left out', () => {
+  it('tells what an input is made of', () => {
     const parts = [
       { name: 'a.fa', records: 2, leftOut: [] },
       { name: 'b.fa', records: 1, leftOut: ['b2', 'b3'] },
     ];
-    expect(fromText(parts)).toBe('a.fa: 2 records; b.fa: 1 of 3 records (b2 and b3 left out)');
-    expect(leftOutTexts(parts)).toEqual(['b.fa: 1 of 3 records (b2 and b3 left out)']);
-    expect(leftOutTexts(undefined)).toEqual([]);
+    expect(fromText(parts)).toBe('a.fa (2 records) and b.fa without b2 and b3 (1 of 3 records)');
+    expect(leavesOut(parts)).toBe(true);
+    expect(leavesOut(undefined)).toBe(false);
+  });
+
+  it('has something to tell for records left out or several parts, not for pasted text alone', () => {
+    expect(worthSaying(undefined)).toBe(false);
+    expect(worthSaying([{ name: 'pasted text', records: 3, leftOut: [] }])).toBe(false);
+    expect(worthSaying([{ name: 'pasted text', records: 2, leftOut: ['r2'] }])).toBe(true);
+    expect(worthSaying([{ name: 'a.fa', records: 1, leftOut: [] }, { name: 'b.fa', records: 1, leftOut: [] }])).toBe(true);
   });
 });

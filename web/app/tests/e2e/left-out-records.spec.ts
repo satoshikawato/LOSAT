@@ -6,6 +6,7 @@
 // LOSAT_WEB_SCREENS=<directory> the query card, Run details and Outputs are saved at 1280x800 and 390x844 as
 // <directory>/<browser>/<shot>-<width>.png, whether the expectations hold or not (the unfixed build gives its pictures too).
 import { spawnSync } from 'node:child_process';
+import { gzipSync } from 'node:zlib';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -132,13 +133,13 @@ test('a query with a record left out: the command names the file of the records 
 
   await chooseRun(page, 1);
   await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · included_q.fa vs s.fa');
-  await expect(page.getByTestId('results-query-left-out')).toHaveText('q.fa: 2 of 3 records (r2 left out)');
-  await expect(page.getByTestId('results-subject-left-out')).toHaveCount(0);
+  await expect(page.getByTestId('results-query-from')).toHaveText('q.fa without r2 (2 of 3 records)');
+  await expect(page.getByTestId('results-subject-from')).toHaveCount(0);
   await page.getByTestId('results-view-details').click();
   await shownThen(page, 'run-details', 'run-details', browserName, async () => {
     await expect(page.getByTestId('run-argv')).toHaveText('blastn -query included_q.fa -subject s.fa');
     await expect(page.getByTestId('run-input-query')).toContainText('included_q.fa: 2 records, ');
-    await expect(page.getByTestId('run-input-query-from')).toHaveText('From q.fa: 2 of 3 records (r2 left out)');
+    await expect(page.getByTestId('run-input-query-from')).toHaveText('From q.fa without r2 (2 of 3 records)');
     for (const format of [0, 6, 7]) await expect(page.getByTestId(`run-command-${format}`)).toHaveText(`${shown} -outfmt ${format}`);
     // The subject is the user's file as given: its row says nothing more.
     await expect(page.getByTestId('run-input-subject')).toContainText('s.fa: 3 records, ');
@@ -147,7 +148,7 @@ test('a query with a record left out: the command names the file of the records 
   await page.getByTestId('results-view-outputs').click();
   await shownThen(page, 'results-outputs', 'outputs', browserName, async () => {
     expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
-    await expect(page.getByTestId('outputs-query-file')).toContainText('-query included_q.fa is q.fa: 2 of 3 records (r2 left out).');
+    await expect(page.getByTestId('outputs-query-file')).toContainText('-query included_q.fa is q.fa without r2 (2 of 3 records).');
     await expect(page.getByTestId('outputs-subject-file')).toHaveCount(0);
   });
 
@@ -179,7 +180,7 @@ test('a query with a record left out: the command names the file of the records 
   await waitStatus(page, 2, 'completed');
   await chooseRun(page, 2);
   await expect(page.getByTestId('run-2-option')).toHaveText('Run 2 · BLASTN · q.fa vs s.fa');
-  await expect(page.getByTestId('results-query-left-out')).toHaveCount(0);
+  await expect(page.getByTestId('results-query-from')).toHaveCount(0);
   await page.getByTestId('results-download-all').click();
   await expect(page.getByTestId('results-download-menu')).toBeVisible();
   await expect(page.getByTestId('results-download-query')).toHaveCount(0);
@@ -203,14 +204,14 @@ test('a subject with a record left out is named and offered as the query is; sev
   await waitStatus(page, 1, 'completed');
   const shown = 'losat blastn -query q.fa -subject included_s.fa';
   await chooseRun(page, 1);
-  await expect(page.getByTestId('results-subject-left-out')).toHaveText('s.fa: 2 of 3 records (s1 left out)');
-  await expect(page.getByTestId('results-query-left-out')).toHaveCount(0);
+  await expect(page.getByTestId('results-subject-from')).toHaveText('s.fa without s1 (2 of 3 records)');
+  await expect(page.getByTestId('results-query-from')).toHaveCount(0);
   await page.getByTestId('results-view-details').click();
-  await expect(page.getByTestId('run-input-subject-from')).toHaveText('From s.fa: 2 of 3 records (s1 left out)');
+  await expect(page.getByTestId('run-input-subject-from')).toHaveText('From s.fa without s1 (2 of 3 records)');
   await expect(page.getByTestId('run-input-query-from')).toHaveCount(0);
   await page.getByTestId('results-view-outputs').click();
   expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
-  await expect(page.getByTestId('outputs-subject-file')).toContainText('-subject included_s.fa is s.fa: 2 of 3 records (s1 left out).');
+  await expect(page.getByTestId('outputs-subject-file')).toContainText('-subject included_s.fa is s.fa without s1 (2 of 3 records).');
   const file = await offered(page, 'subject');
   expect(file.name).toBe('included_s.fa');
   expect(file.bytes.toString('utf8')).toBe(WITHOUT_S1);
@@ -230,12 +231,15 @@ test('a subject with a record left out is named and offered as the query is; sev
   await waitStatus(page, 2, 'completed');
   const together = 'losat blastn -query query.fa -subject combined_subject.fa';
   await chooseRun(page, 2);
-  await expect(page.getByTestId('results-subject-left-out')).toHaveText('b.fa: 1 of 2 records (b2 left out)');
+  await expect(page.getByTestId('results-subject-from')).toHaveText('a.fa (2 records) and b.fa without b2 (1 of 2 records)');
   await page.getByTestId('results-view-details').click();
-  await expect(page.getByTestId('run-input-subject-from')).toHaveText('From a.fa: 2 records; b.fa: 1 of 2 records (b2 left out)');
-  await expect(page.getByTestId('run-input-query-from')).toHaveText('From pasted text: 3 records');
+  await expect(page.getByTestId('run-input-subject-from')).toHaveText('From a.fa (2 records) and b.fa without b2 (1 of 2 records)');
+  // Pasted text with nothing left out is what was pasted: no line of its own, only the file in Download All.
+  await expect(page.getByTestId('run-input-query-from')).toHaveCount(0);
   await page.getByTestId('results-view-outputs').click();
   expect(await shownCommand(page, 2)).toBe(`${together} -outfmt 6`);
+  await expect(page.getByTestId('outputs-query-file')).toHaveCount(0);
+  await expect(page.getByTestId('outputs-subject-file')).toContainText('-subject combined_subject.fa is a.fa (2 records) and b.fa without b2 (1 of 2 records).');
   const pasted = await offered(page, 'query');
   const combined = await offered(page, 'subject');
   expect(pasted.name).toBe('query.fa');
@@ -243,4 +247,44 @@ test('a subject with a record left out is named and offered as the query is; sev
   expect(combined.name).toBe('combined_subject.fa');
   expect(combined.bytes.toString('utf8')).toBe(a + record('b1', R3 + sequence(55, 150)));
   await expectNative(page, 2, together, [pasted, combined]);
+});
+
+// Review M1: one name for two inputs could not be run on the offered files; and a compressed file is named as the user gave it.
+test('the same file in both roles with other records left out gets two names; a compressed file with a record left out (D22)', async ({ page }) => {
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [{ name: 'q.fa', text: QUERY }]);
+  await openFiles(page, 'subject', [{ name: 'q.fa', text: QUERY }]);
+  await leaveOut(page, 'query', 1);
+  await leaveOut(page, 'subject', 0);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const shown = 'losat blastn -query included_query_q.fa -subject included_subject_q.fa';
+  await chooseRun(page, 1);
+  await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · included_query_q.fa vs included_subject_q.fa');
+  await page.getByTestId('results-view-outputs').click();
+  expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
+  const query = await offered(page, 'query');
+  const subject = await offered(page, 'subject');
+  expect([query.name, subject.name]).toEqual(['included_query_q.fa', 'included_subject_q.fa']);
+  expect(query.bytes.toString('utf8')).toBe(WITHOUT_R2);
+  expect(subject.bytes.toString('utf8')).toBe(record('r2', R2) + record('r3', R3));
+  await expectNative(page, 1, shown, [query, subject]);
+
+  // A compressed query with a record left out: the argv names the plain file of the records, the page the file given.
+  await page.getByTestId('tab-search').click();
+  await page.getByTestId('query-source-0-remove').click();
+  await page.getByTestId('subject-source-0-remove').click();
+  await openFiles(page, 'query', [{ name: 'q.fa.gz', text: gzipSync(QUERY) }]);
+  await openFiles(page, 'subject', [{ name: 's.fa', text: SUBJECT }]);
+  await leaveOut(page, 'query', 1);
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await chooseRun(page, 2);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-argv')).toHaveText('blastn -query included_q.fa -subject s.fa');
+  await expect(page.getByTestId('run-input-query-from')).toHaveText('From q.fa.gz without r2 (2 of 3 records)');
+  const plain = await offered(page, 'query');
+  expect(plain.name).toBe('included_q.fa');
+  expect(plain.bytes.toString('utf8')).toBe(WITHOUT_R2);
+  await expectNative(page, 2, 'losat blastn -query included_q.fa -subject s.fa', [plain, { name: 's.fa', bytes: SUBJECT }]);
 });

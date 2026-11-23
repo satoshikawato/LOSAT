@@ -13,7 +13,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
-import { leftOutTexts } from '../domain/input-parts';
+import { fromText, leavesOut } from '../domain/input-parts';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
@@ -294,11 +294,9 @@ async function toAlignments(id: HspId): Promise<void> {
             </dd>
             <!-- Records that the run's file leaves out, which its command and its name say no more of (line WQA's D22, 2026-11-23). -->
             <template v-for="role in ['query', 'subject'] as const" :key="role">
-              <template v-if="leftOutTexts(selected.snapshot[role].from).length > 0">
-                <dt>{{ role === 'query' ? 'Query' : 'Subject' }} left out</dt>
-                <dd :data-testid="`results-${role}-left-out`">
-                  <template v-for="text in leftOutTexts(selected.snapshot[role].from)" :key="text">{{ text }}<br /></template>
-                </dd>
+              <template v-if="leavesOut(selected.snapshot[role].from)">
+                <dt>{{ role === 'query' ? 'Query' : 'Subject' }} from</dt>
+                <dd :data-testid="`results-${role}-from`">{{ fromText(selected.snapshot[role].from!) }}</dd>
               </template>
             </template>
             <template v-if="selected.snapshot.query.records.length === 1">

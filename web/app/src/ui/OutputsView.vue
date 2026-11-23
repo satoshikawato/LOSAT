@@ -13,7 +13,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader, OutputSaver } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
 import { commandWords } from '../domain/argv';
-import { fromText } from '../domain/input-parts';
+import { fromText, worthSaying } from '../domain/input-parts';
 import { isBinaryOutput, outfmtOf } from '../domain/output-format';
 import CommandText from './CommandText.vue';
 import { placeParts } from './message-place-text';
@@ -96,11 +96,14 @@ const tabs = computed(() => [
       ]),
 ]);
 const reader = new OutputReader(props.coordinator);
-/** The query and subject that are files of LOSAT's, which the command names: not the user's files as given (line WQA's D22, 2026-11-23). */
+/**
+ * The query and subject that are files of LOSAT's with something to tell (records left out, several files): the command names
+ * them, and the user needs them to run it. Pasted text is offered in Download All (line WQA's D22, 2026-11-23).
+ */
 const madeInputs = computed(() =>
   (['query', 'subject'] as const).flatMap((role) => {
     const input = props.run.snapshot[role];
-    return input.from === undefined ? [] : [{ role, name: input.name, from: fromText(input.from) }];
+    return worthSaying(input.from) ? [{ role, name: input.name, from: fromText(input.from) }] : [];
   }),
 );
 const inputSaver = new OutputSaver(props.coordinator);

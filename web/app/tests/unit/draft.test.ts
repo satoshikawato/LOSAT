@@ -5,7 +5,7 @@ import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
-import { cannotFollow, noSequenceOf, queryEndBefore, SearchDraft, type DraftSource } from '../../src/application/draft';
+import { cannotFollow, noSequenceOf, queryEndBefore, runNames, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { fastaParser, programById } from '../../src/domain/programs';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -1308,11 +1308,61 @@ describe('SearchDraft submit', () => {
     expect(await draft.submit()).toMatchObject({ ok: true });
     const [request] = requests[0]!;
     expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'] }] });
-    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_s.fa', from: [{ name: 's.fa', records: 1, leftOut: ['s1'] }] });
+    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_s.fa', from: [{ name: 's.fa.zst', records: 1, leftOut: ['s1'] }] });
     // Included again: the user's file as given.
     draft.setIncluded('query', sourceOf(draft, 'query').key, [1], true);
     await draft.idle();
     expect(draft.inputName('query')).toBe('q.fa');
+  });
+
+  // Line WQA's D22, review M1 (2026-11-23): two inputs of one run named alike could not both be offered under their name.
+  it('keeps the names of a run apart: the same file in both roles with other records left out, and a file of the user named like a made one', async () => {
+    const { draft, requests } = setup();
+    const text = '>r1\nACGTACGT\n>r2\nACGTACGT\n>r3\nACGTACGT\n';
+    draft.addFiles('query', [file('q.fa', text)]);
+    draft.addFiles('subject', [file('q.fa', text)]);
+    await draft.idle();
+    // As given, the user's own names stay (the same file twice, a self-comparison).
+    expect(draft.inputName('query')).toBe('q.fa');
+    expect(draft.inputName('subject')).toBe('q.fa');
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1], false);
+    // One with records left out: it takes its role where the other is the user's file of that name; here they differ already.
+    expect([draft.inputName('query'), draft.inputName('subject')]).toEqual(['included_q.fa', 'q.fa']);
+    draft.setIncluded('subject', sourceOf(draft, 'subject').key, [0], false);
+    await draft.idle();
+    expect([draft.inputName('query'), draft.inputName('subject')]).toEqual(['included_query_q.fa', 'included_subject_q.fa']);
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_query_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'] }] });
+    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_subject_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r1'] }] });
+  });
+
+  it('does not give a made name that the user gave to the other input', async () => {
+    const { draft } = setup();
+    draft.addFiles('query', [file('q.fa', '>r1\nACGT\n>r2\nACGT\n')]);
+    draft.addFiles('subject', [file('included_q.fa', '>s\nACGT\n')]);
+    await draft.idle();
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1], false);
+    await draft.idle();
+    expect([draft.inputName('query'), draft.inputName('subject')]).toEqual(['included_query_q.fa', 'included_q.fa']);
+    // A file of that very name too.
+    expect(runNames({ name: 'included_q.fa', made: true }, { name: 'included_q.fa', made: false })).toEqual({ query: 'included_query_q.fa', subject: 'included_q.fa' });
+    expect(runNames({ name: 'included_query_q.fa', made: false }, { name: 'included_query_q.fa', made: true })).toEqual({
+      query: 'included_query_q.fa',
+      subject: 'included_subject_query_q.fa',
+    });
+    expect(runNames({ name: 'query.fa', made: true }, { name: 'query.fa', made: false })).toEqual({ query: 'query_query.fa', subject: 'query.fa' });
+  });
+
+  it('names a record that another record has the ID of by its place in the file', async () => {
+    const { draft, requests } = setup();
+    draft.addFiles('query', [file('q.fa', '>r1\nACGT\n>r1\nACGT\n>r2\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1, 2], false);
+    await draft.idle();
+    await draft.submit();
+    expect(datasetOf(requests[0]![0]!, 'query').from).toEqual([{ name: 'q.fa', records: 1, leftOut: ['r1 (#2)', 'r2'] }]);
   });
 
   it('names the input of a separate search by its own file: as given, or with its records left out', async () => {

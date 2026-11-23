@@ -889,7 +889,12 @@ export class SearchDraft {
 
   /** The name of the role's input in the argv of a combined search (plan §5.3). */
   inputName(role: InputRole): string {
-    return nameOf(this.role(role).sources.filter((source) => source.status !== 'failed'), role);
+    const sources = (r: InputRole) => this.role(r).sources.filter((source) => source.status !== 'failed');
+    const [query, subject] = [sources('query'), sources('subject')];
+    return runNames(
+      { name: nameOf(query, 'query'), made: !isFileAsGiven(query) },
+      { name: nameOf(subject, 'subject'), made: !isFileAsGiven(subject) },
+    )[role];
   }
 
   /** The runs that "Run LOSAT" would make now. */
@@ -974,7 +979,7 @@ export class SearchDraft {
     // Their sources stay until the runs have their inputs, also when the form lets them go meanwhile.
     this.refs.set(
       'submit',
-      [...groups.query, ...groups.subject].flatMap((group) => group.sources.map((source) => source.sourceId!)),
+      [...groups.query, ...groups.subject].flatMap((sources) => sources.map((source) => source.sourceId!)),
     );
     const parameters = this.parameters();
     // The file of -window_masker_db, when the argv has it (a file chosen and then unchecked is not in the form).
@@ -993,16 +998,18 @@ export class SearchDraft {
     const state = this.state.get();
     const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
     const resolved = {
-      query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
-      subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
+      query: await Promise.all(groups.query.map((sources) => this.resolveGroup('query', sources))),
+      subject: await Promise.all(groups.subject.map((sources) => this.resolveGroup('subject', sources))),
     };
     const requests: SearchRequest[] = [];
     for (const query of resolved.query) {
       for (const subject of resolved.subject) {
+        // The two names of one run differ, unless they are the user's own (runNames).
+        const names = runNames({ name: query.name, made: query.from !== undefined }, { name: subject.name, made: subject.from !== undefined });
         requests.push({
           program,
-          query: { dataset: query },
-          subject: { dataset: subject },
+          query: { dataset: { ...query, name: names.query } },
+          subject: { dataset: { ...subject, name: names.subject } },
           parameters,
           ...(extra.length === 0 ? {} : { extra }),
           requestedThreads: threads,
@@ -1173,21 +1180,26 @@ export class SearchDraft {
   }
 
   /** The inputs of the role's runs: all sources together, or one per source (Separate). */
-  private inputGroups(role: InputRole): readonly InputGroup[] {
+  private inputGroups(role: InputRole): ReadonlyArray<readonly DraftSource[]> {
     const draft = this.role(role);
     const usable = draft.sources.filter((source) => source.status === 'ready');
     if (draft.mode === 'separate' && usable.length > 1) {
       // A source whose records are all excluded has nothing to search alone.
       return usable
         .filter((source) => includedOf(source).length > 0 || (source.base?.records.length ?? 0) === 0)
-        .map((source) => groupOf([source], role));
+        .map((source) => [source]);
     }
-    return usable.length === 0 ? [] : [groupOf(usable, role)];
+    return usable.length === 0 ? [] : [usable];
   }
 
-  private async resolveGroup(group: InputGroup) {
-    const revisionIds = await Promise.all(group.sources.map((source) => this.revisionFor(source)));
-    return { name: group.name, revisionIds, ...(group.from === undefined ? {} : { from: group.from }) };
+  /**
+   * An input of a run, from its sources: the name that its file has, the revisions and what it is made of. What it is made of
+   * is made here, when the run is resolved, not when the runs are counted (runCount): it reads the record tables.
+   */
+  private async resolveGroup(role: InputRole, sources: readonly DraftSource[]) {
+    const revisionIds = await Promise.all(sources.map((source) => this.revisionFor(source)));
+    const from = fromOf(sources);
+    return { name: nameOf(sources, role), revisionIds, ...(from === undefined ? {} : { from }) };
   }
 
   // --- asynchronous work ------------------------------------------------------------------
@@ -1655,7 +1667,7 @@ export class SearchDraft {
     for (const role of ROLES) {
       const groups = this.inputGroups(role);
       if (groups.length === 0) return;
-      inputBytes += Math.max(...groups.map((group) => group.sources.reduce((sum, source) => sum + source.size, 0)));
+      inputBytes += Math.max(...groups.map((sources) => sources.reduce((sum, source) => sum + source.size, 0)));
     }
     this.deps.engine.prepare({ requestedThreads: threads, inputBytes, ...(this.validArgv === undefined ? {} : { argv: this.validArgv }) });
   }
@@ -1874,20 +1886,13 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
   return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
-/** The input of a run: the sources it holds, the name its argv gives it, and what it is made of (`InputSnapshot.from`). */
-interface InputGroup {
-  readonly name: string;
-  readonly sources: readonly DraftSource[];
-  readonly from?: readonly InputPart[];
-}
-
 /** Whether the sources are one file of the user's, with every record in: the bytes of the run's input are the file's own. */
 function isFileAsGiven(sources: readonly DraftSource[]): boolean {
   return sources.length === 1 && sources[0]!.origin === 'file' && sources[0]!.excluded.length === 0;
 }
 
 /**
- * The name that an input has in the run's argv, where the command line writes the name of a file: the name of a file whose
+ * The name that an input has in the argv, where the command line writes the name of a file: the name of a file whose
  * bytes are what the run searches. The user's own file name, as the command line is typed, where the input is that file as
  * given: a file named `.gz`, `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's
  * run takes the bytes of its inputs, not files, and writes the names of its argv where the command line writes the names of its
@@ -1895,7 +1900,7 @@ function isFileAsGiven(sources: readonly DraftSource[]): boolean {
  * (line WQA's D21, S3-3 and the review's F1, 2026-11-23). The user's file with records left out is not that file: its name would
  * make the command search other bytes than the run did, so the argv names the file of the included records, `included_` and the
  * name (the plain one: the bytes are not compressed), as `combined_query.fa` names several inputs together and `query.fa` pasted
- * text; the page offers these files with the run (line WQA's D22, 2026-11-23).
+ * text; the page offers these files with the run (line WQA's D22, 2026-11-23). `runNames` keeps the two names of a run apart.
  */
 function nameOf(sources: readonly DraftSource[], role: InputRole): string {
   if (isFileAsGiven(sources)) return sources[0]!.file.name;
@@ -1904,20 +1909,60 @@ function nameOf(sources: readonly DraftSource[], role: InputRole): string {
   return source === undefined || source.origin === 'paste' ? PASTED_NAMES[role] : `${INCLUDED_PREFIX}${source.name}`;
 }
 
+/** An input's name in the argv, and whether it names a file that LOSAT made (not the user's file as given). */
+export interface NamedInput {
+  readonly name: string;
+  readonly made: boolean;
+}
+
+/**
+ * The names of the two inputs of one run (line WQA's D22, review M1, 2026-11-23): a command that names two inputs by one name
+ * cannot be run on the files that the page offers, which then hold other bytes under one name. A file that LOSAT made takes
+ * its role into its name (`included_query_q.fa`) where the other input has the same name: both made (the same file in both
+ * roles with other records left out), or the other the user's own file of that name. The user's own names stay as they are.
+ */
+export function runNames(query: NamedInput, subject: NamedInput): Record<InputRole, string> {
+  if (query.name !== subject.name) return { query: query.name, subject: subject.name };
+  // The same name: a file of LOSAT's takes its role; the user's own stays (a made name may not become theirs).
+  const apart = (input: NamedInput, role: InputRole, other: NamedInput): string => {
+    if (!input.made) return input.name;
+    let name = withRole(input.name, role);
+    while (!other.made && name === other.name) name = withRole(name, role);
+    return name;
+  };
+  return { query: apart(query, 'query', subject), subject: apart(subject, 'subject', query) };
+}
+
+/** `included_q.fa` -> `included_query_q.fa`; `query.fa` -> `query_query.fa`. */
+function withRole(name: string, role: InputRole): string {
+  return name.startsWith(INCLUDED_PREFIX) ? `${INCLUDED_PREFIX}${role}_${name.slice(INCLUDED_PREFIX.length)}` : `${role}_${name}`;
+}
+
 /** What an input made of `sources` is made of, for the run's snapshot; undefined where it is the user's file as given. */
 function fromOf(sources: readonly DraftSource[]): readonly InputPart[] | undefined {
   if (isFileAsGiven(sources)) return undefined;
   return sources.map((source) => ({
-    name: source.origin === 'paste' ? 'pasted text' : source.name,
+    // The user's file by its own name (a compressed file by the name that the user gave), pasted text as such.
+    name: source.origin === 'paste' ? 'pasted text' : source.file.name,
     records: includedOf(source).length,
-    // A record without a title has no ID to name: its place in the file does.
-    leftOut: source.excluded.map((index) => source.base?.records[index]?.id || `record ${index + 1}`),
+    leftOut: leftOutIdsOf(source),
   }));
 }
 
-function groupOf(sources: readonly DraftSource[], role: InputRole): InputGroup {
-  const from = fromOf(sources);
-  return { name: nameOf(sources, role), sources, ...(from === undefined ? {} : { from }) };
+/**
+ * The IDs of the records that a source leaves out, as the page names them: a record without a title by its place in the file
+ * (`record 3`), a record whose ID another record has too by its place (`r1 (#2)`, the number of the card's list).
+ */
+function leftOutIdsOf(source: DraftSource): readonly string[] {
+  const table = source.base?.records ?? [];
+  if (source.excluded.length === 0) return [];
+  const counts = new Map<string, number>();
+  for (const record of table) counts.set(record.id, (counts.get(record.id) ?? 0) + 1);
+  return source.excluded.map((index) => {
+    const id = table[index]?.id ?? '';
+    if (id === '') return `record ${index + 1}`;
+    return (counts.get(id) ?? 0) > 1 ? `${id} (#${index + 1})` : id;
+  });
 }
 
 function describeSource(source: DraftSource): string {

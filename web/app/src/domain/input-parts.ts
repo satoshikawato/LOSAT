@@ -5,28 +5,40 @@ import type { InputPart } from './run';
 /** The most IDs a sentence names; the rest are counted. */
 const MOST_IDS = 3;
 
+/** "a", "a and b", "a, b and c". */
+function listOf(words: readonly string[]): string {
+  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+}
+
 /** "r2", "r2 and r5", "r2, r5, r7 and 4 more". */
 export function leftOutIds(ids: readonly string[]): string {
   const named = ids.slice(0, MOST_IDS);
   const more = ids.length - named.length;
-  if (more > 0) return `${named.join(', ')} and ${more} more`;
-  return named.length < 2 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return more > 0 ? `${named.join(', ')} and ${more} more` : listOf(named);
 }
 
 const records = (count: number): string => `${count} ${count === 1 ? 'record' : 'records'}`;
 
-/** "q.fa: 2 of 3 records (r2 left out)"; "b.fa: 3 records" where nothing is left out. */
+/** "q.fa without r2 (2 of 3 records)"; "b.fa (3 records)" where nothing is left out. */
 export function partText(part: InputPart): string {
-  if (part.leftOut.length === 0) return `${part.name}: ${records(part.records)}`;
-  return `${part.name}: ${part.records} of ${records(part.records + part.leftOut.length)} (${leftOutIds(part.leftOut)} left out)`;
+  if (part.leftOut.length === 0) return `${part.name} (${records(part.records)})`;
+  return `${part.name} without ${leftOutIds(part.leftOut)} (${part.records} of ${records(part.records + part.leftOut.length)})`;
 }
 
-/** The parts that leave records out, as `partText` says them. */
-export function leftOutTexts(parts: readonly InputPart[] | undefined): readonly string[] {
-  return (parts ?? []).filter((part) => part.leftOut.length > 0).map(partText);
-}
-
-/** What the input is made of, as `partText` says each part, for an input that is not the user's file as given. */
+/** What the input is made of, as `partText` says each part: "a.fa (2 records) and b.fa without b2 (1 of 2 records)". */
 export function fromText(parts: readonly InputPart[]): string {
-  return parts.map(partText).join('; ');
+  return listOf(parts.map(partText));
+}
+
+/** Whether a part leaves records out. */
+export function leavesOut(parts: readonly InputPart[] | undefined): boolean {
+  return (parts ?? []).some((part) => part.leftOut.length > 0);
+}
+
+/**
+ * Whether the page has something to tell of what an input is made of: records left out, or several parts. Pasted text with
+ * nothing left out is the text that was pasted: its row already says its records.
+ */
+export function worthSaying(parts: readonly InputPart[] | undefined): parts is readonly InputPart[] {
+  return parts !== undefined && (parts.length > 1 || leavesOut(parts));
 }

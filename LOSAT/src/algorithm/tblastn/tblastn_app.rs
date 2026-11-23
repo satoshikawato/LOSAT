@@ -2076,6 +2076,19 @@ fn search(
                         ));
                         break;
                     }
+                    // `-db`: the first batch whose search reads the sequences (one with a valid
+                    // context searched whole, a split one whose chunks get there) meets the read's
+                    // failure; a reader error of NCBI's own fails it (the preliminary search's
+                    // text, or with `-in_pssm` SeqDB's own error,
+                    // `TblastnDatabase::pssm_search_read_failure`), LOSAT's refusal stops the run.
+                    Err(error)
+                        if error.is::<super::stage_d_pipeline::DatabaseReadReached>()
+                            && stores_error.is_some() =>
+                    {
+                        let error = stores_error.take().expect("the database's read failure");
+                        failed = Some((range, database_read_failure(error)?));
+                        break;
+                    }
                     Err(error) => match batch_failure(error) {
                         Ok(failure) => {
                             failed = Some((range, failure));
@@ -2085,16 +2098,6 @@ fn search(
                     },
                 }
             };
-            // `-db`: the first batch with a valid context reads the sequences (above); a
-            // reader error of NCBI's own fails it (the preliminary search's text, or with
-            // `-in_pssm` SeqDB's own error, `TblastnDatabase::pssm_search_read_failure`), LOSAT's
-            // refusal stops the run.
-            if batch_validity.iter().any(|&valid| valid) {
-                if let Some(error) = stores_error.take() {
-                    failed = Some((range, database_read_failure(error)?));
-                    break;
-                }
-            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
             filter_final_hitlists(
                 &mut batch_results,

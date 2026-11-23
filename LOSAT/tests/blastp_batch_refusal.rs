@@ -18,8 +18,10 @@
 //! ranges leave gaps between chunks that all hold a query (`x4/chunk_second.faa` with `CHUNK_SIZE=-1
 //! OVERLAP_CHUNK_SIZE=-200`: the 398 letters make chunks [0, 100) and [300, 398)), NCBI searches on
 //! without the hits in the gap; the maintainer kept that setting refused (PD-LOSAT-NCBI-DEFECTS
-//! version 1.1), and LOSAT refuses where that batch's search would start, after batch 1's report
-//! (review 3 of X4; row `db.x4.chunk.neg.gap.6`).
+//! version 1.1), and LOSAT refuses where the search of that batch's first chunk with a valid
+//! context would read subjects in hand, after batch 1's report (review 3 of X4, row
+//! `db.x4.chunk.neg.gap.6`; the step of TBLASTN's since PD-LOSAT-NCBI-DEFECTS 1.85, line RG item
+//! X-bpgap).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 
@@ -39,6 +41,19 @@ struct Run {
 /// `losat blastp -query QUERY -db tests/db_search/paja -outfmt OUTFMT -num_threads THREADS` with
 /// `env` as the only variables that choose a code path or NCBI's batches and chunks.
 fn search(query: &str, outfmt: &str, threads: usize, env: &[(&str, &str)]) -> Run {
+    search_in("blastp", query, &["-db", "tests/db_search/paja"], outfmt, threads, env)
+}
+
+/// `search` of `program` against the subjects `subjects` (arguments, paths under the manifest
+/// directory after `-db`, `-subject` and `-negative_seqidlist`).
+fn search_in(
+    program: &str,
+    query: &str,
+    subjects: &[&str],
+    outfmt: &str,
+    threads: usize,
+    env: &[(&str, &str)],
+) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -57,13 +72,21 @@ fn search(query: &str, outfmt: &str, threads: usize, env: &[(&str, &str)]) -> Ru
             command.env_remove(name);
         }
     }
+    let mut paths = false;
+    let subjects: Vec<std::ffi::OsString> = subjects
+        .iter()
+        .map(|&arg| {
+            let value = if paths { path(arg).into_os_string() } else { arg.into() };
+            paths = matches!(arg, "-db" | "-subject" | "-negative_seqidlist");
+            value
+        })
+        .collect();
     let output = command
         .envs(env.iter().copied())
-        .arg("blastp")
+        .arg(program)
         .arg("-query")
         .arg(path(query))
-        .arg("-db")
-        .arg(path("tests/db_search/paja"))
+        .args(subjects)
         .args(["-outfmt", outfmt, "-num_threads", &threads.to_string()])
         .output()
         .expect("run LOSAT");
@@ -225,5 +248,114 @@ fn a_negative_pair_that_leaves_gaps_between_its_chunks_in_batch_2_is_refused_aft
         );
         assert_eq!(one_batch.code, Some(1), "n{threads}: {}", one_batch.stderr);
         assert_eq!(one_batch.stdout, "", "n{threads}");
+    }
+}
+
+const GAP: [(&str, &str); 2] = [("CHUNK_SIZE", "-1"), ("OVERLAP_CHUNK_SIZE", "-200")];
+const NO_SUBJECT: [&str; 4] = [
+    "-db",
+    "tests/db_search/taxfilter/tfp",
+    "-negative_seqidlist",
+    "tests/db_search/seqidlist/sl_tfp_all.txt",
+];
+const SHORT: [&str; 4] = ["-subject", "tests/db_search/q1c/avg_s.faa", "-searchsp", "1000"];
+
+// The gaps (PD-LOSAT-NCBI-DEFECTS 1.85, line RG item X-bpgap): refused only where the search of the
+// batch's first chunk with a valid context would read subjects in hand. A database left without a
+// subject, and a query whose letters are valid only in the gap (`x4/chunk_gapvalid.faa`: 100 X, the
+// TK-TMK protein's letters 101 to 300, 98 X: neither chunk has a valid context), are searched on and
+// reported as NCBI 2.17.0 reports them (exit status 0; rows `db.x4.chunk.neg.gap.nosub.*`,
+// `db.x4.chunk.neg.gapvalid.*`), as is psiblast's database left without a subject.
+#[test]
+fn a_negative_pair_that_leaves_gaps_without_a_subject_or_a_valid_chunk_is_searched_on() {
+    let second = "tests/fasta/x4/chunk_second.faa";
+    for threads in [1, 4] {
+        for (program, query) in [("blastp", second), ("psiblast", "tests/fasta/x4/chunk_gapvalid.faa")] {
+            let plain = search_in(program, query, &NO_SUBJECT, "7", threads, &[]);
+            let gaps = search_in(program, query, &NO_SUBJECT, "7", threads, &GAP);
+            assert_eq!(gaps.code, Some(0), "{program} n{threads}: {}", gaps.stderr);
+            assert_eq!(gaps.stdout, plain.stdout, "{program} n{threads}");
+            assert_eq!(gaps.stderr, plain.stderr, "{program} n{threads}");
+        }
+        let valid_in_gap = search("tests/fasta/x4/chunk_gapvalid.faa", "7", threads, &GAP);
+        assert_eq!(valid_in_gap.code, Some(0), "n{threads}: {}", valid_in_gap.stderr);
+        assert!(valid_in_gap.stdout.contains("# 0 hits found"), "n{threads}: {}", valid_in_gap.stdout);
+    }
+}
+
+// A split batch whose chunks have no valid context (`x4/chunk_gapvalid.faa` with the gaps): the
+// traceback's own setup of the batch fails the subject-length check of `-searchsp` against subjects
+// of 2, 0 and 0 letters (NCBI 2.17.0: `Traceback failed`, exit status 3, after the warnings of the
+// empty subjects), and a database whose sequence file is missing is not read (exit status 0).
+#[test]
+fn a_split_batch_without_a_valid_chunk_meets_the_tracebacks_setup() {
+    let query = "tests/fasta/x4/chunk_gapvalid.faa";
+    for threads in [1, 4] {
+        let short = search_in("blastp", query, &SHORT, "7", threads, &GAP);
+        assert_eq!(short.code, Some(3), "n{threads}: {}", short.stderr);
+        assert!(short.stderr.ends_with("Traceback failed\n"), "n{threads}: {}", short.stderr);
+        let unread = search_in(
+            "blastp",
+            query,
+            &["-db", "tests/db_search/arch_sprot_nopsq"],
+            "7",
+            threads,
+            &GAP,
+        );
+        assert_eq!(unread.code, Some(0), "n{threads}: {}", unread.stderr);
+        assert!(unread.stdout.contains("# 0 hits found"), "n{threads}: {}", unread.stdout);
+    }
+}
+
+/// A query file of the `index`-th record (from 0) of `source`, or of `letters` (`source` empty), in
+/// the temporary directory (`tag` names it).
+fn query_file(tag: &str, source: &str, index: usize, letters: &str) -> String {
+    let text = if source.is_empty() {
+        format!(">{tag}\n{letters}\n")
+    } else {
+        let all = std::fs::read_to_string(path(source)).expect("read the queries");
+        format!(">{}", all.split('>').nth(index + 1).expect("the record"))
+    };
+    let file = std::env::temp_dir().join(format!("losat_bpgap_{tag}_{}.faa", std::process::id()));
+    std::fs::write(&file, text).expect("write the query");
+    file.to_str().expect("a path").to_string()
+}
+
+// The chunks' stops come before the errors of the setup of the batch's first chunk (NCBI 2.17.0 exits
+// 3 with its null pointer, not the database's or the average subject length's error): a chunk
+// without a query (`CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200`, ql of `outfmt0/xsb_ql.faa`, 310
+// letters) and a chunk split again (`CHUNK_SIZE=150`, the 398 letters of `x4/chunk_second.faa`)
+// against a database without sequences and against `-searchsp` with subjects too short. A batch of
+// invalid queries only, which NCBI does not search, is not split and meets no stop (exit status 0,
+// as without the variables).
+#[test]
+fn the_chunk_stops_come_before_the_setup_failures() {
+    let ql = query_file("ql", "tests/fasta/outfmt0/xsb_ql.faa", 1, "");
+    let tk = query_file("tk", "tests/fasta/x4/chunk_second.faa", 1, "");
+    let empty = ["-db", "tests/seqdb/db/empty"];
+    let without_a_query = [("CHUNK_SIZE", "-100"), ("OVERLAP_CHUNK_SIZE", "-200")];
+    let split_again = [("CHUNK_SIZE", "150")];
+    for threads in [1, 4] {
+        for (query, env, message) in [
+            (&ql, &without_a_query[..], "a query chunk without a query"),
+            (&tk, &split_again[..], "would split a query chunk again"),
+        ] {
+            for subjects in [&empty[..], &SHORT[..]] {
+                let run = search_in("blastp", query, subjects, "6", threads, env);
+                assert_eq!(run.code, Some(1), "{subjects:?} {env:?} n{threads}: {}", run.stderr);
+                assert!(run.stderr.contains(message), "{subjects:?} {env:?} n{threads}: {}", run.stderr);
+                assert_eq!(run.stdout, "", "{subjects:?} {env:?} n{threads}");
+            }
+        }
+    }
+    let all_x = query_file("allx", "", 0, &"X".repeat(398));
+    for env in [&GAP[..], &split_again[..]] {
+        let plain = search(&all_x, "7", 1, &[]);
+        let run = search(&all_x, "7", 1, env);
+        assert_eq!(run.code, Some(0), "{env:?}: {}", run.stderr);
+        assert_eq!((run.stdout, run.stderr), (plain.stdout, plain.stderr), "{env:?}");
+    }
+    for file in [ql, tk, all_x] {
+        let _ = std::fs::remove_file(file);
     }
 }

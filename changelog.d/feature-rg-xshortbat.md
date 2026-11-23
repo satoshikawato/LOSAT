@@ -23,3 +23,18 @@
 - With `-searchsp` or `OLD_FSC`, a `tblastn` search of a database of volumes without sequences (an alias over them)
   now fails with NCBI BLAST+ 2.17.0's `Database memory map file error`; before, LOSAT gave `The average subject length
   is too short`, an error that NCBI BLAST+ checks only after that read.
+- `blastp` and `psiblast` now take the same steps as `tblastn` with split queries: a negative `CHUNK_SIZE` above a
+  negative `OVERLAP_CHUNK_SIZE` whose pieces leave gaps stops the search where the batch's first piece with searchable
+  query letters would read the subjects, after the results of the query batches before; with no subject to search (a
+  seqid list that keeps none) or no such piece, the batch is reported as NCBI BLAST+ 2.17.0 reports it. Before, these
+  searches stopped before the batch was searched.
+- With a split query, `blastp` and `psiblast` now stop at a piece that NCBI BLAST+ would split again, or one left
+  without a query, before the database's errors (no sequences, a missing sequence file) and `-searchsp`'s average
+  subject length error, as NCBI BLAST+ 2.17.0 does; a batch whose queries are all unsearchable is no longer refused
+  for its pieces (NCBI BLAST+ does not search it).
+- A split `blastp` or `tblastn` batch none of whose pieces has searchable query letters now fails with NCBI BLAST+'s
+  `Traceback failed` where `-searchsp` leaves the subjects too short, and is reported where the database's sequence
+  file is missing (NCBI BLAST+ reads nothing for it); a later batch that reads the database then fails after its
+  report. Before, LOSAT gave the average subject length error or the database's error at that batch.
+- A `blastp` batch that LOSAT refuses for two queries with one ID and that NCBI BLAST+ splits now gives NCBI BLAST+'s
+  error of the batch's setup where its pieces reach it, as `tblastn` does.

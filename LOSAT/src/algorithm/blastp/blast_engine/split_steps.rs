@@ -1,0 +1,500 @@
+//! BLASTP's split query batches and NCBI's steps of a split batch (`SplitBatchSteps`, the one owner
+//! of BLASTP's and TBLASTN's): which searches split their batches, a chunk's parts and validity,
+//! and where the failures of the setup of a call's batches come when a split batch meets them first
+//! (`run_call`, psiblast's first read, the set-up of a refused batch; line RG item X-bpgap).
+
+use anyhow::Result;
+
+use super::call_setup::{self, CallSetup};
+use super::database::{BlastpDatabase, HeaderReadError, PreliminaryReadError};
+use super::{blastp_query_frames, pssm_hooks, BlastpSubjectSource, ResolvedBlastpArgs};
+use crate::algorithm::blastn::query_split::{ChunkQuery, SplitSizes};
+use crate::algorithm::blastp::encoding::EncodedProtein;
+use crate::algorithm::blastp::protein_query_split::{
+    protein_chunk_part_in_record, protein_query_split_sizes, split_batch_reaches_read,
+    split_protein_batch, ProteinQueryChunk, ReadFails, SplitBatchSteps,
+};
+use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::seq_range;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:61
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
+// `psi_round::run_queries`: a query factory that is not `CObjMgr_QueryFactory` makes one chunk)
+/// Whether the searches of `args` split their query batches (`search_split_query_batches`): an
+/// RPS-BLAST query batch is never split; an ungapped search splits none (and so builds one
+/// compressed lookup table for each batch, `ncbi_compressed_lookup_tables`); a PSSM search splits
+/// only the rounds of a FASTA query (`PsiSearch::split_setup`), never a PSSM query (`-in_pssm`,
+/// `CObjMgrFree_QueryFactory`).
+pub(super) fn splits_batches(args: &ResolvedBlastpArgs) -> bool {
+    args.rps_search.is_none()
+        && !args.ungapped
+        && args
+            .psi_search
+            .as_deref()
+            .is_none_or(|psi| psi.split_setup.is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
+/// The record of the part `part` of the query `record` as its chunk reads it: with
+/// `-lcase_masking`, the lower case of the query's whole record restricted to the part as NCBI
+/// restricts it (`protein_chunk_part_in_record`: `whole`, the record and where the query's
+/// searched letters start in it; each run one letter longer, and with `-query_loc` in the part's
+/// coordinates without the interval's start).
+pub(super) fn chunk_part(
+    args: &ResolvedBlastpArgs,
+    record: &FastaRecord,
+    whole: (&[u8], usize),
+    part: &ChunkQuery,
+) -> FastaRecord {
+    let mut cut = record.cut(part.from, part.to);
+    if args.lcase_masking {
+        cut.sequence = protein_chunk_part_in_record(whole.0, whole.1, part);
+    }
+    cut
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:273-284 (cited at
+// `SplitBatchSteps`)
+/// Whether a context of the query chunk of the parts `parts` is valid, as the chunk's setup finds
+/// it: set up without the PSSM (a split round's chunks are searched as round 1's), with
+/// `call_setup::call_lookup`'s validity (a context without letters is invalid). A chunk without
+/// one finds nothing, as NCBI ignores its setup's error.
+pub(super) fn chunk_valid(args: &ResolvedBlastpArgs, parts: &[FastaRecord]) -> bool {
+    let mut unpssm;
+    let args = match args.psi_search {
+        Some(_) => {
+            unpssm = args.clone();
+            unpssm.psi_search = None;
+            &unpssm
+        }
+        None => args,
+    };
+    pssm_hooks::psi_contexts(args, &blastp_query_frames(args, parts))
+        .iter()
+        .any(|context| context.is_valid && context.aa_len > 0)
+}
+
+/// Whether the search of a query chunk has a subject in hand (`SplitBatchSteps::before_search`):
+/// a subject of the FASTA set with letters (one without is not searched, with its warning), or a
+/// sequence that the database's lists include.
+pub(super) fn subjects_in_hand(subject_source: BlastpSubjectSource<'_>) -> bool {
+    match subject_source {
+        BlastpSubjectSource::Fasta(records) => records.iter().any(|record| !record.seq().is_empty()),
+        BlastpSubjectSource::Database(database) => database.num_sequences() > 0,
+    }
+}
+
+/// The form of a stop of the query batch whose first searched query is `query`: NCBI stops in the
+/// search of the batch after it has printed the reports of the batches before (blastp_app.cpp:
+/// 257-276, cited in `search`), BLASTP's batch failure (`database::HeaderReadError`; TBLASTN's and
+/// TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). psiblast searches one query at a time
+/// and NCBI stops in the query's round 1 (it splits that round too), after the rounds of the
+/// queries before: every round of a query makes the same chunks, so a later round never reaches a
+/// stop, and the stop of the query's search is the plain error.
+pub(super) fn batch_failure(args: &ResolvedBlastpArgs, query: usize, error: anyhow::Error) -> anyhow::Error {
+    if args.psi_search.is_some() {
+        error
+    } else {
+        HeaderReadError { query, error }.into()
+    }
+}
+
+/// The text of NCBI's engine error of a failed setup check of a batch (`SplitBatchSteps`' setup
+/// checks), apart from LOSAT's refusals there.
+#[derive(Debug)]
+struct SetupText(&'static str);
+
+impl std::fmt::Display for SetupText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for SetupText {}
+
+/// The error that a failure of the setup of a batch `error` makes (a check's `SetupText`, or a read
+/// that fails, `database::PreliminaryReadError`): NCBI's engine error; another error (LOSAT's
+/// refusal of a count of 0, a reader's own error) as it is.
+fn setup_failure(error: anyhow::Error) -> anyhow::Error {
+    let error = match error.downcast::<SetupText>() {
+        Ok(text) => return crate::blastinput::app::engine_error(text.0),
+        Err(error) => error,
+    };
+    match error.downcast::<PreliminaryReadError>() {
+        Ok(read) => crate::blastinput::app::engine_error(read.0),
+        Err(error) => error,
+    }
+}
+
+/// What the subjects give the setup of a batch: the read of OID 0 (`first_oid_read_fails`) or
+/// the search's read of a sequence file that cannot be opened (`sequence_file_read_error`), and
+/// the checks of the setup's subject length after LOSAT's refusal of a count of 0
+/// (`call_setup::setup_fails`).
+struct SetupFailures {
+    read_fails: Option<ReadFails>,
+    read_error: Option<anyhow::Error>,
+    checks: Result<()>,
+}
+
+impl SetupFailures {
+    fn of(
+        args: &ResolvedBlastpArgs,
+        database: Option<&BlastpDatabase>,
+        subjects: &[EncodedProtein],
+        contexts: &[QueryContext],
+    ) -> Self {
+        if database.is_some_and(BlastpDatabase::first_oid_read_fails) {
+            return Self {
+                read_fails: Some(ReadFails::Setup),
+                read_error: Some(PreliminaryReadError("Database memory map file error").into()),
+                checks: Ok(()),
+            };
+        }
+        let read_error =
+            database.and_then(|database| database.sequence_file_read_error(args.app.name()));
+        let checks = call_setup::db_extent(args, database, subjects).and_then(|extent| {
+            match call_setup::setup_fails(args, &extent, contexts)? {
+                true => Err(SetupText(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into()),
+                false => Ok(()),
+            }
+        });
+        Self {
+            read_fails: read_error.is_some().then_some(ReadFails::Search),
+            read_error,
+            checks,
+        }
+    }
+
+    fn pending(&self) -> bool {
+        self.read_fails.is_some() || self.checks.is_err()
+    }
+
+    /// The batch's setup checks for its `SplitBatchSteps` (the error kept here for a batch after).
+    fn checks(&self) -> Result<()> {
+        match &self.checks {
+            Ok(()) => Ok(()),
+            Err(error) => match error.downcast_ref::<SetupText>() {
+                Some(text) => Err(SetupText(text.0).into()),
+                None => Err(anyhow::anyhow!("{error:#}")),
+            },
+        }
+    }
+
+    /// The failure that a batch searched whole with a valid context meets, in NCBI's order: the
+    /// read of OID 0, the checks, the search's read.
+    fn of_whole_batch(self) -> Option<anyhow::Error> {
+        match (self.read_fails, self.read_error, self.checks) {
+            (Some(ReadFails::Setup), Some(error), _) => Some(error),
+            (_, _, Err(error)) => Some(error),
+            (_, error, Ok(())) => error,
+        }
+    }
+}
+
+/// What `run_call` does before its search where a split batch is the call's first searched one
+/// (`call_steps`).
+pub(super) enum CallSteps {
+    /// The call's own checks and search: its first searched batch meets the setup's failures as
+    /// `run_call` finds them, if any; `reads`: whether a batch's search reads the database (none
+    /// does where every searched batch is split into chunks without a valid context: the
+    /// preliminary stage then reads nothing, as for a call of invalid queries).
+    Search { reads: bool },
+    /// NCBI's engine error `Traceback failed` of the call's first searched batch, split, whose
+    /// chunks found nothing (`preliminary_search_error`).
+    FirstBatchError(&'static str),
+    /// A later batch's failure or stop after the reports of the batches before
+    /// (`batch_failure`), or LOSAT's refusal: the call's error.
+    Fails(anyhow::Error),
+}
+
+impl CallSteps {
+    /// Whether the call's search reads the database (`Search`), or the call's error, the first
+    /// searched batch's engine error made of its text by `first_batch_error`.
+    pub(super) fn reads(
+        self,
+        first_batch_error: impl FnOnce(&'static str) -> anyhow::Error,
+    ) -> Result<bool> {
+        match self {
+            CallSteps::Search { reads } => Ok(reads),
+            CallSteps::FirstBatchError(text) => Err(first_batch_error(text)),
+            CallSteps::Fails(error) => Err(error),
+        }
+    }
+}
+
+/// The batches of a call (`call_setup::call_lookup`): each batch, whether NCBI skips it (no valid
+/// context, local_blast.cpp:177-180), and the queries' lengths.
+pub(super) struct CallBatches<'c>(
+    pub(super) &'c [seq_range::RangedBatch],
+    pub(super) &'c [bool],
+    pub(super) &'c [usize],
+);
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-982 (cited at
+// `SplitBatchSteps`)
+/// Where NCBI's searches of the call's batches meet the failures of their setup (the read of OID
+/// 0, the checks of the subject length, the search's first read) when the call's first searched
+/// batch is split (NCBI 2.17.0 probes of line RG item X-bpgap): the batches in order, a batch of
+/// invalid queries only not searched, one searched whole meeting them as `run_call` does, a split
+/// one meeting its chunks' stops first and the failures where a chunk gets to them
+/// (`SplitBatchSteps`), or, where no chunk has a valid context, the traceback's own setup meeting
+/// the checks (`Traceback failed`) or nothing read, the next batch going on. A call whose first
+/// searched batch is searched whole, or whose setup does not fail, is `run_call`'s as before: a
+/// split batch's stops then come in `search_split_query_batches`, after the call's search.
+pub(super) fn call_steps(
+    call: &CallSetup<'_, '_>,
+    subject_source: BlastpSubjectSource<'_>,
+    subjects: &[EncodedProtein],
+    contexts: &[QueryContext],
+    batches: CallBatches<'_>,
+) -> Result<CallSteps> {
+    let args = call.args;
+    let searches = CallSteps::Search { reads: true };
+    if call.prelim.is_some() || !splits_batches(args) {
+        return Ok(searches);
+    }
+    let CallBatches(query_batches, skipped, query_lengths) = batches;
+    let searched: Vec<std::ops::Range<usize>> = query_batches
+        .iter()
+        .map(|batch| batch.searched.clone())
+        .filter(|searched| !searched.is_empty() && !skipped[searched.start])
+        .collect();
+    let sizes = protein_query_split_sizes(10000)?;
+    let split_of =
+        |range: &std::ops::Range<usize>| split_protein_batch(&query_lengths[range.clone()], sizes);
+    if searched.first().and_then(&split_of).is_none() {
+        return Ok(searches);
+    }
+    let failures = SetupFailures::of(args, subject_source.database(), subjects, contexts);
+    if !failures.pending() {
+        return Ok(searches);
+    }
+    let mut searched_before = false;
+    for range in searched {
+        let after_before = |error: anyhow::Error| -> Result<CallSteps> {
+            Ok(CallSteps::Fails(batch_failure(
+                args,
+                range.start,
+                setup_failure(error),
+            )))
+        };
+        let Some(chunks) = split_of(&range) else {
+            return match failures.of_whole_batch() {
+                Some(error) if searched_before => after_before(error),
+                _ => Ok(searches),
+            };
+        };
+        let stop = |refusal: anyhow::Error| batch_failure(args, range.start, refusal);
+        let mut steps = match SplitBatchSteps::new(
+            args.app.name(),
+            &chunks,
+            sizes,
+            failures.read_fails,
+            failures.checks(),
+            &stop,
+        ) {
+            Ok(steps) => steps,
+            Err(error) => return Ok(CallSteps::Fails(error)),
+        };
+        let parts = |chunk: &ProteinQueryChunk| {
+            chunk_parts(
+                args,
+                (call.query_records, call.ranges.input_records),
+                call.ranges.query_input,
+                range.start,
+                chunk,
+            )
+        };
+        let reaches =
+            split_batch_reaches_read(&mut steps, &chunks, |chunk| Ok(chunk_valid(args, &parts(chunk))));
+        match reaches {
+            // A stop of the chunks (in its form), or the checks of the first valid chunk.
+            Err(error)
+                if error.is::<HeaderReadError>()
+                    || (args.psi_search.is_some() && !error.is::<SetupText>()) =>
+            {
+                return Ok(CallSteps::Fails(error))
+            }
+            Err(error) if searched_before => return after_before(error),
+            Err(_) => return Ok(searches),
+            Ok(true) if searched_before => {
+                return match failures.of_whole_batch() {
+                    Some(error) => after_before(error),
+                    None => Ok(searches),
+                }
+            }
+            Ok(true) => return Ok(searches),
+            Ok(false) => {}
+        }
+        match steps.unmet_checks() {
+            Some(error) if error.is::<SetupText>() && !searched_before => {
+                return Ok(CallSteps::FirstBatchError("Traceback failed"))
+            }
+            Some(error) if error.is::<SetupText>() => {
+                return after_before(SetupText("Traceback failed").into())
+            }
+            Some(refusal) if searched_before => return after_before(refusal),
+            Some(refusal) => return Ok(CallSteps::Fails(refusal)),
+            None => searched_before = true,
+        }
+    }
+    Ok(CallSteps::Search {
+        reads: failures.read_fails.is_none(),
+    })
+}
+
+/// The parts of the query chunk `chunk` of the batch whose first searched query is `batch_start`,
+/// of the queries `query_records` (`chunk_part`; their whole records `input_records`, by
+/// `input`'s ordinals and placements).
+pub(super) fn chunk_parts(
+    args: &ResolvedBlastpArgs,
+    (query_records, input_records): (&[FastaRecord], &[FastaRecord]),
+    input: &seq_range::QueryInput,
+    batch_start: usize,
+    chunk: &ProteinQueryChunk,
+) -> Vec<FastaRecord> {
+    chunk
+        .queries
+        .iter()
+        .map(|part| {
+            let query = batch_start + part.query;
+            let whole = (
+                input_records[input.ordinal(query)].seq(),
+                input.placements.offset(query),
+            );
+            chunk_part(args, &query_records[query], whole, part)
+        })
+        .collect()
+}
+
+/// psiblast: whether the search of the query `record` (with its whole record `whole`), which NCBI
+/// splits, gets to the first read of the database, whose read fails in `read_fails`
+/// (`psiblast_stop_at_invalid_query`), or its chunks' stop (the plain error); `None` for a query
+/// that NCBI does not split.
+pub(super) fn split_query_reads(
+    args: &ResolvedBlastpArgs,
+    record: &FastaRecord,
+    whole: (&[u8], usize),
+    read_fails: ReadFails,
+) -> Option<Result<bool>> {
+    if !splits_batches(args) {
+        return None;
+    }
+    let sizes = match protein_query_split_sizes(10000) {
+        Ok(sizes) => sizes,
+        Err(error) => return Some(Err(error)),
+    };
+    let chunks = split_protein_batch(&[record.seq().len()], sizes)?;
+    Some(reaches_read(args, &chunks, sizes, Some(read_fails), Ok(()), |chunk| {
+        let parts: Vec<FastaRecord> = chunk
+            .queries
+            .iter()
+            .map(|part| chunk_part(args, record, whole, part))
+            .collect();
+        chunk_valid(args, &parts)
+    }))
+}
+
+/// `split_batch_reaches_read` of the chunks `chunks` with plain stops.
+fn reaches_read(
+    args: &ResolvedBlastpArgs,
+    chunks: &[ProteinQueryChunk],
+    sizes: SplitSizes,
+    read_fails: Option<ReadFails>,
+    checks: Result<()>,
+    mut valid: impl FnMut(&ProteinQueryChunk) -> bool,
+) -> Result<bool> {
+    let plain = |refusal: anyhow::Error| refusal;
+    let mut steps = SplitBatchSteps::new(args.app.name(), chunks, sizes, read_fails, checks, &plain)?;
+    split_batch_reaches_read(&mut steps, chunks, |chunk| Ok(valid(chunk)))
+}
+
+/// A chunk stop of the set-up of a refused batch (`refused_split_batch_error`), which keeps the
+/// refusal.
+#[derive(Debug)]
+struct ChunkStop;
+
+impl std::fmt::Display for ChunkStop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a stop of a query chunk")
+    }
+}
+
+impl std::error::Error for ChunkStop {}
+
+/// BLASTP's set-up of a refused batch that NCBI splits (`refused_batch_setup_error`; TBLASTN's
+/// `stage_d_pipeline::split_batch_reads`, review 4 of line RG item X-short-bat, M1): NCBI's batch
+/// is `records` (each searched query's record and, where it is first in its scope, its whole
+/// record), split into `chunks` by `sizes`. A chunk is valid where a part of a record first in its
+/// scope has a valid context (the parts of a repeated id, which NCBI reads in its earlier record's
+/// letters, are left out). NCBI's error where its search of the batch fails for the subjects (the
+/// read of OID 0, the checks of the first valid chunk, the search's read, or the traceback's own
+/// setup, `Traceback failed`); `None` where it passes or a chunk stops it, so that the refusal
+/// comes.
+pub(super) fn refused_split_batch_error(
+    args: &ResolvedBlastpArgs,
+    database: Option<&BlastpDatabase>,
+    subject_records: &[FastaRecord],
+    records: &[(&FastaRecord, Option<(&[u8], usize)>)],
+    chunks: &[ProteinQueryChunk],
+    sizes: SplitSizes,
+) -> Option<anyhow::Error> {
+    let encoded: Vec<EncodedProtein> = match database {
+        Some(_) => Vec::new(),
+        None => subject_records
+            .iter()
+            .map(|record| crate::algorithm::blastp::encoding::encode_protein_sequence(record.seq()))
+            .collect(),
+    };
+    let own: Vec<FastaRecord> = records
+        .iter()
+        .filter(|(_, whole)| whole.is_some())
+        .map(|&(record, _)| record.clone())
+        .collect();
+    let contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, &own));
+    if !contexts
+        .iter()
+        .any(|context| context.is_valid && context.aa_len > 0)
+    {
+        return None;
+    }
+    let failures = SetupFailures::of(args, database, &encoded, &contexts);
+    let stop = |refusal: anyhow::Error| refusal.context(ChunkStop);
+    let mut steps = SplitBatchSteps::new(
+        args.app.name(),
+        chunks,
+        sizes,
+        failures.read_fails,
+        failures.checks(),
+        &stop,
+    )
+    .ok()?;
+    let reaches = split_batch_reaches_read(&mut steps, chunks, |chunk| {
+        let parts: Vec<FastaRecord> = chunk
+            .queries
+            .iter()
+            .filter_map(|part| {
+                let (record, whole) = records[part.query];
+                whole.map(|whole| chunk_part(args, record, whole, part))
+            })
+            .collect();
+        Ok(!parts.is_empty() && chunk_valid(args, &parts))
+    });
+    // NCBI's errors; LOSAT's other refusals there (a count of 0) leave the batch's refusal.
+    let error = match reaches {
+        Err(error) if error.is::<ChunkStop>() => return None,
+        Err(error) => setup_failure(error),
+        Ok(true) => setup_failure(failures.of_whole_batch()?),
+        Ok(false) => match steps.unmet_checks() {
+            Some(error) if error.is::<SetupText>() => {
+                crate::blastinput::app::engine_error("Traceback failed")
+            }
+            _ => return None,
+        },
+    };
+    error.is::<crate::cli::NativeError>().then_some(error)
+}

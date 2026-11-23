@@ -166,7 +166,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) with composition-based statistics (`-comp_based_stats` 1 to 3) | Refused. NCBI's `tblastn` crashes on some inputs with it. With `-comp_based_stats 0`, `-matrix IDENTITY` or `-ungapped` it runs. |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback, or with `-ungapped` the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-use_sw_tback` on a query and subject that NCBI never finishes, or on a query batch that NCBI crashes on | Refused, as in `blastp`. See [Rare and pathological inputs](refusals-edge-cases.md#tblastn). |
-| `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example) | Refused. NCBI crashes. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
 | `-in_pssm` | See the next section. |
 
@@ -179,7 +178,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
-| `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example) | Refused. NCBI crashes. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
 | `-outfmt 1` to `4` with `-parse_deflines` | See "All five search programs" above. |
 

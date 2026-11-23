@@ -1,12 +1,13 @@
 //! No NCBI counterpart: a guard that the user manual's page "What LOSAT refuses"
-//! (docs/manual/src/refusals.md, the one list of refusals that users read) names every option that
-//! this parser refuses by name, per program, and every NCBI BLAST+ 2.17.0 executable that LOSAT
-//! does not provide.
+//! (docs/manual/src/refusals.md) names every option and run-time refusal per program and every
+//! NCBI BLAST+ 2.17.0 executable that LOSAT does not provide, while rare and pathological inputs
+//! live on the linked page docs/manual/src/refusals-edge-cases.md (not counted toward CLI option
+//! coverage).
 //!
-//! The page is read at compile time. The lists under test are the ones that
-//! `unknown_option_error` consults (`UNPORTED_*_ARGS`) and
-//! `crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS`. Refusals of a value (`-word_size 4`) or
-//! of an input (a database sequence) are in no list and are not checked here.
+//! The page is read at compile time. The list under test is the one list of the arguments that
+//! LOSAT refuses by name or at the run (`ncbi_app::args::refusals`, the rows of `REFUSED` in
+//! `build/ncbi_args.rs`). Refusals of a value (`-word_size 4`) or of an input (a database
+//! sequence) are in no list and are not checked here.
 //!
 //! How the page is read (kept simple on purpose):
 //! - A line that starts with `## ` opens a section; its heading is the rest of the line. The lines
@@ -84,16 +85,24 @@ const NCBI_EXECUTABLES: [&str; 28] = [
     "windowmasker",
 ];
 
-/// The lines of the page with the heading of the section each belongs to ("" before the first).
-fn refusal_lines() -> Vec<(&'static str, &'static str)> {
-    let mut heading = "";
+/// The lines of one manual page with the heading of the section each belongs to
+/// ("" before the first `## ` heading).
+fn page_lines(page: &'static str) -> Vec<(&'static str, &'static str)> {
     let mut lines = Vec::new();
-    for line in PAGE.lines() {
+    let mut heading = "";
+    for line in page.lines() {
         if let Some(rest) = line.strip_prefix("## ") {
             heading = rest.trim();
         }
         lines.push((heading, line));
     }
+    lines
+}
+
+/// The lines of `docs/manual/src/refusals.md` (primary refused options, run refusals, and
+/// non-provided executable list; `refusals-edge-cases.md` is intentionally excluded).
+fn primary_refusal_lines() -> Vec<(&'static str, &'static str)> {
+    let lines = page_lines(PAGE);
     assert!(
         lines.iter().any(|&(heading, _)| heading == FIVE_SECTION),
         "refusals.md has no section `## {FIVE_SECTION}`"
@@ -143,34 +152,27 @@ fn documented(lines: &[(&str, &str)], program: &str, name: &str) -> bool {
 
 #[test]
 fn every_refused_option_is_in_the_manual_for_its_program() {
-    let lines = refusal_lines();
-    let psiblast: Vec<&str> = UNPORTED_PSIBLAST_OWN_ARGS
-        .iter()
-        .chain(UNPORTED_BLASTP_ARGS)
-        .copied()
-        .filter(|name| is_unported_psiblast_arg(name))
-        .collect();
-    let lists: Vec<(&str, Vec<&str>)> = vec![
-        ("blastn", UNPORTED_BLASTN_ARGS.to_vec()),
-        ("blastp", UNPORTED_BLASTP_ARGS.to_vec()),
-        ("blastx", UNPORTED_BLASTX_ARGS.to_vec()),
-        ("tblastn", UNPORTED_TBLASTN_ARGS.to_vec()),
-        ("tblastx", UNPORTED_TBLASTX_ARGS.to_vec()),
-        ("psiblast", psiblast),
-        ("rpsblast", UNPORTED_RPSBLAST_ARGS.to_vec()),
-        (
-            "makeblastdb",
-            crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.to_vec(),
-        ),
-    ];
+    let lines = primary_refusal_lines();
     let mut missing = Vec::new();
-    for (program, names) in &lists {
-        for name in names {
-            if !documented(&lines, program, name) {
-                missing.push(format!(
-                    "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
-                ));
-            }
+    for (program, name, refusal) in crate::ncbi_app::args::refusals() {
+        if matches!(refusal, Refusal::Read(_)) && !documented(&lines, program, name) {
+            missing.push(format!(
+                "{program}: the option -{name} is refused by LOSAT but docs/manual/src/refusals.md does not name it for {program} (rare inputs in refusals-edge-cases.md do not count)"
+            ));
+        }
+    }
+    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
+}
+
+#[test]
+fn every_run_refusal_is_in_the_manual_for_its_program() {
+    let lines = primary_refusal_lines();
+    let mut missing = Vec::new();
+    for (program, name, refusal) in crate::ncbi_app::args::refusals() {
+        if matches!(refusal, Refusal::Run(_)) && !documented(&lines, program, name) {
+            missing.push(format!(
+                "{program}: the run refusal -{name} is refused by LOSAT's run but docs/manual/src/refusals.md does not name it for {program} (rare inputs in refusals-edge-cases.md do not count)"
+            ));
         }
     }
     assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
@@ -198,7 +200,7 @@ fn the_versions_are_answered_by_every_program() {
 
 #[test]
 fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
-    let lines = refusal_lines();
+    let lines = primary_refusal_lines();
     let listed: Vec<&str> = lines
         .iter()
         .filter(|(heading, _)| {
@@ -222,7 +224,7 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
         .collect();
     assert!(
         !not_provided.is_empty(),
-        "refusals.md's \"Programs LOSAT does not provide\" lists nothing"
+        "docs/manual/src/refusals.md's \"Programs LOSAT does not provide\" lists nothing"
     );
     let mut wrong = Vec::new();
     for executable in NCBI_EXECUTABLES {
@@ -246,6 +248,53 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
             wrong.push(format!(
                 "{name}: listed under \"Programs LOSAT does not provide\" but not an executable of NCBI BLAST+ 2.17.0 (NCBI_EXECUTABLES)"
             ));
+        }
+    }
+    assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
+}
+
+/// The `-in_msa` refusals of an input that the code names by a cause (each `pub(crate)` constant
+/// is the text after "is not supported by LOSAT's PSIBLAST:"), and a phrase of the row of
+/// refusals.md that tells the user of it. The page's rows of `-in_msa` input refusals are those of
+/// this list and the three that spell their cause where they refuse (a master sequence that is the
+/// start of a longer one above it, one of X or O alone, `-matrix IDENTITY`): a refusal added to the
+/// code needs its row, and a row needs its refusal.
+#[test]
+fn the_in_msa_input_refusals_of_the_code_are_listed_in_the_manual() {
+    let refusals: [(&str, &str); 5] = [
+        (
+            crate::blastinput::aln_reader::phylip::ZERO_COUNT,
+            "a PHYLIP header of 0 sequences",
+        ),
+        (
+            crate::blastinput::aln_reader::nexus::EMPTY_COMMAND,
+            "an empty command (a lone `;`) in a NEXUS file",
+        ),
+        (
+            crate::algorithm::psiblast::in_msa::SHORT_ROW_READ,
+            "a FASTA alignment whose rows have different lengths",
+        ),
+        (
+            crate::blastinput::aln_reader::mods::BACKWARD_RANGE,
+            "`secondary-accession` range that runs backwards",
+        ),
+        (
+            crate::blastinput::aln_reader::mods::RANGE_OVERFLOW,
+            "a number of more than 18 digits",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (cause, phrase) in refusals {
+        let row = PAGE
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(phrase));
+        match row {
+            None => wrong.push(format!("refusals.md has no row with \"{phrase}\"")),
+            Some(row) if !row.contains("Refused") => {
+                wrong.push(format!("the row with \"{phrase}\" does not say Refused"))
+            }
+            Some(_) if cause.is_empty() => wrong.push(format!("\"{phrase}\": the cause is empty")),
+            Some(_) => {}
         }
     }
     assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));

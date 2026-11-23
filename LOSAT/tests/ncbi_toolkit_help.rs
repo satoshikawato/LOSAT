@@ -2,9 +2,9 @@
 //! 2.17.0, the official Linux x64 release and bioconda's build for rpstblastn, dustmasker and
 //! segmasker, and NCBI's rpsbproc 0.5.1 (probes of 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E2.md`,
 //! run with `env -i` in a fresh directory): `-help-full` writes the bytes of `-help` in every place
-//! but makeblastdb's, whose hidden `-randomize` LOSAT does not run, and the reader stops at a help
-//! flag. LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), so the
-//! test holds `-help-full` to LOSAT's `-help` in the same place.
+//! but makeblastdb's, which lists its hidden `-randomize`, and the reader stops at a help flag.
+//! LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1) and do not list
+//! `-randomize`, so the test holds `-help-full` to LOSAT's `-help` in the same place.
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 //! `cli::try_parse_from`) and c++/src/corelib/ncbiapp.cpp:685-697
@@ -118,12 +118,13 @@ fn help_full_writes_the_help_in_every_place() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// NCBI BLAST+ 2.17.0's `-xmlhelp` of `program`, frozen (`src/ncbi_xmlhelp/`).
+/// NCBI BLAST+ 2.17.0's `-xmlhelp` of `program`, frozen (`src/ncbi_xmlhelp/`), in LOSAT's words
+/// (the version after the description: `losat::wording`).
 fn ncbi_xml(program: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src/ncbi_xmlhelp")
         .join(format!("{program}.xml"));
-    fs::read(path).unwrap()
+    losat::wording::losat_output_bytes(&fs::read(path).unwrap()).into_owned()
 }
 
 /// The names of the arguments (`<key name="NAME" ...>`, `<flag name="NAME" ...>`) of `xml`.
@@ -186,11 +187,13 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.contains(&format!("<name>{program}</name>\n<version>")));
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
             // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
-            // run of a search (psiblast's `-use_sw_tback`, tblastn's `-ungapped` with
-            // `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a database, is in
-            // `cli::RUN_REFUSALS` with them). The arguments left in are read
+            // run of a search (psiblast's `-use_sw_tback`; rpstblastn's `-ungapped`, which needs a
+            // database, is a run refusal of LOSAT's table of refusals with it, `REFUSED` of
+            // `build/ncbi_args.rs`). The arguments left in are read
             // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
-            // statistics, line RG item X4; blastp's `-ungapped` runs, line NP item O4b).
+            // statistics, line RG item X4, tblastn's in every mode, item X4b, blastx's in every
+            // mode, item X4b-2; blastp's `-ungapped` runs, line NP item O4b, and
+            // tblastn's, item O4c).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
                 if kept.contains(&name) {

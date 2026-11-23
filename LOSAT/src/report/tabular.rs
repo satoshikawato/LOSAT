@@ -591,6 +591,24 @@ impl TabularSpec {
         ]) || (self.has(NumIdentical) && *num_ident > 0)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
+    /// Whether NCBI's formatter reads the query's and the subject's letters for a row of this field
+    /// list (`CAlnVec::GetWholeAlnSeqString`) in psiblast, whose formatter fetches sequences
+    /// (`kNoFetchSequence` is false): `qseq`, `sseq`, `positive`, `ppos`, `btop`, `nident`,
+    /// `mismatch` and `pident`, and so the default fields.
+    pub fn reads_sequences(&self) -> bool {
+        self.has_any(&[
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            PercentPositives,
+            Btop,
+            NumIdentical,
+            Mismatches,
+            PercentIdentical,
+        ])
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837,973-980 and 973-980
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908,915,1078-1082
     /// Which of `program`'s rows read the subject's Bioseq in NCBI's formatter, which loads its
@@ -687,6 +705,71 @@ impl TabularSpec {
         self.subject_fetch(program) != SubjectFetch::Never || self.has(SubjectLength)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-924
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:964-968
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
+    /// Whether an RPS program refuses its organism report (outfmt 18) or comma-separated values
+    /// with a header line (outfmt 20) of these fields for an HSP with the Seq-align's identities
+    /// `num_ident` whose profile's Seq-align id is the generated id (`lcl|Query_N`) of a query of
+    /// its batch (`common::database::refuse_generated_query_id`; `program` is the driver's:
+    /// BLASTP for RPSBLAST, BLASTX for RPSTBLASTN). NCBI's formatter finds that query by the id,
+    /// so its row differs where it shows what it found beyond the id: the found sequence's ids,
+    /// titles, taxids and length (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`:
+    /// `N/A` for a query, `slen`), the subject's letters of the alignment (`sseq`, `btop`,
+    /// `positive`, `ppos`, `mismatch`, `pident`, and `nident` where the block opens for it), and
+    /// the taxonomy (`staxid`, the names and the organism report) where the profile has a taxid
+    /// (`subject_taxid`; a query has none, as a profile without one). In RPSTBLASTN, whose found
+    /// query is nucleotide, every row that enters the alignment block (`opens_counts`) ends the
+    /// run with an exception of the Seq-align's conversion after the header line. The profile's
+    /// own ids (`sseqid`, `sacc`, `saccver`, `sgi`, `sallgi`), the query's letters and the
+    /// strand of RPSBLAST, the scores and coordinates are NCBI's bytes (review S1 of PS15a-2:
+    /// every field alone, `tmp/rev15a2/col`). Outfmt 6, 7 and 10 of such an HSP are line RG
+    /// item X7's.
+    pub fn refuses_generated_id(
+        &self,
+        program: crate::blastinput::app::Program,
+        num_ident: usize,
+        subject_taxid: bool,
+    ) -> bool {
+        match self.kind {
+            TabularKind::TaxReport => subject_taxid,
+            TabularKind::CsvWithHeader => {
+                let found = self.has_any(&[
+                    SubjectAllSeqIds,
+                    SubjectAllAccessions,
+                    SubjectTitle,
+                    SubjectAllTitles,
+                    SubjectTaxIds,
+                    SubjectLength,
+                ]);
+                let letters = self.has_any(&[
+                    SubjectSeq,
+                    Btop,
+                    Positives,
+                    PercentPositives,
+                    Mismatches,
+                    PercentIdentical,
+                ]) || (self.has(NumIdentical) && num_ident > 0);
+                let taxonomy = subject_taxid
+                    && self.has_any(&[
+                        SubjectTaxId,
+                        SubjectSciName,
+                        SubjectCommonName,
+                        SubjectBlastName,
+                        SubjectSuperKingdom,
+                        SubjectSciNames,
+                        SubjectCommonNames,
+                        SubjectBlastNames,
+                        SubjectSuperKingdoms,
+                    ]);
+                let throws = program == crate::blastinput::app::Program::Blastx
+                    && self.opens_counts(&num_ident);
+                found || letters || taxonomy || throws
+            }
+            TabularKind::Tabular | TabularKind::Commented | TabularKind::Csv => false,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-878
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
     // every application, cited at `cli::NativeError::exception`)
@@ -730,6 +813,20 @@ impl TabularSpec {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1050-1055
+    /// Whether `program`'s report of this field list writes what it writes with a readable
+    /// taxonomy database where every load of a database sequence with a positive taxid and every
+    /// taxid lookup throw (a file of that database does not open, `SeqDbError::TaxdbThrows`): a
+    /// table whose rows load no subject's Bioseq ([`TabularSpec::subject_fetch`]; `slen` is read
+    /// without it), and the organism report, whose `catch` leaves out each HSP whose load or lookup
+    /// throws, as it leaves out one whose taxid is not found, as LOSAT does
+    /// (`tax_report::TaxLookups`; such a lookup finds nothing, and every load that throws is of a
+    /// subject with a positive taxid, whose lookup throws too).
+    pub fn unchanged_by_load_throws(&self, program: crate::blastinput::app::Program) -> bool {
+        self.kind == TabularKind::TaxReport || self.subject_fetch(program) == SubjectFetch::Never
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (cited at
     // `report::tax_report::organism_report`: the `catch` of each HSP's load, `continue`)
     /// What the report does with a subject whose lookup throws where its batch's prefetch is off
@@ -748,8 +845,8 @@ impl TabularSpec {
             FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
         } else if self.reads_subject(program) {
             FormatThrow::Writes(RunThrow {
-                after: AfterThrow::EndsRun,
                 rows: self.throw_rows(program),
+                ..RunThrow::every_row(AfterThrow::EndsRun)
             })
         } else {
             FormatThrow::Unread
@@ -1598,6 +1695,36 @@ fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
 
 const NA: &[u8] = b"N/A";
 
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:548
+/// The exception that ends a tabular report at its first row when the query's Bioseq has the
+/// molecule `other` (psiblast's `-in_msa` with `[molecule=other]`, or `-in_pssm` of such a PSSM):
+/// the object manager reads the query's letters of the coding number `coding` (iupacaa 2, ncbieaa 8,
+/// ncbistdaa 10) as the coding of a nucleotide sequence
+/// (`Incompatible sequence codings: <coding> -> 1`, `CSeqVector_CI::x_FillCache`), where the rows' letters
+/// are read ([`TabularSpec::reads_sequences`]). The report's text before the row stays; the run
+/// ends with NCBI's exception (exit status 255).
+pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiException {
+    crate::ncbi_exception::NcbiException::new(
+        crate::ncbi_exception::ThrowSite {
+            file: "src/objmgr/seq_vector_ci.cpp",
+            line: 548,
+            kind: "CSeqVectorException::eCodingError",
+            function: Some("ncbi::objects::CSeqVector_CI::x_FillCache"),
+        },
+        format!("Incompatible sequence codings: {coding} -> 1"),
+    )
+}
+
+/// The end of a report at a row that reads the letters of a query whose molecule is `other`
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
+/// flushed, and the exception is the run's error.
+pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
+    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+        return error.into();
+    }
+    crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`)
 /// The end of the run at a row whose subject's load throws outside the subject block
@@ -1842,7 +1969,7 @@ impl<'a> TabularWriter<'a> {
                 lists
             });
             // `x_SetSubjectIds` clears the lists and pushes the lists of the definition lines
-            // before the one that throws; `SetSubjectId(list)` of the catch pushes the Seq-align id
+            // before the one that throws; `SetSubjectId` of `list` in the catch pushes the Seq-align id
             // (tabular.cpp:1374-1378).
             if stage == FailedStage::SubjectIds {
                 lists.iter_mut().for_each(Vec::clear);

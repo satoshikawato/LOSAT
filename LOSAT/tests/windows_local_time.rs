@@ -1,6 +1,6 @@
 //! makeblastdb's local time on Windows against Microsoft's C runtime (UCRT), which NCBI BLAST+'s
-//! Windows build reads it from: `CTime(CTime::eCurrent)` calls `localtime`, which takes the zone
-//! from `TZ` in UCRT's form or from the system (`LOSAT/src/writedb/windows_zone.rs`).
+//! Windows build reads it from: `CTime` made with `CTime::eCurrent` calls `localtime`, which takes
+//! the zone from `TZ` in UCRT's form or from the system (`LOSAT/src/writedb/windows_zone.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734 (`x_SetTime`: `localtime`),
 //! c++/src/objtools/blast/seqdb_writer/build_db.cpp:1104-1105 (the log's current time),

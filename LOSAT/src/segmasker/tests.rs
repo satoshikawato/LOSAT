@@ -21,13 +21,14 @@ fn the_short_usage_is_the_head_of_the_help() {
 }
 
 #[test]
-fn the_version_is_segmasker_s() {
+fn the_version_is_losat_s() {
     assert_eq!(
         run_words(&["-version"], b""),
         (
             0,
             format!(
-                "segmasker: 1.0.0\n Package: LOSAT {}, output compatible with blast {}\n",
+                "segmasker: LOSAT {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                env!("CARGO_PKG_VERSION"),
                 env!("CARGO_PKG_VERSION"),
                 crate::NCBI_BLAST_RELEASE
             ),
@@ -56,8 +57,7 @@ fn the_standard_input_is_masked() {
 // (`StringToDoublePosix` reads the mark), a comma is no decimal point.
 #[test]
 fn the_keys_read_as_ncbis() {
-    let words =
-        |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+    let words = |line: &[&str]| -> Vec<OsString> { line.iter().map(OsString::from).collect() };
     let args = crate::ncbi_app::args::parse(&TOOL, &words(&[])).unwrap();
     assert_eq!(args.integer("window"), Some(12));
     assert_eq!(args.double("locut"), Some(2.2));
@@ -85,8 +85,7 @@ fn an_extended_precision_value_is_read_as_ncbi_reads_it() {
     let input = b">seq1 low complexity test\n\
             MKVLAAGIVALLLAAQQQQQQQQQQQQQQQQPPPPPPPPGSGSGSGSGSGSAEDKLMNVWY\n\
             RTSHCFIPKLEDGHKLMNRSTVWY\n";
-    let words =
-        |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+    let words = |line: &[&str]| -> Vec<OsString> { line.iter().map(OsString::from).collect() };
     for (locut, bits, masks) in [
         (
             "1.23456789012345678901e",
@@ -181,7 +180,7 @@ fn the_full_versions_are_segmasker_s() {
     ] {
         assert_eq!(
             run_words(&["-out", word], b""),
-            (0, print(request, "segmasker", "1.0.0"), String::new()),
+            (0, print(request, "segmasker"), String::new()),
             "{word}"
         );
     }

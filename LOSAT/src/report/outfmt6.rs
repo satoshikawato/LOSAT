@@ -187,7 +187,7 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
         // NCBI: "%5.3le" -> scientific notation
         format_scientific_ncbi(bit_score, 3)
     } else if bit_score > 99.9 {
-        // NCBI: "%3.0ld" with `(long)bit_score` truncates toward zero before formatting,
+        // NCBI: "%3.0ld" with `bit_score` cast to `long` truncates toward zero before formatting,
         // in a field of 3 (a score in (99.9, 100) is " 99").
         format!("{:3}", bit_score as i64)
     } else {

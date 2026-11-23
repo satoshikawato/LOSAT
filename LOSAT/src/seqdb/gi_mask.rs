@@ -108,8 +108,8 @@ impl MappedFile {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:123-130
-    /// The two `SEQDB_FILE_ASSERT`s of `GetFileDataPtr(lease, start, end)`, `what` naming the
-    /// range in LOSAT's error.
+    /// The two `SEQDB_FILE_ASSERT`s of `GetFileDataPtr` (with a lease and the range's start and
+    /// end), `what` naming the range in LOSAT's error.
     fn check_range(&self, start: i64, end: i64, what: &str) -> Result<(), SeqDbError> {
         if start < end && end as u64 <= self.len() && end >= 0 {
             return Ok(());
@@ -161,7 +161,7 @@ fn binary_search(
     Ok((false, idx))
 }
 
-/// `setw(width) << left << text`: `text`, then spaces up to `width` bytes.
+/// `setw` of `width` with `left` alignment: `text`, then spaces up to `width` bytes.
 fn push_padded(out: &mut String, text: &str, width: usize) {
     out.push_str(text);
     for _ in text.len()..width {
@@ -271,11 +271,11 @@ impl GiMaskFiles {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:137-178
     // The files are looked for along the search path (the current directory, `BLASTDB`, the
     // registry), never beside the alias file (survey D5). A data file that is not found maps the
-    // empty name before `found` is tested (`m_DataLease[vol]->Init("")`): the corelib's
-    // "To be memory mapped the file must exist: ''" (`CSeqDBException::eMemoryMappingFailure`,
-    // seqdbatlas.hpp:709-719), so "Could not open gi-mask data file(s)." is never thrown (survey
-    // D8). The data files of an earlier algorithm stay in NCBI's vectors, but `[vol]` is opened
-    // again, so each algorithm reads its own files.
+    // empty name before `found` is tested (`Init` of the volume's data lease with an empty
+    // name): the corelib's "To be memory mapped the file must exist: ''"
+    // (`CSeqDBException::eMemoryMappingFailure`, seqdbatlas.hpp:709-719), so "Could not open
+    // gi-mask data file(s)." is never thrown (survey D8). The data files of an earlier algorithm
+    // stay in NCBI's vectors, but `[vol]` is opened again, so each algorithm reads its own files.
     /// `x_Open` of the mask `name`: its index, offset and data files.
     fn open(name: &str, search: &SearchPath) -> Result<Self, SeqDbError> {
         let index_path = search.resolve_file(&format!("{name}.{}", EXTENSIONS[0]));
@@ -296,9 +296,7 @@ impl GiMaskFiles {
                 format!("{name}.{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2])
             };
             let Some(path) = search.resolve_file(&file) else {
-                return Err(SeqDbError::MemoryMap(
-                    "To be memory mapped the file must exist: ''".to_string(),
-                ));
+                return Err(SeqDbError::MemoryMap(super::oid_list::not_a_file("")));
             };
             data.push(MappedFile::open(Path::new(&path))?);
         }
@@ -471,7 +469,7 @@ impl GiMasks {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.hpp:169-178
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:115-122
-    /// `x_Open(id)`: the files of the algorithm `id`. An id outside 0 to N-1 is NCBI's text in
+    /// `x_Open` of `id`: the files of the algorithm `id`. An id outside 0 to N-1 is NCBI's text in
     /// [`SeqDbError::Range`] (a search reports it as a database error,
     /// [`SeqDbError::ncbi_message`]).
     pub(super) fn open(&self, id: i32) -> Result<Arc<GiMaskFiles>, SeqDbError> {
@@ -489,8 +487,8 @@ impl GiMasks {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:56-63
-    /// `GetDesc(id)`: the stored description of the algorithm `id` and the index file that holds
-    /// it. A description that is not UTF-8 is LOSAT's refusal.
+    /// `GetDesc` of `id`: the stored description of the algorithm `id` and the index file that
+    /// holds it. A description that is not UTF-8 is LOSAT's refusal.
     pub(super) fn description(&self, id: i32) -> Result<(String, PathBuf), SeqDbError> {
         let files = self.open(id)?;
         let path = files.index.path().to_path_buf();
@@ -531,9 +529,9 @@ impl GiMasks {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:66-70
     // A `.nog` value comes from a `Uint4`, so it is never below 0 and is returned as it is (the
     // -1 that makeblastdb writes for a sequence without a GI reads as 4294967295). The mask
-    // lookup takes `GI_TO(Uint4, gi)`, so `INVALID_GI` is 4294967295 too (survey D3).
+    // lookup takes the GI as a `Uint4` (`GI_TO`), so `INVALID_GI` is 4294967295 too (survey D3).
     /// The key of the sequence `vol_oid` of the volume `at` (`volume`) in the GI masks:
-    /// `(Uint4) x_GetSeqGI(oid)`.
+    /// the GI of `x_GetSeqGI` of the OID, as a `Uint4`.
     pub(super) fn seq_gi_key(
         &self,
         at: usize,

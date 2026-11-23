@@ -215,6 +215,8 @@ fn parse_blastn_args(
         // ... and no database masks (series NP, M4a-2).
         db_mask: Default::default(),
         db_mask_resolved: None,
+        // ... and no MegaBLAST database index (line RG item D5b).
+        megablast_index_loaded: None,
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
@@ -228,6 +230,7 @@ fn parse_blastn_args(
         num_threads: 1,
         mt_mode: None,
         use_index: None,
+        index_name: None,
         evalue: Some(10.0),
         percent_identity: None,
         max_target_seqs: None,
@@ -293,6 +296,7 @@ fn parse_blastn_args(
         one_query_batch: false,
         hits_only: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
     };
 
     let mut index = 0;
@@ -413,6 +417,8 @@ fn parse_tblastx_args(
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         subject_besthit: false,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
@@ -424,6 +430,7 @@ fn parse_tblastx_args(
         subject_taxdb: None,
         taxdb_setting: None,
         first_query_ordinal: 0,
+        scope_refusal: None,
         matrix_file: None,
     };
 
@@ -529,6 +536,8 @@ fn parse_blastp_args(
         max_hsps_per_subject: None,
         qcov_hsp_perc: None,
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         subject_besthit: false,
         ungapped: false,
         xdrop_ungap: None,
@@ -558,6 +567,7 @@ fn parse_blastp_args(
         gap_trigger: None,
         sum_stats: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,

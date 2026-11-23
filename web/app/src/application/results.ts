@@ -127,7 +127,8 @@ export interface LoadedRun {
    * outfmt 6 was written.
    */
   readonly tabularError: OutputPlace | undefined;
-  readonly badge: Badge;
+  /** The support badge of the run's options; none for a run that printed the command line's help or version (`RunSnapshot.prints`). */
+  readonly badge?: Badge;
   /** The run's diagnostics (stream 3): the lines that the CLI writes to its standard error. */
   readonly diagnostics: string;
   /**
@@ -286,18 +287,23 @@ export class ResultsBrowser {
         limits,
         outfmt0Error: failedOutput(run, 0),
         tabularError: failedOutput(run, 6),
-        badge: verificationBadge(
-          {
-            program: run.snapshot.program,
-            argv: run.snapshot.argv,
-            formats: description.formats,
-            custom: customOutfmt(run.snapshot.argv),
-            runtimePath: run.record.runtimePath,
-            threads: run.record.threads,
-            grammar: this.grammarOf(run.snapshot.program, description),
-          },
-          this.deps.verification,
-        ),
+        // A run that printed the command line's help or version compared no options (line WQA's D20, S3-1, 2026-11-23).
+        ...(run.snapshot.prints !== undefined
+          ? {}
+          : {
+              badge: verificationBadge(
+                {
+                  program: run.snapshot.program,
+                  argv: run.snapshot.argv,
+                  formats: description.formats,
+                  custom: customOutfmt(run.snapshot.argv),
+                  runtimePath: run.record.runtimePath,
+                  threads: run.record.threads,
+                  grammar: this.grammarOf(run.snapshot.program, description),
+                },
+                this.deps.verification,
+              ),
+            }),
         diagnostics,
         messages,
         kinds,
@@ -705,16 +711,27 @@ export function failedOutput(run: RunView, output: RunOutput): OutputPlace | und
 }
 
 /** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
-export type NoHspReason = 'dry-run' | 'empty-query' | 'no-tabular-hits' | 'no-tabular-output' | 'no-queries' | 'no-hits' | 'filtered-out';
+export type NoHspReason =
+  | 'printed-help'
+  | 'printed-version'
+  | 'dry-run'
+  | 'empty-query'
+  | 'no-tabular-hits'
+  | 'no-tabular-output'
+  | 'no-queries'
+  | 'no-hits'
+  | 'filtered-out';
 
 /**
  * Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is
- * loaded. A dry run (-dryrun; line RG E1w-3b) searched nothing. A run that could not write outfmt 6
+ * loaded. A run that printed the command line's help or version (line WQA's D14, 2026-11-20) and a
+ * dry run (-dryrun; line RG E1w-3b) searched nothing. A run that could not write outfmt 6
  * (`LoadedRun.tabularError`) has no HSP records, whatever its queries found.
  */
 export function noHspReason(state: ResultsState): NoHspReason | undefined {
   const loaded = state.loaded;
   if (loaded === undefined) return undefined;
+  if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
   if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';

@@ -1,4 +1,4 @@
-import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type InputRole, type ProgramId, type SequenceKind } from 'losat/domain';
+import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type InputRole, type PrintedKind, type ProgramId, type SequenceKind } from 'losat/domain';
 // Program descriptors: the only place that lists what differs between programs in the UI
 // (plan §2.1 "O"). A descriptor says which engine options the search form shows, in which
 // section, where on the screen and under which label; the sections and labels are those of
@@ -273,6 +273,9 @@ const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lowe
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const subjectBestHit: ParameterField = { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' };
+// BLAST+'s Best Hit algorithm (-best_hit_overhang, -best_hit_score_edge): either turns it on, the other is then 0.1.
+const bestHitOverhang: ParameterField = { flag: '-best_hit_overhang', label: 'Best hit overhang', ...decimal };
+const bestHitScoreEdge: ParameterField = { flag: '-best_hit_score_edge', label: 'Best hit score edge', ...decimal };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
 const xdropUngap: ParameterField = { flag: '-xdrop_ungap', label: 'X-dropoff, ungapped (bits)', ...decimal };
@@ -419,8 +422,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
           subjectBestHit,
-          { flag: '-best_hit_overhang', label: 'Best hit overhang', ...decimal },
-          { flag: '-best_hit_score_edge', label: 'Best hit score edge', ...decimal },
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -474,6 +477,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGapFinal,
           maxHsps,
           subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -517,6 +522,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           maxHsps,
           { flag: '-strand', label: 'Query strand', kind: 'choice' },
           sumStats,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -559,6 +566,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGapFinal,
           sumStats,
           subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -602,6 +611,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           { flag: '-strand', label: 'Query strand', kind: 'choice' },
           sumStats,
           subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -642,6 +653,23 @@ export function searchSummary(program: ProgramDescriptor, task: string | undefin
   return searchSummaryParts(program, task)
     .map((part) => part.text)
     .join('');
+}
+
+/**
+ * The line beside "Run LOSAT" for a draft whose argv prints the command line's help or version in place of a search (line
+ * WQA's D20, 2026-11-23): what is printed and for which program, and that no search runs.
+ */
+export function printSummaryParts(
+  program: ProgramDescriptor,
+  kind: PrintedKind,
+): ReadonlyArray<{ readonly text: string; readonly strong?: true }> {
+  return [
+    { text: "Print the command line's " },
+    { text: kind, strong: true },
+    { text: ' for ' },
+    { text: program.label, strong: true },
+    { text: '. No search runs.' },
+  ];
 }
 
 /**

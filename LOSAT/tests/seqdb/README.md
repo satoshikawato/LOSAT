@@ -65,6 +65,12 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `CWriteDB::CreateUserColumn` in 2007): six proteins and the user column `comedy`, whose data
   file is the big-endian `.pab` alone; no masks. Its `.pnd .pni .psd .psi` and `.pog` files are
   left out.
+- `db/seqn.{nin,nsq,nhr,nni,nnd}` and `db/seqp.{pin,psq,phr,pni,pnd}`: copies of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/seqn` and `seqp` (598d8ae6; version 4, GIs with
+  DDBJ, GenBank and other accessions), whose `GetBioseq` and `GetHdr` texts NCBI's cases GetBioseqN,
+  GetBioseqP, GetHdrN and GetHdrP expect (`LOSAT/tests/blastdbcmd_retrieve.rs`, `-outfmt %b` and
+  `%d`). Their string-id ISAM files (`.nsd .nsi .psd .psi`), the `.nhd .nhi .phd .phi` and `.nog .pog`
+  files are left out: the cases look the sequences up by GI.
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
 - `expected/mask_*.masks.tsv`: rows `algorithm<TAB>oid<TAB>ranges` from
@@ -101,8 +107,9 @@ each of them:
   the header of the file explains them).
 - `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
   inputs are deterministic, so a rebuild changes nothing.
-- `stl_sort/cases.txt`: the permutations that libstdc++'s `std::sort` gives ranges under NCBI's
-  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the port of `CSeq_loc::Add`.
+- `stl_sort/cases.txt`: orders in which C++ `std::sort` leaves ranges under NCBI's
+  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the test of the sort in the port
+  of `CSeq_loc::Add`.
 
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the
@@ -152,12 +159,16 @@ LOSAT does, setup, the words after `makeblastdb`) in a directory of its own, as 
 tested: `-gi_mask` and `-gi_mask_name` on single-volume (version 5 and 4) and multi-volume databases, nucleotide and
 protein, the argument rules, masks of sequences without a GI, ranges past a sequence's end, `-logfile`, a missing
 directory, a rebuild in the same directory, duplicate GIs of version 4, 1 to 1100 GIs (pages of 512), data volumes
-cut by `-max_file_sz`, and descriptions that pad the index header. Each run's exit status, standard output and error
+cut by `-max_file_sz`, descriptions that pad the index header, two algorithms of one name (one that writes nothing,
+data volumes written one after the other, and the refused cases that write one data file at the same time), and
+`-input_type blastdb` from `gi_mask/in/src4.*` (a version 4 database with a mask column that makeblastdb wrote; the
+"bytes-total" of each metadata file a run writes is checked to be the sum of the sizes of the files it lists). Each
+run's exit status, standard output and error
 (the run directory, time and seconds masked as `<C>`, `<T>`, `<S>`) and its files with their sizes are in
 `gi_mask/expected/<case>.{rc,stdout,stderr,files}`; `gi_mask/db/<case>/` keeps the files that `-gi_mask` writes or
 changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
 These are NCBI's bytes but in one place, the script's `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS approved
-exception 18, the Owner's decision of 2026-11-20): for a database of one volume NCBI's alias file names the database
+exception 25, the Owner's decision of 2026-11-20): for a database of one volume NCBI's alias file names the database
 itself by its absolute path (`DBLIST <C>/db`), which no program can open, and makeblastdb ends with `DB alias files
 are mutually recursive` (exit status 2, no metadata file). LOSAT names the volume by its file name (`DBLIST db`). So
 after each such run the script changes that line in the run directory (before the next case of a chain runs) and,
@@ -167,7 +178,7 @@ database. `gi_mask/in/ncbi_single.nal` is NCBI's own alias file of that kind (`{
 cases `x10_*` put beside a database (setup `F=>G`) as an earlier run of NCBI's leaves it.
 `tests/makeblastdb_gi_mask.rs` runs every case through the `losat` binary and compares them;
 `src/writedb/gi_mask_tests.rs` writes every GI mask of `db/` again from the records, GIs, description and dates it
-holds and compares the six files byte for byte. A rerun changes the dates of the `.gmi`/`.gni`, mask column and
+holds and compares the six files byte for byte (but a name that the alias file lists twice, case `x12`). A rerun changes the dates of the `.gmi`/`.gni`, mask column and
 alias files.
 
 ## Readers of GI-indexed masks (`gi_mask_read/`)
@@ -179,7 +190,7 @@ multi-volume version 5 and 4, protein, a database without masks, a description o
 4294967295 beside a sequence without a GI, duplicate GIs (version 4), an absolute `-gi_mask_name`, data volumes of
 10 and 20 bytes (one of them never written, survey D8), a `-gi_mask_name` with a space, and single-volume databases
 (whose alias file it rewrites to `DBLIST db`, the form LOSAT's makeblastdb writes: PD-LOSAT-NCBI-DEFECTS approved
-exception 18). It then freezes what NCBI's programs print for each row of `gi_mask_read/cases.tsv` (name, databases,
+exception 25). It then freezes what NCBI's programs print for each row of `gi_mask_read/cases.tsv` (name, databases,
 directory under the root, environment, words): `blastdbcmd -info`, `-outfmt %m`, `-mask_sequence_with`, `blastn
 -db_soft_mask` / `-db_hard_mask` by id and name, from another directory, with `BLASTDB`, by absolute name, through an
 alias file over the database and as `-db 'db db'`, and a plain search of each program family. `gi_mask_read/db/<db>/`

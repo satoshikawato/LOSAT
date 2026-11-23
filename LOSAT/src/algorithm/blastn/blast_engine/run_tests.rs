@@ -768,6 +768,7 @@ fn word7_uses_subject_set_cutoffs() {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let sequence: String = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fasta/small_test.fasta"
@@ -816,6 +817,7 @@ fn word7_uses_subject_set_cutoffs() {
         run_local(
             options.blastn,
             &reader_records(&query, ReaderConfig::query("BLASTN", false, false)),
+            &crate::api::QueryEnd::Input,
             &reader_records(&subject, ReaderConfig::subject("BLASTN", false, false)),
             &mut ReportOutputs::single("6", OutputSink::Writer(&mut output), &mut stderr),
         )
@@ -838,6 +840,7 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let mut state = 0x12345678_u32;
     let query: Vec<u8> = (0..512)
         .map(|_| {
@@ -1104,6 +1107,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let args = |words: &[&str]| {
         let mut argv = vec!["test", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(words);
@@ -1119,7 +1123,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         (
             1,
             format!(
-                "BLAST query/options error: {text}\n{}\n",
+                "LOSAT query/options error: {text}\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ),
         )
@@ -1255,16 +1259,9 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
             }
         }
     }
-    // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and refuses only
-    // SAM (17), whose line of a subject joins its HSPs.
-    for (outfmt, refused) in [
-        ("8", false),
-        ("9", false),
-        ("11", false),
-        ("12", false),
-        ("17", true),
-        ("17 SR", true),
-    ] {
+    // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and SAM (17, a
+    // subject's HSPs joined into one record).
+    for outfmt in ["8", "9", "11", "12", "17", "17 SR"] {
         let mut diagnostics = Vec::new();
         let mut sink = Vec::new();
         let mut outputs =
@@ -1274,15 +1271,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
             &mut outputs,
         );
         drop(outputs);
-        if refused {
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                "output format 17 with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
-                "{outfmt}"
-            );
-        } else {
-            result.unwrap();
-        }
+        result.unwrap_or_else(|error| panic!("{outfmt}: {error}"));
     }
     // `run_local`'s formats that NCBI rejects later are left out, as the command line's
     // (`cli_output_formats`): NCBI's formatting handler (`process_options`, above) and

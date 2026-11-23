@@ -32,7 +32,7 @@ const ISAM_STRING_TYPE: i32 = 2;
 /// built: makeblastdb does not set `eAddTrace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IsamType {
-    /// `ePig`: protein identifier groups, never filled from FASTA input ([`PigIsam`]).
+    /// `ePig`: protein identifier groups, which only `makeblastdb -input_type blastdb` gives.
     Pig,
     /// `eGi`: the numeric index of the GIs.
     Gi,
@@ -147,36 +147,6 @@ impl IsamFiles {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:88-96,196-200,344-347,386-389
-/// `m_PigIsam` of a protein volume with indices: never filled from FASTA input, so its files
-/// (`.ppi`, `.ppd`) are never written; it takes part in the volume's fit check (`CanFit(1)`),
-/// and `RenameSingle` and `RenameFileIndex` rename a file of those names that is already there.
-#[derive(Debug)]
-pub(crate) struct PigIsam {
-    files: IsamFiles,
-}
-
-impl PigIsam {
-    pub(crate) fn new(dbname: &str, index: u32, max_file_size: u64) -> Self {
-        Self {
-            files: IsamFiles::new(IsamType::Pig, dbname, true, index, max_file_size),
-        }
-    }
-
-    /// `CanFit(1)` of an index that stays empty: 2 * 8 bytes against the file size limit.
-    pub(crate) fn can_fit(&self) -> bool {
-        16 < self.files.index.max_file_size()
-    }
-
-    pub(crate) fn rename_single(&mut self) {
-        self.files.rename_single();
-    }
-
-    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
-        self.files.rename_file_index(num_digits);
-    }
-}
-
 /// `CWriteDB_IsamIndex::CanFit` with the file's limit.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:807-810
 fn can_fit(data_file_size: u64, num: usize, bytes_per_elem: u64, max_file_size: u64) -> bool {
@@ -191,7 +161,7 @@ const TAIL_CHUNK: usize = 1 << TAIL_CHUNK_BITS;
 /// The tail field of a key of at most 8 bytes, whose bytes are all in the prefix:
 /// `SHORT_KEY + key length` (0 to 8). Arena positions are below it.
 const SHORT_KEY: u32 = u32::MAX - 8;
-/// The longest key `x_AddStringData` copies into its `char buf[256]`.
+/// The longest key `x_AddStringData` copies into its 256-byte `char` buffer `buf`.
 pub(crate) const MAX_STRING_KEY: usize = 256;
 
 /// A string record as stored: `[prefix high, prefix low, tail position, OID]`, the prefix
@@ -227,7 +197,7 @@ fn prefix_bytes(prefix: u64) -> [u8; 8] {
     bytes
 }
 
-/// Appends `value` in decimal (`sprintf("%d")`).
+/// Appends `value` in decimal (the `%d` format of `sprintf`).
 fn push_decimal(out: &mut Vec<u8>, value: i64) {
     let mut digits = [0u8; 20];
     let mut n = value.unsigned_abs();
@@ -246,7 +216,7 @@ fn push_decimal(out: &mut Vec<u8>, value: i64) {
     out.extend_from_slice(&digits[at..]);
 }
 
-/// The decimal digits of `value` (`sprintf("%d")` of an OID) in `buf`.
+/// The decimal digits of `value` (the `%d` format of `sprintf` applied to an OID) in `buf`.
 fn decimal(value: u32, buf: &mut [u8; 10]) -> &[u8] {
     let mut n = value;
     let mut at = buf.len();
@@ -375,7 +345,7 @@ impl OidKeys {
         self.set = None;
     }
 
-    /// `m_OidStringData.insert(record).second`.
+    /// The `second` of the result of `m_OidStringData.insert` of the record.
     fn insert(&mut self, key: &[u8]) -> bool {
         if let Some(set) = &mut self.set {
             return set.insert(key.to_vec());
@@ -460,7 +430,7 @@ impl StringIsam {
         }
     }
 
-    /// `CanFit(num)`: 1024 bytes for each Seq-id and one more.
+    /// `CanFit` of `num`: 1024 bytes for each Seq-id and one more.
     pub(crate) fn can_fit(&self, num: usize) -> bool {
         can_fit(
             self.data_file_size,
@@ -553,7 +523,7 @@ impl StringIsam {
         result
     }
 
-    /// `m_StringSort.Insert(record)` and `m_DataFileSize += record size`.
+    /// `m_StringSort.Insert` of the record, and the record's size added to `m_DataFileSize`.
     fn insert_record(&mut self, oid: u32, key: &[u8]) -> Result<(), WriteDbError> {
         let mut head = Vec::with_capacity(8 + 12);
         head.extend_from_slice(&key[..key.len().min(8)]);
@@ -856,8 +826,9 @@ impl StringIsam {
     }
 }
 
-/// A numeric ISAM index (`CWriteDB_Isam` of `eGi`, or of `ePig`, which FASTA input never
-/// fills) of one volume.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:88-96,196-200,280-282,344-347,386-389
+/// A numeric ISAM index (`CWriteDB_Isam` of `eGi`, or of `ePig`: the PIGs of a protein volume,
+/// which only `makeblastdb -input_type blastdb` gives) of one volume.
 #[derive(Debug)]
 pub(crate) struct NumericIsam {
     files: IsamFiles,
@@ -882,7 +853,7 @@ impl NumericIsam {
         }
     }
 
-    /// `CanFit(num)`: 8 bytes for each id and one more.
+    /// `CanFit` of `num`: 8 bytes for each id and one more.
     pub(crate) fn can_fit(&self, num: usize) -> bool {
         can_fit(
             self.data_file_size,
@@ -899,6 +870,13 @@ impl NumericIsam {
             self.table.push((gi, oid as i32));
             self.data_file_size += 8;
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:496-501
+    /// `AddPig`: the PIG of OID `oid` (a PIG index).
+    pub(crate) fn add_pig(&mut self, oid: u32, pig: i32) {
+        self.table.push((i64::from(pig), oid as i32));
+        self.data_file_size += 8;
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:383-455
@@ -935,7 +913,7 @@ impl NumericIsam {
             self.files.index.write_int4(-1)?;
             self.files.index.write_int4(0)?;
         }
-        // `x_Free`: `vector<SIdOid> tmp; m_NumberTable.swap(tmp);`.
+        // `x_Free`: `m_NumberTable` is swapped with an empty `vector` of `SIdOid`.
         self.table = Vec::new();
         self.files.close();
         Ok(())

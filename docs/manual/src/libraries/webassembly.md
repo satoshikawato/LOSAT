@@ -26,7 +26,7 @@ The package holds two WebAssembly builds of the engine and the TypeScript host t
 - `losat-web-serial.wasm` runs one thread and works in any browser and in Node.js.
 - `losat-web-threads.wasm` runs a search on several threads. It needs a cross-origin isolated page.
 
-A search takes an argv, as on the command line, and FASTA sequences that the page gives it. It writes `-outfmt 0`, `6` and `7` byte for byte as the command line does, and an HSP record for each hit. It does not search BLAST databases: `-db` is refused.
+A search takes an argv, as on the command line, and FASTA sequences that the page gives it. It writes `-outfmt 0`, `6` and `7` byte for byte as the command line does, and an HSP record for each hit. For `-db` and BLASTN `-filtering_db`, the WebAssembly engine and the npm package read BLAST databases from the run's `files` (`EngineRunRequest.files`), while LOSAT Web's browser form refuses both.
 
 ### Getting the package
 

@@ -1,0 +1,12 @@
+rec1
+>
+> y
+>rec4
+	x
+ x
+AB000001.1
+|
+>|
+lcl|rec2 extra words
+>>
+>>|

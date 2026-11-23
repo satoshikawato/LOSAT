@@ -74,23 +74,19 @@ fn path_text(path: &Path) -> &str {
 // `ncbi_environment::preparse`): `-dryrun` anywhere before `--`, also as an option's value, but
 // not as the value of `-logfile` or `-conffile`, which the start takes with them.
 #[test]
-fn the_dry_run_and_the_start_are_the_argv_s_words() {
-    let words = |argv: &[&str]| {
-        let search = validate(Program::Blastp, argv).unwrap();
-        (search.dry_run(), search.starts())
-    };
-    assert_eq!(words(&[]), (false, false));
-    assert_eq!(words(&["-evalue", "1"]), (false, false));
-    assert_eq!(words(&["-dryrun"]), (true, true));
-    assert_eq!(words(&["-evalue", "1", "-dryrun", "-dryrun"]), (true, true));
-    assert_eq!(words(&["-logfile", "log.txt"]), (false, true));
-    assert_eq!(words(&["-logfile", "-dryrun"]), (false, true));
-    assert_eq!(words(&["-conffile", "c.ini"]), (false, true));
-    assert_eq!(words(&["-conffile=c.ini"]), (false, true));
-    assert_eq!(words(&["-conffile", "-dryrun"]), (false, true));
-    // A last `-logfile` or `-conffile` without its value is dropped: nothing to start for.
-    assert_eq!(words(&["-evalue", "1", "-logfile"]), (false, false));
-    assert_eq!(words(&["-evalue", "1", "-conffile"]), (false, false));
+fn the_dry_run_is_the_argv_s_word() {
+    let dry_run = |argv: &[&str]| validate(Program::Blastp, argv).unwrap().dry_run();
+    assert!(!dry_run(&[]));
+    assert!(!dry_run(&["-evalue", "1"]));
+    assert!(dry_run(&["-dryrun"]));
+    assert!(dry_run(&["-evalue", "1", "-dryrun", "-dryrun"]));
+    assert!(!dry_run(&["-logfile", "log.txt"]));
+    assert!(!dry_run(&["-logfile", "-dryrun"]));
+    assert!(!dry_run(&["-conffile", "c.ini"]));
+    assert!(!dry_run(&["-conffile=c.ini"]));
+    assert!(!dry_run(&["-conffile", "-dryrun"]));
+    assert!(!dry_run(&["-evalue", "1", "-logfile"]));
+    assert!(!dry_run(&["-evalue", "1", "-conffile"]));
     for program in [
         Program::Blastn,
         Program::Blastx,
@@ -127,24 +123,32 @@ fn a_call_begins_a_diagnostic_stream_of_its_own() {
     assert!(crate::ncbi_exception::main_diag_failbit());
 }
 
-// No NCBI counterpart: the library's contract (`api`): a search of records without `-logfile`,
-// `-conffile` and `-dryrun` reads no NCBI setting, so its call makes no start at its beginning.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (cited at
+// `ncbi_environment::ApplicationStart`: the application loads its configuration before its
+// arguments, whatever they are)
+// Every search call runs the start at its beginning (line LIB, errpar fix 3): a search of records
+// without `-logfile`, `-conffile` and `-dryrun` too, which writes nothing where the command line
+// writes nothing and keeps the settings for the call.
 #[test]
-fn a_records_search_without_the_words_starts_nothing() {
+fn every_search_call_starts_at_its_beginning() {
     let mut diagnostics = Vec::<u8>::new();
     let search = validate(Program::Blastp, &["-evalue", "1"]).unwrap();
     let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
-    assert!(call.settings.is_none());
     assert!(call.log.is_none());
     assert!(!call.dry_run());
     assert!(diagnostics.is_empty());
-    // With one of the words the start runs at once, and its settings are kept for the call.
-    let dir = scratch("nostart");
+    // tblastx's run messages follow the start's target (`run_messages_follow_log`): `cerr`
+    // without `-logfile`, which is the call's diagnostics, as for the other programs.
+    let search = validate(Program::Tblastx, &["-evalue", "1"]).unwrap();
+    let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
+    assert!(call.log.is_none());
+    assert!(diagnostics.is_empty());
+    // With `-conffile` the start loads the file, and its settings are kept for the call.
+    let dir = scratch("everycall");
     let conffile = dir.join("c.ini");
     std::fs::write(&conffile, "[BLAST]\n").unwrap();
     let search = validate(Program::Blastp, &["-conffile", path_text(&conffile)]).unwrap();
     let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
-    assert!(matches!(call.settings, Some(Ok(_))));
     // Only tblastx's run messages follow `-logfile` (`run_messages_follow_log`).
     assert!(call.log.is_none());
     assert!(diagnostics.is_empty());

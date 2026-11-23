@@ -6,8 +6,9 @@
 //! DECISIONS E2x-1, the Owner's choice of 2026-11-13): the arguments that LOSAT runs keep NCBI's
 //! definitions, byte for byte (their types, defaults, constraints, groups and dependencies), and
 //! an argument that LOSAT ports is written again as it stops being refused. The names to leave
-//! out are the program reader's own refusals (`cli::refuses_option`; the readers of
-//! `ncbi_app` refuse none), so the XML describes what the reader takes.
+//! out are LOSAT's refusals, by name or at the run (`ncbi_app::args::refusal`, read by
+//! `cli::xml_help_text`; the readers of `ncbi_app` refuse none), so the XML describes what the
+//! reader takes.
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690
 // The XML of each program as NCBI BLAST+ 2.17.0 prints it (the official x64-linux build; the
@@ -94,7 +95,11 @@ pub(crate) fn print(program: &str, refused: impl Fn(&str) -> bool) -> Option<Str
         }
         out.push_str(line);
     }
-    Some(out.replace("<dependencies>\n</dependencies>\n", ""))
+    // The description states LOSAT's version (`Protein-Protein BLAST (LOSAT 0.2.0)`).
+    Some(
+        crate::wording::losat_text(&out.replace("<dependencies>\n</dependencies>\n", ""))
+            .into_owned(),
+    )
 }
 
 /// The tag (`key` or `flag`) and the name of the argument whose element starts at `line`

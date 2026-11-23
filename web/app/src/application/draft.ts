@@ -24,6 +24,7 @@ import {
   type FastaParserKind,
   type FastaReader,
   type InputRole,
+  type PrintedKind,
   type ProgramId,
   type RegistryFile,
   type SequenceKind,
@@ -67,7 +68,12 @@ export type InputMode = 'combined' | 'separate';
 /** The engine's verdict on a source (losat/ports: input-check.ts). */
 export type SourceCheck =
   | { readonly state: 'pending' }
-  | { readonly state: 'ok'; readonly records: number }
+  /**
+   * `readerError`: the reader's error that ends the query's records, the command line's text; a run
+   * reads the records before it and ends with it, as the command line does, so it is a warning, not
+   * a refusal (line WQA's D10, 2026-11-19).
+   */
+  | { readonly state: 'ok'; readonly records: number; readonly readerError?: string }
   /** `record` is the index, in the record table, of the record that the message names. */
   | { readonly state: 'refused'; readonly message: string; readonly record?: number }
   /**
@@ -784,12 +790,14 @@ export class SearchDraft {
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     this.updateRole(role, (draft) => ({ ...draft, sources: draft.sources.filter((source) => source.key !== key) }));
     this.set({ message: undefined });
+    this.recheckReaderErrors(role);
     this.scheduleValidation();
   }
 
   setMode(role: InputRole, mode: InputMode): void {
     this.updateRole(role, (draft) => ({ ...draft, mode }));
     this.set({ message: undefined });
+    this.recheckReaderErrors(role);
   }
 
   /** Includes or leaves out records of a source (by their index in its record table). */
@@ -804,6 +812,7 @@ export class SearchDraft {
     });
     this.set({ message: undefined });
     this.scheduleCheck(role, key);
+    this.recheckReaderErrors(role, key);
     this.scheduleValidation();
   }
 
@@ -885,8 +894,13 @@ export class SearchDraft {
     return sources.length === 0 ? PASTED_NAMES[role] : COMBINED_NAMES[role];
   }
 
-  /** The runs that "Run LOSAT" would make now. */
+  /**
+   * The runs that "Run LOSAT" would make now: the runs that `submit` starts (one `inputGroups` for both). A draft whose argv
+   * prints the command line's help or version starts the one run that prints it, whatever the inputs (line WQA's D20, S3-2,
+   * 2026-11-23).
+   */
   runCount(): number {
+    if (this.printsKind() !== null) return 1;
     return ROLES.map((role) => this.inputGroups(role).length).reduce((a, b) => a * Math.max(1, b), 1);
   }
 
@@ -937,9 +951,13 @@ export class SearchDraft {
   }
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
-    // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
+    // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20): it is read once the
+    // validation of the draft's argv has answered (not `idle`, which waits for a fetch too), so that a word typed just before
+    // Run, or taken out, decides as the engine's answer for the argv says (line WQA's D20 round 4, 2026-11-23).
+    await this.validationSettled();
     for (const role of ROLES) {
-      const problem = this.accessionProblem(role);
+      const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
     // What the engine could not answer while a part of LOSAT could not be loaded is asked again first: Run LOSAT was
@@ -954,6 +972,7 @@ export class SearchDraft {
       await this.idle();
     }
     const { program, threads, title } = this.state.get();
+    if (this.printsText()) return this.enqueuePrinting();
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -1007,6 +1026,55 @@ export class SearchDraft {
     return this.deps.enqueueAll(requests);
   }
 
+  /**
+   * Whether the run of the draft's argv prints the command line's help or version in place of a search, as the engine's
+   * start says (`StartInfo.prints`; line WQA's D14, 2026-11-20): it needs no inputs, files or fetches, as the command
+   * line reads none for it.
+   */
+  private printsText(): boolean {
+    return this.printsKind() !== null;
+  }
+
+  /**
+   * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, as the
+   * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
+   * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
+   * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
+   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23).
+   */
+  printsKind(): PrintedKind | null {
+    const { start, validation } = this.state.get();
+    return validation.state === 'ok' ? (start?.prints ?? null) : null;
+  }
+
+  /**
+   * The one run of an argv that prints the command line's help or version (`printsText`): without inputs (the
+   * coordinator gives it none), with the registry file of its -conffile, which the command line reads before the help.
+   */
+  private enqueuePrinting(): Promise<EnqueueAllResult> {
+    const { program, threads, title } = this.state.get();
+    let extra: readonly string[];
+    try {
+      extra = this.extraWords();
+    } catch (error) {
+      return Promise.resolve({ ok: false, message: messageOf(error) });
+    }
+    const state = this.state.get();
+    const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
+    return this.deps.enqueueAll([
+      {
+        program,
+        query: { text: '' },
+        subject: { text: '' },
+        parameters: this.parameters(),
+        ...(extra.length === 0 ? {} : { extra }),
+        requestedThreads: threads,
+        ...(conffile === undefined ? {} : { conffile }),
+        ...(title.trim() === '' ? {} : { title }),
+      },
+    ]);
+  }
+
   /** Why the role cannot be searched as it is (the full message), or undefined. */
   private inputProblem(role: InputRole): string | undefined {
     return this.problemOf(role)?.message;
@@ -1017,6 +1085,7 @@ export class SearchDraft {
    * undefined when nothing does. "Run LOSAT" reports the full message.
    */
   readiness(): string | undefined {
+    if (this.printsText()) return undefined;
     for (const role of ROLES) {
       const problem = this.problemOf(role);
       if (problem !== undefined) return problem.short;
@@ -1090,13 +1159,13 @@ export class SearchDraft {
     }
     if (draft.mode === 'combined') {
       // The sources follow one another in one input, where a sequence without a defline
-      // would join the record before it (NCBI's reader): only the first can start so.
-      const late = draft.sources
-        .filter((source) => includedOf(source).length > 0)
-        .slice(1)
-        .find((source) => includedOf(source)[0]!.sequence_offset === 0);
+      // would join the record before it (NCBI's reader): only the first can start so. So can
+      // neither a source whose reader's error is on its first line, read without a defline (a
+      // byte order mark, a line of other text): the record before it would read that line
+      // (review M2, 2026-11-20).
+      const late = draft.sources.find((source) => cannotFollow(draft.sources, source));
       if (late !== undefined) {
-        const message = `${label} (${describeSource(late)}) starts with a sequence without a defline (">"), which cannot follow another input.`;
+        const message = `${label} (${describeSource(late)}) ${cannotFollowText(late)}`;
         return { message, short: message };
       }
     }
@@ -1339,6 +1408,7 @@ export class SearchDraft {
       }));
       this.noteRevision(id, base.revisionId);
       this.scheduleCheck(role, key, 0);
+      this.recheckReaderErrors(role, key);
       void this.askAgain();
     } catch (error) {
       if (!current()) return;
@@ -1406,7 +1476,9 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source?.status !== 'ready' || source.base === undefined) return;
-    if (includedOf(source).length === 0) {
+    // An input whose reading ends with the reader's error is checked whatever it includes: its run
+    // input keeps the error (line WQA's D10, 2026-11-19).
+    if (includedOf(source).length === 0 && source.base.readerError === undefined) {
       this.updateSource(role, key, (s) => ({ ...s, check: { state: 'ok', records: 0 } }));
       return;
     }
@@ -1427,6 +1499,14 @@ export class SearchDraft {
         verdict.catch(() => this.verdicts.delete(key));
       }
       check = toSourceCheck(await verdict, source);
+      // A Combined input reads the sources before this one first: the run's error names its own
+      // line, which the check of the sources together gives (review L2, 2026-11-20).
+      const before = this.sourcesBefore(role, source);
+      if (check.state === 'ok' && check.readerError !== undefined && before.length > 0) {
+        const ids = [...(await Promise.all(before.map((s) => this.revisionFor(s)))), revisionId];
+        const joined = await this.deps.data.checkInput(reader, ids).catch(() => undefined);
+        if (joined?.ok === true && joined.readerError !== undefined) check = { ...check, readerError: joined.readerError };
+      }
     } catch (error) {
       check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
@@ -1436,6 +1516,34 @@ export class SearchDraft {
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
     );
     if (check.state !== 'error') void this.askAgain();
+  }
+
+  /**
+   * The sources that a Combined run of the query reads before `source`: every source of the run's
+   * input before it, whose bytes the run passes as they are, those without records too
+   * (`DataService.runInputBytes`; review L-a, 2026-11-20). None otherwise, and none when a source
+   * before ends the input with its reader's error, or `source` cannot follow them: a run then does
+   * not read `source` after them, and its own check stands.
+   */
+  private sourcesBefore(role: InputRole, source: DraftSource): readonly DraftSource[] {
+    const draft = this.role(role);
+    if (role !== 'query' || draft.mode !== 'combined' || cannotFollow(draft.sources, source)) return [];
+    const at = draft.sources.findIndex((s) => s.key === source.key);
+    const before = draft.sources.slice(0, Math.max(0, at)).filter((s) => s.status === 'ready');
+    return before.some((s) => s.base?.readerError !== undefined) ? [] : before;
+  }
+
+  /**
+   * Checks again the query sources whose reader's error a run meets after other sources: the line
+   * that its message names follows them (`check`, review L2, 2026-11-20).
+   */
+  private recheckReaderErrors(role: InputRole, except?: string): void {
+    if (role !== 'query') return;
+    for (const source of this.role(role).sources) {
+      if (source.key !== except && source.status === 'ready' && source.base?.readerError !== undefined) {
+        this.scheduleCheck(role, source.key, 0);
+      }
+    }
   }
 
   /** The revision of a source's selection: its record table, or a revision without the excluded records. */
@@ -1516,8 +1624,8 @@ export class SearchDraft {
     let answered = false;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
-      // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
-      // has the parser's message, as validate gives it.
+      // reads, under which the chosen file is checked. An argv that it cannot start (a program that
+      // ABI v2 does not run) has the engine's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
       answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.
@@ -1714,6 +1822,58 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
 }
 
 /**
+ * The sources whose records a Combined run reads, in order: those with included records or the
+ * reader's error, up to the first with the error, which ends the run's input
+ * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
+ */
+function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
+  const read: DraftSource[] = [];
+  for (const source of sources) {
+    if (source.status !== 'ready') continue;
+    const stops = source.base?.readerError !== undefined;
+    if (includedOf(source).length === 0 && !stops) continue;
+    read.push(source);
+    if (stops) break;
+  }
+  return read;
+}
+
+/** Whether what a run reads of a source starts without a defline (review M2, 2026-11-20). */
+function startsWithoutDefline(source: DraftSource): boolean {
+  const first = includedOf(source)[0];
+  return first !== undefined ? first.sequence_offset === 0 : source.base?.readerError?.defline === false;
+}
+
+/**
+ * Whether `source` starts without a defline after a source whose records a Combined input of
+ * `sources` reads: the record before it would read its first line, so no run takes it
+ * (`SearchDraft`'s readiness; review M2, 2026-11-20), and its card says only that (review L-c).
+ */
+export function cannotFollow(sources: readonly DraftSource[], source: DraftSource): boolean {
+  return combinedSources(sources).findIndex((s) => s.key === source.key) > 0 && startsWithoutDefline(source);
+}
+
+/** What a source that cannot follow another input starts with (`cannotFollow`), after its name. */
+export function cannotFollowText(source: DraftSource): string {
+  return includedOf(source).length > 0
+    ? 'starts with a sequence without a defline (">"), which cannot follow another input.'
+    : 'starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.';
+}
+
+/**
+ * The source before `source` whose reader's error ends a Combined query input, after which the run
+ * reads nothing (`DataService.runInputBytes`): `source` is not searched (review L2, 2026-11-20). A
+ * source that cannot follow another input ends no run: no run starts (review L-c, 2026-11-20).
+ */
+export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {
+  for (const before of sources) {
+    if (before.key === source.key) return undefined;
+    if (before.status === 'ready' && before.base?.readerError !== undefined && !cannotFollow(sources, before)) return before;
+  }
+  return undefined;
+}
+
+/**
  * Why what runs take of a source that is read holds no residue, if it holds none: `none`, the input has
  * no residue at all (an empty file, white space only, deflines alone); `excluded`, it has records with
  * residues, but they are left out and the records included have none. The engine reads such an input,
@@ -1735,8 +1895,15 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
   return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
+/**
+ * The name that a source has in the run's argv: the user's own file name, as the command line is typed. A file named `.gz`,
+ * `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's run takes the bytes of its
+ * inputs, not files, and writes the names of its argv where the command line writes the names of its files (the `Input:` line
+ * of a subject set in outfmt 0 to 4 and 7, SAM's command line), so the argv names the file the user gave (line WQA's D21, S3-3
+ * and the review's F1, 2026-11-23).
+ */
 function nameOf(source: DraftSource, role: InputRole): string {
-  return source.origin === 'paste' ? PASTED_NAMES[role] : source.name;
+  return source.origin === 'paste' ? PASTED_NAMES[role] : source.file.name;
 }
 
 function describeSource(source: DraftSource): string {
@@ -1745,7 +1912,10 @@ function describeSource(source: DraftSource): string {
 
 /** The engine's verdict, with the record its message names mapped to the record table. */
 function toSourceCheck(check: InputCheck, source: DraftSource): SourceCheck {
-  if (check.ok) return { state: 'ok', records: check.records.length };
+  if (check.ok) {
+    const { readerError } = check;
+    return { state: 'ok', records: check.records.length, ...(readerError === undefined ? {} : { readerError }) };
+  }
   const match = RECORD_IN_MESSAGE.exec(check.message);
   const record = match === null ? undefined : includedOf(source)[Number(match[1]) - 1];
   return { state: 'refused', message: check.message, ...(record === undefined ? {} : { record: record.index }) };

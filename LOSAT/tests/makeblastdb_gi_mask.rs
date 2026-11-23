@@ -11,16 +11,21 @@
 //! `<T>` and the seconds of "Adding sequences" `<S>`. The bytes that hold the run's date are
 //! masked: the date of a `.gmi` or `.gni` file (its length is compared), the creation time of a
 //! mask column file (`.naa`, `.paa`), the line "Alias file created" of an alias file, and
-//! "last-updated" and "bytes-total" (the size of the index files, which hold the date) of a
-//! metadata file.
+//! "last-updated" of a metadata file. Its "bytes-total" is compared as its distance from the sum
+//! of the sizes of the files it lists, each time it lists one, in the run directory, the metadata
+//! file itself at the size it had before the run (makeblastdb lists the files before it writes the
+//! new one, so an old one that the run did not remove counts as it was): 0 for makeblastdb's (the
+//! script checks that when it freezes them). A metadata file that the case's run did not write (an
+//! earlier case of its directory did) has it masked.
 //!
-//! The cases of the column `losat` other than `same`: `refuse` (two algorithms with the files of
-//! one name, which LOSAT refuses before it writes anything: exit status 1, no file) and `parser`
-//! (an argument rule that LOSAT's parser checks: exit status 2 and no file, where makeblastdb
-//! prints its usage).
+//! The cases of the column `losat` other than `same`: `refuse` (two algorithms that would write
+//! one GI-mask data file at the same time, which LOSAT refuses at the record that would open it:
+//! exit status 1, and what an error of NCBI's `SetMaskData` leaves, `REFUSED_LEFTOVERS`) and
+//! `parser` (an argument rule that LOSAT's parser checks: exit status 2 and no file, where
+//! makeblastdb prints its usage; LOSAT's message holds the sentence of makeblastdb's).
 //!
 //! The expectations of a single-volume database built with `-gi_mask` are NCBI's run with the one
-//! change of PD-LOSAT-NCBI-DEFECTS approved exception 18 (`single_volume_exception` of the
+//! change of PD-LOSAT-NCBI-DEFECTS approved exception 25 (`single_volume_exception` of the
 //! script): the alias file's `DBLIST` names the volume by its file name, and the run ends as a
 //! successful one, with the metadata file of NCBI's `blastdbcmd -metadata` for that database.
 //!
@@ -32,6 +37,7 @@
 // size, and the run directory of a message is the directory as the child process sees it.
 #![cfg(target_os = "linux")]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -129,7 +135,6 @@ fn masked(text: &str, c: &str) -> String {
         (" sequences in ", " seconds.", "<S>"),
         ("# Alias file created: ", "\n", "<D>"),
         ("\"last-updated\": \"", "\"", "<D>"),
-        ("\"bytes-total\": ", ",", "<N>"),
     ] {
         let mut at = 0;
         while let Some(i) = out[at..].find(start) {
@@ -142,6 +147,66 @@ fn masked(text: &str, c: &str) -> String {
         }
     }
     out
+}
+
+/// How the "bytes-total" of a metadata file is compared (`bytes_total_distance`).
+#[derive(Clone, Copy)]
+enum BytesTotal<'a> {
+    /// A file of LOSAT's run under this directory, with the sizes of the run's metadata files
+    /// before the run (`metadata_sizes`).
+    Run(&'a Path, &'a HashMap<String, u64>),
+    /// A file of makeblastdb's run, whose value is the sum (distance 0).
+    Frozen,
+    /// A file that an earlier case of the directory wrote: masked.
+    Masked,
+}
+
+/// The "bytes-total" of the metadata file `rel` (`text`) replaced by its distance from the sum of
+/// the sizes of the files that it lists (each time it lists one), read in the directory of the
+/// metadata file of LOSAT's run (`total`); the metadata file itself counts at its size before the
+/// run.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1610-1703 (the files
+// that exist when the metadata is made, the old metadata file among them, are listed and summed)
+fn bytes_total_distance(rel: &str, text: &str, total: BytesTotal<'_>) -> String {
+    let key = "\"bytes-total\": ";
+    let Some(at) = text.find(key).map(|at| at + key.len()) else {
+        return text.to_string();
+    };
+    let end = at + text[at..].find(',').unwrap_or(0);
+    let distance = match total {
+        BytesTotal::Frozen => "0".to_string(),
+        BytesTotal::Masked => "N".to_string(),
+        BytesTotal::Run(run, before) => {
+            let path = run.join(rel);
+            let dir = path.parent().unwrap();
+            let own = path.file_name().unwrap().to_string_lossy().into_owned();
+            let listed = text
+                .split_once("\"files\": [")
+                .map_or("", |(_, rest)| rest.split(']').next().unwrap_or(""));
+            let mut sum = 0i128;
+            for name in listed
+                .split(',')
+                .map(|item| item.trim().trim_matches('"'))
+                .filter(|name| !name.is_empty())
+            {
+                let size = match name == own {
+                    true => before.get(rel).copied(),
+                    false => std::fs::metadata(dir.join(name))
+                        .ok()
+                        .map(|meta| meta.len()),
+                };
+                match size {
+                    Some(size) => sum += i128::from(size),
+                    None => return format!("{text}\n(listed file {name} is missing)"),
+                }
+            }
+            match text[at..end].trim().parse::<i128>() {
+                Ok(total) => (total - sum).to_string(),
+                Err(_) => format!("unreadable {:?}", &text[at..end]),
+            }
+        }
+    };
+    format!("{}<{distance}>{}", &text[..at], &text[end..])
 }
 
 /// `CBlastDbBlob::x_ReadVarInt` (see `LOSAT/src/writedb/gi_mask_tests.rs`).
@@ -158,8 +223,9 @@ fn read_var_int(bytes: &[u8], at: &mut usize) -> usize {
     }
 }
 
-/// A file of a run with the bytes that hold the run's date or directory masked.
-fn masked_file(rel: &str, bytes: Vec<u8>, c: &str) -> Vec<u8> {
+/// A file of a run with the bytes that hold the run's date or directory masked; `total` says how
+/// the "bytes-total" of a metadata file is compared (`BytesTotal::Run` with the run directory).
+fn masked_file(rel: &str, bytes: Vec<u8>, c: &str, total: BytesTotal<'_>) -> Vec<u8> {
     if rel.ends_with(".gmi") || rel.ends_with(".gni") {
         let mut bytes = bytes;
         let mut at = 32;
@@ -193,9 +259,14 @@ fn masked_file(rel: &str, bytes: Vec<u8>, c: &str) -> Vec<u8> {
         .iter()
         .any(|ext| rel.ends_with(ext))
         || rel == "log.txt";
-    match text {
-        true => masked(&String::from_utf8_lossy(&bytes), c).into_bytes(),
-        false => bytes,
+    let metadata = rel.ends_with(".njs") || rel.ends_with(".pjs");
+    match (text, metadata) {
+        (true, true) => {
+            let text = bytes_total_distance(rel, &String::from_utf8_lossy(&bytes), total);
+            masked(&text, c).into_bytes()
+        }
+        (true, false) => masked(&String::from_utf8_lossy(&bytes), c).into_bytes(),
+        (false, _) => bytes,
     }
 }
 
@@ -235,6 +306,18 @@ fn files_under(dir: &Path) -> Vec<String> {
     listing(dir, &[])
         .into_iter()
         .map(|line| line.split('\t').next().unwrap().to_string())
+        .collect()
+}
+
+/// The sizes of the metadata files under `dir` (relative path), taken before a run.
+fn metadata_sizes(dir: &Path) -> HashMap<String, u64> {
+    files_under(dir)
+        .into_iter()
+        .filter(|rel| rel.ends_with(".njs") || rel.ends_with(".pjs"))
+        .map(|rel| {
+            let size = std::fs::metadata(dir.join(&rel)).unwrap().len();
+            (rel, size)
+        })
         .collect()
 }
 
@@ -283,6 +366,8 @@ fn compare(
     case_dir: &Path,
     put: &[String],
     got: (i32, String, String),
+    started: std::time::SystemTime,
+    before: &HashMap<String, u64>,
 ) -> Vec<String> {
     let dir = fixtures();
     // makeblastdb's messages in LOSAT's words (`losat::wording`, the one mapping of the freeze).
@@ -324,10 +409,19 @@ fn compare(
         if rel == "log.txt" {
             frozen = losat::wording::losat_output_bytes(&frozen).into_owned();
         }
-        let want = masked_file(&rel, frozen, c);
+        // A metadata file of an earlier case of the directory lists files that this run changed
+        // (`started` is the stamp's time, which the file system gives).
+        let fresh = std::fs::metadata(case_dir.join(&rel))
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified >= started);
+        let (want_total, got_total) = match fresh {
+            true => (BytesTotal::Frozen, BytesTotal::Run(case_dir, before)),
+            false => (BytesTotal::Masked, BytesTotal::Masked),
+        };
+        let want = masked_file(&rel, frozen, c, want_total);
         match std::fs::read(case_dir.join(&rel)) {
             Ok(bytes) => {
-                let got = masked_file(&rel, bytes, c);
+                let got = masked_file(&rel, bytes, c, got_total);
                 if got != want {
                     let text = [".nal", ".njs", ".pal", ".pjs", ".txt"]
                         .iter()
@@ -369,33 +463,61 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
         put.extend(setup(&case_dir, &tokens, &inputs));
         let c = case_dir.to_str().unwrap().to_string();
         let words: Vec<String> = case.words.iter().map(|w| w.replace("{C}", &c)).collect();
+        // The time of the run as the file system stamps it (a stamp file written just before):
+        // a file of the directory older than that is an earlier case's.
+        if case.setup.starts_with('^') {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let stamp = tmp.0.join("stamp");
+        std::fs::write(&stamp, case.name.as_bytes()).unwrap();
+        let started = std::fs::metadata(&stamp).unwrap().modified().unwrap();
+        let before = metadata_sizes(&case_dir);
         let got = run(&case_dir, &words);
         let problems = match case.losat.as_str() {
             "same" => {
                 counts[0] += 1;
-                compare(&case, &case_dir, &put, got)
+                compare(&case, &case_dir, &put, got, started, &before)
             }
             "refuse" => {
                 counts[1] += 1;
                 let mut problems = Vec::new();
                 let refusal = "losat makeblastdb: -gi_mask: two masking algorithms would write \
-                               their GI-mask files under one name";
+                               one GI-mask data file at the same time";
                 if got.0 != 1 || !got.2.starts_with(refusal) || got.2.lines().count() != 1 {
                     problems.push(format!("not refused: {got:?}"));
                 }
-                let files = listing(&case_dir, &put);
-                if !files.is_empty() {
-                    problems.push(format!("files written: {files:?}"));
+                let files: Vec<String> = listing(&case_dir, &put)
+                    .into_iter()
+                    .map(|line| line.split('\t').next().unwrap().to_string())
+                    .collect();
+                if files != REFUSED_LEFTOVERS {
+                    problems.push(format!("files left: {files:?}"));
                 }
                 problems
             }
             "parser" => {
                 counts[2] += 1;
                 let files = listing(&case_dir, &put);
-                match got.0 == 2 && got.1.is_empty() && files.is_empty() {
-                    true => Vec::new(),
-                    false => vec![format!("not a parser error: {got:?}, files {files:?}")],
+                let mut problems = Vec::new();
+                if got.0 != 2 || !got.1.is_empty() || !files.is_empty() {
+                    problems.push(format!("not a parser error: {got:?}, files {files:?}"));
                 }
+                // makeblastdb's sentence of a dependency, in LOSAT's message.
+                let frozen =
+                    std::fs::read(dir.join("expected").join(format!("{}.stderr", case.name)))
+                        .unwrap();
+                let frozen = String::from_utf8_lossy(&losat::wording::losat_output_bytes(&frozen))
+                    .into_owned();
+                let sentence = frozen
+                    .lines()
+                    .find_map(|line| line.split_once("(CArgException::eConstraint) "))
+                    .map(|(_, sentence)| sentence);
+                if let Some(sentence) = sentence {
+                    if !got.2.contains(sentence) {
+                        problems.push(format!("not makeblastdb's sentence {sentence:?}: {got:?}"));
+                    }
+                }
+                problems
             }
             other => vec![format!("unknown column {other:?}")],
         };
@@ -417,10 +539,19 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
     );
     // Every kind of case is there (the table was read whole).
     assert!(
-        counts[0] >= 60 && counts[1] >= 2 && counts[2] >= 7,
+        counts[0] >= 75 && counts[1] >= 3 && counts[2] >= 9,
         "{counts:?}"
     );
 }
+
+/// What a refused case leaves (`refuse`): the build ends at the refused record as an error of
+/// NCBI's `SetMaskData` ends it (case `x03gi`): the files that `ListFiles` names are removed, and
+/// the GI-mask files of the algorithm that wrote first (closed with the build), the alias file
+/// and the files of the version 5 LMDB step that `ListFiles` does not name stay.
+const REFUSED_LEFTOVERS: [&str; 11] = [
+    "db.nal", "db.nos", "db.not", "db.ntf", "db.nto", "x.gmd", "x.gmi", "x.gmo", "x.gnd", "x.gni",
+    "x.gno",
+];
 
 /// `losat <command>` in `dir` (`command`: the program and its words, separated by single spaces),
 /// with the environment of `run`: exit status, standard output and error.
@@ -440,7 +571,7 @@ fn losat(dir: &Path, command: &str) -> (i32, String, String) {
 }
 
 /// The database of one volume that `losat makeblastdb -gi_mask` writes opens (its alias file
-/// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 18), and LOSAT's
+/// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 25), and LOSAT's
 /// readers read its GI masks (line NP item M4c-2; `gi_mask_read.rs` compares their output with
 /// NCBI's on the same database).
 #[test]

@@ -6,9 +6,9 @@
   "description": "t",
   "number-of-letters": 1080,
   "number-of-sequences": 3,
-  "last-updated": "2026-11-20T20:20:00",
+  "last-updated": "2026-11-21T22:41:00",
   "number-of-volumes": 3,
-  "bytes-total": 50380,
+  "bytes-total": 50381,
   "bytes-to-cache": 564,
   "files": [
     "db.00.nhr",

@@ -549,7 +549,8 @@ fn the_tax_browser_url_reads_ncbirc_as_ncbi() {
         b"http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi".to_vec()
     );
     // An empty PROTOCOL is the scheme (`GetProtocol`'s `HasEntry` counts it); an empty browser URL
-    // is NCBI's (`Get(...).empty()`). NCBI BLAST+ 2.17.0, `./.ncbirc` `[BLASTFMTUTIL]` `PROTOCOL=`,
+    // is NCBI's (the caller tests whether `Get` gives an empty string). NCBI BLAST+ 2.17.0,
+    // `./.ncbirc` `[BLASTFMTUTIL]` `PROTOCOL=`,
     // outfmt 18 of a taxid whose name holds `<@taxBrowserURL@>` (line RG, review of T4a0 `pe`):
     // `Url //www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi rid 0 ...`.
     let read = read_registry(
@@ -683,4 +684,92 @@ fn the_hsps_of_a_subject_whose_load_throws_are_left_out() {
     // 0's HSPs read and look nothing up and leave the previous id (1) as it was, so 1's second
     // HSP is skipped as the previous id's.
     assert_eq!(steps, [Step::Read(1), Step::LookUp(10090)]);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
+/// A file of the taxonomy database that does not open (`taxdb.btd` of mode 000) throws at every
+/// lookup, which the organism report's `catch` takes as a taxid not found: no row, every HSP
+/// widens the columns, and no error (NCBI BLAST+ 2.17.0 writes the same report as with a taxid
+/// that is not found: review 1 of line WQA D18b, L1, `-subject -outfmt 18`).
+#[cfg(unix)]
+#[test]
+fn a_taxonomy_file_that_does_not_open_leaves_every_hsp_out() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat_tax_report_unopened_{}",
+        crate::utils::test_dir::process_id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["taxdb.bti", "taxdb.btd"] {
+        std::fs::copy(fixture("of18").join(name), dir.join(name)).unwrap();
+    }
+    let btd = dir.join("taxdb.btd");
+    std::fs::set_permissions(&btd, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let superuser = std::fs::File::open(&btd).is_ok();
+    let subjects = Subjects(vec![vec![line("XP_000206", "md2 ok first", 9606)]]);
+    let names = names_in(&dir);
+    let result = organism_report(
+        &[hsp(0, 1e-86, 243.4), hsp(0, 9.6, 11.9)],
+        &subjects,
+        &mut lookups(Some(&names)),
+    );
+    std::fs::set_permissions(&btd, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    if superuser {
+        // A user that reads every file.
+        return;
+    }
+    let (steps, text) = result.expect("the report's catch takes the throw");
+    let mut out = Vec::new();
+    text.insert_into(
+        &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut out)).unwrap(),
+    )
+    .unwrap();
+    let (none, _) = report(&subjects, &[hsp(0, 1e-86, 243.4), hsp(0, 9.6, 11.9)], None);
+    assert_eq!(
+        String::from_utf8_lossy(&out),
+        String::from_utf8_lossy(&none)
+    );
+    assert_eq!(looked_up(&steps), [9606, 9606]);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1130-1155
+/// Where a file of the taxonomy database does not open, NCBI's load of a database sequence that
+/// looks a positive taxid up throws at each HSP, with the batch's prefetch on or off: the report
+/// leaves such a subject's HSPs out before it widens the columns (outfmt 18 with `-db` and
+/// `taxdb.btd` of mode 000 gives the header of zero widths, `Accession...`; review 1 of line WQA
+/// D18b, probe 12 `btd.bx.18`). A sequence without a positive taxid is loaded, and its lookup
+/// throws after it widens them.
+#[test]
+fn loads_that_throw_at_a_positive_taxid_leave_its_subjects_out() {
+    let source = crate::report::defline::SourceTaxname::Unnamed;
+    let queries = [TaxQuery {
+        title: b"q",
+        length: 10,
+        hsps: Some(vec![hsp(0, 1e-50, 150.0), hsp(1, 1e-40, 120.0)]),
+    }];
+    let plain = |subject: usize| TaxPlain::Stored {
+        oid: crate::seqdb::Oid::of_unrestricted(subject as u32),
+        title: b"title",
+        source: &source,
+        taxid: [9606, 0][subject],
+    };
+    let table = |throws: bool| {
+        SubjectTable::new(&queries, &[], plain, true, None, "BLASTP").with_loads_that_throw(throws)
+    };
+    let hsps = queries[0].hsps.as_deref().unwrap();
+    let (steps, _) = organism_report(hsps, &table(true), &mut lookups(None)).unwrap();
+    assert_eq!(steps, [Step::Read(1), Step::LookUp(0)]);
+    let (steps, _) = organism_report(hsps, &table(false), &mut lookups(None)).unwrap();
+    assert_eq!(
+        steps,
+        [
+            Step::Read(0),
+            Step::LookUp(9606),
+            Step::Read(1),
+            Step::LookUp(0)
+        ]
+    );
 }

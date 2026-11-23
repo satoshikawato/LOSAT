@@ -72,6 +72,7 @@ fn document(
 ) -> String {
     let run = RunRecord {
         program: crate::blastinput::app::Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -251,6 +252,7 @@ fn subject_seq(index: usize, id: &'static str) -> SamSequence<'static> {
 fn run_record() -> RunRecord<'static> {
     RunRecord {
         program: crate::blastinput::app::Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     }
@@ -377,4 +379,151 @@ fn an_empty_document_writes_nothing_and_finish_empties_it() {
     document.finish(&mut out).unwrap();
     assert!(out.is_empty());
     assert!(!document.has_records());
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:67-82
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1149-1208
+// (`CreateDensegFromDendiag`): an ungapped search's Seq-align of a subject holds a Dense-diag per
+// HSP, which the formatter joins into one Dense-seg: one record per subject. Its tags are the
+// first HSP's (the first of each score, sam_formatter.cpp:247-279), PI over the summed lengths;
+// the sort key is the lesser of `GetSeqStart` and `GetSeqStop` of row 0 by the strand of the first
+// segment (Dense_seg.cpp:165-238), ties broken by the last HSP's e-value (`s_GetBlastScore` keeps
+// the last one, align_format_util.cpp:229-270). NCBI BLAST+ 2.17.0 sorts the same way (a subject
+// whose lowest query start is lower sorts after one with a lower key; the tie above).
+#[test]
+fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
+    let run = RunRecord {
+        gapped: false,
+        ..run_record()
+    };
+    let at = |subject: u32, q: (i32, i32), s: (i32, i32), frame: i8, evalue: f64, score: i32| {
+        HspRecord {
+            subject,
+            evalue,
+            score,
+            ..hsp(q, s, frame, q.1 - q.0, &[])
+        }
+    };
+    let hsps = [
+        // Subject_1: key min(30, 20 + 5 - 1) = 24, though an HSP starts at 2.
+        HspRecord {
+            num_ident: 18,
+            ..at(0, (30, 50), (0, 20), 1, 1e-9, 21)
+        },
+        at(0, (2, 12), (40, 50), 1, 1e-3, 22),
+        at(0, (20, 25), (70, 75), 1, 1e-2, 23),
+        // Subject_2: key min(10, 40 + 10 - 1) = 10, last e-value 1e-4.
+        at(1, (10, 20), (5, 15), 1, 1e-10, 31),
+        at(1, (40, 50), (30, 40), 1, 1e-4, 32),
+        // Subject_3: the first HSP on the minus strand (query start 60 - 30 = 30), so the key
+        // is min(40, 30 + 20 - 1) = 40 and the flag 16.
+        at(2, (10, 30), (50, 70), -1, 1e-7, 41),
+        at(2, (40, 48), (10, 18), 1, 1e-4, 42),
+        // Subject_4: key 10, e-value 1e-8: before Subject_2, whose first e-value is lower.
+        at(3, (10, 20), (60, 70), 1, 1e-8, 51),
+    ];
+    let subjects = [
+        subject_seq(0, "Subject_1"),
+        subject_seq(1, "Subject_2"),
+        subject_seq(2, "Subject_3"),
+        subject_seq(3, "Subject_4"),
+    ];
+    let records = |spec: SamSpec| {
+        let mut document = SamDocument::new(spec, "2.17.0+", None);
+        document
+            .query(
+                &run,
+                &query_seq(0, "Query_1"),
+                &subjects,
+                &hsps,
+                &mut NoLetters,
+            )
+            .unwrap();
+        let mut out = Vec::new();
+        document.finish(&mut out).unwrap();
+        String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .filter(|line| !line.starts_with('@'))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let lines = records(SamSpec::default());
+    let names: Vec<&str> = lines
+        .iter()
+        .map(|l| l.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(names, ["Subject_4", "Subject_2", "Subject_1", "Subject_3"]);
+    let fields: Vec<&str> = lines[2].split('\t').collect();
+    // POS: the lowest query start + 1; the clips from the union of the subject rows [0, 75).
+    assert_eq!(fields[1..6], ["0", "Query_1", "3", "255", "35M25H"]);
+    assert_eq!(
+        fields[11..],
+        ["AS:i:21", "EV:f:1e-09", "NM:i:0", "PI:f:51.43", "BS:f:75.8"]
+    );
+    // Reversed: the subject rows [10, 70) clip 100 - 70 in front and 10 behind.
+    let fields: Vec<&str> = lines[3].split('\t').collect();
+    assert_eq!(fields[1..6], ["16", "Query_1", "31", "255", "30H28M10H"]);
+    // `SR` keeps the Seq-align order: one record per subject.
+    let lines = records(SamSpec::parse("SR"));
+    let names: Vec<&str> = lines
+        .iter()
+        .map(|l| l.split('\t').nth(2).unwrap())
+        .collect();
+    assert_eq!(names, ["Subject_1", "Subject_2", "Subject_3", "Subject_4"]);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276 and
+// c++/src/objtools/format/cigar_formatter.cpp:164, :324-346: the aligned length that PI divides
+// by is `len`, an `int`, from `GetAlignLength` with false (a `TSeqPos` sum) and the CIGAR count a
+// `TSeqPos` sum. NCBI BLAST+ 2.17.0 on a 16-letter unit repeated 11,600 and 16,400 times against
+// itself (`-ungapped -dust no`): `2152959968M` with `PI:f:-0.01`, and `8392672M`
+// (4303359968 - 2^32) with `PI:f:3.13`.
+#[test]
+fn an_ungapped_record_sums_its_lengths_in_32_bits() {
+    let run = RunRecord {
+        gapped: false,
+        ..run_record()
+    };
+    let unit = 1 << 30;
+    let record = |copies: i32, ident: i32| {
+        let hsps: Vec<HspRecord<'_>> = (0..copies)
+            .map(|_| HspRecord {
+                num_ident: ident,
+                ..hsp((0, unit), (0, unit), 1, ident, &[])
+            })
+            .collect();
+        let mut document = SamDocument::new(SamSpec::default(), "2.17.0+", None);
+        document
+            .query(
+                &run,
+                &query_seq(0, "Query_1"),
+                &[subject_seq(0, "Subject_1")],
+                &hsps,
+                &mut NoLetters,
+            )
+            .unwrap();
+        let mut out = Vec::new();
+        document.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let line = text
+            .lines()
+            .find(|l| !l.starts_with('@'))
+            .unwrap()
+            .to_string();
+        let fields: Vec<String> = line.split('\t').map(str::to_string).collect();
+        (fields[5].clone(), fields[14].clone())
+    };
+    // 3 * 2^30 = 3221225472 is above 2^31 - 1: as an int it is -1073741824.
+    assert_eq!(
+        record(3, unit),
+        ("3221225472M".to_string(), "PI:f:-100.00".to_string())
+    );
+    // 5 * 2^30 wraps to 2^30, which the identities then equal.
+    assert_eq!(
+        record(5, unit),
+        ("1073741824M".to_string(), "PI:f:100.00".to_string())
+    );
+    // 4 * 2^30 wraps to 0: 100 * 1 / 0 is infinity and `min(99.99, inf)` 99.99.
+    assert_eq!(record(4, 1), ("0M".to_string(), "PI:f:99.99".to_string()));
 }

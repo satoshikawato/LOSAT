@@ -15,7 +15,7 @@ pub(crate) struct WriteDbFile {
     /// `m_RealFile`: the `ofstream` of the file, without a file until `Create`.
     stream: OfStream,
     base_name: String,
-    extension: &'static str,
+    extension: String,
     index: u32,
     use_index: bool,
     fname: String,
@@ -40,7 +40,7 @@ impl WriteDbFile {
     // NCBI does not test the stream: a file that cannot be opened (a directory of its name
     // that the removal of the old database could not delete) is written to nowhere and the
     // build goes on, as makeblastdb's (`super::ofstream`).
-    fn create(base_name: &str, extension: &'static str, index: u32, max_file_size: u64) -> Self {
+    fn create(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         let mut file = Self::lazy(base_name, extension, index, max_file_size);
         file.create_now();
         file
@@ -48,35 +48,24 @@ impl WriteDbFile {
 
     /// The constructor with `always_create` false: the file is named but created only by
     /// `create_now` (`CWriteDB_File::Create`).
-    pub(crate) fn lazy(
-        base_name: &str,
-        extension: &'static str,
-        index: u32,
-        max_file_size: u64,
-    ) -> Self {
+    pub(crate) fn lazy(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         Self::named(base_name, extension, Some(index), max_file_size)
     }
 
     /// `lazy` with the index -1 (`m_UseIndex` false): the file `<base>.<ext>`, without a
     /// volume number (the offset and index files of a GI mask, `super::gi_mask`).
-    pub(crate) fn lazy_unindexed(
-        base_name: &str,
-        extension: &'static str,
-        max_file_size: u64,
-    ) -> Self {
+    pub(crate) fn lazy_unindexed(base_name: &str, extension: &str, max_file_size: u64) -> Self {
         Self::named(base_name, extension, None, max_file_size)
     }
 
-    fn named(
-        base_name: &str,
-        extension: &'static str,
-        index: Option<u32>,
-        max_file_size: u64,
-    ) -> Self {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:158-195
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:247-257
+    // A negative index turns the volume number off; a limit of 0 takes the default one.
+    fn named(base_name: &str, extension: &str, index: Option<u32>, max_file_size: u64) -> Self {
         Self {
             stream: OfStream::new(),
             base_name: base_name.to_string(),
-            extension,
+            extension: extension.to_string(),
             index: index.unwrap_or(0),
             use_index: index.is_some(),
             fname: match index {
@@ -93,7 +82,7 @@ impl WriteDbFile {
         }
     }
 
-    /// `CWriteDB_File::Create`: `m_RealFile.open(m_Fname.c_str(), ios::out | ios::binary)`
+    /// `CWriteDB_File::Create`: `m_RealFile` is opened for binary output on `m_Fname`
     /// under the current name.
     pub(crate) fn create_now(&mut self) {
         self.created = true;
@@ -130,6 +119,7 @@ impl WriteDbFile {
         Ok(self.offset)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:204-222
     /// `Write` for a file whose stream position nothing reads (the files of a GI mask, which
     /// keep their own lengths, `super::gi_mask`): every byte is written and `m_Offset` wraps
     /// as NCBI's `unsigned int` does.
@@ -156,12 +146,12 @@ impl WriteDbFile {
         &self.fname
     }
 
-    // `fn1.Rename(m_Fname, CDirEntry::fRF_Overwrite)` of `RenameSingle` and `RenameFileIndex`,
-    // after which `m_Fname` is the new name whether the rename worked or not: makeblastdb does
-    // not look at the result. A volume file whose destination cannot be freed stays under its
-    // old name (`CDirEntry::Rename`, `super::dir_entry::rename_overwrite`) and the build goes
-    // on; a source that does not exist (an ISAM file without entries, a `.pog` of a volume
-    // without sequences) renames nothing, and an existing file of that name that LOSAT never
+    // `Rename` of `fn1` to `m_Fname` with `CDirEntry::fRF_Overwrite`, in `RenameSingle` and
+    // `RenameFileIndex`, after which `m_Fname` is the new name whether the rename worked or not:
+    // makeblastdb does not look at the result. A volume file whose destination cannot be freed
+    // stays under its old name (`CDirEntry::Rename`, `super::dir_entry::rename_overwrite`) and the
+    // build goes on; a source that does not exist (an ISAM file without entries, a `.pog` of a
+    // volume without sequences) renames nothing, and an existing file of that name that LOSAT never
     // wrote is renamed as NCBI renames it.
     fn rename_to(&mut self, new_name: String) {
         let _ = super::dir_entry::rename_overwrite(Path::new(&self.fname), Path::new(&new_name));
@@ -195,7 +185,7 @@ impl WriteDbFile {
     }
 }
 
-/// `log10(m_Index) + 1` as an `unsigned int`: the number of decimal digits
+/// One more than the `log10` of `m_Index`, as an `unsigned int`: the number of decimal digits
 /// of a positive index, and 0 for index 0 (see `rename_file_index`).
 pub(crate) fn orig_num_digits(index: u32) -> u32 {
     if index == 0 {
@@ -225,7 +215,7 @@ impl DbVersion {
         }
     }
 
-    /// `(int) m_Version`: the number written as the format version of an index file.
+    /// `m_Version` cast to `int`: the number written as the format version of an index file.
     pub fn number(self) -> u32 {
         match self {
             DbVersion::V4 => 4,
@@ -268,7 +258,7 @@ pub(crate) struct IndexFile {
     index: u32,
     /// `x_MakeLmdbName()` for version 5, empty for version 4.
     lmdb_name: Vec<u8>,
-    /// The platform's `sizeof(long)` in `x_Overhead`.
+    /// The platform's `sizeof` of `long` in `x_Overhead`.
     sizeof_long: u64,
     oids: u32,
     data_size: u64,
@@ -280,7 +270,7 @@ pub(crate) struct IndexFile {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:346-360
-// `sizeof(int)` is 4 and `sizeof(long)` the platform's (`Platform::sizeof_long`):
+// `sizeof` of `int` is 4 and `sizeof` of `long` the platform's (`Platform::sizeof_long`):
 // 8 on Linux and macOS (LP64), 4 on Windows (LLP64), so the padding of the
 // date and the room the header takes from `-max_file_sz` follow the platform
 // whose makeblastdb is reproduced. The version 5 form counts the volume number
@@ -566,7 +556,7 @@ impl SequenceFile {
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:419-434
     // makeblastdb sets no limit on the letters of a volume (`m_BaseLimit` is
-    // 0). `m_Offset + size` is a 32-bit unsigned sum, as in NCBI.
+    // 0). `m_Offset` plus `size` is a 32-bit unsigned sum, as in NCBI.
     pub(crate) fn can_fit(&self, size: usize) -> bool {
         if self.file.offset <= 1 {
             return true;

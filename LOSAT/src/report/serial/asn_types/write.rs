@@ -16,20 +16,26 @@
 //! reads any depth), so it is written from a list on the heap, never by a recursion as deep as
 //! the nest.
 
-use super::{type_info, Kind, Member, Storage, StringKind, Value};
+use super::{resolved, type_info, Encoding, Kind, Member, Storage, StringKind, Value};
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::{Encoder, Traced};
 
 /// What is left to write: a value of a type, or one call of the encoder.
 enum Step<'a> {
     Value(u16, &'a Value),
-    Member(&'static Member),
+    Member(&'static Member, u8),
     EndMember,
     EndSequence,
     Element,
     EndList,
     EndVariant,
     EndNamed,
+}
+
+/// The tag of the member or variant at `position` of its type: NCBI's automatic tags, the position
+/// from 0 (`scripts/asn_spec_gen.py` stops on any other tag and on a position over 255).
+fn automatic_tag(position: u16) -> u8 {
+    u8::try_from(position).expect("the table's positions are tags of one byte")
 }
 
 /// Writes `value`, a value of the type `ty` of the table, with `enc` (as the value of the member
@@ -48,7 +54,7 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
         }
         match step {
             Step::Value(ty, value) => open(enc, ty, value, &mut todo),
-            Step::Member(member) => enc.member(member.name(), member.tag),
+            Step::Member(member, tag) => enc.member(member.name(), tag),
             Step::EndMember => enc.end_member(),
             Step::EndSequence => enc.end_sequence(),
             Step::Element => enc.element(),
@@ -60,8 +66,23 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
     true
 }
 
-/// `value` as one document of its type (`MSerial_AsnText << object`: `WriteFileHeader`, the
-/// object, `EndOfWrite` and the separator), for the named type `ty`.
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// A delayed member of the type `ty` read from ASN.1 binary (`bytes`): NCBI's stream of another
+/// format reads the buffer first (`CDelayBuffer::Update`, a binary stream over the bytes) and
+/// writes the value read. (The binary stream copies a buffer of its own format; no document that
+/// LOSAT writes in ASN.1 binary holds a value of a PSSM file.) The read posts a message or fails
+/// where NCBI's skip did not (a VisibleString byte replaced, a number past its storage), which
+/// NCBI reports while it writes: LOSAT does not write such a member (`Encoder::unread_delayed`).
+fn write_updated<E: Encoder>(enc: &mut E, ty: u16, bytes: &[u8]) {
+    match super::read::read_ber_value(bytes, ty) {
+        (Ok(value), posts) if posts.is_empty() => write_value(enc, ty, &value),
+        _ => enc.unread_delayed(),
+    }
+}
+
+/// `value` as one document of its type (an object written to a stream after `MSerial_AsnText`:
+/// `WriteFileHeader`, the object, `EndOfWrite` and the separator), for the named type `ty`.
 #[cfg(test)]
 pub(crate) fn write_document<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
     write_document_until(enc, ty, value, |_| false);
@@ -82,12 +103,12 @@ fn write_document_until<E: Encoder>(
 }
 
 /// What an output stream that has failed gets of `value` written as a document of the named type
-/// `ty` (`MSerial_AsnText << object` in a message of NCBI's diagnostic stream after it failed,
-/// `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to the
-/// stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
-/// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer
-/// first flushed. NCBI's writing stops there: the first pass follows its buffer to find how many
-/// bytes it held (`Traced`), the second writes those bytes as they were then
+/// `ty` (an object written after `MSerial_AsnText` in a message of NCBI's diagnostic stream after
+/// it failed, `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to
+/// the stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
+/// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer first
+/// flushed. NCBI's writing stops there: the first pass follows its buffer to find how many bytes it
+/// held (`Traced`), the second writes those bytes as they were then
 /// (`AsnTextEncoder::failed_after`: a string's wrap that would come later inserts no end of line
 /// before the cut). Both stop at the cut, so the text in memory is the cut and at most one step
 /// more.
@@ -114,8 +135,11 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733 (cited at
     // `AsnTextEncoder::delayed`): the delay buffer is written in place of the member's value,
     // without its type.
-    if let Value::Delayed(text) = value {
-        enc.delayed(text);
+    if let Value::Delayed { encoding, bytes } = value {
+        match encoding {
+            Encoding::Text => enc.delayed(bytes),
+            Encoding::Binary => write_updated(enc, ty, bytes),
+        }
         return;
     }
     // A named type that is not a SEQUENCE or a CHOICE (an alias, a SEQUENCE OF or SET OF, an
@@ -140,12 +164,12 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
                 let member = &members[usize::from(*position)];
                 todo.push(Step::EndMember);
                 todo.push(Step::Value(member.ty, value));
-                todo.push(Step::Member(member));
+                todo.push(Step::Member(member, automatic_tag(*position)));
             }
         }
         (Kind::Choice(span), Value::Choice(index, value)) => {
             let variant = &span.members()[usize::from(*index)];
-            enc.variant(info.name(), variant.name(), variant.tag);
+            enc.variant(info.name(), variant.name(), automatic_tag(*index));
             todo.push(Step::EndVariant);
             todo.push(Step::Value(variant.ty, value));
         }
@@ -202,6 +226,26 @@ fn write_elements<'a, E: Encoder>(
             for &number in numbers {
                 enc.element();
                 write_number(enc, element, Number::Real(number));
+            }
+        }
+        Value::Texts(runs) => {
+            // The elements are Seq-ids (a CHOICE) or strings; each is made, written and dropped.
+            let seq_ids = matches!(resolved(element).kind, Kind::Choice(_));
+            for run in runs {
+                run.for_each(&mut |text| {
+                    enc.element();
+                    if seq_ids {
+                        let id = crate::seqid::parse::seq_id_from_text(
+                            text,
+                            crate::seqid::accguide::parse_flags::ANY_RAW,
+                            &mut |_| {},
+                        )
+                        .expect("a text that the modifier checked when it made the list");
+                        write_value(enc, element, &Value::SeqId(Box::new(id)));
+                    } else {
+                        write_value(enc, element, &Value::Str(text.to_vec()));
+                    }
+                });
             }
         }
         _ => unreachable!("a SEQUENCE OF or SET OF value is a list"),

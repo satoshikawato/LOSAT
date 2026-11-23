@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::support::{
     assert_observer_ranges, assert_tabular_ranges, reader_records, run_formats, temp_path, Run,
+    TempFasta,
 };
 use crate::algorithm::tblastn::TblastnArgs;
 use crate::api::local_blast::{
@@ -78,6 +79,7 @@ fn run(
         run_local_tblastn(
             tblastn_args(names.0, names.1, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             outputs,
         )
@@ -107,6 +109,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -122,11 +125,18 @@ fn a_task_that_is_not_tblastns_is_refused() {
                 run_local_database_tblastn(
                     args,
                     &queries(&query),
+                    &crate::api::QueryEnd::Input,
                     ApplicationSettings::default(),
                     &mut outputs,
                 )
             } else {
-                run_local_tblastn(args, &queries(&query), &subjects(&subject), &mut outputs)
+                run_local_tblastn(
+                    args,
+                    &queries(&query),
+                    &crate::api::QueryEnd::Input,
+                    &subjects(&subject),
+                    &mut outputs,
+                )
             }
         };
         let error = format!("{:#}", result.expect_err(message));
@@ -186,9 +196,11 @@ fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
         for (index, outfmt) in SAVED_FORMATS.iter().enumerate() {
             let expected = std::fs::read(repository(&format!("{stem}.fmt{outfmt}{suffix}")))
                 .expect("saved NCBI output");
+            // The saved bytes are NCBI's; LOSAT writes them in its own words.
+            let expected = crate::wording::losat_output_bytes(&expected).into_owned();
             assert!(
                 together.outputs[index] == expected,
-                "{stem} outfmt {outfmt} differs from the saved NCBI bytes"
+                "{stem} outfmt {outfmt} differs from the saved NCBI bytes in LOSAT's words"
             );
         }
         let expected_stderr = stderr_suffix.map_or_else(Vec::new, |stderr_suffix| {
@@ -341,6 +353,7 @@ fn unsupported_formats_fail_before_searching() {
     for outfmt in ["17", "6 delim=; qseqid staxids"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -359,7 +372,13 @@ fn unsupported_formats_fail_before_searching() {
             observer: None,
         };
         let args = tblastn_args(&query_name, &subject_name, &[]);
-        let result = run_local_tblastn(args, &queries, &subjects, &mut outputs);
+        let result = run_local_tblastn(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert!(result.is_err(), "outfmt {outfmt:?} must be rejected");
         assert!(
@@ -383,6 +402,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -400,6 +420,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let result = run_local_tblastn(
             tblastn_args(&query_name, &subject_name, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             &mut outputs,
         );
@@ -483,6 +504,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let result = run_local_tblastn(
                 tblastn_args("q", "s", &[]),
                 &queries,
+                &crate::api::QueryEnd::Input,
                 &subjects,
                 &mut outputs,
             );
@@ -503,4 +525,57 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// The hit records that the library API and the Web adapter hand out show the query row's masks
+// (`-lcase_masking`) in lower case, as outfmt 0 writes the row (`stage_e_report::query_row_masks`,
+// `x_OutputSeq`); the subject row, a translation, shows none. The rows are those that the release
+// before T4a1 (1ede53b7b) shows in outfmt 0 for the same search.
+#[test]
+fn hit_records_keep_the_query_masks_in_lower_case() {
+    let shown = "MKTAYIAKQRQISFVKSHFSrqleerLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGE";
+    // The protein's codons, frame +1.
+    let nucleotides =
+        "ATGAAAACCGCTTACATCGCTAAACAGCGTCAGATCTCTTTCGTTAAATCTCACTTCTCTCGTCAGCTGGAAGAACGTCTGG\
+        GTCTGATCGAAGTTCAGGCTCCGATCCTGTCTCGTGTTGGTGACGGTACCCAGGACAACCTGTCTGGTGCTGAAAAAGCTGTTCAGGTTA\
+        AAGTTAAAGCTCTGCCGGACGCTCAGTTCGAAGTTGTTCACTCTCTGGCTAAATGGAAACGTCAGACCCTGGGTCAGCACGACTTCTCTG\
+        CTGGTGAA";
+    let query = TempFasta::new("tblastn_lcase_query.faa", &[("q1", shown.as_bytes())]);
+    let subject = TempFasta::new(
+        "tblastn_lcase_subject.fna",
+        &[("s1", nucleotides.as_bytes())],
+    );
+    let run = run(
+        &query.0,
+        &subject.0,
+        ("q", "s"),
+        &["0"],
+        &["-lcase_masking", "-seg", "no"],
+        true,
+    );
+    let whole = run
+        .hits
+        .iter()
+        .find(|hit| (hit.hit.q_start, hit.hit.q_end) == (1, 90))
+        .expect("the HSP of the whole query");
+    assert_eq!(whole.query_seq.as_deref(), Some(shown));
+    assert_eq!(
+        whole.subject_seq.as_deref(),
+        Some(shown.to_ascii_uppercase().as_str())
+    );
+    // An HSP after the mask shows none.
+    for hit in run.hits.iter().filter(|hit| hit.hit.q_start > 26) {
+        let row = hit.query_seq.as_deref().expect("a query row");
+        assert!(
+            !row.bytes().any(|letter| letter.is_ascii_lowercase()),
+            "{row}"
+        );
+    }
+    let report = String::from_utf8(run.outputs[0].clone()).expect("UTF-8 report");
+    assert!(
+        report.contains(
+            "Query  1    MKTAYIAKQRQISFVKSHFSrqleerLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVK  60\n"
+        ),
+        "{report}"
+    );
 }

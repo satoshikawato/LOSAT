@@ -170,6 +170,10 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) lcase_masking: bool,
     pub(super) db_mask: Option<(&'a database::BlastnDatabase, i32, MaskKind)>,
     pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+    /// The seeds of the MegaBLAST database index that the batch is searched with (`None`
+    /// without one, and for a batch split into query chunks: each chunk has its own), which
+    /// replace the scan of every chunk (`mb_index_seeds::index_chunk_hits`).
+    pub(super) mb_index: Option<&'a super::mb_index_seeds::IndexSeeds<'a>>,
     /// The subject's list after its chunks (the reap, the `-ungapped` finish): the concatenated
     /// query's letters without its masks (NCBI's `sequence_nomask`, as
     /// `encoded_query_concat_blastna` is laid out), the Karlin blocks by context, whether an
@@ -391,6 +395,9 @@ pub(super) struct PrelimSubject<'a> {
     pub(super) x_prelim_subject: &'a XPrelimSubject<'a>,
     pub(super) subject_masked: bool,
     pub(super) dbseq_chunk_overlap: usize,
+    /// A database sequence of a search with a MegaBLAST database index and `-db_hard_mask`: the
+    /// index's seeds placed into its hard chunks (`mb_index_seeds::HardSeeds`).
+    pub(super) hard_index: Option<&'a super::mb_index_seeds::HardSeeds>,
 }
 
 /// The search of one chunk of a subject (one turn of the chunk loop): the chunk's ranges and packed
@@ -420,19 +427,33 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // What every chunk of the batch reads is `scan`'s (its word finder) and `scan.batch`'s (the
     // rest), read where it is used; what the chunk's subject gives is `subject`'s.
     let batch = scan.batch;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1006-1012
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1727-1734
+    // A batch searched with a MegaBLAST database index has the indexed word finder, which scans
+    // a sequence of a database volume without an index as without the index.
+    if let Some(index) = batch.mb_index {
+        if index.is_indexed(subject.s_idx as u32) {
+            return super::mb_index_seeds::index_chunk_hits::<UNGAPPED>(
+                scan,
+                index,
+                subject,
+                chunk,
+                gap_scratch,
+                subject_scratch,
+                reuse_prelim_hits,
+            );
+        }
+    }
     let &PrelimSubject {
         s_idx,
         s_id,
         s_seq_packed_full,
-        x_prelim_subject,
         ..
     } = subject;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     let hits = &mut subject_scratch.hits;
     hits.clear();
-    let prelim_hits = &mut subject_scratch.prelim_hits;
-    prelim_hits.clear();
-    let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
+    subject_scratch.prelim_hits.clear();
 
     let s_len = chunk.length;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-307
@@ -765,29 +786,87 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         } // end of if/else for two-stage vs original lookup
     } // end of strand loop
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500,560-563
+    // The chunk's HSP list from its initial hits (`chunk_hsp_list`), whose count sizes the next
+    // batch; then the diagonal table's offset moves on after the chunk, also after a chunk
+    // without an initial hit (`Blast_ExtendWordExit` runs inside the word finder, before
+    // NCBI's `continue`). A mixed search counts the initial hits of its scans by volume
+    // (`mb_index_seeds::IndexSeeds::check`).
+    if let Some(index) = batch.mb_index {
+        index.note_scanned_hits(s_idx as u32, subject_scratch.ungapped_hits.len());
+    }
+    let chunk_prelim_hits = chunk_hsp_list::<UNGAPPED>(
+        batch,
+        subject,
+        chunk,
+        s_seq_packed,
+        gap_scratch,
+        subject_scratch,
+        reuse_prelim_hits,
+        batch.good_init_extends,
+    );
+    // Suppress unused variable warnings when not in debug mode
+    let _ = (
+        dbg_total_s_positions,
+        dbg_ambiguous_skipped,
+        dbg_no_lookup_match,
+        dbg_seeds_found,
+        dbg_ungapped_low,
+        dbg_two_hit_failed,
+        dbg_gapped_attempted,
+        dbg_window_seeds,
+    );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
+    advance_diag_table_offset(
+        &mut subject_scratch.diag_table_offset,
+        scan.diag_window,
+        s_len,
+        use_array_indexing,
+        &mut subject_scratch.hit_level_array,
+        &mut subject_scratch.hit_len_array,
+        &mut subject_scratch.diag_hash,
+    );
+    chunk_prelim_hits
+}
+
+/// The HSP list of a chunk from the initial hits that its word finder saved
+/// (`subject_scratch.ungapped_hits`), counted into `good_init_extends` (they size the next
+/// batch). A chunk without an initial hit ends with an empty list, as NCBI's chunk loop goes on to
+/// the next chunk after its word finder: the saved hits counted are none, and nothing else runs
+/// for the chunk: no sort, no gapped stage and its interval tree, no HSP list, and no merge into
+/// the subject's list or best-hit filter (`collect_subject_prelim` skips both for an empty list,
+/// as NCBI's `continue` does). The empty list returned is the scratch's own buffer when the owner
+/// reuses it (`collect_subject_prelim` puts it back), as the gapped stage's empty list was.
+/// LOSAT's `-verbose` line of the gapped stage (no NCBI counterpart) is still written for the
+/// chunk, with no extension. An ungapped (`-ungapped`) search makes the chunk's HSP list from its
+/// initial hits (`prelim_hsp_list::ungapped_hsp_list`); a gapped one sorts them
+/// (`prelim_hsp_list::sort_ungapped_hits_for_gapped`) for the gapped loop with its interval tree,
+/// purge and sort (`prelim_hsp_list::gapped_hsp_list`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500,522-527,555,560-563
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn chunk_hsp_list<const UNGAPPED: bool>(
+    batch: &PrelimBatch<'_>,
+    subject: &PrelimSubject<'_>,
+    chunk: &SubjectChunk,
+    s_seq_packed: &[u8],
+    gap_scratch: &mut GapAlignScratch,
+    subject_scratch: &mut SubjectScratch,
+    reuse_prelim_hits: bool,
+    good_init_extends: &AtomicU64,
+) -> Vec<PrelimHit> {
+    let &PrelimSubject {
+        s_idx,
+        s_id,
+        x_prelim_subject,
+        ..
+    } = subject;
+    let s_len = chunk.length;
+    let ungapped_hits = &mut subject_scratch.ungapped_hits;
+    let prelim_hits = &mut subject_scratch.prelim_hits;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1686-1689
-    // A chunk without an initial hit ends here, as NCBI's chunk loop goes on to the next chunk
-    // after its word finder: the diagonal table's offset moves on (`Blast_ExtendWordExit` runs
-    // inside the word finder, before the `continue`), the saved hits counted are none, and nothing
-    // else runs for the chunk: no sort, no gapped stage and its interval tree, no HSP list, and
-    // no merge into the subject's list or best-hit filter (`collect_subject_prelim` skips both for
-    // an empty list, as NCBI's `continue` does). The empty list returned is the scratch's own
-    // buffer when the owner reuses it (`collect_subject_prelim` puts it back), as the gapped
-    // stage's empty list was. LOSAT's `-verbose` line of the gapped stage (no NCBI counterpart)
-    // is still written for the chunk, with no extension.
     if ungapped_hits.is_empty() {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
-        // (the diagonal table's offset moves on after each chunk, as below)
-        advance_diag_table_offset(
-            &mut subject_scratch.diag_table_offset,
-            scan.diag_window,
-            s_len,
-            use_array_indexing,
-            &mut subject_scratch.hit_level_array,
-            &mut subject_scratch.hit_len_array,
-            &mut subject_scratch.diag_hash,
-        );
         if !UNGAPPED && batch.verbose {
             prelim_hsp_list::verbose_gapped_line(std::time::Duration::ZERO, 0, 0, 0);
         }
@@ -797,26 +876,8 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             Vec::new()
         };
     }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:560-563
-    // An ungapped (`-ungapped`) search makes the chunk's HSP list from its initial hits
-    // (`prelim_hsp_list::ungapped_hsp_list`); the diagonal table then moves on, as after
-    // a gapped search's chunk.
     if UNGAPPED {
-        let chunk_prelim_hits =
-            prelim_hsp_list::ungapped_hsp_list(ungapped_hits, chunk, batch.good_init_extends);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
-        // (the diagonal table's offset moves on after each chunk, as below)
-        advance_diag_table_offset(
-            &mut subject_scratch.diag_table_offset,
-            scan.diag_window,
-            s_len,
-            use_array_indexing,
-            &mut subject_scratch.hit_level_array,
-            &mut subject_scratch.hit_len_array,
-            &mut subject_scratch.diag_hash,
-        );
-        return chunk_prelim_hits;
+        return prelim_hsp_list::ungapped_hsp_list(ungapped_hits, chunk, good_init_extends);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1692
@@ -828,7 +889,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         batch.x_qgroup_batch,
         reuse_prelim_hits,
         batch.queries,
-        batch.good_init_extends,
+        good_init_extends,
     );
     // No NCBI counterpart: the clock of the gapped stage, read only by LOSAT_TIMING's
     // `gapped_ns` and the `-verbose` line (`prelim_hsp_list::gapped_hsp_list`), so it is read
@@ -858,7 +919,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // The chunk's gapped HSP list (`prelim_hsp_list::gapped_hsp_list`): the gapped loop per
     // query on the pool (LOSAT_X_QGROUPPAR) or over the chunk's list on this thread with
     // the subject's scratch, then the purge, the sort and the chunk's offset.
-    let chunk_prelim_hits = prelim_hsp_list::gapped_hsp_list(
+    prelim_hsp_list::gapped_hsp_list(
         &gapped,
         &prelim_hsp_list::GappedDrive {
             x_counts: &x_counts,
@@ -869,37 +930,11 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         prelim_hsp_list::GappedListState {
             interval_tree: &mut subject_scratch.x_tree,
             gap_scratch,
-            greedy_align_scratch,
+            greedy_align_scratch: &mut subject_scratch.greedy_align_scratch,
             x_helper_scratch: Some(&mut subject_scratch.x_ahead_scratch),
             prelim_hits,
         },
-    );
-    // Suppress unused variable warnings when not in debug mode
-    let _ = (
-        dbg_total_s_positions,
-        dbg_ambiguous_skipped,
-        dbg_no_lookup_match,
-        dbg_seeds_found,
-        dbg_ungapped_low,
-        dbg_two_hit_failed,
-        dbg_gapped_attempted,
-        dbg_window_seeds,
-        total_ungapped,
-    );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
-    let hit_level_array = &mut subject_scratch.hit_level_array;
-    let hit_len_array = &mut subject_scratch.hit_len_array;
-    let diag_hash = &mut subject_scratch.diag_hash;
-    advance_diag_table_offset(
-        &mut subject_scratch.diag_table_offset,
-        scan.diag_window,
-        s_len,
-        use_array_indexing,
-        hit_level_array,
-        hit_len_array,
-        diag_hash,
-    );
-    chunk_prelim_hits
+    )
 }
 
 /// Whether a job of the pool's chunk batches that holds `letters` letters takes `chunk` as well:
@@ -1282,6 +1317,20 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     combined_prelim_hits
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+/// The shortest subject that the preliminary stage searches (the traceback skips the shorter
+/// ones too). NCBI skips only an empty subject; one shorter than a word has no word to scan
+/// (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches skip it, but
+/// the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
+/// into the next one of the index's local id, so an indexed search searches it.
+pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usize {
+    if indexed {
+        1
+    } else {
+        effective_word_size
+    }
+}
+
 /// The preliminary search of one subject, `search_subject`'s preliminary stage (`scan`: the batch's
 /// values and lookup tables, which the preliminary pass passes): the subject's lowercase masks
 /// (`-lcase_masking`) and the soft ranges between them, or a database sequence's soft ranges from
@@ -1373,7 +1422,14 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         }
     }
 
-    if s_len_full < effective_word_size {
+    if s_len_full
+        < shortest_subject(
+            effective_word_size,
+            batch
+                .mb_index
+                .is_some_and(|index| index.is_indexed(s_idx as u32)),
+        )
+    {
         if db_masked {
             subject_scratch.db_soft_ranges = soft_ranges;
             subject_scratch.db_hard_split.end();
@@ -1407,6 +1463,20 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     // `-db_hard_mask` takes its chunks from its hard ranges (`HardSplitState`, in the worker's
     // scratch; series NP, M4a-2b decision H1) in an instance of its own, so the chunk loops of
     // every other subject are the base's and the subject pays one test of the mask's kind (`HARD`).
+    let hard = matches!(db_mask, Some((_, _, MaskKind::Hard)));
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1727-1734 (cited at
+    // `IndexSeeds::is_indexed`)
+    // The seeds of a sequence of an index volume with `-db_hard_mask`, placed into its hard
+    // chunks before they are searched (the Owner's answer C to Q-HARDIDX).
+    let hard_index = match batch.mb_index {
+        Some(index) if hard && index.is_indexed(s_idx as u32) => Some(index.hard_seeds(
+            s_idx as u32,
+            s_len_full,
+            &subject_scratch.db_hard_split.ranges,
+            dbseq_chunk_overlap,
+        )),
+        _ => None,
+    };
     let prelim_subject = PrelimSubject {
         s_idx,
         s_id,
@@ -1414,8 +1484,9 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         x_prelim_subject: &x_prelim_subject,
         subject_masked,
         dbseq_chunk_overlap,
+        hard_index: hard_index.as_ref(),
     };
-    let mut combined_prelim_hits = if matches!(db_mask, Some((_, _, MaskKind::Hard))) {
+    let mut combined_prelim_hits = if hard {
         collect_subject_prelim::<UNGAPPED, true>(
             scan,
             &prelim_subject,

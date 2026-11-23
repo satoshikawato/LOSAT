@@ -36,7 +36,7 @@
 //! The sum pass also makes the fill's presence vector and helper counters from the counts: the fill
 //! sets the bit of a cell at its first word (`hashtable[ecode] == 0`) and adds 1 to the cell's
 //! counter at every further word, i.e. bit `ecode & 31` of word `ecode >> pv_array_bts` for every
-//! non-empty cell and `count - 1` on counter `ecode / kCompressionFactor` (wrapping in the sum pass
+//! non-empty cell and `count - 1` on counter `ecode` divided by `kCompressionFactor` (wrapping in the sum pass
 //! where the pool fill saturates; both are the plain sum, which stays below the number of words,
 //! itself below 2^32); `longest_chain` is then computed from the counters by the original code. A
 //! scan that reads `qs[offsets[c] .. offsets[c + 1]]` after the same presence test visits the same

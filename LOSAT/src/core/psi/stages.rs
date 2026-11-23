@@ -150,8 +150,8 @@ impl Msa {
         }
     }
 
-    /// `_PSIStructureGroupCustomization(msa)`: the query row is made of gaps that are not aligned
-    /// (`ignore_msa_master`), and the counts are made again.
+    /// `_PSIStructureGroupCustomization` of the `msa`: the query row is made of gaps that are not
+    /// aligned (`ignore_msa_master`), and the counts are made again.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:799-808
     pub(super) fn structure_group_customization(&mut self) {
@@ -424,7 +424,7 @@ pub(super) fn validate_msa(msa: &Msa, ignore_unaligned_positions: bool) -> Resul
     Ok(())
 }
 
-/// `_PSIValidateMSA_StructureGroup(msa)`: only the check that sequences take part
+/// `_PSIValidateMSA_StructureGroup` of the `msa`: only the check that sequences take part
 /// (`s_PSIValidateParticipatingSequences`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:810-819
@@ -530,9 +530,9 @@ fn compute_aligned_region_lengths(msa: &Msa, aligned_blocks: &mut AlignedBlock) 
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:1580-1639
-// `last_calc_pos` is set to `pos` just before the test, so `last_calc_pos != pos - 1` always
-// holds and the weights are computed at every position: the `else` branch is never taken.
-// Without the structure group compatibility mode, `kExpectedNumMatchingSeqs` is 1.
+// `last_calc_pos` is set to `pos` just before the test, so it always differs from one less than
+// `pos`: the test always holds and the weights are computed at every position: the `else` branch is
+// never taken. Without the structure group compatibility mode, `kExpectedNumMatchingSeqs` is 1.
 pub(super) fn compute_sequence_weights(
     msa: &Msa,
     aligned_blocks: &AlignedBlock,
@@ -793,8 +793,9 @@ fn initialize_exp_num_observations(background: &[f64; 20]) -> [f64; MAX_IND_OBSE
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3135-3175
 // The distribution of a column whose extent was set holds one count per column of the extent
 // (`_PSICalculateNormalizedSequenceWeights`), at least `halfNumColumns`, so `k` stays at 0 or
-// above. The loop's `k >= 0` stands for NCBI's `ASSERT(k >= 0)`, which only debug builds check:
-// a release build of NCBI would read before the row there; LOSAT stops instead (not reached).
+// above. The loop's `k >= 0` stands for NCBI's `ASSERT` of the same test, which only debug builds
+// check: a release build of NCBI would read before the row there; LOSAT stops instead (not
+// reached).
 fn effective_observations(
     align_blk: &AlignedBlock,
     seq_weights: &SequenceWeights,

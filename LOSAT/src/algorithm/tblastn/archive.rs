@@ -62,8 +62,11 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     inputs.sum_stats = args.sum_stats;
+    inputs.use_sw_tback = args.use_sw_tback;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).
@@ -157,8 +160,8 @@ pub(super) struct ArchiveRender<'a> {
 /// `EffectiveSearchSpace` option: `batch_searched_space`).
 struct FirstContext {
     /// The ungapped and the gapped block; `None` when the first query has no valid context
-    /// (both blocks are then missing).
-    karlin: Option<(KarlinParams, KarlinParams)>,
+    /// (both blocks are then missing). An ungapped search has no gapped block (`None`).
+    karlin: Option<(KarlinParams, Option<KarlinParams>)>,
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
@@ -271,7 +274,9 @@ pub(super) struct ArchiveData<'a> {
     pub ungapped_karlin: &'a [KarlinParams],
     pub query_validity: &'a [bool],
     pub query_batch_skipped: &'a [bool],
-    pub gapped: KarlinParams,
+    /// The gapped Karlin-Altschul values; `None` for an ungapped search, which makes no gapped
+    /// block (NCBI's `kbp_gap` is not set up).
+    pub gapped: Option<KarlinParams>,
     pub seg: Option<&'a SegParams>,
     pub mask_lowercase: bool,
     pub ranges: &'a ReportRanges<'a>,
@@ -334,7 +339,12 @@ fn for_each_batch(
             }
         };
         let ka_blocks = match &context.karlin {
-            Some((ungapped, gapped)) => [ka_block(ungapped, false), ka_block(gapped, true)],
+            Some((ungapped, gapped)) => [
+                ka_block(ungapped, false),
+                gapped
+                    .as_ref()
+                    .map_or(KaBlock::missing(true), |gapped| ka_block(gapped, true)),
+            ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
         requests.with_batch(records, data.ranges.queries.get(first), |request| {
@@ -370,8 +380,11 @@ pub(super) fn write_tblastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,
+        rps: false,
         db_title: data.shown.db_title(),
-        gapped: true,
+        // NCBI's `CBlastFormatUtil`/`CBlastSeqalign` builds Std-seg diagonals for an ungapped
+        // translated search (`report::serial::seqalign`).
+        gapped: data.gapped.is_some(),
     };
     for_each_batch(data, render.spans, |span, batch| {
         for index in span.clone() {
@@ -381,6 +394,7 @@ pub(super) fn write_tblastn_archives(
         let mut aligns = TblastnAligns {
             run: RunRecord {
                 program: run.program,
+                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
             },

@@ -47,11 +47,13 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-matrix` | `BLOSUM62` | Scoring matrix: BLOSUM45, 50, 62, 80, 90 or PAM30, 70, 250 |
 | `-gapopen`, `-gapextend` | 11, 1 | Gap costs |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 
 For every option: `losat blastx -help`.
 
@@ -78,20 +80,20 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 ## Differences from NCBI BLAST+
 
+- With `-db_hard_mask`, a database sequence whose first mask runs to its end (a masked tail, or a sequence masked entirely) is searched before its mask. NCBI BLAST+ 2.17.0 reads the masked letters there and can crash or report other alignments. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ 2.17.0 can read memory past the end of the query batch or of a protein subject and crash. LOSAT reads the letters past the end as the end marker. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With `-use_sw_tback` in e-value mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4), NCBI BLAST+ 2.17.0 checks each new Smith-Waterman alignment against a list of kept alignments that it picks by a number: 6 × the query's place in the batch (counted from 0) plus 0 to 5 for frames +1, +2, +3, -1, -2, -3. It keeps one list per query, so a number that is the batch's number of queries or more lies past its lists, and NCBI crashes, fails or goes on with what it reads there. With one query in a batch (for example a search of a single query, or a query that fills a batch of 10,002 letters, BLASTX's batch size, by itself) that is every hit outside frame +1. LOSAT checks such an alignment against an empty list and keeps it, as NCBI does when its lists reach that far (in our tests, NCBI's report of the same queries followed by queries without hits, which keep NCBI inside its lists). See [Differences from NCBI BLAST+](../differences.md#blastx--use_sw_tback-in-e-value-mode).
 
 ## What LOSAT refuses
 
 LOSAT stops with an error for these `blastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-use_sw_tback`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- With `-use_sw_tback`, a query batch on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
 - `-query_gencode 32`; `blastx` does not accept code 32.
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
-- A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
-- `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example).
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.
 
 ## Examples

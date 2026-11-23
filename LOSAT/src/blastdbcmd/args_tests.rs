@@ -1,18 +1,23 @@
 use super::*;
 use crate::ncbi_app::args::{ArgException, Args, ArgsError};
 
-fn words(line: &[&str]) -> Vec<String> {
-    line.iter().map(|word| word.to_string()).collect()
+fn words(line: &[&str]) -> Vec<std::ffi::OsString> {
+    line.iter().map(std::ffi::OsString::from).collect()
 }
 
 /// The arguments of `line` as NCBI's reader reads blastdbcmd's.
-fn parse(line: &[String]) -> Result<Args, ArgsError> {
+fn parse(line: &[std::ffi::OsString]) -> Result<Args, ArgsError> {
     crate::ncbi_app::args::parse(&super::super::TOOL, line)
 }
 
 fn messages(line: &[&str]) -> (&'static str, Vec<String>) {
     match parse(&words(line)) {
-        Err(ArgsError::Invalid(ArgException { code, messages })) => (code, messages),
+        Err(ArgsError::Invalid(ArgException { code, messages })) => {
+            let texts = messages
+                .into_iter()
+                .map(|message| String::from_utf8(message).unwrap());
+            (code, texts.collect())
+        }
         other => panic!("{line:?}: {other:?}"),
     }
 }
@@ -220,11 +225,50 @@ fn names_are_checked_and_looked_up_as_ncbi_does() {
 
 #[test]
 fn integer_keys_convert_as_ncbi_s_reader() {
-    // NCBI's constraint `>=` reads a hexadecimal value as a double: LOSAT's refusal.
-    assert!(matches!(
-        parse(&words(&["-db", "x", "-info", "-line_length", "0x10"])),
-        Err(ArgsError::Refused(_))
-    ));
+    // `s_StringToInt8` reads a hexadecimal value, and BLAST's constraint `>=` reads its text
+    // with `NStr::StringToDouble`, whose `strtod` reads it too (NCBI 2.17.0: `-line_length 0x5`
+    // writes lines of 5, probe K4i `edge.blastdbcmd.line_length.hex`).
+    let args = parse(&words(&["-db", "x", "-info", "-line_length", "0x10"])).unwrap();
+    assert_eq!(args.integer("line_length"), Some(16));
+    let args = parse(&words(&["-db", "x", "-ipg", "0X0"])).unwrap();
+    assert_eq!(args.integer("ipg"), Some(0));
+    // `0x` alone reads 0 in base 16, but `strtod` reads only its `0` and the constraint fails.
+    assert_eq!(
+        messages(&["-db", "x", "-info", "-line_length", "0x"]),
+        (
+            "eConstraint",
+            vec!["Argument \"line_length\". Illegal value, expected >=1:  `0x'".to_string()]
+        )
+    );
+    assert_eq!(
+        messages(&["-db", "x", "-info", "-line_length", "0x0"]),
+        (
+            "eConstraint",
+            vec!["Argument \"line_length\". Illegal value, expected >=1:  `0x0'".to_string()]
+        )
+    );
+    // The conversion in base 16 throws the exception that is reported.
+    assert_eq!(
+        messages(&["-db", "x", "-info", "-line_length", "0x1p3"]),
+        (
+            "eConvert",
+            vec![
+                crate::wording::losat_text("Cannot convert string '0x1p3' to Int8 (m_Pos = 3)")
+                    .into_owned(),
+                "Argument \"line_length\". Argument cannot be converted:  `0x1p3'".to_string(),
+            ]
+        )
+    );
+    assert_eq!(
+        messages(&["-db", "x", "-info", "-line_length", "0x80000000"]),
+        (
+            "eConvert",
+            vec![
+                "Argument \"line_length\". Integer value is out of range:  `0x80000000'"
+                    .to_string()
+            ]
+        )
+    );
     // A value that starts with a character of several bytes.
     assert_eq!(
         messages(&["-db", "x", "-ipg", "\u{3042}"]),
@@ -259,8 +303,8 @@ fn integer_keys_convert_as_ncbi_s_reader() {
         string_to_int8_message("").unwrap_err(),
         "Cannot convert string '' to Int8"
     );
-    // NCBI reads up to a NUL (`while (char ch = str[pos])`, `CHECK_ENDPTR` sees the NUL): a
-    // batch line `12\0x` is 12.
+    // NCBI reads up to a NUL (its loop runs while the character at `str[pos]` is not zero,
+    // `CHECK_ENDPTR` sees the NUL): a batch line `12\0x` is 12.
     assert_eq!(string_to_int8_message("12\u{0}x"), Ok(12));
     assert_eq!(
         string_to_int8_message("\u{0}1").unwrap_err(),
@@ -289,11 +333,23 @@ fn an_integer_key_is_the_number_the_reader_accepted() {
     assert_eq!(args.integer("line_length"), Some(80));
 }
 
+// NCBI's `multimap` keeps the order of insertion among equal names: of two exclusions that a
+// command line breaks, NCBI reports the first of the map (blastdbcmd.cpp:928-934: `-entry_batch`
+// excludes `-entry` before `-ipg` does, so `entry`'s first entry is the reverse of the former).
 #[test]
-fn the_dependency_order_is_that_of_ncbi_s_multimap() {
-    let deps = crate::ncbi_app::args::dependencies(&super::super::TOOL);
-    assert!(deps.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-    // Among the entries of `entry`, the reverse of `entry_batch excludes entry` comes first.
-    let first_of_entry = deps.iter().find(|dep| dep.0 == "entry").unwrap();
-    assert_eq!(*first_of_entry, ("entry", Dep::Excludes, "entry_batch"));
+fn the_first_exclusion_of_ncbi_s_multimap_is_reported() {
+    assert_eq!(
+        messages(&["-db", "x", "-ipg", "1", "-entry", "a", "-entry_batch", "b"]),
+        (
+            "eConstraint",
+            vec!["Argument \"entry_batch\". Incompatible with argument:  `entry'".to_string()]
+        )
+    );
+    assert_eq!(
+        messages(&["-db", "x", "-entry", "a", "-ipg", "1"]),
+        (
+            "eConstraint",
+            vec!["Argument \"ipg\". Incompatible with argument:  `entry'".to_string()]
+        )
+    );
 }

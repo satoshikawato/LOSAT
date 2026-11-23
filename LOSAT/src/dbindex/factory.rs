@@ -12,11 +12,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::rc::Rc;
 
+use super::format::Header;
 use super::stream::{SeqData, SequenceStream, StreamError};
-use super::{
-    code_bits, min_offset, Options, SeqNum, Word, CR, OFFSET_COMBINED, UNCOMPRESSED, VERSION,
-    WIDTH_32,
-};
+use super::{code_bits, min_offset, Options, SeqNum, Word, CR};
 
 /// `CDbIndex_Factory::MEGABYTE`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
@@ -54,7 +52,8 @@ impl MaskHelper {
         self.vit != self.locs.len()
     }
 
-    /// `start_` and `stop_` of the interval at `it` (`stop_` is `GetTo() + 1`, a `TSeqPos`).
+    /// `start_` and `stop_` of the interval at `it` (`stop_` is one more than `GetTo()`, a
+    /// `TSeqPos`).
     fn set(&mut self) {
         let (from, to) = self.locs[self.vit][self.it];
         self.start = from;
@@ -91,7 +90,7 @@ impl MaskHelper {
         }
     }
 
-    /// `Adjust(pos)`: back to the first interval to the left of `pos`, or to the start.
+    /// `Adjust` of `pos`: back to the first interval to the left of `pos`, or to the start.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:571-578
     fn adjust(&mut self, pos: u32) {
         loop {
@@ -143,7 +142,7 @@ impl MaskHelper {
         false
     }
 
-    /// `In(pos)`: whether `pos` is in the interval reached by moving forward.
+    /// `In` of `pos`: whether `pos` is in the interval reached by moving forward.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:635-640
     fn contains(&mut self, pos: u32) -> bool {
         while self.good() && pos >= self.stop {
@@ -207,7 +206,7 @@ struct SubjectMap {
 }
 
 impl SubjectMap {
-    /// `CSubjectMap_Factory(options)`.
+    /// `CSubjectMap_Factory` of `options`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:273-285
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:804-811
     fn new(options: &Options) -> Self {
@@ -241,9 +240,10 @@ impl SubjectMap {
         self.c_seq.as_ref().map_or(0, |seq| seq.bases.len() as u32)
     }
 
-    /// `NewSequenceInit(sd, start_chunk)` (with the lengths table of `CSubjectMap_Factory`):
-    /// a new sequence, or none at the end of the input, which keeps the last one's letters
-    /// (its length goes into the table again). The first word of the title, `unknown` for none.
+    /// `NewSequenceInit` with `sd` and `start_chunk` (with the lengths table of
+    /// `CSubjectMap_Factory`): a new sequence, or none at the end of the input, which keeps the
+    /// last one's letters (its length goes into the table again). The first word of the title,
+    /// `unknown` for none.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:665-686
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:480-485
     fn new_sequence_init(&mut self, sd: Option<Rc<SeqData>>, start_chunk: SeqNum) -> Vec<u8> {
@@ -259,7 +259,7 @@ impl SubjectMap {
         result
     }
 
-    /// `CSubjectMap_Factory_TBase::AddSequenceChunk(seq_off)`: the valid intervals of the
+    /// `CSubjectMap_Factory_TBase::AddSequenceChunk` of `seq_off`: the valid intervals of the
     /// next chunk of the current sequence; false when it has no more chunks.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:714-778
     fn add_chunk_base(&mut self, seq_off: usize) -> bool {
@@ -316,7 +316,7 @@ impl SubjectMap {
         true
     }
 
-    /// `CSubjectMap_Factory::AddSequenceChunk(overflow)`: the next chunk, under the current
+    /// `CSubjectMap_Factory::AddSequenceChunk` of `overflow`: the next chunk, under the current
     /// local id or a new one; the whole sequence is packed with its first chunk. `(added,
     /// overflow)`: overflow when a new local id was needed and none is left.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:814-876
@@ -383,8 +383,8 @@ impl SubjectMap {
         )
     }
 
-    /// `MakeOffset(seq, off)` of the chunk whose data start at byte `soff`, by its local id
-    /// `lid` and base `base` (`lid_of`).
+    /// `MakeOffset` (with `seq` and `off`) of the chunk whose data start at byte `soff`, by its
+    /// local id `lid` and base `base` (`lid_of`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:891-903
     #[inline]
     fn make_offset(&self, (lid, base): (usize, u32), off: u32) -> Word {
@@ -393,14 +393,14 @@ impl SubjectMap {
         (((lid as u64) << self.offset_bits) + off) as Word
     }
 
-    /// `MakeOffset(seqnum, off)`: of chunk `seqnum` (0-based).
+    /// `MakeOffset` with `seqnum` and `off`: of chunk `seqnum` (0-based).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:906-912
     fn make_chunk_offset(&self, seqnum: SeqNum, off: u32) -> Word {
         let soff = self.chunks[seqnum as usize].seq_start;
         self.make_offset(self.lid_of(soff), off)
     }
 
-    /// `GetSeqInfo(snum)`: chunk `snum` (1-based) while it is valid.
+    /// `GetSeqInfo` of `snum`: chunk `snum` (1-based) while it is valid.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:411-418
     fn has_seq_info(&self, snum: SeqNum) -> bool {
         snum <= self.last_chunk
@@ -431,7 +431,7 @@ impl SubjectMap {
         self.seq_store.len() as Word
     }
 
-    /// `Save(os)` of `CSubjectMap_Factory`, then of its base.
+    /// `Save` of `CSubjectMap_Factory` (to `os`), then of its base.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:915-938
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:689-711
     fn save(&self, os: &mut impl Write) -> std::io::Result<()> {
@@ -462,7 +462,7 @@ impl SubjectMap {
     }
 }
 
-/// `WriteWord(os, word)`: the word's bytes (little-endian, as NCBI's on its targets).
+/// `WriteWord` with `os` and `word`: the word's bytes (little-endian, as NCBI's on its targets).
 #[inline]
 fn write_word(os: &mut impl Write, word: Word) -> std::io::Result<()> {
     os.write_all(&word.to_le_bytes())
@@ -529,7 +529,7 @@ impl Pool {
         id
     }
 
-    /// `free(d)`: the chain from block `id` goes to the free blocks.
+    /// `free` of a block: the chain from block `id` goes to the free blocks.
     fn free_chain(&mut self, id: u32) {
         if id == 0 {
             return;
@@ -561,12 +561,13 @@ struct OffsetData {
     stride: u64,
     code_bits: u64,
     min_offset: u64,
-    /// `mult_` of the lists: `(ws_hint - hkey_width + 1) / stride`.
+    /// `mult_` of the lists: `ws_hint` less `hkey_width`, plus 1, divided by `stride`.
     mult: u64,
 }
 
 impl OffsetData {
-    /// `COffsetData_Factory(subject_map, options, pool)` and each list's `SetIndexParams`.
+    /// `COffsetData_Factory` (with `subject_map`, `options` and `pool`) and each list's
+    /// `SetIndexParams`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1303-1320
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:953-957
     fn new(options: &Options) -> Self {
@@ -586,7 +587,7 @@ impl OffsetData {
         }
     }
 
-    /// `AddData(item, total_)` of the list of `nmer`.
+    /// `AddData` (with `item` and `total_`) of the list of `nmer`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1255-1259
     #[inline]
     fn add_data(&mut self, nmer: usize, item: Word) {
@@ -620,10 +621,10 @@ impl OffsetData {
         })
     }
 
-    /// `TruncateList(offset, total_)` of the list of `nmer`: the entries from the first that is
-    /// at least `offset` are dropped, with the code before it. Every list is read from its
-    /// start, as NCBI reads it: a list is not always in increasing order (with `-stride 1` a
-    /// local id of many short sequences has positions whose offsets reach into the local id's
+    /// `TruncateList` (with `offset` and `total_`) of the list of `nmer`: the entries from the
+    /// first that is at least `offset` are dropped, with the code before it. Every list is read
+    /// from its start, as NCBI reads it: a list is not always in increasing order (with `-stride 1`
+    /// a local id of many short sequences has positions whose offsets reach into the local id's
     /// bits, above the offsets of a later local id).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1262-1286
     fn truncate_list(&mut self, nmer: usize, offset: Word) {
@@ -652,7 +653,7 @@ impl OffsetData {
         self.resize(nmer, newsize);
     }
 
-    /// `CData::resize(newsize)` to a smaller size.
+    /// `CData::resize` to the smaller size `newsize`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1178-1201
     fn resize(&mut self, nmer: usize, newsize: usize) {
         if newsize == 0 {
@@ -673,8 +674,9 @@ impl OffsetData {
         self.sizes[nmer] = newsize as u32;
     }
 
-    /// `EncodeAndAddOffset(nmer, start, stop, curr, offset)`: the offset, after the code of its
-    /// distances to the ends of its valid interval when one of them is at most the stride.
+    /// `EncodeAndAddOffset` with `nmer`, `start`, `stop`, `curr` and `offset`: the offset, after
+    /// the code of its distances to the ends of its valid interval when one of them is at most the
+    /// stride.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1450-1467
     #[inline]
     fn encode_and_add_offset(
@@ -703,9 +705,9 @@ impl OffsetData {
         self.add_data(nmer as usize, offset);
     }
 
-    /// `AddSeqSeg(seq, seqlen, start, stop)`: the Nmers ending in the valid interval `start ..
-    /// stop` of the chunk whose data start at byte `soff`, at the positions that are multiples
-    /// of the stride in its local id (`CheckOffset`).
+    /// `AddSeqSeg` with `seq`, `seqlen`, `start` and `stop`: the Nmers ending in the valid interval
+    /// `start .. stop` of the chunk whose data start at byte `soff`, at the positions that are
+    /// multiples of the stride in its local id (`CheckOffset`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1470-1490
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:879-888
     fn add_seq_seg(&mut self, map: &SubjectMap, soff: u32, start: u32, stop: u32) {
@@ -756,9 +758,9 @@ impl OffsetData {
         }
     }
 
-    /// `COffsetList::Save(os)`: the list's codes, each with its offset, and the offsets that are
-    /// multiples of `mult_`, then for each `m` from `mult_ - 1` down to 1 the other offsets
-    /// whose largest divisor up to `mult_` is `m`, then 0 (for a list that is not empty).
+    /// `COffsetList::Save` (to `os`): the list's codes, each with its offset, and the offsets that
+    /// are multiples of `mult_`, then for each `m` from one less than `mult_` down to 1 the other
+    /// offsets whose largest divisor up to `mult_` is `m`, then 0 (for a list that is not empty).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1222-1252
     fn save_list(
         &self,
@@ -793,8 +795,8 @@ impl OffsetData {
         Ok(())
     }
 
-    /// `Save(os)`: the total of the words (with the 0 that ends each list and the 0 before the
-    /// first), the hash table (each Nmer's first word in the lists, 0 for an empty list), then
+    /// `Save` (to `os`): the total of the words (with the 0 that ends each list and the 0 before
+    /// the first), the hash table (each Nmer's first word in the lists, 0 for an empty list), then
     /// the lists; with `stat_file_name`, the size of each list that is not empty.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1399-1447
     fn save(&mut self, os: &mut impl Write, options: &Options) -> std::io::Result<()> {
@@ -840,32 +842,6 @@ impl OffsetData {
     }
 }
 
-/// `CDbIndex_Factory::SaveHeader`: the version (5 legacy, 6 new), the width, the Nmer length,
-/// then `OFFSET_COMBINED` and `UNCOMPRESSED` (legacy) or the stride and the word size hint,
-/// then the first and last sequences and chunks.
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1604-1634
-fn save_header(
-    os: &mut impl Write,
-    options: &Options,
-    [start, start_chunk, stop, stop_chunk]: [SeqNum; 4],
-) -> std::io::Result<()> {
-    let version = if options.legacy { VERSION } else { VERSION + 1 };
-    os.write_all(&[version, 0, 0, 0, 0, 0, 0, 0])?;
-    os.write_all(&WIDTH_32.to_le_bytes())?;
-    write_word(os, options.hkey_width as Word)?;
-    if options.legacy {
-        write_word(os, OFFSET_COMBINED)?;
-        write_word(os, UNCOMPRESSED)?;
-    } else {
-        write_word(os, options.stride as Word)?;
-        write_word(os, options.ws_hint as Word)?;
-    }
-    for word in [start, start_chunk, stop, stop_chunk] {
-        write_word(os, word)?;
-    }
-    Ok(())
-}
-
 /// Why a volume was not made, after what NCBI's would have posted.
 pub(crate) enum Stop {
     Stream(StreamError),
@@ -881,9 +857,9 @@ impl From<StreamError> for Stop {
     }
 }
 
-/// `CDbIndex::MakeIndex(input, oname, start, stop, options)` (`do_create_1_2`): the index
-/// volume `oname` of the sequences from `start` of `input`; `stop` becomes the number after its
-/// last sequence (`start` when the input had none left, and then nothing is written). A
+/// `CDbIndex::MakeIndex` with `input`, `oname`, `start`, `stop` and `options` (`do_create_1_2`):
+/// the index volume `oname` of the sequences from `start` of `input`; `stop` becomes the number
+/// after its last sequence (`start` when the input had none left, and then nothing is written). A
 /// sequence that the volume cannot take whole goes back to the input. `post` gets the messages
 /// of the input's sequences; `cerr` gets the lines NCBI writes to `std::cerr`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1657-1760
@@ -968,7 +944,15 @@ pub(crate) fn make_index(
     // open, or a write that fails, is not reported.
     if let Ok(file) = File::create(oname) {
         let mut os = BufWriter::with_capacity(1 << 20, file);
-        let _ = save_header(&mut os, options, [start, start_chunk, *stop, stop_chunk])
+        let header = Header::of(
+            options.legacy,
+            options.hkey_width as Word,
+            options.stride as Word,
+            options.ws_hint as Word,
+            [start, start_chunk, *stop, stop_chunk],
+        );
+        let _ = header
+            .write(&mut os)
             .and_then(|()| offset_data.save(&mut os, options))
             .and_then(|()| subject_map.save(&mut os))
             .and_then(|()| os.flush());

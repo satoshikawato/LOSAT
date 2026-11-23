@@ -89,7 +89,7 @@ fn title_from_bio_source(taxname: Option<&[u8]>) -> Vec<u8> {
     title
 }
 
-/// `NStr::StartsWith(s, prefix, NStr::eNocase)`.
+/// `NStr::StartsWith` with `NStr::eNocase`.
 fn starts_with_nocase(text: &[u8], prefix: &[u8]) -> bool {
     text.len() >= prefix.len() && text[..prefix.len()].eq_ignore_ascii_case(prefix)
 }

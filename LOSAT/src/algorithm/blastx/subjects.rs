@@ -102,7 +102,7 @@ impl<'a> Subjects<'a> {
                     count: i32::try_from(count).unwrap_or(i32::MAX),
                     gumbel_total: total,
                     shortest,
-                    average: (total / count.max(1)) as i32,
+                    average: crate::stats::setup::fasta_average_length(total, self.len()),
                     request_count: i32::try_from(count).unwrap_or(i32::MAX),
                 }
             }
@@ -121,6 +121,22 @@ impl<'a> Subjects<'a> {
 
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)
+    }
+
+    /// The error of the preliminary search's first read of the database after a batch's set-up
+    /// checks, where a sequence file cannot be opened
+    /// (`common::database::sequence_file_read_error`): NCBI's engine error, or LOSAT's refusal of
+    /// an error that is not NCBI's; `None` for `-subject`.
+    pub(crate) fn sequence_file_read_error(&self) -> Option<anyhow::Error> {
+        use crate::algorithm::common::database::{sequence_file_read_error, PreliminaryReadError};
+        let Subjects::Stream(stream) = self else {
+            return None;
+        };
+        let error = sequence_file_read_error(stream.db.seqdb(), "BLASTX")?;
+        Some(match error.downcast::<PreliminaryReadError>() {
+            Ok(PreliminaryReadError(text)) => super::native::engine(text),
+            Err(refusal) => refusal,
+        })
     }
 
     /// `error`, raised by a search after the point where `Unreadable` subjects fail it

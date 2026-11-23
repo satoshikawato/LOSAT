@@ -6,9 +6,9 @@
   "description": "t",
   "number-of-letters": 134640,
   "number-of-sequences": 1024,
-  "last-updated": "2026-11-20T20:20:00",
+  "last-updated": "2026-11-21T22:41:00",
   "number-of-volumes": 1,
-  "bytes-total": 268443,
+  "bytes-total": 268445,
   "bytes-to-cache": 47057,
   "files": [
     "db.nal",

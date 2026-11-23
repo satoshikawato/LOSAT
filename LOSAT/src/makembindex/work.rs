@@ -14,8 +14,9 @@ use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::dbindex::factory::{make_index, Stop};
+use crate::dbindex::format::{volume_name, SuperHeader};
 use crate::dbindex::stream::{BlastDbStream, FastaStream, Filter, SequenceStream, StreamError};
-use crate::dbindex::{save_super_header, unsupported, volume_name, Options, SeqNum, MAX_STRIDE};
+use crate::dbindex::{unsupported, Options, SeqNum, MAX_STRIDE};
 use crate::ncbi_app::args::{ArgException, Args};
 use crate::ncbi_app::files::{open_text_file, Cin};
 use crate::ncbi_app::Diag;
@@ -196,7 +197,7 @@ fn no_defined_index(options: &Options) -> String {
     }
 }
 
-/// `CSequenceIStreamFasta(name)`: the file, or `failed to open input stream`.
+/// `CSequenceIStreamFasta` of `name`: the file, or `failed to open input stream`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:55-71
 fn fasta_file(name: &str, titles: bool) -> Result<FastaStream<'static>, Failure> {
     match open_text_file(name) {
@@ -213,7 +214,7 @@ fn fasta_file(name: &str, titles: bool) -> Result<FastaStream<'static>, Failure>
     }
 }
 
-/// `Run` itself; `Ok` holds its exit status (an `exit(1)` after an error post included).
+/// `Run` itself; `Ok` holds its exit status (an `exit` of 1 after an error post included).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.cpp:151-378
 fn run_index<'a>(
     args: &Args,
@@ -301,7 +302,7 @@ fn new_style(
             ));
             return Ok(1);
         }
-        save_super_header(&format!("{dbv_name}.shd"), num_seq, num_vol);
+        SuperHeader { num_seq, num_vol }.save(&format!("{dbv_name}.shd"));
     }
     Ok(0)
 }

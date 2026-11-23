@@ -41,7 +41,7 @@ With reward 0 and penalty 0 (`-task rmblastn`, or `-reward 0 -penalty 0` with an
 
 | Option | Default | Meaning |
 |:---|:---|:---|
-| `-task` | `megablast` | One of the four tasks above |
+| `-task` | `megablast` | One of the five tasks above |
 | `-evalue` | 10 (1000 for `blastn-short`) | Report hits with an E-value at or below this value |
 | `-outfmt` | 0 | Output format; see [Output](#output) |
 | `-out` | standard output | Write the report to a file |
@@ -93,9 +93,8 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 LOSAT stops with an error for these `blastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
 - `-reward 0` with a penalty other than 0, and `-reward 0 -penalty 0` with the greedy extension of `-task megablast`.
-- `-ungapped` together with `-outfmt 17` (SAM).
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- `-index_name`. `-use_index true` on a database that has a MegaBLAST index (`makembindex`).
+- `-use_index true` with an index of only some database volumes, a later query batch or query chunk whose scan saves a second initial hit into the list that NCBI frees; also an index volume whose parts do not fit together, an index not made from the database, a seed that starts at or past the last letter of its sequence, and an old-style index of fewer sequences than the database searched in more than one query batch or query chunk (NCBI reads past the index or the sequence there, or stops with an error). Other searches with an index, and the warning paths (no index found, a first index volume whose header does not read, or a `-word_size` below the index's minimum), run as in NCBI BLAST+; with `-db_hard_mask`, see [Differences from NCBI BLAST+](../differences.md#blastn--use_index-true-with--db_hard_mask).
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.
 - Extreme `-xdrop_gap`, `-xdrop_gap_final` or `-xdrop_ungap` values for which NCBI BLAST+ overflows its 32-bit arithmetic.
 

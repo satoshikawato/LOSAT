@@ -15,7 +15,7 @@ the directory of the case before it), with the input files copied in first, so t
 the command line, in the log and in the files are relative as a user types them.
 
 One expectation leaves NCBI's bytes, in one place: `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS
-approved exception 18, the Owner's decision of 2026-11-20). NCBI's makeblastdb gives a
+approved exception 25, the Owner's decision of 2026-11-20). NCBI's makeblastdb gives a
 single-volume database built with `-gi_mask` an alias file whose DBLIST is the database's own
 absolute path; no program can open that database, and makeblastdb itself ends with "BLAST Database
 error: Illegal configuration: DB alias files are mutually recursive." (exit status 2, no metadata
@@ -34,11 +34,15 @@ Output files:
                               written by hand; `ncbi_single.nal` is the alias file that makeblastdb
                               wrote for a single-volume database with `-gi_mask` (`{C}` for its
                               directory), which LOSAT never writes: the cases x10 put it beside
-                              a database as an earlier run of NCBI's would have left it
+                              a database as an earlier run of NCBI's would have left it;
+                              `src4.*` is a version 4 database of nucl.fa with the mask column of
+                              dust_nucl.asnb that makeblastdb wrote, the input of the cases s01 and
+                              s02 (`-input_type blastdb`; `@SRC4` in the table of this script)
   cases.tsv                   one row per case: name, losat, setup, then the words after
                               `makeblastdb`, one per field. `losat`: `same` (LOSAT does as NCBI),
-                              `refuse` (LOSAT refuses the input: two algorithms with one name, whose
-                              files NCBI writes through two streams; see gi_mask.rs), `parser` (an
+                              `refuse` (LOSAT refuses the input: two algorithms with one name that
+                              would write one data file at the same time, through two streams of
+                              NCBI's; see gi_mask.rs), `parser` (an
                               argument rule: LOSAT's parser refuses the words, exit status 2, where
                               NCBI's prints its usage). `setup`: space separated, `-` for none:
                               `F` copies in/F, `F>G` copies in/F to G, `F^N>G` writes the first N
@@ -65,9 +69,14 @@ Output files:
                               their bytes are those of a build without -gi_mask, which the fixtures
                               of the mask writer and of the database writer compare.
 
-Rerunning changes the dates in the `.gmi`/`.gni` files and the alias files (the tests mask them).
+The "bytes-total" of every metadata file that a run writes is checked to be the sum of the sizes of
+the files it lists (the Rust test compares LOSAT's with that sum).
+
+Rerunning changes the dates in the `.gmi`/`.gni` files and the alias files (the tests mask them), and
+in the files of `in/src4`.
 """
 import argparse
+import json
 import os
 import random
 import re
@@ -132,6 +141,13 @@ def write_inputs(d):
             if k % 7 == 0:
                 body += "AT" * 25 + rnd(30)
             f.write(">gi|%d|gb|BG%06d.1| big %d\n%s\n" % (gi, k, k, wrap(body)))
+    # The last three records of big.fa, and the records of nucl.fa without a GI: the inputs of
+    # the masks of one algorithm that writes after another of its name (x12) or never (x11).
+    big_records = (d / "big.fa").read_text().split(">")[1:]
+    (d / "big_late.fa").write_text("".join(">" + r for r in big_records[-3:]))
+    (d / "nucl_nogionly.fa").write_text("".join(
+        ">" + h + "\n" + wrap(seq) + "\n" for h, seq in nucl if not h.startswith("gi|")
+        and "|gi|" not in h))
     aa = "ACDEFGHIKLMNPQRSTVWY"
     prot = [
         ("gi|7001|gb|AAA00001.1| p one", rnd(80, aa) + "Q" * 25 + rnd(90, aa)),
@@ -203,6 +219,10 @@ def write_masks(bin_dir, d):
     run(dust + ["-in", "nucl.fa", "-outfmt", "maskinfo_asn1_text", "-out", "dust_nucl.asnt"], d)
     run([bin_dir / "dustmasker", "-infmt", "fasta", "-in", "nucl.fa", "-outfmt", "maskinfo_asn1_bin",
          "-out", "dust_nucl_noparse.asnb"], d)
+    for name in ("big_late", "nucl_nogionly"):
+        run(dust + ["-in", f"{name}.fa", "-outfmt", "maskinfo_asn1_bin", "-level", "10", "-out",
+                    f"dust10_{name}.asnb"], d)
+        (d / f"{name}.fa").unlink()
     run([bin_dir / "segmasker", "-infmt", "fasta", "-parse_seqids", "-in", "prot.fa", "-outfmt",
          "maskinfo_asn1_bin", "-out", "seg_prot.asnb"], d)
     run([bin_dir / "convert2blastmask", "-in", "lower_nucl.fa", "-masking_algorithm", "mymask",
@@ -212,6 +232,10 @@ def write_masks(bin_dir, d):
 
 
 N = ["-in", "nucl.fa", "-dbtype", "nucl", "-parse_seqids", "-out", "db", "-title", "t"]
+BN = ["-in", "big.fa", "-dbtype", "nucl", "-parse_seqids", "-out", "db", "-title", "t"]
+# -input_type blastdb from in/src4.* (`write_source_db`; `@SRC4` in a setup lists its files).
+S = ["-input_type", "blastdb", "-in", "src4", "-dbtype", "nucl", "-parse_seqids", "-out", "db",
+     "-title", "t", "-gi_mask"]
 NM = N + ["-max_file_sz", "400"]
 P = ["-in", "prot.fa", "-dbtype", "prot", "-parse_seqids", "-out", "db", "-title", "pt"]
 DN = "nucl.fa dust_nucl.asnb"
@@ -334,6 +358,28 @@ CASES = [
     ("x10_2", "same", "^ ncbi_single.nal=>db.nal",
      N + ["-mask_data", "dust_nucl.asnb", "-gi_mask", "-gi_mask_name", "gm1"]),
     ("x10_3", "same", "^ ncbi_single.nal=>db.nal", N + ["-mask_data", "dust_nucl.asnb"]),
+    # Two algorithms of one name (x11, x12): one never writes, or each data volume is written by
+    # one algorithm after the other's closed it (the files are NCBI's; w25, w25b and m04 write
+    # one data file at the same time and are refused).
+    ("x11_1", "same", "nucl.fa dust_nucl.asnb dust10_nucl_nogionly.asnb",
+     N + ["-mask_data", "dust_nucl.asnb,dust10_nucl_nogionly.asnb", "-gi_mask", "-gi_mask_name",
+          "x,x"]),
+    ("x11_2", "same", "nucl.fa dust_nucl.asnb dust10_nucl_nogionly.asnb",
+     N + ["-mask_data", "dust10_nucl_nogionly.asnb,dust_nucl.asnb", "-gi_mask", "-gi_mask_name",
+          "x,x"]),
+    ("x12", "same", "big.fa dust_big.asnb dust10_big_late.asnb",
+     BN + ["-max_file_sz", "4000", "-mask_data", "dust_big.asnb,dust10_big_late.asnb",
+           "-gi_mask", "-gi_mask_name", "x,x"]),
+    # -input_type blastdb: the input's algorithms write GI masks under the GIs of every
+    # definition line of a sequence; s02 with an algorithm of -mask_data first.
+    ("s01", "same", "@SRC4", S),
+    ("s02", "same", "@SRC4 dust10_nucl.asnb",
+     S + ["-mask_data", "dust10_nucl.asnb", "-gi_mask_name", "m"]),
+    # An exclusion is reported before the missing -dbtype (x_PostCheck's first walk).
+    ("e10", "parser", DN, ["-in", "nucl.fa", "-taxid", "1", "-taxid_map", "nucl.fa",
+                           "-parse_seqids", "-out", "db"]),
+    ("e11", "parser", DN, ["-in", "nucl.fa", "-gi_mask", "-mask_id", "foo", "-mask_data",
+                           "dust_nucl.asnb", "-parse_seqids", "-out", "db"]),
     ("m01", "same", DN2, NM + ["-mask_data", "dust_nucl.asnb,dust10_nucl.asnb", "-gi_mask",
                                "-gi_mask_name", "m1,m2"]),
     ("m03", "same", DN, NM + GM),
@@ -409,6 +455,46 @@ def setup(case_dir, tokens, inputs):
 RECURSION = b"BLAST Database error: Illegal configuration: DB alias files are mutually recursive.\n"
 
 
+def write_source_db(bin_dir, d, env):
+    """`in/src4.*`: a version 4 database of nucl.fa with the mask column of dust_nucl.asnb, the
+    input of the cases of `-input_type blastdb`. Returns the names of its files (`@SRC4`)."""
+    words = N[:-4] + ["-blastdb_version", "4", "-mask_data", "dust_nucl.asnb", "-out", "src4",
+                      "-title", "src"]
+    result = subprocess.run([str(bin_dir / "makeblastdb")] + words, cwd=d, capture_output=True,
+                            env=env)
+    if result.returncode != 0 or result.stderr:
+        raise SystemExit(f"src4: {result.returncode} {result.stderr!r}")
+    return " ".join(sorted(p.name for p in d.glob("src4.*")))
+
+
+def metadata_sizes(case_dir):
+    """The sizes of the metadata files under `case_dir`, taken before a run."""
+    return {path: path.stat().st_size for path in case_dir.rglob("*.[np]js")}
+
+
+def check_bytes_total(case_dir, stamp, before):
+    """The "bytes-total" of every metadata file that the run wrote is the sum of the sizes of the
+    files it lists, each time it lists one, the metadata file itself at its size before the run
+    (`before`: makeblastdb lists the files before it writes the new one, so an old one that the
+    run did not remove counts as it was). The Rust test compares LOSAT's distance from that sum
+    with 0."""
+    for path in sorted(case_dir.rglob("*.[np]js")):
+        if path.stat().st_mtime_ns < stamp.stat().st_mtime_ns:
+            continue
+        meta = json.loads(path.read_text())
+        total = 0
+        for name in meta["files"]:
+            listed = path.parent / name
+            if listed == path:
+                if path not in before:
+                    raise SystemExit(f"{path}: lists itself, which did not exist before the run")
+                total += before[path]
+            else:
+                total += listed.stat().st_size
+        if meta["bytes-total"] != total:
+            raise SystemExit(f"{path}: bytes-total {meta['bytes-total']}, files {total}")
+
+
 def write_ncbi_single_alias(bin_dir, inputs, work, env):
     """`in/ncbi_single.nal`: the alias file that NCBI's makeblastdb writes for a single-volume
     database built with `-gi_mask` (DBLIST = the database's absolute path, `{C}/db` here), as an
@@ -428,14 +514,15 @@ def write_ncbi_single_alias(bin_dir, inputs, work, env):
 
 def single_volume_exception(bin_dir, case_dir, argv, rc, stderr, stamp, env):
     """The one place where an expectation leaves NCBI's bytes (PD-LOSAT-NCBI-DEFECTS approved
-    exception 18; the module's docstring). Where this run of makeblastdb with `-gi_mask` wrote the
+    exception 25; the module's docstring). Where this run of makeblastdb with `-gi_mask` wrote the
     alias file of a single-volume database (DBLIST = the database's absolute path), that line
     becomes the database's file name without a directory; where the run then ended on "DB alias
     files are mutually recursive" (exit status 2), the line goes from the standard error or the
     `-logfile` file, the exit status is 0, and the metadata file is NCBI's `blastdbcmd -metadata`
     of the database. `stamp` is a file touched before the run. Returns the exit status and the
     standard error."""
-    if "-gi_mask" not in argv:
+    if "-gi_mask" not in argv or "-dbtype" not in argv:
+        # Without -dbtype the argument reader stops before anything is written (e10, e11).
         return rc, stderr
     out = argv[argv.index("-out") + 1]
     dbtype = argv[argv.index("-dbtype") + 1]
@@ -478,7 +565,8 @@ def masked_text(text, case_dir):
     masked."""
     text = text.replace(str(case_dir), "<C>")
     text = re.sub(r"^(Building a new DB, current time: ).*$", r"\1<T>", text, flags=re.M)
-    text = re.sub(r"^(Adding sequences from FASTA; added \d+ sequences in )\S+( seconds\.)$",
+    text = re.sub(r"^(Adding sequences from (?:FASTA|raw db source); added \d+ sequences in )\S+"
+                  r"( seconds\.)$",
                   r"\1<S>\2", text, flags=re.M)
     return text
 
@@ -500,6 +588,7 @@ def main():
     write_inputs(inputs)
     write_masks(bin_dir, inputs)
     write_ncbi_single_alias(bin_dir, inputs, work, env)
+    src4 = write_source_db(bin_dir, inputs, env)
     if out.exists():
         shutil.rmtree(out)
     for sub in ("in", "expected", "db"):
@@ -512,6 +601,7 @@ def main():
     put = []
     stamp = work / "stamp"
     for name, losat, setup_text, words in CASES:
+        setup_text = setup_text.replace("@SRC4", src4)
         tokens = setup_text.split()
         if tokens and tokens[0] == "^":
             tokens = tokens[1:]
@@ -521,12 +611,14 @@ def main():
             put = []
         put += setup(case_dir, tokens, inputs)
         argv = [w.replace("{C}", str(case_dir)) for w in words]
+        before = metadata_sizes(case_dir)
         stamp.touch()
         time.sleep(0.05)
         result = subprocess.run([str(bin_dir / "makeblastdb")] + argv, cwd=case_dir,
                                 capture_output=True, env=env)
         rc, stderr = single_volume_exception(bin_dir, case_dir, argv, result.returncode,
                                              result.stderr, stamp, env)
+        check_bytes_total(case_dir, stamp, before)
         rows.append("\t".join([name, losat, setup_text] + words))
         exp = out / "expected"
         (exp / f"{name}.rc").write_text(f"{rc}\n")

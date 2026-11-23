@@ -1,7 +1,7 @@
-//! Output streams to the host (docs/web/abi_v2.md §3, §5): `losat_host.emit(stream,
-//! ptr, len)`. The engine formats on the thread that called the export (the caller
-//! runs the search pool's slot zero, `LOSAT/src/utils/threading.rs`), so every call
-//! reaches the host's own thread.
+//! Output streams to the host (docs/web/abi_v2.md §3, §5): the `losat_host.emit` import takes a
+//! stream, a pointer and a length. The engine formats on the thread that called the export (the
+//! caller runs the search pool's slot zero, `LOSAT/src/utils/threading.rs`), so every call reaches
+//! the host's own thread.
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,6 +30,11 @@ pub const STREAM_DISCARD: u32 = 9;
 /// that the command line writes to its standard error without `-logfile`. Line WQA's sweep, D7,
 /// 2026-11-20.
 pub const STREAM_MESSAGES: u32 = 10;
+/// The text that the command line prints to its standard output in place of a run, exit status 0
+/// (docs/web/abi_v2.md §5): its help (`-h`, `-help`, `-help-full`, `--help`), the XML of
+/// `-xmlhelp`, or a version (`-version`, `-version-full`, `-version-full-xml`,
+/// `-version-full-json`). Line WQA's D14, 2026-11-20.
+pub const STREAM_PRINTED: u32 = 11;
 /// The place "nowhere" in the signals of `STREAM_DISCARD` and `STREAM_MESSAGES` (`place`): the
 /// messages of TBLASTX's `-logfile ""` or `-logfile /dev/null`, which the run writes nowhere.
 pub const PLACE_NOWHERE: u32 = u32::MAX;

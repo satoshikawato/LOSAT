@@ -33,7 +33,7 @@ fn the_filter_program_table_is_blastdb_asn_s() {
     assert_eq!(FilterProgram::Other.value(), 100);
 }
 
-/// `GetMaskData(oid, algo)`: the masks of NCBI's OID `oid` (`SeqDb::locate_oid`).
+/// `GetMaskData` with `oid` and `algo`: the masks of NCBI's OID `oid` (`SeqDb::locate_oid`).
 fn oid_mask_ranges(db: &SeqDb, oid: u32, algo: i32) -> Result<MaskRanges, SeqDbError> {
     db.mask_ranges_at(db.locate_oid(oid)?, algo)
 }
@@ -773,9 +773,9 @@ fn a_user_column_beside_the_masks_reads_its_big_endian_data_file() {
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:3841-3848 CheckColumnFailureCleanup
 /// NCBI's `data/broken-mask-data-db` has an empty `.paa` beside a `.pab` alone, and the case
 /// asserts that `GetAvailableMaskAlgorithms` throws: the empty index is opened (the
-/// big-endian data file is enough) and fails NCBI's `SEQDB_FILE_ASSERT(m_Length >= end)`,
-/// whose text names NCBI's source line, so LOSAT's error is its own. Rust has no cleanup to
-/// check.
+/// big-endian data file is enough) and fails NCBI's check `SEQDB_FILE_ASSERT` that `m_Length` is at
+/// least `end`, whose text names NCBI's source line, so LOSAT's error is its own. Rust has no
+/// cleanup to check.
 #[test]
 fn an_empty_index_beside_a_big_endian_data_file_fails() {
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nab"]);
@@ -1409,10 +1409,12 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
 /// have a blob of 8 bytes and the others none.
 fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::column::Column {
     let base = dir.name("edge");
-    let mut column = crate::writedb::mask_data::column::Column::new(
+    let mut column = crate::writedb::column::Column::new(
         &base,
         false,
         0,
+        0,
+        super::column::MASK_DATA_TITLE,
         &Default::default(),
         b"Fri Nov 14 12:00:00 2026",
         0,

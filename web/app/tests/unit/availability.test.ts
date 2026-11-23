@@ -76,7 +76,7 @@ function setup(
       const failing = fail.validate === true;
       return gated(async () => {
         if (failing) throw new UnavailableError(SERIAL);
-        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } };
+        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
       }, hold.start === true);
     },
     validate: async () => ({ ok: true, dataLoaders: true }) as const,
@@ -118,7 +118,8 @@ describe('a part of LOSAT that is unavailable, in the search form', () => {
 
   it('an input that the engine cannot read is still the input\'s', async () => {
     const { draft } = setup();
-    draft.setPaste('query', '>q\n$$$$$$\n');
+    // A record over 2147483647 letters, which LOSAT refuses.
+    draft.setPaste('query', '>q\n>?2147483647\nA\n');
     await draft.idle();
     expect(sourceOf(draft, 'query').status).toBe('failed');
     expect('unavailable' in sourceOf(draft, 'query')).toBe(false);
@@ -528,6 +529,6 @@ describe('the remedy', () => {
     const crossed = new Error(SERIAL);
     crossed.name = 'UnavailableError';
     expect(failureText(crossed)).toBe(`${SERIAL}. Reload the page.`);
-    expect(failureText(new Error('BLAST engine error: x'))).toBe('BLAST engine error: x');
+    expect(failureText(new Error('LOSAT engine error: x'))).toBe('LOSAT engine error: x');
   });
 });

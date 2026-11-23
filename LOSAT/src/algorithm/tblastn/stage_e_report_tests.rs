@@ -134,9 +134,11 @@ fn initial_tabular_oracle_bytes() {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                best_hit: None,
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             },
             if mode == 2 {
                 BlastCompoAdjustMode::CompositionMatrixAdjust
@@ -151,6 +153,7 @@ fn initial_tabular_oracle_bytes() {
         let mut outputs_bytes = vec![Vec::new(); FORMATS.len()];
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: FORMATS
                 .iter()
                 .zip(outputs_bytes.iter_mut())
@@ -220,6 +223,8 @@ fn initial_tabular_oracle_bytes() {
                 env!("CARGO_MANIFEST_DIR"),
             ))
             .unwrap();
+            // The frozen files are NCBI's bytes; LOSAT writes them in its own words.
+            let expected = crate::wording::losat_output_bytes(&expected).into_owned();
             if *actual != expected {
                 // No NCBI counterpart: test plumbing; the platform's temporary directory
                 // replaces the Unix-only "/tmp" that made a mismatch fail on Windows with

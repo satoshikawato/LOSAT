@@ -1,6 +1,7 @@
 //! NCBI's guess of an alignment file's format (`CAlnFormatGuesser`), ported whole: LOSAT reads the
 //! Clustal files that NCBI reads and names the other formats that NCBI would read as such.
 
+use super::base::split_merge;
 use super::lines::PeekAheadStream;
 use crate::ncbi_str::{string_to_int, string_to_uint, truncate_spaces};
 
@@ -19,7 +20,7 @@ pub(crate) enum AlignFormat {
 /// `CAlnFormatGuesser::SAMPLE_SIZE`.
 const SAMPLE_SIZE: usize = 10;
 
-/// `CAlnFormatGuesser::GetFormat(iStr)`.
+/// `CAlnFormatGuesser::GetFormat` of the stream `iStr`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:50-74
 /// `xInitSample`: the first `SAMPLE_SIZE` lines, each with the white space cut from both ends
@@ -56,40 +57,9 @@ pub(crate) fn guess_format(input: &mut PeekAheadStream<'_>) -> AlignFormat {
     AlignFormat::Unknown
 }
 
-/// `NStr::StartsWith(str, prefix)`.
+/// `NStr::StartsWith` of `str` with `prefix`.
 fn starts_with(str: &[u8], prefix: &[u8]) -> bool {
     str.starts_with(prefix)
-}
-
-/// `NStr::Split(str, " \t", tokens, fSplit_MergeDelimiters)` of a line whose ends carry no white
-/// space (the lines of the sample are cut; an empty line has no token).
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:199-201
-/// A line that was not cut (the lines that `sample_is_clustal` appends are not) can start or end
-/// with a delimiter, and `fSplit_MergeDelimiters` then leaves an empty token there. That is not
-/// `fSplit_Tokenize` (`utils::format_guess::tokens`, which the Clustal scanner uses: it has
-/// `fSplit_Truncate` too and gives no empty token), and the repository has no other port of the
-/// flag alone, so this one stays here.
-fn split_merge(line: &[u8]) -> Vec<&[u8]> {
-    if line.is_empty() {
-        return Vec::new();
-    }
-    let mut tokens = Vec::new();
-    let mut start = 0;
-    let mut i = 0;
-    while i < line.len() {
-        if line[i] == b' ' || line[i] == b'\t' {
-            tokens.push(&line[start..i]);
-            while i < line.len() && (line[i] == b' ' || line[i] == b'\t') {
-                i += 1;
-            }
-            start = i;
-        } else {
-            i += 1;
-        }
-    }
-    tokens.push(&line[start..]);
-    tokens
 }
 
 /// `xSampleIsNexus`.
@@ -99,7 +69,7 @@ fn sample_is_nexus(sample: &[Vec<u8>]) -> bool {
     starts_with(&sample[0].to_ascii_lowercase(), b"#nexus")
 }
 
-/// `xSampleIsClustal`: a first line `clustalw` or `clustal w` (a `CLUSTAL O(...)` header of Clustal
+/// `xSampleIsClustal`: a first line `clustalw` or `clustal w` (a `CLUSTAL O` header of Clustal
 /// Omega is neither), or three blocks of lines each ended by an empty line that follows a
 /// conservation line. The lines past the sample come from the stream as it is, not cut, and the
 /// sample grows with them.
@@ -149,7 +119,7 @@ fn sample_is_fasta_gap(sample: &[Vec<u8>]) -> bool {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_formatguess.cpp:199-211
 fn sample_is_phylip(sample: &[Vec<u8>]) -> bool {
-    let tokens = split_merge(&sample[0]);
+    let tokens = split_merge(&sample[0], b" \t");
     if tokens.len() != 2 {
         return false;
     }
@@ -166,7 +136,10 @@ fn sample_is_sequin(sample: &[Vec<u8>]) -> bool {
     if !sample[0].is_empty() {
         return false;
     }
-    let tokens = split_merge(&sample[1]);
+    let Some(second) = sample.get(1) else {
+        return false;
+    };
+    let tokens = split_merge(second, b" \t");
     if tokens.is_empty() {
         return false;
     }
@@ -196,7 +169,7 @@ fn sample_is_mult_align(sample: &[Vec<u8>]) -> bool {
         return false;
     }
     line_index += 1;
-    let tokens = split_merge(&sample[line_index]);
+    let tokens = split_merge(&sample[line_index], b" \t");
     if tokens.len() != 2 {
         return false;
     }
@@ -212,7 +185,7 @@ fn sample_is_mult_align(sample: &[Vec<u8>]) -> bool {
         return false;
     }
     line_index += 1;
-    let data_columns = split_merge(&sample[line_index]);
+    let data_columns = split_merge(&sample[line_index], b" \t");
     if data_columns.len() < 2 {
         return false;
     }

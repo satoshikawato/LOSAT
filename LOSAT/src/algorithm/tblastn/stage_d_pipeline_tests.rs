@@ -1,5 +1,25 @@
 use super::*;
 
+// NCBI BLAST+ 2.17.0, `tblastn -ungapped -comp_based_stats 0 -matrix FOO` with the queries of
+// tests/fasta/outfmt0/sc1_q_mix.faa (an empty record, one with O at 77 and 97, one of 480
+// letters, one of 32 X) against tests/db_search/tn_amb_s.fna, line O4c: each query's error,
+// then the warnings of its set-up; no Karlin-Altschul message, which comes after the score
+// block.
+#[test]
+fn an_unknown_matrix_fails_each_query_with_the_warnings_of_its_setup() {
+    let mut with_o = vec![b'A'; 100];
+    with_o[77] = b'O';
+    with_o[97] = b'o';
+    let queries = [Vec::new(), with_o, vec![b'M'; 480], vec![b'X'; 32]];
+    assert_eq!(
+        SetupEngineError::unknown_matrix(&queries).0,
+        "Error: Unknown error code -1 Warning: Sequence contains no data \
+         Error: Unknown error code -1 Warning: One or more O characters replaced by X for \
+         alignment score calculations at positions 77, 97 \
+         Error: Unknown error code -1 Error: Unknown error code -1 "
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922 and :716-735
 // (cited at `SubjectSetNumbers`)
 // A total of 2^32 letters or more is NCBI's `Int8` on every target, wasm32's 32-bit `usize`
@@ -24,6 +44,7 @@ fn subject_set_numbers_hold_totals_of_2_to_the_32_letters_or_more() {
                 engine_db_length: total,
                 min_length: 10,
                 request_count: 16,
+                average: (total / 16) as i32,
             }),
             ..SubjectSetNumbers::default()
         };
@@ -50,6 +71,43 @@ fn subject_set_numbers_hold_totals_of_2_to_the_32_letters_or_more() {
     assert_eq!(
         dbsize.gumbel_db_length(6_000_000_000),
         1_431_655_765_333_333_333
+    );
+}
+
+// `BlastSeqSrcGetAvgSeqLen` (cited at `average_subject_length`), the length of the ungapped
+// search's word cutoff: a FASTA set's total over its number of records in NCBI's `Uint4`
+// (truncated; 0 for no record), a database's average as the database gives it.
+#[test]
+fn average_subject_length_is_the_sets_or_the_databases() {
+    let fasta = SubjectSetNumbers::default();
+    assert_eq!(
+        fasta.average_subject_length(&SubjectLetters::Lengths(&[300, 400, 0])),
+        233
+    );
+    assert_eq!(
+        fasta.average_subject_length(&SubjectLetters::Lengths(&[])),
+        0
+    );
+    // An average of 4e9 letters: NCBI's `Uint4`, given back as the source's `Int4`.
+    assert_eq!(
+        fasta.average_subject_length(&SubjectLetters::Lengths(&[4_000_000_000, 4_000_000_000])),
+        -294_967_296
+    );
+    let database = SubjectSetNumbers {
+        database: Some(DatabaseNumbers {
+            total_length: 700,
+            num_seqs: 2,
+            gumbel_db_length: 700,
+            engine_db_length: 700,
+            min_length: 300,
+            request_count: 2,
+            average: 351,
+        }),
+        ..SubjectSetNumbers::default()
+    };
+    assert_eq!(
+        database.average_subject_length(&SubjectLetters::Lengths(&[300, 400])),
+        351
     );
 }
 
@@ -102,9 +160,11 @@ fn query_specific_word_xdrop_preserves_ncbi_bdt63307_seed() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
         BlastCompoAdjustMode::CompositionMatrixAdjust,
         true,
@@ -151,9 +211,11 @@ fn all_invalid_query_skips_subject_search_and_returns_empty_hitlist() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
         BlastCompoAdjustMode::CompositionMatrixAdjust,
         true,
@@ -441,9 +503,11 @@ fn natural_112_subject_local_path_matches_retained_ncbi_fields() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
         BlastCompoAdjustMode::CompositionMatrixAdjust,
         true,
@@ -532,9 +596,11 @@ fn natural_multi_query_local_path_matches_retained_ncbi_scores_and_coordinates()
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
         BlastCompoAdjustMode::CompositionMatrixAdjust,
         true,
@@ -692,9 +758,11 @@ fn code32_local_path_matches_cli_calibrated_api_oracle() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
     )
     .unwrap();
@@ -788,9 +856,11 @@ fn ordinary_traceback_controls_match_local_ncbi_full_precision_fields() {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                best_hit: None,
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             },
         )
         .unwrap();
@@ -975,9 +1045,11 @@ fn remaining_five_local_fixture_families_match_ncbi_stage_d() {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                best_hit: None,
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let results = run_local_search(
@@ -1026,7 +1098,6 @@ fn remaining_five_local_fixture_families_match_ncbi_stage_d() {
                         (
                             hsp.hsp.score,
                             payload.report_num_ident,
-                            payload.report_num_positives,
                             payload.align_length,
                             payload.report_mismatches,
                             payload.gap_letters,
@@ -1112,7 +1183,6 @@ fn remaining_five_local_fixture_families_match_ncbi_stage_d() {
                             (
                                 f[2].parse().unwrap(),
                                 f[5].parse().unwrap(),
-                                f[6].parse().unwrap(),
                                 f[7].parse().unwrap(),
                                 f[8].parse().unwrap(),
                                 f[9].parse().unwrap(),
@@ -1210,9 +1280,11 @@ fn four_generated_stage_c_chunk_families_match_ncbi_stage_d() {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                best_hit: None,
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let results = run_local_search(
@@ -1258,7 +1330,6 @@ fn four_generated_stage_c_chunk_families_match_ncbi_stage_d() {
                             (
                                 hsp.hsp.score,
                                 payload.report_num_ident,
-                                payload.report_num_positives,
                                 payload.align_length,
                                 payload.report_mismatches,
                                 payload.gap_letters,
@@ -1282,7 +1353,6 @@ fn four_generated_stage_c_chunk_families_match_ncbi_stage_d() {
                     (
                         f[2].parse().unwrap(),
                         f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
                         f[7].parse().unwrap(),
                         f[8].parse().unwrap(),
                         f[9].parse().unwrap(),
@@ -1297,27 +1367,12 @@ fn four_generated_stage_c_chunk_families_match_ncbi_stage_d() {
                 .collect();
             assert_eq!(actual.len(), expected.len(), "{name} retained count");
             for (
-                (
-                    score,
-                    ident,
-                    pos,
-                    length,
-                    mismatch,
-                    gaps,
-                    gapopen,
-                    q0,
-                    q1,
-                    s0,
-                    s1,
-                    frame,
-                    e,
-                    bits,
-                ),
+                (score, ident, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame, e, bits),
                 expected,
             ) in actual.into_iter().zip(expected)
             {
                 assert_eq!(
-                    (score, ident, pos, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame),
+                    (score, ident, length, mismatch, gaps, gapopen, q0, q1, s0, s1, frame),
                     expected,
                     "{name} report values/order"
                 );
@@ -1425,9 +1480,11 @@ fn long_multi_query_local_stage_d_matches_ncbi() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
         BlastCompoAdjustMode::NoCompositionBasedStats,
         false,
@@ -1457,7 +1514,6 @@ fn long_multi_query_local_stage_d_matches_ncbi() {
                     (
                         hsp.hsp.score,
                         payload.report_num_ident,
-                        payload.report_num_positives,
                         payload.align_length,
                         payload.report_mismatches,
                         payload.gap_letters,
@@ -1508,7 +1564,6 @@ fn long_multi_query_local_stage_d_matches_ncbi() {
                 (
                     f[2].parse().unwrap(),
                     f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
                     f[7].parse().unwrap(),
                     f[8].parse().unwrap(),
                     f[9].parse().unwrap(),
@@ -1577,9 +1632,11 @@ fn alternate_blosum45_word2_local_stage_d_matches_ncbi() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
         BlastCompoAdjustMode::NoCompositionBasedStats,
         false,
@@ -1593,6 +1650,9 @@ fn alternate_blosum45_word2_local_stage_d_matches_ncbi() {
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
             word_xdrop_bits: 7.0,
+            gapped: true,
+            unknown_matrix: false,
+            smith_waterman: false,
         },
         Some(&mut boundary),
     )
@@ -1632,7 +1692,6 @@ fn alternate_blosum45_word2_local_stage_d_matches_ncbi() {
                     (
                         hsp.hsp.score,
                         payload.report_num_ident,
-                        payload.report_num_positives,
                         payload.align_length,
                         payload.report_mismatches,
                         payload.gap_letters,
@@ -1683,7 +1742,6 @@ fn alternate_blosum45_word2_local_stage_d_matches_ncbi() {
                 (
                     f[2].parse().unwrap(),
                     f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
                     f[7].parse().unwrap(),
                     f[8].parse().unwrap(),
                     f[9].parse().unwrap(),
@@ -1751,9 +1809,11 @@ fn independent_composition_and_sum_stats_options_match_ncbi() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         };
         let mut boundary = StageDBoundaryTrace::default();
         let result = run_local_search(
@@ -1803,7 +1863,6 @@ fn independent_composition_and_sum_stats_options_match_ncbi() {
                         (
                             hsp.hsp.score,
                             payload.report_num_ident,
-                            payload.report_num_positives,
                             payload.align_length,
                             payload.report_mismatches,
                             payload.gap_letters,
@@ -1888,7 +1947,6 @@ fn independent_composition_and_sum_stats_options_match_ncbi() {
                     (
                         f[2].parse().unwrap(),
                         f[5].parse().unwrap(),
-                        f[6].parse().unwrap(),
                         f[7].parse().unwrap(),
                         f[8].parse().unwrap(),
                         f[9].parse().unwrap(),
@@ -1955,9 +2013,11 @@ fn six_masking_fixtures_match_both_local_stage_d_option_paths() {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                best_hit: None,
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let results = run_local_search(
@@ -1991,7 +2051,6 @@ fn six_masking_fixtures_match_both_local_stage_d_option_paths() {
             assert_eq!(
                 (
                     payload.report_num_ident,
-                    payload.report_num_positives,
                     payload.align_length,
                     payload.report_mismatches,
                     payload.gap_letters,
@@ -1999,7 +2058,6 @@ fn six_masking_fixtures_match_both_local_stage_d_option_paths() {
                 ),
                 (
                     f[5].parse().unwrap(),
-                    f[6].parse().unwrap(),
                     f[7].parse().unwrap(),
                     f[8].parse().unwrap(),
                     f[9].parse().unwrap(),
@@ -2123,9 +2181,11 @@ fn all_27_codes_and_code1_controls_match_local_ncbi_result_traces() {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    best_hit: None,
                     subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
+                    query_cov_hsp_perc: 0.0,
                 },
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 true,
@@ -2223,11 +2283,6 @@ fn all_27_codes_and_code1_controls_match_local_ncbi_result_traces() {
                     payload.report_num_ident,
                     custom_fields[5].parse().unwrap(),
                     "code {code} {label} report identities"
-                );
-                assert_eq!(
-                    payload.report_num_positives,
-                    custom_fields[6].parse().unwrap(),
-                    "code {code} {label} positives"
                 );
                 assert_eq!(
                     payload.align_length,
@@ -2437,9 +2492,11 @@ fn broad_112_subject_results_keep_every_ncbi_report_payload() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
     )
     .unwrap();
@@ -2627,9 +2684,11 @@ fn thirteen_subject_and_hard_seg_local_results_match_exact_ncbi_heap_fields() {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                best_hit: None,
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             },
         )
         .unwrap();
@@ -2745,9 +2804,11 @@ fn natural_evalue_sort_moves_the_owned_kappa_payload() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
     )
     .unwrap();
@@ -2844,9 +2905,11 @@ fn natural_postredo_containment_keeps_surviving_script_and_report_fields() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
     )
     .unwrap();
@@ -2962,9 +3025,11 @@ fn natural_composition_heap_replacement_keeps_new_hsp_payloads() {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            best_hit: None,
             subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
+            query_cov_hsp_perc: 0.0,
         },
     )
     .unwrap();
@@ -3213,9 +3278,11 @@ fn x_search_batches_takes_the_batches_whatever_their_number() {
         subject_set: Default::default(),
         engine_positives: false,
         culling_limit: 0,
+        best_hit: None,
         subject_besthit: false,
         pssm: None,
         fetch_excluded: None,
+        query_cov_hsp_perc: 0.0,
     };
     for ranges in [
         vec![0..1],
@@ -3303,9 +3370,11 @@ fn x_search_batches_side_by_side_gives_each_batch_its_report() {
         subject_set: Default::default(),
         engine_positives: false,
         culling_limit: 0,
+        best_hit: None,
         subject_besthit: false,
         pssm: None,
         fetch_excluded: None,
+        query_cov_hsp_perc: 0.0,
     };
     let ranges = vec![0..1, 1..2, 2..3, 3..4];
     let searched = x_search_batches(

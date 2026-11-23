@@ -75,17 +75,18 @@ pub enum NameMaskError<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2138-2141
-// `StringToNumeric(str, &int, flags, base)` is `NStr::StringToInt` that returns whether it
-// converted the text (`*value || !errno`; a converted 0 leaves `errno` at 0).
-/// `s_IsNumericId(id)` (`blastinput::db_mask::FilteringAlgorithm::parse` is the same test of
+// `StringToNumeric` (with `str`, the address of an `int`, `flags` and `base`) is
+// `NStr::StringToInt` that returns whether it converted the text (true when the value is not 0 or
+// `errno` is 0; a converted 0 leaves `errno` at 0).
+/// `s_IsNumericId` of `id` (`blastinput::db_mask::FilteringAlgorithm::parse` is the same test of
 /// the searches, `uniform_search.cpp:149-153`).
 fn is_numeric_id(id: &str) -> bool {
     string_to_int(id.as_bytes(), 0).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-303
-/// `NStr::Split(s, ":", items)` with flags 0: every `:` separates, empty tokens are kept
-/// (so `"30:"` is `["30", ""]`), and the empty string has no tokens.
+/// `NStr::Split` of `s` at `":"` into `items` with flags 0: every `:` separates, empty tokens are
+/// kept (so `"30:"` is `["30", ""]`), and the empty string has no tokens.
 pub(super) fn ncbi_split(s: &str) -> Vec<&str> {
     if s.is_empty() {
         Vec::new()
@@ -213,8 +214,8 @@ fn utf8_value<'a>(bytes: &'a [u8], path: &Path) -> Result<&'a str, SeqDbError> {
     })
 }
 
-/// Pads `text` with spaces on the right to `width` bytes (`setw(width) << left`; text that
-/// is longer is not cut).
+/// Pads `text` with spaces on the right to `width` bytes (`setw` of `width` with `left` alignment;
+/// text that is longer is not cut).
 fn push_padded(out: &mut String, text: &str, width: usize) {
     out.push_str(text);
     for _ in text.len()..width {
@@ -487,7 +488,7 @@ fn parse_details(id: i32, description: &str, source: &Path) -> Result<MaskAlgori
     match items.len() {
         2 => {
             // `NStr::StringToInt` throws a CStringException on a text that is no
-            // integer; `FindName(pid, false)` throws on a value the enum lacks.
+            // integer; `FindName` with `pid` and false throws on a value the enum lacks.
             let number = string_to_int(items[0].as_bytes(), 0).map_err(|_| {
                 bad(format!(
                     "the program {:?} of the mask algorithm description {description:?} \
@@ -582,7 +583,7 @@ fn read_ranges_into(
         let algo = blob.read_i32().map_err(format)?;
         let num_pairs = blob.read_i32().map_err(format)?;
         if algo == vol_algo {
-            // `ReadRaw(n*8)`: a negative count is NCBI's "hit end of data".
+            // `ReadRaw` of 8 times `n` bytes: a negative count is NCBI's "hit end of data".
             let bytes = blob.read_raw(i64::from(num_pairs) * 8).map_err(format)?;
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1418-1423
             // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:302-306
@@ -657,6 +658,7 @@ impl SeqDb {
             block,
         );
         match block.ranges(vol_oid) {
+            Ok(BlockMasks::NoMaskData) => return Ok(MaskRanges::Ranges(Vec::new())),
             Ok(BlockMasks::Ranges(ranges)) => return Ok(MaskRanges::Ranges(ranges.to_vec())),
             Ok(BlockMasks::AlgorithmNotInVolume) => {
                 return Ok(MaskRanges::AlgorithmNotInVolume {
@@ -868,8 +870,9 @@ impl SeqDb {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
                 let masks = match block.ranges(vol_oid) {
                     Ok(BlockMasks::Ranges(masks)) => masks,
-                    // Refused before (`check_search_masks`).
-                    Ok(BlockMasks::AlgorithmNotInVolume) => continue,
+                    // No masks; an algorithm not in the volume is refused before
+                    // (`check_search_masks`).
+                    Ok(BlockMasks::NoMaskData | BlockMasks::AlgorithmNotInVolume) => continue,
                     Err(_) => return None,
                 };
                 if masks.is_empty() {
@@ -987,7 +990,11 @@ enum BlockSource {
 /// The masks of a sequence of a [`MaskBlock`].
 #[derive(Debug)]
 pub enum BlockMasks<'a> {
-    /// The ranges, as stored (none for a sequence without mask data).
+    /// The sequence has no mask data (its volume has no mask column, or the sequence's blob is
+    /// empty): no ranges, and NCBI does not look the algorithm up in the volume.
+    NoMaskData,
+    /// The ranges of the sequence's mask data, as stored; with GI masks the ranges of its GI
+    /// (none for a GI without masks: NCBI never looks the algorithm up in a volume then).
     Ranges(&'a [(u32, u32)]),
     /// The sequence has mask data but its volume does not know the algorithm
     /// ([`MaskRanges::AlgorithmNotInVolume`]).
@@ -1024,19 +1031,19 @@ impl MaskBlock {
         }
         match self.source {
             BlockSource::Column => {}
-            BlockSource::None => return Ok(BlockMasks::Ranges(&[])),
+            BlockSource::None => return Ok(BlockMasks::NoMaskData),
             BlockSource::Gi => {
                 let first = self.read.map_or(0, |(range, _)| range.first);
                 return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
                     Some(Ok(span)) => Ok(BlockMasks::Ranges(&self.ranges[span.clone()])),
                     Some(Err(error)) => Err(BlockMaskError::Read(error)),
-                    None => Ok(BlockMasks::Ranges(&[])),
+                    None => Ok(BlockMasks::NoMaskData),
                 };
             }
         }
         let blob = self.blobs.blob(vol_oid).map_err(BlockMaskError::Read)?;
         if blob.is_empty() {
-            return Ok(BlockMasks::Ranges(&[]));
+            return Ok(BlockMasks::NoMaskData);
         }
         let Some(volume_algo) = self.volume_algo else {
             return Ok(BlockMasks::AlgorithmNotInVolume);
@@ -1054,7 +1061,7 @@ impl MaskBlock {
     }
 
     /// The read error that [`MaskBlock::ranges`] gives the sequence `vol_oid` (`Read`), owned.
-    fn into_read_error(self, vol_oid: u32) -> SeqDbError {
+    pub(crate) fn into_read_error(self, vol_oid: u32) -> SeqDbError {
         if let Some(error) = self.error {
             return error;
         }

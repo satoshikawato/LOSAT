@@ -1,7 +1,7 @@
 //! When two Seq-ids are one `CSeq_id_Handle` in NCBI BLAST+ 2.17.0: the identity that
 //! `makeblastdb`'s `CMaskedRangeSet` matches a mask's Seq-id and a database sequence's Seq-ids
 //! by (`c++/src/app/blastdb/masked_range_set.hpp`, `.cpp`: a `map<CSeq_id_Handle, CConstRef<CSeq_loc>>`
-//! per algorithm, filled with `CSeq_id_Handle::GetHandle(id)` and looked up the same way), and
+//! per algorithm, filled with `CSeq_id_Handle::GetHandle` of the id and looked up the same way), and
 //! that the object manager keys the ranges of a PSSM query's annotations by
 //! (`algorithm::pssm_search::annot_index`, `CHandleRangeMap`; psiblast and tblastn `-in_pssm`
 //! probes of line RG D3-1, `om/` cases `s_i*` and `s_o*`, agree with the rules below and with
@@ -60,7 +60,7 @@ pub(crate) enum TreeHandle {
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:193-207
-/// The key of the `CSeq_id_Handle` that `CSeq_id_Handle::GetHandle(id)` gives in NCBI 2.17.0
+/// The key of the `CSeq_id_Handle` that `CSeq_id_Handle::GetHandle` of the id gives in NCBI 2.17.0
 /// (`CSeq_id_Mapper::GetHandle` -> `FindOrCreate`): two Seq-ids are one handle exactly when
 /// their keys are equal. `Ok(None)`: a Textseq-id with neither accession nor name, which gets a
 /// new handle on every call (seq_id_tree.cpp:1187-1198) and so is one handle with no Seq-id,
@@ -111,7 +111,7 @@ pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeH
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1185
-/// The key of the info (`CSeq_id_Info`) of the handle that `CSeq_id_Handle::GetHandle(id)` gives:
+/// The key of the info (`CSeq_id_Info`) of the handle that `CSeq_id_Handle::GetHandle` of the id gives:
 /// two Seq-ids whose keys are equal share one info, and `GetSeqId()` of either handle is made from
 /// the Seq-id that made it ([`handle_seq_id`]). It is [`mask_handle_key`] but for a Textseq-id that
 /// packs: its info is shared by every accession with the same prefix (without case), number of
@@ -175,9 +175,9 @@ fn textseq_key(id: &ParsedSeqId, text: &TextseqId, mut key: Vec<u8>) -> Option<V
     Some(key)
 }
 
-/// `m_Packed` of the handle (0: the id has an info of its own). `CSeq_id_Handle::operator<`
-/// orders handles by `m_Packed - 1` as an unsigned number ([`mask_handle_order`]), then by the
-/// info's address; `CSeq_loc::Add(.., fMerge_All | fSort, NULL)` puts the ranges of each handle
+/// `m_Packed` of the handle (0: the id has an info of its own). `CSeq_id_Handle::operator<` orders
+/// handles by one less than `m_Packed`, as an unsigned number ([`mask_handle_order`]), then by the
+/// info's address; `CSeq_loc::Add` with `fMerge_All` and `fSort` puts the ranges of each handle
 /// together in that order (Seq_loc.cpp:4278, 4547-4596, 4641-4692, 5011-5021). Two different
 /// handles with the same `m_Packed` (both 0 included) are ordered by address, which no pure
 /// function knows.
@@ -225,9 +225,9 @@ pub(crate) fn mask_handle_packed(id: &ParsedSeqId) -> i64 {
     }
 }
 
-/// The position of a handle in `CSeq_id_Handle::operator<` among handles of different
-/// `m_Packed`: `m_Packed - 1` as an unsigned number (`TUintId`, 64 bits), so an unpacked handle
-/// (0) comes last.
+/// The position of a handle in `CSeq_id_Handle::operator<` among handles of different `m_Packed`:
+/// one less than `m_Packed`, as an unsigned number (`TUintId`, 64 bits), so an unpacked handle (0)
+/// comes last.
 pub(crate) fn mask_handle_order(packed: i64) -> u64 {
     (packed as u64).wrapping_sub(1)
 }
@@ -241,7 +241,7 @@ pub(crate) fn mask_handle_order(packed: i64) -> u64 {
 // the info's Seq-id with the accession's case only), 1934-1950 (a local string id), 2172-2181,
 // 2338-2357, 2466-2481 (a general id: the database, then a string tag), 3408-3463 (a PDB id: the
 // variant of `CSeq_id_PDB_Info::Normalize` gives back the molecule's case, `chain` and `chain-id`)
-/// `CSeq_id_Handle::GetSeqId()` of the handle that `CSeq_id_Handle::GetHandle(id)` gives when the
+/// `CSeq_id_Handle::GetSeqId()` of the handle that `CSeq_id_Handle::GetHandle` of the id gives when the
 /// handle's info was made from `first` (the two share the info: [`mask_info_key`], or the `giim`
 /// tree's [`GiimTree::made_from`]): the Seq-id that `AsString()` writes and the masking tools'
 /// `seqloc_*` and `maskinfo_*` writers print. The info keeps `first`;
@@ -450,7 +450,7 @@ fn parse_digits(digits: &[u8]) -> i64 {
 /// `CSeq_id_PDB_Info::Normalize` (seq_id_tree.cpp:3408-3464): an id with a release date that does
 /// not normalize is kept as it is; any other id loses its date, gets the molecule's 2nd-4th
 /// characters in upper case when the molecule has a lower-case letter, `chain_id` from `chain`
-/// (`char(chain)`) and `chain` from `chain_id[0]` (a signed char) when one of them is set
+/// (as a `char`) and `chain` from `chain_id[0]` (a signed char) when one of them is set
 /// (`chain` only for a 1-character `chain_id`). The tree compares the results with `Equals`
 /// (values and set flags; 3502-3523).
 fn push_pdb_normalized(key: &mut Vec<u8>, pdb: &PdbSeqId) {

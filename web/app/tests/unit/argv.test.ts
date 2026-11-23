@@ -15,6 +15,7 @@ import {
   RESERVED_FLAGS,
   shellWords,
   splitOptions,
+  userArgv,
   toShellCommand,
 } from '../../src/domain/argv';
 import { PROGRAMS } from '../../src/domain/programs';
@@ -98,13 +99,17 @@ describe('buildArgv', () => {
     ).toThrow(message);
   });
 
-  // WA-FM-04 and WA-FM-05: the CLI prints its help for these words, and its message for the
-  // others names -subject or -num_threads, which the browser sets itself.
+  // WA-FM-04: the CLI's message for these words names -subject or -num_threads, which the browser sets itself.
   const extra = (program: ProgramId, words: readonly string[]) => () =>
     buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
-  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help'])('refuses %s, which asks the CLI for its help, in a few words', (word) => {
-    for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word]), program.id).toThrow(`${word} is not available in the browser`);
-  });
+  // Line WQA's D14, 2026-11-20: the engine prints the command line's help or version for these words, as the CLI does
+  // (WA-FM-05 refused the help words).
+  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
+    'passes %s, which asks the CLI for its help or version, to the engine',
+    (word) => {
+      for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word])(), program.id).toContain(word);
+    },
+  );
 
   it('refuses the database options, also written -flag=value, as the browser build cannot search a database', () => {
     for (const program of PROGRAMS) {
@@ -127,7 +132,8 @@ describe('buildArgv', () => {
     }
   });
 
-  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  // BLASTN's -filtering_db searches a BLAST database of repeats: the engine reads it from the run's directory, but the
+  // form has no input for its files yet (D4-W2, with WQA D12b; Owner 2026-11-22).
   it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
     for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
       expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
@@ -268,7 +274,7 @@ describe('refusedFields', () => {
       extra: false,
       flags: ['-word_size'],
     });
-    expect(fields('BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
+    expect(fields('LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
       extra: false,
       flags: [],
     });
@@ -313,5 +319,27 @@ describe('refusedFields', () => {
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });
     expect(fields("Additional options: '' is not accepted", "''")).toEqual({ extra: true, flags: [] });
+  });
+});
+
+// Line WQA's D20, 2026-11-23: a run that printed the command line's help or version is shown as the command the user typed.
+describe('userArgv', () => {
+  const argv = ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-version-full', '-num_threads', '2'];
+  it('leaves out the placeholder inputs of a printed run, which read none', () => {
+    expect(userArgv({ argv, prints: 'version' })).toEqual(['blastn', '-version-full', '-num_threads', '2']);
+    expect(userArgv({ argv: ['blastp', '-query', 'q.fa', '-subject', 's.fa', '-h'], prints: 'help' })).toEqual(['blastp', '-h']);
+  });
+  it('keeps the options and the words of Additional options, such as -conffile and -outfmt', () => {
+    expect(userArgv({ argv: ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-help', '-conffile', 's.ini', '-outfmt', '17'], prints: 'help' })).toEqual([
+      'blastn',
+      '-help',
+      '-conffile',
+      's.ini',
+      '-outfmt',
+      '17',
+    ]);
+  });
+  it('is the argv itself for a search', () => {
+    expect(userArgv({ argv })).toBe(argv);
   });
 });

@@ -30,12 +30,12 @@
 //! component by component with `Ord::cmp`, each component in a fixed direction, is one: it is
 //! the lexicographic order of integer tuples, a total order, applied to the keys.
 //!
-//! (S) The result of a stable sort is unique. Let the comparator be a total preorder and the
-//! input the sequence x_0 .. x_{n-1}. A sorted output never has x_j before x_i when
-//! `compare(x_i, x_j)` is `Less`, and a stable sort keeps x_i before x_j when the two are
-//! `Equal` and i < j. So in the output x_i is before x_j exactly when `compare(x_i, x_j)` is
-//! `Less`, or `Equal` with i < j. That fixes the relative order of every pair, hence the whole
-//! sequence. The two sorts used here are documented as stable:
+//! (S) The result of a stable sort is unique. Let the comparator be a total preorder and the input
+//! the sequence x_0 .. x_{n-1}. A sorted output never has x_j before x_i when x_i compares `Less`
+//! than x_j, and a stable sort keeps x_i before x_j when the two are `Equal` and i < j. So in the
+//! output x_i is before x_j exactly when x_i compares `Less` than x_j, or `Equal` with i < j. That
+//! fixes the relative order of every pair, hence the whole sequence. The two sorts used here are
+//! documented as stable:
 //!
 //! - `slice::sort_by` (Rust 1.92, alloc/src/slice.rs:136-144): "Sorts the slice in ascending
 //!   order with a comparison function, preserving initial order of equal elements. This sort is

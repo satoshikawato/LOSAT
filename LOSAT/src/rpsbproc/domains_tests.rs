@@ -97,8 +97,9 @@ fn a_plus_strand_hit_of_a_translated_query() {
     assert_eq!(rf_index(&dom, 5000), 0);
 }
 
-// The minus strand: `alignedLen = (m_iTo + 1) / 3`, starts `alignedLen - (f / 3 + len)`, and
-// the frame index from the query's length (`PlusRFIdx2MinusRFIdx`).
+// The minus strand: `alignedLen` is `m_iTo` plus 1, divided by 3; starts `alignedLen` less the
+// sum of `f` divided by 3 and `len`, and the frame index from the query's length
+// (`PlusRFIdx2MinusRFIdx`).
 #[test]
 fn a_minus_strand_hit_of_a_translated_query() {
     let segs = [
@@ -211,11 +212,11 @@ fn locations_are_read_in_ncbis_order() {
     }
 }
 
-// biodata_blast.cpp:178-182 (cited at `parse_std_align`): `alignedLen = (dst.m_iTo + 1) /
-// RF_SIZE` of a minus-strand hit is `int` arithmetic, which overflows for a hit that ends at
-// 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
-// exception 12; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base
-// shorter does (no overflow). A plus-strand hit with that end parses as it is.
+// biodata_blast.cpp:178-182 (cited at `parse_std_align`): `alignedLen` of a minus-strand hit,
+// `dst.m_iTo` plus 1 divided by `RF_SIZE`, is `int` arithmetic, which overflows for a hit that ends
+// at 2^31 - 1 (undefined): its value, 2^31, divided as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS
+// exception 12; PS16-Q1 oracle `ntminusmax`), gives 715,827,882 codons, as the hit one base shorter
+// does (no overflow). A plus-strand hit with that end parses as it is.
 #[test]
 fn a_minus_strand_hit_that_ends_at_int_max() {
     let hit = |to: u32, strand: i32| {
@@ -276,15 +277,15 @@ fn ends_that_overflow_int() {
         pr2na_ends(&set(min + 1, 10), &minus),
         Some((568, -2_147_483_051))
     );
-    // The plus strand has no `pr - 1`: `INT_MIN * 3 + rfidx` wraps.
+    // The plus strand has no `pr - 1`: `INT_MIN` times 3 plus `rfidx` wraps.
     assert_eq!(pr2na_ends(&set(min, 10), &plus), Some((-2_147_483_647, 33)));
 }
 
-// basedata.cpp:1180-1250 (cited at `segset::SegSet::map_through`): `m_vecSStarts[idx] +
-// m_vecLens[idx] - 1` is an `unsigned int` sum stored in the `int` `end`. A segment from model
-// position 2^31 - 3 of 10 residues ends at -2^31 + 6 for NCBI, below the site's range (2^31 - 8
-// to 2^31 - 1), which is then not mapped; one from 2^31 - 14 ends at 2^31 - 5 and maps the part
-// of the range up to it.
+// basedata.cpp:1180-1250 (cited at `segset::SegSet::map_through`): one less than the sum of
+// `m_vecSStarts[idx]` and `m_vecLens[idx]` is an `unsigned int` sum stored in the `int` `end`. A
+// segment from model position 2^31 - 3 of 10 residues ends at -2^31 + 6 for NCBI, below the site's
+// range (2^31 - 8 to 2^31 - 1), which is then not mapped; one from 2^31 - 14 ends at 2^31 - 5 and
+// maps the part of the range up to it.
 #[test]
 fn mapped_segment_ends_wrap_as_unsigned_int() {
     let map = |s_start: i32| {
@@ -302,7 +303,7 @@ fn mapped_segment_ends_wrap_as_unsigned_int() {
 }
 
 // basedata.cpp:1252-1300 (cited at `translated_pos_map`): a minus-strand hit's positions move
-// by `aaLen - alignedLen`; an aligned length beyond the query is NCBI's exception.
+// by `aaLen` less `alignedLen`; an aligned length beyond the query is NCBI's exception.
 #[test]
 fn positions_on_a_minus_strand_translation() {
     let segs = [std_seg(int(301, 599, Some(2)), int(0, 99, None))];
@@ -340,4 +341,82 @@ fn ends_on_the_plus_strand() {
     assert_eq!(pr2na_ends(&set, &dom), Some((403, 417)));
     let positions = translated_pos_map(&set, &dom, 5000).unwrap();
     assert_eq!(positions[0].curr, 134);
+}
+
+// `key_order`, one key of `e_value_order`: numbers as C++'s `<` and `>` compare doubles (-0.0 and
+// 0.0 equal, the infinities ordered), a NaN after every number in either direction, two NaNs equal
+// (PD-LOSAT-NCBI-DEFECTS 1.67).
+#[test]
+fn a_key_orders_numbers_as_cpp_and_a_nan_last() {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let nan = f64::NAN;
+    let (inf, ninf) = (f64::INFINITY, f64::NEG_INFINITY);
+    for descending in [false, true] {
+        assert_eq!(key_order(-0.0, 0.0, descending), Equal);
+        assert_eq!(key_order(0.0, -0.0, descending), Equal);
+        assert_eq!(key_order(nan, -nan, descending), Equal);
+        for number in [ninf, -1e300, -0.0, 0.0, 1e-300, 3.15371e-14, 1e300, inf] {
+            assert_eq!(
+                key_order(nan, number, descending),
+                Greater,
+                "{number} {descending}"
+            );
+            assert_eq!(
+                key_order(number, nan, descending),
+                Less,
+                "{number} {descending}"
+            );
+        }
+    }
+    assert_eq!(key_order(ninf, -1e300, false), Less);
+    assert_eq!(key_order(inf, 1e300, false), Greater);
+    assert_eq!(key_order(1e-5, 2e-5, false), Less);
+    // The bit score, descending: the larger first.
+    assert_eq!(key_order(inf, 1e300, true), Less);
+    assert_eq!(key_order(ninf, -1e300, true), Greater);
+    assert_eq!(key_order(70.4332, 28.0864, true), Less);
+}
+
+// `e_value_order` (`TDomAlignOrderByEValue` made total): the E-value first, then the bit score
+// descending; a NaN E-value after every E-value that is a number whatever the bit scores, a NaN bit
+// score last among the hits of one E-value; ties keep their order (`sort_ties_in_input_order`).
+#[test]
+fn hits_sort_by_e_value_then_bit_score_with_nan_last() {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let hit = |e_value: f64, bit_score: f64| DomAlign::new(0, 0, 10, e_value, bit_score);
+    let nan = f64::NAN;
+    assert_eq!(
+        e_value_order(&hit(nan, 1000.0), &hit(1e300, -1000.0)),
+        Greater
+    );
+    assert_eq!(
+        e_value_order(&hit(nan, nan), &hit(f64::INFINITY, nan)),
+        Greater
+    );
+    assert_eq!(e_value_order(&hit(1e300, nan), &hit(nan, 1000.0)), Less);
+    assert_eq!(
+        e_value_order(&hit(1e-5, nan), &hit(1e-5, f64::NEG_INFINITY)),
+        Greater
+    );
+    assert_eq!(e_value_order(&hit(1e-5, 50.0), &hit(1e-5, 40.0)), Less);
+    assert_eq!(e_value_order(&hit(-0.0, 5.0), &hit(0.0, 5.0)), Equal);
+    assert_eq!(e_value_order(&hit(nan, nan), &hit(-nan, nan)), Equal);
+
+    let aligns = [
+        hit(nan, 10.0),
+        hit(1e-3, 20.0),
+        hit(-0.0, 5.0),
+        hit(0.0, 5.0),
+        hit(1e-3, nan),
+        hit(1e-3, 30.0),
+        hit(f64::INFINITY, 1.0),
+        hit(1e-3, 30.0),
+    ];
+    let mut order: Vec<usize> = (0..aligns.len()).collect();
+    sort_ties_in_input_order(
+        &mut order,
+        |&i| i,
+        |&a, &b| e_value_order(&aligns[a], &aligns[b]),
+    );
+    assert_eq!(order, [2, 3, 5, 7, 1, 4, 6, 0]);
 }

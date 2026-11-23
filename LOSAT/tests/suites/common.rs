@@ -9,6 +9,8 @@
 
 #[path = "../archive_replaced_bytes.rs"]
 mod archive_replaced_bytes;
+#[path = "../balanced_title.rs"]
+mod balanced_title;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -23,6 +25,8 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastn_mb_index_fixtures.rs"]
+mod blastn_mb_index_fixtures;
 #[path = "../blastx_library_db_hold.rs"]
 mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
@@ -35,8 +39,12 @@ mod database_sequence_without_letters;
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
 mod db_seqidlist;
+#[path = "../db_taxdb_unreadable.rs"]
+mod db_taxdb_unreadable;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
+#[path = "../db_unreadable_files.rs"]
+mod db_unreadable_files;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../entry_names.rs"]
@@ -53,6 +61,8 @@ mod library_api;
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../llvm_profile.rs"]
+mod llvm_profile;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
 #[path = "../makeblastdb_gi_mask.rs"]

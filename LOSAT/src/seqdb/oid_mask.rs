@@ -2,9 +2,9 @@
 //! alias key `OID_MASK_TYPE` reads — the mask types, the file of a volume and its name, and the
 //! test of a predicted RefSeq accession that both sides apply to a sequence's ids.
 //!
-//! The file `<volume>.pxm` / `.nxm` of `fExcludeModel` is the volume's last OID as a big-endian
-//! `Int4`, then one bit per OID, the first OID of each byte in its most significant bit, 0 for an
-//! OID that is masked (`writedb::oid_list` writes it).
+//! The file `<volume>.pxm` / `.nxm` of `fExcludeModel` is an OID list file of the volume, whose
+//! layout `seqdb::oid_list` owns, with the bit 0 for an OID that is masked (`writedb::oid_list`
+//! writes it).
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:147-150
 
@@ -25,8 +25,27 @@ pub(crate) fn exclude_model_extension(protein: bool) -> &'static str {
     }
 }
 
-/// `IdentifyAccession() & CSeq_id::fAcc_predicted` of `id`, with the default flags of the member
-/// function; `warn` gets the accession guide's warnings, which NCBI posts at every call.
+/// The `CSeq_id::fAcc_predicted` bit of `IdentifyAccession()` of `id`, with the default flags of
+/// the member function; `warn` gets the accession guide's warnings, which NCBI posts at every call.
 pub(crate) fn is_predicted(id: &ParsedSeqId, warn: &mut dyn FnMut(SeqIdWarning)) -> bool {
     identify_seq_id(id, parse_flags::ANY_RAW | parse_flags::ANY_LOCAL, warn) & F_PREDICTED != 0
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1943-1953
+// The volume keeps the type as an `int` (seqdbvol.hpp:887-889), which the test widens to `Uint8`:
+// only bit 0 is tested, so a type of 2 erases nothing and 3 or 4294967295 erase as 1 does (probes
+// E_t_2, E_t_3, E_t_4294967295 of line RG D1b).
+/// Whether a volume's `OID_MASK_TYPE` makes NCBI's header reads erase the definition lines of
+/// model sequences (the `fExcludeModel` bit of `m_OidMaskType`).
+pub(crate) fn excludes_models(mask_type: u32) -> bool {
+    u64::from(mask_type) & EXCLUDE_MODEL != 0
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1943-1953
+/// The negation of `s_IncludeDefline_MaskFilter` for `fExcludeModel`: a definition line of the
+/// Seq-ids `ids` is a model's, erased by the header reads, when one of them is a predicted
+/// accession. The ids are identified in order up to the first predicted one, as NCBI's loop returns
+/// there.
+pub(crate) fn is_model_line(ids: &[ParsedSeqId], warn: &mut dyn FnMut(SeqIdWarning)) -> bool {
+    ids.iter().any(|id| is_predicted(id, warn))
 }

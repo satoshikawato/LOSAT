@@ -41,10 +41,10 @@ use crate::report::tabular::{
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
-const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
+const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::wording::report_version!());
 
 /// outfmt 7's line of an RPSTBLASTN run (`ResolvedOptions::rpstblastn`).
-const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::ncbi_blast_version!());
+const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::wording::report_version!());
 
 /// The program line of the run's tabular reports (`args::ProgramName`).
 fn program_version(program: super::args::ProgramName) -> &'static str {
@@ -438,8 +438,8 @@ pub(super) fn write_blastx_tabular(
                     &mut buf,
                     &query.query_line(),
                     &database,
-                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
-                    (!batch.search_skipped || options.merged_volumes()).then_some(count),
+                    // A query with an alignment set (`BatchResults::has_alignment_set`).
+                    batch.has_alignment_set(options).then_some(count),
                 )?;
                 writer.write_all(&buf)?;
                 buf.clear();
@@ -718,7 +718,7 @@ pub(super) fn write_blastx_tabular(
                         } else {
                             // The writer counts the rows' identities and positives
                             // (`TabularWriter::row`); `alignment` makes no counts.
-                            a = alignment(batch, hsp, subject, query, &code)?;
+                            a = alignment(hsp, subject, query, &code)?;
                             // NCBI reads the alignment's rows when a field reads its counts
                             // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;
                             // BLASTX fetches the sequences, so `nident`, `mismatch` and `pident`
@@ -841,16 +841,18 @@ fn write_blastx_tax_report(
                 (
                     batch.query_ordinal + qidx,
                     lists.as_slice(),
-                    batch.search_skipped,
+                    batch.has_alignment_set(options),
                 )
             })
         })
         .zip(&titles)
-        .map(|((ordinal, lists, skipped), title)| TaxQuery {
+        .map(|((ordinal, lists, alignment_set), title)| TaxQuery {
             title,
             length: queries[ordinal].placement().length,
-            // A query of a batch that NCBI did not search has no Seq-align-set.
-            hsps: (!skipped).then(|| {
+            // A query without an alignment set (`BatchResults::has_alignment_set`: of a batch
+            // that NCBI did not search, but for the merge of several volumes) has no
+            // Seq-align-set.
+            hsps: alignment_set.then(|| {
                 lists
                     .iter()
                     .flat_map(|list| {

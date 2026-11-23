@@ -1,0 +1,5 @@
+TITLE oidlist k range
+DBLIST ../taxfilter/tfp
+OIDLIST k.msk
+FIRST_OID 3
+LAST_OID 15

@@ -16,7 +16,7 @@ use crate::blastinput::value_parsers::*;
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` is refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// `-phi_pattern` is refused by the parser (its rows of `ncbi_app::args::refusal`).
 // The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -113,6 +113,15 @@ pub struct PsiblastArgs {
     // every round culls, the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::best_hit_overhang`): every round,
+    // the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::subject_besthit`): every round.
     /// Return only the best HSP for each non overlapping query region
@@ -244,7 +253,7 @@ pub struct PsiblastArgs {
     // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
     // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
     // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by the parser
-    // (`cli.rs` `is_unported_psiblast_arg`).
+    // (its rows of `ncbi_app::args::refusal`).
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",
@@ -255,7 +264,7 @@ pub struct PsiblastArgs {
     pub in_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
     // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
-    // refused by name (`cli.rs` `is_unported_psiblast_arg`) before any exclusion is looked at. The
+    // refused by name (its rows of `ncbi_app::args::refusal`) before any exclusion is looked at. The
     // exclusions and requirements are errors of the argument parser, which LOSAT's parser reports
     // with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is read with
     // the options (`algorithm::psiblast::in_msa`).
@@ -288,6 +297,13 @@ pub struct PsiblastArgs {
     /// that starts there (`api::run_batches`). 0 on the command line.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
     /// The run's numbers of the files of `-save_each_pssm` (`pssm::PssmVersions`, NCBI's
     /// `CAutoOutputFileReset` of the run): a command line's run makes them; the library's query
     /// batches, each a call of its own, share the run's (`api::batches`).
@@ -349,7 +365,7 @@ impl PsiblastArgs {
             threshold: self.threshold,
             word_size: self.word_size,
             num_threads: self.num_threads,
-            // psiblast has no `-mt_mode` (`cli.rs` `is_unported_psiblast_arg`).
+            // psiblast has no `-mt_mode` (its rows of `ncbi_app::args::refusal`).
             mt_mode: None,
             out: self.out,
             max_target_seqs: self.max_target_seqs,
@@ -358,6 +374,8 @@ impl PsiblastArgs {
             max_hsps_per_subject: self.max_hsps_per_subject,
             qcov_hsp_perc: self.qcov_hsp_perc,
             culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
             subject_besthit: self.subject_besthit,
             ungapped: false,
             xdrop_ungap: self.xdrop_ungap,
@@ -385,6 +403,7 @@ impl PsiblastArgs {
             matrix_search: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
+            scope_refusal: self.scope_refusal.clone(),
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
                 save_pssm_after_last_round: self.save_pssm_after_last_round,
                 save_each_pssm: self.save_each_pssm,
@@ -433,6 +452,8 @@ impl PsiblastArgs {
         inputs.qcov_hsp_perc = self.qcov_hsp_perc;
         inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
         inputs.culling_limit = self.culling_limit;
+        inputs.best_hit_overhang = self.best_hit_overhang;
+        inputs.best_hit_score_edge = self.best_hit_score_edge;
         inputs.subject_besthit = self.subject_besthit;
         // `static_cast<int>` of the double, as BLASTP's (`blastp::archive::option_inputs`).
         inputs.threshold = self

@@ -199,6 +199,14 @@ jobs:
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments
         run: python3 scripts/changelog_fragments.py check
+      # No NCBI counterpart: maintainer bookkeeping. Pull requests take the next Product Decision
+      # version and exception number by hand; when two take the same one, Git stops the second with
+      # a conflict, and a conflict resolved by keeping both entries leaves one number twice (#1451
+      # and #1460 both wrote PD-LOSAT-NCBI-DEFECTS 1.68 = approved exception 20, 2026-11-21).
+      - name: Product Decision numbers
+        run: python3 -I LOSAT/tests/check_pd_numbers.py --root .
+      - name: Product Decision number check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pd_numbers.py'
       # No NCBI counterpart: maintainer bookkeeping. Line and stage IDs cited in CHANGELOG.md,
       # changelog.d/ and docs/ that have no row in docs/decisions/LINE_IDS.md, as warnings only.
       - name: Line IDs
@@ -228,7 +236,7 @@ jobs:
       # is python.yml's check, which is not required; after clippy, so the `cargo metadata` of this
       # step cannot rewrite a stale LOSAT/Cargo.lock before clippy --locked reads it. The
       # advisories run in nightly.yml (job `audit`).
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-deny@0.20.2
       - name: cargo deny (bans, licenses, sources)
@@ -293,7 +301,7 @@ jobs:
           workspaces: LOSAT -> target
           cache-on-failure: true
           save-if: ${{ (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && matrix.part == 'rest' }}
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest@0.9.148
       # The unit tests run no example: their archive is made without .github/nextest.toml, whose
@@ -350,7 +358,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest@0.9.148
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -427,7 +435,7 @@ jobs:
       # No rust-cache: the job runs only on pull requests, and a pull request's cache serves only
       # that pull request (2026-11-12: 35 copies of 65 MiB; 32 of 45 runs found none). Without it
       # the check step took 28.5 s instead of 20.
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-semver-checks@0.51.0
       - name: Semver checks of losat::api against the base

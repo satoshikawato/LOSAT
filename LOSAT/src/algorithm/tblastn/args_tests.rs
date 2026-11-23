@@ -78,7 +78,7 @@ fn num_descriptions_and_num_alignments_set_the_counts() {
     assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
     assert_eq!(
         error(&["-num_descriptions", "0", "-num_alignments", "0"]),
-        "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
+        "LOSAT query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
     );
 }
 
@@ -167,16 +167,9 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         ),
         (9, 1, 18.0, 15)
     );
-    for extra in [
-        &["-ungapped", "-comp_based_stats", "F"][..],
-        &["-max_target_seqs", "1073741799"],
-        &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
-    ] {
-        assert!(
-            limit(extra).contains("not supported by LOSAT's TBLASTN"),
-            "{extra:?}"
-        );
-    }
+    // `-ungapped` with composition-based statistics F (0): NCBI's ungapped search, which
+    // LOSAT runs (line O4c).
+    assert!(check_options(&parse(&["-ungapped", "-comp_based_stats", "F"]).unwrap()).is_ok());
     // NCBI's tblastn crashes with IDENTITY's compressed lookup table.
     for extra in [
         &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
@@ -342,10 +335,17 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     for value in ["bogus", "0", "F", "2u", "D", "t"] {
         check_options(&parse(&["-comp_based_stats", value]).unwrap()).unwrap();
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 through an int: 2^30 without composition statistics
-    // keeps a preliminary hit list of 10 subjects.
-    check_options(&parse(&["-comp_based_stats", "0", "-max_target_seqs", "1073741824"]).unwrap())
-        .unwrap();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70: a hit list size whose
+    // preliminary size overflows NCBI's `int` (2^30 without composition-based statistics, 2^30 - 25
+    // with them, up to 2^31 - 1) runs; LOSAT computes the size without overflow.
+    for extra in [
+        &["-comp_based_stats", "0", "-max_target_seqs", "1073741824"][..],
+        &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
+        &["-max_target_seqs", "1073741799"],
+        &["-max_target_seqs", "2147483647"],
+    ] {
+        check_options(&parse(extra).unwrap()).unwrap();
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-319: -qcov_hsp_perc and -max_hsps.
     let resolved = parse(&["-max_hsps", "2", "-qcov_hsp_perc", "50.5"])
         .unwrap()
@@ -361,17 +361,25 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
-    for extra in [
-        &["-gilist", "ids.gil"][..],
-        &["-remote"],
-        &["-use_sw_tback"],
-    ] {
+    for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
         let error = crate::cli::render_message(&parse(extra).unwrap_err());
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806,885
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+    // `-use_sw_tback` is a flag that sets the Smith-Waterman traceback, with every
+    // `-comp_based_stats` (the redo runs with mode 0 too).
+    for cbs in ["0", "1", "2", "3"] {
+        let args = parse(&["-use_sw_tback", "-comp_based_stats", cbs]).unwrap();
+        check_options(&args).unwrap();
+        let resolved = args.resolve().unwrap();
+        assert!(resolved.use_sw_tback, "{cbs}");
+    }
+    assert!(!parse(&[]).unwrap().resolve().unwrap().use_sw_tback);
+    assert!(parse(&["-use_sw_tback", "true"]).is_err());
 }
 
 /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
@@ -454,7 +462,7 @@ fn in_pssm_errors_are_ncbis_and_losats() {
     for size in ["5", "6", "7", "8"] {
         assert_eq!(
             error(&["-word_size", size]),
-            "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the LOSAT user manual.\n",
+            "LOSAT query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the LOSAT user manual.\n",
             "{size}"
         );
     }
@@ -463,7 +471,7 @@ fn in_pssm_errors_are_ncbis_and_losats() {
     let identity = error(&["-matrix", "IDENTITY"]);
     assert!(
         identity.starts_with(
-            "BLAST query/options error: IDENTITY is not a supported matrix, supported matrices are:\nBLOSUM80 \n"
+            "LOSAT query/options error: IDENTITY is not a supported matrix, supported matrices are:\nBLOSUM80 \n"
         ),
         "{identity}"
     );
@@ -564,4 +572,75 @@ fn the_x_drops_reach_the_search_or_ncbis_errors() {
             .unwrap();
         assert!(check_search_limits(&resolved).is_ok());
     }
+}
+
+// NCBI BLAST+ 2.17.0 with `-ungapped -comp_based_stats 0` (line O4c): a `-matrix` name that
+// NCBI's tables do not have reaches the setup of the first batch, which fails with NCBI's
+// engine error (`SetupEngineError::unknown_matrix`); one that the matrix loader reads as
+// IDENTITY without a table aborts there, which LOSAT refuses; a gapped search refuses both
+// with NCBI's options error first.
+#[test]
+fn an_ungapped_search_keeps_a_matrix_of_no_table_for_its_setup() {
+    use crate::algorithm::tblastx::args::TblastxMatrix;
+    let ungapped = |matrix: &str| {
+        parse(&["-ungapped", "-comp_based_stats", "0", "-matrix", matrix])
+            .unwrap()
+            .resolve()
+            .unwrap()
+    };
+    let resolved = ungapped("FOO");
+    assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Unknown));
+    assert!(check_search_limits(&resolved).is_ok());
+    let scoring = search_settings(&resolved).unwrap().scoring;
+    assert!(scoring.unknown_matrix);
+    assert_eq!(scoring.matrix, ScoringMatrix::Blosum62);
+    for matrix in ["BLOSUM62", "pam30", "IDENTITY"] {
+        let resolved = ungapped(matrix);
+        assert_eq!(resolved.unknown_matrix, None, "{matrix}");
+        assert!(!search_settings(&resolved).unwrap().scoring.unknown_matrix);
+    }
+    let resolved = ungapped("identityx");
+    assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Aborts));
+    let error = check_search_limits(&resolved).unwrap_err().to_string();
+    assert!(
+        error.contains("-matrix identityx is read as IDENTITY") && error.contains("TBLASTN"),
+        "{error}"
+    );
+    for matrix in ["FOO", "IDENTITYX"] {
+        assert!(
+            parse(&["-matrix", matrix]).unwrap().resolve().is_err(),
+            "{matrix}"
+        );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328,3341-3346
+// `-best_hit_overhang` / `-best_hit_score_edge`: above 0 and below 0.5, the one not given takes
+// 0.1, neither given is no filter, and `-culling_limit` excludes both (NCBI refuses the command
+// line; LOSAT's parser too).
+#[test]
+fn best_hit_options_are_read_as_ncbi_reads_them() {
+    use crate::core::hspfilter_besthit::BestHitParams;
+    let best_hit = |extra: &[&str]| parse(extra).unwrap().resolve().unwrap().best_hit;
+    assert_eq!(best_hit(&[]), None);
+    assert_eq!(
+        best_hit(&["-best_hit_overhang", "0.25"]),
+        Some(BestHitParams {
+            overhang: 0.25,
+            score_edge: 0.1
+        })
+    );
+    assert_eq!(
+        best_hit(&["-best_hit_score_edge", "0.05", "-best_hit_overhang", "0.3"]),
+        Some(BestHitParams {
+            overhang: 0.3,
+            score_edge: 0.05
+        })
+    );
+    for value in ["0", "0.5", "-0.1", "nan", "x"] {
+        assert!(parse(&["-best_hit_overhang", value]).is_err(), "{value}");
+        assert!(parse(&["-best_hit_score_edge", value]).is_err(), "{value}");
+    }
+    assert!(parse(&["-culling_limit", "1", "-best_hit_overhang", "0.1"]).is_err());
+    assert!(parse(&["-culling_limit", "0", "-best_hit_score_edge", "0.1"]).is_err());
 }

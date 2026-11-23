@@ -20,7 +20,7 @@ use crate::blastinput::pssm_text::PssmReadError;
 use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
-use crate::ncbi_exception::NcbiException;
+use crate::ncbi_exception::{NcbiException, Severity};
 use crate::report::serial::asn_types::{ReadError, Value};
 use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::ParsedSeqId;
@@ -37,44 +37,39 @@ const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 /// (`read_in_pssm`'s range rule), half of `Int4`'s range as NCBI's `MININT`.
 const PSSM_SCORE_SUM_LIMIT: i64 = 1 << 30;
 
-/// What `-in_pssm` makes of the file: the `switch` on `CFormatGuess().Format(in)` and the first steps of the
-/// reader it picks.
+/// What `-in_pssm` makes of the file: the `switch` on the format that `CFormatGuess` guesses for the stream.
 #[derive(Debug)]
 enum PssmFileFormat {
     /// `eTextASN`: the text reader reads the stream from `start` (the start of the file, or its end after
     /// `TestFormatNewick` read a NEXUS file through).
     TextAsn { start: usize },
+    /// `eBinaryASN`: the binary reader reads the stream from `start` (the stream read as `MSerial_AsnBinary`).
+    BinaryAsn { start: usize },
     /// A format that the `switch` sends to "Unsupported format for PSSM" (`eUnknown` and every format but the
     /// three).
     Unsupported,
-    /// `eBinaryASN` whose first tag is not the SEQUENCE `PssmWithParameters`: NCBI's binary reader stops there with a
-    /// `CSerialException`, "Unrecognized format for PSSM" (`ber_first_tag`).
-    Unrecognized,
-    /// `eBinaryASN` whose first tag runs into the end of the file: the reader's `CEofException`, which leaves the
-    /// handler and ends the run without a word (exit status 0).
-    Eof,
     /// The guess threw (`TestFormatGlimmer3`'s `NStr::StringToInt`): `CATCH_ALL`'s report (exit status 255).
     Exception(NcbiException),
-    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): a binary ASN.1 PSSM (its first tag
-    /// is a SEQUENCE's; item PS9), an XML PSSM, or a file whose guess reads memory the file does not decide.
+    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): an XML PSSM, or a file whose guess
+    /// reads memory the file does not decide.
     Refused {
         what: &'static str,
         detail: &'static str,
     },
 }
 
-/// The refusal of a PSSM file that the binary or the XML reader reads.
-const NOT_TEXT: &str = "a PSSM file that is not ASN.1 text";
+/// The refusal of a PSSM file that NCBI's XML reader reads.
+const XML_PSSM: &str = "a PSSM file in XML";
 /// The refusal of a guess that reads memory its file does not decide.
 const UNDECIDED_GUESS: &str =
     "a PSSM file whose format NCBI's format guess decides by reading memory past the file";
 
-/// `CFormatGuess().Format(in)` (`utils::format_guess`, the whole order of `sm_CheckOrder` without hints) and
-/// the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when the formats it
-/// could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); the binary
-/// reader's first tag decides `eBinaryASN` (`ber_first_tag`); `eXml` is refused (the XML reader's first failure
-/// is its file header: `CObjectIStreamXml::ReadFileHeader`, objistrxml.cpp:582-660, with the declaration's
-/// attributes and encodings, comments, `DOCTYPE` and namespace prefixes, not ported).
+/// The format that `CFormatGuess` guesses for the stream (`utils::format_guess`, the whole order of `sm_CheckOrder`
+/// without hints) and the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when
+/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); `eXml`
+/// is refused (the XML reader's first failure is its file header: `CObjectIStreamXml::ReadFileHeader`,
+/// objistrxml.cpp:582-660, with the declaration's attributes and encodings, comments, `DOCTYPE` and namespace
+/// prefixes, not ported).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     let guessed = match FormatGuess::over(bytes).guess_format() {
         Ok(guessed) => guessed,
@@ -94,65 +89,14 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
         Format::TextAsn => PssmFileFormat::TextAsn {
             start: guessed.stream_pos,
         },
-        Format::BinaryAsn => ber_first_tag(&bytes[guessed.stream_pos..]),
+        Format::BinaryAsn => PssmFileFormat::BinaryAsn {
+            start: guessed.stream_pos,
+        },
         Format::Xml => PssmFileFormat::Refused {
-            what: NOT_TEXT,
-            detail: "XML",
+            what: XML_PSSM,
+            detail: "its XML reader is not ported",
         },
         _ => PssmFileFormat::Unsupported,
-    }
-}
-
-/// The binary reader's first steps on `bytes` (`in >> MSerial_AsnBinary >> *m_Pssm`): the file header (a byte to
-/// peek at), then `BeginClass` of `PssmWithParameters`, `ExpectTag(eUniversal, eConstructed, eSequence)`. A first
-/// byte whose class and form bits are not those of a universal constructed tag (0x20), or whose tag number is not
-/// 16, is a `CSerialException`; a long tag (0x3F) reads its number from the next bytes (a number of 2^24 or more is
-/// `fOverflow`, the end of the file a `CEofException`, which `HandleEOF` passes on at the root, NCBI BLAST+ 2.17.0:
-/// exit status 0 and nothing written). Tag 16 (0x30, or 0x3F with the number 16) begins a binary PSSM: refused.
-///
-/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1121-1126
-/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1029-1041
-/// NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:167-219
-/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:150-171
-/// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:174-216 (`UnexpectedTagClassByte`,
-/// `UnexpectedTagValue`: `ThrowError(fFormatError, ...)`)
-/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
-fn ber_first_tag(bytes: &[u8]) -> PssmFileFormat {
-    const UNIVERSAL_CONSTRUCTED: u8 = 0x20;
-    const LONG_TAG: u8 = 0x1f;
-    const SEQUENCE: u32 = 16;
-    let Some(&first) = bytes.first() else {
-        return PssmFileFormat::Eof;
-    };
-    if first & 0xe0 != UNIVERSAL_CONSTRUCTED {
-        return PssmFileFormat::Unrecognized;
-    }
-    let tag = if first & LONG_TAG != LONG_TAG {
-        u32::from(first & LONG_TAG)
-    } else {
-        let mut tag: u32 = 0;
-        let mut i = 1;
-        loop {
-            if tag >= 1 << 24 {
-                return PssmFileFormat::Unrecognized;
-            }
-            let Some(&byte) = bytes.get(i) else {
-                return PssmFileFormat::Eof;
-            };
-            i += 1;
-            tag = (tag << 7) | u32::from(byte & 0x7f);
-            if byte & 0x80 == 0 {
-                break tag;
-            }
-        }
-    };
-    if tag == SEQUENCE {
-        PssmFileFormat::Refused {
-            what: NOT_TEXT,
-            detail: "binary ASN.1 that starts with a SEQUENCE tag",
-        }
-    } else {
-        PssmFileFormat::Unrecognized
     }
 }
 
@@ -243,20 +187,42 @@ pub(crate) fn read_in_pssm(
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<(PsiSearch, InPssmFile)> {
     let bytes = read_input_argument("in_pssm", path)?;
-    let text = match guess_format(&bytes) {
-        PssmFileFormat::TextAsn { start } => &bytes[start..],
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-263 (the clauses of
+    // `CATCH_ALL` that an error of the reader other than its `CSerialException` reaches)
+    // NCBI's reader posts its messages as it reads (`Post`), before its error when it stops. Its
+    // `CSerialException` is the handler's "Unrecognized format"; a `CUtilException` of a number
+    // or a `CStringException` of a tag leaves the handler and `CATCH_ALL` reports it with the
+    // lines of the reader's stack (exit status 255), and so does a `std::length_error` of
+    // Dense-seg's reserve hook (`Error: vector::reserve`) or of the reserve of a binary string or
+    // byte block; a `bad_alloc` of such a reserve is "BLAST ran out of memory" (exit status 4),
+    // each after the byte block's post 803.4 where a byte block's reserve threw; a
+    // `CEofException` (a `CIOException`, the input ending directly in the root object) is caught
+    // without a word and the run ends with exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters
+    // ::=` alone; line RG D3-1 probe e01; a binary file cut after its last byte, line RG D3c-3a).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+    // (`CBlastAppDiagHandler::Post`, cited in `report::diag_log`): the BLAST archive saves each post as one message of its
+    // severity; the reader's posts are errors (the post 803.7 of a replaced byte, whose text has
+    // three lines, the error post of `PostRead` and 803.4 of a byte block; NCBI BLAST+ 2.17.0
+    // tblastn -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`), and
+    // the binary reader's warning of a UTF8String tag for a VisibleString.
+    // NCBI's reader recurses once per value on the main thread's stack and crashes when a PSSM's
+    // values nest deeper than that stack holds (NCBI BLAST+ 2.17.0 with 8 MiB: from a few thousand
+    // levels, by the stack limit, the command line, the environment and the stack's random start).
+    // LOSAT's reader and the object manager's step keep the values they are in on the heap, so
+    // every depth is read, and the output is NCBI's with a stack large enough
+    // (PD-LOSAT-NCBI-DEFECTS exception 15).
+    let read = match guess_format(&bytes) {
+        PssmFileFormat::TextAsn { start } => {
+            crate::blastinput::pssm_text::read_pssm(&bytes[start..])
+        }
+        PssmFileFormat::BinaryAsn { start } => {
+            crate::blastinput::pssm_text::read_pssm_binary(&bytes[start..])
+        }
         PssmFileFormat::Unsupported => {
             return Err(crate::blastinput::app::options_error(
                 "Unsupported format for PSSM",
             ))
         }
-        PssmFileFormat::Unrecognized => {
-            return Err(crate::blastinput::app::options_error(&format!(
-                "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
-                path.display()
-            )))
-        }
-        PssmFileFormat::Eof => return Err(crate::cli::NativeError::silent_end().into()),
         PssmFileFormat::Exception(exception) => {
             return Err(crate::cli::NativeError::exception(&exception).into())
         }
@@ -264,31 +230,14 @@ pub(crate) fn read_in_pssm(
             return Err(reader.refuse(format!("{what} ({detail}; {})", path.display())))
         }
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-251 (the clauses of
-    // `CATCH_ALL` that an error of the reader other than its `CSerialException` reaches)
-    // NCBI's reader posts its messages as it reads (`Post`), before its error when it stops. Its
-    // `CSerialException` is the handler's "Unrecognized format"; a `CUtilException` of a number
-    // or a `CStringException` of a tag leaves the handler and `CATCH_ALL` reports it with the
-    // lines of the reader's stack (exit status 255), and so does a `std::length_error` of
-    // Dense-seg's reserve hook (`Error: vector::reserve`); a `CEofException` (a `CIOException`, the
-    // text ending directly in the root object) is caught without a word and the run ends with
-    // exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters ::=` alone; line RG D3-1 probe e01).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-    // (`CBlastAppDiagHandler::Post`, cited in `report::diag_log`): the BLAST archive saves each post as one message of its
-    // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
-    // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
-    // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
-    // NCBI's reader recurses once per value on the main thread's stack and crashes when a PSSM's
-    // values nest deeper than that stack holds (NCBI BLAST+ 2.17.0 with 8 MiB: from a few thousand
-    // levels, by the stack limit, the command line, the environment and the stack's random start).
-    // LOSAT's reader and the object manager's step keep the values they are in on the heap, so
-    // every depth is read, and the output is NCBI's with a stack large enough
-    // (PD-LOSAT-NCBI-DEFECTS exception 15).
-    let read = crate::blastinput::pssm_text::read_pssm(text);
     let program = reader.program.to_ascii_lowercase();
     let mut posts = crate::report::diag_log::Posts::new();
     for post in &read.posts {
-        posts.post(crate::report::diag_log::ERROR, post.line(&program));
+        let severity = match post.severity() {
+            Severity::Warning => crate::report::diag_log::WARNING,
+            Severity::Error => crate::report::diag_log::ERROR,
+        };
+        posts.post(severity, post.line(&program));
     }
     posts.write(diagnostics, reader.archive)?;
     let pssm = match read.result {
@@ -305,10 +254,13 @@ pub(crate) fn read_in_pssm(
         Err(PssmReadError::Ncbi(ReadError::Std(what))) => {
             return Err(crate::cli::NativeError::std_exception(what).into())
         }
+        Err(PssmReadError::Ncbi(ReadError::OutOfMemory)) => {
+            return Err(crate::cli::NativeError::out_of_memory().into())
+        }
         Err(PssmReadError::Ncbi(ReadError::Eof)) => {
             return Err(crate::cli::NativeError::silent_end().into())
         }
-        // The lexical reader's own limits (`read_pssm`): LOSAT's refusal, after NCBI's reader read
+        // The readers' own limits (`read_pssm`): LOSAT's refusal, after NCBI's reader read
         // the file. (What NCBI reads and LOSAT's search does not take is refused after the object
         // manager's step, `psi_search_and_object`.)
         Err(PssmReadError::Refused(what))
@@ -500,6 +452,7 @@ fn stopped_as_query_joins_scope(
         round_query: None,
         split_setup: None,
         from_msa: false,
+        query_other_coding: None,
     };
     let file = InPssmFile {
         object: pssm,
@@ -655,6 +608,15 @@ pub(crate) fn psi_search_and_object_of(
         .is_none()
         .then(|| crate::report::query_warnings::invalid_residues_error(&residues.invalid))
         .flatten();
+    // A nucleotide Bioseq (`mol` dna, rna or na) is the query set-up's first error
+    // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
+    // frequency ratios only, whose engine sets the query up first too.
+    let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
+    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+        Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else {
+        invalid_residues
+    };
     let (mut scores_error, setup_error) = if ratios_only {
         (invalid_residues, None)
     } else {
@@ -680,8 +642,8 @@ pub(crate) fn psi_search_and_object_of(
     // string or the integer's decimal digits (`CObject_id::AsString`). Any other id (`gi 4504347`
     // of a `-parse_deflines` PSSM, `swissprot`, `pdb`, ...), and several ids, are shown with or
     // without `-parse_deflines`, as `-parse_deflines` shows the ids of a FASTA query (NCBI BLAST+
-    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString(cbs,
-    // believe_local_id)` asks `believe_local_id` of a local id only, align_format_util.cpp).
+    // 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`; `GetSeqIdString` with `cbs` and
+    // `believe_local_id` asks `believe_local_id` of a local id only, align_format_util.cpp).
     let ids = query.ids.as_slice();
     if ids.is_empty() {
         return Err(reader.refuse(
@@ -769,7 +731,20 @@ pub(crate) fn psi_search_and_object_of(
             .map_or(0, |last| last + 1);
         title[..end].to_vec()
     };
-    if query.inst.mol.1 != 3 || query.inst.repr.1 != 2 {
+    // `other` (255): psiblast searches it as a protein (NCBI's query set-up refuses only the
+    // nucleotide molecules). tblastn's query is checked as before.
+    let mol_other = if query.inst.mol.1 == 255 && reader.program == "PSIBLAST" {
+        match query.inst.seq_data.as_ref() {
+            // The coding that NCBI's object manager converts (`CSeq_data::E_Choice`).
+            Some(SeqData::Iupacaa(_)) => Some(2),
+            Some(SeqData::Ncbieaa(_)) => Some(8),
+            Some(SeqData::Ncbistdaa(_)) => Some(10),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if !(matches!(query.inst.mol.1, 1..=4) || mol_other.is_some()) || query.inst.repr.1 != 2 {
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",
             query.inst.repr.0, query.inst.mol.0
@@ -902,30 +877,60 @@ pub(crate) fn psi_search_and_object_of(
     // cutoff of 1, E-values of -1), an output without meaning, refused as a PSSM whose scaling gives
     // no Karlin-Altschul parameters is (line PS DECISIONS 28), unless the setup stops first. NCBI's
     // check of the PSSM's file (`validation_error`) comes first.
-    let negative = |values: [(&'static str, Option<f64>); 3]| {
-        values
-            .into_iter()
-            .find(|(_, value)| value.is_some_and(|value| value < 0.0))
+    //
+    // A value that is not a finite number (ASN.1 `PLUS-INFINITY`, `MINUS-INFINITY`,
+    // `NOT-A-NUMBER`, in text or binary) NCBI takes in the same way: an ungapped one that is not
+    // above 0 (`NOT-A-NUMBER` too) makes `kbp_psi` invalid, as `PsiSearch::ungapped_karlin_valid`
+    // holds it. Where NCBI then goes on, LOSAT's search does not yet compute what NCBI computes
+    // from a gapped `lambda` of `PLUS-INFINITY`, a gapped `NOT-A-NUMBER` or psiblast's
+    // `lambdaUngapped` of `PLUS-INFINITY` (line RG D3c-3a, `D/d3/c3a/probe/realtext`: NCBI's
+    // E-values 0.0 and bit scores `inf` or -1.0, its hits; handed to line PS,
+    // `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`): refused with the negative values. Gapped `kappa`
+    // and `h` of `PLUS-INFINITY` and the other ungapped values of `PLUS-INFINITY` give NCBI's
+    // output; tblastn reads `lambdaUngapped` only for its word X-drop, where it gives NCBI's too.
+    let ungapped_invalid = [
+        stats.lambda_ungapped,
+        stats.kappa_ungapped,
+        stats.h_ungapped,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.is_nan() || value <= 0.0);
+    let unusable = |name: &'static str, value: Option<f64>| match value {
+        Some(value) if value < 0.0 => Some((name, "negative")),
+        Some(value) if value.is_nan() => Some((name, "not a number")),
+        Some(value) if value == f64::INFINITY && name == "lambda" => Some((name, "infinite")),
+        _ => None,
     };
-    let ungapped_invalid = negative([
-        ("lambdaUngapped", stats.lambda_ungapped),
-        ("kappaUngapped", stats.kappa_ungapped),
-        ("hUngapped", stats.h_ungapped),
-    ])
-    .is_some();
-    let gapped_negative = negative([
-        ("lambda", stats.lambda),
-        ("kappa", stats.kappa),
-        ("h", stats.h),
-    ]);
-    if let (Some((name, _)), true, false) = (
-        gapped_negative,
-        validation_error.is_none() && scores_error.is_none() && setup_error.is_none(),
-        ungapped_invalid,
-    ) {
-        return Err(reader.refuse(format!(
-            "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
-        )));
+    let gapped_unusable = unusable("lambda", stats.lambda)
+        .or_else(|| unusable("kappa", stats.kappa))
+        .or_else(|| unusable("h", stats.h));
+    let ungapped_unusable = (reader.program == PssmReader::PSIBLAST.program
+        && stats.lambda_ungapped == Some(f64::INFINITY))
+    .then_some(("lambdaUngapped", "infinite"));
+    if validation_error.is_none()
+        && scores_error.is_none()
+        && setup_error.is_none()
+        && !ungapped_invalid
+    {
+        match (gapped_unusable, ungapped_unusable) {
+            (Some((name, "negative")), _) => {
+                return Err(reader.refuse(format!(
+                    "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
+                )));
+            }
+            (Some((name, what)), _) | (None, Some((name, what))) => {
+                let kind = if name == "lambdaUngapped" {
+                    "ungapped"
+                } else {
+                    "gapped"
+                };
+                return Err(reader.refuse(format!(
+                    "a PSSM whose {kind} Karlin-Altschul parameter {name} is {what} (LOSAT does not yet compute the hits, E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it)"
+                )));
+            }
+            (None, None) => {}
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:533-557
     // The search strategy's request holds the object that the application read, which
@@ -957,6 +962,7 @@ pub(crate) fn psi_search_and_object_of(
         round_query: None,
         split_setup: None,
         from_msa: false,
+        query_other_coding: mol_other,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI

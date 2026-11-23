@@ -48,10 +48,6 @@ pub(crate) struct TranslatedRpsSearch {
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
-    /// `-use_sw_tback` and `-comp_based_stats` as given: `-use_sw_tback` with composition-based
-    /// statistics (a later item) is refused per run (`check_options`).
-    pub(crate) use_sw_tback: bool,
-    pub(crate) comp_based_stats: String,
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
@@ -548,8 +544,8 @@ impl TranslatedRpsSearch {
                         .as_deref()
                         .expect("a searching batch has its score blocks"),
                     masked,
-                    i32::from(options.outfmt)
-                        != crate::blastinput::app::output_format::ARCHIVE_FORMAT,
+                    !crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
+                        .is_some_and(crate::blastinput::app::ReportFormat::writes_seqaligns),
                 ));
                 spans.push(queries.len() - start);
             }
@@ -653,16 +649,21 @@ impl TranslatedRpsSearch {
         let db = database.x_seqdb();
         for batch in 0..states.len() {
             let state = &mut states[batch];
-            let checked =
-                report_ordinal_ids(db, &mut state.hit_lists, options.shown_lists(), PROGRAM)
-                    .and_then(|unlisted| {
-                        state.unlisted = unlisted.unwrap_or_default();
-                        if self.strategy {
-                            state.request_space(units, options, &gapped)
-                        } else {
-                            Ok(None)
-                        }
-                    });
+            let checked = report_ordinal_ids(
+                db,
+                &mut state.hit_lists,
+                options.shown_lists(),
+                PROGRAM,
+                units.searches_volumes_bare(),
+            )
+            .and_then(|unlisted| {
+                state.unlisted = unlisted.unwrap_or_default();
+                if self.strategy {
+                    state.request_space(units, options, &gapped)
+                } else {
+                    Ok(None)
+                }
+            });
             match checked {
                 Ok(request_space) => state.request_space = request_space,
                 Err(error) => {
@@ -680,12 +681,6 @@ impl TranslatedRpsSearch {
     /// LOSAT's refusals of the options before the first byte of the reports: what NCBI BLAST+
     /// 2.17.0's rpstblastn does in its search with them has no result that can be checked.
     pub(crate) fn check_options(&self) -> Result<()> {
-        let requested_cbs = self.search.requested_cbs;
-        if self.use_sw_tback && requested_cbs > 0 {
-            bail!(
-                "-use_sw_tback with composition-based statistics is not supported by LOSAT's {PROGRAM} yet"
-            );
-        }
         if self.search.sum_stats {
             bail!(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpstblastn links HSPs with the profiles' indexes as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's {PROGRAM}"
@@ -934,9 +929,9 @@ fn unsearched_batch(
 /// `sequence_start` holds each frame with letters between two sentinels at its context's offset;
 /// `masked` holds a frame's letters where a 26-column database masks some
 /// (`mask_unsupported_letters`). `-qcov_hsp_perc` reads the batch's first query's frames.
-/// `recount_identities` is false for the BLAST archive (outfmt 11), whose Seq-aligns show the
-/// traceback's counts on the searched letters, not the formatter's counts on the letters as read
-/// (`traceback::formatter_identities`).
+/// `recount_identities` is false for the Seq-aligns as they are (outfmt 8, 9, 11, 12:
+/// `ReportFormat::writes_seqaligns`), which show the traceback's counts on the searched letters,
+/// not the formatter's counts on the letters as read (`traceback::formatter_identities`).
 pub(crate) fn frame_queries<'a>(
     prepared: &'a PreparedQueryBatch,
     parameters: &[ContextParameters],

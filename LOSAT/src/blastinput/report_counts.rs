@@ -60,8 +60,8 @@ impl FormattingArgs {
     }
 }
 
-/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween(0, 4,
-/// true)`, cited at `FormattingArgs`).
+/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween` from 0 to 4,
+/// with `true`, cited at `FormattingArgs`).
 fn formatting_sort_option(value: &str) -> Result<u8, String> {
     let option = crate::blastinput::value_parsers::ncbi_integer_at_least(value, 0)?;
     u8::try_from(option)
@@ -70,7 +70,7 @@ fn formatting_sort_option(value: &str) -> Result<u8, String> {
         .ok_or_else(|| "Illegal value: expected an integer from 0 to 4".to_string())
 }
 
-/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual(1)`,
+/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual` of 1,
 /// cited at `FormattingArgs`).
 fn formatting_line_length(value: &str) -> Result<usize, String> {
     let length = crate::blastinput::value_parsers::ncbi_integer_at_least(value, 1)?;
@@ -86,6 +86,17 @@ pub struct ReportCounts {
     pub num_descriptions: usize,
     /// The number of alignments of the pairwise format (`m_NumAlignments`).
     pub num_alignments: usize,
+}
+
+impl ReportCounts {
+    /// The counts of what the pairwise reports show of each query (`db_subject::Shown`):
+    /// `num_descriptions` description lines, the alignments of the first `num_alignments` hits.
+    pub fn shown(self) -> crate::report::db_subject::Shown {
+        crate::report::db_subject::Shown {
+            descriptions: self.num_descriptions,
+            alignments: self.num_alignments,
+        }
+    }
 }
 
 impl Default for ReportCounts {

@@ -1,6 +1,7 @@
 //! `-oid_masks` of makeblastdb: the OID mask file of each volume (`CWriteDB_OidList`) and the
-//! test of a model sequence; the mask types, the file's name and layout belong to
-//! `seqdb::oid_mask`, which the reader of the alias key `OID_MASK_TYPE` shares.
+//! test of a model sequence; the mask types and the file's name belong to `seqdb::oid_mask`,
+//! which the reader of the alias key `OID_MASK_TYPE` shares, and the file's layout to
+//! `seqdb::oid_list`, its reader.
 
 use super::files::WriteDbFile;
 use super::WriteDbError;
@@ -12,7 +13,7 @@ use crate::seqid::ParsedSeqId;
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:293-308
 /// Whether `CWriteDB_Volume::WriteSequence` adds the OID of a sequence of the ids `ids` to the
 /// list of models: every id that is not a GI is a predicted accession
-/// (`IdentifyAccession() & fAcc_predicted`). A sequence with no id but GIs is one, as in
+/// (`IdentifyAccession()` has `fAcc_predicted` set). A sequence with no id but GIs is one, as in
 /// makeblastdb 2.17.0 (line RG item D3b probe `p_v4`). Every id that is not a GI is identified,
 /// also after one that is no model, and `warn` gets the accession guide's warnings of each
 /// (review probe `sc`).
@@ -46,7 +47,7 @@ impl OidList {
         self.oids.push(oid);
     }
 
-    /// `Close(total_oids)`: the file of a volume of `total_oids` OIDs, none for 0.
+    /// `Close`, given `total_oids`: the file of a volume of `total_oids` OIDs, none for 0.
     pub(crate) fn close(&mut self, total_oids: u32) -> Result<(), WriteDbError> {
         if total_oids != 0 && !self.file.created() {
             let mut map = vec![0xFFu8; ((total_oids - 1) / 8 + 1) as usize];

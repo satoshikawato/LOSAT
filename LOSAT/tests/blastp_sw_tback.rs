@@ -8,15 +8,15 @@
 //! protein (`sok1`), and their redo succeeds; in `sw_endless_subjects.faa`, `send` (tks_M twice)
 //! gives tks_M the redo that NCBI never ends (M against M). NCBI's one-thread redo keeps the status of the batch's last redone
 //! match: a failed match before another is dropped, a failed last one fails the batch's traceback
-//! (`BLAST engine error: Traceback failed`, exit status 3) after the reports of the batches
+//! (`LOSAT engine error: Traceback failed`, exit status 3) after the reports of the batches
 //! before, unless the batch's first query holds a redone match: NCBI's clean-up then reads that
 //! query's freed heap and crashes (SIGSEGV), and LOSAT refuses the batch after the same reports
 //! (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.53). `qnohit` (W 87 times) has no hit (the subjects
 //! have no W). That the bytes equal NCBI's is the business of the fixture rows `db.x4.sw.fail.*`
 //! (frozen on ws); these tests pin LOSAT's decisions and their independence of `-num_threads`.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
-//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3796-3802 (the arrays of
 //! every query's heap are freed, then the first query's heap is popped:
 //! `BlastCompo_HeapPop`, compo_heap.c:444-457, reads `heapArray[1]` when its count is above 0)
@@ -112,7 +112,7 @@ fn row_queries(stdout: &str) -> Vec<&str> {
         .collect()
 }
 
-const TRACEBACK_FAILED: &str = "BLAST engine error: Traceback failed\n";
+const TRACEBACK_FAILED: &str = "LOSAT engine error: Traceback failed\n";
 /// The part of LOSAT's refusal of a failed batch whose first query holds a redone match.
 const NCBI_CRASHES: &str = "with which NCBI BLAST+ 2.17.0's blastp crashes";
 

@@ -12,8 +12,8 @@ use anyhow::Result;
 use std::cell::RefCell;
 
 use super::{
-    culling, database, BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult,
-    BlastpSubjectScratch, PrelimCollector,
+    database, BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch,
+    PrelimCollector, PrelimFilter,
 };
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -318,8 +318,9 @@ fn psi_prelim_cutoffs(
 /// `ResolvedBlastpArgs`), converted as blastp's are (the X-drops in `core::x_drop`, the gap trigger
 /// in `tblastx::ncbi_cutoffs::gap_trigger_raw_score`); a gapped X-drop that NCBI's
 /// kernels cannot size with the PSSM's Lambda is refused before the search, as blastp refuses it
-/// with the matrix's (`core::x_drop::check_gapped_x_dropoffs`). With `-culling_limit` the
-/// subjects' lists go to the culling writer `culling` in place of the collector, as blastp's do.
+/// with the matrix's (`core::x_drop::check_gapped_x_dropoffs`). With `-culling_limit` or
+/// `-best_hit_*` the subjects' lists go to the option's writer `prelim_filter` in place of the
+/// collector, as blastp's do.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:204-221
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:338-345
@@ -337,7 +338,7 @@ pub(super) fn pssm_prelim(
     database: Option<&database::BlastpDatabase>,
     subjects: &[EncodedProtein],
     pool: &crate::utils::threading::SearchPool<'_>,
-    culling: Option<&mut culling::PrelimCulling>,
+    prelim_filter: Option<&mut PrelimFilter>,
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<()> {
     let BlastpRuntimeLookup::Aa(table) = lookup else {
@@ -495,7 +496,7 @@ pub(super) fn pssm_prelim(
             run.total_query_span,
         )
     };
-    let searched = match (database, culling) {
+    let searched = match (database, prelim_filter) {
         // The preliminary stage of a database: blocks of sequences in the order of their ordinal
         // ids (`database::search_blocks`, the deterministic merge of every thread count).
         (Some(database), None) => database::search_blocks(
@@ -509,17 +510,17 @@ pub(super) fn pssm_prelim(
                 prelim_hitlist_size: run.prelim_hitlist_size,
             },
         ),
-        (Some(database), Some(culling)) => database::search_blocks(
+        (Some(database), Some(filter)) => database::search_blocks(
             database,
             pool,
             window,
             &new_scratch,
             &process_subject,
-            culling,
+            filter,
         ),
         // A subject set: each subject in turn (`blast_engine.c:1409-1498`), with one diagonal
         // table, at every thread count.
-        (None, mut culling) => {
+        (None, mut prelim_filter) => {
             let mut scratch = new_scratch();
             let mut subject_result = BlastpSubjectResult::new(0);
             for (s_idx, subject) in subjects.iter().enumerate() {
@@ -529,8 +530,8 @@ pub(super) fn pssm_prelim(
                     BlastpSubjectRef::of(subject),
                     &mut subject_result,
                 );
-                if let Some(culling) = culling.as_deref_mut() {
-                    culling.add(&mut subject_result);
+                if let Some(filter) = prelim_filter.as_deref_mut() {
+                    filter.add(&mut subject_result);
                     continue;
                 }
                 for (q_idx, list) in subject_result.x_compact_hsp_lists.drain(..) {

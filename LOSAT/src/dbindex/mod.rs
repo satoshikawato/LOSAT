@@ -8,9 +8,12 @@
 //! makembindex.
 
 pub(crate) mod factory;
+pub(crate) mod format;
+pub(crate) mod search;
 pub(crate) mod stream;
+pub(crate) mod volume;
 
-use std::io::Write;
+use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 
 /// The name in LOSAT's refusals.
 pub(crate) const PROGRAM: &str = "MAKEMBINDEX";
@@ -44,12 +47,6 @@ pub(crate) const WIDTH_32: u64 = 0;
 pub(crate) const OFFSET_COMBINED: Word = 1;
 pub(crate) const UNCOMPRESSED: Word = 0;
 
-/// `MAX_DBSEQ_LEN` and `DBSEQ_CHUNK_OVERLAP` of BLAST's core: the chunks of a long sequence.
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192
-pub(crate) const MAX_DBSEQ_LEN: u64 = 5_000_000;
-pub(crate) const DBSEQ_CHUNK_OVERLAP: u64 = 100;
-
 /// `CDbIndex::SOptions`: the parameters of index creation (`report_level` is read by nothing).
 // NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/dbindex.hpp:467-481
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,15 +77,16 @@ impl Options {
             stride: STRIDE,
             ws_hint: 28,
             hkey_width: 12,
-            chunk_size: MAX_DBSEQ_LEN,
-            chunk_overlap: DBSEQ_CHUNK_OVERLAP,
+            // BLAST's chunks of a long sequence (`MAX_DBSEQ_LEN`, `DBSEQ_CHUNK_OVERLAP`).
+            chunk_size: MAX_DBSEQ_LEN as u64,
+            chunk_overlap: DBSEQ_CHUNK_OVERLAP as u64,
             max_index_size: 1536,
             stat_file_name: None,
         }
     }
 }
 
-/// `GetCodeBits(stride)`: the bits of `stride`, at least 1.
+/// `GetCodeBits` of `stride`: the bits of `stride`, at least 1.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:438-443
 pub(crate) fn code_bits(stride: u64) -> u64 {
     let mut stride = stride;
@@ -102,7 +100,7 @@ pub(crate) fn code_bits(stride: u64) -> u64 {
     }
 }
 
-/// `GetMinOffset(stride)`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
+/// `GetMinOffset` of `stride`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
 /// an `int`; defined for a stride below 32768 (`code_bits` 15 or less), which `makembindex`
 /// checks first (`MAX_STRIDE`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:446-447
@@ -114,25 +112,46 @@ pub(crate) fn min_offset(stride: u64) -> u64 {
 /// shifts an `int` by 32 bits or more, which C++ leaves undefined.
 pub(crate) const MAX_STRIDE: u64 = 1 << 15;
 
-/// `CIndexSuperHeader<INDEX_FORMAT_VERSION_1>::Save(fname)`: the endianness (0, little), the
-/// format version (1), the number of sequences and the number of volumes, each a 32-bit word.
-/// `std::ofstream` reports no failure here (`CheckStream` tests `bad()` only, and a stream that
-/// did not open is only `fail()`), so none is returned.
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:196-203
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:241-252
-pub(crate) fn save_super_header(fname: &str, num_seq: u32, num_vol: u32) {
-    let Ok(file) = std::fs::File::create(fname) else {
-        return;
-    };
-    let mut out = std::io::BufWriter::new(file);
-    for word in [0u32, 1, num_seq, num_vol] {
-        let _ = out.write_all(&word.to_le_bytes());
-    }
-    let _ = out.flush();
+/// The index volume `<dir>/<name>.00.idx` of the FASTA text `fasta`, made with `options` by
+/// LOSAT's writer (the tests of `volume` and `search`).
+#[cfg(test)]
+pub(crate) fn test_volume(name: &str, fasta: &str, options: &Options) -> std::path::PathBuf {
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-dbindex-{name}-{}-{:?}",
+        crate::utils::test_dir::process_id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = dir.join(name).to_string_lossy().into_owned();
+    let mut input = stream::FastaStream::new(
+        Box::new(std::io::Cursor::new(fasta.as_bytes().to_vec())),
+        false,
+    );
+    let path = format::volume_name(&base, 0);
+    let mut stop = SeqNum::MAX;
+    let made = factory::make_index(
+        &mut input,
+        &path,
+        0,
+        &mut stop,
+        options,
+        &mut |_| {},
+        &mut |_| {},
+    );
+    assert!(made.is_ok(), "the test index was not made");
+    std::path::PathBuf::from(path)
 }
 
-/// `<base>.<NN>.idx`: the name of index volume `volume` (two digits at least).
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:105-112
-pub(crate) fn volume_name(base: &str, volume: u32) -> String {
-    format!("{base}.{volume:02}.idx")
+/// Letters `A`, `C`, `G`, `T` from a fixed generator (the tests' sequences).
+#[cfg(test)]
+pub(crate) fn test_letters(len: usize, seed: u64) -> String {
+    let mut state = seed | 1;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            b"ACGT"[(state >> 20) as usize % 4] as char
+        })
+        .collect()
 }

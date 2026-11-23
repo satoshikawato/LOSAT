@@ -26,18 +26,28 @@ use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
 use crate::writedb::Platform;
 
-/// The caller's stream of a tool's diagnostics, which keeps what it passes on: a tool writes its
-/// failure there, and that text is the error's message.
+/// The caller's stream of a tool's diagnostics, which keeps what the tool writes there: a tool
+/// writes its failure there, and that text without its last newlines is the error's message, also
+/// where the caller's writer fails.
 struct Recorded<'a> {
     writer: &'a mut dyn Write,
     bytes: Vec<u8>,
 }
 
 impl Write for Recorded<'_> {
+    /// Keeps the bytes that the caller's writer takes, and the whole `buffer` where it takes none
+    /// (an error, or nothing written): the command line's standard error would hold them, and
+    /// `write_all` gives them up there. An interrupted write keeps nothing, as `write_all` writes
+    /// the buffer again.
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let written = self.writer.write(buffer)?;
-        self.bytes.extend_from_slice(&buffer[..written]);
-        Ok(written)
+        let result = self.writer.write(buffer);
+        let kept = match &result {
+            Ok(written) if *written > 0 => &buffer[..*written],
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => &[],
+            _ => buffer,
+        };
+        self.bytes.extend_from_slice(kept);
+        result
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -65,14 +75,27 @@ fn refused(mut recorded: Recorded<'_>, reason: &[u8]) -> Error {
     }
 }
 
-/// Runs `blastdbcmd` with the words after the program name, as on the command line. `input` is
-/// what the command line reads as standard input (`-entry_batch -`, `-ipg_batch -`,
-/// `-taxidlist -`), so a batch of ids can be given from memory. What the command line writes to
-/// standard output goes to `output` (`-out` is a file, as there), what it writes to standard
-/// error to `diagnostics`. A failure is an error whose message is that text (an argv that NCBI's
-/// argument reader refuses too). The call runs NCBI's application start, as the command line
-/// does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`, whose XML only the command
-/// line writes, is refused.
+/// The parser's refusal `error` of a tool's argv (makeblastdb's, which LOSAT's parser reads): the
+/// command line writes its message to standard error (`cli::command_line_message`, exit status 2),
+/// so it goes to the diagnostics, and the error is what the run wrote there without its last line
+/// feeds, as a tool's error (`outcome`), of the parser's kind (`Error::Argv`). The help (`-h`,
+/// `-help`), which the command line writes to standard output, is the error's text alone.
+fn parser_refused(mut recorded: Recorded<'_>, error: &clap::Error) -> Error {
+    if !error.use_stderr() {
+        return Error::Argv(crate::cli::render_message(error).into());
+    }
+    let _ = recorded.write_all(crate::cli::command_line_message(error, false).as_bytes());
+    Error::written_argv(recorded.bytes)
+}
+
+/// Runs `blastdbcmd` with the words after the program name, as on the command line. `input` is what
+/// the command line reads as standard input (`-entry_batch -`, `-ipg_batch -`, `-taxidlist -`), so
+/// a batch of ids can be given from memory. What the command line writes to standard output goes to
+/// `output` (`-out` is a file, as there), what it writes to standard error to `diagnostics`. A
+/// failure is an error whose message is that text without its last newlines (an argv that NCBI's
+/// argument reader refuses too). The call runs NCBI's application start, as the command line does
+/// (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`, whose XML only the command line
+/// writes, is refused.
 pub fn run_blastdbcmd(
     argv: &[&str],
     input: &mut dyn Read,
@@ -88,14 +111,14 @@ pub fn run_blastdbcmd(
     outcome(status, recorded.bytes)
 }
 
-/// Runs `dustmasker` with the words after the program name, as on the command line. `input` is
-/// what the command line reads as standard input (`-in -`, and without `-in`), so sequences in
-/// memory can be masked. What the command line writes to standard output goes to `output`
-/// (`-out` is a file, as there), what it writes to standard error to `diagnostics`. A failure
-/// is an error whose message is that text (an argv that NCBI's argument reader refuses too: its
-/// usage and report, as the command line prints them). The call runs NCBI's application start, as
-/// the command line does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`, whose XML
-/// only the command line writes, is refused.
+/// Runs `dustmasker` with the words after the program name, as on the command line. `input` is what
+/// the command line reads as standard input (`-in -`, and without `-in`), so sequences in memory
+/// can be masked. What the command line writes to standard output goes to `output` (`-out` is a
+/// file, as there), what it writes to standard error to `diagnostics`. A failure is an error whose
+/// message is that text without its last newlines (an argv that NCBI's argument reader refuses too:
+/// its usage and report, as the command line prints them). The call runs NCBI's application start,
+/// as the command line does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`, whose
+/// XML only the command line writes, is refused.
 pub fn run_dustmasker(
     argv: &[&str],
     input: &mut dyn Read,
@@ -115,9 +138,9 @@ pub fn run_dustmasker(
 /// [`run_dustmasker`], for protein sequences. `input` is what the command line reads as standard
 /// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
 /// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
-/// error whose message is that text. The call runs NCBI's application start, as the command line
-/// does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`, whose XML only the command
-/// line writes, is refused.
+/// error whose message is that text without its last newlines. The call runs NCBI's application
+/// start, as the command line does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`,
+/// whose XML only the command line writes, is refused.
 pub fn run_segmasker(
     argv: &[&str],
     input: &mut dyn Read,
@@ -138,9 +161,9 @@ pub fn run_segmasker(
 /// converting them, `-convert`, are refused). `input` is what the command line reads as standard
 /// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
 /// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
-/// error whose message is that text. The call runs NCBI's application start, as the command line
-/// does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`, whose XML only the command
-/// line writes, is refused.
+/// error whose message is that text without its last newlines. The call runs NCBI's application
+/// start, as the command line does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`,
+/// whose XML only the command line writes, is refused.
 pub fn run_windowmasker(
     argv: &[&str],
     input: &mut dyn Read,
@@ -160,7 +183,7 @@ pub fn run_windowmasker(
 /// [`run_dustmasker`], for the lower case letters of FASTA input. `input` is what the command
 /// line reads as standard input (`-in -`, and without `-in`), what it writes to standard output
 /// goes to `output` (`-out` is a file, as there), what it writes to standard error to
-/// `diagnostics`, and a failure is an error whose message is that text.
+/// `diagnostics`, and a failure is an error whose message is that text without its last newlines.
 pub fn run_convert2blastmask(
     argv: &[&str],
     input: &mut dyn Read,
@@ -179,10 +202,10 @@ pub fn run_convert2blastmask(
 /// Runs `makembindex` with the words after the program name, as on the command line: as
 /// [`run_dustmasker`], for the index of a BLAST database (`-input`) or of FASTA input
 /// (`-old_style_index true -iformat fasta`). `input` is what the command line reads as standard
-/// input (FASTA input without `-input`), what it writes to standard output (`-show_filters`)
-/// goes to `output`, what it writes to standard error (the `creating ...` lines too) to
-/// `diagnostics`, and a failure is an error whose message is that text. The index files are
-/// written where the command line writes them.
+/// input (FASTA input without `-input`), what it writes to standard output (`-show_filters`) goes
+/// to `output`, what it writes to standard error (the `creating ...` lines too) to `diagnostics`,
+/// and a failure is an error whose message is that text without its last newlines. The index files
+/// are written where the command line writes them.
 pub fn run_makembindex(
     argv: &[&str],
     input: &mut dyn Read,
@@ -204,8 +227,9 @@ pub fn run_makembindex(
 /// writes the database's files as there. `input` is what the command line reads as standard input
 /// (`-in -`, and without `-in`), so a database can be built from FASTA in memory. What the command
 /// line writes to standard output goes to `output`, what it writes to standard error to
-/// `diagnostics`. A failure is an error whose message is that text; an argv that the parser
-/// refuses is `Error::Argv`. The call runs NCBI's application start, as the command line does:
+/// `diagnostics`. A failure is an error whose message is that text without its last newlines; an
+/// argv that the parser refuses is `Error::Argv`, with the parser's message in the diagnostics too.
+/// The call runs NCBI's application start, as the command line does:
 /// the file of `-logfile` gets its messages, the file of `-conffile` is loaded, the versions are
 /// printed to `output`, and `-dryrun` ends the call after the arguments and the settings.
 pub fn run_makeblastdb(
@@ -238,8 +262,10 @@ pub fn run_makeblastdb(
         Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     }
     drop(opened.target);
-    let cli: Cli = crate::cli::try_parse_with_own_start(words())
-        .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
+    let cli: Cli = match crate::cli::try_parse_with_own_start(words()) {
+        Ok(cli) => cli,
+        Err(error) => return Err(parser_refused(recorded, &error)),
+    };
     let Commands::Makedb(args) = cli.command else {
         unreachable!("the first word names makeblastdb");
     };
@@ -261,7 +287,7 @@ pub fn run_makeblastdb(
             .map(Option::as_deref)
             .map_err(String::as_str),
     )
-    .and_then(|()| makeblastdb::check_environment(&|name: &str| std::env::var_os(name)));
+    .and_then(|()| makeblastdb::check_environment(&args, &|name: &str| std::env::var_os(name)));
     if let Err(reason) = checked {
         return Err(refused(recorded, reason.as_bytes()));
     }

@@ -14,14 +14,6 @@ fn parse(extra: &[&str]) -> Result<RpstblastnArgs, String> {
     }
 }
 
-fn refusal(extra: &[&str]) -> String {
-    parse(extra)
-        .unwrap()
-        .into_blastx_args()
-        .unwrap_err()
-        .to_string()
-}
-
 /// The refusal of `check_options`, once per run.
 fn late_refusal(extra: &[&str]) -> String {
     search(extra).check_options().unwrap_err().to_string()
@@ -128,36 +120,29 @@ fn composition_modes_run() {
     assert!(search(&["-ungapped", "-comp_based_stats", "0"]).ungapped);
 }
 
-// The refusals of the options that later items run, before the search.
+// The refusals of the options that later items run, before the search. Every output format
+// that NCBI's rpstblastn runs is BLASTX's report (items PS15a-1, PS15a-2).
 #[test]
 fn options_of_later_items_are_refused() {
-    for (extra, text) in [
-        (
-            &["-outfmt", "8"][..],
-            "output format 8 is not supported by LOSAT's RPSTBLASTN",
-        ),
-        (
-            &["-outfmt", "12"],
-            "output format 12 is not supported by LOSAT's RPSTBLASTN",
-        ),
-        (
-            &["-outfmt", "20"],
-            "output format 20 is not supported by LOSAT's RPSTBLASTN",
-        ),
-        (
-            &["-outfmt", "13", "-out", "x.json"],
-            "output format 13 is not supported by LOSAT's RPSTBLASTN",
-        ),
+    for outfmt in [
+        "1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20",
     ] {
-        assert!(
-            refusal(extra).contains(text),
-            "{extra:?}: {}",
-            refusal(extra)
-        );
+        parse(&["-outfmt", outfmt, "-out", "x.out"])
+            .unwrap()
+            .into_blastx_args()
+            .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
     }
-    // The composition-based statistics of later items, once per run (`check_options`).
-    assert!(late_refusal(&["-use_sw_tback"])
-        .contains("-use_sw_tback with composition-based statistics is not supported by LOSAT's RPSTBLASTN yet"));
+    // -use_sw_tback with composition-based statistics (item PS12c): the redo of the frames is
+    // NCBI's Smith-Waterman redo.
+    assert!(search(&["-use_sw_tback"]).search.use_sw_tback);
+    assert!(
+        search(&["-use_sw_tback", "-comp_based_stats", "2"])
+            .search
+            .use_sw_tback
+    );
+    assert!(!search(&[]).search.use_sw_tback);
+    // LOSAT's refusals of options, once per run (`check_options`).
+    assert!(late_refusal(&["-sum_stats", "true"]).contains("-sum_stats true"));
     // -searchsp and -dbsize reach BLASTX's options.
     let args = parse(&[
         "-comp_based_stats",

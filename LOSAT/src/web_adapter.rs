@@ -20,14 +20,24 @@
 use std::ffi::OsString;
 
 // The command line's arguments (`cli.rs`): the clap types of every program, the parser's
-// messages, and the command line's own errors.
-pub use crate::cli::{command_line_message, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
+// messages, the text that the command line prints where its reader stopped at a help word, and
+// the command line's own errors.
+pub use crate::cli::{
+    command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
+};
 
-/// `cli::try_parse_with_own_start` for the command line's own arguments (`Cli`): the argv read as
-/// the command line reads it after its application start, NCBI's single-dash options included. A
-/// run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
-/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them; the versions and
-/// `-xmlhelp`, whose texts only the command line writes, are refused.
+// The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
+// made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
+// defaults it resolves.
+pub use crate::ncbi_app::args::{genetic_codes, string_values};
+
+/// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
+/// as the command line reads it after its application start, NCBI's single-dash options included.
+/// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
+/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them, and the help
+/// words stop the reader as on the command line, `-xmlhelp` included: the run prints their text
+/// (`printed_text`; line WQA's D14, 2026-11-20). The versions are printed by the start
+/// (`CallerStart::version`) and never reach the reader.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
 /// other clap type.
@@ -36,7 +46,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_with_own_start(argv)
+    crate::cli::try_parse_with_printing_start(argv)
 }
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
@@ -75,6 +85,13 @@ pub use crate::algorithm::blastn::coordination::{
 };
 pub use crate::algorithm::blastn::scoring::{check_losat_limits, check_scoring_options};
 pub use crate::algorithm::blastn::BlastnArgs;
+
+/// Gives BLASTN's `-filtering_db` its repeat search with the run's `settings` (the lookup of the
+/// database as of `-db`: the run's working directory and registry), as the command line does
+/// before a search; nothing without the option (`BlastnArgs::resolve_repeat_filter`).
+pub fn resolve_blastn_repeat_filter(args: &mut BlastnArgs, settings: &ApplicationSettings) {
+    args.resolve_repeat_filter(settings);
+}
 pub use crate::algorithm::blastp::blast_engine::check_options as check_blastp_options;
 pub use crate::algorithm::blastx::check_options as check_blastx_options;
 pub use crate::algorithm::blastx::BlastxArgs;
@@ -83,12 +100,15 @@ pub use crate::algorithm::tblastn::refuse_browser_pssm_query as refuse_tblastn_p
 pub use crate::algorithm::tblastx::blast_engine::check_options as check_tblastx_options;
 pub use crate::utils::threading::validate_threads;
 
-// The searches: each program's `run_local` over records in memory, the pool that the searches
-// of one argv share, and the routing of their outputs (`api/local_blast.rs`).
+// The searches: each program's `run_local` over records in memory and its `run_local_database`
+// over the database of `-db` (opened by name with the run's application settings, as the command
+// line opens it: LOSAT Web's host gives the engine the run's working directory, line WQA D12a), the
+// pool that the searches of one argv share, and the routing of their outputs (`api/local_blast.rs`).
 pub use crate::api::local_blast::{
-    run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    with_run_pool, FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink,
-    ReportOutputs,
+    run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
+    run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
+    run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
+    FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink, ReportOutputs,
 };
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;
@@ -96,7 +116,9 @@ pub use crate::report::PairwiseHit;
 // LOSAT's words of NCBI's messages (`wording.rs`, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
 // the adapter's tests compare the engine's messages with NCBI's texts through it (AGENTS.md
 // rule 8).
-pub use crate::wording::{losat_bytes, losat_text};
+pub use crate::wording::{
+    losat_bytes, losat_output_bytes, losat_text, LOSAT_VERSION, REPORT_VERSION,
+};
 
 // The output formats of the application layer (`blastinput/app.rs`, NCBI's CFormattingArgs):
 // `-outfmt` parsed and checked as the command line does. `EngineProgram` is the program of
@@ -104,7 +126,8 @@ pub use crate::wording::{losat_bytes, losat_text};
 pub use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, SAM as SAM_FORMAT};
 pub use crate::blastinput::app::Program as EngineProgram;
 pub use crate::blastinput::app::{
-    engine_error, formatting_handler_check, parse_formatting_string, report_format,
+    engine_error, formatting_handler_check, missing_subject_error, parse_formatting_string,
+    report_format,
 };
 
 // The hit list sizes of the formats (`blastinput/report_counts.rs`), the scoring matrices that
@@ -119,7 +142,9 @@ pub use crate::config::ScoringMatrix;
 // the registered inputs; its records are `api::FastaRecord`. The inputs of a run whose reading
 // needs its options (`-parse_deflines`: the ids of the deflines, read in one scope of ids for the
 // query and the subjects) are read together, by the reading of the library API's `read_inputs`.
-pub use crate::api::input::{parse_deflines_of, read_search_inputs};
+// A query is read as the command line's query batches read it (`read_query_records`): the records
+// before the reader's error, and the error, which the run meets in its batch.
+pub use crate::api::input::{parse_deflines_of, read_query_records, read_search_inputs};
 pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
@@ -127,7 +152,6 @@ pub use crate::blastinput::fasta_reader::{
 // the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
 // the refusal of a record longer than LOSAT reads.
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
-pub use crate::blastinput::input_files::is_blank;
 
 /// The options of `program`'s command line that the browser's searches of records do not take:
 /// the search strategy file, which the library API refuses too (`api::search::file_options`), and

@@ -5,12 +5,14 @@
 use super::super::view::V;
 use super::super::{Indexer, Stop};
 use super::{Caches, Column, Want};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 
 fn column_value(text: &str) -> Value {
     let (value, posts) = read_document(
         format!("SeqTable-column ::= {{ header {{ field-id 3 }}, {text} }}").as_bytes(),
         named::SEQTABLE_COLUMN,
+        Names::PSSM,
     );
     assert!(posts.is_empty());
     value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
@@ -26,7 +28,7 @@ fn indexer() -> Indexer<'static> {
     }
 }
 
-/// `TryGetValue(row, v)` of the column `text` at each of `rows`, as text (`-` for none, `E:` and
+/// `TryGetValue` of the column `text` at each of `rows`, as text (`-` for none, `E:` and
 /// the message for an exception, `S:` and `what()` for a `std::exception`, `R` for a refusal).
 fn values(text: &str, want: Want, rows: std::ops::Range<u64>) -> Vec<String> {
     let value = column_value(text);
@@ -252,7 +254,7 @@ fn probe_rows(rows: u64, read: &Rows<'_>) -> std::collections::BTreeSet<u64> {
 }
 
 /// Whether the rows `rows` of a feature table whose `disabled` column is `column` are read
-/// (`RowIsDisabled(row)` false), against `read`.
+/// (`RowIsDisabled` false for the row), against `read`.
 fn check_disabled_rows(case: &str, column: &str, rows: u64, read: &Rows<'_>) {
     let value = column_value(column);
     let column = Column(V::new(named::SEQTABLE_COLUMN, &value));
@@ -441,7 +443,8 @@ fn nested_multi_data_are_read_without_recursion() {
         .stack_size(256 << 10)
         .spawn(|| {
             let read = |text: String| {
-                let (value, posts) = read_document(text.as_bytes(), named::SEQTABLE_COLUMN);
+                let (value, posts) =
+                    read_document(text.as_bytes(), named::SEQTABLE_COLUMN, Names::PSSM);
                 assert!(posts.is_empty());
                 value.expect("read")
             };

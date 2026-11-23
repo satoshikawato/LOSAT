@@ -16,14 +16,18 @@ use crate::run::Program;
 /// `-outfmt` of its own, whose other formats and 6 or 7 with fields add an output,
 /// `run::parse_run`) and the thread count, and the
 /// options of NCBI's command line that the application has no control for (`-mt_mode`,
-/// which needs `-num_threads` and has no effect; `-use_index`, which a search of records ignores
-/// as NCBI ignores it with `-subject`).
+/// which needs `-num_threads` and has no effect; `-use_index` and `-index_name`, which a search
+/// of records ignores as NCBI ignores them with `-subject`).
 /// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
 /// distinct hit list size of its formats (`run::search_groups`).
-const ADAPTER_OWNED: [&str; 5] = ["out", "outfmt", "num_threads", "mt_mode", "use_index"];
-
-/// Genetic codes are small integers; every accepted one is below this bound.
-const GENETIC_CODE_PROBE: u32 = 64;
+const ADAPTER_OWNED: [&str; 6] = [
+    "out",
+    "outfmt",
+    "num_threads",
+    "mt_mode",
+    "use_index",
+    "index_name",
+];
 
 /// The options of `program` that the browser's searches of records take none of (tblastn's
 /// `-in_pssm`, which the browser refuses until line PS's PSW1; the search strategy file
@@ -123,15 +127,9 @@ fn describe_program(program: Program) -> Result<String, String> {
         {
             continue;
         }
-        // The engine's own parser decides which codes it accepts.
-        let flag = format!("-{long}");
-        let accepted: Vec<u32> = (0..GENETIC_CODE_PROBE)
-            .filter(|code| {
-                let code = code.to_string();
-                crate::run::parse(&[program.name(), "-query", "q", "-subject", "s", &flag, &code])
-                    .is_ok()
-            })
-            .collect();
+        // The codes of the key's constraint in the engine's argument tables (NCBI's, and LOSAT's
+        // 32 of tblastn's `-db_gencode`).
+        let accepted = losat::web_adapter::genetic_codes(program.name(), long).unwrap_or_default();
         let _ = write!(out, ",\"{key}\":[");
         for (index, code) in accepted.iter().enumerate() {
             if index > 0 {

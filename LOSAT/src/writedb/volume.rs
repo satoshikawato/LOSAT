@@ -1,14 +1,14 @@
 //! One volume of a database being written (`CWriteDB_Volume`,
 //! `c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp`).
 
+use super::column::{BlobPair, Column, ColumnMeta, COLUMN_LETTERS};
 use super::convert::find_sequence_length;
 use super::fasta_source::post_seq_id_warning;
 use super::files::{
     make_short_name, orig_num_digits, DbVersion, HeaderFile, IndexFile, OffsetArrays, SequenceFile,
 };
 use super::id_set::LabelSet;
-use super::isam::{GiIndex, IsamType, NumericIsam, PigIsam, StringIsam, StringIsamScratch};
-use super::mask_data::column::{Column, ColumnMeta};
+use super::isam::{GiIndex, IsamType, NumericIsam, StringIsam, StringIsamScratch};
 use super::oid_list::{is_model, OidList, EXCLUDE_MODEL};
 use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
@@ -24,7 +24,7 @@ pub struct Indices {
 }
 
 impl Indices {
-    /// `m_Indices != CWriteDB::eNoIndex`.
+    /// `m_Indices` is not `CWriteDB::eNoIndex`.
     pub fn any(self) -> bool {
         self.full || self.hash
     }
@@ -40,11 +40,11 @@ pub(crate) struct IndexScratch {
 }
 
 /// The ISAM indices, the OID to GI file and the duplicate check of a volume built with
-/// indices (`m_Indices != eNoIndex`).
+/// indices (`m_Indices` is not `eNoIndex`).
 #[derive(Debug)]
 struct VolumeIndices {
     /// `m_PigIsam` (protein only).
-    pig: Option<PigIsam>,
+    pig: Option<NumericIsam>,
     /// `m_GiIsam`.
     gi: NumericIsam,
     /// `m_AccIsam` (version 4 only).
@@ -59,7 +59,7 @@ struct VolumeIndices {
     label: Vec<u8>,
 }
 
-/// `CWriteDB_Volume` without OID masks, and with the mask column as its only column.
+/// `CWriteDB_Volume`.
 #[derive(Debug)]
 pub(crate) struct Volume {
     dbname: String,
@@ -69,23 +69,15 @@ pub(crate) struct Volume {
     idx: IndexFile,
     hdr: HeaderFile,
     seq: SequenceFile,
-    /// The indices of `m_Indices != eNoIndex`.
+    /// The indices when `m_Indices` is not `eNoIndex`.
     indices: Option<VolumeIndices>,
     /// `m_OID`: the number of sequences written to this volume.
     oid: u32,
     open: bool,
-    /// `m_Columns`: the mask column (`BlastDb/MaskData`) when the database has mask data.
-    mask_column: Option<Column>,
+    /// `m_Columns`, in the order of their ids.
+    columns: Vec<Column>,
     /// `m_ExModelList`: the OIDs of models, for `-oid_masks` with `fExcludeModel`.
     excluded_models: Option<OidList>,
-}
-
-/// The two blobs of the mask column for one sequence (the offsets in big-endian and in
-/// little-endian byte order); empty for a sequence without mask data.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct MaskBlobs<'a> {
-    pub(crate) blob: &'a [u8],
-    pub(crate) blob2: &'a [u8],
 }
 
 impl Volume {
@@ -94,7 +86,7 @@ impl Volume {
     // makeblastdb never sets `eAddTrace` or `eSparseIndex`.
     /// `arrays`: the offset arrays of the previous volume
     /// (`take_offset_arrays`), or new ones for the first; `sizeof_long` the
-    /// platform's `sizeof(long)` (`Platform::sizeof_long`); `indices` makeblastdb's index
+    /// platform's `sizeof` of `long` (`Platform::sizeof_long`); `indices` makeblastdb's index
     /// type, `scratch` the index memory of the previous volume (`take_index_scratch`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
@@ -134,7 +126,8 @@ impl Volume {
             } = scratch;
             id_set.clear();
             VolumeIndices {
-                pig: protein.then(|| PigIsam::new(dbname, index, max_file_size)),
+                pig: protein
+                    .then(|| NumericIsam::new(IsamType::Pig, dbname, true, index, max_file_size)),
                 gi: NumericIsam::new(IsamType::Gi, dbname, protein, index, max_file_size),
                 acc: (version != DbVersion::V5).then(|| {
                     StringIsam::new(IsamType::Acc, dbname, protein, index, max_file_size, acc)
@@ -158,7 +151,7 @@ impl Volume {
             indices,
             oid: 0,
             open: true,
-            mask_column: None,
+            columns: Vec::new(),
             excluded_models: (oid_masks & EXCLUDE_MODEL != 0)
                 .then(|| OidList::exclude_model(dbname, protein, index, max_file_size)),
         })
@@ -166,28 +159,38 @@ impl Volume {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:505-554
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1206-1210
-    // The mask column is the volume's only column (column 0, letter `a`) and
-    // `CWriteDB_Volume::CreateColumn`'s `mbo` is true by default. `date` is the creation
-    // date of the column's index file. The column files are the same in version 4 and
-    // version 5: the LMDB files of version 5 belong to the database, not to a volume.
-    pub(crate) fn create_mask_column(
+    // `date` is the creation date of the column's index file. The column files are the same in
+    // version 4 and version 5: the LMDB files of version 5 belong to the database, not to a
+    // volume. Columns are made only with a new volume, before its first sequence.
+    /// `CreateColumn` of a title, the metadata and `max_sz`: the next column of the volume, with
+    /// both byte orders.
+    pub(crate) fn create_column(
         &mut self,
+        title: &[u8],
         meta: &ColumnMeta,
         date: &[u8],
         max_file_size: u64,
     ) -> Result<(), WriteDbError> {
-        let mut column = Column::new(
+        let col_id = self.columns.len();
+        if col_id >= COLUMN_LETTERS.len() {
+            return Err(WriteDbError::Creation(
+                "Error: Cannot have more than 36 columns.".to_string(),
+            ));
+        }
+        debug_assert_eq!(
+            self.oid, 0,
+            "a column is made before the volume's first sequence"
+        );
+        self.columns.push(Column::new(
             &self.dbname,
             self.protein,
             self.index,
+            col_id,
+            title,
             meta,
             date,
             max_file_size,
-        );
-        for _ in 0..self.oid {
-            column.add_blob(&[], &[])?;
-        }
-        self.mask_column = Some(column);
+        ));
         Ok(())
     }
 
@@ -210,19 +213,24 @@ impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:254-264
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:321-323
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:266-291
-    // The PIG of FASTA input is 0, so `m_PigIsam` stays empty. `INVALID_GI` is -1.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:280-282
+    // A PIG of 0 (every sequence of FASTA input) is not indexed. `INVALID_GI` is -1.
     /// `WriteSequence`: adds one sequence, or returns `false` when the
     /// volume already holds a sequence and this one does not fit a file. `ids` is the
-    /// sequence's id list (`m_Ids`) and `hash` its sequence hash (`m_Hash`), read when the
-    /// volume has indices.
+    /// sequence's id list (`m_Ids`), `pig` its PIG (`m_Pig`) and `hash` its sequence hash
+    /// (`m_Hash`), read when the volume has indices; `blobs` holds the blobs of each column, in
+    /// the order of the columns, and `mask_column` the index of the mask column
+    /// (`maskcol_id`), the only one whose second blob is written.
     pub(crate) fn write_sequence(
         &mut self,
         seq: &[u8],
         ambig: &[u8],
         binhdr: &[u8],
         ids: &[ParsedSeqId],
+        pig: i32,
         hash: u32,
-        mask: MaskBlobs<'_>,
+        blobs: &[BlobPair<'_>],
+        mask_column: Option<usize>,
         diagnostics: &mut Vec<u8>,
     ) -> Result<bool, WriteDbError> {
         if seq.is_empty() || binhdr.is_empty() {
@@ -240,7 +248,7 @@ impl Volume {
             {
                 overfull = true;
             }
-            if indices.pig.as_ref().is_some_and(|pig| !pig.can_fit()) {
+            if indices.pig.as_ref().is_some_and(|pig| !pig.can_fit(1)) {
                 overfull = true;
             }
             if indices.hash.as_ref().is_some_and(|hash| !hash.can_fit(1)) {
@@ -248,10 +256,11 @@ impl Volume {
             }
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:209-216
-        // Both blobs of the mask column are checked, the first one first.
-        if let Some(column) = &self.mask_column {
-            if !(column.can_fit(mask.blob.len()) && column.can_fit(mask.blob2.len())) {
+        // Both blobs of each column are checked against the column, the first one first.
+        for (column, blobs) in self.columns.iter().zip(blobs) {
+            if !(column.can_fit(blobs.blob.len()) && column.can_fit(blobs.blob2.len())) {
                 overfull = true;
+                break;
             }
         }
         if self.oid != 0 && overfull {
@@ -290,6 +299,9 @@ impl Volume {
             indices
                 .gi_index
                 .add_gi(ids.iter().find_map(ParsedSeqId::gi).unwrap_or(-1));
+            if let Some(pig_isam) = indices.pig.as_mut().filter(|_| pig != 0) {
+                pig_isam.add_pig(self.oid, pig);
+            }
             if let Some(hash_isam) = &mut indices.hash {
                 hash_isam.add_hash(self.oid, hash)?;
             }
@@ -307,9 +319,15 @@ impl Volume {
             }
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:311-318
-        // Every sequence adds its blobs to the column, empty ones too.
-        if let Some(column) = &mut self.mask_column {
-            column.add_blob(mask.blob, mask.blob2)?;
+        // Every sequence adds its blobs to each column, empty ones too; a column other than the
+        // mask column gets its first blob alone.
+        for (col_id, (column, blobs)) in self.columns.iter_mut().zip(blobs).enumerate() {
+            let blob2 = if mask_column == Some(col_id) {
+                blobs.blob2
+            } else {
+                &[]
+            };
+            column.add_blob(blobs.blob, blob2)?;
         }
         self.oid += 1;
         Ok(true)
@@ -325,6 +343,9 @@ impl Volume {
             self.hdr.close();
             self.seq.close();
             if let Some(indices) = &mut self.indices {
+                if let Some(pig) = &mut indices.pig {
+                    pig.close()?;
+                }
                 indices.gi.close()?;
                 if let Some(acc) = &mut indices.acc {
                     acc.close()?;
@@ -340,7 +361,7 @@ impl Volume {
                 models.close(self.oid)?;
             }
             // The columns are closed after the other files (writedb_volume.cpp:362-367).
-            if let Some(column) = &mut self.mask_column {
+            for column in &mut self.columns {
                 column.close()?;
             }
         }
@@ -397,7 +418,7 @@ impl Volume {
         if let Some(models) = &mut self.excluded_models {
             models.file_mut().rename_single();
         }
-        if let Some(column) = &mut self.mask_column {
+        for column in &mut self.columns {
             column.rename_single();
         }
     }
@@ -433,7 +454,7 @@ impl Volume {
         if let Some(models) = &mut self.excluded_models {
             models.file_mut().rename_file_index(num_digits);
         }
-        if let Some(column) = &mut self.mask_column {
+        for column in &mut self.columns {
             column.rename_file_index(num_digits);
         }
     }
@@ -449,6 +470,9 @@ impl Volume {
                 acc.list_files(files);
             }
             indices.gi.list_files(files);
+            if let Some(pig) = &indices.pig {
+                pig.list_files(files);
+            }
             if let Some(hash) = &indices.hash {
                 hash.list_files(files);
             }
@@ -457,7 +481,7 @@ impl Volume {
         if let Some(models) = &self.excluded_models {
             files.push(models.filename().to_string());
         }
-        if let Some(column) = &self.mask_column {
+        for column in &self.columns {
             column.list_files(files);
         }
     }

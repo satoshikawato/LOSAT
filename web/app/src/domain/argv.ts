@@ -9,9 +9,6 @@ import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-fo
  */
 export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
-/** The words with which the CLI prints its help instead of searching (BLAST+'s `-h`, `-help`, `-help-full` and `-xmlhelp`). */
-const HELP_WORDS: readonly string[] = Object.freeze(['-h', '-help', '-help-full', '-xmlhelp', '--help']);
-
 /** The CLI's database options: `-db` and the filters of a database search. */
 export const DATABASE_FLAGS: readonly string[] = Object.freeze([
   '-db',
@@ -39,15 +36,17 @@ const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp'
 /**
  * Why a word of "Additional options" is refused before the engine reads it: options that the
  * application manages, and the CLI's options that a search in the browser cannot have, whose
- * CLI message would name what the user cannot change here (`-subject`, `-num_threads`) or print
- * the CLI's help (WA-FM-04, WA-FM-05); undefined for the other words.
+ * CLI message would name what the user cannot change here (`-subject`, `-num_threads`; WA-FM-04);
+ * undefined for the other words. The words of the CLI's help and version (`-h`, `-help`,
+ * `-help-full`, `--help`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
+ * prints the command line's text for them and searches nothing (*start*'s `prints`; line WQA's D14,
+ * 2026-11-20, in place of WA-FM-05's refusal).
  */
 function refusedWord(program: ProgramId, word: string): string | undefined {
   // -flag=value is the command line's form of -flag value too.
   const flag = word.split('=', 1)[0]!;
   if (flag === '-num_threads') return '-num_threads is set in the form: Threads';
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
-  if (HELP_WORDS.includes(word)) return `${word} is not available in the browser`;
   if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
   if (program === 'blastn' && flag === '-filtering_db') return '-filtering_db (a BLAST database of repeats) is not supported in the browser yet';
   if (DATABASE_FLAGS.includes(flag) || (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag))) {
@@ -71,6 +70,17 @@ export interface ArgvInput {
   readonly parameters: ReadonlyArray<readonly [flag: string, value: string | true]>;
   /** Words of other options, as on a command line ("Additional options", `splitOptions`), after the parameters. */
   readonly extra?: readonly string[];
+}
+
+/**
+ * The argv of a run as the user's command: a run that printed the command line's help or version (`RunSnapshot.prints`) read
+ * no input, so its command names none (`blastn -version`), where the engine's argv has the placeholders `-query query.fa
+ * -subject subject.fa` that `buildArgv` writes. Where the run is shown as a command, it takes the argv from here (line WQA's
+ * D20, 2026-11-23).
+ */
+export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {
+  // buildArgv's layout: [program, '-query', name, '-subject', name, ...].
+  return run.prints === undefined ? run.argv : [run.argv[0]!, ...run.argv.slice(5)];
 }
 
 /**

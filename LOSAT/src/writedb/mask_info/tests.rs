@@ -513,10 +513,11 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
                     panic!("{file}: not rejected by the format guess");
                 };
                 // NCBI's stderr names the file as it was given; here the path is absolute.
+                // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
                 assert_eq!(
-                    run.stderr,
+                    crate::wording::losat_text(&run.stderr),
                     format!(
-                        "BLAST options error: {}\n",
+                        "LOSAT options error: {}\n",
                         text.replace(&path.display().to_string(), file)
                     ),
                     "{file}"
@@ -838,7 +839,7 @@ fn files_that_are_neither_encoding() {
     assert_eq!(
         error.to_string(),
         format!(
-            "BLAST options error: Unknown encoding for mask data in '{}'",
+            "LOSAT options error: Unknown encoding for mask data in '{}'",
             fasta.display()
         )
     );
@@ -1270,6 +1271,38 @@ fn a_text_file_is_read_in_blocks() {
     assert!(r.next_info().unwrap().is_none());
 }
 
+/// A binary file is read in blocks too (`StreamSource` under `BerReader`): the elements of
+/// `b_small_int.asnb`'s mask list, 100,000 of them, each with its own interval.
+#[test]
+fn a_binary_file_is_read_in_blocks() {
+    let count = 100_000u32;
+    let small = std::fs::read(parse_dir().join("b_small_int.asnb")).unwrap();
+    // The mask list's one element (a Seq-loc `int`: from 5, to 14, id local id 3) starts at
+    // byte 31 and takes 37 bytes; `from` and `to` are its bytes 8 and 15.
+    let (head, element, tail) = (&small[..31], &small[31..68], &small[68..]);
+    assert_eq!((element[8], element[15]), (5, 14));
+    let mut data = head.to_vec();
+    for i in 0..count {
+        let mut copy = element.to_vec();
+        copy[8] = (i % 100) as u8;
+        copy[15] = (i % 100 + 1) as u8;
+        data.extend_from_slice(&copy);
+    }
+    data.extend_from_slice(tail);
+    let size = data.len();
+    let mut r = MaskFileReader::from_bytes(Path::new("big.asnb"), data).unwrap();
+    assert_eq!(r.format(), MaskFileFormat::BinaryAsn);
+    let info = r.next_info().unwrap().unwrap();
+    assert_eq!(info.masks.masks.len(), count as usize);
+    assert_eq!(info.masks.masks[7].intervals(), vec![interval(7, 8)]);
+    assert!(
+        r.buffered() < size / 4,
+        "{} of {size} bytes kept",
+        r.buffered()
+    );
+    assert!(r.next_info().unwrap().is_none());
+}
+
 // ---------------------------------------------------------------------------------------------
 // NCBI's pointer syntax: what LOSAT refuses (the files that makeblastdb reads or fails on are the
 // h_pointer_* and b_pointer_* fixtures)
@@ -1488,7 +1521,7 @@ fn ber_tagged(tag: &[u8], content: &[u8]) -> Vec<u8> {
     [tag, &[0x80][..], content, &[0, 0][..]].concat()
 }
 
-/// The bytes of a file, one per read.
+/// The bytes of a file, one per read (`MaskFileReader::from_read` reads one byte per fill).
 struct OneByteReads(std::io::Cursor<Vec<u8>>);
 
 impl std::io::Read for OneByteReads {
@@ -1500,7 +1533,12 @@ impl std::io::Read for OneByteReads {
 
 /// `read_all` and the posts of a text file whose bytes come in blocks or one per read.
 fn read_text(data: &[u8], by_byte: bool) -> String {
-    let path = Path::new("text.asnt");
+    read_stream(Path::new("text.asnt"), data, by_byte)
+}
+
+/// `read_all` and the posts of the file `path` whose bytes are `data`, read whole or one byte
+/// per fill.
+fn read_stream(path: &Path, data: &[u8], by_byte: bool) -> String {
     let reader = if by_byte {
         MaskFileReader::from_read(
             path,
@@ -1515,6 +1553,32 @@ fn read_text(data: &[u8], by_byte: bool) -> String {
             format!("{objects:?} {:?}", reader.take_posts())
         }
         Err(error) => format!("open {error:?}"),
+    }
+}
+
+/// The binary mask files read one byte per fill are read as whole: the same objects, posts and
+/// errors, whole and cut at every length (each form that `BerReader` reads from the kept bytes is
+/// then read one byte at a time, at each place where the kept bytes end).
+#[test]
+fn binary_files_read_one_byte_per_fill() {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(parse_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == "asnb"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 20, "{}", paths.len());
+    let path = Path::new("binary.asnb");
+    for file in paths {
+        let data = read_file(&file);
+        for cut in 0..=data.len() {
+            assert_eq!(
+                read_stream(path, &data[..cut], false),
+                read_stream(path, &data[..cut], true),
+                "{} cut {cut}",
+                file.display()
+            );
+        }
     }
 }
 

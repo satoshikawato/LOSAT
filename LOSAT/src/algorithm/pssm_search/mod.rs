@@ -115,6 +115,13 @@ pub struct PsiSearch {
     /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
     /// refusals that name the option name that one.
     pub(crate) from_msa: bool,
+    /// The query's Seq-inst has the molecule `other` (psiblast only), with the coding number of
+    /// its Seq-data (`CSeq_data::E_Choice`: iupacaa 2, ncbieaa 8, ncbistdaa 10). NCBI searches it
+    /// as a protein; the tabular formats read the query's letters through the object manager for
+    /// the fields `qseq`, `sseq`, `btop`, `positive`, `ppos`, `nident`, `mismatch` and `pident`
+    /// (the default fields among them), which throws `CSeqVectorException` at the first row
+    /// (`report::tabular::query_sequence_exception`).
+    pub(crate) query_other_coding: Option<i32>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -264,7 +271,7 @@ impl PsiSearch {
 
     /// Whether `kbp_psi[0]` (`ungapped_karlin`) is valid: a file's negative ungapped value makes
     /// it invalid, and the search's setup then stops with NCBI's engine error of an invalid query
-    /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp = kbp_psi`, blast_stat.c:2826).
+    /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp` set to `kbp_psi`, blast_stat.c:2826).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
     pub(crate) fn ungapped_karlin_valid(&self, kbp_std: &KarlinParams) -> bool {
@@ -424,13 +431,14 @@ impl PsiSearch {
             round_query: None,
             split_setup: None,
             from_msa: false,
+            query_other_coding: None,
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 and
     // c++/src/app/blast/tblastn_app.cpp:226, 270 (psiblast posts the object manager's messages after
     // its prolog, tblastn before it: `formatter.PrintProlog()` comes before
-    // `scope->AddTopLevelSeqEntry(pssm->SetQuery())` in psiblast, after it in tblastn)
+    // `scope->AddTopLevelSeqEntry` of the query (`pssm->SetQuery`) in psiblast, after it in tblastn)
     /// The messages of NCBI's object manager about the PSSM query's annotations, written to
     /// `diagnostics` (psiblast after its prolog, as the messages of its query batch,
     /// `blast_engine::psiblast_stop_at_pssm_query`; tblastn before its prolog), each saved as one

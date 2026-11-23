@@ -56,7 +56,7 @@ impl SourceError {
     // either reaches this clause (after `AddFasta` has ended the build).
     fn out_of_memory() -> Self {
         Self {
-            message: b"BLAST ran out of memory".to_vec(),
+            message: crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),
             kind: SourceErrorKind::OutOfMemory,
         }
     }
@@ -73,9 +73,9 @@ pub struct FastaBioseqSource<R: Read> {
 }
 
 impl<R: Read> FastaBioseqSource<R> {
-    /// `CFastaBioseqSource(fasta_file, is_protein, parse_ids, long_ids = false)`: with
+    /// `CFastaBioseqSource` of the file, `is_protein` and `parse_ids`, with `long_ids` false: with
     /// `parse_ids` (`-parse_seqids`) the reader parses the ids of each definition line
-    /// (`fRequireID | fParseRawID`) and the Bioseq carries them (`Bioseq::parsed`).
+    /// (flags `fRequireID` and `fParseRawID`) and the Bioseq carries them (`Bioseq::parsed`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:701-734
     /// The flags are cited at `reader::ReaderFlags::fasta_bioseq_source`.
@@ -228,10 +228,10 @@ fn read_error_message(error: &std::io::Error) -> SourceError {
     }
 }
 
-/// The title of the Blast-def-line that `CWriteDB::ExtractBioseqDeflines(bs, parse_ids =
-/// false, long_ids = false, scan = true)` builds for a record of `CFastaReader`: the one
-/// of the reader's user object (`title::fasta_reader_title`), or, when that object has an
-/// empty definition line, the title descriptor (`x_BuildDeflinesFromBioseq`).
+/// The title of the Blast-def-line that `CWriteDB::ExtractBioseqDeflines` of the bioseq `bs`
+/// (`parse_ids` false, `long_ids` false, `scan` true) builds for a record of `CFastaReader`: the
+/// one of the reader's user object (`title::fasta_reader_title`), or, when that object has an empty
+/// definition line, the title descriptor (`x_BuildDeflinesFromBioseq`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:802-829
 /// `s_UseFastaReaderDeflines` keeps the deflines of the user object, because the record

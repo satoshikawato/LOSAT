@@ -182,7 +182,7 @@ fn missing_data_volume_is_the_memory_map_error() {
     let search = SearchPath::new(&dir, None, None).unwrap();
     let error = GiMaskFiles::open("big", &search).map(|_| ()).unwrap_err();
     assert!(
-        matches!(&error, SeqDbError::MemoryMap(text) if text == "To be memory mapped the file must exist: ''"),
+        matches!(&error, SeqDbError::MemoryMap(text) if text == b"To be memory mapped the file must exist: ''"),
         "{error}"
     );
     assert_eq!(

@@ -7,11 +7,12 @@
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { FastaReader, RecordKey, ShownIds } from '../../domain/dataset.js';
+import { isPrintedKind } from '../../domain/run-files.js';
 import { FileReadError, type StartResult, type ValidationResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 8;
+export const ABI_VERSION = 12;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -34,6 +35,11 @@ export const DISCARD_STREAM = 9;
  * before its outputs. `messagesSignal` reads it.
  */
 export const MESSAGES_STREAM = 10;
+/**
+ * Stream 11: the text that the command line prints to its standard output in place of a run (its help, the XML of
+ * `-xmlhelp`, or a version), for an argv whose start `prints` (ABI v2 §5, version 10; line WQA's D14, 2026-11-20).
+ */
+export const PRINTED_STREAM = 11;
 /** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */
 export const PLACE_NOWHERE = 0xffff_ffff;
 /**
@@ -152,6 +158,12 @@ export class EngineStoppedError extends Error {
 export interface RegisteredInput {
   readonly handle: number;
   readonly records: readonly RecordKey[];
+  /**
+   * The reader's error that ends a query's records (*register* `reader_error`, the CLI's text): a run
+   * of the handle reads the records before it and ends with it in its query batch (line WQA's D10,
+   * 2026-11-19).
+   */
+  readonly readerError?: string;
 }
 
 /**
@@ -160,11 +172,25 @@ export interface RegisteredInput {
  */
 export interface RegisteredInputs {
   readonly query: RegisteredInput;
-  readonly subject: RegisteredInput;
+  /** None for a run of `-db`, whose subjects are the database's (*inputs* `subject` null). */
+  readonly subject: RegisteredInput | undefined;
   readonly shownIds: ShownIds;
 }
 
-type RecordsResponse = { handle: number; records: Array<{ id: string; length: number; shown_id?: string }> };
+type RecordsResponse = {
+  handle: number;
+  records: Array<{ id: string; length: number; shown_id?: string | null }>;
+  reader_error?: string;
+};
+
+/** A registered input of a *register* or *inputs* response. */
+function registeredInput(input: RecordsResponse): RegisteredInput {
+  return {
+    handle: input.handle,
+    records: Object.freeze(input.records.map(({ id, length }) => ({ id, length }))),
+    ...(typeof input.reader_error === 'string' ? { readerError: input.reader_error } : {}),
+  };
+}
 
 /**
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
@@ -261,9 +287,9 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile`, whether it is a dry run and whether its inputs are read
-   * together (`registerInputs`); or the CLI's message for an argv that the engine cannot start (a
-   * version word, a program that ABI v2 does not run).
+   * `-conffile`, the file of its `-logfile`, whether it is a dry run, whether its inputs are read
+   * together (`registerInputs`), what it prints in place of a search (`prints`) and whether it searches the database of
+   * `-db` (`database`); or the CLI's message for an argv that the engine cannot start (a program that ABI v2 does not run).
    */
   start(argv: readonly string[]): StartResult {
     const status = this.call(this.exports.losat_web2_start, [encoder.encode(argv.join('\0'))]);
@@ -273,10 +299,20 @@ export class ReactorAbi {
       log_file: string | null;
       dry_run: boolean;
       register_inputs: boolean;
+      prints: string | null;
+      database: boolean;
     };
+    if (json.prints !== null && !isPrintedKind(json.prints)) throw new EngineCallError(`the engine's start says that a run prints ${JSON.stringify(json.prints)}`);
     return {
       ok: true,
-      start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run, registerInputs: json.register_inputs },
+      start: {
+        conffile: json.conffile,
+        logFile: json.log_file,
+        dryRun: json.dry_run,
+        registerInputs: json.register_inputs,
+        prints: json.prints,
+        database: json.database,
+      },
     };
   }
 
@@ -298,8 +334,7 @@ export class ReactorAbi {
   register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
     const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
     try {
-      const response = this.response() as { handle: number; records: Array<{ id: string; length: number }> };
-      return { handle, records: Object.freeze(response.records.map(({ id, length }) => ({ id, length }))) };
+      return { ...registeredInput(this.response() as RecordsResponse), handle };
     } catch (error) {
       // A handle whose response cannot be read is not used: give its copy of the input back.
       if (this.stopped === undefined) this.release(handle);
@@ -311,28 +346,29 @@ export class ReactorAbi {
    * Reads the query and the subject of the run of `argv` together, as the CLI reads its `-query` and
    * `-subject` for that argv (ABI v2 §4 `losat_web2_register_inputs`): the inputs of a run whose
    * *start* JSON says `register_inputs` (`-parse_deflines`, line WQA's sweep, D7, 2026-11-19). Only
-   * the run of `argv` takes the two handles; the error is the CLI's message for these inputs.
+   * the run of `argv` takes the two handles; the error is the CLI's message for these inputs. A run of
+   * `-db` takes no subject: its `subject` is empty, and the query is read alone (line WQA D12a).
    */
   registerInputs(argv: readonly string[], query: Uint8Array, subject: Uint8Array): RegisteredInputs {
     this.check(this.call(this.exports.losat_web2_register_inputs, [encoder.encode(argv.join('\0')), query, subject]));
-    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse };
+    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse | null };
     const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
     try {
-      const read = (input: RecordsResponse) => ({
-        handle: input.handle,
-        records: Object.freeze(input.records.map(({ id, length }) => ({ id, length }))),
-      });
+      // A record past the reader's error that ends the query's records has no shown ID (`null`): no
+      // run reads it, and its name is its ID (line WQA's D10, 2026-11-19).
       const shown = (input: RecordsResponse) =>
         Object.freeze(
-          input.records.map(({ shown_id }) => {
+          input.records.map(({ id, shown_id }) => {
+            if (shown_id === null && input.reader_error !== undefined) return id;
             if (typeof shown_id !== 'string') throw new Error('a record of register_inputs has no shown_id');
             return shown_id;
           }),
         );
+      const subjects = response.subject;
       return {
-        query: read(response.query),
-        subject: read(response.subject),
-        shownIds: Object.freeze({ query: shown(response.query), subject: shown(response.subject) }),
+        query: registeredInput(response.query),
+        subject: subjects === null ? undefined : registeredInput(subjects),
+        shownIds: Object.freeze({ query: shown(response.query), subject: subjects === null ? Object.freeze([]) : shown(subjects) }),
       };
     } catch (error) {
       // Handles whose response cannot be read are not used: give their copies of the inputs back.
@@ -450,7 +486,10 @@ export class ReactorAbi {
     this.inflating(sink, () => this.check(this.call(this.exports.losat_web2_inflate_end, [inflation])));
   }
 
-  /** Runs one search (ABI v2 §4); the output streams go to `sink` during the call. */
+  /**
+   * Runs one search (ABI v2 §4); the output streams go to `sink` during the call. A run whose start `prints` reads no
+   * input: its handles are 0.
+   */
   run(argv: readonly string[], query: number, subject: number, sink: StreamSink): void {
     this.sink = sink;
     try {

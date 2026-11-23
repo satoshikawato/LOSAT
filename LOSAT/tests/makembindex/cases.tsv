@@ -65,3 +65,11 @@ tx_idmap	-input txdb/tx -idmap true -nmer 8
 # -idmap of database sequences with a tax id (in/ttdb/tt, -parse_seqids -taxid_map in/tt_taxid.txt): the first word of sequence::GetTitle, an empty title made from the scientific name in the taxonomy database (BLASTDB=taxt5, a copy of ../seqdb/taxdb/t5), else "No definition line found" (line RG item D5a-t, 2026-11-21, ad-RG-D5-3; local official release).
 tt_idmap	-input ttdb/tt -idmap true -nmer 8
 tt_taxdb_idmap	BLASTDB=taxt5 -input ttdb/tt -idmap true -nmer 8
+oidlist_new_n8	-input ol -nmer 8
+oidlist_new_missl_n8	-input olmissl -nmer 8
+oidlist_new_miss_n8	-input olmiss -nmer 8
+oidlist_old_n8	-old_style_index true -iformat blastdb -input ol -output o -nmer 8
+oidlist_old_missl_n8	-old_style_index true -iformat blastdb -input olmissl -output o -nmer 8
+oidlist_old_miss_n8	-old_style_index true -iformat blastdb -input olmiss -output o -nmer 8
+# OID_MASK_TYPE (line RG, series D, D1b-2, 2026-11-21): in/omall.nal keeps every OID of in/omdb/omn (a copy of tests/db_search/oidmask/omn's volumes, which have predicted RefSeq ids, with its .ndb) under the key's bit 0. The new style indexes the volumes and reads no alias key; the old style reads the null sequence of an OID left without a line, which LOSAT refuses (src/makembindex/tests.rs).
+oidmask_new_n8	-input omall -nmer 8

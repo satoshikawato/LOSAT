@@ -52,11 +52,14 @@ pub(super) fn write_tblastn_seqalign(
     hitlists: &[KappaResultHitList],
     ranges: &ReportRanges<'_>,
     warnings: &mut QueryWarnings<'_>,
+    gapped: bool,
 ) -> Result<()> {
+    // An ungapped search's alignments are Std-seg diagonals (`report::serial::seqalign`).
     let run = RunRecord {
         program: Program::Tblastn,
+        rps: false,
         db_title: shown.db_title(),
-        gapped: true,
+        gapped,
     };
     let mut subjects: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsps: Vec<HspRecord<'_>> = Vec::new();

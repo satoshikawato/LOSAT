@@ -21,8 +21,18 @@ pub struct Volume {
     /// The definition lines a taxid or seqid list keeps (`SeqDb::restrict_taxids`,
     /// `restrict_seqids`), none without one.
     defline_rule: Option<LineRule>,
+    /// Whether the alias files' `OID_MASK_TYPE` of the volume erases the definition lines of
+    /// model sequences after `defline_rule` (the `fExcludeModel` bit of `m_OidMaskType`,
+    /// `oid_mask::excludes_models`; `SeqDb::read_alias_tree`).
+    exclude_model: bool,
+    /// The volume's `OID_MASK_TYPE` itself, 0 without one (`m_OidMaskType`): any type makes the
+    /// header reads go through NCBI's filter, which needs a set (`Volume::has_oid_mask_type`).
+    oid_mask_type: u32,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
+    /// The failure of NCBI's OID list that a search meets at its first read of a sequence
+    /// (`Volume::fail_sequence_reads`), none when the list can be built.
+    read_failure: Option<super::oid_list::OidListError>,
 }
 
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
@@ -111,7 +121,10 @@ impl Volume {
             seq: OnceLock::new(),
             hdr: OnceLock::new(),
             defline_rule: None,
+            exclude_model: false,
+            oid_mask_type: 0,
             columns: OnceLock::new(),
+            read_failure: None,
         })
     }
 
@@ -163,7 +176,17 @@ impl Volume {
     }
 
     fn seq_file(&self) -> Result<&DbFile, SeqDbError> {
+        if let Some(failure) = &self.read_failure {
+            return Err(failure.to_error());
+        }
         self.lazy_file(&self.seq, "sq")
+    }
+
+    /// Makes every read of the sequence file fail with `failure`, the failure of NCBI's OID
+    /// list of the database, before which a search reads no sequence
+    /// (`SeqDb::fail_search_reads_with_oid_list`).
+    pub(super) fn fail_sequence_reads(&mut self, failure: super::oid_list::OidListError) {
+        self.read_failure = Some(failure);
     }
 
     /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error
@@ -204,12 +227,13 @@ impl Volume {
             "protein length of a nucleotide volume"
         );
         self.check_range(oid, oid.saturating_add(1))?;
-        // One read of the two offsets, as `read_block` reads them; the residues end before the
-        // sentinel byte at the start of the next sequence's offset.
-        let offsets = self.index.sequence_offsets(oid, oid + 1)?;
-        offsets[1]
-            .checked_sub(offsets[0])
+        // One read of the two offsets, as `read_block` reads them, into a pair rather than a
+        // vector (no allocation for each sequence); the residues end before the sentinel byte at
+        // the start of the next sequence's offset.
+        let (start, end) = self.index.sequence_range(oid)?;
+        end.checked_sub(start)
             .and_then(|bytes| bytes.checked_sub(1))
+            .and_then(|residues| u32::try_from(residues).ok())
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 
@@ -543,6 +567,34 @@ impl Volume {
         self.decode_kept_set(oid, &record, path)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
+    /// `defline_set`, `None` for a stored header of no bytes, which NCBI's read gives as no set
+    /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_at`).
+    pub fn header_set(&self, oid: u32) -> Result<Option<crate::seqid::DeflineSet>, SeqDbError> {
+        let (record, path) = self.header_record(oid)?;
+        if record.is_empty() {
+            return Ok(None);
+        }
+        self.decode_kept_set(oid, &record, path).map(Some)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
+    /// `defline_set` and the stored record it was decoded from, `None` in place of the record
+    /// when the definition-line rule dropped a line of it (`x_GetFilteredHeader`'s `changed`,
+    /// `SeqDb::defline_set_with_header_at`). `None` for a stored header of no bytes, as
+    /// [`Volume::header_set`].
+    pub fn defline_set_with_record(
+        &self,
+        oid: u32,
+    ) -> Result<Option<(crate::seqid::DeflineSet, Option<Vec<u8>>)>, SeqDbError> {
+        let (record, path) = self.header_record(oid)?;
+        if record.is_empty() {
+            return Ok(None);
+        }
+        let (set, dropped) = self.decode_kept_set_dropped(oid, &record, path)?;
+        Ok(Some((set, (!dropped).then_some(record))))
+    }
+
     /// Restricts the definition lines that the reads of this volume give to those `rule`
     /// keeps (`SeqDb::restrict_taxids`, `restrict_seqids`); `volume_start` is the volume's first
     /// OID in the database.
@@ -552,6 +604,26 @@ impl Volume {
         volume_start: u32,
     ) {
         self.defline_rule = Some(LineRule { rule, volume_start });
+    }
+
+    /// Sets the volume's `OID_MASK_TYPE` (`SeqDb::read_alias_tree`) and with it whether the reads
+    /// of this volume erase the definition lines of model sequences (`oid_mask::excludes_models`).
+    pub(super) fn set_oid_mask_type(&mut self, mask_type: u32) {
+        self.oid_mask_type = mask_type;
+        self.exclude_model = super::oid_mask::excludes_models(mask_type);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1995-1999
+    /// Whether the volume has an `OID_MASK_TYPE` other than 0, of any bits: NCBI's header read
+    /// then filters the set it read (`SeqDb::filters_header_sets`).
+    pub(super) fn has_oid_mask_type(&self) -> bool {
+        self.oid_mask_type != 0
+    }
+
+    /// Whether the reads of this volume remove definition lines: a list's rule or the erasure of
+    /// model lines.
+    fn filters_lines(&self) -> bool {
+        self.defline_rule.is_some() || self.exclude_model
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1990-1995
@@ -582,26 +654,101 @@ impl Volume {
         Ok(line_rule.rule.keep_mask(set))
     }
 
-    /// [`Volume::rule_mask`] for a read of the sequence `oid` (volume-relative): the reader's
-    /// error for a tag NCBI's read cannot adjust, LOSAT's refusal (`no_line_kept`) where a seqid
-    /// rule keeps no line.
-    fn line_mask(
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2006-2058
+    // The list's tests come first and the erasure of model lines last, on the lines the list
+    // keeps; a line whose every test passes is kept. A sequence whose every line is erased is
+    // read with none, as NCBI's `GetHdr` gives it (probes A2, A7a of line RG D1b): its hits get no
+    // Seq-align (`keeps_line`), and `GetBioseq` gives none. The accession guide's warning about an
+    // id (`oid_mask::is_predicted`) is posted at each of NCBI's header reads that is not served
+    // by its cache of filtered headers (seqdbvol.cpp:1977-1988, a cache of the main thread):
+    // LOSAT does not count those reads and refuses such an id. NCBI decodes the whole header
+    // before it removes a line (seqdbvol.cpp:1993, then 2057), and its decoder writes an error
+    // for each byte it reads as '#' in a line it then removes too (probe b1 of line RG D1b-2):
+    // refused as the bytes of a kept line are where they are read.
+    /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the reads
+    /// keep, as NCBI's filtered header read tests them (the volume's list rule, `rule_mask`, then
+    /// the erasure of model lines): `None` where a seqid rule keeps none; the reader's error for
+    /// a tag NCBI's read cannot adjust, LOSAT's refusals of a removed line with bytes NCBI reads
+    /// as '#' and of an id the accession guide warns about.
+    fn filtered_mask(
         &self,
-        line_rule: &LineRule,
         oid: u32,
         set: &crate::seqid::DeflineSet,
-    ) -> Result<Vec<bool>, SeqDbError> {
-        Self::rule_mask(line_rule, set)
-            .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
+    ) -> Result<Option<Vec<bool>>, SeqDbError> {
+        let mut mask = match &self.defline_rule {
+            Some(line_rule) => match Self::rule_mask(line_rule, set)
+                .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
+            {
+                Some(mask) => mask,
+                None => {
+                    self.refuse_removed_replaced_bytes(oid, set, &vec![false; set.deflines.len()])?;
+                    return Ok(None);
+                }
+            },
+            None => vec![true; set.deflines.len()],
+        };
+        let mut warned = false;
+        if self.exclude_model {
+            for (keep, defline) in mask.iter_mut().zip(&set.deflines) {
+                if *keep {
+                    *keep = !super::oid_mask::is_model_line(&defline.ids, &mut |_| warned = true);
+                }
+            }
+        }
+        self.refuse_removed_replaced_bytes(oid, set, &mask)?;
+        if warned {
+            return Err(SeqDbError::Unsupported {
+                path: self.base.clone(),
+                message: format!(
+                    "sequence {oid} of the volume: a Seq-id that NCBI's accession guide warns \
+                     about, under the alias files' OID_MASK_TYPE (NCBI writes the warning at each \
+                     of its uncached reads of the header)"
+                ),
+            });
+        }
+        Ok(Some(mask))
+    }
+
+    /// LOSAT's refusal of the sequence `oid` (volume-relative) where a line of `set` that `mask`
+    /// removes has bytes NCBI reads as '#' (`filtered_mask`).
+    fn refuse_removed_replaced_bytes(
+        &self,
+        oid: u32,
+        set: &crate::seqid::DeflineSet,
+        mask: &[bool],
+    ) -> Result<(), SeqDbError> {
+        let removed_replaced = set.deflines.iter().zip(mask).any(|(defline, &keep)| {
+            !keep && (defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+        });
+        if removed_replaced {
+            return Err(SeqDbError::Unsupported {
+                path: self.base.clone(),
+                message: format!(
+                    "sequence {oid} of the volume: a definition line that a list or the alias \
+                     files' OID_MASK_TYPE removes, with bytes NCBI reads as '#' (it writes an \
+                     error each time it reads them)"
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// [`Volume::filtered_mask`] for a read of the sequence `oid` (volume-relative): LOSAT's
+    /// refusal (`no_line_kept`) where a seqid rule keeps no line.
+    fn line_mask(&self, oid: u32, set: &crate::seqid::DeflineSet) -> Result<Vec<bool>, SeqDbError> {
+        self.filtered_mask(oid, set)?
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the volume's rule is a seqid list's, positive or negative
+    /// Whether the reads of the volume may leave a sequence without a line: its rule is a seqid
+    /// list's, positive or negative, or its `OID_MASK_TYPE` erases model lines
     /// (`SeqDb::drops_lineless_hits`).
-    pub(super) fn has_seqid_rule(&self) -> bool {
-        self.defline_rule
-            .as_ref()
-            .is_some_and(|line_rule| line_rule.rule.reads_seqids())
+    pub(super) fn may_drop_every_line(&self) -> bool {
+        self.exclude_model
+            || self
+                .defline_rule
+                .as_ref()
+                .is_some_and(|line_rule| line_rule.rule.reads_seqids())
     }
 
     /// Whether the volume's rule is a negative seqid list's with at least one id
@@ -612,22 +759,19 @@ impl Volume {
         })
     }
 
-    /// Whether the volume's rule keeps a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none; the reader's error for a
-    /// tag that NCBI's read cannot adjust (NCBI's `GetSeqIDs` of the Seq-align throws there).
+    /// Whether the volume's reads keep a line of the sequence `oid` (volume-relative;
+    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none or the erasure of model
+    /// lines leaves none; the reader's error for a tag that NCBI's read cannot adjust (NCBI's
+    /// `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
     pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
-        let Some(line_rule) = self
-            .defline_rule
-            .as_ref()
-            .filter(|line_rule| line_rule.rule.reads_seqids())
-        else {
+        if !self.may_drop_every_line() {
             return Ok(true);
-        };
+        }
         let (record, path) = self.header_record(oid)?;
         let set = decode_full(&record, path)?;
-        Self::rule_mask(line_rule, &set)
-            .map(|mask| mask.is_some())
-            .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))
+        Ok(self
+            .filtered_mask(oid, &set)?
+            .is_some_and(|mask| mask.contains(&true)))
     }
 
     /// `decoded`, the definition lines of `record` (one sequence's header), without those
@@ -639,11 +783,11 @@ impl Volume {
         path: &Path,
         decoded: Result<T, SeqDbError>,
     ) -> Result<T, SeqDbError> {
-        let Some(line_rule) = &self.defline_rule else {
+        if !self.filters_lines() {
             return decoded;
-        };
+        }
         let mut decoded = decoded?;
-        let keep = self.line_mask(line_rule, oid, &decode_full(record, path)?)?;
+        let keep = self.line_mask(oid, &decode_full(record, path)?)?;
         decoded.retain_lines(&keep);
         Ok(decoded)
     }
@@ -666,6 +810,45 @@ impl Volume {
         }
     }
 
+    /// The header of the sequence `oid` (volume-relative) with every definition line it stores:
+    /// no list's rule and no erasure of model lines, as NCBI reads the volume searched bare
+    /// (`SeqDb::read_stored_header_of_oid`).
+    pub fn stored_header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
+        let (record, path) = self.header_record(oid)?;
+        match decode_deflines_as(&record, path, oid, true) {
+            Err(error) if error.is_parsed_seqids() => {
+                decode_full(&record, path).map(VolumeHeader::Parsed)
+            }
+            read => read.map(VolumeHeader::Ordinal),
+        }
+    }
+
+    /// Whether the volume's reads remove a definition line of the sequence `oid`
+    /// (volume-relative): its list's rule or the erasure of model lines
+    /// (`SeqDb::erases_a_line_of_oid`). Nothing is posted or refused for the lines themselves,
+    /// as a read of the volume searched bare tests none (the reader's error for a header that
+    /// cannot be read or a tag NCBI's read cannot adjust stays).
+    pub(super) fn erases_a_line(&self, oid: u32) -> Result<bool, SeqDbError> {
+        if !self.filters_lines() {
+            return Ok(false);
+        }
+        let (record, path) = self.header_record(oid)?;
+        let set = decode_full(&record, path)?;
+        let mask = match &self.defline_rule {
+            Some(line_rule) => match Self::rule_mask(line_rule, &set)
+                .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
+            {
+                Some(mask) => mask,
+                None => return Ok(true),
+            },
+            None => vec![true; set.deflines.len()],
+        };
+        Ok(mask.iter().zip(&set.deflines).any(|(&keep, defline)| {
+            !keep
+                || (self.exclude_model && super::oid_mask::is_model_line(&defline.ids, &mut |_| {}))
+        }))
+    }
+
     /// LOSAT's refusal of the sequence `oid` (volume-relative) whose every definition line
     /// the seqid list removes (`filter::no_line_kept`).
     fn no_line_kept(&self, oid: u32) -> SeqDbError {
@@ -683,12 +866,25 @@ impl Volume {
         record: &[u8],
         path: &Path,
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
+        self.decode_kept_set_dropped(oid, record, path)
+            .map(|(set, _)| set)
+    }
+
+    /// `decode_kept_set` and whether the rule dropped a line of the record.
+    fn decode_kept_set_dropped(
+        &self,
+        oid: u32,
+        record: &[u8],
+        path: &Path,
+    ) -> Result<(crate::seqid::DeflineSet, bool), SeqDbError> {
         let mut set = decode_full(record, path)?;
-        if let Some(line_rule) = &self.defline_rule {
-            let keep = self.line_mask(line_rule, oid, &set)?;
+        let stored_lines = set.deflines.len();
+        if self.filters_lines() {
+            let keep = self.line_mask(oid, &set)?;
             set.retain_lines(&keep);
         }
-        Ok(set)
+        let dropped = set.deflines.len() != stored_lines;
+        Ok((set, dropped))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
@@ -1171,6 +1367,12 @@ pub struct NucleotideAmbiguity {
 }
 
 impl NucleotideAmbiguity {
+    /// The ambiguity of a sequence without letters, which nothing reads (`seqmasks_io`'s record of
+    /// a sequence that NCBI's `GetBioseq` gives no Bioseq for).
+    pub(crate) fn none() -> Self {
+        Self::new(0, 0, Vec::new())
+    }
+
     fn new(length: usize, packed_start: u64, runs: Vec<AmbiguityRun>) -> Self {
         let ordered = runs.windows(2).all(|pair| {
             u64::from(pair[0].offset) + u64::from(pair[0].length) <= u64::from(pair[1].offset)
@@ -1334,11 +1536,13 @@ fn x_blastna_by_byte(
     x_overlay_runs_in_ranges(runs, ranges, seq, &NCBINA8_TO_BLASTNA8);
 }
 
-/// The decode of `nucleotide_blastna` that `LOSAT_X_BNDECODE=0` runs: each base's NCBI8na value
-/// `1 << p` from its two bits, the ambiguity `runs` in stored order (a run that ends before the
-/// sequence is skipped, the first that starts at or after its end stops the loop), then every byte
-/// mapped with `NCBINA8_TO_BLASTNA8` (`seq` holds one byte per base).
-fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:455-471
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:804-832
+/// `s_SeqDBMapNA2ToNA8` and `s_SeqDBRebuildDNA_NA8` over the whole sequence: each base's NCBI8na
+/// value `1 << p` from its two bits, then the ambiguity `runs` in stored order (a run that ends
+/// before the sequence is skipped, the first that starts at or after its end stops the loop) write
+/// their NCBI4na codes (`seq` holds one byte per base).
+fn ncbi4na_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
     for (position, base) in seq.iter_mut().enumerate() {
         let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
         *base = 1 << code;
@@ -1360,6 +1564,37 @@ fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
             position += 1;
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1716-1771
+// The ambiguity words are read whole (a last partial word is not read, as
+// `SequenceBlock::ambiguity_runs`), and a count that passes their end is an error where NCBI
+// reads past its vector. A sequence of no base gives no base before its ambiguity data are read.
+/// `SeqDB_UnpackAmbiguities`: the bases of a stored nucleotide (`packed`: four bases per byte,
+/// the last byte holding the count of its bases; `ambig`: the stored ambiguity data) as NCBI4na
+/// codes, one byte per base. The error is the message of a malformed sequence.
+pub(crate) fn unpack_ambiguities(packed: &[u8], ambig: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let Some(&last) = packed.last() else {
+        return Err("Error: packed sequence data is not valid.");
+    };
+    let base_length = (packed.len() - 1) * 4 + usize::from(last & 3);
+    if base_length == 0 {
+        return Ok(Vec::new());
+    }
+    let words: Vec<u32> = ambig
+        .chunks_exact(4)
+        .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
+        .collect();
+    let runs = decode_ambiguity_runs(&words)?;
+    let mut na8 = vec![0u8; base_length];
+    ncbi4na_by_base(packed, &runs, &mut na8);
+    Ok(na8)
+}
+
+/// The decode of `nucleotide_blastna` that `LOSAT_X_BNDECODE=0` runs: `ncbi4na_by_base`, then
+/// every byte mapped with `NCBINA8_TO_BLASTNA8` (`seq` holds one byte per base).
+fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
+    ncbi4na_by_base(packed, runs, seq);
     for base in seq.iter_mut() {
         *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
     }
@@ -1391,6 +1626,52 @@ fn x_blastna_by_base_ranges(
 
 /// `NCBI4NA_TO_IUPACNA` (c++/src/algo/blast/core/blast_encoding.c:80-83).
 const NCBI4NA_TO_IUPAC: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
+
+/// The four bases of each stored 2-bit byte as two NCBI4na bytes, two bases a byte from the high
+/// bits (`s_SeqDBMapNA2ToNA4Setup`: A 1, C 2, G 4, T 8).
+const PACKED_TO_NCBI4NA: [[u8; 2]; 256] = {
+    const NCBI4NA: [u8; 4] = [1, 2, 4, 8];
+    let mut table = [[0u8; 2]; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let [b0, b1, b2, b3] = [
+            NCBI4NA[(byte >> 6) & 3],
+            NCBI4NA[(byte >> 4) & 3],
+            NCBI4NA[(byte >> 2) & 3],
+            NCBI4NA[byte & 3],
+        ];
+        table[byte] = [(b0 << 4) | b1, (b2 << 4) | b3];
+        byte += 1;
+    }
+    table
+};
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:728-786
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:803-844
+/// Calls `set(position, ncbi4na)` for each base of the ambiguity runs `runs` (in stored order)
+/// inside a sequence of `length` bases, as NCBI's rebuilds of the 4-bit (`s_SeqDBRebuildDNA_NA4`,
+/// [`SequenceBlock::nucleotide_seq_data`]) and 8-bit letters (`s_SeqDBRebuildDNA_NA8`,
+/// [`SequenceBlock::nucleotide_iupac`]) place them: the bases of a run outside it are skipped, and
+/// the runs after one that starts at or past its end are not read.
+fn for_each_ambiguous_base(runs: &[AmbiguityRun], length: usize, mut set: impl FnMut(usize, u8)) {
+    let region_end = length as i64;
+    for run in runs {
+        let mut position = i64::from(run.offset as i32);
+        let row_len = i64::from(run.length);
+        if position + row_len <= 0 {
+            continue;
+        }
+        if position >= region_end {
+            break;
+        }
+        for _ in 0..row_len {
+            if position >= 0 && position < region_end {
+                set(position as usize, run.ncbi4na & 0xF);
+            }
+            position += 1;
+        }
+    }
+}
 
 /// The four bases of each stored 2-bit byte, from the high bits down, as IUPAC letters.
 const PACKED_TO_IUPAC: [[u8; 4]; 256] = {
@@ -1651,25 +1932,62 @@ impl SequenceBlock {
         for (bases, &byte) in letters.chunks_mut(4).zip(packed) {
             bases.copy_from_slice(&PACKED_TO_IUPAC[usize::from(byte)][..bases.len()]);
         }
-        let region_end = base_length as i64;
-        for run in runs {
-            let mut position = i64::from(run.offset as i32);
-            let row_len = i64::from(run.length);
-            if position + row_len <= 0 {
-                continue;
+        for_each_ambiguous_base(&runs, base_length, |position, ncbi4na| {
+            letters[position] = NCBI4NA_TO_IUPAC[usize::from(ncbi4na)];
+        });
+        Ok(letters)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1424
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2350-2385
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:896-945
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:403-442
+    /// The `Seq-data` of nucleotide `i` in the Bioseq that NCBI's `GetBioseq` makes: with fewer
+    /// than 4 bytes of ambiguity data (`x_GetAmbChar` reads whole 4-byte words: none), the stored
+    /// 2-bit bytes of its bases with the count bits of the last byte cleared and its bits after
+    /// the last base as stored (`ncbi2na`, `true`); with a word (even a count of no run), NCBI4na
+    /// (`false`), two bases a
+    /// byte from the high bits, made from the stored bytes whose bits past the length are
+    /// cleared first (`s_SeqDBMapNA2ToNA4`: the half byte after the last base of an odd length
+    /// is the A of those bits), with each ambiguity run written over it
+    /// (`s_SeqDBRebuildDNA_NA4`, the runs as [`Self::nucleotide_iupac`] places them).
+    pub fn nucleotide_seq_data(&self, i: usize) -> Result<(bool, Vec<u8>), SeqDbError> {
+        let (packed, length) = self.nucleotide_packed_len(i)?;
+        let whole = length / 4;
+        let remainder = length % 4;
+        if self.ambiguity_bytes(i).len() < 4 {
+            // The last stored byte of a length not a multiple of 4 with its count bits cleared:
+            // the bits after the last base stay as stored.
+            let mut data = Vec::with_capacity(whole + 1);
+            data.extend_from_slice(&packed[..whole]);
+            if remainder != 0 {
+                data.push(packed[whole] & 0xFC);
             }
-            if position >= region_end {
-                break;
-            }
-            let letter = NCBI4NA_TO_IUPAC[usize::from(run.ncbi4na & 0xF)];
-            for _ in 0..row_len {
-                if position >= 0 && position < region_end {
-                    letters[position as usize] = letter;
-                }
-                position += 1;
+            return Ok((true, data));
+        }
+        // The bases of the last stored byte up to the length, the bits after them cleared.
+        let last = (remainder != 0).then(|| packed[whole] & (0xFFu8 << (8 - 2 * remainder)));
+        let runs = self.ambiguity_runs(i)?;
+        let mut data = Vec::with_capacity(length.div_ceil(2));
+        for &byte in &packed[..whole] {
+            data.extend_from_slice(&PACKED_TO_NCBI4NA[usize::from(byte)]);
+        }
+        if let Some(byte) = last {
+            let pair = PACKED_TO_NCBI4NA[usize::from(byte)];
+            data.push(pair[0]);
+            if remainder > 2 {
+                data.push(pair[1]);
             }
         }
-        Ok(letters)
+        for_each_ambiguous_base(&runs, length, |position, ncbi4na| {
+            let byte = &mut data[position / 2];
+            *byte = if position % 2 == 0 {
+                (*byte & 0x0F) | (ncbi4na << 4)
+            } else {
+                (*byte & 0xF0) | ncbi4na
+            };
+        });
+        Ok((false, data))
     }
 
     // NCBI: the checks of `x_GetSequence` cited above `nucleotide_blastna`

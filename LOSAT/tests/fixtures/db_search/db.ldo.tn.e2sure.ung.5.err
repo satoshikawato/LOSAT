@@ -1,0 +1,7 @@
+Error: [tblastn] Error: Tax database file has wrong magic number.
+Error: [tblastn] Failed s_BlastXMLAddIteration Q(0/1NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbistr.cpp", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/serial/objostrxml.cpp", line 1538: Error: (CStringException::eConvert) ncbi::CObjectOStreamXml::WriteClassMember() -  Frame type= eFrameClassMember, Member name= query-def (m_Pos = 0)
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/serial/objostrxml.cpp", line 1519: Error: (CStringException::eConvert) ncbi::CObjectOStreamXml::WriteClass() -  Frame type= eFrameClass, Object type= Iteration (m_Pos = 0)
+
+BLAST Database error: DB contains no accession info.

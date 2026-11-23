@@ -191,6 +191,17 @@ jobs:
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
+      # The texts of a database file that does not open or read in LOSAT Web: the WASI error codes
+      # give the native CLI's texts on Linux (utils::os_error_text), and the reader's errors carry
+      # them as NCBI's (seqdb::tests::ncbis_errors_are_told_from_losats; line WQA D18,
+      # 2026-11-21). Same build as the step above.
+      - name: Database reader error texts on wasm32-wasip1
+        working-directory: LOSAT
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
+        run: >-
+          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
+          seqdb::tests::ncbis_errors_are_told_from_losats utils::os_error_text
       # The lib tests of the 128-bit SIMD kernels on the target that ships them (simd128: the
       # wasm32 layer of utils/xdrop_simd.rs and the kernels written over it); the native
       # `cargo test` runs them only in their x86-64 SSE form. Same build as the step above.

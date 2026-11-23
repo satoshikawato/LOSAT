@@ -91,7 +91,9 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
-    inputs.mb_index_name = args.megablast_index_name().map(str::to_string);
+    inputs.mb_index_name = args
+        .megablast_index_name()
+        .map(|(name, _)| name.to_string());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -151,7 +153,8 @@ pub(crate) struct CallBatches<'a> {
     /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
     /// With `-filtering_db`, the repeat hits of the call's queries (0-based, inclusive, in the
-    /// searched letters; `repeat_filter::RepeatFilter::hits`), empty for a query without one.
+    /// searched letters) that their batch's set-up found
+    /// (`repeat_filter::RepeatFilter::add_masks`), empty for a query without one.
     /// Only the archive reads them (empty without it or without the option).
     pub repeat_hits: &'a [Vec<(usize, usize)>],
     pub unsearched: &'a [bool],
@@ -471,6 +474,7 @@ pub(crate) fn write_blastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: call.subjects.db_title(),
         gapped: call.batches.gapped,
     };

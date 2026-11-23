@@ -70,10 +70,28 @@ impl PreparedQueryBatch {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 pub const BATCH_SIZE: usize = 10002;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:134-139
-/// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize(eRPSTblastn)`, the `default:`
+/// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize` of `eRPSTblastn`, the `default:`
 /// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
 pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
+/// The search units of a reader batch (`records`, NCBI's query batch): parts of at most
+/// `BATCH_SIZE` letters (`batch_ranges`), or, with `-use_sw_tback`, the whole batch. NCBI's
+/// Smith-Waterman redo keeps state over the whole query batch, which a unit cannot see alone:
+/// the status of the batch's last redone match, the heap of its first query, and, in e-value
+/// mode, the heaps that a window's query context indexes among the batch's queries
+/// (`runtime::kappa_batch`). No NCBI counterpart of its own: LOSAT's units are its own
+/// scheduling (`native.rs`, `XUnit`).
+pub(crate) fn unit_ranges(
+    records: &[FastaRecord],
+    options: &ResolvedOptions,
+) -> Vec<std::ops::Range<usize>> {
+    if options.use_sw_tback && !records.is_empty() {
+        vec![0..records.len()]
+    } else {
+        batch_ranges(records, BATCH_SIZE)
+    }
+}
+
 pub fn batch_ranges(records: &[FastaRecord], batch_size: usize) -> Vec<std::ops::Range<usize>> {
     let mut result = Vec::new();
     let mut start = 0;
@@ -134,7 +152,8 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
 /// One message per query (`TSearchMessages::ToString`), `Error: ` first (`GetMessage`); a query
 /// without letters keeps its `Sequence contains no data` (blast_setup_cxx.cpp:631-638) after the
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
-/// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
+/// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`) and TBLASTN's
+/// (`tblastn/stage_d_pipeline.rs`): the text of `common::unknown_matrix::unknown_matrix_message_of`.
 pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
     crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(records.iter().map(
         |record| {
@@ -331,7 +350,7 @@ pub(crate) fn prepare_unit_queries(
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
             }
         }
-        // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort of
+        // SEG's intervals first, as `BlastSeqLocAppend` of `lcase_mask_slp` to `filter_out`: the sort of
         // `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter
         // of a SEG interval is merged only in this order (the results' masks).
         masks.extend_from_slice(&context.lowercase_masks);

@@ -238,17 +238,14 @@ impl HitList {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:44-70
-/// The size in NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`, with `ADAPTIVE_CBS`):
-/// a `-max_target_seqs` from 2^31 - 24 wraps to 2..48 with composition-based statistics, from
-/// 2^30 to 10 without; a size that is not positive (NCBI crashes) was refused with the options
-/// (`args.rs`).
+/// The size of `blastn/hsp.rs` `get_prelim_hitlist_size` (with `ADAPTIVE_CBS`), computed
+/// without NCBI's `int` overflow.
 pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
-    let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         o.hitlist_size as usize,
         o.composition > 0,
         o.gapped,
-    );
-    usize::try_from(size).unwrap_or(0)
+    )
 }
 
 /// `-subject_besthit` over one subject's HSPs of BLASTX (`core::blast_hits::subject_besthit`):
@@ -280,6 +277,9 @@ pub(crate) struct HspStream {
     sorted: Option<Vec<HspList>>,
     finalized: bool,
     culling: Option<super::culling::Culling>,
+    /// The best hit writer of `-best_hit_overhang` / `-best_hit_score_edge`, in place of the
+    /// collector (`with_best_hit`).
+    besthit: Option<super::besthit::BestHitWriter>,
     max: usize,
 }
 impl HspStream {
@@ -289,8 +289,23 @@ impl HspStream {
             sorted: None,
             finalized: false,
             culling: None,
+            besthit: None,
             max,
         }
+    }
+
+    /// The stream of `num_queries` queries whose writer is the best hit writer `writer`
+    /// (`CSetupFactory::CreateHspWriter` with a best hit score edge), of `max` lists per query.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:305-329
+    pub(crate) fn with_best_hit(
+        writer: super::besthit::BestHitWriter,
+        num_queries: usize,
+        max: usize,
+    ) -> Self {
+        let mut stream = Self::new(num_queries, max);
+        stream.besthit = Some(writer);
+        stream
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
@@ -320,6 +335,11 @@ impl HspStream {
         );
         if let Some(culling) = &mut self.culling {
             culling.write(oid, hsps, trace);
+            return Ok(Vec::new());
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
+        if let Some(writer) = &mut self.besthit {
+            writer.write(oid, hsps);
             return Ok(Vec::new());
         }
         let mut lists: Vec<Vec<Hsp>> = (0..self.queries.len()).map(|_| Vec::new()).collect();
@@ -358,6 +378,10 @@ impl HspStream {
                     trace.hsps("CULL_FINAL", l.oid, &l.hsps);
                 }
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
+        if let Some(writer) = self.besthit.take() {
+            self.queries = writer.finalize(self.queries.len(), self.max);
         }
         self.finalized = true;
     }
@@ -723,6 +747,36 @@ impl CompoHeap {
         heaps
             .iter()
             .all(|h| h.entries.len() >= h.threshold && h.worst <= h.cutoff && e > 5.0 * h.cutoff)
+    }
+
+    /// The heap test of a Smith-Waterman window in e-value mode (`-use_sw_tback`, line RG item
+    /// X4b-2), the one owner of the heap a window's query context reads: NCBI tests the heap that
+    /// the window's query context `context` (6 x query + frame) indexes in the batch's array of
+    /// `heaps`, which holds one heap per query. Below the batch's query count that is the heap of
+    /// the batch's query number `context` (the window's own query only for context 0), whose
+    /// answer this is. At or past it NCBI reads its other memory; LOSAT tests an empty heap there,
+    /// which takes the window (approved exception 23 of PD-LOSAT-NCBI-DEFECTS, the Owner's
+    /// decision Q-HEAP=B of 2026-11-21). NCBI's run of the batch followed by five queries without
+    /// a hit per query, whose heaps are empty and inside the array, gives the same result where it
+    /// searches the batch as the input as is: no heap of the batch fills to its cutoff (the early
+    /// termination) and no lone query is split.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3282-3296
+    pub fn would_insert_at(
+        heaps: &mut [Self],
+        context: usize,
+        e: f64,
+        score: i32,
+        oid: usize,
+    ) -> bool {
+        match heaps.get_mut(context) {
+            Some(heap) => heap.would_insert(e, score, oid),
+            // An empty heap takes every window: it holds fewer entries than its threshold, the
+            // hit list size, which is at least 1.
+            None => true,
+        }
     }
 }
 

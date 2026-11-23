@@ -15,7 +15,7 @@
 //! ## Files
 //!
 //! Both files are found as NCBI finds them, with [`SearchPath::resolve_file`]
-//! (`SeqDB_ResolveDbPath("taxdb.bti")`: the first of the current directory,
+//! (`SeqDB_ResolveDbPath` of `"taxdb.bti"`: the first of the current directory,
 //! `BLASTDB` and the registry value `[BLAST] BLASTDB` that holds a regular file of
 //! that name; the data file is the same path ending in `d`). All integers
 //! are big-endian 32-bit.
@@ -119,14 +119,14 @@ pub enum TaxLookup {
     /// False before the search finds the taxid (a missing database, a taxid outside the
     /// index or not in it): the caller's `info.taxid` is not set.
     NotInIndex,
-    /// False after the search found it (`info.taxid = tax_id`; seqdbtax.cpp:258-259): the offset
-    /// error of the last entry, a record of no positive size or not of four fields.
+    /// False after the search found it (`info.taxid` is set to `tax_id`; seqdbtax.cpp:258-259): the
+    /// offset error of the last entry, a record of no positive size or not of four fields.
     Unnamed,
     /// True: the names.
     Named(TaxNames),
-    /// The search found the taxid (`info.taxid = tax_id`) and its record reaches past NCBI's
-    /// mapping of `taxdb.btd` before its third tab: NCBI looks for the tabs in memory past the
-    /// mapping, so whether it finds names, and which, depends on its memory map (or it faults).
+    /// The search found the taxid (`info.taxid` is set to `tax_id`) and its record reaches past
+    /// NCBI's mapping of `taxdb.btd` before its third tab: NCBI looks for the tabs in memory past
+    /// the mapping, so whether it finds names, and which, depends on its memory map (or it faults).
     /// Nothing of the lookup but its texts can be written.
     PastMapping(PastMapping),
 }
@@ -227,10 +227,19 @@ impl TaxDb {
         if !super::alias::exists(&index_path) || !super::alias::exists(&data_path) {
             return missing(Vec::new());
         }
-        let index = DbFile::open(&index_path)?;
-        if index.len() < HEADER_LEN + ENTRY_LEN {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:154-161
+        // NCBI takes the index's length from the file system before it maps the index: a short
+        // index is missing even where it does not open.
+        let index_len = std::fs::metadata(&index_path)
+            .map_err(|source| SeqDbError::Io {
+                path: index_path.clone(),
+                source,
+            })?
+            .len();
+        if index_len < HEADER_LEN + ENTRY_LEN {
             return missing(Vec::new());
         }
+        let index = DbFile::open(&index_path).map_err(throws_at_every_lookup)?;
         let mut header = [0u8; HEADER_LEN as usize];
         index.read_exact_at(&mut header, 0)?;
         if be32(&header[0..4]) != MAGIC {
@@ -243,7 +252,7 @@ impl TaxDb {
                 "SeqDB: Taxid metadata indicates ({count}) entries but file has room for ({room})."
             )]);
         }
-        let data = DbFile::open(&data_path)?;
+        let data = DbFile::open(&data_path).map_err(throws_at_every_lookup)?;
         Ok(Self {
             files: Some(Files { index, data, count }),
             messages: Vec::new(),
@@ -285,10 +294,10 @@ impl TaxDb {
     // loop with `Int4` taxids and `Int4` index arithmetic, and "the last
     // entry" is whatever `high_index` ends on (for a sorted index only the
     // last entry; for a damaged one `end_data` may then be the file size).
-    // `CSeqDB_Substring::Size()` is `int(m_End-m_Begin)` (seqdbgeneral.hpp:375-378),
-    // so a record whose end precedes its beginning (`end_data - begin_data`
-    // wraps to 2^32-k as `Uint4`) has a negative size, as has a record of 2 GiB
-    // or more: `SeqDB_SplitString` finds nothing in it and the lookup fails.
+    // `CSeqDB_Substring::Size()` is `m_End` minus `m_Begin` cast to `int`
+    // (seqdbgeneral.hpp:375-378), so a record whose end precedes its beginning
+    // (`end_data` minus `begin_data` wraps to 2^32-k as `Uint4`) has a negative size, as has a
+    // record of 2 GiB or more: `SeqDB_SplitString` finds nothing in it and the lookup fails.
     // A record that reaches past the end of `taxdb.btd` is read by NCBI from
     // beyond the file: zero bytes up to the end of the last page of its
     // mapping (observed: `offset_next_past_end`, `btd_truncated`), then memory
@@ -320,9 +329,9 @@ impl TaxDb {
 
     /// [`Self::names`], telling apart the two ways in which NCBI's lookup returns false: before
     /// its search finds the taxid in the index ([`TaxLookup::NotInIndex`]: `info.taxid` keeps
-    /// its value) and after ([`TaxLookup::Unnamed`]: `info.taxid = tax_id`, the names stay empty),
-    /// which blastdbcmd's `-tax_info` writes apart (`N/A` or empty names), and giving a record
-    /// past NCBI's mapping of `taxdb.btd` as it is ([`TaxLookup::PastMapping`],
+    /// its value) and after ([`TaxLookup::Unnamed`]: `info.taxid` is set to `tax_id`, the names
+    /// stay empty), which blastdbcmd's `-tax_info` writes apart (`N/A` or empty names), and giving
+    /// a record past NCBI's mapping of `taxdb.btd` as it is ([`TaxLookup::PastMapping`],
     /// [`TaxNames::super_kingdom`]): a caller that writes nothing of the names (the texts of
     /// `GetBioseq`'s lookups) goes on as NCBI does where it completes. Err: a read error, or a
     /// record of an empty `taxdb.btd` (NCBI faults for certain).
@@ -372,7 +381,7 @@ impl TaxDb {
         } else {
             Self::entry(files, new_index + 1)?.1
         };
-        // `int(m_End - m_Begin)` of a pointer difference that is the wrapped
+        // `m_End` minus `m_Begin` cast to `int`: a pointer difference that is the wrapped
         // `Uint4` difference.
         let size = end_data.wrapping_sub(begin_data) as i32;
         if size <= 0 {
@@ -481,7 +490,8 @@ impl TaxDb {
             for entry in block.chunks_exact(ENTRY_LEN as usize) {
                 let offset = be32(&entry[4..8]);
                 if let Some(begin) = previous {
-                    // `lookup`: `int(m_End - m_Begin)` of the wrapped `Uint4` difference.
+                    // `lookup`: `m_End` minus `m_Begin` cast to `int`, the wrapped `Uint4`
+                    // difference.
                     let size = offset.wrapping_sub(begin) as i32;
                     if size > 0 && u64::from(begin) + size as u64 > mapped {
                         return Ok(true);
@@ -553,8 +563,49 @@ fn split_record(taxid: i32, record: &[u8]) -> Option<TaxNames> {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:161
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:199
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+// NCBI maps each file with `CMemoryFile`, whose exception leaves the constructor of the function's
+// `static` taxonomy file object: the object stays unbuilt, so every later lookup builds it again
+// and throws again (NCBI BLAST+ 2.17.0 with `taxdb.bti` or `taxdb.btd` of mode 000: every load of a
+// subject with a taxid fails; line WQA D18b probe 12, 2026-11-21).
+/// The error of a file of the taxonomy database that does not open or whose first byte cannot be
+/// read: [`SeqDbError::TaxdbThrows`] where NCBI's `CMemoryFile` throws there (a system text), the
+/// error as it is otherwise.
+fn throws_at_every_lookup(error: SeqDbError) -> SeqDbError {
+    let Some(exception) = error.memory_file_exception() else {
+        return error;
+    };
+    match error {
+        SeqDbError::Open { path, source } | SeqDbError::Map { path, source, .. } => {
+            SeqDbError::TaxdbThrows {
+                path,
+                reason: crate::utils::os_error_text::ncbi_strerror(&source)
+                    .map_or_else(|| source.to_string(), |text| text.into_owned()),
+                exception: Box::new(exception),
+            }
+        }
+        other => other,
+    }
+}
+
 fn be32(bytes: &[u8]) -> u32 {
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+/// Why the taxonomy database of a run did not open, given again at every later call
+/// ([`LazyTaxDb`]).
+#[derive(Debug)]
+enum OpenFailure {
+    /// A file that NCBI's `CMemoryFile` throws on at every lookup ([`SeqDbError::TaxdbThrows`]).
+    Throws {
+        path: PathBuf,
+        reason: String,
+        exception: Box<crate::ncbi_exception::NcbiException>,
+    },
+    /// LOSAT's refusal of the database ([`SeqDbError::Unsupported`]): the file and the reason.
+    Refused(PathBuf, String),
 }
 
 /// The taxonomy database of one run, opened at the first name asked for and
@@ -563,7 +614,7 @@ fn be32(bytes: &[u8]) -> u32 {
 #[derive(Debug)]
 pub struct LazyTaxDb {
     search: SearchPath,
-    db: OnceLock<Result<TaxDb, (PathBuf, String)>>,
+    db: OnceLock<Result<TaxDb, OpenFailure>>,
     /// Whether the next call hands over the texts of opening again ([`LazyTaxDb::restart`]).
     again: std::sync::atomic::AtomicBool,
 }
@@ -601,13 +652,25 @@ impl LazyTaxDb {
         let db = self.db.get_or_init(|| {
             opened = true;
             TaxDb::open(&self.search).map_err(|error| match error {
-                SeqDbError::Unsupported { path, message } => (path, message),
+                SeqDbError::TaxdbThrows {
+                    path,
+                    reason,
+                    exception,
+                } => OpenFailure::Throws {
+                    path,
+                    reason,
+                    exception,
+                },
+                SeqDbError::Unsupported { path, message } => OpenFailure::Refused(path, message),
                 // The file that failed, and what the system said of it.
-                SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
-                    (path, source.to_string())
+                SeqDbError::Open { path, source }
+                | SeqDbError::Io { path, source }
+                | SeqDbError::Map { path, source, .. }
+                | SeqDbError::Read { path, source } => {
+                    OpenFailure::Refused(path, source.to_string())
                 }
-                SeqDbError::Format { path, message } => (path, message),
-                other => (PathBuf::from("taxdb.bti"), other.to_string()),
+                SeqDbError::Format { path, message } => OpenFailure::Refused(path, message),
+                other => OpenFailure::Refused(PathBuf::from("taxdb.bti"), other.to_string()),
             })
         });
         match db {
@@ -617,9 +680,18 @@ impl LazyTaxDb {
                 }
                 Ok(db)
             }
-            Err((path, message)) => Err(SeqDbError::Unsupported {
+            Err(OpenFailure::Refused(path, message)) => Err(SeqDbError::Unsupported {
                 path: path.clone(),
                 message: message.clone(),
+            }),
+            Err(OpenFailure::Throws {
+                path,
+                reason,
+                exception,
+            }) => Err(SeqDbError::TaxdbThrows {
+                path: path.clone(),
+                reason: reason.clone(),
+                exception: exception.clone(),
             }),
         }
     }
@@ -711,7 +783,7 @@ impl SourceNames {
     }
 }
 
-/// `CSeqDBVol::m_TaxCache(256)` (seqdbvol.cpp:84).
+/// The size of `CSeqDBVol`'s `m_TaxCache`, 256 slots (seqdbvol.cpp:84).
 const TAX_CACHE_SLOTS: usize = 256;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1105-1107, 1140-1182

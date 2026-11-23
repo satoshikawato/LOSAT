@@ -78,6 +78,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         subject,
         [&[], &[]],
         Default::default(),
+        None,
         &config,
     )
     .unwrap();
@@ -275,6 +276,7 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
                     )),
                     x_pool,
                     None,
+                    &crate::report::db_subject::HitLoads::default(),
                 )
                 .unwrap();
                 (written, diagnostics)
@@ -377,6 +379,7 @@ fn description_table_shows_the_linked_set_column() {
         false,
         None,
         &mut crate::report::query_warnings::no_subject_reads,
+        &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -443,6 +446,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         true,
         columns,
         &mut crate::report::query_warnings::no_subject_reads,
+        &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -491,6 +495,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         false,
         columns,
         &mut crate::report::query_warnings::no_subject_reads,
+        &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -534,6 +539,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         true,
         columns,
         &mut crate::report::query_warnings::no_subject_reads,
+        &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -582,6 +588,7 @@ fn sorthits_refuses_a_last_total_wider_than_its_column() {
             true,
             columns,
             &mut crate::report::query_warnings::no_subject_reads,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .map(|()| out)
     };
@@ -711,6 +718,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
         gapped_karlin: Default::default(),
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     };
@@ -760,6 +768,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
             0,
             None,
             pool,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap_err();
         // The merged stream when the error comes back: the report's last bytes are there
@@ -937,6 +946,7 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         false,
         None,
         &mut crate::report::query_warnings::no_subject_reads,
+        &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
     let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
@@ -959,6 +969,115 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         out,
         b"Sequence with id Subject_1 no longer exists in database...alignment skipped\n\
               Sequence with id Subject_1 no longer exists in database...alignment skipped\n"
+    );
+}
+
+// DBID pfoff-3 (DECISIONS 62 (13); NCBI BLAST+ 2.17.0, probe `R/pfoff/p3`, `tx.U2.b1.dflt.0`):
+// a subject whose load throws where its batch's prefetch is off has the description line of
+// its Seq-align id and `Unknown`, and in outfmt 0 each of its HSPs one line that names the
+// id's accession without its version, with no heading (`DatabaseHeading::Thrown`).
+#[test]
+fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
+    use crate::report::db_subject::{
+        AfterThrow, FoundInstead, HitLoads, LookupFailure, ParsedSubject, RunThrow,
+    };
+    let subject = |accession: &[u8], throws: bool| {
+        let subject = ParsedSubject::new(crate::seqid::DeflineSet {
+            deflines: vec![crate::seqid::BlastDefline {
+                title: Some(b"ntitle".to_vec()),
+                ids: vec![crate::seqid::ParsedSeqId::Other(
+                    crate::seqid::model::TextseqId {
+                        accession: Some(accession.to_vec()),
+                        version: Some(1),
+                        ..Default::default()
+                    },
+                )],
+                ..Default::default()
+            }],
+        })
+        .unwrap();
+        Some(Arc::new(if throws {
+            subject.found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+                crate::seqdb::tax_files::NO_ACCESSION_INFO,
+            ))))
+        } else {
+            subject
+        }))
+    };
+    // 0 loads, 1 throws.
+    let parsed = vec![subject(b"NM_100000", false), subject(b"NM_100001", true)];
+    // The report's reads as its writer makes them (`PairwiseReads`): both description lines,
+    // both alignments.
+    let reads =
+        crate::report::db_subject::ReportKeys::Pairwise(crate::report::db_subject::PairwiseReads {
+            hits: vec![vec![0], vec![1]],
+            described: vec![0, 1],
+            aligned: 2,
+        });
+    let loads = HitLoads::of(
+        Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),
+        [(true, reads)],
+        |key| parsed[key].as_deref(),
+        |_, _| 0,
+    );
+    assert!(loads.loaded(0));
+    assert!(loads.thrown(1).is_some());
+    let mut second = tblastx_hit(1);
+    second.hit.s_idx = 1;
+    let mut third = second.clone();
+    third.hit.bit_score = 13.9;
+    let first = tblastx_hit(1);
+    let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+        [(0, vec![&first]), (1, vec![&second, &third])]
+            .into_iter()
+            .collect();
+    let titles: std::collections::HashMap<u32, Vec<u8>> =
+        [(0, b"ntitle".to_vec()), (1, b"ntitle".to_vec())]
+            .into_iter()
+            .collect();
+    let mut out = Vec::new();
+    write_blastn_description_table(
+        &mut out,
+        &[0, 1],
+        true,
+        &hits,
+        &titles,
+        &parsed,
+        &[],
+        false,
+        false,
+        None,
+        &mut crate::report::query_warnings::no_subject_reads,
+        &loads,
+    )
+    .unwrap();
+    let rows: Vec<&[u8]> = out.split(|&byte| byte == b'\n').skip(3).take(2).collect();
+    assert!(
+        rows[0].starts_with(b"NM_100000.1 ntitle "),
+        "{:?}",
+        String::from_utf8_lossy(rows[0])
+    );
+    assert!(
+        rows[1].starts_with(b"NM_100001.1 Unknown "),
+        "{:?}",
+        String::from_utf8_lossy(rows[1])
+    );
+    let mut out = Vec::new();
+    write_database_subject_alignments_part(
+        &mut out,
+        None,
+        DatabaseHeading::loaded(parsed[1].as_deref().unwrap(), false, 2, true),
+        false,
+        &hits[&1],
+        &[1, 2],
+        0..2,
+        |_, _| panic!("no HSP is written"),
+    )
+    .unwrap();
+    assert_eq!(
+        out,
+        b"Sequence with id NM_100001 no longer exists in database...alignment skipped\n\
+          Sequence with id NM_100001 no longer exists in database...alignment skipped\n"
     );
 }
 
@@ -1035,6 +1154,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         gapped_karlin: karlin,
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: 500,
         num_alignments: 250,
     };
@@ -1045,6 +1165,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         protein_matrix: ScoringMatrix::Blosum62,
         sort: Default::default(),
         view: PairwiseView::Pairwise,
+        unreadable_query: None,
     };
     let gapped_k = [0.041, 0.047, 0.041, 0.041];
     let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
@@ -1067,6 +1188,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
             true,
             None,
             None,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
     };
@@ -1108,6 +1230,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
                 &subject_titles,
                 &parsed,
                 &[],
+                &crate::report::db_subject::HitLoads::default(),
                 &report,
                 None,
                 None,
@@ -1137,4 +1260,155 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
             assert_eq!(String::from_utf8_lossy(&windowed), text);
         }
     }
+}
+
+// NCBI BLAST+ 2.17.0 psiblast -outfmt 0 with a PSSM query of the molecule `other` (rows
+// db.ps.inmsa.f.fa.mol.other.0 and db.ps.inmsa.f.fa.mol.other.id.0): the description table is
+// as ever, and each HSP is one line `Sequence with id <id> no longer exists in
+// database...alignment skipped` with no heading and no score lines; the id is the Seq-align
+// id's text: `BL_ORD_ID:<oid>` of a database sequence without ids, `Subject_N` of a `-subject`
+// record, in every round.
+#[test]
+fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
+    let karlin = KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        ..KarlinParams::default()
+    };
+    let queries = [BlastpPairwiseQuery {
+        query_name: Vec::new(),
+        query_length: 61,
+        ungapped_karlin: karlin,
+        effective_search_space: 1_000_000,
+        valid: true,
+        batch_skipped: false,
+    }];
+    let query_titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"q"[..])];
+    let subject_titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"first"[..]), Arc::from(&b"second"[..])];
+    let parsed: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>> = vec![None, None];
+    let hit = |s_idx: u32, bit_score: f64| {
+        let mut pairwise = PairwiseHit::from(Hit {
+            identity: 100.0,
+            length: 10,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 10,
+            s_start: 1,
+            s_end: 10,
+            e_value: 1e-5,
+            bit_score,
+            num_ident: 10,
+            query_frame: 0,
+            query_length: 61,
+            q_idx: 0,
+            s_idx,
+            raw_score: 50,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: None,
+            num_positives: 10,
+        });
+        pairwise.query_seq = Some("MKVLAAGIVG".to_string());
+        pairwise.subject_seq = Some("MKVLAAGIVG".to_string());
+        pairwise.subject_length = Some(185);
+        pairwise
+    };
+    let hits = [hit(0, 120.5), hit(0, 80.5), hit(1, 100.5)];
+    let report = BlastpPairwiseReport {
+        version: "PSIBLAST (test)".to_string(),
+        database_name: b"db".to_vec(),
+        database_num_sequences: 2,
+        database_total_letters: 370,
+        matrix_name: Some("BLOSUM62".to_string()),
+        gap_open: 11,
+        gap_extend: 1,
+        word_threshold: 0.0,
+        window_size: 40,
+        gapped_karlin: karlin,
+        gumbel: None,
+        gapped: true,
+        show_linked_set_size: false,
+        num_descriptions: 500,
+        num_alignments: 250,
+    };
+    let write = |unreadable_query: Option<UnreadableQuery>, number: u32| {
+        let config = PairwiseConfig {
+            program: "psiblast".to_string(),
+            unreadable_query,
+            ..PairwiseConfig::default()
+        };
+        let mut out = Vec::new();
+        psiblast_round::write_psiblast_round_report(
+            &hits,
+            0..1,
+            &mut out,
+            &config,
+            &queries,
+            &query_titles,
+            &subject_titles,
+            &parsed,
+            &[],
+            &crate::report::db_subject::HitLoads::default(),
+            &report,
+            None,
+            None,
+            None,
+            true,
+            psiblast_round::ReportRound {
+                number,
+                found_before: None,
+            },
+        )
+        .unwrap();
+        String::from_utf8(out).unwrap()
+    };
+    let lines = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|line| line.starts_with("Sequence with id "))
+            .map(str::to_string)
+            .collect()
+    };
+    let skipped = |ids: [&str; 3]| -> Vec<String> {
+        ids.map(|id| {
+            format!("Sequence with id {id} no longer exists in database...alignment skipped")
+        })
+        .to_vec()
+    };
+    // A `-subject` set: the record's position.
+    let records = write(Some(UnreadableQuery::default()), 1);
+    assert_eq!(
+        lines(&records),
+        skipped(["Subject_1", "Subject_1", "Subject_2"])
+    );
+    // A database's sequences without Seq-ids: their OIDs, which are not their ranks.
+    let database = write(
+        Some(UnreadableQuery {
+            oids: Some(Arc::from([45_u32, 481])),
+        }),
+        2,
+    );
+    assert_eq!(
+        lines(&database),
+        skipped(["BL_ORD_ID:45", "BL_ORD_ID:45", "BL_ORD_ID:481"])
+    );
+    // Nothing else of the alignments is written: no heading, no score line, no alignment.
+    for text in [&records, &database] {
+        assert!(text.contains("Results from round "), "{text}");
+        assert!(
+            !text.contains("Length=185") && !text.contains(" Score = "),
+            "{text}"
+        );
+        assert!(!text.contains("Query  "), "{text}");
+    }
+    // A readable query writes the alignments as before.
+    let readable = write(None, 1);
+    assert!(
+        lines(&readable).is_empty() && readable.contains(" Score = "),
+        "{readable}"
+    );
 }

@@ -6,7 +6,8 @@
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use crate::utils::glibc_fma_libm::GlibcLibm;
-use anyhow::{Context, Result};
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
+use anyhow::Result;
 use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
@@ -93,10 +94,10 @@ use crate::blastinput::fasta_reader::{
 use crate::blastinput::input_files::{
     check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
+use crate::blastinput::query_batch::{BatchCount, BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
-    cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
-    QueryInput, RangeRole, SequenceRange,
+    cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
+    RangeRole, SequenceRange,
 };
 use crate::report::diag_log::Posts;
 use crate::report::pairwise::{
@@ -154,6 +155,15 @@ mod x_rpt_stream;
 // types).
 #[path = "database.rs"]
 mod database;
+// `-use_index true`: NCBI's loader of the MegaBLAST database index, its error lines and its
+// warning, the index that the search uses, and LOSAT's refusals of the indexed searches it does
+// not run (line RG item D5b).
+#[path = "mb_index.rs"]
+mod mb_index;
+// The search of a query batch with a MegaBLAST database index (`-use_index true`): the index's
+// seeds and the indexed word finder (line RG item D5b-2).
+#[path = "mb_index_seeds.rs"]
+mod mb_index_seeds;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c (whole file)
 // BLASTN `-culling_limit`: the culling writer of the preliminary stage and the culling pipe of
@@ -2945,7 +2955,7 @@ impl UngappedHit {
     /// `ungapped` (offsets in the concatenated query), and whose offsets
     /// `s_AdjustInitialHSPOffsets` makes context-relative. NCBI's extensions run on the
     /// concatenated query (na_ungapped.c:164-206 and 284-310), so a saved hit can start left of
-    /// its context: where the exact walk passes two sentinels (`INT4_MIN / 2` each,
+    /// its context: where the exact walk passes two sentinels (half of `INT4_MIN` each,
     /// blast_stat.c:1124-1127) and its `Int4` sum wraps above 0 (a raw X-drop of 2^30 or more,
     /// such as the `INT_MIN` of `-xdrop_ungap 1e10`, does not stop the walk at the first one),
     /// or where the approximate walk, which reads the sentinel as bases, keeps a hit below the
@@ -3378,7 +3388,7 @@ fn prelim_subject_best_hit(combined: &mut Vec<PrelimHit>, query_lengths: &[usize
 
 /// Where the second of two preliminary HSP lists continues the first: the start of a subject
 /// chunk, or the offsets of a query chunk's contexts (plus and minus strand; `Blast_HSPListsMerge`
-/// takes `contexts_per_query < 0` for the subject).
+/// takes a negative `contexts_per_query` for the subject).
 #[derive(Clone, Copy)]
 enum HspListSplit {
     Subject { offset: usize },
@@ -4774,8 +4784,9 @@ struct BlastnReportInputs<'a> {
     /// The DUST-only masks of every query (outfmt 11's `LCaseMask`), or with
     /// `-window_masker_db` the WindowMasker masks; empty without outfmt 11.
     archive_dust: &'a [Vec<MaskedInterval>],
-    /// With `-filtering_db`, the repeat hits of every query (outfmt 11's `LCaseMask`,
-    /// `repeat_filter::RepeatFilter::hits`); empty without outfmt 11 or without the option.
+    /// With `-filtering_db`, the repeat hits of every query that its batch's set-up found
+    /// (outfmt 11's `LCaseMask`, `BatchResults::repeat_hits`); empty without outfmt 11 or without
+    /// the option.
     archive_repeats: &'a [Vec<(usize, usize)>],
     lcase_masking: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`).
@@ -4784,6 +4795,8 @@ struct BlastnReportInputs<'a> {
     /// `-strand minus`, else 0 (`context 2 * q + first_context`).
     first_context: usize,
     megablast: bool,
+    /// The search used a MegaBLAST database index (`BlastnIntro::indexed_megablast`).
+    indexed_megablast: bool,
     /// Matrix-only scoring (reward 0 and penalty 0, `TaskConfig::matrix_only`): the outfmt 0
     /// report shows raw scores only (`BlastnIntro`).
     matrix_only: bool,
@@ -4961,9 +4974,10 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
+        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
+            indexed_megablast: report.indexed_megablast,
             matrix_only: report.matrix_only,
         },
         database_name: subject_title.as_bytes().to_vec(),
@@ -5267,7 +5281,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI's best hit pipe is there in its place (`-best_hit_overhang`, `-best_hit_score_edge`;
@@ -5278,7 +5292,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             params,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -5764,7 +5778,11 @@ fn post_process_hits_and_write(
                         anchored.as_ref().map(|sequences| {
                             sequences as &dyn crate::report::query_anchored::ReportSequences
                         }),
+                        report.database_loads,
                     )
+                    // A subject whose load throws may end the run there
+                    // (`x_pairwise_par::alignment_end`).
+                    .map_err(crate::cli::NativeError::of_writer)
                 };
                 match pairwise_hits.as_deref() {
                     Some(hits) => write(hits, 0..queries.len())?,
@@ -6165,7 +6183,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, "blastn", &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -6264,22 +6285,11 @@ pub fn run(
             }
         }
     }
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut report);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
-    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if report.failed && (pairwise || tax_report) {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".into(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    // exit 6; `cli::ReportStream::finish`).
+    report.finish(result, pairwise || tax_report)
 }
 
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
@@ -6354,7 +6364,7 @@ fn read_cli_subjects(
         return Err(crate::cli::NativeError {
             exit: 1,
             message: format!(
-                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                "{QUERY_OPTIONS_ERROR} Either a BLAST database or subject sequence(s) must be specified\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ).into(),
         }
@@ -6746,7 +6756,7 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -6814,19 +6824,6 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:66-80
-        // (SAM's one line per subject of an ungapped search, `-outfmt 17`)
-        // The Seq-aligns of an ungapped search (8, 9, 11, 12) are Dense-diags, which
-        // `report::serial::seqalign::write_seq_align_dendiag` writes (NCBI reference (598d8ae6):
-        // c++/src/algo/blast/api/blast_seqalign.cpp:1274-1311,
-        // `x_UngappedHSPToDenseDiag`); SAM's line of a subject that joins its HSPs (O4a-2) is
-        // not written yet.
-        if args.ungapped && choice.number == 17 {
-            anyhow::bail!(
-                "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
-                choice.number
-            );
-        }
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report, with the formatting
@@ -6855,6 +6852,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
 pub fn run_local(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -6878,17 +6876,19 @@ pub fn run_local(
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, subject_records, view)
+                run_local_formats(args, query_records, query_end, subject_records, view)
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            let no_query = query_records.is_empty() && query_end.is_input();
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
-    run_local_formats(args, query_records, subject_records, outputs)
+    run_local_formats(args, query_records, query_end, subject_records, outputs)
 }
 
 fn run_local_formats(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -6914,10 +6914,12 @@ fn run_local_formats(
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
-    // them, `api::run`); LOSAT Web has no databases.
+    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
+    // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
+    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+            "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -6954,7 +6956,7 @@ fn run_local_formats(
     search(
         args,
         SearchQueries::Records(query_records),
-        QueryReading::Records,
+        query_end.reading(),
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -6981,6 +6983,7 @@ fn run_local_formats(
 pub fn run_local_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -7006,11 +7009,28 @@ pub fn run_local_database(
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, output_formats, settings, view, None)
+                search_database(
+                    args,
+                    query_records,
+                    query_end,
+                    output_formats,
+                    settings,
+                    view,
+                    None,
+                )
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, output_formats, settings, outputs, None),
+        None => search_database(
+            args,
+            query_records,
+            query_end,
+            output_formats,
+            settings,
+            outputs,
+            None,
+        ),
     }
 }
 
@@ -7062,6 +7082,7 @@ pub(crate) fn repeat_search_hits(
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![crate::api::local_blast::FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -7076,6 +7097,8 @@ pub(crate) fn repeat_search_hits(
             search_database(
                 args,
                 query_records,
+                // The repeat search's queries are the batch's records, read whole.
+                &crate::api::QueryEnd::Input,
                 output_formats,
                 filter.settings().clone(),
                 &mut outputs,
@@ -7086,10 +7109,11 @@ pub(crate) fn repeat_search_hits(
     result.map_err(|error| match error.downcast::<crate::cli::NativeError>() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-651
         // The search's set-up that finds no valid query stops with its messages, which the
-        // command line writes after `BLAST engine error: `.
+        // command line writes after its prefix (`ENGINE_ERROR`, NCBI's `BLAST engine error:`).
         Ok(native) => match native
             .message
-            .strip_prefix(b"BLAST engine error: ")
+            .strip_prefix(ENGINE_ERROR.as_bytes())
+            .and_then(|text| text.strip_prefix(b" "))
             .and_then(|text| text.strip_suffix(b"\n"))
         {
             Some(text) if native.exit == 3 => RepeatError::Posted(text.to_vec()),
@@ -7105,6 +7129,7 @@ pub(crate) fn repeat_search_hits(
 fn search_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
@@ -7113,7 +7138,7 @@ fn search_database(
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "blastn", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.resolve_dust()?;
@@ -7134,7 +7159,7 @@ fn search_database(
     search(
         args,
         SearchQueries::Records(query_records),
-        QueryReading::Records,
+        query_end.reading(),
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -7158,103 +7183,6 @@ enum SearchQueries<'a> {
     /// EXPERIMENT (LOSAT_X_BNQPACK): records read before the search that the batch loop takes out
     /// of their store (`x_query_drop.rs`).
     Taken(&'a x_query_drop::Store),
-}
-
-/// What `-use_index true` found (`megablast_index`).
-enum MegablastIndex {
-    /// NCBI does not ask for an index (`BlastnArgs::megablast_index_name`), or asked, found
-    /// none, warned and searches without one.
-    NotAsked,
-    /// A file of the database's index: NCBI searches with the index, which LOSAT does not.
-    Found(std::path::PathBuf),
-    /// A `-db` value with a comma, which NCBI's loader of old-style indices reads as a range of
-    /// index volumes (`blast_dbindex.cpp:964-995`) that LOSAT does not read.
-    VolumeRange,
-}
-
-impl MegablastIndex {
-    /// LOSAT's refusal of a search that NCBI runs with a MegaBLAST database index.
-    fn check(&self) -> Result<()> {
-        match self {
-            Self::NotAsked => Ok(()),
-            Self::Found(file) => anyhow::bail!(
-                "-use_index true with a database that has a MegaBLAST index ({}) is not supported by LOSAT's BLASTN",
-                file.display()
-            ),
-            Self::VolumeRange => anyhow::bail!(
-                "-use_index true with a -db value that has a comma (old-style index volumes) is not supported by LOSAT's BLASTN"
-            ),
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:216-221
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:447-459
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1145-1168
-/// `-use_index true` of a megablast search of `-db` (`BlastnArgs::megablast_index_name`): NCBI
-/// looks for the database's MegaBLAST index (new style, then old style). Without one it writes
-/// the two loaders' exceptions as one warning, with the source paths of the official Linux x64
-/// build as LOSAT's other NCBI exceptions (`NCBI_BUILD_ROOT`), and searches as without
-/// `-use_index`; the archive records the name (`report::archive::options`). With one, NCBI
-/// searches with the index, which LOSAT refuses (`MegablastIndex::check`).
-fn megablast_index(
-    args: &BlastnArgs,
-    database: &database::BlastnDatabase,
-    diagnostics: &mut (dyn std::io::Write + Send),
-) -> Result<MegablastIndex> {
-    let Some(index_name) = args.megablast_index_name() else {
-        return Ok(MegablastIndex::NotAsked);
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:440-446
-    // A megablast search with a template (`-template_type` and `-template_length`, which
-    // require each other) looks for no index.
-    let warning = if args.template_length.is_some() {
-        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".as_bytes().to_vec()
-    } else {
-        if index_name.contains(',') {
-            return Ok(MegablastIndex::VolumeRange);
-        }
-        if let Some(file) = database.megablast_index_file(index_name) {
-            return Ok(MegablastIndex::Found(file));
-        }
-        use crate::ncbi_exception::{NcbiException, ThrowSite};
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:794-797
-        const NO_VOLUME_INDEX: ThrowSite = ThrowSite {
-            file: "src/algo/blast/api/blast_dbindex.cpp",
-            line: 795,
-            kind: "CDbIndex_Exception::bad index creation option",
-            function: Some("BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New"),
-        };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1023-1027
-        const NO_INDEX_FILE: ThrowSite = ThrowSite {
-            file: "src/algo/blast/api/blast_dbindex.cpp",
-            line: 1026,
-            kind: "CDbIndex_Exception::bad index creation option",
-            function: Some("BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old"),
-        };
-        let new_style = NcbiException::new(NO_VOLUME_INDEX, "no database volume has an index");
-        let old_style = NcbiException::new(
-            NO_INDEX_FILE,
-            format!("no index file specified or index '{index_name}*' not found."),
-        );
-        // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
-        // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
-        // " Database index will not be used." (setup_factory.cpp:455).
-        [
-            b"Warning: (1.1) [blastn] ".as_slice(),
-            &new_style.what(),
-            b"\n",
-            &old_style.what(),
-            b" Database index will not be used.\n",
-        ]
-        .concat()
-    };
-    // One diagnostic: the archive saves it as one message.
-    match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, &warning)?,
-        None => diagnostics.write_all(&warning)?,
-    }
-    Ok(MegablastIndex::NotAsked)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7286,11 +7214,13 @@ fn search(
         return Ok(());
     }
     // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
-    // and before the formatter (`megablast_index`); LOSAT's refusal of an index comes with its
-    // other limits below.
+    // and before the formatter (`mb_index::megablast_index`); LOSAT's refusal of an index comes
+    // with its other limits below.
     let megablast_index = match subjects {
-        Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
-        Subjects::Records(_) => MegablastIndex::NotAsked,
+        Subjects::Database(database) => {
+            mb_index::megablast_index(&args, database, outputs.diagnostics)?
+        }
+        Subjects::Records(_) => mb_index::MegablastIndex::NotUsed,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
     // `blastinput::db_mask::DbMaskOption::resolve`)
@@ -7341,7 +7271,10 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    megablast_index.check()?;
+    args.megablast_index_loaded = megablast_index.check()?;
+    if args.megablast_index_loaded.is_some() {
+        mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
+    }
     if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1625-1633
         // The words that the scan reads: the discontiguous template's, else the word size.
@@ -7663,8 +7596,8 @@ enum Subjects<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2609-2737
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2694-2697
-/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start +
-/// hsp->query.offset`, which lies outside the context for an HSP whose ungapped hit passes an end
+/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start` plus
+/// `hsp->query.offset`, which lies outside the context for an HSP whose ungapped hit passes an end
 /// of it (a negative `PrelimHit::prelim_qs`, or a `prelim_qe` past the context's length); the
 /// context's letters are the same bytes. Where the re-evaluation keeps a piece outside the
 /// context, NCBI's HSP keeps those offsets, and so does LOSAT's through the later stages, which may
@@ -7988,12 +7921,17 @@ enum BatchStage<'a> {
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
     /// (`x_lut_drop::after_prelim`).
+    ///
+    /// `setup_only`: the set-up of the batch alone, up to its checks of the subjects
+    /// (`context_statistics`), which ends with `SetUpOnly` where they pass: the set-up of a batch
+    /// that LOSAT refuses (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
     Search {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
         lower_case_before: &'a [bool],
         masks_outside: &'a [MasksOutside],
         last: bool,
+        setup_only: bool,
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -8003,6 +7941,19 @@ enum BatchStage<'a> {
         batch_eff_searchsp: &'a [i64],
     },
 }
+
+/// The end of a batch's set-up alone (`BatchStage::Search::setup_only`) whose checks pass: no
+/// error of NCBI's. Never shown: the refusal of the batch takes its place.
+#[derive(Debug)]
+struct SetUpOnly;
+
+impl std::fmt::Display for SetUpOnly {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the set-up of the batch passes")
+    }
+}
+
+impl std::error::Error for SetUpOnly {}
 
 /// Whether `run_in_pool`'s batch loop reads a batch from input record `input_start` of
 /// `records`: records are left, or what ends the reading after them (`reading`: blank lines or
@@ -8099,7 +8050,8 @@ fn run_in_pool(
             scopes.with_whole_run_of(input)
         }
         _ => scopes,
-    });
+    })
+    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
     let intro = blastn_intro(&args);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
@@ -8129,12 +8081,12 @@ fn run_in_pool(
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);
         }
-        // `input.SetBatchSize(mixer.GetBatchSize())` converts the `Int4` to `TSeqPos`.
+        // `SetBatchSize` of the input, given `GetBatchSize` of the mixer, converts the `Int4` to `TSeqPos`.
         batching.batch_size = mixer.batch_size(None) as u32;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-280
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     if queries.input_count() == 0 && matches!(reading, QueryReading::End) {
         return write_batch_reports(
@@ -8158,6 +8110,7 @@ fn run_in_pool(
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
+                repeat_hits: &[],
                 context_karlin: &[],
                 query_eff_searchsp: &[],
                 batches: &[],
@@ -8172,7 +8125,7 @@ fn run_in_pool(
         write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -8210,6 +8163,12 @@ fn run_in_pool(
     let mut batch_spans: Vec<std::ops::Range<usize>> = Vec::new();
     let mut unsearched = Vec::with_capacity(lengths.len());
     let mut query_masks = Vec::with_capacity(lengths.len());
+    // With `-filtering_db` and the BLAST archive, the repeat hits of each query that its batch's
+    // set-up found (`repeat_batch_masks`), which the archive's masks join
+    // (`BatchResults::repeat_hits`).
+    let keeps_repeat_hits =
+        args.repeat_filter.is_some() && output_formats.contains(&BlastnOutputFormat::Archive);
+    let mut repeat_hits: Vec<Vec<(usize, usize)>> = Vec::new();
     let mut context_karlin = Vec::with_capacity(2 * lengths.len());
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Posts> = vec![Posts::new(); lengths.len()];
@@ -8248,11 +8207,15 @@ fn run_in_pool(
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
+    // NCBI's reader's count of the records into the batches (`BatchCount`).
+    let mut batch_count = BatchCount::of(query_scopes.as_ref());
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
-    let run_loads =
-        crate::report::db_subject::RunLoads::new(database::after_throw(&output_formats));
+    let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
+        &output_formats,
+        outputs.other_outfmts,
+    ));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
@@ -8263,7 +8226,9 @@ fn run_in_pool(
         &reading,
         reading_ended,
     ) {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            batch_count.as_mut(),
+            &|record| queries.believed(record),
             &query_input.input_lengths,
             &query_input.skipped,
             input_start,
@@ -8288,18 +8253,10 @@ fn run_in_pool(
                 .flat_map(|record| record.warnings.iter().copied())
                 .collect(),
         );
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:145-152
-        // An `eEOF` ends the batch with the records read so far. A reader error (or LOSAT's
-        // rejection of a Seq-id line) stops the run while the batch is read: after the
-        // reports of the batches before (without the epilog) and the messages of the
-        // batch's records, which are neither searched nor reported.
-        if reading_ends_here {
-            reading_ended = true;
-            if let QueryReading::Error {
-                error,
-                warnings: error_warnings,
-            } = std::mem::replace(&mut reading, QueryReading::End)
-            {
+        // The reports of the batches before a batch at which the run stops (for the first batch,
+        // the prologs that come with them), before the batch's messages and its error.
+        macro_rules! write_reports_before {
+            () => {{
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                 // written when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8321,6 +8278,7 @@ fn run_in_pool(
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
+                            repeat_hits: &repeat_hits,
                             context_karlin: &context_karlin,
                             query_eff_searchsp: &query_eff_searchsp,
                             batches: &batch_spans,
@@ -8334,6 +8292,21 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
+            }};
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:145-152
+        // An `eEOF` ends the batch with the records read so far. A reader error (or LOSAT's
+        // rejection of a Seq-id line) stops the run while the batch is read: after the
+        // reports of the batches before (without the epilog) and the messages of the
+        // batch's records, which are neither searched nor reported.
+        if reading_ends_here {
+            reading_ended = true;
+            if let QueryReading::Error {
+                error,
+                warnings: error_warnings,
+            } = std::mem::replace(&mut reading, QueryReading::End)
+            {
+                write_reports_before!();
                 batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
                 outputs.diagnostics.write_all(&error_warnings)?;
                 return Err(error.into_app_error());
@@ -8344,46 +8317,31 @@ fn run_in_pool(
         // ends before its first record, fails after the reports of the batches before,
         // without the epilog.
         if start == end {
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
-            // when the loop took them.
-            let before = |outputs: &mut ReportOutputs<'_>| {
-                write_before_failed_batch(
-                    &args,
-                    queries.before(&kept, start),
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        reads: &query_reads[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                        batches: &batch_spans,
-                    },
-                )
-            };
-            // In the first batch nothing was streamed: the call of the off path writes the
-            // prologs that come with the reports (outfmt 20's line of the field names).
-            if stream.acting() && start > 0 {
-                stream.finish_sam(outputs)?;
-            } else {
-                before(outputs)?;
-            }
+            write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
             }
             .into());
+        }
+        // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every
+        // program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+        // `-export_search_strategy` before the batch's request, which NCBI writes with the earlier
+        // record's letters for the repeated id (no request of the batch is written); else after the
+        // batch's checks before its set-up, where the set-up of the batch's records that are first
+        // in the scope gives NCBI's error of the subjects or the refusal comes, before the search.
+        // (Round 4 refused after the search, and wrote the batch's request.)
+        let mut scope_refusal = None;
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(refusal) = scopes.add_batch(batch_records.input(), start) {
+                scope_refusal = Some(refusal);
+            }
+        }
+        if let Some(refusal) = scope_refusal.take_if(|_| args.strategy.is_some()) {
+            write_reports_before!();
+            batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
+            return Err(refusal);
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282
         // The batch's search strategy request (`-export_search_strategy`): once its query factory
@@ -8426,6 +8384,7 @@ fn run_in_pool(
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
+                        repeat_hits: &repeat_hits,
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                         batches: &batch_spans,
@@ -8481,6 +8440,8 @@ fn run_in_pool(
         // that they join go on to the chunks of a split batch (`BatchStage::Search`'s
         // `masks_outside`).
         let mut masks_outside: Vec<MasksOutside> = Vec::new();
+        // The batch's repeat hits, kept for the BLAST archive (`BatchResults::repeat_hits`).
+        let mut batch_repeat_hits: Vec<Vec<(usize, usize)>> = Vec::new();
         if let Some(filter) = &args.repeat_filter {
             let ranged = (args.lcase_masking && query_input.placements.ranged()).then(|| {
                 (start..end)
@@ -8492,48 +8453,18 @@ fn run_in_pool(
             });
             let searched = batch_records.searched();
             match repeat_batch_masks(&args, filter, searched, ranged, parallel_pool)? {
-                Ok((masks, outside)) => {
+                Ok((masks, outside, hits)) => {
                     window_masker_masks = Some(masks);
                     masks_outside = outside;
+                    if keeps_repeat_hits {
+                        batch_repeat_hits = hits;
+                    }
                 }
                 Err(failure) => mask_failure = Some((Posts::new(), failure)),
             }
         }
         if let Some((masker_warnings, failure)) = mask_failure {
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-            // written when the loop took them.
-            let before = |outputs: &mut ReportOutputs<'_>| {
-                write_before_failed_batch(
-                    &args,
-                    queries.before(&kept, start),
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        reads: &query_reads[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                        batches: &batch_spans,
-                    },
-                )
-            };
-            // In the first batch nothing was streamed: the call of the off path writes the
-            // prologs that come with the reports (outfmt 20's line of the field names).
-            if stream.acting() && start > 0 {
-                stream.finish_sam(outputs)?;
-            } else {
-                before(outputs)?;
-            }
+            write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             masker_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(failure.into());
@@ -8550,42 +8481,9 @@ fn run_in_pool(
             .iter()
             .all(|record| record.seq().is_empty())
         {
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
-            // when the loop took them.
-            let before = |outputs: &mut ReportOutputs<'_>| {
-                write_before_failed_batch(
-                    &args,
-                    queries.before(&kept, start),
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        reads: &query_reads[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                        batches: &batch_spans,
-                    },
-                )
-            };
-            // In the first batch nothing was streamed: the call of the off path writes the
-            // prologs that come with the reports (outfmt 20's line of the field names).
-            if stream.acting() && start > 0 {
-                stream.finish_sam(outputs)?;
-            } else {
-                before(outputs)?;
-            }
+            write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            let mut message = String::from("BLAST engine error: ");
+            let mut message = format!("{ENGINE_ERROR} ");
             for _ in start..end {
                 message.push_str("Warning: ");
                 message.push_str(NO_DATA_MESSAGE);
@@ -8619,6 +8517,49 @@ fn run_in_pool(
         } else {
             Vec::new()
         };
+        // NCBI fails a batch where it reads a header file that it cannot read (`read_titles`)
+        // or where its prefetch looks up a Seq-align id whose lookup fails on a file
+        // (`database::batch_prefetch`), after the prologs, the reports of the batches before
+        // (without the epilog) and the batch's reader messages: `error` is NCBI's.
+        macro_rules! fail_batch {
+            ($error:expr) => {{
+                write_reports_before!();
+                warnings[start].write(&mut *outputs.diagnostics, archive)?;
+                return Err($error);
+            }};
+        }
+        // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
+        // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,
+        // which ends before the search), or the refusal (line WQA D10 round 5, 2026-11-20).
+        if let Some(refusal) = scope_refusal.take() {
+            let error =
+                crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
+                    refused_batch_setup_error(
+                        &args,
+                        batch_records.searched(),
+                        (start..end)
+                            .filter(|&query| first[query_input.ordinal(query) - input_start]),
+                        start,
+                        &query_offsets,
+                        window_masker_masks.as_deref(),
+                        &lower_case_before,
+                        &masks_outside,
+                        source,
+                        Some((&mut *outputs, &output_formats[..])),
+                        parallel_pool,
+                        batching,
+                        input_start == 0,
+                        &mut warnings[start],
+                        &mut query_keep,
+                    )
+                });
+            // The first batch's set-up wrote the prologs before its error (`database_search_error`).
+            if input_start == 0 && error.is::<crate::cli::NativeError>() {
+                warnings[start].write(&mut *outputs.diagnostics, archive)?;
+                return Err(error);
+            }
+            fail_batch!(error);
+        }
         // Whether the loop reads no batch after this one: its keep then frees the table after the
         // batch's preliminary stage (`BatchStage::Search`'s `last`).
         let last = !batches_follow(
@@ -8646,6 +8587,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
+                    setup_only: false,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -8666,6 +8608,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
+                    setup_only: false,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -8700,6 +8643,7 @@ fn run_in_pool(
                                 lengths: &lengths[..start],
                                 unsearched,
                                 query_masks: &query_masks,
+                                repeat_hits: &repeat_hits,
                                 context_karlin: &context_karlin,
                                 query_eff_searchsp: &query_eff_searchsp,
                                 batches: &batch_spans,
@@ -8761,62 +8705,6 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
-        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
-        // the batch (its own errors come first): the warnings of the batches read so far, as for
-        // its refusal of a title (below).
-        if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
-                let written = if stream.acting() { start } else { 0 };
-                for query_warnings in &warnings[written..=start] {
-                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                }
-                return Err(error);
-            }
-        }
-        // NCBI fails a batch where it reads a header file that it cannot read (`read_titles`)
-        // or where its prefetch looks up a Seq-align id whose lookup fails on a file
-        // (`database::batch_prefetch`), after the prologs, the reports of the batches before
-        // (without the epilog) and the batch's reader messages: `error` is NCBI's.
-        macro_rules! fail_batch {
-            ($error:expr) => {{
-                // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                // written when the loop took them.
-                let before = |outputs: &mut ReportOutputs<'_>| {
-                    write_before_failed_batch(
-                        &args,
-                        queries.before(&kept, start),
-                        ReportSubjects {
-                            source,
-                            shown: &shown,
-                            titles: &titles,
-                        },
-                        &report_ranges,
-                        outputs,
-                        &output_formats,
-                        BatchResults {
-                            hit_lists,
-                            warnings: &warnings[..start],
-                            reads: &query_reads[..start],
-                            lengths: &lengths[..start],
-                            unsearched,
-                            query_masks: &query_masks,
-                            context_karlin: &context_karlin,
-                            query_eff_searchsp: &query_eff_searchsp,
-                            batches: &batch_spans,
-                        },
-                    )
-                };
-                // In the first batch nothing was streamed: the call of the off path writes the
-                // prologs that come with the reports (outfmt 20's line of the field names).
-                if stream.acting() && start > 0 {
-                    stream.finish_sam(outputs)?;
-                } else {
-                    before(outputs)?;
-                }
-                warnings[start].write(&mut *outputs.diagnostics, archive)?;
-                return Err($error);
-            }};
-        }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
@@ -8884,6 +8772,7 @@ fn run_in_pool(
                     lengths: &lengths[..start],
                     unsearched,
                     query_masks: &query_masks,
+                    repeat_hits: &repeat_hits,
                     context_karlin: &context_karlin,
                     query_eff_searchsp: &query_eff_searchsp,
                     batches: &batch_spans,
@@ -8972,7 +8861,10 @@ fn run_in_pool(
             // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0);
+                    .after_unrecorded_calls(args.first_query_ordinal > 0)
+                    .where_reports_unchanged_by_load_throws(
+                        database::reports_unchanged_by_load_throws(&output_formats),
+                    );
             let prefetch = if run_loads.ended() {
                 None
             } else if output_formats
@@ -8992,8 +8884,8 @@ fn run_in_pool(
                 // A query's own fetches where the batch's prefetch is off: the texts of the
                 // subjects its report reads, kept by subject where the first format writes them
                 // where it reads each (`ReportFormat::places_subject_reads`), else returned for the
-                // query's warnings; the pairwise report (outfmt 0 to 4) reads its subjects in the
-                // order of its `-sorthits`.
+                // query's warnings; the pairwise report (outfmt 0 to 4) reads those that it shows
+                // as its writer reads them (`database::pairwise_reading`).
                 let first_report = outputs
                     .formats
                     .first()
@@ -9005,9 +8897,14 @@ fn run_in_pool(
                     places: first_report
                         .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads),
                     plural_names,
-                    pairwise: first_report
+                    pairwise: database::pairwise_reading(
+                        &output_formats,
+                        args.formatting.report_sort(),
+                        args.report_counts,
+                    ),
+                    pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
-                        .map(|view| view.report_sort(args.formatting.report_sort())),
+                        .is_some(),
                     gapped: !args.ungapped,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
@@ -9112,7 +9009,7 @@ fn run_in_pool(
                                 &titles,
                                 &hit_lists,
                                 &batch_spans,
-                                database::after_throw(&output_formats),
+                                run_loads.answer(),
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &prefetch_queries,
@@ -9163,6 +9060,7 @@ fn run_in_pool(
         batch_spans.push(start..end);
         unsearched.extend(std::iter::repeat_n(!batch.searched, end - start));
         query_masks.extend(batch.query_masks);
+        repeat_hits.extend(batch_repeat_hits);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
         // The warning of an invalid query comes with its report (`PrintOneResultSet`),
         // before its preamble (`QueryWarnings`): a query without letters has the message of
@@ -9250,6 +9148,9 @@ fn run_in_pool(
             }
             let batch_unsearched = take(&mut unsearched, at);
             let batch_masks = take(&mut query_masks, at);
+            // (Empty without the archive: nothing kept.)
+            let repeats_at = at.min(repeat_hits.len());
+            let batch_repeats = take(&mut repeat_hits, repeats_at);
             let batch_karlin = take(&mut context_karlin, 2 * at);
             let batch_searchsp = take(&mut query_eff_searchsp, 2 * at);
             let batch_input = x_rpt_stream::batch_input(query_input, start..end);
@@ -9279,6 +9180,7 @@ fn run_in_pool(
                         lengths: &lengths[start..end],
                         unsearched: batch_unsearched,
                         query_masks: &batch_masks,
+                        repeat_hits: &batch_repeats,
                         context_karlin: &batch_karlin,
                         query_eff_searchsp: &batch_searchsp,
                         batches: &[],
@@ -9333,6 +9235,7 @@ fn run_in_pool(
                 lengths: &lengths,
                 unsearched,
                 query_masks: &query_masks,
+                repeat_hits: &repeat_hits,
                 context_karlin: &context_karlin,
                 query_eff_searchsp: &query_eff_searchsp,
                 batches: &batch_spans,
@@ -9366,6 +9269,7 @@ fn run_in_pool(
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
+                repeat_hits: &[],
                 context_karlin: &[],
                 query_eff_searchsp: &[],
                 batches: &[],
@@ -9451,6 +9355,7 @@ fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
     BlastnIntro {
         megablast: args.task == "megablast",
+        indexed_megablast: args.megablast_index_loaded.is_some(),
         matrix_only: super::super::coordination::matrix_only_scoring(reward, penalty),
     }
 }
@@ -9503,7 +9408,7 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
-            crate::NCBI_BLAST_VERSION,
+            crate::wording::REPORT_VERSION,
             intro,
             shown.name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).
@@ -9539,6 +9444,10 @@ struct BatchResults<'a> {
     lengths: &'a [usize],
     unsearched: Vec<bool>,
     query_masks: &'a [Vec<MaskedInterval>],
+    /// With `-filtering_db` and the BLAST archive, each query's repeat hits that its batch's
+    /// set-up found (`repeat_batch_masks`; 0-based, inclusive, in the searched letters), which
+    /// the archive's masks join (`archive::CallBatches::repeat_hits`); empty otherwise.
+    repeat_hits: &'a [Vec<(usize, usize)>],
     context_karlin: &'a [Option<ContextKarlin>],
     query_eff_searchsp: &'a [i64],
     /// The searched queries of each query batch of the call, in order, for the reports of
@@ -9758,7 +9667,14 @@ fn write_reports_untimed(
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
-                database::after_throw(output_formats),
+                (
+                    database::after_throw(output_formats, outputs.other_outfmts),
+                    database::pairwise_reading(
+                        output_formats,
+                        args.formatting.report_sort(),
+                        args.report_counts,
+                    ),
+                ),
                 results.batches,
                 written.queries,
                 !args.ungapped,
@@ -9822,31 +9738,6 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
-    // With `-filtering_db` the query vector's masks of a query with repeat hits are its masks
-    // combined with the hits (`repeat_filter::RepeatFilter::add_masks`): the archive searches the
-    // repeats again, one search for each query batch, as the batch's set-up searched them.
-    let archive_repeats: Vec<Vec<(usize, usize)>> = match &args.repeat_filter {
-        Some(filter) if output_formats.contains(&BlastnOutputFormat::Archive) => {
-            let serial = crate::utils::threading::SearchPool::x_serial();
-            let pool = x_pool.unwrap_or(&serial);
-            let whole = [0..query_records.len()];
-            let spans = if results.batches.is_empty() {
-                &whole[..]
-            } else {
-                results.batches
-            };
-            let mut found = Vec::with_capacity(query_records.len());
-            for span in spans {
-                found.extend(
-                    filter
-                        .hits(&args.strand, &query_records[span.clone()], pool)
-                        .map_err(|error| super::super::repeat_filter::rejection(filter, error))?,
-                );
-            }
-            found
-        }
-        _ => Vec::new(),
-    };
     let records_parsed = if args.parse_deflines && reported.is_none() {
         crate::report::db_subject::parsed_records(
             subject_letters
@@ -9880,6 +9771,14 @@ fn write_reports_untimed(
         }
         None => results.reads.to_vec(),
     };
+    // The kept repeat hits are those of the reported queries, one for each (the archive reads
+    // them by query index and would take a missing one for a query without hits).
+    debug_assert!(
+        results.repeat_hits.is_empty() || results.repeat_hits.len() == query_records.len(),
+        "repeat hits for {} of {} queries",
+        results.repeat_hits.len(),
+        query_records.len()
+    );
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
@@ -9889,12 +9788,16 @@ fn write_reports_untimed(
         ranges,
         query_masks: results.query_masks,
         archive_dust: &archive_dust,
-        archive_repeats: &archive_repeats,
+        // With `-filtering_db` the query vector's masks of a query with repeat hits are its masks
+        // combined with the hits (`repeat_filter::RepeatFilter::add_masks`): those that the
+        // batch's set-up found.
+        archive_repeats: results.repeat_hits,
         lcase_masking: args.lcase_masking,
         database_mask: args.db_mask_resolved.as_ref().map(|mask| mask.id),
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
+        indexed_megablast: args.megablast_index_loaded.is_some(),
         matrix_only: config.matrix_only,
         reward: config.reward,
         penalty: config.penalty,
@@ -10056,7 +9959,9 @@ fn window_masker_rejection(
 /// The masks of a query batch with `-filtering_db` (`coordination::query_masks`: DUST's, the
 /// lower case and the hits of `filter`'s repeat search of the `searched` letters), and with
 /// `-query_loc` and `-lcase_masking` (`ranged`: each query's record and the start of its
-/// interval) the lower case next to the intervals that they join (`repeat_filter::MasksOutside`).
+/// interval) the lower case next to the intervals that they join (`repeat_filter::MasksOutside`),
+/// and the repeat hits of each query (`RepeatFilter::add_masks`), which the batch's BLAST archive
+/// reads (`BatchResults::repeat_hits`).
 /// NCBI makes them in the set-up of the batch's queries: an error of the repeat search that it
 /// reports fails each query of the batch (`Ok(Err(..))`, `repeat_filter::batch_error`).
 #[allow(clippy::type_complexity)]
@@ -10067,7 +9972,14 @@ fn repeat_batch_masks(
     ranged: Option<Vec<(&FastaRecord, usize)>>,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<
-    std::result::Result<(Vec<Vec<MaskedInterval>>, Vec<MasksOutside>), crate::cli::NativeError>,
+    std::result::Result<
+        (
+            Vec<Vec<MaskedInterval>>,
+            Vec<MasksOutside>,
+            Vec<Vec<(usize, usize)>>,
+        ),
+        crate::cli::NativeError,
+    >,
 > {
     let mut outside: Vec<MasksOutside> = ranged
         .unwrap_or_default()
@@ -10078,7 +9990,7 @@ fn repeat_batch_masks(
         })
         .collect();
     match super::super::coordination::query_masks(args, searched, &mut outside, pool) {
-        Ok(masks) => Ok(Ok((masks, outside))),
+        Ok((masks, hits)) => Ok(Ok((masks, outside, hits))),
         Err(MaskError::Repeats(error)) => {
             match super::super::repeat_filter::batch_error(&error, searched.len()) {
                 Some(failure) => Ok(Err(failure)),
@@ -10198,6 +10110,106 @@ fn read_db_seq_ranges(
     Some(none)
 }
 
+/// NCBI's error of the set-up of the records of a refused batch that are first in their scope
+/// (`first_in_scope`, of the batch's searched records `batch`, numbered from `start` in the run),
+/// which ends before the search (`BatchStage::Search::setup_only`), or `None` where the set-up
+/// succeeds or NCBI splits the batch, whose chunks check the subjects (`ContextInputs::split`):
+/// the refusal then comes (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+fn refused_batch_setup_error(
+    args: &BlastnArgs,
+    batch: &[FastaRecord],
+    first_in_scope: impl Iterator<Item = usize>,
+    start: usize,
+    query_offsets: &[usize],
+    window_masker_masks: Option<&[Vec<MaskedInterval>]>,
+    lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
+    subjects: SubjectSource<'_>,
+    outputs: BatchOutputs<'_, '_>,
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    batching: QueryBatching,
+    first_batch: bool,
+    posts: &mut Posts,
+    query_keep: &mut Vec<u8>,
+) -> Option<anyhow::Error> {
+    let batch_letters: usize = batch.iter().map(|record| record.seq().len()).sum();
+    if !args.ungapped && splits(batching.split, batch_letters) {
+        return None;
+    }
+    let chosen: Vec<usize> = first_in_scope.collect();
+    let records: Vec<FastaRecord> = chosen
+        .iter()
+        .map(|&query| batch[query - start].clone())
+        .collect();
+    let offsets: Vec<usize> = chosen.iter().map(|&query| query_offsets[query]).collect();
+    let masks: Option<Vec<Vec<MaskedInterval>>> = window_masker_masks.map(|masks| {
+        chosen
+            .iter()
+            .map(|&query| masks[query - start].clone())
+            .collect()
+    });
+    let letter_before: Vec<bool> = if lower_case_before.is_empty() {
+        Vec::new()
+    } else {
+        chosen
+            .iter()
+            .map(|&query| lower_case_before[query - start])
+            .collect()
+    };
+    let outside: Vec<MasksOutside> = if masks_outside.is_empty() {
+        Vec::new()
+    } else {
+        chosen
+            .iter()
+            .map(|&query| masks_outside[query - start])
+            .collect()
+    };
+    let stage = BatchStage::Search {
+        query_offsets: &offsets,
+        query_masks: masks.as_deref(),
+        lower_case_before: &letter_before,
+        masks_outside: &outside,
+        last: true,
+        setup_only: true,
+    };
+    let queries = x_query_drop::BatchQueries::Shared(&records);
+    let set_up = if args.ungapped {
+        search_query_batch::<true>(
+            args,
+            queries,
+            subjects,
+            outputs,
+            parallel_pool,
+            batching,
+            first_batch,
+            stage,
+            posts,
+            None,
+            query_keep,
+        )
+    } else {
+        search_query_batch::<false>(
+            args,
+            queries,
+            subjects,
+            outputs,
+            parallel_pool,
+            batching,
+            first_batch,
+            stage,
+            posts,
+            None,
+            query_keep,
+        )
+    };
+    set_up
+        .err()
+        .map(|error| match error.downcast::<ErrorAfterInvalidBatches>() {
+            Ok(ErrorAfterInvalidBatches(error)) => error,
+            Err(error) => error,
+        })
+}
+
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
@@ -10280,6 +10292,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             ..
         } => masks.to_vec(),
         BatchStage::Search { .. } => query_masks(args, &letters, &mut [], parallel_pool)
+            .map(|(masks, _)| masks)
             .map_err(|error| mask_rejection(args, error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
@@ -10468,6 +10481,25 @@ fn search_query_batch<const UNGAPPED: bool>(
         },
         reborrow_outputs(&mut outputs),
     )?;
+    if let BatchStage::Search {
+        setup_only: true, ..
+    } = stage
+    {
+        // The search's first read of the database after the set-up (`prelim_pass`): a sequence
+        // file that cannot be opened fails the batch there (line WQA D10 round 6, review 4 M2).
+        if let (true, SubjectSource::Database(database)) = (any_valid_context && !split, subjects) {
+            if let Some(error) = database.sequence_file_read_error() {
+                return Err(database_search_error(
+                    error,
+                    first_batch,
+                    reborrow_outputs(&mut outputs),
+                    intro,
+                    &shown,
+                ));
+            }
+        }
+        return Err(SetUpOnly.into());
+    }
     // The preliminary stage's option spaces and its own spaces where they differ from the setup's
     // (`batch_setup::batch_spaces`).
     let batch_setup::BatchSpaces {
@@ -10555,6 +10587,14 @@ fn search_query_batch<const UNGAPPED: bool>(
         db_num_seqs,
     };
 
+    // Whether the batch is searched with a MegaBLAST database index (`index_seeds` below; only a
+    // database search keeps one, `mb_index::MegablastIndex::check`), and whether the index leaves
+    // database volumes to the scan (a mixed search).
+    let index_search = args.megablast_index_loaded.is_some() && split_prelim_lists.is_none();
+    let index_mixed = args
+        .megablast_index_loaded
+        .as_deref()
+        .is_some_and(crate::dbindex::search::LoadedIndex::mixed);
     // Build lookup tables
     let (lookup_tables, scan_step, offset_array_size) =
         batch_setup::batch_lookup_tables(&batch_setup::LookupInputs {
@@ -10568,7 +10608,13 @@ fn search_query_batch<const UNGAPPED: bool>(
             approx_table_entries,
             x_keep,
             subjects,
-            split: split_prelim_lists.is_some(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-163
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:460-462
+            // A search with a MegaBLAST database index has no lookup table, except a mixed
+            // one (`eMixedMBLookupTable`: the table without an index). (NCBI also builds the
+            // table for an old-style index found after the new style left a database volume
+            // without an index, `partial`, and never reads it: every OID is the index's.)
+            split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -10716,6 +10762,28 @@ fn search_query_batch<const UNGAPPED: bool>(
         .filter(|&(_, _, kind)| kind == crate::blastinput::db_mask::MaskKind::Hard)
         .map(|(_, algo_id, _)| algo_id);
     let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:302-306
+    // The seeds of the MegaBLAST database index for the batch's query (`mb_index_seeds`), each
+    // index volume searched when the preliminary stage first reaches it; a batch split into
+    // query chunks has none (each chunk searched its own above).
+    let index_seeds = match (subjects, args.megablast_index_loaded.as_deref()) {
+        (SubjectSource::Database(database), Some(index)) if index_search => {
+            Some(mb_index_seeds::IndexSeeds::new(
+                index,
+                database.oid_map(),
+                encoded_query_concat_blastna,
+                &query_contexts,
+                &context_valid,
+                crate::dbindex::search::SearchOptions {
+                    word_size: effective_word_size as u64,
+                    two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
+                        as u64,
+                },
+                db_hard_mask.map(|algo_id| (database, algo_id)),
+            ))
+        }
+        _ => None,
+    };
     // What the preliminary search of a subject reads of the batch
     // (`prelim_subject::PrelimBatch`), built once: the preliminary stage's cutoffs and
     // spaces (the setup's, or its own where they differ, `prelim_eff_searchsp`). With the
@@ -10778,6 +10846,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         lcase_masking,
         db_mask,
         db_mask_error: &db_mask_error,
+        mb_index: index_seeds.as_ref(),
         encoded_query_concat_nomask,
         search_karlin_ref,
         round_down_evalue_score,
@@ -10804,7 +10873,13 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        effective_word_size,
+        // A batch split into query chunks traces what its chunks' indexed searches kept. (With
+        // an index of only some volumes this is 1 for every subject: the traceback sees only
+        // subjects with kept HSPs, and a scanned subject shorter than a word has none.)
+        shortest_subject: prelim_subject::shortest_subject(
+            effective_word_size,
+            args.megablast_index_loaded.is_some(),
+        ),
         encoded_queries_blastna: &encoded_queries_blastna,
         encoded_queries_nomask,
         encoded_query_concat_blastna,
@@ -10907,6 +10982,11 @@ fn search_query_batch<const UNGAPPED: bool>(
             intro,
             &shown,
         ));
+    }
+    // An index volume that did not read or search is LOSAT's refusal, after the preliminary
+    // stage's read errors.
+    if let Some(index_seeds) = &index_seeds {
+        index_seeds.check()?;
     }
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).

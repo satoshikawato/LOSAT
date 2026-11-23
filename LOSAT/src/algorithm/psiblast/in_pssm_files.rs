@@ -8,11 +8,11 @@
 //! LOSAT's refusals of what NCBI cannot write.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-408
-//! With `-in_pssm` the loop's first `SavePssmToFile(pssm, &itr)` writes the input PSSM, the object
-//! that `CPsiBlast` searches (`CPsiBlast(pssm, db_adapter, psi_opts)` holds the same `CRef`); its
-//! ASCII PSSM takes the ancillary data of the PSSM itself, which stays for the files written after
-//! the loop until the next PSSM is computed (`ComputePssmForNextIteration` replaces
-//! `m_AncillaryData`).
+//! With `-in_pssm` the loop's first `SavePssmToFile` of `pssm` writes the input PSSM, the object
+//! that `CPsiBlast` searches (the `CPsiBlast` made from `pssm`, `db_adapter` and `psi_opts` holds
+//! the same `CRef`); its ASCII PSSM takes the ancillary data of the PSSM itself, which stays for
+//! the files written after the loop until the next PSSM is computed (`ComputePssmForNextIteration`
+//! replaces `m_AncillaryData`).
 
 use anyhow::{bail, Result};
 
@@ -24,6 +24,7 @@ use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
+use crate::report::serial::encoder::ReplacedChar;
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
@@ -128,7 +129,7 @@ fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
 
 /// The refusal of the long ASCII form of a PSSM file that NCBI cannot print (`rounds_input`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-188, 278-301 (quoted
-// at `pssm::print_ascii_pssm`: the long form reads `(*weighted_res_freqs)(r, i)`,
+// at `pssm::print_ascii_pssm`: the long form reads `weighted_res_freqs` at row `r` and column `i`,
 // `info_content[i]`, `num_matching_seqs[i]` and, where that is above 1 and the letter is not X,
 // `gapless_col_weights[i]`; `GetWeightedResidueFrequencies` gives NULL without the member)
 fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
@@ -219,6 +220,10 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
     }
 }
 
+/// The files of the input PSSM: its ASN.1 text, its ASCII PSSM and NCBI's posts of the bytes that
+/// the ASN.1 text's stream replaces.
+pub(crate) type InputFiles = (Option<Vec<u8>>, Option<Vec<u8>>, Vec<ReplacedChar>);
+
 impl InPssmRounds {
     /// LOSAT's refusal of the input PSSM's files (`rounds_input`), made once the database is opened
     /// for a run that searches (`blastp::blast_engine` `search_cli`).
@@ -231,22 +236,23 @@ impl InPssmRounds {
 
     /// The files of the input PSSM at the start of round 1 (`SavePssmToFile`): its ASN.1 text and
     /// its ASCII PSSM, as requested.
-    pub(crate) fn files(
-        &self,
-        request: &PssmRequest,
-    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+    ///
+    /// The third value is NCBI's post of each byte that its ASN.1 text stream replaces in the
+    /// file (a query title outside the visible ASCII range; `pssm::file_posts`).
+    pub(crate) fn files(&self, request: &PssmRequest) -> Result<InputFiles> {
         let Some(object) = self.object.as_ref() else {
-            return Ok((None, None));
+            return Ok((None, None, Vec::new()));
         };
-        let asn = match request.asn_path {
-            Some(_) => Some(
-                crate::report::serial::pssm::asn_text(object)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?,
-            ),
-            None => None,
+        let (asn, posts) = match request.asn_path {
+            Some(_) => {
+                let (asn, posts) = crate::report::serial::pssm::asn_text_posting(object)
+                    .map_err(|error| anyhow::anyhow!("{error}"))?;
+                (Some(asn), posts)
+            }
+            None => (None, Vec::new()),
         };
         let ascii = request.ascii_path.as_ref().map(|_| ascii_pssm(object));
-        Ok((asn, ascii))
+        Ok((asn, ascii, posts))
     }
 
     /// The ASN.1 text of the input PSSM after round 1's K/A write-back (`ungapped`: `kbp_psi[0]`,
@@ -264,9 +270,9 @@ impl InPssmRounds {
         request: &PssmRequest,
         ungapped: KarlinBlk,
         gapped: KarlinBlk,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<(Option<Vec<u8>>, Vec<ReplacedChar>)> {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
-            return Ok(None);
+            return Ok((None, Vec::new()));
         };
         // The six values are written in place of the object's (no copy of the object).
         let karlin = crate::report::serial::pssm::FinalKarlin {
@@ -277,16 +283,16 @@ impl InPssmRounds {
             kappa_ungapped: ungapped.k,
             h_ungapped: ungapped.h,
         };
-        crate::report::serial::pssm::asn_text_with_karlin(object, Some(karlin))
-            .map(Some)
+        crate::report::serial::pssm::asn_text_posting_with_karlin(object, Some(karlin))
+            .map(|(asn, posts)| (Some(asn), posts))
             .map_err(|error| anyhow::anyhow!("{error}"))
     }
 }
 
-/// `PrintAsciiPssm(*pssm, ExtractPssmAncillaryData(*pssm))` of a file PSSM: the scores of the file
-/// (`GetScores`), the query's letters (`GetQuerySequenceData`), the long form with the file's
-/// diagnostics when it has `informationContent`, and the PSI blocks of its `finalData` (a member
-/// it lacks is `CPssm::kInvalidStat`, 0).
+/// `PrintAsciiPssm` of a file PSSM, with the ancillary data that `ExtractPssmAncillaryData` takes
+/// from it: the scores of the file (`GetScores`), the query's letters (`GetQuerySequenceData`), the
+/// long form with the file's diagnostics when it has `informationContent`, and the PSI blocks of
+/// its `finalData` (a member it lacks is `CPssm::kInvalidStat`, 0).
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:792-804
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-134
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-196

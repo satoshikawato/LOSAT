@@ -7,7 +7,8 @@ use super::view::V;
 use std::collections::HashMap;
 
 use crate::seqid::mask_handle::{
-    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, GiimTree, TreeHandle,
+    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, mask_info_key, GiimTree,
+    TreeHandle,
 };
 use crate::seqid::model::GiimportId;
 use crate::seqid::ParsedSeqId;
@@ -35,8 +36,8 @@ impl Range {
         to_open: MAX,
     };
 
-    /// `CRange<TSeqPos>(from, to)`: the open end `to + 1`, wrapping (`to` 4294967295 makes an
-    /// empty range).
+    /// `CRange<TSeqPos>` of `from` and `to`: the open end is `to` plus 1, wrapping (`to` 4294967295
+    /// makes an empty range).
     pub(super) fn new(from: u32, to: u32) -> Range {
         Range {
             from,
@@ -114,7 +115,8 @@ impl HandleRange {
     // NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:115-206
     // The map's `AddRange` (handle_range_map.cpp:277) passes `more_before` and `more_after`
     // false: it sets the flags itself (`HandleRangeMap::add`).
-    /// `AddRange(range, strand, false, false, circular_rna)`.
+    /// `AddRange` of `range`, `strand` and `circular_rna`, with `more_before` and `more_after`
+    /// false.
     pub(super) fn add(&mut self, range: Range, strand: Strand, circular_rna: bool) {
         if let Some(&(_, first)) = self.ranges.first() {
             if self.single_strand {
@@ -267,7 +269,7 @@ fn next_lookup() -> u64 {
 // one: two equal `giim` Seq-ids are two handles, two different ones of a number one handle, unless
 // other `giim` handles of the number are alive; `om/` cases `s_i72_giim_same`, `s_i73_giim_db_diff`)
 impl Handle {
-    /// `CSeq_id_Handle::GetHandle(id)`, a `giim` Seq-id found in `giim`.
+    /// `CSeq_id_Handle::GetHandle` of `id`, a `giim` Seq-id found in `giim`.
     pub(super) fn of(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
         match mask_handle_key(id) {
             Ok(Some(key)) => Handle::Key {
@@ -287,16 +289,14 @@ impl Handle {
         }
     }
 
-    /// `CSeq_id_Handle::GetHandle(id)` of a handle that lives as long as the run (a Bioseq's Seq-id,
+    /// `CSeq_id_Handle::GetHandle` of a handle that lives as long as the run (a Bioseq's Seq-id,
     /// `CBioseq_Info::m_Id`; a Seq-table column's default, `CSeqTableLocColumns::m_DefaultIdHandle`):
-    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`).
+    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`: the info
+    /// of an accession is shared with every other number of its prefix, digit count and version).
     pub(super) fn of_run(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
         let handle = Handle::of(id, handles);
-        if let Handle::Key { key, .. } = &handle {
-            handles
-                .made_from
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
+        if let (Handle::Key { .. }, Ok(Some(info))) = (&handle, mask_info_key(id)) {
+            handles.made_from.entry(info).or_insert_with(|| id.clone());
         }
         handles.mapped(&handle);
         handles.end_object();
@@ -310,7 +310,7 @@ impl Handle {
         }
     }
 
-    /// `CSeq_id_Handle::GetGiHandle(gi)`.
+    /// `CSeq_id_Handle::GetGiHandle` of `gi`.
     pub(super) fn gi(gi: i64) -> Handle {
         match mask_handle_key(&ParsedSeqId::Gi(gi)) {
             Ok(Some(key)) => Handle::Key {
@@ -363,8 +363,10 @@ pub(super) struct LiveHandles {
     tree: GiimTree,
     /// What holds each live `giim` handle: its number and holders, by its info.
     holds: HashMap<usize, (i32, Holds)>,
-    /// The Seq-id that made the info of each keyed handle of the run, the first of the run to
-    /// have it (the phase C handles: no other handle is made before the attach).
+    /// The Seq-id that made each info of the keyed handles of the run (by `mask_info_key`: the
+    /// info of a packing Textseq-id is shared by the accessions of one prefix, digit count and
+    /// version), the first of the run to have it (the phase C handles: no other handle is made
+    /// before the attach).
     made_from: HashMap<Vec<u8>, ParsedSeqId>,
 }
 
@@ -410,7 +412,7 @@ impl LiveHandles {
         handles
     }
 
-    /// `CSeq_id_Giim_Tree::FindOrCreate(id)`, the handle held by `holder`: its info.
+    /// `CSeq_id_Giim_Tree::FindOrCreate` of the value, the handle held by `holder`: its info.
     fn find_or_create(&mut self, value: &GiimportId, holder: Holder) -> usize {
         let (info, _) = self.tree.find_or_create(value);
         self.holds
@@ -487,15 +489,20 @@ impl LiveHandles {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_handle.cpp:220-233
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (the info of a packed
+    // Textseq-id is shared by its packed key, not by its accession: `seqid::mask_handle::mask_info_key`)
     /// `CSeq_id_Handle::AsString()` of `handle`, the handle of `id` that lives as long as the run:
     /// `GetSeqId()` (`seqid::mask_handle::handle_seq_id` of the Seq-id that made its info) in
     /// FASTA form (`gi|` and the number for a gi).
     pub(super) fn as_string(&self, handle: &Handle, id: &ParsedSeqId) -> String {
         let seq_id = match handle {
-            Handle::Key { key, .. } => self
-                .made_from
-                .get(key)
-                .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
+            Handle::Key { .. } => match mask_info_key(id) {
+                Ok(Some(info)) => self
+                    .made_from
+                    .get(&info)
+                    .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
+                _ => id.clone(),
+            },
             Handle::Giim { id: number, info } => {
                 ParsedSeqId::Giim(self.tree.made_from(*number, *info).clone())
             }
@@ -534,7 +541,7 @@ struct AddState<'g> {
 }
 
 impl HandleRangeMap {
-    /// `AddLocation(loc, mode)` of a fresh map.
+    /// `AddLocation` of `loc` in `mode` on a fresh map.
     pub(super) fn of_location(loc: V<'_>, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
         let mut map = HandleRangeMap::default();
         map.add_location(
@@ -578,8 +585,8 @@ impl HandleRangeMap {
         state.prev = Some(at);
     }
 
-    /// `AddRange(id, range, strand)` with a state of its own (no Seq-id before it): the rows of an
-    /// alignment (annot_object.cpp:591-842).
+    /// `AddRange` of an id, `range` and `strand` with a state of its own (no Seq-id before it): the
+    /// rows of an alignment (annot_object.cpp:591-842).
     pub(super) fn add_range(
         &mut self,
         id: &ParsedSeqId,
@@ -591,7 +598,7 @@ impl HandleRangeMap {
         self.add_handle(handle, range, strand, handles);
     }
 
-    /// `AddRange(handle, range, strand)` with a state of its own.
+    /// `AddRange` of `handle`, `range` and `strand` with a state of its own.
     pub(super) fn add_handle(
         &mut self,
         handle: Handle,
@@ -710,7 +717,8 @@ impl HandleRangeMap {
     }
 }
 
-/// A Seq-interval's Seq-id, range `CRange(from, to)` and strand (`unknown` when not set).
+/// A Seq-interval's Seq-id, range (a `CRange` from `from` to `to`) and strand (`unknown` when not
+/// set).
 pub(super) fn interval_parts(interval: V<'_>) -> (&ParsedSeqId, Range, Strand) {
     let from = interval.field("from").int() as u32;
     let to = interval.field("to").int() as u32;
@@ -721,7 +729,7 @@ pub(super) fn interval_parts(interval: V<'_>) -> (&ParsedSeqId, Range, Strand) {
     )
 }
 
-/// A Seq-point's Seq-id, range `CRange(point, point)` and strand.
+/// A Seq-point's Seq-id, range (a `CRange` of `point` alone) and strand.
 pub(super) fn point_parts(point: V<'_>) -> (&ParsedSeqId, Range, Strand) {
     let at = point.field("point").int() as u32;
     (

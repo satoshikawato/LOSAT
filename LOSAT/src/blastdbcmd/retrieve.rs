@@ -25,6 +25,7 @@ use crate::seqid::parse::seq_id_from_text;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::args;
+use super::bioseq::{write_asn_text, AsnTextDocument, BioseqFormatter, DbSeqData};
 use super::fasta::FastaFormatter;
 use super::format::FormatSpec;
 use super::range::{parse_sequence_range_open_end, SeqRange, NO_RANGE};
@@ -60,13 +61,17 @@ impl Stop {
 }
 
 impl From<SeqDbError> for Stop {
-    /// A reader error inside the request: NCBI's own (`CSeqDBException`) is caught like any
-    /// exception there (exit status 1, not the 2 of an error at opening); LOSAT's is a
-    /// refusal.
+    /// A reader error inside the request: NCBI's own (`CSeqDBException`, or the `CFileException`
+    /// of a lookup file) is caught like any exception there (exit status 1, not the 2 of an error
+    /// at opening), with its message (`SeqDbError::ncbi_request_message`); LOSAT's is its error of
+    /// a file that cannot be read or a refusal (`common::database::losat_reader_error`).
     fn from(error: SeqDbError) -> Stop {
         match error.ncbi_request_message() {
             Some(text) => Stop::NcbiBytes(text),
-            None => Stop::refused(error.to_string()),
+            None => Stop::Refused(crate::algorithm::common::database::losat_reader_error(
+                &error,
+                super::PROGRAM,
+            )),
         }
     }
 }
@@ -77,7 +82,7 @@ impl From<SeqDbError> for Stop {
 pub(super) struct Config {
     /// `m_SeqRange`.
     pub range: SeqRange,
-    /// `m_Strand == eNa_strand_minus` (never for a protein database).
+    /// `m_Strand` is `eNa_strand_minus` (never for a protein database).
     pub strand_minus: bool,
     /// `m_UseCtrlA`.
     pub ctrl_a: bool,
@@ -137,7 +142,7 @@ impl<'a> Source<'a> {
             .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
     }
 
-    /// `GetSeqLength(oid)`.
+    /// `GetSeqLength` of `oid`.
     pub fn length(&self, oid: u32) -> Result<u32, Stop> {
         let at = self.at(oid)?;
         if self.protein {
@@ -149,24 +154,60 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// `GetHdr(oid)`: the definition lines with their Seq-ids.
-    pub fn deflines(&self, oid: u32) -> Result<DeflineSet, Stop> {
-        let set = self.db.defline_set_at(self.at(oid)?)?;
-        if set
-            .deflines
-            .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
-        {
-            return Err(Stop::refused(format!(
-                "sequence {oid}: a definition line with bytes NCBI reads as '#' (it writes an \
-                 error each time it reads them)"
-            )));
-        }
-        Ok(set)
+    /// `GetHdr` of `oid`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
+    /// stored header of no bytes ([`Source::null_set`]).
+    pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
+        let at = self.at(oid)?;
+        let Some(set) = self.db.header_set_at(at)? else {
+            return self.null_set(at);
+        };
+        check_read_bytes(oid, &set)?;
+        Ok(Some(set))
     }
 
-    /// The letters of `GetSequenceAsString(oid[, range])` (`-outfmt %s`, `%h`): iupacaa
-    /// with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
+    /// `GetHdr` of `oid` and the header that `GetBioseq` keeps in the Bioseq's user object
+    /// (`SeqDb::defline_set_with_header_at`); `None` as for [`Source::deflines`].
+    pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
+        let at = self.at(oid)?;
+        let Some((set, header)) = self.db.defline_set_with_header_at(at)? else {
+            return self.null_set(at);
+        };
+        check_read_bytes(oid, &set)?;
+        Ok(Some((set, header)))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1997-2003
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
+    // A database opened with a taxid list (`-taxids`, `-taxidlist` with `-target_only`), or a
+    // volume under an alias file's `OID_MASK_TYPE`, filters the set it read, also the null one
+    // (probes w1-w4 and O1-O4 of line RG-Dbc); otherwise the readers see no set: the `%` formatter
+    // writes nothing, `GetBioseq` gives no Bioseq, and its read of a target's line throws (probes
+    // z1-z9, za-zd).
+    /// The read of the sequence at `at` whose stored header has no bytes: `None`, or NCBI's null
+    /// pointer exception where the read filters its definition lines
+    /// ([`SeqDb::filters_header_sets`]).
+    fn null_set<T>(&self, at: SeqLocation) -> Result<Option<T>, Stop> {
+        if self.db.filters_header_sets(at) {
+            return Err(null_pointer());
+        }
+        Ok(None)
+    }
+
+    /// The `Seq-data` of `GetBioseq` of `oid`: the stored NCBIstdaa of a protein, the stored 2-bit
+    /// bytes or NCBI4na of a nucleotide (`SequenceBlock::nucleotide_seq_data`).
+    pub fn seq_data(&self, oid: u32) -> Result<DbSeqData, Stop> {
+        let block = self.db.read_sequence_at(self.at(oid)?)?;
+        if self.protein {
+            return Ok(DbSeqData::Ncbistdaa(block.protein(0).to_vec()));
+        }
+        Ok(match block.nucleotide_seq_data(0)? {
+            (true, bytes) => DbSeqData::Ncbi2na(bytes),
+            (false, bytes) => DbSeqData::Ncbi4na(bytes),
+        })
+    }
+
+    /// The letters of `GetSequenceAsString` of `oid`, with `range` when one is given (`-outfmt %s`,
+    /// `%h`): iupacaa with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
     pub fn string_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
         if self.protein {
             let block = self.db.read_sequence_at(self.at(oid)?)?;
@@ -201,8 +242,8 @@ impl<'a> Source<'a> {
     // `RealToVol` throws for an algorithm the volume does not know, after the cache's key was
     // written, and `GetMaskData` catches it: that sequence has no masks, and the next one of
     // the volume reads the masks of the id cached before, or of an uninitialised one.
-    /// `GetMaskData(oid, algo)`: the stored ranges of the sequence, or the refusal of a volume
-    /// that has masks but not this algorithm (line NP's M/DECISIONS 9).
+    /// `GetMaskData` with `oid` and `algo`: the stored ranges of the sequence, or the refusal of a
+    /// volume that has masks but not this algorithm (line NP's M/DECISIONS 9).
     pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
         let at = self.at(oid)?;
         match self
@@ -219,20 +260,27 @@ impl<'a> Source<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1614-1621
-    /// `CSeqDB::GetTaxInfo(taxid)` (and `GetBioseq`'s lookup of a source, [`Source::tax_names`]):
-    /// the names of the taxonomy database on the search path, none where NCBI's lookup throws (no
-    /// database, no such taxid), and the `ERR_POST` texts of the lookup (of opening the database,
-    /// when it is the run's first lookup, and the offset error), which NCBI writes where it looks
-    /// the taxid up. The lookups are kept as NCBI's volume keeps them (`source_names`), which keeps
-    /// no lookup that writes a text: a kept answer is that of a lookup that writes none. Err:
-    /// LOSAT's refusal of a lookup that reads a record of an empty `taxdb.btd` (NCBI faults) or
-    /// whose names NCBI reads past its mapping of `taxdb.btd` without a defined result
-    /// (`TaxLookup::into_names`); a super kingdom past the mapping is refused where the format
-    /// writes it (`format::DeflineFields`).
+    /// `CSeqDB::GetTaxInfo` of `taxid` (and `GetBioseq`'s lookup of a source,
+    /// [`Source::tax_names`]): the names of the taxonomy database on the search path, none where
+    /// NCBI's lookup throws (no database, no such taxid), and the `ERR_POST` texts of the lookup
+    /// (of opening the database, when it is the run's first lookup, and the offset error), which
+    /// NCBI writes where it looks the taxid up. The lookups are kept as NCBI's volume keeps them
+    /// (`source_names`), which keeps no lookup that writes a text: a kept answer is that of a
+    /// lookup that writes none. Err: LOSAT's refusal of a lookup that reads a record of an empty
+    /// `taxdb.btd` (NCBI faults) or whose names NCBI reads past its mapping of `taxdb.btd` without
+    /// a defined result (`TaxLookup::into_names`); a super kingdom past the mapping is refused
+    /// where the format writes it (`format::DeflineFields`).
     pub fn tax_info(&self, taxid: i32) -> Result<(std::sync::Arc<SourceNames>, Vec<String>), Stop> {
         let mut texts = Vec::new();
         let names = self.source_names.names(taxid, &mut texts, |messages| {
-            self.taxdb.lookup(self.db, taxid, messages)?.into_names()
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:873-886
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:902-912
+            // The formatter's names catch any exception of the lookup, so a file of the taxonomy
+            // database that does not open gives `N/A` (line WQA D18b probe 12, `%S %L %B %K`).
+            match self.taxdb.lookup(self.db, taxid, messages) {
+                Err(SeqDbError::TaxdbThrows { .. }) => Ok(None),
+                lookup => lookup?.into_names(),
+            }
         })?;
         Ok((names, texts))
     }
@@ -266,6 +314,21 @@ impl<'a> Source<'a> {
     }
 }
 
+/// The refusal of a sequence whose definition lines hold bytes that NCBI reads as '#'.
+fn check_read_bytes(oid: u32, set: &DeflineSet) -> Result<(), Stop> {
+    if set
+        .deflines
+        .iter()
+        .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+    {
+        return Err(Stop::refused(format!(
+            "sequence {oid}: a definition line with bytes NCBI reads as '#' (it writes an \
+             error each time it reads them)"
+        )));
+    }
+    Ok(())
+}
+
 /// The retrieval's output and its diagnostics, NCBI's `cout` and the `cerr` tied to it.
 pub(super) struct Output<'a, 'b> {
     out: &'a mut dyn Write,
@@ -276,12 +339,38 @@ pub(super) struct Output<'a, 'b> {
 // diagnostics NCBI's stream flushes the output, so the two come out in the order they were
 // written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
 impl Output<'_, '_> {
-    /// `ERR_POST(Error << message)` of the retrieval: the output is flushed first (to the file
-    /// or the pipe, `cerr`'s tie), and a closed pipe ends the retrieval without the line.
+    /// The error that the retrieval posts (`ERR_POST` at severity `Error`, with `message`): the
+    /// output is flushed first (to the file or the pipe, `cerr`'s tie), and a closed pipe ends the
+    /// retrieval without the line.
     pub fn post(&mut self, message: &str) -> Result<(), Stop> {
         self.out.flush().map_err(Stop::write)?;
         self.diag.err_post(message);
         Ok(())
+    }
+
+    /// The write of `object` to `m_Out` through `MSerial_AsnText`: the ASN.1 text document
+    /// `document`, with NCBI's post of each byte its text stream replaces
+    /// (`bioseq::write_asn_text`).
+    pub fn asn_text<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
+        let diag = &mut *self.diag;
+        write_asn_text(document, &mut *self.out, |replaced| {
+            diag.post_replaced(std::slice::from_ref(replaced))
+        })
+    }
+
+    /// The line of `x_Print` whose one field is the ASN.1 text document `document`, which NCBI
+    /// writes into the field's string first: the posts of the bytes its text stream replaces, then
+    /// the document and the line's end.
+    pub fn asn_text_line<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
+        let mut line = Vec::new();
+        let mut replaced = Vec::new();
+        write_asn_text(document, &mut line, |byte| replaced.push(byte.clone()))?;
+        if !replaced.is_empty() {
+            self.out.flush().map_err(Stop::write)?;
+            self.diag.post_replaced(&replaced);
+        }
+        line.push(b'\n');
+        self.out.write_all(&line).map_err(Stop::write)
     }
 }
 
@@ -308,43 +397,43 @@ fn slice(letters: &[u8], range: Option<(u32, u32)>) -> &[u8] {
     }
 }
 
-/// The formatter of the request (`CBlastDB_Formatter`), or the refusal of one LOSAT does
-/// not write, given at the first sequence (NCBI's `%b` and `%d` fail on nothing before).
+/// The formatter of the request (`CBlastDB_Formatter`).
 enum Formatter {
     Fasta(FastaFormatter),
+    Bioseq(BioseqFormatter),
     Fields(FormatSpec),
-    Refused(String),
 }
 
 impl Formatter {
     /// Whether the formatter reads the definition lines of a sequence (the FASTA's `GetBioseq`,
-    /// a `%` specifier's `GetHdr`), which set NCBI's OID list up (`SeqDb::set_up_oid_list`).
+    /// a `%` specifier's `GetHdr`), which build NCBI's OID list (`SeqDb::build_oid_list`).
     fn reads_deflines(&self) -> bool {
         match self {
-            Formatter::Fasta(_) => true,
+            Formatter::Fasta(_) | Formatter::Bioseq(_) => true,
             Formatter::Fields(spec) => spec.reads_deflines(),
-            Formatter::Refused(_) => false,
         }
     }
 
-    /// Whether the formatter writes the letters of the sequence (the FASTA, `%s`).
+    /// Whether the formatter writes letters that `-strand` turns (the FASTA, `%s`; the Bioseq
+    /// of `%b` holds the stored data).
     fn reads_letters(&self) -> bool {
         match self {
             Formatter::Fasta(_) => true,
+            Formatter::Bioseq(_) => false,
             Formatter::Fields(spec) => spec.writes_letters(),
-            Formatter::Refused(_) => false,
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:613-628
-    /// `Write(-1, config)`: the OID of a PIG that no volume holds. The FASTA formatter's
-    /// `GetBioseq` throws `OID not found`; the `%` formatter's first read does
+    /// `Write(-1, config)`: the OID of a PIG that no volume holds. The FASTA and Bioseq
+    /// formatters' `GetBioseq` throws `OID not found`; the `%` formatter's first read does
     /// (`FormatSpec::write_missing_oid`).
     fn write_missing(&mut self, out: &mut dyn Write) -> Result<(), Stop> {
         match self {
-            Formatter::Fasta(_) => Err(Stop::Ncbi(OID_NOT_FOUND.to_string())),
+            Formatter::Fasta(_) | Formatter::Bioseq(_) => {
+                Err(Stop::Ncbi(OID_NOT_FOUND.to_string()))
+            }
             Formatter::Fields(spec) => spec.write_missing_oid(out),
-            Formatter::Refused(reason) => Err(Stop::Refused(reason.clone())),
         }
     }
 
@@ -358,8 +447,8 @@ impl Formatter {
     ) -> Result<(), Stop> {
         match self {
             Formatter::Fasta(fasta) => fasta.write(source, oid, config, target, out),
+            Formatter::Bioseq(bioseq) => bioseq.write(source, oid, target, out),
             Formatter::Fields(spec) => spec.write(source, oid, config, target, out),
-            Formatter::Refused(reason) => Err(Stop::Refused(reason.clone())),
         }
     }
 }
@@ -367,16 +456,31 @@ impl Formatter {
 /// `CSeqDB::kOidNotFound` (seqdb.cpp:53).
 pub(super) const OID_NOT_FOUND: &str = "OID not found";
 
-/// `NStr::StringToNumeric<Int8>(text, fConvErr_NoThrow)` with `errno` clear: the number of
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:965-975
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1013
+/// The exception of NCBI's `CRef` read of no object (`CObject::ThrowNullPointerException`), whose
+/// message `x_ProcessSearchRequest` posts: a read of the null set of a stored header of no bytes
+/// ([`Source::null_set`], `GetBioseq` of a target).
+pub(super) fn null_pointer() -> Stop {
+    Stop::Ncbi("Attempt to access NULL pointer.".to_string())
+}
+
+/// `NStr::StringToNumeric<Int8>` of `text` with `fConvErr_NoThrow` and `errno` clear: the number of
 /// a text that is one (an optional sign and digits that fit 64 bits).
 pub(super) fn numeric_target(text: &str) -> Option<i64> {
     args::string_to_int8_message(text).ok()
 }
 
-/// `CSeq_id(text, fParse_PartialOK | fParse_Default)`: the Seq-id of a `-target_only`
-/// target that is not a number; the message of NCBI's exception as the request reports it.
+/// `CSeq_id` of `text` with the flags `fParse_PartialOK` and `fParse_Default`: the Seq-id of a
+/// `-target_only` target that is not a number; the message of NCBI's exception as the request
+/// reports it.
 pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
-    seq_id_from_text(text.as_bytes(), PARTIAL_OK | DEFAULT, &mut |_| {})
+    parse_target_with(text, PARTIAL_OK | DEFAULT)
+}
+
+/// `CSeq_id` of `text` with `flags`, for a `-target_only` target (`parse_target`).
+pub(super) fn parse_target_with(text: &str, flags: u32) -> Result<ParsedSeqId, Stop> {
+    seq_id_from_text(text.as_bytes(), flags, &mut |_| {})
         .map_err(|error| Stop::NcbiBytes(error.message))
 }
 
@@ -445,13 +549,8 @@ fn request(
         OutputKind::Fasta => {
             Formatter::Fasta(FastaFormatter::new(line_length, args.given("long_seqids")))
         }
-        OutputKind::Bioseq => Formatter::Refused(super::refusal(
-            "-outfmt %b (the Bioseq as ASN.1 text) is not served",
-        )),
+        OutputKind::Bioseq => Formatter::Bioseq(BioseqFormatter),
         OutputKind::Fields(spec, mask_algos) => match FormatSpec::parse(&spec, mask_algos) {
-            Ok(spec) if spec.asks_asn_text() => Formatter::Refused(super::refusal(
-                "-outfmt %d (the definition lines as ASN.1 text) is not served",
-            )),
             Ok(spec) => Formatter::Fields(spec),
             Err(message) => return Err(Stop::Ncbi(message)),
         },
@@ -691,7 +790,7 @@ fn init_search_request(
 /// refuses do not stop `-entry all`).
 struct DbIds<'a> {
     lookup: Option<IdLookup<'a>>,
-    /// `GetBlastDbVersion() == eBDB_Version5`.
+    /// `GetBlastDbVersion()` is `eBDB_Version5`.
     version5: bool,
 }
 
@@ -745,7 +844,7 @@ fn preprocess_accession_for_v5(id: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:183-210
-/// `x_GetOids(id)`: the tables of the database (none for `-entry all`, which looks nothing up).
+/// `x_GetOids` of `id`: the tables of the database (none for `-entry all`, which looks nothing up).
 fn get_oids(ids: &DbIds, id: &str) -> Lookup {
     match &ids.lookup {
         Some(lookup) if ids.version5 => get_oids_v5(lookup, id),
@@ -754,7 +853,7 @@ fn get_oids(ids: &DbIds, id: &str) -> Lookup {
     }
 }
 
-/// `x_GetOids(id)` of a version 5 database: a GI first when the key is a number, then the
+/// `x_GetOids` of `id` of a version 5 database: a GI first when the key is a number, then the
 /// accession table.
 fn get_oids_v5(lookup: &IdLookup, id: &str) -> Lookup {
     let acc = preprocess_accession_for_v5(id);
@@ -773,7 +872,7 @@ fn get_oids_v5(lookup: &IdLookup, id: &str) -> Lookup {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:870-893
-/// `x_GetOids(id)` of a version 4 database: a GI first when the id is a number, then the ISAMs
+/// `x_GetOids` of `id` of a version 4 database: a GI first when the id is a number, then the ISAMs
 /// of the volumes. (The GI that `CSeqDB::AccessionToOids` tries when they find nothing is the
 /// lookup `x_GetOids` has made before for a number, and finds nothing for any other text.)
 fn get_oids_v4(lookup: &IdLookup, id: &str) -> Lookup {
@@ -791,7 +890,7 @@ fn get_oids_v4(lookup: &IdLookup, id: &str) -> Lookup {
     }
 }
 
-/// `CSeqDBImpl::AccessionToOids(id)` of a version 4 database, with the exceptions of
+/// `CSeqDBImpl::AccessionToOids` of `id` of a version 4 database, with the exceptions of
 /// `SeqDB_SimplifyAccession` and of the volumes as the request reports them.
 fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
     let simplified = seqdb_simplify_accession(id.as_bytes()).map_err(|error| {
@@ -807,9 +906,10 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:382-386
 /// The lines of an `-entry_batch` (`-ipg_batch`) file (`args::input_lines`): the id and the
-/// rest of the line (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters |
-/// fSplit_Truncate)`), lines without an id left out. A `\r` that the platform's reading leaves
-/// in a line stays (Linux: every `\r`), as in NCBI's reading.
+/// rest of the line (`NStr::SplitInTwo` of `line` at a space or a tab, giving `id` and `format`,
+/// with the flags `fSplit_MergeDelimiters` and `fSplit_Truncate`), lines without an id left out.
+/// A `\r` that the platform's reading leaves in a line stays (Linux: every `\r`), as in NCBI's
+/// reading.
 fn read_batch(
     argument: &str,
     file: &str,
@@ -846,7 +946,8 @@ struct Run<'a, 'b, 'c> {
 }
 
 impl Run<'_, '_, '_> {
-    /// `ERR_POST(Error << message)` of the retrieval ([`Output::post`]).
+    /// The error that the retrieval posts (`ERR_POST` at severity `Error`, with `message`)
+    /// ([`Output::post`]).
     fn post(&mut self, message: &str) -> Result<(), Stop> {
         self.output.post(message)
     }
@@ -869,7 +970,7 @@ impl Run<'_, '_, '_> {
         // check keeps (`SeqDb::check_oid`, `SeqDb::oid_walk`), or, for `-ipg`, the OID of a
         // PIG whose volume holds it (`PigToOid`), kept or not.
         if self.formatter.reads_deflines() {
-            self.source.db.set_up_oid_list();
+            self.source.db.build_oid_list()?;
         }
         self.formatter
             .write(self.source, oid, config, target, &mut self.output)
@@ -883,7 +984,7 @@ impl Run<'_, '_, '_> {
     /// D1a-2, survey A, pattern 3).
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
         let db = self.source.db;
-        for oid in db.oid_walk() {
+        for oid in db.oid_walk()? {
             self.write(oid, config, None)?;
         }
         Ok(())

@@ -473,31 +473,19 @@ test("the options form: the engine's defaults are not written; tasks, templates 
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await task(page, 'megablast');
     await expect(page.getByTestId('argv-validation')).toContainText(
-      'BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12',
+      'LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12',
     );
   }
 });
 
 test("the engine's refusals of option values are shown as the engine writes them, and nothing is started", async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, "the engine's messages need the engine build");
-  await program(page, 'tblastx');
-  await openParameters(page);
-  // A toolkit word in a free-text value (S08+a, D14): the arguments of the Low complexity regions filter.
-  await page.getByTestId('param-seg-value').fill('-version');
-  await expect(page.getByTestId('argv-validation')).toHaveText(
-    "error: the option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
-  );
-  await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
-  await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
-  await submit(page);
-  await expect(page.getByTestId('search-message')).toHaveText(
-    "error: the option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
-  );
-  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs 15/2; a
-  // value that LOSAT does not support (IDENTITY with the compressed lookup table of word size 5,
-  // with which NCBI crashes), and one that NCBI refuses.
+  // A toolkit word in a free-text value (S08+a) prints the command line's version, as the CLI does: help-version.spec.ts
+  // (line WQA's D14, 2026-11-20). IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs
+  // 15/2; a value that LOSAT does not support (IDENTITY with the compressed lookup table of word size 5, with which NCBI
+  // crashes), and one that NCBI refuses.
   await program(page, 'blastp');
+  await openParameters(page);
   await page.getByTestId('param-matrix').selectOption('other');
   await page.getByTestId('param-matrix-other').fill('IDENTITY');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
@@ -508,7 +496,7 @@ test("the engine's refusals of option values are shown as the engine writes them
   await page.getByTestId('param-word_size').selectOption('3');
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
-  await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
+  await expect(page.getByTestId('argv-validation')).toContainText('LOSAT query/options error:');
 });
 
 // WA-FM-01: scores without a Karlin-Altschul table row are not refused by the form's check. The CLI
@@ -990,19 +978,25 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
 
 test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
   await program(page, 'blastn');
-  // Not a defline, and a later line that NCBI's reader refuses fails it again after the defline: the card stays, with
-  // the button. (Until line WQA's D13, 2026-11-20, a `>?` gap line did this; LOSAT Web now reads it as the CLI does.)
-  await paste(page, 'query', 'ACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  // Not a defline, and a first line that is not plausible data: the reader's error comes before the first record, so the
+  // card offers the defline. After it, the same line ends the records in the record that the defline starts: the card
+  // stays, with the reader's error, and keeps the focus. (Until line WQA's D13, 2026-11-20, a `>?` gap line did this,
+  // and until D10 merged with D13, 2026-11-21, a line that is not plausible data after a defline failed the input; a run
+  // now ends at the reader's error, as the CLI's does.)
+  await paste(page, 'query', 'AB000001.1 MH011443.1 ACGT-1\n');
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
   await page.getByTestId('query-source-0-add-defline').click();
-  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nAB000001.1 MH011443.1 ACGT-1\n');
   await expect(page.getByTestId('query-source-0')).toBeFocused();
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
 });
 
 test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  // The reader's error before the first record: a run ends with it, as the command line does, so the
+  // check warns (line WQA's D10, 2026-11-19).
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
   await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
   await page.getByTestId('query-source-0-remove-mark').click();
   // The button goes with the old reading: the focus stays on the card (WA2-AX-04).
@@ -1522,9 +1516,12 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
-  // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).
-  await extra.fill('-help');
-  await expect(validation).toHaveText('-help is not available in the browser');
+  // The CLI's options that a search in the browser cannot have (WA-FM-04). The engine prints the CLI's help, as the CLI
+  // does (line WQA's D14, 2026-11-20: help-version.spec.ts), where WA-FM-05 refused it.
+  if (BUILD_HAS_ENGINE) {
+    await extra.fill('-help');
+    await expect(validation).toHaveAttribute('data-state', 'ok');
+  }
   await extra.fill('-db nt');
   await expect(validation).toHaveText('-db (a database search) is not supported in the browser yet');
   await extra.fill('-mt_mode 1');

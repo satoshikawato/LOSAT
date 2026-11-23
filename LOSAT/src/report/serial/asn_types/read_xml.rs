@@ -557,7 +557,7 @@ impl<S: AsnSource> XmlInput<S> {
     fn find_item(&self, items: &(impl Items + ?Sized), pos: usize) -> R<Option<usize>> {
         let id = skip_stack_tag_char(&self.frames, &self.x.last_tag, 1, b'_')
             .map_err(|e| self.tag_error(e))?;
-        Ok((pos..items.count()).find(|&index| items.name(index).as_bytes() == id))
+        Ok((pos..items.count()).find(|&index| items.is_named(index, id)))
     }
 
     /// `UnexpectedMember` of `id` among `items`.

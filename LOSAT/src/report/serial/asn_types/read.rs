@@ -156,6 +156,11 @@ impl Items for [Member] {
     fn name(&self, index: usize) -> &'static str {
         self[index].name()
     }
+
+    #[inline(always)]
+    fn is_named(&self, index: usize, id: &[u8]) -> bool {
+        self[index].name.is(id)
+    }
 }
 
 /// The named values of an ENUMERATED (`integer` false) or an INTEGER with named values.
@@ -172,7 +177,7 @@ impl EnumItems for EnumType {
     fn value_of(&self, name: &[u8]) -> Option<i32> {
         self.values
             .iter()
-            .find(|value| value.name().as_bytes() == name)
+            .find(|value| value.is_named(name))
             .map(|value| value.value)
     }
 
@@ -593,6 +598,14 @@ impl<I: Input> TypedReader<I> {
         frame
     }
 
+    /// `END_OBJECT_FRAME` of the top frame without an error: the frame is dropped unread.
+    #[inline(always)]
+    fn drop_frame(&mut self) {
+        let left = self.frames.pop();
+        debug_assert!(left.is_some(), "a frame to leave");
+        self.inp.frame_popped(self.frames.len());
+    }
+
     // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-214 (cited at
     // `report::serial::object_frame::text_frame_site`)
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608 (`HandleEOF`, cited at
@@ -604,12 +617,21 @@ impl<I: Input> TypedReader<I> {
     /// otherwise; another `CException` takes the frame's line (`NCBI_RETHROW_SAME` with
     /// `GetFrameInfo()`).
     #[inline(always)]
-    pub(super) fn pop<T>(&mut self, result: R<T>) -> R<T> {
-        let frame = self.pop_frame();
-        match result {
-            Ok(value) => Ok(value),
-            Err(fail) => Err(self.leave(frame, fail)),
+    pub(super) fn pop<T>(&mut self, mut result: R<T>) -> R<T> {
+        match &mut result {
+            Ok(_) => self.drop_frame(),
+            Err(fail) => self.leave_top(fail),
         }
+        result
+    }
+
+    /// `pop`'s error: the top frame is left by `fail`, which takes what the frame adds.
+    #[cold]
+    #[inline(never)]
+    fn leave_top(&mut self, fail: &mut Fail) {
+        let frame = self.pop_frame();
+        let left = std::mem::replace(fail, Fail::Eof);
+        *fail = self.leave(frame, left);
     }
 
     /// What leaving `frame` (the stack is below it now) adds to `fail`.
@@ -958,7 +980,7 @@ impl<I: Input> TypedReader<I> {
             unreachable!("the member's SEQUENCE")
         };
         while self.frames.len() > depth {
-            self.pop_frame();
+            self.drop_frame();
         }
         self.inp.end_member()?;
         self.next_member(ty, members, skip, values, reading + 1)
@@ -1073,9 +1095,9 @@ impl<I: Input> TypedReader<I> {
             }
             Open::Choice { index } => {
                 self.inp.end_variant()?;
-                self.pop_frame();
+                self.drop_frame();
                 self.inp.end_choice()?;
-                self.pop_frame();
+                self.drop_frame();
                 Ok(Step::Done(Value::Choice(index, Box::new(value))))
             }
             Open::List {
@@ -1214,12 +1236,12 @@ impl<I: Input> TypedReader<I> {
             }
             return Ok(Step::Read(member.ty, skip || delayed));
         }
-        self.pop_frame();
+        self.drop_frame();
         for member in &members[pos..] {
             self.expected_member(member)?;
         }
         self.inp.end_class()?;
-        self.pop_frame();
+        self.drop_frame();
         Ok(Step::Done(Value::Sequence(values)))
     }
 
@@ -1279,11 +1301,11 @@ impl<I: Input> TypedReader<I> {
     #[inline(always)]
     fn end_list(&mut self, element: u16) -> R<()> {
         if I::element_frame(element) {
-            self.pop_frame();
+            self.drop_frame();
         }
         self.inp.end_container()?;
         if I::ARRAY_FRAMES {
-            self.pop_frame();
+            self.drop_frame();
         }
         Ok(())
     }

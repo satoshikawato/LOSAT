@@ -4661,6 +4661,8 @@ mod x_capture;
 /// aarch64). Bit 3 (LOSAT_X_DPNEON2, on unless `=0`, aarch64 only): try the two-register NEON
 /// kernels of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
 /// the 8-bit 256-bit kernel's `EM` instances (no E clearing at the row end, see `x_xdrop_avx2.rs`).
+/// Bit 5 (LOSAT_X_DPEDGE, with bit 0): its `LM` instances (the lane mask of the matrix edge only
+/// on the block that crosses it).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
     static ON: OnceLock<u8> = OnceLock::new();
@@ -4672,6 +4674,9 @@ fn x_extra_switches() -> u8 {
                 on |= 1;
                 if x_avx2::emask_on() {
                     on |= 16;
+                }
+                if x_avx2::edge_on() {
+                    on |= 32;
                 }
             }
         }
@@ -4774,6 +4779,7 @@ fn x_extra_dispatch(
                     tb,
                     check_fence,
                     on & 16 != 0,
+                    on & 32 != 0,
                     sc,
                 )
             };

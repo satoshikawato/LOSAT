@@ -1178,6 +1178,7 @@ pub(super) fn write_custom_tabular(
         query_titles,
         searched_lengths: query_lengths,
         range_length: ranges.query_input.range_length,
+        ungapped: args.ungapped,
         database: context
             .database_name
             .as_deref()

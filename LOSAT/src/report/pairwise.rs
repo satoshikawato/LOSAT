@@ -1463,7 +1463,10 @@ fn write_hsp_identities<W: Write>(
     } else if config.program == "blastn" {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1805,2131-2141
         // The displayed counts come from the two rows (before the lowercase masking of
-        // the display), and the gaps are the gap columns of both rows.
+        // the display), and the gaps are the gap columns of the alignment (`x_GetNumGaps`'s
+        // chunks): `gaps` above, the hit's count of its edit script's gaps, which BLASTN's rows
+        // always give (`algorithm::blastn::pairwise::Rows`; a query letter past the query's
+        // record shows the gap character too, remaining-gaps X1b-p).
         let (query_row, subject_row) = (
             hit.query_seq.as_deref().unwrap_or_default().as_bytes(),
             hit.subject_seq.as_deref().unwrap_or_default().as_bytes(),
@@ -1473,11 +1476,6 @@ fn write_hsp_identities<W: Write>(
             .iter()
             .zip(subject_row)
             .filter(|(q, s)| q.eq_ignore_ascii_case(s))
-            .count();
-        let gaps = query_row
-            .iter()
-            .chain(subject_row)
-            .filter(|&&residue| residue == b'-')
             .count();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:310-320
         // The query is always shown on its plus strand (showalign.cpp:1852-1858).
@@ -1605,9 +1603,16 @@ fn write_alignment_with_sequences<W: Write>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1570-1573
     let nucleotide = config.program == "blastn";
     // The rows' end gaps (`end_gap_span`; a `-` that is a residue, the query's gap residue or a
-    // gap stored in the subject, is a residue).
-    let [query_span, subject_span] = [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
-        .map(|(row, stored)| end_gap_span(row, stored));
+    // gap stored in the subject, is a residue). A BLASTN alignment (X-drop or greedy) starts and
+    // ends with a substitution and has none: a `-` at the end of its query row fills a segment
+    // past the query's end, the gap character (alnvec.cpp:288-297, cited at `end_gap_span`;
+    // `algorithm::blastn::pairwise::context_letters`).
+    let [query_span, subject_span] = if nucleotide {
+        [(0, q_chars.len()), (0, s_chars.len())]
+    } else {
+        [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
+            .map(|(row, stored)| end_gap_span(row, stored))
+    };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155
     // The rows may carry lowercase masking, which NCBI applies only when it prints a
@@ -2028,12 +2033,15 @@ fn ascii_row_strings<'a>(
 /// its first residue and after its last, which NCBI's alignment strings fill with the end
 /// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
 /// inner gap is `-`. `stored` holds the columns (sorted) whose `-` is a residue: a gap character
-/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman alignment has end gaps (rpsblast's
-/// `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path
-/// may start with a gap); an X-drop alignment starts and ends with a substitution. The `-` that
+/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman
+/// alignment has end gaps (rpsblast's `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman
+/// start over a rectangle whose best path may start with a gap); an X-drop alignment starts and
+/// ends with a substitution. The `-` that
 /// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
 /// mapped row of BLASTX, which the tables write as it is (`tabular::TabularHsp::end_gaps`) and
-/// outfmt 0 refuses (decision X2g-5 of line RG).
+/// outfmt 0 refuses (decision X2g-5 of line RG), and BLASTN's query row of an HSP that NCBI keeps
+/// outside its query context (`algorithm::blastn::pairwise::context_letters`), whose rows the
+/// tables and outfmt 0 write without this span (remaining-gaps X1b-p).
 pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
     row: &[T],
     stored: &[u32],

@@ -1135,22 +1135,24 @@ impl ListedSubjects {
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
-        let mut listed = Self::x_list(database, hit_lists, x_compact_hit_lists)?;
+        let mut listed = Self::x_list(database, hit_lists, x_compact_hit_lists, true)?;
         listed.x_read_shown(database, &[], XShownResidues::Listed, &[])?;
         Ok(listed)
     }
 
     /// The final hit lists of the call (subjects named by rank) without the subjects that
     /// NCBI makes no Seq-align of (`shared::SeqAligned`): right after the cut to the hit list
-    /// size, before the reads of the reported subjects.
+    /// size, before the reads of the reported subjects. `fetched`: whether the search fetched
+    /// its subjects with `check_oid_exclusion` (`x_list`).
     pub(super) fn drop_unaligned(
         &self,
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
+        fetched: bool,
     ) {
-        // blastp and psiblast fetch every subject of the redo or the traceback with
-        // `check_oid_exclusion` (`exclude_fetched`).
-        let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+        // A gapped search fetched every subject of the redo or the traceback with
+        // `check_oid_exclusion` (`exclude_fetched`); an ungapped one fetches no subject.
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db, fetched) else {
             return;
         };
         let mut first = None;
@@ -1312,7 +1314,7 @@ impl ListedSubjects {
 // it is aligned, after the early termination test of its match (which reads only the heaps,
 // where it never enters), so it takes no place in the final hit lists. LOSAT removes it from
 // the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS` and the
-// sort into the redo's order); blastp and psiblast are gapped here (`-ungapped` is refused).
+// sort into the redo's order).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
@@ -1325,6 +1327,16 @@ impl ListedSubjects {
 // are listed). Shown on ws with NCBI 2.17.0 (rows
 // `db.x4excl.*`: an excluded match after a failed Smith-Waterman redo ends the batch with
 // status 0).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526-1576
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1705-1777
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1582-1586
+// BLASTP's `-ungapped` search fetches no subject (`perform_traceback` is the gapped mode), so
+// such a subject stays in its hit list through the traceback's cut to the hit list size, where
+// it takes a place, its pipes (`-culling_limit`, `-best_hit_*`: its HSPs cull those of other
+// subjects) and the prune, and leaves at its Seq-align, as BLASTX's does
+// (`blastx::database::ReportedSubjects::drop_unaligned`); here `ListedSubjects::x_list` without
+// `fetched` and `ListedSubjects::drop_unaligned`. psiblast is always gapped.
 /// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
 /// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
 /// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a
@@ -2311,7 +2323,7 @@ impl ListedTitles<'_> {
                         &database.db,
                         &database.taxdb,
                         self.parsed_subject(rank as usize),
-                        blob,
+                        (blob, ordinal),
                         &lookups,
                         self.program,
                     )?
@@ -2321,7 +2333,7 @@ impl ListedTitles<'_> {
                     &database.db,
                     &database.taxdb,
                     self.parsed_subject(rank as usize),
-                    ordinal,
+                    (ordinal, ordinal),
                     &[],
                     self.program,
                 )?,

@@ -202,8 +202,7 @@ pub(super) fn write_sam(
                     whole: &|rank| lengths[rank],
                 },
                 &mut sam::BlastnSamLetters {
-                    queries: report.queries,
-                    query_placements: &report.ranges.queries.placements,
+                    queries: report.query_records,
                     subjects: sam::SubjectSource::Database(&letters_of),
                 },
             )?;
@@ -234,8 +233,7 @@ pub(super) fn write_sam(
                     },
                 },
                 &mut sam::BlastnSamLetters {
-                    queries: report.queries,
-                    query_placements: &report.ranges.queries.placements,
+                    queries: report.query_records,
                     subjects: sam::SubjectSource::Records(whole_records),
                 },
             )?;
@@ -416,6 +414,7 @@ pub(super) fn write_structured_xml(
             mask_char: b'N',
         },
         queries: report.queries,
+        query_records: report.query_records,
         searched_lengths: query_lengths,
         stats: xml_stats,
         messages: xml_messages,

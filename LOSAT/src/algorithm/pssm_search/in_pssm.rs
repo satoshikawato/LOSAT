@@ -497,9 +497,10 @@ const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exceptio
     function: None,
 };
 
-/// The PSSM search of a PSSM that has no query Seq-entry (the alignment's `-in_msa` PSSM, whose
-/// query NCBI's `x_ExtractQueryForPssm` did not find): the application adds the empty entry to
-/// its scope and `GetSeq()` of it ends the run after the prolog, before any report.
+/// The PSSM search of a PSSM that has no query Seq-entry (an `-in_pssm` PSSM without one, the
+/// alignment's `-in_msa` PSSM whose query NCBI's `x_ExtractQueryForPssm` did not find): the
+/// application adds the empty entry to its scope and `GetSeq()` of it ends the run after the
+/// prolog, before any report.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-540 (cited at
 /// `psi_search_and_object`)
@@ -546,11 +547,12 @@ pub(crate) fn psi_search_and_object_of(
     ids_of: &str,
 ) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-540
-    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here (a PSSM
-    // without one ends with a C++ exception of the release build).
+    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here: a
+    // PSSM without one (no `query`, or `query NULL`) gets an empty Seq-entry, whose `GetSeq()`
+    // ends the run as the alignment's PSSM without a query does (NCBI BLAST+ 2.17.0, psiblast and
+    // tblastn, probe D3c-3b q_absent_ps, q_absent_tbn, t_query_null, q_null_tbn, b_query_null).
     let Some(entry) = pssm.pssm.query.as_ref() else {
-        return Err(reader
-            .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
+        return Ok(psi_search_unset_query(pssm));
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (c++/src/app/blast/tblastn_app.cpp:226)
     // The query's Seq-entry joins NCBI's scope with its annotations, which NCBI's object manager
@@ -638,15 +640,24 @@ pub(crate) fn psi_search_and_object_of(
     // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
     // frequency ratios only, whose engine sets the query up first too.
     let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
-    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+    // Then the set-up takes the query's title (`GetTitle`, before its letters), which reads every
+    // descriptor's variant: an empty descriptor is the query's error
+    // (`report::query_warnings::null_descriptor_error`; NCBI BLAST+ 2.17.0, psiblast and tblastn,
+    // on every report path and with a PSSM of frequency ratios only, probe D3c-3b `probe4`).
+    let query_error = if validation_error.is_some() {
+        None
+    } else if nucleotide_query {
         Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else if query.has_empty() {
+        Some(crate::report::query_warnings::null_descriptor_error())
     } else {
         invalid_residues
     };
     let (mut scores_error, setup_error) = if ratios_only {
-        (invalid_residues, None)
+        (query_error, None)
     } else {
-        (None, invalid_residues)
+        (None, query_error)
     };
     let reads_values =
         validation_error.is_none() && scores_error.is_none() && setup_error.is_none();

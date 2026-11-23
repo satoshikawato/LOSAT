@@ -6127,7 +6127,8 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         Ok(())
     }
 
-    // Only `-subject`'s Dense-segs throw (`remaps`), so a `-db` report gives no texts.
+    // Only `-subject`'s Dense-segs throw (`remaps`, the test of `subject_densegs`), so a `-db`
+    // report gives no texts and makes none: where `subject_densegs` throws, this gives texts.
     fn alignment_id_texts(&self, s_idx: u32) -> Option<[Vec<u8>; 2]> {
         self.remaps()
             .then(|| record_alignment_id_texts(self.records_parsed, s_idx))

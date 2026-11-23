@@ -214,8 +214,10 @@ const LATER_FORMATS_CHILD: &str = "LOSAT_TEST_HTML_LATER_FORMATS_CHILD";
 // place gets the posts of NCBI's formatter registries (`report::query_warnings::report_posts`,
 // `ReportFormat::writes_html_links`). Here `FMTCFG` names a registry file whose read posts (a
 // repeated key) and `GETURL_DEBUG` is set, the run's directory has no `./.ncbirc`: each format's
-// posts in the call are those of the command line's run of that format alone (its standard
-// error), and each report's bytes those of the call of that format alone, in the five programs.
+// call alone posts the command line's standard error of that format alone, each report's bytes
+// in the call are those of the call of that format alone, and the call's posts are the same lines
+// as those calls' posts (in their order where the call has one pairwise format), in the five
+// programs.
 // The child process gets the environment (the tests do not change their own).
 #[test]
 fn later_formats_post_as_their_runs_alone() {

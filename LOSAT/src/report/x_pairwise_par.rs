@@ -662,7 +662,8 @@ pub(crate) trait QuerySections: Sync {
     /// any byte of the query's alignments, which can throw (BLASTX's
     /// `EmptyRowsStop::StdSegLengths`): where `merges_alignments`, the merge's work on the subject
     /// after it reads it and before it reads the next one; in the `-html` pairwise report, for
-    /// every aligned subject before the first alignment (`html_links_densegs`). Nothing by default.
+    /// the aligned subjects that `html_links_densegs` does not pass over, before the first
+    /// alignment. Nothing by default.
     fn subject_densegs<W: Write>(
         &self,
         _writer: &mut W,
@@ -812,9 +813,9 @@ pub(super) fn end_here(
 /// first alignment's subject, so before that load (and before the end of the run there) where
 /// its Seq-align id is local (`GetDbType` does not load it; the merge of a query-anchored
 /// section, outfmt 1 to 4, or the pairwise heading does); then the pairwise report (outfmt 0)
-/// makes the Dense-seg of every aligned subject's HSPs for its links (`x_PreProcessSeqAlign`,
-/// `QuerySections::subject_densegs`), which can throw, before any alignment. One order for
-/// both writers (line RG T4b review a B1, N3).
+/// makes the Dense-segs of the HSPs of the aligned subjects that `html_links_densegs` does not
+/// pass over, for its links (`x_PreProcessSeqAlign`, `QuerySections::subject_densegs`), which
+/// can throw, before any alignment. One order for both writers (line RG T4b review a B1, N3).
 fn alignment_start<S: QuerySections, W: Write>(
     sections: &S,
     group: &QueryGroup<'_>,

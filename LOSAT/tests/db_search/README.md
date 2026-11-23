@@ -117,7 +117,10 @@ FASTA files:
   `x2g_f3147_s.faa` and `x2g_f1144_s.faa` there (cases of the line's format survey: an HSP of length 0 in frame
   -2, in frame +1 at query offset 0, at subject offset 0), `x2g_ms` the two subjects `x2g_ms.faa` (with the two
   queries `x2g_mq.fna`, the second's HSP of length 0) and `x2g_rk` the two subjects `x2g_rk.faa` (the one
-  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
+  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`); `x2g_rk_ver.faa` and `x2g_rk_lcl.faa` there are its
+  letters under the ids `gb|AAA00001.1|` and `gb|AAA00001.2|`, and `lcl|AAA00001` and `gb|AAA00001.1|` (written by hand
+  for the rows `db.html.bx.x2g.rk.ver.subj.pd.f0` and `db.html.bx.x2g.rk.lcl.subj.pd.f0`: two versions of one accession,
+  and a local id before a versioned one). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
   subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
   one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
   one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.

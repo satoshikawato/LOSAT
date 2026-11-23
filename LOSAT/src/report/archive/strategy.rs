@@ -1059,12 +1059,12 @@ impl StrategyExport {
 // No NCBI counterpart: NCBI posts while it writes the request, so no post can wait there.
 /// The end of a run of a program with `-export_search_strategy` (`strategy`; `None` without
 /// it). The requests written (`StrategyExport::write_with`) whose batches' starts the run did not
-/// reach: a run that ends with one of NCBI's errors (`cli::NativeError`) ended before those starts,
-/// where NCBI's run ends before it writes them (its reports' exception, or a later batch's error,
-/// whose batch's start the run writes before the error), so the file is cut back to the requests
-/// reached; a run that ends with `Ok` keeps them all, as NCBI writes every request (and so does a
-/// refusal of LOSAT's, whose file is not NCBI's). A strategy file that cannot be cut (a FIFO, a
-/// pipe, a terminal: `StrategySink::can_cut`) has got only the requests reached
+/// reach: a run that ends with one of NCBI's errors (`cli::native_error_of`) ended before those
+/// starts, where NCBI's run ends before it writes them (its reports' exception, or a later batch's
+/// error, whose batch's start the run writes before the error), so the file is cut back to the
+/// requests reached; a run that ends with `Ok` keeps them all, as NCBI writes every request (and
+/// so does a refusal of LOSAT's, whose file is not NCBI's). A strategy file that cannot be cut (a
+/// FIFO, a pipe, a terminal: `StrategySink::can_cut`) has got only the requests reached
 /// (`StrategyExport::release_through`): the others are dropped at NCBI's error, written at any
 /// other end. A regular file that fails to be cut is LOSAT's error, not a file with requests that
 /// NCBI does not write. A run that ends as NCBI's (`Ok` or NCBI's error)
@@ -1087,8 +1087,9 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
     // that does not get there is LOSAT's internal error instead of a run without it. A refusal of
     // LOSAT's keeps its own text.
     let handed = strategy.with_state(|state| state.sink.hand_over());
+    let refused = matches!(&ended, Err(error) if crate::cli::native_error_of(error).is_none());
     match handed {
-        Err(error) if !matches!(&ended, Err(refusal) if !refusal.is::<crate::cli::NativeError>()) => {
+        Err(error) if !refused => {
             Err(anyhow::anyhow!(
                 "LOSAT internal error: the -export_search_strategy file did not reach the run's files ({error})"
             ))
@@ -1099,7 +1100,10 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
 
 /// `end_run` of a run with the export `strategy`, before its waiting posts go.
 fn end_export(strategy: &StrategyExport, result: Result<()>) -> Result<()> {
-    let native = matches!(&result, Err(error) if error.is::<crate::cli::NativeError>());
+    // NCBI's error (`cli::native_error_of`, which the command line's exit reads too): a
+    // `NativeError`, or an exception of NCBI's that a report's writer carries (the `-html`
+    // links' registry, which NCBI's prolog reads before its first request).
+    let native = matches!(&result, Err(error) if crate::cli::native_error_of(error).is_some());
     // The report stream's held bytes (`hold_report`): where the run ends before NCBI's first
     // request they are NCBI's, written before its error (or its success); LOSAT's refusal has
     // none before it.

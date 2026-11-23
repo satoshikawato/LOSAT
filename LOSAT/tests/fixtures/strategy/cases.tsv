@@ -594,3 +594,23 @@ blastp.sub.badgi.stdout	blastp	-	-query tests/fasta/strategy/badgi_p.faa -subjec
 psiblast.pssm.sub.stdout	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -comp_based_stats 0 -outfmt 0 -export_search_strategy -	ncbi	1	-	-
 psiblast.pssm.sub.sameout	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -comp_based_stats 0 -outfmt 0 -out {ss} -export_search_strategy {ss}	ncbi	1	-	-
 tblastn.in_pssm.sub.stdout	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 0 -export_search_strategy -	ncbi	1	-	-
+blastp.sub.qlocrev.fx	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.qlocrev.fx.plain	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x	ncbi	1	-	-
+blastp.sub.qlocrev.f99	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.qlocrev.f99.plain	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+blastn.sub.qlocrev.fx	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.qlocrev.fx.plain	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt x	ncbi	1	-	-
+blastn.sub.qlocrev.f99	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.qlocrev.f99.plain	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+blastx.sub.qlocrev.fx	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.qlocrev.fx.plain	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x	ncbi	1	-	-
+blastx.sub.qlocrev.f99	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.qlocrev.f99.plain	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+tblastn.sub.qlocrev.fx	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.qlocrev.fx.plain	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt x	ncbi	1	-	-
+tblastn.sub.qlocrev.f99	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.qlocrev.f99.plain	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+tblastx.sub.qlocrev.fx	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.qlocrev.fx.plain	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt x	ncbi	1	-	-
+tblastx.sub.qlocrev.f99	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.qlocrev.f99.plain	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt 99	ncbi	255	-	-

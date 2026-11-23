@@ -6,4 +6,9 @@
   files, the file of `-query`, `-subject`, `-logfile` or `-window_masker_db`, and a file that the search reads from the
   run's folder (a file of the database of `-db` or `-filtering_db`, the list of a filter) are refused in the Web GUI,
   where the command line writes the requests into that stream or file. A search of `-db` writes its file too, with the
-  database in its requests. The library and pylosat still refuse the option.
+  database in its requests. The library and pylosat still refuse the option. With the option, a `-outfmt` value that
+  is not a format is reported where the command line reports it, after the errors of the other arguments (such as
+  `-query_loc 10-5`), in the Web GUI as on the command line; before, the Web GUI reported the `-outfmt` value first.
+- `-html` with a malformed `./.ncbirc` and `-export_search_strategy -`: BLASTX, BLASTN and TBLASTX write the start of
+  the HTML report and exit with status 255, as NCBI BLAST+ and the run without the option do; before, they wrote
+  nothing to the standard output.

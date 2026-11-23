@@ -5423,20 +5423,18 @@ fn split_option_space(batch: &[i64], context_index: usize, options_searchsp: i64
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its BLASTP does not write (`app::report_format`): the command line's
-/// checks before it opens `-out` (`run`). The formatting handler's come after
-/// (`resolve_for_formats`).
+/// rejection of a format that its BLASTP does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run`). The formatting handler's come after
+/// (`resolve_for_formats`), and so does the error of a value left to it with a search strategy
+/// file.
 fn report_formats(args: &BlastpArgs, outputs: &ReportOutputs<'_>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(
-            &choice,
-            app::Program::Blastp,
-            format.side_out(args.out.as_deref()),
-        )?;
-    }
-    Ok(())
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Blastp,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
@@ -5450,14 +5448,20 @@ fn resolve_for_formats(
     for (index, format) in outputs.formats.iter().enumerate() {
         let mut requested = args.clone();
         requested.outfmt = format.outfmt.to_string();
-        let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
+        let choice = crate::blastinput::app::early_format_choice(
+            &requested.outfmt,
+            args.export_search_strategy.is_some(),
+        )?;
         let program = crate::blastinput::app::Program::Blastp;
         let out = format.side_out(args.out.as_deref());
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
         // the XInclude formats without a file come after `Query is Empty!`, in `search`
-        // (`xinclude_format`).
-        if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
-            crate::blastinput::app::formatting_handler_check(&choice, program)?;
+        // (`xinclude_format`). A value left to the formatting handler
+        // (`app::EarlyFormat::Deferred`) fails in `check_options`, after the query options.
+        if let Some(choice) = choice.parsed() {
+            if crate::blastinput::app::report_format(choice, program, out)?.is_none() {
+                crate::blastinput::app::formatting_handler_check(choice, program)?;
+            }
         }
         // The options handlers of every format (`check_options`, also through `resolve`) make
         // the formatting handler's checks, the custom delimiter's among them.

@@ -1412,7 +1412,7 @@ fn with_html_help_place(mut command: clap::Command) -> clap::Command {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NativeError {
     pub exit: i32,
     /// The text NCBI's `CATCH_ALL` writes, as bytes: a name of the command line or of a file
@@ -2036,23 +2036,13 @@ pub(crate) fn create_out_file(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-/// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
-/// that the run already wrote (`post_native_error`) is not written again. A failed write is
-/// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
-/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
-/// error of a report's writer that carries an exception of NCBI's (`NcbiException::into_io_error`:
-/// the `-html` links' registry, `report::formatter_registry::InitConfig`, which NCBI's formatter
-/// reads while it writes) is that exception's report (`NativeError::of_writer`), whichever program
-/// wrote it.
+/// Writes the text of the run's `NativeError` (`native_error_of`) to standard error and exits with
+/// its code; a text that the run already wrote (`post_native_error`) is not written again. A
+/// failed write is dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0
+/// -logfile /dev/full` exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11
+/// round 2, 2026-11-20).
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    let of_writer = error
-        .downcast_ref::<std::io::Error>()
-        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
-        .map(NativeError::exception);
-    if let Some(e) = of_writer
-        .as_ref()
-        .or_else(|| error.downcast_ref::<NativeError>())
-    {
+    if let Some(e) = native_error_of(error) {
         if !posted(&e.message) {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));
@@ -2063,6 +2053,26 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
         }
         std::process::exit(e.exit);
     }
+}
+
+/// The error of NCBI's that ends a run with `error`, as `CATCH_ALL` reports it: a `NativeError`, or
+/// an error of a report's writer that carries an exception of NCBI's
+/// (`NcbiException::into_io_error`: the `-html` links' registry,
+/// `report::formatter_registry::InitConfig`, which NCBI's formatter reads while it writes), which
+/// is that exception's report (`NativeError::of_writer`), whichever program wrote it. `None` for
+/// LOSAT's own errors and refusals. The one reading of whether an error is NCBI's: the command
+/// line's exit (`exit_on_native_error`) and the end of a search strategy file
+/// (`report::archive::strategy::end_run`) read it alike.
+pub(crate) fn native_error_of(error: &anyhow::Error) -> Option<std::borrow::Cow<'_, NativeError>> {
+    if let Some(exception) = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
+    {
+        return Some(std::borrow::Cow::Owned(NativeError::exception(exception)));
+    }
+    error
+        .downcast_ref::<NativeError>()
+        .map(std::borrow::Cow::Borrowed)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176 (`CATCH_ALL`'s one clause

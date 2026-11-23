@@ -37,10 +37,11 @@
 //! `:Type value` naming the declared type is the value, read in a frame of its own.
 //!
 //! A Seq-loc holds Seq-locs (`mix`, `equiv`) to any depth: NCBI reads them by recursion, and with
-//! its default stack of 8 MiB a nest of about 6,500 levels overflows it, which crashes makeblastdb;
-//! with a stack large enough it reads every depth. The reader keeps the frames of such a nest on
-//! the heap (`reader.rs`, `Rd::read_seq_loc_parts`) and reads every depth as far as memory allows,
-//! writing what makeblastdb writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 25).
+//! its default stack of 8 MiB a nest of about 6,500 to 6,900 levels (by build and format)
+//! overflows it, which crashes makeblastdb; with a stack large enough it reads every depth. The
+//! reader keeps the frames of such a nest on the heap (`reader.rs`, `Rd::read_seq_loc_parts`) and
+//! reads every depth as far as memory allows, writing what makeblastdb writes with a stack large
+//! enough (PD-LOSAT-NCBI-DEFECTS exception 25).
 //!
 //! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): a string
 //! whose length passes the end of the file by an amount that makeblastdb may or may not be able to

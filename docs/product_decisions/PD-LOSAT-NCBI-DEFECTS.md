@@ -1112,9 +1112,11 @@ object frames, 97 levels of `mix` and more, which NCBI reads at every start.
     about 1.3 KB of the main thread's stack for each level. With the default stack limit of 8 MiB
     NCBI BLAST+ 2.17.0 overflows its stack and ends with SIGSEGV (exit status 139; the log's first
     lines, nothing on standard error, no database): in a minimal environment, 5 runs at each
-    depth, it read every nest of 6,449 levels and crashed on every nest of 6,473 levels in binary
-    files, and read 6,610 levels and crashed from 6,634 in text files, crashing in some runs only
-    at the depths between; `mix`, `equiv`, the two alternating and the pointer syntax alike. As in
+    depth, the bioconda build read every nest of up to 6,449 levels and crashed in every run from
+    6,474 levels in binary files, and read up to 6,610 levels and crashed from 6,637 in text files,
+    crashing in some runs only at the depths between; NCBI's Linux x86-64 release crashes deeper
+    (binary files read up to 6,784 levels, crashes from 6,809; text files 6,873 and 6,900); `mix`,
+    `equiv`, the two alternating and the pointer syntax alike. As in
     exception 15 the depth is not the input's: the stack limit, the lengths of the command line and
     of the environment and the stack's random start at each run move it. With no stack limit
     (`ulimit -s unlimited`) NCBI reads every depth tried, to 100,000 levels (205 MB of memory), and

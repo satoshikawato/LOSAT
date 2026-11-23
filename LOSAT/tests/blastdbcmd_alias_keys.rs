@@ -13,7 +13,8 @@
 //! over the databases of `tests/db_search/idlist` and the lists over `db/pz4`'s header of no
 //! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22; review 1 of D1c-1: string tags of
 //! `PIG` and `BL_ORD_ID` under a list, TI and GI ISAMs NCBI does not initialise, a `SEQIDLIST`
-//! over two volumes, A382-A389). The
+//! over two volumes, A382-A389), and (D1c-1b, 2026-11-23) `-taxids -target_only` over headers
+//! whose lines the list erases (A390-A394, A395). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -555,6 +556,13 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A387", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 2),
     ("A388", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
     ("A389", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-info"], 0),
+    // D1c-1b: -taxids -target_only reads the headers through the list, which erases the lines without a Seq-id
+    // (ln) and those whose taxids are not the lookup files' (lx); a sequence left without a line is not written.
+    ("A390", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A391", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only"], 0),
+    ("A392", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A393", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A394", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
 ];
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
@@ -612,6 +620,36 @@ fn ranges_outside_the_bit_array_below_them_are_refused() {
             "{id} {words:?}: {stderr}"
         );
     }
+}
+
+/// A string tag of `BL_ORD_ID` on a line of a volume after the first that a taxid list then erases
+/// (`idlist/lt`, review 2 G1 of line RG D1c-1b): NCBI's header read adjusts the tags of every line
+/// before the taxid test and fails on it (NCBI BLAST+ 2.17.0: its exception of the tag, exit 1).
+/// LOSAT refuses it there, as it refuses such a tag in every read (rows db.ordsl.bp.tagq.6 and
+/// db.il.bp.lt.*.rej.6).
+#[test]
+fn a_string_tag_that_a_taxid_list_erases_is_refused() {
+    let config = TestDir::new("taxid-string-tag");
+    let words = [
+        "-db",
+        "../db_search/idlist/lt",
+        "-dbtype",
+        "prot",
+        "-taxids",
+        "10090",
+        "-no_taxid_expansion",
+        "-target_only",
+        "-outfmt",
+        "%o|%a|%T|%t",
+    ];
+    let (stdout, stderr, code) = blastdbcmd(&words, &config.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(stdout, b"", "A395: {stderr}");
+    assert_eq!(code, 1, "A395: {stderr}");
+    assert!(
+        stderr.contains("BL_ORD_ID of sequence 1 has a string tag"),
+        "A395: {stderr}"
+    );
 }
 
 #[test]

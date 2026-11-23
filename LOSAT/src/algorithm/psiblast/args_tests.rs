@@ -147,7 +147,18 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    for format in ["1", "3", "5", "8", "11", "15", "16", "18"] {
+    // Item PS15b-1: BLAST XML, the Seq-annots and the archive run; the formats of PS15b-2 are
+    // refused.
+    for format in ["5", "8", "9", "11"] {
+        assert!(
+            parse(&["-outfmt", format])
+                .unwrap()
+                .into_blastp_args()
+                .is_ok(),
+            "outfmt {format}"
+        );
+    }
+    for format in ["1", "3", "4", "12", "15", "16", "18"] {
         let error = parse(&["-outfmt", format])
             .unwrap()
             .into_blastp_args()
@@ -155,7 +166,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .to_string();
         assert_eq!(
             error,
-            format!("output format {format} is not supported by LOSAT's PSIBLAST")
+            format!("output format {format} is not supported by LOSAT's PSIBLAST yet")
         );
     }
     // Outfmt 13 and 14 to a file are refused here; to standard output they go on to NCBI's
@@ -169,7 +180,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .to_string();
         assert_eq!(
             error,
-            format!("output format {format} is not supported by LOSAT's PSIBLAST")
+            format!("output format {format} is not supported by LOSAT's PSIBLAST yet")
         );
         assert!(parse(&["-outfmt", format])
             .unwrap()

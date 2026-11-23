@@ -21,6 +21,8 @@ mod blastdbcmd_discovery;
 mod blastdbcmd_info;
 #[path = "../blastdbcmd_masks.rs"]
 mod blastdbcmd_masks;
+#[path = "../blastdbcmd_metadata_failures.rs"]
+mod blastdbcmd_metadata_failures;
 #[path = "../blastdbcmd_retrieve.rs"]
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]

@@ -558,9 +558,9 @@ fn tbx_hsp(
 fn tbx_run() -> RunRecord<'static> {
     RunRecord {
         program: crate::blastinput::app::Program::Tblastx,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     }
 }
 

@@ -98,7 +98,7 @@ LOSAT stops with an error for these `tblastx` settings instead of running someth
 - `-db_gencode 32` and `-query_gencode 32`.
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation.
-- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
+- `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
 - `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example).
 
 ## Examples

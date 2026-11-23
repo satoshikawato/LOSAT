@@ -127,7 +127,7 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 - An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
+- `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
 - `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example).
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation).
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).

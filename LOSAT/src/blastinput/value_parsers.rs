@@ -91,7 +91,7 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 /// that does not read (a byte after `0x` that is not a hexadecimal digit included: NCBI's base
 /// 16 conversion throws on an overflow before it reaches such a byte, ncbistr.cpp:852).
 pub fn ncbi_int8(value: &str) -> Result<i64, String> {
-    crate::ncbi_app::args::string_to_int8(value).map_err(|_| {
+    crate::ncbi_app::args::string_to_int8(value.as_bytes()).map_err(|_| {
         let bytes = value.as_bytes();
         let hexadecimal = bytes
             .get(..2)

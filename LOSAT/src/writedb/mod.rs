@@ -25,7 +25,7 @@
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
 //! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask` and `-gi_mask_name`
-//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
+//! (their rows of `ncbi_app::args::refusal`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
 //! files of the metadata file (`metadata::metadata_user_path`).
 //!
 //! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each

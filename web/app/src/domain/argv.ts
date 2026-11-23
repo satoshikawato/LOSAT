@@ -79,6 +79,17 @@ export interface ArgvInput {
 }
 
 /**
+ * The argv of a run as the user's command: a run that printed the command line's help or version (`RunSnapshot.prints`) read
+ * no input, so its command names none (`blastn -version`), where the engine's argv has the placeholders `-query query.fa
+ * -subject subject.fa` that `buildArgv` writes. Where the run is shown as a command, it takes the argv from here (line WQA's
+ * D20, 2026-11-23).
+ */
+export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {
+  // buildArgv's layout: [program, '-query', name, '-subject', name, ...].
+  return run.prints === undefined ? run.argv : [run.argv[0]!, ...run.argv.slice(5)];
+}
+
+/**
  * Builds `[program, -query, name, -subject, name, ...parameters]`.
  * Engine defaults are never written out, so the CLI command stays minimal.
  */

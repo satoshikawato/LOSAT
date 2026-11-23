@@ -253,6 +253,59 @@ fn coverage_merges_touching_ranges() {
     assert_eq!(coverage_percent(1000, 1000), 100);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1447
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3162-3205
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
+// The values that NCBI BLAST+ 2.17.0 writes. BLASTN: x1bp fix 2's d3mK probe, a 200-letter HSP
+// with -query_loc 1203-1000000 of a record of 2202 letters (998798 as given, 1000 searched).
+// BLASTP and TBLASTN -ungapped -comp_based_stats 0: rows db.x1bp.cov.bp.6 and db.x1bp.cov.tbn.6
+// (q_plain, 142 residues, with -query_loc 1-1000000), the review's probe D without the range and
+// gapped. BLASTX: tab.bx.cov.6 (qn2, 135 letters; a gapped search counts a frame's residues
+// against a third of them), with -query_loc a range of 300 as given.
+/// The `qcovhsp` of one HSP: its subject's rule (`QueryCoveragePerHsp::of_subject`), then the
+/// row's division.
+fn query_coverage_per_hsp(
+    ungapped: bool,
+    hsps: usize,
+    span: i32,
+    context_length: i32,
+    seqalign_span: i32,
+    query_length: i32,
+) -> i32 {
+    QueryCoveragePerHsp::of_subject(ungapped, hsps, context_length, query_length)
+        .of_hsp(span, seqalign_span)
+}
+
+#[test]
+fn query_coverage_per_hsp_reads_the_seq_align_that_the_formatter_gets() {
+    // A subject's single ungapped HSP counts against the range as given; several, or a gapped
+    // HSP, against the searched letters.
+    assert_eq!(query_coverage_per_hsp(true, 1, 200, 1000, 200, 998_798), 0);
+    assert_eq!(query_coverage_per_hsp(true, 2, 200, 1000, 200, 998_798), 20);
+    assert_eq!(
+        query_coverage_per_hsp(false, 1, 200, 1000, 200, 998_798),
+        20
+    );
+    // BLASTP: 120 residues; TBLASTN: 142.
+    assert_eq!(query_coverage_per_hsp(true, 1, 120, 142, 120, 1_000_000), 0);
+    assert_eq!(query_coverage_per_hsp(true, 1, 120, 142, 120, 142), 85);
+    assert_eq!(
+        query_coverage_per_hsp(false, 1, 120, 142, 120, 1_000_000),
+        85
+    );
+    assert_eq!(query_coverage_per_hsp(true, 1, 142, 142, 142, 1_000_000), 0);
+    assert_eq!(query_coverage_per_hsp(true, 1, 142, 142, 142, 142), 100);
+    // BLASTX: residues of the frame in the HSP, the Seq-align's nucleotides.
+    assert_eq!(query_coverage_per_hsp(false, 2, 6, 45, 18, 135), 13);
+    assert_eq!(query_coverage_per_hsp(false, 1, 15, 45, 45, 135), 33);
+    assert_eq!(query_coverage_per_hsp(true, 2, 6, 135, 18, 135), 4);
+    assert_eq!(query_coverage_per_hsp(true, 1, 6, 135, 18, 135), 13);
+    assert_eq!(query_coverage_per_hsp(false, 1, 140, 140, 420, 420), 100);
+    assert_eq!(query_coverage_per_hsp(false, 1, 15, 45, 45, 300), 33);
+    assert_eq!(query_coverage_per_hsp(true, 2, 6, 135, 18, 300), 4);
+    assert_eq!(query_coverage_per_hsp(true, 1, 6, 135, 18, 300), 6);
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:626-633 and 693-700: without the taxonomy database's names, `staxids`
 // brings `N/A` fillers, quoted in a CSV (the singular names only for a non-zero taxid, the
 // plural ones once per taxid).

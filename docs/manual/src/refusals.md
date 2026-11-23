@@ -31,7 +31,7 @@ Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's 
 An output format the program does not write (exit status 1):
 
 ```text
-Error: output format 1 is not supported by LOSAT's PSIBLAST yet
+Error: output format 15 is not supported by LOSAT's PSIBLAST yet
 ```
 
 For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
@@ -57,7 +57,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
-| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
+| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
 
@@ -217,7 +217,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` 1 to 4, 12 to 16 and 18 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 13 to 16 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |
@@ -246,7 +246,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-outfmt 11` | Refused. NCBI searches, then stops with a C++ exception whose report (in its error archive too) changes from run to run. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
 | A PSSM query that `-seg` masks completely | Refused. |
-| `-outfmt` 12 to 16 and 18 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-db_gencode 32` | Refused. It is not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations. |
 | `-in_pssm` in LOSAT Web | Refused. The library API and pylosat take it as an input. |
 
@@ -445,7 +444,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 - The programs `deltablast` and `blast_formatter`.
 - `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
-- The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
+- The `psiblast` output formats `13` to `16`.
 - `-html` with `-outfmt 1` to `4`, and in `psiblast`, `rpsblast` and `rpstblastn`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

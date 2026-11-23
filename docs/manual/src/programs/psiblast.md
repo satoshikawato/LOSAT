@@ -72,10 +72,10 @@ For every option: `losat psiblast -help`.
 
 | Search | Supported `-outfmt` |
 | --- | --- |
-| FASTA query (`-query`) | 0, 5 to 11, 20 |
-| PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0, 5 to 11, 20 |
+| FASTA query (`-query`) | 0 to 12, 18, 20 |
+| PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0 to 12, 18, 20 |
 
-Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. As in NCBI's `psiblast`, `delim=` is read and checked but the columns keep their tab or comma. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. With `-outfmt 5`, one XML document holds every round, one `Iteration` per round. With `-outfmt 8` and `9`, each round writes its own Seq-annot. With `-outfmt 11`, each round writes its own archive, and the archive of a later round holds the PSSM that the round searched. With `-subject`, `-outfmt 11` stops at the first round that searches a PSSM (round 2 for a FASTA query, round 1 for `-in_pssm` or `-in_msa`), after the archives of the rounds before it, with NCBI's error `Empty reference for CSearchDatabase.` and exit status 3, as NCBI BLAST+ does. See [Output formats](../output-formats.md).
+Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. As in NCBI's `psiblast`, `delim=` is read and checked but the columns keep their tab or comma. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. With `-outfmt 5`, one XML document holds every round, one `Iteration` per round. With `-outfmt 1` to `4`, each round's report has its query-anchored section in place of the alignments of `-outfmt 0`, and the report ends with the footer of `-outfmt 0`. With `-outfmt 8`, `9` and `12`, each round writes its own Seq-annot or Seq-align set. With `-outfmt 18`, each round writes its organism report, from every hit of the round: as in NCBI, that report is not cut to `-max_target_seqs`, so a round can show more subjects than the other formats. A PSSM whose query has the molecule `other` is searched as a protein, as in NCBI: the alignments of `-outfmt 0` are NCBI's line `Sequence with id ... no longer exists in database...alignment skipped`, and the query-anchored sections are empty. Formats 13 to 16 are not yet supported. With `-outfmt 11`, each round writes its own archive, and the archive of a later round holds the PSSM that the round searched. With `-subject`, `-outfmt 11` stops at the first round that searches a PSSM (round 2 for a FASTA query, round 1 for `-in_pssm` or `-in_msa`), after the archives of the rounds before it, with NCBI's error `Empty reference for CSearchDatabase.` and exit status 3, as NCBI BLAST+ does. See [Output formats](../output-formats.md).
 
 ## Differences from NCBI BLAST+
 
@@ -86,7 +86,7 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 Not yet supported:
 
 - `-phi_pattern`.
-- `-outfmt` 1 to 4, 12 to 16 and 18. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
+- `-outfmt` 13 to 16. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
 
 Also refused:
 

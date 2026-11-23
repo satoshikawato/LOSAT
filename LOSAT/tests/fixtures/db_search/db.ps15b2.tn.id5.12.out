@@ -1,0 +1,4327 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "psitblastn"
+              },
+              "data": {
+                "int": 11
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tfn"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 694
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 694
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.85331382088561e-98
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 271.815542234365
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 142
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 142
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000251595.11"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000251595.11"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 694
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 694
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.91752326571785e-98
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 271.815542234365
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 142
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 142
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000320868.9"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000320868.9"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 597
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 597
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.51570543426309e-83
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 234.451183370381
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 76
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 97
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000113098.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 115,
+                      "to": 255,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000113098.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000113098.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 256,
+                      "to": 258,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000113098.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000113098.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 259,
+                      "to": 543,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000113098.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 562
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 562
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.05319435621947e-78
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 220.969198213274
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 81
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 100
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 41,
+                      "to": 181,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 182,
+                      "to": 184,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 185,
+                      "to": 469,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 28
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 28
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.27598904271716
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 15.2726246734074
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 10
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 16
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 27.9647887323944
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 83,
+                      "to": 87,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 164,
+                      "to": 178,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 88,
+                      "to": 88,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENSDART00000101709.5"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 89,
+                      "to": 95,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 143,
+                      "to": 163,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 96,
+                      "to": 98,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENSDART00000101709.5"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 99,
+                      "to": 106,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 119,
+                      "to": 142,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 107,
+                      "to": 107,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENSDART00000101709.5"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101709.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 108,
+                      "to": 121,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 77,
+                      "to": 118,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101709.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 553
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 553
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.0171458352931e-76
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 217.502402030018
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 71
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 95
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000125092.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 91,
+                      "to": 231,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000125092.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000125092.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 232,
+                      "to": 234,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000125092.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000125092.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 235,
+                      "to": 519,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000125092.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 378
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 378
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.26133093845432e-50
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 150.092476244481
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 60
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 86
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 98.387323943662
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 62,
+                      "to": 109,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000336906.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENST00000336906.6"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 110,
+                      "to": 190,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000336906.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 191,
+                      "to": 193,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000336906.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 53,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 194,
+                      "to": 214,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000336906.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 215,
+                      "to": 229,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000336906.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000336906.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 54,
+                      "to": 140,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 230,
+                      "to": 490,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000336906.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 357
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 357
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 5.23107640350852e-47
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 142.003285150217
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 63
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 88
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 98.387323943662
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 59,
+                      "to": 106,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENST00000335295.4"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 107,
+                      "to": 187,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 188,
+                      "to": 190,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 50,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 191,
+                      "to": 202,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 203,
+                      "to": 217,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 51,
+                      "to": 140,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 218,
+                      "to": 487,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 29
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 29
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 7.02509455013966
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 15.6578242493248
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 6.83802816901408
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000335295.4"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 44,
+                      "to": 52,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 105,
+                      "to": 131,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000335295.4"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 351
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 351
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.98390499203096e-46
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 139.692087694713
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 56
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 86
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 98.387323943662
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 64,
+                      "to": 111,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000396895.3"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENST00000396895.3"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 112,
+                      "to": 192,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000396895.3"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 193,
+                      "to": 195,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000396895.3"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 53,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 196,
+                      "to": 216,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000396895.3"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 217,
+                      "to": 231,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000396895.3"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000396895.3"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 54,
+                      "to": 140,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 232,
+                      "to": 492,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000396895.3"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 325
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 325
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.25317492196569e-42
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 129.676898720861
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 56
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 81
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 97.6830985915493
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 3,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 143,
+                      "to": 187,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000053077.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENSDART00000053077.6"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 188,
+                      "to": 268,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000053077.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 269,
+                      "to": 271,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000053077.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 53,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 272,
+                      "to": 292,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000053077.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 293,
+                      "to": 307,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000053077.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000053077.6"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 54,
+                      "to": 140,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 308,
+                      "to": 568,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000053077.6"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 292
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 292
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.40676085262855e-37
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 116.965312715589
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 52
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 80
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 97.6830985915493
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 3,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 119,
+                      "to": 163,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENSDART00000101713.5"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 164,
+                      "to": 244,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 245,
+                      "to": 247,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 50,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 248,
+                      "to": 259,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 260,
+                      "to": 274,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 51,
+                      "to": 114,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 275,
+                      "to": 466,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 467,
+                      "to": 469,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 115,
+                      "to": 140,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 470,
+                      "to": 547,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 28
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 28
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.48376363730426
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 15.2726246734074
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 12
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 15.9929577464789
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000101713.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 68,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 425,
+                      "to": 490,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000101713.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 268
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 268
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.3577531439103e-34
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 107.720522893572
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 49
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 81
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 97.6830985915493
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 3,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 88,
+                      "to": 132,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000066384.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENSDART00000066384.5"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 133,
+                      "to": 213,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000066384.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 214,
+                      "to": 216,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000066384.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 53,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 217,
+                      "to": 237,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000066384.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 238,
+                      "to": 252,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000066384.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENSDART00000066384.5"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 54,
+                      "to": 140,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 253,
+                      "to": 513,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENSDART00000066384.5"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 264
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 264
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 6.6689277396272e-33
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 106.179724589903
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 46
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 65
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 70.2183098591549
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 17,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 234,
+                      "to": 281,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "ENST00000292901.8"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 282,
+                      "to": 362,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 363,
+                      "to": 365,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 50,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 366,
+                      "to": 377,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 378,
+                      "to": 392,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 51,
+                      "to": 100,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 393,
+                      "to": 542,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.94876838943956
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.8134229770769
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 11.0633802816901
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000292901.8"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 44,
+                      "to": 58,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 262,
+                      "to": 306,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000292901.8"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 233
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 233
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.15986832516361e-28
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 94.2385377364649
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 29
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 37
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 39.9366197183099
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "ENST00000652335.1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 55,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 379,
+                      "to": 546,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "ENST00000652335.1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 39
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 39
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.412664415882924
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 19.5098200084983
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 10
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 13
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 11.7676056338028
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "FBtr0078640"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 86,
+                      "to": 93,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 353,
+                      "to": 376,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "FBtr0078640"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "FBtr0078640"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "id": 5
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 377,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "FBtr0078640"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "FBtr0078640"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 94,
+                      "to": 101,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 410,
+                      "to": 433,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "FBtr0078640"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 31
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 31
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.06397493372728
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.4282234011595
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 6.13380281690141
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "id": 5
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "FBtr0301286"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 87,
+                      "to": 94,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "id": 5
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 508,
+                      "to": 531,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "FBtr0301286"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,1609 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220492.1 hypothetical protein [White spot syndrome virus]
+
+Length=843
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       147     2e-38
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       135     1e-34
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       127     3e-32
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       25.8    0.90 
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       24.3    2.6  
+BDT63537.1 hypothetical protein [Pasiphaea japonica whispovirus]      22.3    8.4  
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       22.3    8.4  
+
+
+
+Query_1  98   TFRGLYENIHDDFLFVKYSLLVSMDNGFLRRETHGIKFGTGDDSRTGFKFTSKEQAEEER  157
+7        196  S.DSI.Q-.K..DR.ILIAI.IGQN.L.FNK--.SSE.NKLSSDYKS.NISDNKEMNHQY  271
+                                                                    \     
+                                                                    |     
+                                                  SFNIEDEEKIIQNYKPTPT
+8        210          .K..DR.ILIAI.IGQN.L.FNK--.SSE.NKNSNKKKS.NIEDE.EMNHQY  271
+                                                      \             \     
+                                                      |             |     
+                                                      L   KIMKNYKPTPT
+6        203          .K..DR.ILIAI.IGQN.L.FNK--.SS..NKSSNKKKS.NIEDE.EMNHQY  264
+                                                      \             \     
+                                                      |             |     
+                                                      L   KIIKNYKPTPT
+
+Query_1  158  EKVMRRIKKLDGVLASLKKSTSSARSGIVFYVEKCSSVIRFRLFSRIVNITSDYVAEMKK  217
+7        272  D.IKN.FT..ENI.IY.ENEKNYP---LY.FIKCAI.E.LLL.QE...KLLFS.FSSTPT  328
+8        272  D.IKN.FT..ENI.IY.ENEKNYS----LYLLI..VAQ.LLL.QE...EFLFS.FSSTPT  328
+                                                  \                       
+                                                  |                       
+                                                  I
+6        265  D.IKN.FT..ENI.IY.ENEKNYS----LYLLI..VAQ.LLL.QE...EFLFS.FSSTPT  321
+                                                  \                       
+                                                  |                       
+                                                  I
+
+Query_1  218  SAPLEPFDISFGYKYFVDESPCVTKAKRLISNGNFIIGRPFSCLETSPSSVSTDFREEMN  277
+7        329  APLV....M..LMPFLP-----IFRQ.SFQKFSKLVE..KI.VFKSMQIKQ.V.K.SYIE  392
+                                                                   \      
+                                                                   |      
+                                                           HNYGNLFLV
+8        329  TPSV....M..                                                   339
+6        322  TPSV....M..                                                   332
+21       557                                                          D.I.  560
+
+Query_1  278  MDARSIARLNWTNEERASAYRSVIIKSFLSSIEEEMVEEYCETTTKTVAEMAVEFVDVFI  337
+7        393  VKHL.VLGMR.NRFP.V.T..KEMMRAL..Q.QQV-------.AGN.SIYTRS.DIEEIV  450
+                            \           \                                 
+                            |           |                                 
+                            F        ETQQ
+21       561  SNV.GKNT.AT..K.MDYILLKIDDRFKVVLV...D.GHDG...IE.ILQ---.AL.SYR  617
+
+Query_1  338  EKAETIQHFQTLYSIFDTMPKFSAEMMDNILKNVAINEAVGSGLCGAILLWMINSRPFEE  397
+7        451  .GFHN.RFDYQD.KFV.IIQRWPLP.FCSV..ELQKKRCKSK.R.IK.A-----K.IY..  508
+                                        \    \                            
+                                        |    |                            
+                                        S   LQ
+21       618  N.NDAM.QIS.                                                   628
+
+Query_1  398  IDYNYFKICLREIMVRKKTDKLCDNLIVKRIVSHKNVVITDPHEVKGYVRLCVKVSCFME  457
+7        509  EN--------E.NVMK.DNL..N.TCSL.KLFQ.QKETL-NVDDI.YLL.Y.ID.N.YRN  576
+                                   \                                 \   \
+                                   |                                 |   |
+                             FIKYAIF                          HSSKPTSL  SS
+8        535                       .N.TCSL.KLFQ.QKETL-NVDDI.YLL.Y.ID..SEST  573
+                                                                     \    
+                                                                     |    
+                                                                     H
+6        528                       .N.TCSL.KLFQ.QKETL-NVDDI.YLL.Y.ID..SEST  566
+                                                                     \    
+                                                                     |    
+                                                                     H
+
+Query_1  458  DLEAFLTKNPWLKHTYFDEKGNTLLCYCIINKYSHTSKLVKQEKLNILKPSAKGMSPLMV  517
+7        577  NVC.IISEFK..LN.WI.DE...FIG..VKHR.PALDDILDDRRISTINATSRDLT.A.I  639
+                                                            \       \     
+                                                            |       |     
+                                                            A      DD
+8        574  S.DSY.SSHK..LN.WI.DE...FIG..VKHR.PYL.FILGDRHIDTINATSRDLT.A.I  645
+                       \                                    \       \     
+                       |                                    |       |     
+               TACDIISEF                                    A      DD
+6        567  S.DSYISEFK..LN.WI.DE...FIG..VKHR.PYL.SI-----.GY.HI..DDLT.A.I  638
+                   \                                              \       
+                   |                                              |       
+              RSSHTACNI                                    TINATSRE
+77       126                   .AS.K...MSNL.S.--.LME.MVSTSM.L.QINK.DK.NFLH  170
+                                                          \   \           
+                                                          |   |           
+                                                        DFF   C
+39       227      YMK.EFF.P..TI..TD.QYMKMG.CKQH.YQN.PQ.ES...                272
+                             \                                            
+                             |                                            
+                          CSLT
+
+Query_1  518  CAAISSPFTTRVGIEILTTNSLAFSFINENNENVFHAAAVATSCNFLDALAKKYKNIIYD  577
+7        640  A.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL.R..G.NNSIM.QSI----..MATG  696
+                     \                                                    
+                     |                                                    
+                     T
+8        646  A.DNAN.TSKTDI.RV.HNYGANLFYV.K.R.TIL.R..G.NNSTV.RSI----..MATG  701
+6        639  A.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL.R..G.NNSIV.QSI----..MATG  695
+                     \                                                    
+                     |                                                    
+                     T
+77       171  AF.PKTRV.NIY.EQLS.QTL.FIADLLF....--YCQY.SSRA..P..N.PN-------  221
+79       287                                  .I.L.NFIIYM..H.RGIIRSV.T.L.E  314
+
+Query_1  578  FDRSIVNARRASDGATPLMIAIANHKHDVSDALVGAHGAKINMLYGKSSTLSVTEAALLM  637
+7        697  D.EK..EL..KV.NT..M...LSRGHC.FAKQ.SDICRV.FCT.F.N.NV.RTP.FI..K  757
+                \                                                         
+                |                                                         
+                L
+8        702  D.EK..EL..KV.NT..M...LSRGHC.FAKQ.SDICRV.FRT.F.N.NV.RTP.FI..K  762
+                \                                                         
+                |                                                         
+                L
+6        696  D.EK..EL..KV.NT..M...LSRGHC.FAKQ.SDICRV.FCT.F.N.NV.RTP.FI..K  756
+                \                                                         
+                |                                                         
+                L
+77       222  -----------K..M...QL..SADNAQAVLY.ICLY..                       249
+
+Query_1  638  FNDTALTQFAQRGYEPSIPTILKAALDFSLQEEEPLVAATGLDVNKAPRSWPILNCRLGY  697
+7        758  GVSVSTEFLENQ.V.ANMSI.KD.FFYNT.F...YHI.TA..RL.ESNNT.TA.R-----  842
+                                                        \                 
+                                                        |                 
+                           INIGRQAVEKIDGVKTSHPNKKQFFGGNIN
+8        763  GVSISTEFLENQ.I.ANMSI.KD.F.YNT.FK..YHI.TA..TIDGVKT.H.NK.TWT.L  846
+                                                        \           \     
+                                                        |           |     
+                                                INIGRQAVE KQFFGGNINRLNESN
+6        757  GVSVSTEFLENQ.V.ANMSI.KD.FFYNT.FK..YHI.TA..RL.ESNNT.TA.R-----  841
+                                                        \                 
+                                                        |                 
+                           INIGRQAVEKIDGVKTSHPNKKQFFGGNIN
+
+Query_1  698  IASSNYPWAEHIISGDKEEIKRALEEHEKNANVRFDSDNCPVCLEDFSSTNIIRTTRCGH  757
+7        843  -Q.KGHK.VSLLVN.KMDAFINSV.KTT.----I.E.ED.SI...KL.AN--YGS.K...  895
+8        847  RQ.KGHK.VSPLVN.KMDAFINSV.KTT.----I.E.ED.SI...KL.ANYGFSS.K...  906
+                                                                    \     
+                                                                    |     
+                                                                 VNYG
+6        842  -Q.KGHK.VSLLVN.KMDAFINSV.KTT.----I.E.ED.SI...KL.ANYGFSS.K...  900
+                                                                    \     
+                                                                    |     
+                                                                 VNYG
+77       287   .K...TIHSN.--NNQ.L.NQGMC.---.G..ST.NIT.SI.TVSCTENQNEQWFK...  343
+                                                    \                  \  
+                                                    |                  |  
+                                                    I                 MP
+
+Query_1  758  CIDEKCWDRLVLSTQRGEITRCPVCRERTSLRPDADQVKEMLVEPIVSCKRMAVPDEQVS  817
+7        896  QFHTH..QTMKNTIKQ.S.-Y.....QK.CF.KHTSSLVYDEE..QQYENSTPS.PTKI-  956
+                              \                                           
+                              |                                           
+                            DPS
+8        907  QFHTH..QTMKNTIKQ.S.-Y.....QK.CF.KHTSSLVYDEE..QQYENSTPS.PTKI-  967
+                              \                                           
+                              |                                           
+                            DPS
+6        901  QFHTH..QTMKNTIKQ.S.-Y.....QK.CF.KHTSSLVYDEE..QQYENLTPS.PTKI-  961
+                              \                                           
+                              |                                           
+                            DPS
+77       344  F.HCR.---.MGICAV.SSLT..M..                                    366
+
+Query_1  818  CKRRRIGYNRYQFLINDVWTDE  839
+7        957  --W....D...E....G.YI..  976
+8        968  --W....D...E....G.YI..  987
+6        962  --W....D...E....G.YI..  981
+
+
+Lambda      K        H        a         alpha
+   0.320    0.134    0.393    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 46680966
+Results from round 2
+
+
+Query= YP_009220492.1 hypothetical protein [White spot syndrome virus]
+
+Length=843
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       904     0.0  
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       851     0.0  
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       843     0.0  
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       195     4e-54
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       91.8    5e-21
+BDT63537.1 hypothetical protein [Pasiphaea japonica whispovirus]      55.2    3e-10
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       42.5    7e-06
+
+Sequences not found previously or not previously below threshold:
+
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       23.6    3.7  
+BDT63574.1 wsv277-like protein [Pasiphaea japonica whispovirus]       23.6    4.4  
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       22.8    6.6  
+BDT63530.1 wsv327-like protein [Pasiphaea japonica whispovirus]       22.4    8.9  
+
+
+
+Query_1  28   VFTERELALLNDIITSRNSPPVPSSSFKKLDNKEEFRDIIYFFINNNTKSDSSPICEGMT  87
+76       410  .SSKKV.GIIK..VSNT.VSNIKC.A.R..                                439
+
+Query_1  88   FINALTTVCKTFRGLYENIHDDFLFVKYSLLVSMDNGFLRRETHGIKFGTGDDSRTGFKF  147
+7        196            S.DSI.Q-.K..DR.ILIAI.IGQN.L.FNK--.SSE.NKLSSDYKS.NI  242
+8        196   .D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.SSE.NKNSNKKKS.NI  250
+                                                                \         
+                                                                |         
+                                                                L
+6        189   .D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.SS..NKLSNKKKS.NI  243
+                                                                  \       
+                                                                  |       
+                                                                  S
+
+Query_1  148  TSKEQAEEEREKVMRRIKKLDGVLASLKKSTSSARSGIVFYVEKCSSVIRFRLFSRIVNI  207
+7        243  SDNKEMNHQYD.IKN.FT..ENI.IY.ENEKNYP---LY.FIKCAI.E.LLL.QE...KL  318
+                  \                                                       
+                  |                                                       
+              SFNIEDEEKIIQNYKPTPT
+8        251  EDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCVIAQ.LLL.QE...EF  318
+                  \                                                       
+                  |                                                       
+              KIMKNYKPTPT
+6        244  EDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCVIAQ.LLL.QE...EF  311
+                  \                                                       
+                  |                                                       
+              KIIKNYKPTPT
+
+Query_1  208  TSDYVAEMKKSAPLEPFDISFGYKYFVDESPCVTKAKRLISNGNFIIGRPFSCLETSPSS  267
+7        319  LFS.FSSTPTAPLV....M..LMPFLP-----IFRQ.SFQKFSKLVE..KI.VFKSMQIK  373
+8        319  LFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKLVED.KI.VFKSVRIK  373
+6        312  LFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKLVED.KI.VFKSVRIK  366
+57       427                        MPFCIPKGRRLF.I.NMTTPNK...KS.----------  454
+32       651                 ..-LA.AAFWALRN.VRARRQVNDPT.T...P...LPLISALSLT  694
+
+Query_1  268  VSTDFREEMNMDARSIARLNWTNEERASAYRSVIIKSFLSSIEEEMVEEYCETTTKTVAE  327
+7        374  Q.V.K.SYIEVKHL.VLGMR.NRFP.V.T..KEMMRAL..Q.QQV-------.AGN.SIY  440
+                 \                    \           \                       
+                 |                    |           |                       
+              HNYGNLFLV               F        ETQQ
+8        374  QPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMQAL..Q.QQVR-------AGN.STY  440
+                   \                  \          \                        
+                   |                  |          |                        
+              YRNLYLLET               F       HETQ
+6        367  QPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMQAL..Q.QQVR-------AGN.STY  433
+                   \                  \          \                        
+                   |                  |          |                        
+              YRNLYLLET               F       HETQ
+21       557        D.I.SNV.GKNT.AT..K.MDYILLKIDDRFKVVLV...D.GHDG...IE.ILQ  610
+57       455  -.VSIA.TIKKNPI.LC.FD.KDY.DKEK.QTENLHAKI.AM                    497
+                                    \                                     
+                                    |                                     
+                                   QI
+32       695  .NILKNNYCDA.KINSQK.M.RAL.                                     722
+                \                                                         
+                |                                                         
+              LIK
+
+Query_1  328  MAVEFVDVFIEKAETIQHFQTLYSIFDTMPKFSAEMMDNILKNVAINEAVGSGLCGAILL  387
+7        441  TRS.DIEEIV.GFHN.RFDYQD.KFV.IIQRWPLP.FCSV..ELQKKRCKSK.R.IK.A-  502
+                                                  \    \                  
+                                                  |    |                  
+                                                  S   LQ
+8        441  TRSQDIEEIV.GFHN.RFDYGDHRFVNIIQRWPLP.FCSV..ELQKERYKNK.R.IK.A-  508
+                                \                 \    \         \        
+                                |                 |    |         |        
+                                W                 S   LQ     HNLSD
+6        434  TRSQDIEEIV.GFHN.HFDYGDHRFVNIIQRWPLP.FCSV..ELQKERYKNK.R.IK.A-  501
+                                \                 \    \         \        
+                                |                 |    |         |        
+                                W                 S   LQ     HNLSN
+21       611  ---.AL.SYRN.NDAM.QIS.EHELY.IIQE                               645
+                                    \                                     
+                                    |                                     
+                              EEEDVIG
+
+Query_1  388  WMINSRPFEEIDYNYFKICLREIMVRKKTDKLCDNLIVKRIVSHKNVVITDPHEVKGYVR  447
+7        503  ----K.IY..EN--------E.NVMK.DNL..N.TCSL.KLFQ.QKETL-NVDDI.YLL.  556
+                                             \                            
+                                             |                            
+                                       FIKYAIF
+8        509  ----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.QKETL-NVDDI.YLL.  562
+                                             \                            
+                                             |                            
+                                       FLKYAIF
+6        502  ----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.QKETL-NVDDI.YLL.  555
+                                             \                            
+                                             |                            
+                                       FLKYAIF
+
+Query_1  448  LCVKVSCFMEDLEAFLTKNPWLKHTYFDEKGNTLLCYCIINKYSHTSKLVKQEKLNILKP  507
+7        557  Y.ID.N.YSNNVC.IISEFK..LN.WI.DE...FIG..VKHR.PALDDILDDRRISTINA  627
+                   \  \                                               \   
+                   |  |                                               |   
+              HSSKPTSL|                                               A
+                      |                                                   
+                     RS
+8        563  Y.ID..SESTS.DSY.SEFK..LN.WI.DE...FIG..VKHR.PYL.FILGDRHIDTINA  633
+                   \           \                                      \   
+                   |           |                                      |   
+                   H   SHTACDIIS                                      A
+6        556  Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PYL.SILGYLHISTINA  626
+                   \         \                                        \   
+                   |         |                                        |   
+                   H RSSHTACNI                                        A
+77       125                            I.AS.K...MSNL.S.--.LME.MVSTSM.L.QI  160
+                                                                    \   \ 
+                                                                    |   | 
+                                                                  DFF   C
+39       227                YMK.EFF.P..TI..TD.QYMKMG.CKQH.YQN.PQ.ES...      272
+                                       \                                  
+                                       |                                  
+                                    CSLT
+3        23       IDA.DN.FATIKSAYI.K...NQ.DNDD--FSSE.M.PVGLLNDV..DV..HVPYV  84
+                                                                     \    
+                                                                     |    
+                                                              LYHRLCKN
+
+Query_1  508  SAKGMSPLMVCAAISSPFTTRVGIEILTTNSLAFSFINENNENVFHAAAVATSCNFLDAL  567
+7        628  TSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL.R..G.NNSIM.QSI  690
+                  \            \                                          
+                  |            |                                          
+                 DD            T
+8        634  TSRDLT.A.IA.DNAN.TSKTDI.RV.HNYGANLFYV.K.R.TIL.R..G.NNSTV.RSI  695
+                  \                                                       
+                  |                                                       
+                 DD
+6        627  TSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL.R..G.NNSIV.QSI  689
+                 \             \                                          
+                 |             |                                          
+                ED             T
+77       161  NK.DK.NFLHAF.PKTRV.NIY.EQLS.QTL.FIADLLF....--YCQY.SSRA..P..N  218
+79       252    DNNT.A.MF-----.YENLW.DNKI.VCL.NHIMTEVAIP.I.L.NFIIYM..H.RGI  304
+3        85   .S.QRQ.FCNILLNENR..NLK.C.T.QNT..SYHD.                         130
+                    \           \                                         
+                    |           |                                         
+              DNGDSEGV          V
+
+Query_1  568  AKKYKNIIYDFDRSIVNARRASDGATPLMIAIANHKHDVSDALVGAHGAKINMLYGKSST  627
+7        691  ----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SDICRV.FCT.F.N.NV  747
+                          \                                               
+                          |                                               
+                          L
+8        696  ----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SDICRV.FRT.F.N.NV  752
+                          \                                               
+                          |                                               
+                          L
+6        690  ----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SDICRV.FCT.F.N.NV  746
+                          \                                               
+                          |                                               
+                          L
+77       219  .PN------------------K..M...QL..SADNAQAVLY.ICLY..-----------  249
+79       305  IRSV.T.L.EDNDDGSSINYFE..                                      328
+
+Query_1  628  LSVTEAALLMFNDTALTQFAQRGYEPSIPTILKAALDFSLQEEEPLVAATGLDVNKAPRS  687
+7        748  .RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.F...YHI.TA..KIDGVKT.  816
+                                                                  \       
+                                                                  |       
+                                                          INIGRQAVE
+8        753  .RTP.FI..KGVSISTEFLENQ.I.ANMSI.KD.F.YNT.FK..YHI.TA..TIDGVKT.  821
+                                                                  \       
+                                                                  |       
+                                                          INIGRQAVE
+6        747  .RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.FK..YHI.TA..KIDGVKT.  815
+                                                                  \       
+                                                                  |       
+                                                          INIGRQAVE
+77       250  -----FWFEQ.T.KGT.DGT.MN.----------------F.YAY--------------.  274
+
+Query_1  688  WPILNCRLGYIASSNYPWAEHIISGDKEEIKRALEEHEKNANVRFDSDNCPVCLEDFSST  747
+7        817  H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.E.ED.SI...KL.AN  887
+                  \                                                       
+                  |                                                       
+              KQFFGGNINRLNESN
+8        822  H.NK.TWT.LRQ.KGHK.VSPLVN.KMDAFINSV.KTT.----I.E.ED.SI...KL.AN  892
+                  \                                                       
+                  |                                                       
+              KQFFGGNINRLNESN
+6        816  H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.E.ED.SI...KL.AN  886
+                  \                                                       
+                  |                                                       
+              KQFFGGNINRLNESN
+77       275  KKAIK.VTVLK.K...TIHSN.--NNQ.L.NQGMC.---.G..ST.NIT.SI.TVSCTEN  331
+                         \                                   \            
+                         |                                   |            
+                         F                                   I
+
+Query_1  748  NIIRTTRCGHCIDEKCWDRLVLSTQRGEITRCPVCRERTSLRPDADQVKEMLVEPIVSCK  807
+7        888  YG--S.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHTSSLVYDEE..QQYEN  947
+                                        \                                 
+                                        |                                 
+                                       DP
+8        893  YGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHTSSLVYDEE..QQYEN  958
+                  \                     \                                 
+                  |                     |                                 
+               VNYG                    DP
+6        887  YGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHTSSLVYDEE..QQYEN  952
+                  \                     \                                 
+                  |                     |                                 
+               VNYG                    DP
+77       332  QNEQWFK...F.HCR.---.MGICAV.SSLT..M..                          366
+                     \                                                    
+                     |                                                    
+                    MP
+
+Query_1  808  RMAVPDEQVSCKRRRIGYNRYQFLINDVWTDE  839
+7        948  STPS.PTKI---W....D...E....G.YI..  976
+8        959  STPS.PTKI---W....D...E....G.YI..  987
+6        953  LTPS.PTKI---W....D...E....G.YI..  981
+
+
+Lambda      K        H        a         alpha
+   0.318    0.125    0.319    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0382    0.140     1.90     42.6     43.6 
+
+Effective search space used: 46680966
+Results from round 3
+
+
+Query= YP_009220492.1 hypothetical protein [White spot syndrome virus]
+
+Length=843
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       861     0.0  
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       846     0.0  
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       833     0.0  
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       228     5e-65
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       91.0    6e-21
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       90.7    1e-20
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       89.5    2e-20
+BDT63530.1 wsv327-like protein [Pasiphaea japonica whispovirus]       81.0    9e-18
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       75.6    4e-16
+BDT63537.1 hypothetical protein [Pasiphaea japonica whispovirus]      51.8    4e-09
+BDT63574.1 wsv277-like protein [Pasiphaea japonica whispovirus]       48.7    9e-08
+
+Sequences not found previously or not previously below threshold:
+
+BDT63553.1 wsv433-like protein [Pasiphaea japonica whispovirus]       24.8    1.6  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       22.5    9.0  
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       22.5    9.0  
+
+
+
+Query_1  13    EEVLENIEPYMSFLDVFTERELALLNDIITSRNSPPVPSSSFKKLDNKEEFRDIIYFFIN  72
+8        133    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  184
+6        126    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLC.A  177
+76       410                  .SSKKV.GIIK..VSNT.VSNIKC.A.R..                 439
+82       2633  ......AQRIV.Y.G.PLQNIVGCM.ELLARTDKNHLEWLTLSAVSFARA.NVTT.HALD  2707
+                           \             \                                 
+                           |             |                                 
+                   GGTCARKSG        GVDTVD
+
+Query_1  73    NNTKSDSSPICEGMTFINALTTVCKTFRGLYENIHDDFLFVKYSLLVSMDNGFLRRETHG  132
+7        189                   .D.VSSC--S.DSI.Q-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+8        185   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  234
+6        178   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+82       2708  STL.TTA-----------...DMYNA.KS.I.TVDEER.K..ST..---.SI.NT.MA.   2752
+
+Query_1  133   IKFGTGDDSRTGFKFTSKEQAEEEREKVMRRIKKLDGVLASLKKSTSSARSGIVFYVEKC  192
+7        228   SE.NKLSSDYKS.NISDNKEMNHQYD.IKN.FT..ENI.IY.ENEKNYP---LY.FIKCA  303
+                                  \                                        
+                                  |                                        
+                SFNIEDEEKIIQNYKPTPT
+8        235   SE.NKNSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  303
+                    \             \                                        
+                    |             |                                        
+                    L   KIMKNYKPTPT
+6        228   S..NKLSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  296
+                      \           \                                        
+                      |           |                                        
+                      S KIIKNYKPTPT
+
+Query_1  193   SSVIRFRLFSRIVNITSDYVAEMKKSAPLEPFDISFGYKYFVDESPCVTKAKRLISNGNF  252
+7        304   I.E.LLL.QE...KLLFS.FSSTPTAPLV....M..LMPFLP-----IFRQ.SFQKFSKL  358
+8        304   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  358
+6        297   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  351
+21       499                            AT.FQK.AMDELSS.CINARQLLIDC.EVGHFV.K  537
+                                                                         \ 
+                                                                         | 
+                                                                      MDAF
+32       651                                 ..-LA.AAFWALRN.VRARRQVNDPT.T..  679
+57       427                                        MPFCIPKGRRLF.I.NMTTPNK.  449
+
+Query_1  253   IIGRPFSCLETSPSSVSTDFREEMNMDARSIARLNWTNEERASAYRSVIIKSFLSSIEEE  312
+7        359   VE..KI.VFKSMQIKQ.V.K.SYIEVKHL.VLGMR.NRFP.V.T..KEMMRAL..Q.QQV  432
+                                 \                    \           \        
+                                 |                    |           |        
+                         HNYGNLFLV                    F        ETQQ
+8        359   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  432
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+6        352   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  425
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+21       538   .AE.EN.--N.ISLKKARCLID.I.SNV.GKNT.AT..K.MDYILLKIDDRFKVVLV...  595
+32       680   .P...LPLISALSLT.NILKNNYCDA.KINSQK.M.RAL.                      722
+                                \                                          
+                                |                                          
+                              LIK
+57       450   ..KS.-----------.VSIA.TIKKNPI.LC.FD.KDY.DKEK.QTENLHAKI.AM     497
+                                                    \                      
+                                                    |                      
+                                                   QI
+55       709                                            DEY.SKGSFENII.QTK.V  727
+2        573    EKS.YPKY.G..I.KGLLQFDMIPKFDK.QLTH..GDLKLKIKKHG.RNSM.VATMPTA  631
+
+Query_1  313   MVEEYCETTTKTVAEMAVEFVDVFIEKAETIQHFQTLYSIFDTMPKFSAEMMDNILKNVA  372
+7        433   -------.AGN.SIYTRS.DIEEIV.GFHN.RFDYQD.KFV.IIQRWPLP.FCSV..ELQ  488
+                                                                  \    \   
+                                                                  |    |   
+                                                                  S   LQ
+8        433   R-------AGN.STYTRSQDIEEIV.GFHN.RFDYGDHRFVNIIQRWPLP.FCSV..ELQ  489
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+6        426   R-------AGN.STYTRSQDIEEIV.GFHN.HFDYGDHRFVNIIQRWPLP.FCSV..ELQ  482
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+21       596   D.GHDG...IE.ILQ---.AL.SYRN.NDAM.QIS.EHELY.IIQEQE--------Q..K  651
+                                                    \                      
+                                                    |                      
+                                              EEEDVIG
+55       728   .ENN.DRQSGLLLVPSHIDDR.TVTGDVSEKYQQYL.HRDV.YLMASPMK.FIRAID.QN  791
+                   \                                    \         \        
+                   |                                    |         |        
+                  SP                                    E         V
+2        632   STAQILGNAES.EPY.SNI.NRNILSG                                   658
+
+Query_1  373   INEAVGSGLCGAILLWMINSRPFEEIDYNYFKICLREIMVRKKTDKLCDNLIVKRIVSHK  432
+7        489   KKRCKSK.R.IK.A-----K.IY..EN--------E.NVMK.DNL..N.TCSL.KLFQ.Q  542
+                                                             \             
+                                                             |             
+                                                       FIKYAIF
+8        490   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  548
+                     \                                       \             
+                     |                                       |             
+                 HNLSD                                 FLKYAIF
+6        483   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  541
+                     \                                       \             
+                     |                                       |             
+                 HNLSN                                 FLKYAIF
+21       653   .RKIKSDDA.QL.PSSHVTENI..KLKKQ..INTASTSVSAC.SAL.--TVKSHAVIQAI  715
+               \                     \                                     
+               |                     |                                     
+               H                 FIAPW
+55       792   KEKYLSV.DLAVLAI.CKKYVLCK----.WEDPVISKSQYEWLSS...GH.LLADL.N--  845
+
+Query_1  433   NVVITDPHEVKGYVRLCVKVSCFMEDLEAFLTKNPWLKHTYFDEKGNTLLCYCIINKYSH  492
+7        543   KETL-NVDDI.YLL.Y.ID.N.YSNNVC.IISEFK..LN.WI.DE...FIG..VKHR.PA  611
+                                   \  \                                    
+                                   |  |                                    
+                            HSSKPTSL RS
+8        549   KETL-NVDDI.YLL.Y.ID..SESTS.DSY.SEFK..LN.WI.DE...FIG..VKHR.PY  617
+                                   \           \                           
+                                   |           |                           
+                                   H   SHTACDIIS
+6        542   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  610
+                                   \         \                             
+                                   |         |                             
+                                   H RSSHTACNI
+77       125                                            I.AS.K...MSNL.S.--.  141
+3        23                       IDA.DN.FATIKSAYI.K...NQ.DNDD--FSSE.M.PVGL  61
+21       716   QKLRKT.EDK.AVMS.EQTGDSYLTN.STRISE.VREE.YGLVDT.SSP.ANT.FSG.RL  789
+                                              \              \             
+                                              |              |             
+                                    CDACRKRKMQT            VYD
+39       227                                YMK.EFF.P..TI..TD.QYMKMG.CKQH.Y  261
+                                                       \                   
+                                                       |                   
+                                                    CSLT
+55       846   ---FGLLGDL.IIN..DTNTNT.HR.T.RLP.ASKFI.N.SL.DRKKLAFVHHC..      901
+                                                 \                         
+                                                 |                         
+                                               DQK
+
+Query_1  493   TSKLVKQEKLNILKPSAKGMSPLMVCAAISSPFTTRVGIEILTTNSLAFSFINENNENVF  552
+7        612   LDDILDDRRISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  675
+                          \       \            \                           
+                          |       |            |                           
+                          A      DD            T
+8        618   L.FILGDRHIDTINATSRDLT.A.IA.DNAN.TSKTDI.RV.HNYGANLFYV.K.R.TIL  680
+                          \       \                                        
+                          |       |                                        
+                          A      DD
+6        611   L.SILGYLHISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  674
+                          \      \             \                           
+                          |      |             |                           
+                          A     ED             T
+77       142   LME.MVSTSM.L.QINK.DK.NFLHAF.PKTRV.NIY.EQLS.QTL.FIADLLF....--  203
+                        \   \                                              
+                        |   |                                              
+                      DFF   C
+79       247               PSDDNDNNT.A.MF-----.YENLW.DNKI.VCL.NHIMTEVAIP.I.  289
+3        62    LNDV..DV..HVPYV.S.QRQ.FCNILLNENR..NLK.C.T.QNT..SYHD.          130
+                         \          \           \                          
+                         |          |           |                          
+                  LYHRLCKN   DNGDSEGV           V
+21       790   LCRA.AMSSTFKF.IKQ.PN.VAY.ILLPMP.IEPL.ALSGNPID.IVQTVGES.HAEIT  850
+                                            \                              
+                                            |                              
+                                            I
+39       262   QN.PQ.ES...                                                   272
+
+Query_1  553   HAAAVATSCNFLDALAKKYKNIIYDFDRSIVNARRASDGATPLMIAIANHKHDVSDALVG  612
+7        676   .R..G.NNSIM.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  732
+                                          \                                
+                                          |                                
+                                          L
+8        681   .R..G.NNSTV.RSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  737
+                                          \                                
+                                          |                                
+                                          L
+6        675   .R..G.NNSIV.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  731
+                                          \                                
+                                          |                                
+                                          L
+77       204   YCQY.SSRA..P..N.PN------------------K..M...QL..SADNAQAVLY.IC  245
+79       290   L.NFIIYM..H.RGIIRSV.T.L.EDNDDGSSINYFE..                       328
+21       851   NRKLCSNTARGMILIKPNT.TANTNKCIDSF.NTKQV..S.G.SLHDSKSNSVAAKRIHC  918
+                     \                               \                     
+                     |                               |                     
+                     R                         VIMLGPK
+
+Query_1  613   AHGAKINMLYGKSSTLSVTEAALLMFNDTALTQFAQRGYEPSIPTILKAALDFSLQEEEP  672
+7        733   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.F...Y  792
+8        738   ICRV.FRT.F.N.NV.RTP.FI..KGVSISTEFLENQ.I.ANMSI.KD.F.YNT.FK..Y  797
+6        732   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.FK..Y  791
+77       246   LY..----------------FWFEQ.T.KGT.DGT.MN.----------------F.YAY  273
+21       919   LLDVPY.AIAFLQTIGRT                                            936
+
+Query_1  673   LVAATGLDVNKAPRSWPILNCRLGYIASSNYPWAEHIISGDKEEIKRALEEHEKNANVRF  732
+7        793   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  872
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+8        798   HI.TA..TIDGVKT.H.NK.TWT.LRQ.KGHK.VSPLVN.KMDAFINSV.KTT.----I.  877
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+6        792   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  871
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+77       274   --------------.KKAIK.VTVLK.K...TIHSN.--NNQ.L.NQGMC.---.G..ST  315
+                                         \                                 
+                                         |                                 
+                                         F
+
+Query_1  733   DSDNCPVCLEDFSSTNIIRTTRCGHCIDEKCWDRLVLSTQRGEITRCPVCRERTSLRPDA  792
+7        873   E.ED.SI...KL.ANYG--S.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  932
+                                                        \                  
+                                                        |                  
+                                                       DP
+8        878   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  943
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+6        872   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  937
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+77       316   .NIT.SI.TVSCTENQNEQWFK...F.HCR.---.MGICAV.SSLT..M..           366
+                 \                   \                                     
+                 |                   |                                     
+                 I                  MP
+
+Query_1  793   DQVKEMLVEPIVSCKRMAVPDEQVSCKRRRIGYNRYQFLINDVWTDE  839
+7        933   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  976
+8        944   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  987
+6        938   SSLVYDEE..QQYENLTPS.PTKI---W....D...E....G.YI..  981
+
+
+Lambda      K        H        a         alpha
+   0.317    0.121    0.300    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0370    0.140     1.90     42.6     43.6 
+
+Effective search space used: 46680966
+Results from round 4
+
+
+Query= YP_009220492.1 hypothetical protein [White spot syndrome virus]
+
+Length=843
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       838     0.0   
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       829     0.0   
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       818     0.0   
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       335     1e-100
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       216     6e-61 
+BDT63553.1 wsv433-like protein [Pasiphaea japonica whispovirus]       175     3e-47 
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       109     3e-26 
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       90.7    7e-21 
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       90.0    1e-20 
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       83.8    1e-18 
+BDT63530.1 wsv327-like protein [Pasiphaea japonica whispovirus]       73.8    2e-15 
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       70.3    2e-14 
+BDT63574.1 wsv277-like protein [Pasiphaea japonica whispovirus]       37.6    2e-04 
+
+Sequences not found previously or not previously below threshold:
+
+BDT63552.1 wsv427-like protein [Pasiphaea japonica whispovirus]       25.6    0.85 
+
+
+
+Query_1  13    EEVLENIEPYMSFLDVFTERELALLNDIITSRNSPPVPSSSFKKLDNKEEFRDIIYFFIN  72
+7        126    .MFWSF.K.DTMTKQQQKLLVGII.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  177
+8        133    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  184
+6        126    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLC.A  177
+82       2633  ......AQRIV.Y.G.PLQNIVGCM.ELLARTDKNHLEWLTLSAVSFARA.NVTT.HALD  2707
+                           \             \                                 
+                           |             |                                 
+                   GGTCARKSG        GVDTVD
+76       410                  .SSKKV.GIIK..VSNT.VSNIKC.A.R..                 439
+
+Query_1  73    NNTKSDSSPICEGMTFINALTTVCKTFRGLYENIHDDFLFVKYSLLVSMDNGFLRRETHG  132
+7        178   AHP.FEIN-----SCV.D.VSSC--S.DSI.Q-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+8        185   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  234
+6        178   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+82       2708  STL.TTA-----------...DMYNA.KS.I.TVDEER.K..ST..---.SI.NT.MA.   2752
+54       333                                           I.HA.IFNEPST.N.LSSGA  352
+
+Query_1  133   IKFGTGDDSRTGFKFTSKEQAEEEREKVMRRIKKLDGVLASLKKSTSSARSGIVFYVEKC  192
+7        228   SE.NKLSSDYKS.NISDNKEMNHQYD.IKN.FT..ENI.IY.ENEKNYP---LY.FIKCA  303
+                                  \                                        
+                                  |                                        
+                SFNIEDEEKIIQNYKPTPT
+8        235   SE.NKNSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  303
+                    \             \                                        
+                    |             |                                        
+                    L   KIMKNYKPTPT
+6        228   S..NKLSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  296
+                      \           \                                        
+                      |           |                                        
+                      S KIIKNYKPTPT
+54       353   GL..KFTGRDND.DYDNEA.SGLQFNV.TDCLS..                           387
+
+Query_1  193   SSVIRFRLFSRIVNITSDYVAEMKKSAPLEPFDISFGYKYFVDESPCVTKAKRLISNGNF  252
+7        304   I.E.LLL.QE...KLLFS.FSSTPTAPLV....M..LMPFLP-----IFRQ.SFQKFSKL  358
+8        304   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  358
+6        297   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  351
+21       499                            AT.FQK.AMDELSS.CINARQLLIDC.EVGHFV.K  537
+                                                                         \ 
+                                                                         | 
+                                                                      MDAF
+32       647                          .T.S.F----LA.AAFWALRN.VRARRQVNDPT.T..  679
+57       427                                        MPFCIPKGRRLF.I.NMTTPNK.  449
+
+Query_1  253   IIGRPFSCLETSPSSVSTDFREEMNMDARSIARLNWTNEERASAYRSVIIKSFLSSIEEE  312
+7        359   VE..KI.VFKSMQIKQ.VHK.SYIEVKHL.VLGMR.NRFP.V.T..KEMMRAL..Q.QQV  432
+                                  \                   \           \        
+                                  |                   |           |        
+                          NYGNLFLVD                   F        ETQQ
+8        359   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  432
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+6        352   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  425
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+21       538   .AE.EN.--N.ISLKKARCLID.I.SNV.GKNT.AT..K.MDYILLKIDDRFKVVLV...  595
+55       709                                            DEY.SKGSFENII.QTK.V  727
+2        573    EKS.YPKY.G..I.KGLLQFDMIPKFDK.QLTH..GDLKLKIKKHG.RNSM.VATMPTA  631
+32       680   .P...LPLISALSLT.NILKNNYCDA.KINSQK.M.RAL.EMQFESEI----WAA.KKQV  738
+                                \                                          
+                                |                                          
+                              LIK
+57       450   ..KS.-----------.VSIA.TIKKNPI.LC.FD.KDY.DKEK.QTENLHAKI.AM     497
+                                                    \                      
+                                                    |                      
+                                                   QI
+
+Query_1  313   MVEEYCETTTKTVAEMAVEFVDVFIEKAETIQHFQTLYSIFDTMPKFSAEMMDNILKNVA  372
+7        433   -------.AGN.SIYTRS.DIEEIV.GFHN.RFDYQD.KFV.IIQRWPLP.FCSV..ELQ  488
+                                                                  \    \   
+                                                                  |    |   
+                                                                  S   LQ
+8        433   R-------AGN.STYTRSQDIEEIV.GFHN.RFDYGDHRFVNIIQRWPLP.FCSV..ELQ  489
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+6        426   R-------AGN.STYTRSQDIEEIV.GFHN.HFDYGDHRFVNIIQRWPLP.FCSV..ELQ  482
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+21       596   D.GHDG...IE.ILQ---.AL.SYRN.NDAM.QIS.EHELY.IIQEQE--------Q..K  651
+                                                    \                      
+                                                    |                      
+                                              EEEDVIG
+55       728   .ENN.DRQSGLLLVPSHIDDR.TVTGDVSEKYQQYL.HRDV.YLMASPMK.FIRAID.QN  791
+                   \                                    \         \        
+                   |                                    |         |        
+                  SP                                    E         V
+2        632   STAQILGNAES.EPY.SNI.NRNILSGTCQVVNESLVNDLMN-LGIWTKKIS.R.I      686
+32       739   TTK.IKNRAIAKLVLEPSG.IPN.                                      762
+
+Query_1  373   INEAVGSGLCGAILLWMINSRPFEEIDYNYFKICLREIMVRKKTDKLCDNLIVKRIVSHK  432
+7        489   KKRCKSK.R.IK.A-----K.IY..EN--------E.NVMK.DNL..N.TCSL.KLFQ.Q  542
+                                                             \             
+                                                             |             
+                                                       FIKYAIF
+8        490   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  548
+                     \                                       \             
+                     |                                       |             
+                 HNLSD                                 FLKYAIF
+6        483   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  541
+                     \                                       \             
+                     |                                       |             
+                 HNLSN                                 FLKYAIF
+21       653   .RKIKSDDA.QL.PSSHVTENI..KLKKQ..INTASTSVSAC.SAL.--TVKSHAVIQAI  715
+               \                      \                                    
+               |                      |                                    
+               H                  IAPWF
+55       792   KEKYLSV.DLAVLAI.CKKYVLCK----.WEDPVISKSQYEWLSS...GH.LLADL.N--  845
+
+Query_1  433   NVVITDPHEVKGYVRLCVKVSCFMEDLEAFLTKNPWLKHTYFDEKGNTLLCYCIINKYSH  492
+7        543   KETL-NVDDI.YLL.Y.ID.N.YSNNVC.IISEFK..LN.WI.DE...FIG..VKHR.PA  611
+                                   \  \                                    
+                                   |  |                                    
+                            HSSKPTSL RS
+8        549   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  617
+                                   \         \                             
+                                   |         |                             
+                                   H LSSHTACDI
+6        542   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  610
+                                   \         \                             
+                                   |         |                             
+                                   H RSSHTACNI
+21       716   QKLRKT.EDK.AVMS.EQTGDSYLTN.STRISE.VREE.YGLVDT.SSP.ANT.FSG.RL  789
+                                              \              \             
+                                              |              |             
+                                    CDACRKRKMQT            VYD
+77       125                                            I.AS.K...MSNL.S.--.  141
+55       846   ---FGLLGDL.IIN..DTNTNT.HR.T.RLP.ASKFI.N.SL.DRKKLAFVHHC..      901
+                                                 \                         
+                                                 |                         
+                                               DQK
+79       194                     DINFAER.VDENAAGVIM.SDSSL.DAIKNAEQQHVLS--GL  233
+3        9          L..SCSLPPTYDKLIDA.DN.FATIKSAYI.K...NQ.DNDD--FSSE.M.PVGL  61
+
+Query_1  493   TSKLVKQEKLNILKPSAKGMSPLMVCAAISSPFTTRVGIEILTTNSLAFSFINENNENVF  552
+7        612   LDDILDDRRISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  675
+                          \       \            \                           
+                          |       |            |                           
+                          A      DD            T
+8        618   L.FILGDRHIDTINATSRDLT.A.IA.DNAN.TSKTDI.RV.HNYGANLFYV.K.R.TIL  680
+                          \       \                                        
+                          |       |                                        
+                          A      DD
+6        611   L.SILGYLHISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  674
+                          \      \             \                           
+                          |      |             |                           
+                          A     ED             T
+21       790   LCRA.AMSSTFKF.IKQ.PN.VAY.ILLPMP.IEPL.ALSGNPID.IVQTVGES.HAEIT  850
+                                            \                              
+                                            |                              
+                                            I
+77       142   LME.MVSTSM.L.QINK.DK.NFLHAF.PKTRV.NIY.EQLS.QTL.FIADLLF....--  203
+                        \   \                                              
+                        |   |                                              
+                      DFF   C
+79       234   VK.RPAEKGVDRPSDDNDNNT.A.MF-----.YENLW.DNKI.VCL.NHIMTEVAIP.I.  289
+                          \                                                
+                          |                                                
+                          W
+3        62    LNDV..DV..HVPYV.S.QRQ.FCNILLNENR..NLK.C.T.QNT..SYHD.          130
+                         \          \           \                          
+                         |          |           |                          
+                  LYHRLCKN   DNGDSEGV           V
+
+Query_1  553   HAAAVATSCNFLDALAKKYKNIIYDFDRSIVNARRASDGATPLMIAIANHKHDVSDALVG  612
+7        676   .R..G.NNSIM.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  732
+                                          \                                
+                                          |                                
+                                          L
+8        681   .R..G.NNSTV.RSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  737
+                                          \                                
+                                          |                                
+                                          L
+6        675   .R..G.NNSIV.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  731
+                                          \                                
+                                          |                                
+                                          L
+21       851   NRKLCSNTARGMILIKPNT.TANTNKCIDSF.NTKQV..S.G.SLHDSKSNSVAAKRIHC  918
+                     \                               \                     
+                     |                               |                     
+                     R                         VIMLGPK
+77       204   YCQY.SSRA..P..N.PN------------------K..M...QL..SADNAQAVLY.IC  245
+79       290   L.NFIIYM..H.RGIIRSV.T.L.EDNDDGSSINYFE..                       328
+
+Query_1  613   AHGAKINMLYGKSSTLSVTEAALLMFNDTALTQFAQRGYEPSIPTILKAALDFSLQEEEP  672
+7        733   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.F...Y  792
+8        738   ICRV.FRT.F.N.NV.RTP.FI..KGVSISTEFLENQ.I.ANMSI.KD.F.YNT.FK..Y  797
+6        732   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.FK..Y  791
+21       919   LLDVPY.AIAFLQTIGRT                                            936
+77       246   LY..----------------FWFEQ.T.KGT.DGT.MN.----------------F.YAY  273
+
+Query_1  673   LVAATGLDVNKAPRSWPILNCRLGYIASSNYPWAEHIISGDKEEIKRALEEHEKNANVRF  732
+7        793   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  872
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+8        798   HI.TA..TIDGVKT.H.NK.TWT.LRQ.KGHK.VSPLVN.KMDAFINSV.KTT.----I.  877
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+6        792   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  871
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+77       274   --------------.KKAIK.VTVLK.K...TIHSN.--NNQ.L.NQGMC.---.G..ST  315
+                                         \                                 
+                                         |                                 
+                                         F
+
+Query_1  733   DSDNCPVCLEDFSSTNIIRTTRCGHCIDEKCWDRLVLSTQRGEITRCPVCRERTSLRPDA  792
+7        873   E.ED.SI...KL.ANYG--S.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  932
+                                                        \                  
+                                                        |                  
+                                                       DP
+8        878   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  943
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+6        872   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  937
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+77       316   .NIT.SI.TVSCTENQNEQWFK...F.HCR.---.MGICAV.SSLT..M..           366
+                 \                   \                                     
+                 |                   |                                     
+                 I                  MP
+
+Query_1  793   DQVKEMLVEPIVSCKRMAVPDEQVSCKRRRIGYNRYQFLINDVWTDE  839
+7        933   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  976
+8        944   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  987
+6        938   SSLVYDEE..QQYENLTPS.PTKI---W....D...E....G.YI..  981
+
+
+Lambda      K        H        a         alpha
+   0.318    0.115    0.267    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0351    0.140     1.90     42.6     43.6 
+
+Effective search space used: 46680966
+Results from round 5
+
+
+Query= YP_009220492.1 hypothetical protein [White spot syndrome virus]
+
+Length=843
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       834     0.0  
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       821     0.0  
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       809     0.0  
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       330     8e-99
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       216     4e-61
+BDT63553.1 wsv433-like protein [Pasiphaea japonica whispovirus]       169     2e-45
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       127     2e-32
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       111     2e-27
+BDT63530.1 wsv327-like protein [Pasiphaea japonica whispovirus]       108     2e-26
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       106     2e-25
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       97.7    6e-23
+BDT63552.1 wsv427-like protein [Pasiphaea japonica whispovirus]       78.0    4e-17
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       68.4    6e-14
+BDT63574.1 wsv277-like protein [Pasiphaea japonica whispovirus]       37.6    2e-04
+
+Sequences not found previously or not previously below threshold:
+
+BDT63532.1 wsv285-like protein [Pasiphaea japonica whispovirus]       22.6    8.3  
+
+
+
+Query_1  13    EEVLENIEPYMSFLDVFTERELALLNDIITSRNSPPVPSSSFKKLDNKEEFRDIIYFFIN  72
+7        126    .MFWSF.K.DTMTKQQQKLLVGII.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  177
+8        133    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  184
+6        126    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLC.A  177
+55       852                        .KII.RLD.NT.TFHRDTERLPTASDQKK.IKNTHHC..  901
+                                                                      \    
+                                                                      |    
+                                                            SLDDRKKLAFV
+82       2633  ......AQRIV.Y.G.PLQNIVGCM.ELLARTDKNHLEWLTLSAVSFARA.NVTT.HALD  2707
+                           \             \                                 
+                           |             |                                 
+                   GGTCARKSG        GVDTVD
+76       410                  .SSKKV.GIIK..VSNT.VSNIKC.A.R..                 439
+34       895                        .SSISN.VGY.F.NNGDGIKYHEVSVNSCISYAD..STR  935
+                                                           \               
+                                                           |               
+                                                          TI
+
+Query_1  73    NNTKSDSSPICEGMTFINALTTVCKTFRGLYENIHDDFLFVKYSLLVSMDNGFLRRETHG  132
+7        178   AHP.FEIN-----SCV.D.VSSC--S.DSI.Q-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+8        185   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  234
+6        178   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+55       902   IR.RTHLGRVTATSWAVD.IR.LT.GDKDTFATL                            935
+82       2708  STL.TTA-----------...DMYNA.KS.I.TVDEER.K..ST..---.SI.NT.MA.   2752
+54       333                                           I.HA.IFNEPST.N.LSSGA  352
+34       936   GCGQ..AAT.HNEALN.DTIA.MSSQ.DSEGKDTKSENNAM.FNIFNDD..SESNSDSDP  1002
+                                 \                       \                 
+                                 |                       |                 
+                                 K                  MYASHI
+
+Query_1  133   IKFGTGDDSRTGFKFTSKEQAEEEREKVMRRIKKLDGVLASLKKSTSSARSGIVFYVEKC  192
+7        228   SE.NKLSSDYKS.NISDNKEMNHQYD.IKN.FT..ENI.IY.ENEKNYP---LY.FIKCA  303
+                                  \                                        
+                                  |                                        
+                SFNIEDEEKIIQNYKPTPT
+8        235   SE.NKNSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  303
+                    \             \                                        
+                    |             |                                        
+                    L   KIMKNYKPTPT
+6        228   S..NKLSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  296
+                      \           \                                        
+                      |           |                                        
+                      S KIIKNYKPTPT
+54       353   GL..KFTGRDND.DYDNEA.SGLQFNV.TDCLS..                           387
+34       1003  EHPS.TPVK.KMTDTINE.EQGHQ.D                                    1028
+
+Query_1  193   SSVIRFRLFSRIVNITSDYVAEMKKSAPLEPFDISFGYKYFVDESPCVTKAKRLISNGNF  252
+7        304   I.E.LLL.QE...KLLFS.FSSTPTAPLV....M..LMPFLP-----IFRQ.SFQKFSKL  358
+8        304   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  358
+6        297   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  351
+21       499                            AT.FQK.AMDELSS.CINARQLLIDC.EVGHFV.K  537
+                                                                         \ 
+                                                                         | 
+                                                                      MDAF
+32       647                          .T.S.F----LA.AAFWALRN.VRARRQVNDPT.T..  679
+57       427                                        MPFCIPKGRRLF.I.NMTTPNK.  449
+
+Query_1  253   IIGRPFSCLETSPSSVSTDFREEMNMDARSIARLNWTNEERASAYRSVIIKSFLSSIEEE  312
+7        359   VE..KI.VFKSMQIKQ.VHK.SYIEVKHL.VLGMR.NRFP.V.T..KEMMRAL..Q.QQV  432
+                                  \                   \           \        
+                                  |                   |           |        
+                          NYGNLFLVD                   F        ETQQ
+8        359   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  432
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+6        352   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  425
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+21       538   .AE.EN.--N.ISLKKARCLID.I.SNV.GKNT.AT..K.MDYILLKIDDRFKVVLV...  595
+55       709                                            DEY.SKGSFENII.QTK.V  727
+2        573    EKS.YPKY.G..I.KGLLQFDMIPKFDK.QLTH..GDLKLKIKKHG.RNSM.VATMPTA  631
+32       680   .P...LPLISALSLT.NILKNNYCDA.KINSQK.M.RAL.EMQFESEI----WAA.KKQV  738
+                                \                                          
+                                |                                          
+                              LIK
+57       450   ..KS.-----------.VSIA.TIKKNPI.LC.FD.KDY.DKEK.QTENLHAKI.AM     497
+                                                    \                      
+                                                    |                      
+                                                   QI
+
+Query_1  313   MVEEYCETTTKTVAEMAVEFVDVFIEKAETIQHFQTLYSIFDTMPKFSAEMMDNILKNVA  372
+7        433   -------.AGN.SIYTRS.DIEEIV.GFHN.RFDYQD.KFV.IIQRWPLP.FCSV..ELQ  488
+                                                                  \    \   
+                                                                  |    |   
+                                                                  S   LQ
+8        433   -------RAGN.STYTRSQDIEEIV.GFHN.RFDYGDHRFVNIIQRWPLP.FCSV..ELQ  489
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+6        426   -------RAGN.STYTRSQDIEEIV.GFHN.HFDYGDHRFVNIIQRWPLP.FCSV..ELQ  482
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+21       596   D.GHDG...IE.ILQ---.AL.SYRN.NDAM.QIS.EHELY.IIQEQE--------Q..K  651
+                                                    \                      
+                                                    |                      
+                                              EEEDVIG
+55       728   .ENN.DRQSGLLLVPSHIDDR.TVTGDVSEKYQQYL.HRDV.YLMASPMK.FIRAID.QN  791
+                   \                                    \         \        
+                   |                                    |         |        
+                  SP                                    E         V
+2        632   STAQILGNAES.EPY.SNI.NRNILSGTCQVVNESLVNDLMN-LGIWTKKIS.R.I      686
+32       739   TTK.IKNRAIAKLVLEPSG.IPN.DPRNNQ                                768
+
+Query_1  373   INEAVGSGLCGAILLWMINSRPFEEIDYNYFKICLREIMVRKKTDKLCDNLIVKRIVSHK  432
+7        489   KKRCKSK.R.IK.A-----K.IY..EN--------E.NVMK.DNL..N.TCSL.KLFQ.Q  542
+                                                             \             
+                                                             |             
+                                                       FIKYAIF
+8        490   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  548
+                     \                                       \             
+                     |                                       |             
+                 HNLSD                                 FLKYAIF
+6        483   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  541
+                     \                                       \             
+                     |                                       |             
+                 HNLSN                                 FLKYAIF
+21       653   .RKIKSDDA.QL.PSSHVTENI..KLKKQ..INTASTSVSAC.SAL.--TVKSHAVIQAI  715
+               \                      \                                    
+               |                      |                                    
+               H                  IAPWF
+55       792   KEKYLSV.DLAVLAI.CKKYVLCK----.WEDPVISKSQYEWLSS...GH.LLADL.N--  845
+
+Query_1  433   NVVITDPHEVKGYVRLCVKVSCFMEDLEAFLTKNPWLKHTYFDEKGNTLLCYCIINKYSH  492
+7        543   KETL-NVDDI.YLL.Y.ID.N.YSNNVC.IISEFK..LN.WI.DE...FIG..VKHR.PA  611
+                                   \  \                                    
+                                   |  |                                    
+                            HSSKPTSL RS
+8        549   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  617
+                                   \         \                             
+                                   |         |                             
+                                   H LSSHTACDI
+6        542   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  610
+                                   \         \                             
+                                   |         |                             
+                                   H RSSHTACNI
+21       716   QKLRKT.EDK.AVMS.EQTGDSYLTN.STRISE.VREE.YGLVDT.SSP.ANT.FSG.RL  789
+                                              \              \             
+                                              |              |             
+                                    CDACRKRKMQT            VYD
+77       125                                            I.AS.K...MSNL.S.--.  141
+55       846   ---FGLLGDL.IIN..DTNTNT.HR.T.RLP.ASKFI.N.SL.DRKKLAFVHHC..      901
+                                                 \                         
+                                                 |                         
+                                               DQK
+79       194                     DINFAER.VDENAAGVIM.SDSSL.DAIKNAEQQHVLS--GL  233
+3        9          L..SCSLPPTYDKLIDA.DN.FATIKSAYI.K...NQ.DNDD--FSSE.M.PVGL  61
+
+Query_1  493   TSKLVKQEKLNILKPSAKGMSPLMVCAAISSPFTTRVGIEILTTNSLAFSFINENNENVF  552
+7        612   LDDILDDRRISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  675
+                          \       \            \                           
+                          |       |            |                           
+                          A      DD            T
+8        618   L.FILGDRHIDTINATSRDLT.A.IA.DNAN.TSKTDI.RV.HNYGANLFYV.K.R.TIL  680
+                          \       \                                        
+                          |       |                                        
+                          A      DD
+6        611   L.SILGYLHISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  674
+                          \      \             \                           
+                          |      |             |                           
+                          A     ED             T
+21       790   LCRA.AMSSTFKF.IKQ.PN.VAY.ILLPMP.IEPL.ALSGNPID.IVQTVGES.HAEIT  850
+                                            \                              
+                                            |                              
+                                            I
+77       142   LME.MVSTSDFFMNINK.DK.NFLHAF.PKTRV.NIY.EQLS.QTL.FIADLLF....--  203
+                             \                                             
+                             |                                             
+                          LLCQ
+79       234   VK.RPAEKGVDRPSDDNDNNT.A.MF-----.YENLW.DNKI.VCL.NHIMTEVAIP.I.  289
+                          \                                                
+                          |                                                
+                          W
+3        62    LNDV..DV..HVPYV.S.QRQ.FCNILLNENR..NLK.C.T.QNT..SYHD.          130
+                         \          \           \                          
+                         |          |           |                          
+                  LYHRLCKN   DNGDSEGV           V
+
+Query_1  553   HAAAVATSCNFLDALAKKYKNIIYDFDRSIVNARRASDGATPLMIAIANHKHDVSDALVG  612
+7        676   .R..G.NNSIM.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  732
+                                          \                                
+                                          |                                
+                                          L
+8        681   .R..G.NNSTV.RSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  737
+                                          \                                
+                                          |                                
+                                          L
+6        675   .R..G.NNSIV.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  731
+                                          \                                
+                                          |                                
+                                          L
+21       851   NRKLCSNTARGMILIKPNT.TANTNKCIDSF.NTKQV..S.G.SLHDSKSNSVAAKRIHC  918
+                     \                               \                     
+                     |                               |                     
+                     R                         VIMLGPK
+77       204   YCQY.SSRA..P..N.PN------------------K..M...QL..SADNAQAVLY.IC  245
+79       290   L.NFIIYM..H.RGIIRSV.T.L.EDNDDGSSINYFE..                       328
+
+Query_1  613   AHGAKINMLYGKSSTLSVTEAALLMFNDTALTQFAQRGYEPSIPTILKAALDFSLQEEEP  672
+7        733   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.F...Y  792
+8        738   ICRV.FRT.F.N.NV.RTP.FI..KGVSISTEFLENQ.I.ANMSI.KD.F.YNT.FK..Y  797
+6        732   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.FK..Y  791
+21       919   LLDVPY.AIAFLQTIGRT                                            936
+77       246   LY..----------------FWFEQ.T.KGT.DGT.MN.----------------F.YAY  273
+
+Query_1  673   LVAATGLDVNKAPRSWPILNCRLGYIASSNYPWAEHIISGDKEEIKRALEEHEKNANVRF  732
+7        793   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  872
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+8        798   HI.TA..TIDGVKT.H.NK.TWT.LRQ.KGHK.VSPLVN.KMDAFINSV.KTT.----I.  877
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+6        792   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  871
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+77       274   --------------.KKAIK.VTVLK.K...TIHSN.--NNQ.L.NQGMC.---.G..ST  315
+                                         \                                 
+                                         |                                 
+                                         F
+
+Query_1  733   DSDNCPVCLEDFSSTNIIRTTRCGHCIDEKCWDRLVLSTQRGEITRCPVCRERTSLRPDA  792
+7        873   E.ED.SI...KL.ANYG--S.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  932
+                                                        \                  
+                                                        |                  
+                                                       DP
+8        878   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  943
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+6        872   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  937
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+77       316   .NIT.SI.TVSCTENQNEQWFK...F.HCR.---.MGICAV.SSLT..M..           366
+                 \                   \                                     
+                 |                   |                                     
+                 I                  MP
+
+Query_1  793   DQVKEMLVEPIVSCKRMAVPDEQVSCKRRRIGYNRYQFLINDVWTDE  839
+7        933   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  976
+8        944   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  987
+6        938   SSLVYDEE..QQYENLTPS.PTKI---W....D...E....G.YI..  981
+
+
+Lambda      K        H        a         alpha
+   0.318    0.114    0.261    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0348    0.140     1.90     42.6     43.6 
+
+Effective search space used: 46680966
+Results from round 6
+
+
+Query= YP_009220492.1 hypothetical protein [White spot syndrome virus]
+
+Length=843
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       818     0.0  
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       805     0.0  
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       794     0.0  
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       331     6e-99
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       222     5e-63
+BDT63553.1 wsv433-like protein [Pasiphaea japonica whispovirus]       170     2e-45
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       127     2e-32
+BDT63532.1 wsv285-like protein [Pasiphaea japonica whispovirus]       123     4e-31
+BDT63530.1 wsv327-like protein [Pasiphaea japonica whispovirus]       116     1e-28
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       111     2e-27
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       98.1    5e-23
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       94.2    1e-21
+BDT63552.1 wsv427-like protein [Pasiphaea japonica whispovirus]       72.7    2e-15
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       68.4    6e-14
+BDT63574.1 wsv277-like protein [Pasiphaea japonica whispovirus]       34.5    0.002
+
+Sequences not found previously or not previously below threshold:
+
+
+
+
+Query_1  13    EEVLENIEPYMSFLDVFTERELALLNDIITSRNSPPVPSSSFKKLDNKEEFRDIIYFFIN  72
+7        126    .MFWSF.K.DTMTKQQQKLLVGII.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  177
+8        133    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLCVA  184
+6        126    .IVWSF.K.DTMTKQQQKLLVGTI.GN.DYL.DCHLK.IKGL.INDE-------LLC.A  177
+55       852                        .KII.RLD.NT.TFHRDTERLPTASDQKK.IKNTHHC..  901
+                                                                      \    
+                                                                      |    
+                                                            SLDDRKKLAFV
+34       895                        .SSISN.VGY.F.NNGDGIKYHEVSVNSCISYAD..STR  935
+                                                           \               
+                                                           |               
+                                                          TI
+32       447                             GLTH.S..NG.KCRLLAQVYL.------DLHALF  474
+82       2633  ......AQRIV.Y.G.PLQNIVGCM.ELLARTDKNHLEWLTLSAVSFARA.NVTT.HALD  2707
+                           \             \                                 
+                           |             |                                 
+                   GGTCARKSG        GVDTVD
+76       410                  .SSKKV.GIIK..VSNT.VSNIKC.A.R..                 439
+
+Query_1  73    NNTKSDSSPICEGMTFINALTTVCKTFRGLYENIHDDFLFVKYSLLVSMDNGFLRRETHG  132
+7        178   AHP.FEIN-----SCV.D.VSSC--S.DSI.Q-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+8        185   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  234
+6        178   A.P.FEIN.-----CV.D.ISSC--S.DSICQ-.K..DR.ILIAI.IGQN.L.FNK--.S  227
+55       902   IR.RTHLGRVTATSWAVD.IR.LT.GDKDTFATL                            935
+34       936   GCGQ..AAT.HNEALN.DTIA.MSSQ.DSEGKDTKSENNAM.FNIFNDD..SESNSDSDP  1002
+                                 \                       \                 
+                                 |                       |                 
+                                 K                  MYASHI
+32       475   SCPRCETGFLVK-SLDTFSILDAE.VN..EG.KQLVEN.QMCV-.ALDPNATPQTKVG.P  540
+                                                                          \
+                                                                          |
+                                                                   LIVQVFTL
+82       2708  STL.TTA-----------...DMYNA.KS.I.TVDEER.K..ST..---.SI.NT.MA.   2752
+54       333                                           I.HA.IFNEPST.N.LSSGA  352
+
+Query_1  133   IKFGTGDDSRTGFKFTSKEQAEEEREKVMRRIKKLDGVLASLKKSTSSARSGIVFYVEKC  192
+7        228   SE.NKLSSDYKS.NISDNKEMNHQYD.IKN.FT..ENI.IY.ENEKNYP---LY.FIKCA  303
+                                  \                                        
+                                  |                                        
+                SFNIEDEEKIIQNYKPTPT
+8        235   SE.NKNSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  303
+                    \             \                                        
+                    |             |                                        
+                    L   KIMKNYKPTPT
+6        228   S..NKLSNKKKS.NIEDE.EMNHQYD.IKN.FT..ENI.IY.ENEKNYS---LYLLIKCV  296
+                      \           \                                        
+                      |           |                                        
+                      S KIIKNYKPTPT
+34       1003  EHPS.TPVK.KMTDTINE.EQGHQ.D                                    1028
+32       541   TP.NVSK.GYGKLGLSG.IRQQKQ-D.EV.KLY..NKAAKFI.V.KGF.SLAFYL.ASVA  606
+                                                    \                 \    
+                                                    |                 |    
+                                               QQYSFE                 L
+54       353   GL..KFTGRDND.DYDNEA.SGLQFNV.TDCLS..                           387
+
+Query_1  193   SSVIRFRLFSRIVNITSDYVAEMKKSAPLEPFDISFGYKYFVDESPCVTKAKRLISNGNF  252
+7        304   I.E.LLL.QE...KLLFS.FSSTPTAPLV....M..LMPFLP-----IFRQ.SFQKFSKL  358
+8        304   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  358
+6        297   IAQ.LLL.QE...EFLFS.FSSTPTTPSV....M..LMPFLP-----IFRQ.SFQNFSKL  351
+21       499                            AT.FQK.AMDELSS.CINARQLLIDC.EVGHFV.K  537
+                                                                         \ 
+                                                                         | 
+                                                                      MDAF
+32       607   T.ETVYL.I..WGDVRFPTTNND.T.S.F----LA.AAFWALRN.VRARRQVNDPT.T..  679
+                   \                \                                      
+                   |                |                                      
+               TWSNRDEIDPS     LWGNDN
+57       427                                        MPFCIPKGRRLF.I.NMTTPNK.  449
+
+Query_1  253   IIGRPFSCLETSPSSVSTDFREEMNMDARSIARLNWTNEERASAYRSVIIKSFLSSIEEE  312
+7        359   VE..KI.VFKSMQIKQ.VHK.SYIEVKHL.VLGMR.NRFP.V.T..KEMMRAL..Q.QQV  432
+                                  \                   \           \        
+                                  |                   |           |        
+                          NYGNLFLVD                   F        ETQQ
+8        359   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  432
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+6        352   VED.KI.VFKSVRIKQPVHK.SCNQVKHL.VLGMR.NRFP.V.T..KEMMHAL..Q.QQV  425
+                                   \                  \           \        
+                                   |                  |           |        
+                           YRNLYLLET                  F        ETQQ
+21       538   .AE.EN.--N.ISLKKARCLID.I.SNV.GKNT.AT..K.MDYILLKIDDRFKVVLV...  595
+55       709                                            DEY.SKGSFENII.QTK.V  727
+32       680   .P...LPLISALSLT.NILKNNYCDA.KINSQK.M.RAL.EMQFESEI----WAA.KKQV  738
+                                \                                          
+                                |                                          
+                              LIK
+2        573    EKS.YPKY.G..I.KGLLQFDMIPKFDK.QLTH..GDLKLKIKKHG.RNSM.VATMPTA  631
+57       450   ..KS.-----------.VSIA.TIKKNPI.LC.FD.KDY.DKEK.QTENLHAKI.AM     497
+                                                    \                      
+                                                    |                      
+                                                   QI
+
+Query_1  313   MVEEYCETTTKTVAEMAVEFVDVFIEKAETIQHFQTLYSIFDTMPKFSAEMMDNILKNVA  372
+7        433   -------.AGN.SIYTRS.DIEEIV.GFHN.RFDYQD.KFV.IIQRWPLP.FCSV..ELQ  488
+                                                                  \    \   
+                                                                  |    |   
+                                                                  S   LQ
+8        433   -------RAGN.STYTRSQDIEEIV.GFHN.RFDYGDHRFVNIIQRWPLP.FCSV..ELQ  489
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+6        426   -------RAGN.STYTRSQDIEEIV.GFHN.HFDYGDHRFVNIIQRWPLP.FCSV..ELQ  482
+                                                \                 \    \   
+                                                |                 |    |   
+                                                W                 S   LQ
+21       596   D.GHDG...IE.ILQ---.AL.SYRN.NDAM.QIS.EHELY.IIQEQE--------Q..K  651
+                                                    \                      
+                                                    |                      
+                                              EEEDVIG
+55       728   .ENN.DRQSGLLLVPSHIDDR.TVTGDVSEKYQQYL.HRDV.YLMASPMK.FIRAID.QN  791
+                   \                                    \         \        
+                   |                                    |         |        
+                  SP                                    E         V
+32       739   TTK.IKNRAIAKLVLEPSG.IPN.DPRNNQ                                768
+2        632   STAQILGNAES.EPY.SNI.NRNILSGTCQVVNESLVNDLMN-LGIWTKKIS.R.I      686
+
+Query_1  373   INEAVGSGLCGAILLWMINSRPFEEIDYNYFKICLREIMVRKKTDKLCDNLIVKRIVSHK  432
+7        489   KKRCKSK.R.IK.A-----K.IY..EN--------E.NVMK.DNL..N.TCSL.KLFQ.Q  542
+                                                             \             
+                                                             |             
+                                                       FIKYAIF
+8        490   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  548
+                     \                                       \             
+                     |                                       |             
+                 HNLSD                                 FLKYAIF
+6        483   KERYKNK.R.IK.A-----E.VY..ENG--------.NVMK.DNL..N.TCSL.KLFQ.Q  541
+                     \                                       \             
+                     |                                       |             
+                 HNLSN                                 FLKYAIF
+21       653   .RKIKSDDA.QL.PSSHVTENI..KLKKQ..INTASTSVSAC.SAL.--TVKSHAVIQAI  715
+               \                      \                                    
+               |                      |                                    
+               H                  IAPWF
+55       792   KEKYLSV.DLAVLAI.CKKYVLCK----.WEDPVISKSQYEWLSS...GH.LLADL.N--  845
+
+Query_1  433   NVVITDPHEVKGYVRLCVKVSCFMEDLEAFLTKNPWLKHTYFDEKGNTLLCYCIINKYSH  492
+7        543   KETL-NVDDI.YLL.Y.ID.N.YSNNVC.IISEFK..LN.WI.DE...FIG..VKHR.PA  611
+                                   \  \                                    
+                                   |  |                                    
+                            HSSKPTSL RS
+8        549   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  617
+                                   \         \                             
+                                   |         |                             
+                                   H LSSHTACDI
+6        542   KETL-NVDDI.YLL.Y.ID..SESTS.DSYISEFK..LN.WI.DE...FIG..VKHR.PY  610
+                                   \         \                             
+                                   |         |                             
+                                   H RSSHTACNI
+21       716   QKLRKT.EDK.AVMS.EQTGDSYLTN.STRISE.VREE.YGLVDT.SSP.ANT.FSG.RL  789
+                                              \              \             
+                                              |              |             
+                                    CDACRKRKMQT            VYD
+77       125                                            I.AS.K...MSNL.S.--.  141
+55       846   ---FGLLGDL.IIN..DTNTNT.HR.T.RLP.ASKFI.N.SL.DRKKLAFVHHC..      901
+                                                 \                         
+                                                 |                         
+                                               DQK
+79       194                     DINFAER.VDENAAGVIM.SDSSL.DAIKNAEQQHVLS--GL  233
+3        9          L..SCSLPPTYDKLIDA.DN.FATIKSAYI.K...NQ.DNDD--FSSE.M.PVGL  61
+
+Query_1  493   TSKLVKQEKLNILKPSAKGMSPLMVCAAISSPFTTRVGIEILTTNSLAFSFINENNENVF  552
+7        612   LDDILDDRRISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  675
+                          \       \            \                           
+                          |       |            |                           
+                          A      DD            T
+8        618   L.FILGDRHIDTINATSRDLT.A.IA.DNAN.TSKTDI.RV.HNYGANLFYV.K.R.TIL  680
+                          \       \                                        
+                          |       |                                        
+                          A      DD
+6        611   L.SILGYLHISTINATSRDLT.A.IA.DNAN..KPTDI.RV.HNHGANLFYV.K.R.TIL  674
+                          \      \             \                           
+                          |      |             |                           
+                          A     ED             T
+21       790   LCRA.AMSSTFKF.IKQ.PN.VAY.ILLPMP.IEPL.ALSGNPID.IVQTVGES.HAEIT  850
+                                            \                              
+                                            |                              
+                                            I
+77       142   LME.MVSTSDFFMNINK.DK.NFLHAF.PKTRV.NIY.EQLS.QTL.FIADLLF....--  203
+                             \                                             
+                             |                                             
+                          LLCQ
+79       234   VK.RPAEKGVDRPSDDNDNNT.A.MF-----.YENLW.DNKI.VCL.NHIMTEVAIP.I.  289
+                          \                                                
+                          |                                                
+                          W
+3        62    LNDV..DV..HVPYV.S.QRQ.FCNILLNENR..NLK.C.T.QNT..SYHD.          130
+                         \          \           \                          
+                         |          |           |                          
+                  LYHRLCKN   DNGDSEGV           V
+
+Query_1  553   HAAAVATSCNFLDALAKKYKNIIYDFDRSIVNARRASDGATPLMIAIANHKHDVSDALVG  612
+7        676   .R..G.NNSIM.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  732
+                                          \                                
+                                          |                                
+                                          L
+8        681   .R..G.NNSTV.RSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  737
+                                          \                                
+                                          |                                
+                                          L
+6        675   .R..G.NNSIV.QSI----..MATGD.EK..EL..KV.NT..M...LSRGHC.FAKQ.SD  731
+                                          \                                
+                                          |                                
+                                          L
+21       851   NRKLCSNTARGMILIKPNT.TANTNKCIDSF.NTKQV..S.G.SLHDSKSNSVAAKRIHC  918
+                     \                               \                     
+                     |                               |                     
+                     R                         VIMLGPK
+77       204   YCQY.SSRA..P..N.PN------------------K..M...QL..SADNAQAVLY.IC  245
+79       290   L.NFIIYM..H.RGIIRSV.T.L.EDNDDGSSINYFE..                       328
+
+Query_1  613   AHGAKINMLYGKSSTLSVTEAALLMFNDTALTQFAQRGYEPSIPTILKAALDFSLQEEEP  672
+7        733   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.F...Y  792
+8        738   ICRV.FRT.F.N.NV.RTP.FI..KGVSISTEFLENQ.I.ANMSI.KD.F.YNT.FK..Y  797
+6        732   ICRV.FCT.F.N.NV.RTP.FI..KGVSVSTEFLENQ.V.ANMSI.KD.FFYNT.FK..Y  791
+21       919   LLDVPY.AIAFLQTIGRT                                            936
+77       246   LY..----------------FWFEQ.T.KGT.DGT.MN.----------------F.YAY  273
+
+Query_1  673   LVAATGLDVNKAPRSWPILNCRLGYIASSNYPWAEHIISGDKEEIKRALEEHEKNANVRF  732
+7        793   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  872
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+8        798   HI.TA..TIDGVKT.H.NK.TWT.LRQ.KGHK.VSPLVN.KMDAFINSV.KTT.----I.  877
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+6        792   HI.TA..KIDGVKT.H.NK.TWTALRQ.KGHK.VSLLVN.KMDAFINSV.KTT.----I.  871
+                      \           \                                        
+                      |           |                                        
+               INIGRQAVE KQFFGGNINRLNESN
+77       274   --------------.KKAIK.VTVLK.K...TIHSN.--NNQ.L.NQGMC.---.G..ST  315
+                                         \                                 
+                                         |                                 
+                                         F
+
+Query_1  733   DSDNCPVCLEDFSSTNIIRTTRCGHCIDEKCWDRLVLSTQRGEITRCPVCRERTSLRPDA  792
+7        873   E.ED.SI...KL.ANYG--S.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  932
+                                                        \                  
+                                                        |                  
+                                                       DP
+8        878   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  943
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+6        872   E.ED.SI...KL.ANYGFSS.K...QFHTH..QTMKNTIKQSGSIY.....QK.CF.KHT  937
+                                  \                     \                  
+                                  |                     |                  
+                               VNYG                    DP
+77       316   .NIT.SI.TVSCTENQNEQWFK...F.HCR.---.MGICAV.SSLT..M..           366
+                 \                   \                                     
+                 |                   |                                     
+                 I                  MP
+
+Query_1  793   DQVKEMLVEPIVSCKRMAVPDEQVSCKRRRIGYNRYQFLINDVWTDE  839
+7        933   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  976
+8        944   SSLVYDEE..QQYENSTPS.PTKI---W....D...E....G.YI..  987
+6        938   SSLVYDEE..QQYENLTPS.PTKI---W....D...E....G.YI..  981
+
+
+Lambda      K        H        a         alpha
+   0.317    0.113    0.255    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0345    0.140     1.90     42.6     43.6 
+
+Effective search space used: 46680966
+
+Search has CONVERGED!
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

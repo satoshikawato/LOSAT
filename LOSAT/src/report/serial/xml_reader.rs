@@ -247,10 +247,11 @@ pub(crate) struct XmlReader<S: AsnSource> {
     /// `m_Utf8Buf` and `m_Utf8Pos`: the UTF-8 bytes of a character being returned one by one.
     utf8: Vec<u8>,
     utf8_at: usize,
-    /// The object stream of a type table (`asn_types::read_xml`, `CObjectIStream::Open` with
-    /// `eSerial_Xml` for blast_formatter's archives) rather than rpsbproc's reader of a BLAST XML document:
-    /// attributes are skipped as NCBI skips the ones it does not know, and a control character
-    /// is replaced by `#` with a post (`x_VerifyChar`), where rpsbproc's refuses both.
+    /// The object stream of a type table (`asn_types::read_xml`: NCBI's XML object stream, as
+    /// `-in_pssm` and blast_formatter's archives open it) rather than rpsbproc's reader of a BLAST
+    /// XML document: attributes are skipped as NCBI skips the ones it does not know, a name with a
+    /// namespace prefix is read as NCBI reads it, and a control character is replaced by `#` with
+    /// a post (`x_VerifyChar`), where rpsbproc's reader refuses all three.
     object: bool,
     /// `m_Input.GetLine()`: the line counter of NCBI's input buffer, which only
     /// `SkipEndOfLine` advances.
@@ -462,9 +463,10 @@ impl<S: AsnSource> XmlReader<S> {
     /// `ReadUndefinedAttributes`: the end of a tag, or an attribute (refused).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:914-931
     // (`ReadName` throws for a byte that cannot start a name.)
-    // (An object stream skips each attribute: its name, `=` and the quoted value. `xmlns` and `nil`
-    // would also set namespace maps and `m_IsNil`, which a type of an ASN.1 module never
-    // reads; the `nil` value's own check (`NStr::StringToBool`) is not made.)
+    // (An object stream skips each attribute: its name, `=` and the quoted value. `read_name`
+    // reads an `xmlns` declaration and a `nil` attribute itself, as NCBI's `ReadName` does under
+    // `m_Attlist`; the `m_IsNil` it sets is used only for a nillable member (`eReadAsNil`), which
+    // no type of an ASN.1 module has.)
     pub(super) fn read_undefined_attributes(&mut self) -> Result<u8> {
         if self.object {
             self.attlist = true;
@@ -1015,8 +1017,8 @@ impl<S: AsnSource> XmlReader<S> {
     /// comments and the `DOCTYPE` before the first element, whose name it gives back
     /// (`UndoClassMember`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:582-670
-    // (The namespace prefix of the type name is refused by `read_name`; without one,
-    // `m_CurrNsPrefix` is empty and a colon followed by `typeName` never equals a type's name.)
+    // (No type of an ASN.1 module has a `:` in its name, so `m_CurrNsPrefix`, `:` and `typeName`
+    // never equal it, whether `read_name` read a prefix or, in rpsbproc's reader, refused it.)
     pub(super) fn read_file_header(&mut self) -> Result<Vec<u8>> {
         if self.peek(0)? == 0xEF && self.peek(1)? == 0xBB && self.peek(2)? == 0xBF {
             self.skip(3);

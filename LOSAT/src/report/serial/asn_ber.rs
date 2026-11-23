@@ -361,6 +361,12 @@ impl Encoder for AsnBinaryEncoder<'_> {
         Ok(())
     }
 
+    fn null_element(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::NullElement);
+        }
+    }
+
     fn error(&self) -> Option<SerialError> {
         self.error
     }

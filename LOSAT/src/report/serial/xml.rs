@@ -1007,6 +1007,10 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         }
     }
 
+    fn null_element(&mut self) {
+        self.fail(SerialError::NullElement);
+    }
+
     /// `WriteString` of a UTF8String (a PSSM query's `User-field` `str`, `asn_types::write`) in
     /// the object mode: the archive's stream has no encoding, so the string's encoding is the
     /// stream's (UTF-8) and NCBI checks and writes each byte as a VisibleString's

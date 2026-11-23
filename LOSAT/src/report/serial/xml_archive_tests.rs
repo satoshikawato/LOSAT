@@ -668,6 +668,9 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.null();
         self.flush();
     }
+    fn null_element(&mut self) {
+        self.inner.null_element();
+    }
     fn utf8_str(&mut self, value: &[u8]) {
         self.inner.utf8_str(value);
         self.flush();

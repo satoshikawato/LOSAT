@@ -85,10 +85,6 @@ impl fmt::Display for MaskFileError {
 
 impl std::error::Error for MaskFileError {}
 
-/// The deepest nesting of object frames that LOSAT follows in a mask file (NCBI's stack is only
-/// limited by memory; `ObjectStream::limit_depth`).
-const MAX_DEPTH: usize = 400;
-
 /// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, cited at `read_seq_loc_parts`):
 /// each Seq-loc starts a walk of its own (`my_id`, NULL), takes the Seq-ids of its parts in
 /// order, and hands its own to the Seq-loc around it (`x_UpdateId` of `id` and `my_id`) once its
@@ -116,7 +112,7 @@ impl IdWalk {
         }
     }
 
-    /// `CheckId` of `id` and `may_throw`, called on an element (`*li`) of a `mix` or `equiv`:
+    /// `CheckId` of `id` and `may_throw`, called on an element of a `mix` or `equiv`:
     /// the element's own walk `inner`, if this walk gets that far.
     fn nested(&mut self, inner: IdWalk) {
         if !matches!(self, IdWalk::Same(_)) {
@@ -264,7 +260,8 @@ impl Build {
     /// 4294967294, whose `CRange` is `TRange::GetWhole()`; a point the interval of one position),
     /// and walks it in `walk` (a new [`IdWalk`]) as `CSeq_loc::CheckId` does. An element of
     /// `packed-int`, `mix` or `equiv` stated as `NULL` (an empty `CRef<>`) is where the walk
-    /// dereferences it, if it gets that far (`**ii`, `(*li)->CheckId`).
+    /// dereferences it, if it gets that far (through the element's reference, for its range or
+    /// for its own `CheckId`).
     fn seq_loc_parts<I: Input>(
         r: &mut TypedReader<I>,
         parts: &mut Vec<MaskPart>,
@@ -617,13 +614,11 @@ impl MaskFileReader {
         let src = StreamSource::new(input, &sample);
         let source = match format {
             MaskFileFormat::TextAsn => {
-                let mut stream = ObjectStream::text(src, Names::MASK);
-                stream.limit_depth(MAX_DEPTH);
+                let stream = ObjectStream::text(src, Names::MASK);
                 Source::Text(Box::new(stream))
             }
             MaskFileFormat::BinaryAsn => {
-                let mut stream = ObjectStream::binary(src, Names::MASK);
-                stream.limit_depth(MAX_DEPTH);
+                let stream = ObjectStream::binary(src, Names::MASK);
                 Source::Binary(Box::new(stream))
             }
         };

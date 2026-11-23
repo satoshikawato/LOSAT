@@ -106,8 +106,8 @@ fn value_kind(kind: Kind) -> ValueKind {
 
 /// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
 /// command line's `-help` (`ncbi_app::args::described`): `describe`'s, and those the library API
-/// sets itself. LOSAT
-/// Web's *describe* lists these rows but those that its adapter sets (`web_adapter`).
+/// sets itself. LOSAT Web's *describe* lists these rows but those that its adapter sets
+/// (`web_adapter`).
 pub(crate) fn parameters(program: Program) -> impl Iterator<Item = Parameter> {
     let tool =
         crate::cli::reader::tool(program.name()).expect("every API program is on NCBI's reader");

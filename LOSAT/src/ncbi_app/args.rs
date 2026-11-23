@@ -336,11 +336,11 @@ pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
 }
 
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
-// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by `LOSAT/build.rs`
-// (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
-// arguments of every `CArgDescriptions` before the program's own (the help flags of its
-// constructor), `FILE_ARGUMENTS` those of every application after them
-// (`AddDefaultFileArguments`: `-logfile`, `-conffile`); the build script cites NCBI's lines.
+// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by
+// `LOSAT/build.rs` (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS`
+// are the arguments of every `CArgDescriptions` before the program's own (the help flags of its
+// constructor), `FILE_ARGUMENTS` those of every application after them (`AddDefaultFileArguments`:
+// `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
 
 /// Whether `name` is one of the arguments that every NCBI application has after its own

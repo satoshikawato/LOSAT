@@ -238,9 +238,10 @@ pub use crate::blastinput::fasta_reader::{
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 
 /// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
-/// command line's `-help`, as the library API's `describe` gives each (NCBI's argument tables, line RG DECISIONS
-/// K4i-3-1): the rows of the adapter's `describe`, which leaves out the options that the adapter
-/// sets itself. `api::describe` lists the same rows but those that the library API sets.
+/// command line's `-help`, as the library API's `describe` gives each (NCBI's argument tables,
+/// line RG DECISIONS K4i-3-1): the rows of the adapter's `describe`, which leaves out the options
+/// that the adapter sets itself. `api::describe` lists the same rows but those that the library
+/// API sets.
 pub fn described_parameters(program: crate::api::Program) -> Vec<crate::api::Parameter> {
     crate::api::described_parameters(program).collect()
 }

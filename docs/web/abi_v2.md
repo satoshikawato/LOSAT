@@ -538,7 +538,7 @@ refused: it runs with `-db` and with `-subject`, the engine opening the repeat d
 Version 13 (line NP WW3a, 2026-11-22) runs the tool `windowmasker` (`losat_web2_tool`, §4) with any command line that `losat windowmasker` accepts, on the run's files (§3): `-mk_counts` in each `-sformat`, `-convert`, the masking of `-ustat` in each `-outfmt`, with their options, help and version. Its standard output comes on stream 11, its standard error on stream 3 and its files on the new stream 12 as they are written (D-WW3-6: a tool's output may be larger than the browser's memory, human counts 724 MB, a genome masked as FASTA 3.1 GB), each write at its offset in its file, so that a file that the run opens twice is one file as on the command line (D-WW3-9), its exit status on stream 2 (*status*), and `validate` takes its argv (D-WW3-7, with the checks before the tool's files, D-WW3-10). A host of version 12 does not know the export, stream 12 or the *status*: the application refuses a module of an earlier version, and a host of version 12 refuses a module of version 13. Searches give the streams of version 12.
 
 The *describe* rows of line RG item K4i-3a (2026-11-24) kept version 13: they have the same fields, and a host finds an
-option by its `flag`. Their `help` is NCBI's comment of the option in place of the clap definitions' text, and they come in
-the order of the usage line of the program's `-help`; psiblast's `-out_pssm` and `-out_ascii_pssm` are paths in the library API's `describe`
-(`value_kind`, which this response does not carry). The application reads no value from `help`: the hit list defaults that
-it read from the clap texts (`default: 500`) come from `defaults`.
+option by its `flag`. Their `help` is NCBI's comment of the option in place of the clap definitions' text, and they come
+in the order of the usage line of the program's `-help`; psiblast's `-out_pssm` and `-out_ascii_pssm` are paths in the
+library API's `describe` (`value_kind`, which this response does not carry). The application reads no value from `help`:
+the hit list defaults that it read from the clap texts (`default: 500`) come from `defaults`.

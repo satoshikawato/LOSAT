@@ -156,32 +156,53 @@ pub struct Csr {
     qs: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the batch loop's keep that takes `offsets` back when the CSR
     /// is dropped, with `Keep::take_buffer`'s length and written elements (`x_kept`), and
-    /// (LOSAT_X_CSRQSKEEP) `qs`.
-    x_keep: Option<(std::sync::Arc<super::x_mb_lut_keep::Keep>, usize, usize)>,
+    /// whether it is offered `qs` too (LOSAT_X_CSRQSKEEP, `x_kept_with_qs`).
+    x_keep: Option<(
+        std::sync::Arc<super::x_mb_lut_keep::Keep>,
+        usize,
+        usize,
+        bool,
+    )>,
 }
 
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): `offsets` goes back to the batch loop's keep when the build
-// took its buffer from it (`x_kept`); EXPERIMENT (LOSAT_X_CSRQSKEEP) then `qs` (with the switch
-// off it stays here and is freed with the CSR, as before).
+// took its buffer from it (`x_kept`); EXPERIMENT (LOSAT_X_CSRQSKEEP) then, for a discontiguous
+// build (`x_kept_with_qs`), `qs` (with the switch off, or once the keep is closed for the loop's
+// last tables, it stays here and is freed with the CSR, as before).
 // No NCBI counterpart (memory only): where the CSR's arrays go when its batch drops it.
 impl Drop for Csr {
     fn drop(&mut self) {
-        if let Some((keep, length, dirty)) = self.x_keep.take() {
+        if let Some((keep, length, dirty, qs_back)) = self.x_keep.take() {
             keep.give_back_buffer(std::mem::take(&mut self.offsets), length, dirty);
-            keep.give_back_qs(&mut self.qs);
+            if qs_back {
+                keep.give_back_qs(&mut self.qs);
+            }
         }
     }
 }
 
 impl Csr {
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the CSR whose `offsets` goes back to `keep` when it is
-    /// dropped (`take` = `Keep::take_buffer`'s length and written elements).
+    /// dropped (`take` = `Keep::take_buffer`'s length and written elements). Its `qs` is freed
+    /// with it (a contiguous build, `x_bn_csr`).
     pub(super) fn x_kept(
         mut self,
         keep: &std::sync::Arc<super::x_mb_lut_keep::Keep>,
         take: (usize, usize),
     ) -> Self {
-        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1));
+        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1, false));
+        self
+    }
+
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_kept` for a discontiguous build, which took the kept `qs`
+    /// (`Keep::take_qs`): its `qs` goes back to `keep` after its `offsets` (`Keep::give_back_qs`).
+    /// No NCBI counterpart (memory only).
+    pub(super) fn x_kept_with_qs(
+        mut self,
+        keep: &std::sync::Arc<super::x_mb_lut_keep::Keep>,
+        take: (usize, usize),
+    ) -> Self {
+        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1, true));
         self
     }
 

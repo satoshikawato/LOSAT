@@ -7988,9 +7988,14 @@ enum BatchStage<'a> {
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
     /// spaces of the batch's contexts.
+    ///
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP) `x_last`: the last chunk of the batch loop's last batch, after
+    /// whose tables no build follows, so the loop's keep takes no `qs` back when they drop
+    /// (`x_mb_lut_keep::Keep::close_qs`).
     ChunkPrelim {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
+        x_last: bool,
     },
 }
 
@@ -10597,6 +10602,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             query_offsets,
             lower_case_before,
             masks_outside,
+            last,
             ..
         } if any_valid_context && !UNGAPPED => {
             let chunks = search_query_chunks(
@@ -10614,7 +10620,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 batching,
                 first_batch,
                 posts,
-                x_keep,
+                (x_keep, last),
             )?;
             // A batch with a valid context whose chunks have none (the chunks' own masks would
             // cover the letters that the batch's leave open) meets `BLAST_GapAlignSetUp` first
@@ -11061,7 +11067,14 @@ fn search_query_batch<const UNGAPPED: bool>(
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
     subject_space_overflow.check()?;
-    if let BatchStage::ChunkPrelim { .. } = stage {
+    if let BatchStage::ChunkPrelim { x_last, .. } = stage {
+        // EXPERIMENT (LOSAT_X_CSRQSKEEP): the last chunk of the loop's last batch: no build
+        // follows, so its CSR frees its `qs` when its tables drop at this return, as before the
+        // switch (`x_lut_drop::after_prelim` for a batch that is not split). No NCBI counterpart
+        // (memory only).
+        if let (true, Some(keep)) = (x_last, x_keep) {
+            keep.close_qs();
+        }
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
@@ -11120,7 +11133,9 @@ fn search_query_batch<const UNGAPPED: bool>(
 /// diagnostics (a split batch gives the next batch size 0 initial hits), and NCBI drops its
 /// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error. With the
 /// merged lists it returns whether a chunk had a valid context (its set-up checked the subjects
-/// and the greedy set-up).
+/// and the greedy set-up). `x_keep`: the batch loop's keep (LOSAT_X_MBLUTKEEP) and whether the
+/// batch is the loop's last (`BatchStage::Search`'s `last`; LOSAT_X_CSRQSKEEP, the chunks'
+/// `x_last`).
 #[allow(clippy::too_many_arguments)]
 fn search_query_chunks(
     args: &BlastnArgs,
@@ -11137,7 +11152,7 @@ fn search_query_chunks(
     batching: QueryBatching,
     first_batch: bool,
     posts: &mut Posts,
-    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    (x_keep, last_batch): (Option<&Arc<x_mb_lut_keep::Keep>>, bool),
 ) -> Result<Option<(PrelimHitLists, bool)>> {
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
@@ -11174,7 +11189,7 @@ fn search_query_chunks(
     // Whether a chunk had a valid context, so that its set-up (`context_statistics`) checked the
     // subjects and the greedy set-up.
     let mut chunk_set_up = false;
-    for chunk in &chunks {
+    for (index, chunk) in chunks.iter().enumerate() {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
         anyhow::ensure!(
@@ -11247,6 +11262,7 @@ fn search_query_chunks(
             BatchStage::ChunkPrelim {
                 query_masks: &part_masks,
                 batch_eff_searchsp,
+                x_last: last_batch && index + 1 == chunks.len(),
             },
             &mut *posts,
             x_keep,

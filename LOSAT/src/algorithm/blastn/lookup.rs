@@ -1691,9 +1691,6 @@ fn build_mb_lookup(
     if x_csr_layout {
         let (mut x_offsets, mut x_length, x_dirty) =
             x_csr_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(table_size + 2));
-        // EXPERIMENT (LOSAT_X_CSRQSKEEP): and the kept `qs`, which the build takes where it has
-        // room for its own (`x_mb_lut_keep::qs_buffer`). No NCBI counterpart (memory only).
-        let x_qs = x_csr_keep.and_then(|keep| keep.take_qs());
         // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head writes one element per non-empty cell, so
         // the buffer a fresh build gives back to the keep is the zeroed table `Keep::take` makes for
         // a chains build (two elements more), of which the build wrote its first elements: a later
@@ -1713,7 +1710,6 @@ fn build_mb_lookup(
             pv_array_bts,
             &mut helper_array,
             x_offsets,
-            x_qs,
         );
         x_csr = Some(match x_csr_keep {
             Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),
@@ -2162,7 +2158,7 @@ pub(crate) fn build_disc_mb_lookup_kept(
             }
         };
         let csr = match x_keep {
-            Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),
+            Some(keep) => csr.x_kept_with_qs(keep, (x_length, x_dirty)),
             None => csr,
         };
         x_clock.chain();

@@ -2,12 +2,14 @@
 //! (`LOSAT_X_CSRQSKEEP`, `src/algorithm/blastn/x_mb_lut_keep.rs` module comment) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
-//! It chooses where a CSR build's `qs` comes from (the keep's, from an earlier batch's CSR, or a
-//! fresh allocation), not what the build writes there, so the property under test is that the
-//! report and the standard error do not depend on it, and that the kept `qs` is taken where it has
-//! room: with `LOSAT_TIMING`, `[TIMING] x_mb_lut_keep: ... qs_kept= qs_fresh=` counts the CSR
-//! builds that took it and those that allocated theirs, which add up to the search's CSR builds;
-//! both are 0 with `=0`. That those bytes equal NCBI's is the business of the fixture suites.
+//! It chooses where a discontiguous CSR build's `qs` comes from (the keep's, from an earlier
+//! batch's CSR, or a fresh allocation), not what the build writes there, so the property under test
+//! is that the report and the standard error do not depend on it, and that the kept `qs` is taken
+//! where it has room: with `LOSAT_TIMING`, `[TIMING] x_mb_lut_keep: ... qs_kept= qs_fresh=` counts
+//! the CSR builds that took it and those that allocated theirs, which add up to the search's
+//! discontiguous CSR builds; both are 0 with `=0`. The contiguous CSR builds (`x_bn_csr`) keep
+//! their own `qs`, so a megablast search counts neither on either side. That those bytes equal
+//! NCBI's is the business of the fixture suites.
 //!
 //! The subject is LC738868; `BATCH_SIZE=4000` puts each query record in a batch of its own (a
 //! batch holds whole records). dc-megablast: three records of two genomes each (LC738869 and
@@ -16,11 +18,11 @@
 //! builds: the first finds no `qs` kept, the second has fewer words (and positions) than the first
 //! and takes its `qs`, the third has more and allocates its own. At one thread the serial build
 //! (`x_dc_csr::build`, room for the words) runs, at four the pool's (`x_disc_lookup_par`, room for
-//! the positions). Megablast: four pieces of 100,000 letters from the middles of LC738869,
-//! LC738870, LC738873 and LC738874, whose tables of 4^11 cells are packed CSR heads
-//! (`LOSAT_X_BNCSRPACK`, `x_bn_csr::x_serial_packed` at one thread, `x_mb_lookup_once::csr_on_pool`
-//! at four), each with room for a quarter of the cells (the counts' bytes), so the last three take
-//! the first one's `qs`.
+//! the positions). The third, in the loop's last batch, frees its `qs` with its table (the keep is
+//! closed then, `Keep::close_qs`). Megablast, the reference side: four pieces of 100,000 letters
+//! from the middles of LC738869, LC738870, LC738873 and LC738874, whose tables of 4^11 cells are
+//! packed CSR heads (`LOSAT_X_BNCSRPACK`) built through the keep (their `offsets`), each
+//! allocating its own `qs` with the switch on as with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -127,10 +129,11 @@ fn untimed(stderr: &str) -> Vec<&str> {
 }
 
 /// At one thread and four, with LOSAT_TIMING: the default and `=0` give the same report and the
-/// same standard error but for the `[TIMING]` lines; the default's CSR builds (`[TIMING] <csr>
-/// builds=`, all of them through the keep) took the kept `qs` `qs_kept` times and allocated the
-/// others; `=0` counts neither.
-fn check(task: &str, query: &Path, csr: &str, builds: u64, qs_kept: u64) {
+/// same standard error but for the `[TIMING]` lines; of the default's `builds` CSR builds
+/// (`[TIMING] <csr> builds=`, all of them through the keep) `qs.0` took the kept `qs` and `qs.1`
+/// allocated theirs through the keep (`qs_kept=`, `qs_fresh=`); `=0` counts neither.
+fn check(task: &str, query: &Path, csr: &str, builds: u64, qs: (u64, u64)) {
+    let (qs_kept, qs_fresh) = qs;
     for threads in [1, 4] {
         let what = format!("{task} threads {threads}");
         let (expected, expected_stderr) = search(task, query, threads, &[SWITCH_OFF, TIMING]);
@@ -151,7 +154,7 @@ fn check(task: &str, query: &Path, csr: &str, builds: u64, qs_kept: u64) {
         );
         assert_eq!(
             field(&stderr, KEEP, "qs_fresh="),
-            builds - qs_kept,
+            qs_fresh,
             "{what}:\n{stderr}"
         );
         for name in ["qs_kept=", "qs_fresh="] {
@@ -165,7 +168,7 @@ fn check(task: &str, query: &Path, csr: &str, builds: u64, qs_kept: u64) {
 }
 
 // dc-megablast: three CSR builds of 4^11 cells; the second takes the first one's `qs`, the third
-// (more words) allocates its own.
+// (more words) allocates its own and, in the last batch, frees it with its table.
 #[test]
 fn dc_megablast_csr_builds_take_the_kept_qs() {
     let joined = |a: &str, b: &str| (format!("{a}_{b}"), letters(a) + &letters(b));
@@ -177,12 +180,19 @@ fn dc_megablast_csr_builds_take_the_kept_qs() {
             joined("LC738871", "LC738875"),
         ],
     );
-    check("dc-megablast", &query, "[TIMING] disc_lookup_csr: ", 3, 1);
+    check(
+        "dc-megablast",
+        &query,
+        "[TIMING] disc_lookup_csr: ",
+        3,
+        (1, 2),
+    );
 }
 
-// Megablast: four packed CSR heads of 4^11 cells; the last three take the first one's `qs`.
+// Megablast, the reference side: four packed CSR heads of 4^11 cells through the keep, each with a
+// `qs` of its own as with `=0` (the contiguous builds keep their own `qs`).
 #[test]
-fn megablast_csr_builds_take_the_kept_qs() {
+fn megablast_csr_builds_keep_their_own_qs() {
     let records: Vec<(String, String)> = ["LC738869", "LC738870", "LC738873", "LC738874"]
         .iter()
         .map(|name| {
@@ -195,5 +205,5 @@ fn megablast_csr_builds_take_the_kept_qs() {
         })
         .collect();
     let query = query_file("mb_middles", &records);
-    check("megablast", &query, "[TIMING] x_bn_csr: ", 4, 3);
+    check("megablast", &query, "[TIMING] x_bn_csr: ", 4, (0, 0));
 }

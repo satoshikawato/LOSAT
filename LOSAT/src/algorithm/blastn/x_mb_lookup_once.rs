@@ -1266,7 +1266,6 @@ pub(super) fn csr(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
-    x_qs: Option<Vec<u32>>,
 ) -> (super::x_dc_csr::Csr, bool) {
     #[cfg(all(
         feature = "parallel",
@@ -1285,7 +1284,6 @@ pub(super) fn csr(
             helper_array,
             chunk_positions(parts),
             x_offsets,
-            x_qs,
         );
         return (csr, true);
     }
@@ -1297,7 +1295,6 @@ pub(super) fn csr(
         pv_array_bts,
         helper_array,
         x_offsets,
-        x_qs,
     );
     (csr, false)
 }
@@ -1317,7 +1314,6 @@ fn csr_on_pool(
     helper_array: &mut [u32],
     chunk: usize,
     x_offsets: Vec<u32>,
-    x_qs: Option<Vec<u32>>,
 ) -> super::x_dc_csr::Csr {
     use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
     let chunk = chunk.max(1);
@@ -1404,11 +1400,8 @@ fn csr_on_pool(
         // bytes first, and the place phase writes `qs` only after the barrier that follows the last
         // read of a count), so the build frees nothing in the middle of a batch (a freed block
         // there is trimmed and faulted in again, each trim interrupting every thread of the
-        // process). EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_qs` is the batch loop's kept `qs`, taken
-        // when it has that room, or `None`. No NCBI counterpart (memory only). The owners zero the
-        // counts' bytes of all cells before they count, and the place phase writes each of the
-        // places `0 .. n_words` once before anything reads one, so a kept `qs` needs no zeroing.
-        let mut qs: Vec<u32> = super::x_mb_lut_keep::qs_buffer(x_qs, total.max(cells.div_ceil(4)));
+        // process).
+        let mut qs: Vec<u32> = Vec::with_capacity(total.max(cells.div_ceil(4)));
         let bb = Shared {
             ptr: bits.as_mut_ptr(),
             len: 2 * blocks,
@@ -1547,11 +1540,7 @@ fn csr_on_pool(
     let shift = super::x_bn_csr::count_shift(ascending);
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 2);
-    // EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_qs` is the batch loop's kept `qs`, taken when it has room
-    // for `total` elements, or `None`. No NCBI counterpart (memory only). The owners' place phase
-    // writes each of the places `0 .. n_words` once (the runs partition them) before anything
-    // reads one, so a kept `qs` needs no zeroing.
-    let mut qs: Vec<u32> = super::x_mb_lut_keep::qs_buffer(x_qs, total);
+    let mut qs: Vec<u32> = Vec::with_capacity(total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
         len: cells + 2,

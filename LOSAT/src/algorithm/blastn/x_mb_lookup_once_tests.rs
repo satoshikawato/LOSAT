@@ -983,32 +983,10 @@ fn csr_on_a_pool_is_the_serial_build() {
                     &mut helper,
                     chunk,
                     Vec::new(),
-                    None,
-                );
-                // EXPERIMENT (LOSAT_X_CSRQSKEEP): on a kept `qs` of stale values (a packed head's
-                // counts in its first bytes), the same CSR.
-                super::super::x_dc_csr::x_assert_same_on_a_kept_qs(
-                    &csr,
-                    |x_qs| {
-                        let mut pv = vec![0 as PvArrayType; pv_len];
-                        let mut helper = vec![0u32; cells >> 11];
-                        csr_on_pool(
-                            threads,
-                            &words,
-                            cells,
-                            &mut pv,
-                            bts,
-                            &mut helper,
-                            chunk,
-                            Vec::new(),
-                            x_qs,
-                        )
-                    },
-                    &what,
                 );
                 let mut pv1 = vec![0 as PvArrayType; pv_len];
                 let mut helper1 = vec![0u32; cells >> 11];
-                let one = serial(&words, cells, &mut pv1, bts, &mut helper1, Vec::new(), None);
+                let one = serial(&words, cells, &mut pv1, bts, &mut helper1, Vec::new());
                 assert_eq!(csr.words(), one.words(), "{what}");
                 for cell in 0..cells {
                     assert_eq!(
@@ -1045,7 +1023,6 @@ fn csr_on_a_pool_is_the_serial_build() {
                 bts,
                 &mut helper,
                 Vec::new(),
-                None,
             );
             assert!(on_pool, "threads {threads}");
             Ok(())
@@ -1058,15 +1035,6 @@ fn csr_on_a_pool_is_the_serial_build() {
     let (pv_len, bts) = pv_params(&case, 11);
     let mut pv = vec![0 as PvArrayType; pv_len];
     let mut helper = vec![0u32; (1 << 22) >> 11];
-    let (_, on_pool) = csr(
-        4,
-        &words,
-        1 << 22,
-        &mut pv,
-        bts,
-        &mut helper,
-        Vec::new(),
-        None,
-    );
+    let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, bts, &mut helper, Vec::new());
     assert!(!on_pool, "off a pool");
 }

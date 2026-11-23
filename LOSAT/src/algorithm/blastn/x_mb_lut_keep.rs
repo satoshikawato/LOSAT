@@ -94,37 +94,58 @@
 //! where the table is read, and does not move.
 //!
 //! EXPERIMENT (LOSAT_X_CSRQSKEEP, in the strict set from 2026-11-23: on unless it is `0`): the
-//! keep also holds the `qs` of a CSR whose `offsets` goes back to it (the CSR's second array, one
-//! element per word of the batch's table: 37 MB for a full batch of the dc-megablast of 31,168
-//! cDNAs, above glibc's largest mmap threshold of 32 MiB, so each build mapped it, faulted its
-//! pages in during the place pass and unmapped it when the batch dropped the CSR; at one thread
-//! 91 % of that search's page faults were in the dc CSR build). NCBI allocates the chains that
-//! `qs` stands for (`next_pos`) per batch and frees them with the table, as it does the hashtable.
+//! keep also holds the `qs` of a discontiguous CSR whose `offsets` goes back to it (the CSR's
+//! second array, one element per word of the batch's table: 37 MB for a full batch of the
+//! dc-megablast of 31,168 cDNAs, above glibc's largest mmap threshold of 32 MiB, so each build
+//! mapped it, faulted its pages in during the place pass and unmapped it when the batch dropped
+//! the CSR; at one thread 91 % of that search's page faults were in the dc CSR build). NCBI
+//! allocates the chains that `qs` stands for (`next_pos`) per batch and frees them with the table,
+//! as it does the hashtable.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:685,979,1377
 //!
-//! A CSR build that takes its `offsets` through the keep (`take_buffer`) also takes the kept `qs`
-//! (`take_qs`, an empty vector when none is kept) and uses it where it allocated `qs` before
-//! (`qs_buffer`, the switch's decision point) when its capacity holds the elements the build
-//! allocates; else it frees the kept one first and allocates a fresh one, as `take_buffer` does
-//! with a table too short. The CSR gives its `qs` back when it is dropped (`give_back_qs`, after
-//! its `offsets`): kept when no `qs` is kept or the kept one has less room, else freed with the
-//! CSR. `release` frees it with the table. It does not depend on the table's layout (a CSR of
-//! one element per cell or a packed head, `x_bn_csr.rs`) or cells, so the CSR builds of the
-//! contiguous and discontiguous tables (`x_bn_csr`, `x_mb_lookup_once`, `x_dc_csr`,
-//! `x_disc_lookup_par`) share it.
+//! A discontiguous CSR build that takes its `offsets` through the keep (`take_buffer`,
+//! `build_disc_mb_lookup_kept`) also takes the kept `qs` (`take_qs`, an empty vector when none is
+//! kept) and uses it where it allocated `qs` before (`qs_buffer`, the switch's decision point:
+//! `x_dc_csr::build`, `x_disc_lookup_par::csr_on_pool` and `csr_on_pool_steps`) when its capacity
+//! holds the elements the build allocates; else it frees the kept one first and allocates a fresh
+//! one, as `take_buffer` does with a table too short. The CSR gives its `qs` back when it is
+//! dropped (`x_dc_csr::Csr::x_kept_with_qs`, `give_back_qs`, after its `offsets`): kept when no
+//! `qs` is kept or the kept one has less room, else freed with the CSR. No build follows the
+//! loop's last tables, so before they drop (`x_lut_drop::after_prelim` of its last batch, or the
+//! last query chunk of a split last batch) the keep frees a kept `qs` and takes none back from
+//! then on (`close_qs`; `release` closes it too): the last CSR frees its `qs` with its table, where
+//! and when it did before the switch, and a search of one batch runs as before it. The switch has
+//! no rule of its own: it acts wherever a CSR of LOSAT_X_DCCSR takes its `offsets` through the
+//! keep of LOSAT_X_MBLUTKEEP.
 //!
-//! Why the CSR is the same. Every build writes each element of `qs` that it uses before it reads
-//! one: its place pass writes each of the places `0 .. words` once (the runs partition them), and
-//! a packed head's counts, which take the first bytes of the capacity until the place pass, are
-//! zeroed by the build first (`x_bn_csr::x_serial_packed`, `x_mb_lookup_once::csr_on_pool`); the
-//! elements past `words` are never read (`assemble` sets the length to `words`). So a kept `qs`
-//! is not zeroed, and the CSR is the CSR of a fresh one. No floating-point operation is involved.
+//! The contiguous CSR builds (LOSAT_X_BNCSR, `x_bn_csr`, `x_mb_lookup_once`) keep their own `qs`
+//! (`Csr::x_kept`: their `offsets` alone goes back to the keep). Their CSR tables are those of
+//! 4^11 cells or fewer (at 4^12 cells only LOSAT_X_MBCSR's side, beside a large subject), while
+//! megablast's full batches build tables of 4^12 cells: in the megablast of the 31,168 cDNAs the
+//! CSR batches are `CBatchSizeMixer`'s small ones (packed heads of LOSAT_X_BNCSRPACK) beside full
+//! batches of chains, so a kept `qs` (4 MiB for a packed head of 4^11 cells) idled through the
+//! full batches' scans, where the search's peak is, and a `qs` that small is served again from
+//! glibc's heap without faults anyway: with it (2026-11-23, line FD, workstation node 1, dev
+//! 5541322b2 against its merge 141e00ebc, the 31,168 cDNAs against 3 Mb of the D. melanogaster
+//! genome, `-subject`) megablast at 16 threads took 0.757 s against 0.748 s with VmHWM +2.90 %
+//! (137,004 against 133,146 KiB; `=0` +0.10 %), at one thread 3.935 s against 3.916 s with max RSS
+//! +2.5 %, and blastn at 16 threads 4.718 s against 4.651 s (VmHWM -1.6 %): no gain for more
+//! memory. The discontiguous CSR batches are the full
+//! ones (LOSAT_X_DCCSR's size rule) and their probe batches chains, so the kept `qs` goes from a
+//! full batch to the next: dc-megablast at 16 threads x0.957 (VmHWM +0.11 %), 8 x0.967 (+0.28
+//! %), one x0.990; 5,000 of the cDNAs at 16 threads x0.965 (+0.28 %).
+//!
+//! Why the CSR is the same. Every discontiguous build writes each element of `qs` that it uses
+//! before it reads one: its place pass writes each of the places `0 .. words` once (the runs
+//! partition them; on the pool each owner writes its own places); the elements past `words` are
+//! never read (`assemble` sets the length to `words`). So a kept `qs` is not zeroed, and the CSR
+//! is the CSR of a fresh one. No floating-point operation is involved.
 //!
 //! Memory. No build allocates a `qs` beside the kept one (a kept `qs` too small is freed before
 //! the fresh allocation). Between the drop of a CSR and the next CSR build the loop holds the
 //! `qs` that was freed at the drop before: through the batch's traceback (LOSAT_X_BNLUTDROP), as
-//! the kept table, except in the loop's last batch (`release`), and through the chain builds of
+//! the kept table, except in the loop's last batch (`close_qs`), and through the chain builds of
 //! `CBatchSizeMixer`'s probe batches; a smaller batch's CSR uses the largest kept `qs` (the
 //! resident pages that earlier builds wrote) where it allocated its own before. So the search's
 //! peak stays the one of the batch that built the largest `qs`, which holds it itself, unless the
@@ -134,9 +155,9 @@
 //! qs_fresh=` gives the loop's builds of a hashtable or chain heads on the kept table, its builds
 //! on a fresh one (of either layout), its CSR builds whose `offsets` is the kept table, the time
 //! spent zeroing (also inside `x_mb_lookup_split`'s `alloc=`), the kept tables freed after a
-//! loop's last preliminary stage (`Keep::release`), and (LOSAT_X_CSRQSKEEP) its CSR builds whose
-//! `qs` is the kept one and those that allocated their `qs` (none kept, or the kept one too
-//! small; both 0 with the switch off).
+//! loop's last preliminary stage (`Keep::release`), and (LOSAT_X_CSRQSKEEP) its discontiguous CSR
+//! builds whose `qs` is the kept one and those that allocated their `qs` (none kept, or the kept
+//! one too small; both 0 with the switch off).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -173,13 +194,21 @@ struct Kept {
     dirty: usize,
 }
 
+/// EXPERIMENT (LOSAT_X_CSRQSKEEP): the kept `qs` (the one with the most room of the dropped CSRs
+/// that gave theirs back, or an empty vector) and whether the keep takes no more (`closed`: the
+/// loop's last tables are being dropped, `Keep::close_qs`).
+#[derive(Default)]
+struct KeptQs {
+    qs: Vec<u32>,
+    closed: bool,
+}
+
 /// The table one batch loop keeps between its batches (LOSAT_X_MBLUTKEEP).
 #[derive(Default)]
 pub(crate) struct Keep {
     kept: Mutex<Option<Kept>>,
-    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): the `qs` of a dropped CSR whose `offsets` came back to the
-    /// keep (the one with the most room), or an empty vector.
-    qs: Mutex<Vec<u32>>,
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): the `qs` a discontiguous CSR build takes (`take_qs`).
+    qs: Mutex<KeptQs>,
 }
 
 impl Keep {
@@ -281,22 +310,24 @@ impl Keep {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): for a CSR build that takes its `offsets` through the keep
-    /// (`take_buffer`), the kept `qs` (an empty vector when none is kept), which the build passes
-    /// to `qs_buffer`; `None` with the switch off (the build allocates its `qs` as before).
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): for a discontiguous CSR build that takes its `offsets`
+    /// through the keep (`take_buffer`), the kept `qs` (an empty vector when none is kept), which
+    /// the build passes to `qs_buffer`; `None` with the switch off (the build allocates its `qs` as
+    /// before).
     pub(super) fn take_qs(&self) -> Option<Vec<u32>> {
         self.take_qs_when(qs_on())
     }
 
     /// `take_qs` with the switch's state given (`on`).
     fn take_qs_when(&self, on: bool) -> Option<Vec<u32>> {
-        on.then(|| std::mem::take(&mut *self.qs.lock().unwrap_or_else(|e| e.into_inner())))
+        on.then(|| std::mem::take(&mut self.qs.lock().unwrap_or_else(|e| e.into_inner()).qs))
     }
 
     /// EXPERIMENT (LOSAT_X_CSRQSKEEP): takes back the `qs` of a CSR dropped after its `offsets` went
-    /// back (`x_dc_csr::Csr`'s `Drop`): kept when no `qs` is kept or the kept one has less room
-    /// (which is freed), else left in `qs`, which the CSR frees; with the switch off always left
-    /// there, as before the switch.
+    /// back (`x_dc_csr::Csr`'s `Drop`, for a CSR made with `x_kept_with_qs`): kept when no `qs` is
+    /// kept or the kept one has less room (which is freed), else left in `qs`, which the CSR frees;
+    /// always left there with the switch off, as before the switch, and once the keep is closed
+    /// (`close_qs`, `release`), so the loop's last CSR frees its `qs` itself, where it did before.
     pub(super) fn give_back_qs(&self, qs: &mut Vec<u32>) {
         self.give_back_qs_when(qs, qs_on());
     }
@@ -307,27 +338,47 @@ impl Keep {
             return;
         }
         let mut slot = self.qs.lock().unwrap_or_else(|e| e.into_inner());
-        if slot.capacity() < qs.capacity() {
-            let old = std::mem::replace(&mut *slot, std::mem::take(qs));
+        if !slot.closed && slot.qs.capacity() < qs.capacity() {
+            let old = std::mem::replace(&mut slot.qs, std::mem::take(qs));
             drop(slot);
             drop(old);
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): no CSR build follows: frees the kept `qs` and keeps no `qs`
+    /// from here on (`give_back_qs`). Called before the loop's last tables drop (the last batch's,
+    /// `x_lut_drop::after_prelim`, or the last query chunk's of a split last batch), so the last
+    /// CSR frees its `qs` with its table, where and when it did before the switch. No effect with
+    /// the switch off.
+    pub(crate) fn close_qs(&self) {
+        self.close_qs_when(qs_on());
+    }
+
+    /// `close_qs` with the switch's state given (`on`).
+    fn close_qs_when(&self, on: bool) {
+        if !on {
+            return;
+        }
+        let mut slot = self.qs.lock().unwrap_or_else(|e| e.into_inner());
+        slot.closed = true;
+        let old = std::mem::take(&mut slot.qs);
+        drop(slot);
+        drop(old);
+    }
+
     /// Frees the kept table, when the loop has no batch left to build one on it: after the
     /// preliminary stage of its last batch (`x_lut_drop::after_prelim`), where NCBI's traceback
-    /// stage frees the batch's table, instead of when the loop ends; with it the kept `qs`
-    /// (LOSAT_X_CSRQSKEEP; NCBI frees the batch's chains with its table). Whether a table was
-    /// kept.
+    /// stage frees the batch's table, instead of when the loop ends; and closes the keep to `qs`
+    /// (`close_qs`, LOSAT_X_CSRQSKEEP; NCBI frees the batch's chains with its table), which holds
+    /// none after it. Whether a table was kept.
     pub(crate) fn release(&self) -> bool {
+        self.close_qs();
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
-        let qs = std::mem::take(&mut *self.qs.lock().unwrap_or_else(|e| e.into_inner()));
         let released = kept.is_some();
         if released {
             RELEASED.fetch_add(1, Ordering::Relaxed);
         }
         drop(kept);
-        drop(qs);
         released
     }
 }

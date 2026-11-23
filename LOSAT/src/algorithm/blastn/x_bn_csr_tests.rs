@@ -168,7 +168,7 @@ fn the_runs_are_the_chains_in_both_orders() {
                     chains(&case, &words, cells, pv_len, bts);
                 let mut pv = vec![0 as PvArrayType; pv_len];
                 let mut helper = vec![0u32; cells >> 11];
-                let csr = serial(&words, cells, &mut pv, bts, &mut helper, Vec::new(), None);
+                let csr = serial(&words, cells, &mut pv, bts, &mut helper, Vec::new());
                 x_assert_runs_are_the_chains(
                     &csr,
                     &pv,
@@ -224,21 +224,8 @@ fn the_packed_head_lists_the_chains_too() {
                 } else {
                     x_serial_unpacked
                 };
-                let csr = build(&words, cells, &mut pv, bts, &mut helper, Vec::new(), None);
+                let csr = build(&words, cells, &mut pv, bts, &mut helper, Vec::new());
                 let what = format!("lut {lut} packed {packed} n {n} len {len}");
-                // EXPERIMENT (LOSAT_X_CSRQSKEEP): on a kept `qs` of stale values (a packed head's
-                // counts in its first bytes), the same CSR; not the largest table, twice more.
-                if len < 900_000 {
-                    super::super::x_dc_csr::x_assert_same_on_a_kept_qs(
-                        &csr,
-                        |x_qs| {
-                            let mut pv = vec![0 as PvArrayType; pv_len];
-                            let mut helper = vec![0u32; cells >> 11];
-                            build(&words, cells, &mut pv, bts, &mut helper, Vec::new(), x_qs)
-                        },
-                        &what,
-                    );
-                }
                 if repeats {
                     // the cells of 255, 256 and more words
                     let mut runs: Vec<usize> = (0..cells).map(|c| csr.x_run_any(c).len()).collect();

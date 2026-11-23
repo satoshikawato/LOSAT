@@ -1078,13 +1078,7 @@ impl<'a> PairwiseRows<'a> {
             positives: Some(positives),
             gaps: Some(0),
             subject_length: Some(subject_length),
-            // The title after its first word, as BLASTN's; the reports take the subject's
-            // title bytes by subject index (`write_tblastx_pairwise_report`).
-            subject_title: subject
-                .title
-                .iter()
-                .position(|&byte| byte == b' ')
-                .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
+            subject_title: crate::blastinput::fasta_reader::hit_subject_title(&subject.title),
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
             subject_stored_gaps: Vec::new(),

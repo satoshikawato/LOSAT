@@ -529,11 +529,36 @@ pub struct BlastnArgs {
 }
 
 impl BlastnArgs {
-    /// Whether the report cites the megablast paper: task megablast run by blastn. The program
-    /// of the command line chooses its formatter's reference, so tblastx running a megablast
-    /// strategy cites Gapped BLAST (`import::apply`, probe `C.tblastx.from.blastn.db`).
-    pub(crate) fn megablast_reference(&self) -> bool {
-        self.task == "megablast" && self.import.as_ref().is_none_or(|run| run.app == "blastn")
+    /// The running application: the program of the command line, the library call or the Web run,
+    /// which is not this program's when it runs another program's strategy
+    /// (`ImportRun::app`). Its name prefixes the run's diagnostics and its formatting handler
+    /// checks the formats.
+    pub(crate) fn app(&self) -> crate::blastinput::app::Program {
+        crate::report::archive::read::import::ImportRun::running(
+            self.import.as_ref(),
+            crate::blastinput::app::Program::Blastn,
+        )
+    }
+
+    /// Whether the pairwise report (outfmt 0, `CBlastFormat`) cites the megablast paper: the
+    /// formatter is made by the running application, and BLASTN's makes it with its `-task`
+    /// megablast, TBLASTX's never does. So tblastx running a megablast strategy cites Gapped
+    /// BLAST here (`import::apply`, probe `C.tblastx.from.blastn.db`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:244
+    /// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:158-161
+    pub(crate) fn pairwise_megablast_reference(&self) -> bool {
+        self.task == "megablast" && self.app() == crate::blastinput::app::Program::Blastn
+    }
+
+    /// Whether the XML and JSON reports (outfmt 5, 15 and 16) cite the megablast paper: their
+    /// formatters read the program of the options, which is the strategy's task, whichever
+    /// application runs it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:653-668
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:637-653
+    pub(crate) fn structured_megablast_reference(&self) -> bool {
+        self.task == "megablast"
     }
 
     /// The `-subject` path (empty before NCBI's check that it is given).
@@ -663,7 +688,11 @@ impl BlastnArgs {
         }
         let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
         let database = match &self.window_masker_db {
-            Some(name) => Some(super::window_masker::open(name, &*source)?),
+            Some(name) => Some(super::window_masker::open(
+                name,
+                &*source,
+                self.app().ncbi_name(),
+            )?),
             None => None,
         };
         let filter_dbs = usize::from(self.filtering_db.is_some())
@@ -695,7 +724,12 @@ impl BlastnArgs {
                     })?
                     .as_ref()
                     .map_err(|reason| anyhow::anyhow!("{reason}"))?;
-                Some(super::window_masker::open_taxid(taxid, registry, &*source)?)
+                Some(super::window_masker::open_taxid(
+                    taxid,
+                    registry,
+                    &*source,
+                    self.app().ncbi_name(),
+                )?)
             }
             None => database,
         };

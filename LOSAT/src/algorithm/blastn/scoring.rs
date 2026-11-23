@@ -251,7 +251,7 @@ pub(crate) fn report_counts_of(
     outfmts: &[i32],
 ) -> anyhow::Result<(ReportCounts, Vec<u8>)> {
     run_report_counts_with(
-        "blastn",
+        args.app().ncbi_name(),
         outfmts,
         args.max_target_seqs,
         args.num_descriptions,

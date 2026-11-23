@@ -686,3 +686,62 @@ fn chunk_merge_is_ncbis_merge() {
     }
     assert!(compared > 1000 && merged > 100 && refused > 10 && reordered > 10);
 }
+
+/// The TBLASTX engine of a strategy that another application runs (R2-B1, review 2 of F2).
+fn run_as(running: &str, options: &[&str]) -> TblastxArgs {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/strategy/import/ss/tblastx.db.ss");
+    let mut argv = vec![
+        "losat",
+        running,
+        "-import_search_strategy",
+        path.to_str().unwrap(),
+    ];
+    argv.extend_from_slice(options);
+    let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).unwrap();
+    let command =
+        crate::report::archive::read::import::apply(cli.command, None, &mut Vec::new()).unwrap();
+    let crate::cli::Commands::Tblastx(args) = command else {
+        panic!("{running} running a tblastx strategy");
+    };
+    args
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2947-2989
+// The formatting handler's warnings of blastn (and of blastx) running a tblastx strategy carry the
+// running application's name.
+#[test]
+fn the_warnings_of_another_applications_run_carry_its_name() {
+    for running in ["blastn", "blastx"] {
+        let args = run_as(running, &["-max_target_seqs", "2"]);
+        assert_eq!(args.app().ncbi_name(), running);
+        let mut posted = Vec::new();
+        check_ncbi_options(&args, &cli_outfmts(&args).unwrap(), &mut posted).unwrap();
+        let posted = String::from_utf8(posted).unwrap();
+        assert!(
+            posted.contains(&format!(
+                "Warning: [{running}] Examining 5 or more matches is recommended\n"
+            )),
+            "{running}: {posted}"
+        );
+        assert!(!posted.contains("[tblastx]"), "{running}: {posted}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
+// The SAM check is the running application's: blastx stops with NCBI's error, blastn passes it
+// and LOSAT refuses the SAM report of a translated search (`formatting_handler_check_of_run`).
+#[test]
+fn the_sam_check_of_another_applications_run_is_the_running_applications() {
+    let refused = |running: &str| {
+        let args = run_as(running, &["-outfmt", "17"]);
+        check_ncbi_options(&args, &cli_outfmts(&args).unwrap(), &mut Vec::new())
+            .unwrap_err()
+            .to_string()
+    };
+    assert!(refused("blastx").contains("SAM format is only applicable to blastn"));
+    assert_eq!(
+        refused("blastn"),
+        "output format 17 is not supported by LOSAT's TBLASTX"
+    );
+}

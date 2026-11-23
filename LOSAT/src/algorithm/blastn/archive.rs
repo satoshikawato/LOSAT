@@ -97,6 +97,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
         .megablast_index_name()
         .map(|(name, _)| name.to_string());
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -515,7 +516,6 @@ pub(crate) fn write_blastn_archives(
 /// after the table (`finish`).
 impl import::StrategyArgs for BlastnArgs {
     const PROGRAM: Program = Program::Blastn;
-    const APP: &'static str = "blastn";
 
     fn runs(program: EProgram) -> bool {
         matches!(

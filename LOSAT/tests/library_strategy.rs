@@ -13,7 +13,7 @@ use losat::api::{run, run_collect, validate, Error, Inputs, Program};
 
 /// The rows `C.<program>.from.<program>` of `import_cases.tsv` that exit 0 (alone and with the
 /// command line's options).
-const C_ROWS: usize = 11;
+const C_ROWS: usize = 33;
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/strategy/import")
@@ -83,12 +83,21 @@ fn strategy_bytes(file: &str) -> Vec<u8> {
 fn differing(rows: &[Row], argv: &[&str]) -> Vec<String> {
     let mut failed = Vec::new();
     for row in rows {
-        let words: Vec<&str> = row
+        // The report's format is the output's name in the library API, not an option of the argv.
+        let mut format = "0";
+        let mut words: Vec<&str> = Vec::new();
+        let mut given = row
             .options
             .iter()
             .map(String::as_str)
-            .chain(argv.iter().copied())
-            .collect();
+            .chain(argv.iter().copied());
+        while let Some(word) = given.next() {
+            if word == "-outfmt" {
+                format = given.next().expect("the value of -outfmt");
+            } else {
+                words.push(word);
+            }
+        }
         let argv = words.as_slice();
         let search = validate(row.program, argv).unwrap();
         let outcome = (|| -> Result<(Vec<u8>, Vec<u8>), Error> {
@@ -97,7 +106,7 @@ fn differing(rows: &[Row], argv: &[&str]) -> Vec<String> {
             run(
                 &search,
                 Inputs::strategy(&strategy),
-                &mut [("0", &mut report)],
+                &mut [(format, &mut report)],
                 &mut diagnostics,
             )?;
             Ok((report, diagnostics))

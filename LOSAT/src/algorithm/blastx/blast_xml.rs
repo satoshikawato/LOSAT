@@ -1288,6 +1288,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     );
     let run = XmlRun {
         program: options.program().lower,
+        app: options.app_name,
         version: &format!(
             "{} {}",
             options.program().upper,
@@ -1405,9 +1406,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 let post = match document.unwritten(&mut buf) {
                     Ok(()) => None,
                     Err(error) => match error.downcast::<CaughtException>() {
-                        Ok(CaughtException(exception)) => {
-                            Some(caught_post(&document.caught_message(&exception)))
-                        }
+                        Ok(CaughtException(exception)) => Some(caught_post(
+                            options.app_name,
+                            &document.caught_message(&exception),
+                        )),
                         Err(error) => return Err(error),
                     },
                 };
@@ -1556,9 +1558,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let caught = match written {
                 Ok(()) => None,
                 Err(error) => match error.downcast::<CaughtException>() {
-                    Ok(CaughtException(exception)) => {
-                        Some(caught_post(&document.caught_message(&exception)))
-                    }
+                    Ok(CaughtException(exception)) => Some(caught_post(
+                        options.app_name,
+                        &document.caught_message(&exception),
+                    )),
                     Err(error) => return Err(error),
                 },
             };
@@ -1593,6 +1596,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
+    app: &str,
     queries: usize,
     xml2: Option<&mut RunXml2>,
 ) -> Result<()> {
@@ -1604,7 +1608,7 @@ pub(super) fn write_xml_epilog(
                 // message, then the end of the document.
                 match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => {
-                        Ok(caught_post(&xml2.caught_message(&exception)))
+                        Ok(caught_post(app, &xml2.caught_message(&exception)))
                     }
                     Err(error) => Err(error),
                 }
@@ -1644,10 +1648,10 @@ fn write_with_posts(
 }
 
 /// NCBI's post (`ERR_POST` at the error level with `message`) of a structured report's caught exception
-/// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
+/// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [<app>] ` (the running application's name `app`),
 /// the message (which ends with the `what()` text's end of line) and the post's end of line.
-fn caught_post(message: &[u8]) -> Vec<u8> {
-    [b"Error: [blastx] ".as_slice(), message, b"\n"].concat()
+fn caught_post(app: &str, message: &[u8]) -> Vec<u8> {
+    [format!("Error: [{app}] ").as_bytes(), message, b"\n"].concat()
 }
 
 #[cfg(test)]

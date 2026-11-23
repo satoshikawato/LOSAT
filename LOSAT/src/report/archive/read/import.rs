@@ -27,6 +27,7 @@ use anyhow::Result;
 use super::options::{import_request, EProgram, ImportedOptions, SeqRange, Setter};
 use super::queries::{render_queries, RenderError, Rendered, Text};
 use super::request::{Queries, Request, Subject};
+use crate::blastinput::app::Program;
 use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
 use crate::report::archive::options::{Param, ParamValue};
@@ -531,7 +532,7 @@ pub(crate) fn ignored_option_warnings(
 /// What a run that imports a strategy carries into the program's own flow (each program's
 /// `import` field): the texts that stand for its query and subject inputs, and the warnings that
 /// NCBI posts during the import.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct ImportRun {
     /// The strategy's queries (the text of NCBI's temporary FASTA file), read in place of
     /// `-query` (`open_query`).
@@ -543,8 +544,12 @@ pub(crate) struct ImportRun {
     pub(crate) warnings: Vec<String>,
     /// `x_IssueWarningsForIgnoredOptions`' warnings, posted after the formatting handler's.
     pub(crate) option_warnings: Vec<String>,
-    /// The running program's NCBI name (`Start::app`), the prefix of the warnings.
-    pub(crate) app: &'static str,
+    /// The running application (`Start::app`): the program of the command line, the library call
+    /// or the Web run, also when it runs another program's strategy. Everything that NCBI does
+    /// as the application (the diagnostics' prefix, the formatting handler and its checks, the
+    /// pairwise report's formatter) reads this, never the strategy's program; what the strategy's
+    /// options decide (the search, the XML and JSON reference) reads the options.
+    pub(crate) app: Program,
     /// The effective search space is the strategy's `EffectiveSearchSpace`, which does not set
     /// `OLD_FSC` in the environment as the command line's `-searchsp` does.
     pub(crate) searchsp_from_strategy: bool,
@@ -563,12 +568,19 @@ pub(crate) struct ImportRun {
 impl ImportRun {
     /// `RecoverSearchStrategy`'s warnings as the running program posts them.
     pub(crate) fn warning_lines(&self) -> Vec<u8> {
-        Self::lines(&self.warnings, self.app)
+        Self::lines(&self.warnings, self.app.ncbi_name())
     }
 
     /// `x_IssueWarningsForIgnoredOptions`' warnings as the running program posts them.
     pub(crate) fn option_warning_lines(&self) -> Vec<u8> {
-        Self::lines(&self.option_warnings, self.app)
+        Self::lines(&self.option_warnings, self.app.ncbi_name())
+    }
+
+    /// The running application of a run of the program `own`'s engine: the program of the
+    /// command line that imported the strategy (`ImportRun::app`), else `own`. The one reading
+    /// of the identity that the diagnostics' prefix and the formatting handler take.
+    pub(crate) fn running(import: Option<&ImportRun>, own: Program) -> Program {
+        import.map_or(own, |run| run.app)
     }
 
     /// The lines of `warnings` as the program `program` (NCBI's name) posts them.
@@ -685,30 +697,30 @@ pub(crate) struct Start {
     pub(crate) imported: Imported,
     /// The arguments of the command line as NCBI's `CArgs` holds them.
     pub(crate) arguments: NcbiArguments,
-    /// The running program's NCBI name, the prefix of its warnings (`blastn`, ...): the program
-    /// of the command line, also when it runs another program's strategy (`import`).
-    pub(crate) app: &'static str,
+    /// The running application, the program of the command line, also when it runs another
+    /// program's strategy (`import`).
+    pub(crate) app: Program,
 }
 
-/// `RecoverSearchStrategy` for the running program `ncbi_name` (`blastp` ...) whose command line
+/// `RecoverSearchStrategy` for the running application `app` (`blastp` ...) whose command line
 /// gave the arguments `given` ([`crate::cli::GivenArguments`]): the strategy, or the error after
 /// the warnings posted before it (written to `diagnostics` here, as NCBI posts them before its
 /// `CATCH_ALL` reports the error; the command line's are its standard error).
 pub(crate) fn start(
     command: &Command<'_>,
-    ncbi_name: &'static str,
+    app: Program,
     given: &[(String, String)],
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<Start> {
-    let arguments = NcbiArguments::new(ncbi_name, given);
+    let arguments = NcbiArguments::new(app.ncbi_name(), given);
     match recover(command) {
         Ok(imported) => Ok(Start {
             imported,
             arguments,
-            app: ncbi_name,
+            app,
         }),
         Err(failure) => {
-            let _ = diagnostics.write_all(&ImportRun::lines(&failure.warnings, ncbi_name));
+            let _ = diagnostics.write_all(&ImportRun::lines(&failure.warnings, app.ncbi_name()));
             Err(failure.error)
         }
     }
@@ -1142,8 +1154,6 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
 pub(crate) trait StrategyArgs: Sized {
     /// The program, by LOSAT's name in its refusals.
     const PROGRAM: crate::blastinput::app::Program;
-    /// NCBI's name of the program, the prefix of its warnings.
-    const APP: &'static str;
     /// Whether a strategy of `program` is the program's own.
     fn runs(program: EProgram) -> bool;
     /// Whether the arguments give a strategy that is not imported yet.
@@ -1471,7 +1481,7 @@ fn import<A: StrategyArgs>(
             override_subject: kept.database.is_some(),
             use_index_set: kept.use_index,
         },
-        A::APP,
+        A::PROGRAM,
         &kept.given,
         diagnostics,
     )?;
@@ -1479,14 +1489,19 @@ fn import<A: StrategyArgs>(
     if A::runs(target) {
         return import_as::<A>(start, kept, diagnostics);
     }
-    match (A::APP, target) {
-        ("blastn" | "blastx", Tblastx) => import_as::<TblastxArgs>(start, kept, diagnostics),
-        ("tblastx", Blastx) => import_as::<BlastxArgs>(start, kept, diagnostics),
-        ("tblastx", Blastn | Megablast | DiscMegablast) => {
+    match (A::PROGRAM, target) {
+        (Program::Blastn | Program::Blastx, Tblastx) => {
+            import_as::<TblastxArgs>(start, kept, diagnostics)
+        }
+        (Program::Tblastx, Blastx) => import_as::<BlastxArgs>(start, kept, diagnostics),
+        (Program::Tblastx, Blastn | Megablast | DiscMegablast) => {
             import_as::<BlastnArgs>(start, kept, diagnostics)
         }
         _ => {
-            let _ = diagnostics.write_all(&ImportRun::lines(&start.imported.warnings, start.app));
+            let _ = diagnostics.write_all(&ImportRun::lines(
+                &start.imported.warnings,
+                start.app.ncbi_name(),
+            ));
             Err(start.unported_program(program))
         }
     }
@@ -1502,7 +1517,10 @@ fn import_as<T: StrategyArgs>(
 ) -> Result<Commands> {
     let imported = import_into::<T>(&mut start, kept);
     if imported.is_err() {
-        let _ = diagnostics.write_all(&ImportRun::lines(&start.imported.warnings, start.app));
+        let _ = diagnostics.write_all(&ImportRun::lines(
+            &start.imported.warnings,
+            start.app.ncbi_name(),
+        ));
     }
     imported
 }
@@ -1601,7 +1619,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
         MbIndexRequest::Index { name, old_style } => Some((name, old_style)),
         MbIndexRequest::None => collected.index.take().map(|name| (name, false)),
     };
-    if index.is_some() && (T::APP != "blastn" || out.fields().db.is_none()) {
+    if index.is_some() && (T::PROGRAM != Program::Blastn || out.fields().db.is_none()) {
         return Err(unported(
             "a search strategy with a MegaBLAST database index (ForceMbIndex) outside a BLASTN search of a database",
             program,

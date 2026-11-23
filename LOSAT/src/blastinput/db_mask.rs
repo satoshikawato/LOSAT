@@ -174,12 +174,13 @@ impl DbMaskOption {
     /// database of each name of the `-db` list (`SeqDb::name_mask_details`, the tables that the
     /// database's name records keep): an id that one of them does not have is NCBI's database
     /// error, exit 2 (the id 0, an id below -1, or a name's id that a database of the list
-    /// lacks).
+    /// lacks). `app` is the running application, the prefix of the warning.
     pub fn resolve(
         &self,
         db: &SeqDb,
         db_name: &str,
         program: &str,
+        app: &str,
         warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
     ) -> Result<Option<ResolvedMask>> {
         let (id, key) = match &self.algorithm {
@@ -201,8 +202,7 @@ impl DbMaskOption {
         let Some(id) = id.filter(|&id| id != -1) else {
             warning(
                 format!(
-                    "Warning: [{}] Subject mask not found in {db_name}, proceeding without subject masking.\n",
-                    program.to_ascii_lowercase()
+                    "Warning: [{app}] Subject mask not found in {db_name}, proceeding without subject masking.\n",
                 )
                 .as_bytes(),
             )?;

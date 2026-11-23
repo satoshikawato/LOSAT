@@ -254,7 +254,7 @@ fn run_inner(
     let list = match args.database_name() {
         Some(_) => args
             .db_filter
-            .resolve(&settings, "blastx", &mut stderr)
+            .resolve(&settings, args.app().ncbi_name(), &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };
@@ -380,7 +380,7 @@ fn run_inner(
     };
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
     let choice = choice.at_formatting_handler(&args.outfmt)?;
-    app::formatting_handler_check(&choice, Program::Blastx)?;
+    app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
@@ -404,6 +404,7 @@ fn run_inner(
                 args.db_mask.option().as_ref(),
                 &mut stderr,
                 program.upper,
+                program.app,
             )?
             .showing_gis(args.show_gis);
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
@@ -627,7 +628,7 @@ fn run_inner(
     let shared_standard_input =
         args.query.as_os_str() == "-" && subject_path.is_some_and(|path| path.as_os_str() == "-");
     if !shared_standard_input && stream_is_empty(&mut query_stream) {
-        stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
+        stderr.write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
             handle.take_messages();
@@ -649,13 +650,14 @@ fn run_inner(
     if let (Some(database), Some(option)) = (&database, args.db_mask.option()) {
         options.db_mask = database.resolve_mask_option(
             &option,
+            args.app().ncbi_name(),
             archive.as_ref(),
             strategy.as_ref(),
             &mut *stderr,
         )?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-    write_empty_subject_warnings(&subjects, &mut *stderr)?;
+    write_empty_subject_warnings(&subjects, args.app_name(), &mut *stderr)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
@@ -1431,7 +1433,7 @@ pub(super) fn reported_batch(
     };
     let mut reported = reported;
     if prefetch_fails {
-        diagnostics.write_all(&database.prefetch_warning())?;
+        diagnostics.write_all(&database.prefetch_warning(options.app_name))?;
     }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
@@ -1625,11 +1627,12 @@ pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
 /// (`input_files::write_empty_subject_warnings_of`: the id, then the title's bytes as read).
 pub(super) fn write_empty_subject_warnings(
     subjects: &[FastaRecord],
+    app: &str,
     stderr: &mut dyn Write,
 ) -> Result<()> {
     crate::blastinput::input_files::write_empty_subject_warnings_of(
         subjects.iter().map(|s| (s.names(), s.sequence.len())),
-        "blastx",
+        app,
         stderr,
     )?;
     Ok(())
@@ -2836,7 +2839,7 @@ pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
         args.num_alignments,
     )
     .warnings_with(
-        args.program().lower,
+        args.app_name(),
         outfmt,
         args.num_descriptions.is_some(),
         &args.formatting,

@@ -82,6 +82,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
         .as_deref()
         .and_then(crate::report::archive::options::seg_filter);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = hitlist_size;
     if let Ok((mode, unified_p)) =
         crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, true, false)
@@ -364,7 +365,6 @@ pub(crate) fn write_blastp_archives(
 /// line keeps and its table of the strategy's setters over its own options.
 impl import::StrategyArgs for BlastpArgs {
     const PROGRAM: Program = Program::Blastp;
-    const APP: &'static str = "blastp";
 
     fn runs(program: EProgram) -> bool {
         program == EProgram::Blastp

@@ -358,16 +358,22 @@ pub(crate) struct ProgramName {
     pub(crate) upper: &'static str,
     /// `blastx`: NCBI's messages (`Warning: [blastx] ...`) and its settings.
     pub(crate) lower: &'static str,
+    /// NCBI's name of the running application, the prefix of the run's diagnostics: `lower`,
+    /// or the application of the command line that runs another program's strategy
+    /// (`ResolvedOptions::app_name`).
+    pub(crate) app: &'static str,
 }
 
 impl ProgramName {
     pub(crate) const BLASTX: Self = Self {
         upper: "BLASTX",
         lower: "blastx",
+        app: "blastx",
     };
     pub(crate) const RPSTBLASTN: Self = Self {
         upper: "RPSTBLASTN",
         lower: "rpstblastn",
+        app: "rpstblastn",
     };
 
     fn of(rpstblastn: &Option<std::sync::Arc<dyn RpsTblastnSearch>>) -> Self {
@@ -381,7 +387,10 @@ impl ProgramName {
 impl ResolvedOptions {
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
-        ProgramName::of(&self.rpstblastn)
+        ProgramName {
+            app: self.app_name,
+            ..ProgramName::of(&self.rpstblastn)
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81 (cited at
@@ -594,6 +603,9 @@ pub struct ResolvedOptions {
     /// `native::run` and `local::run_local_database`; series NP, M4b); `None` before, and for a
     /// search without it.
     pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
+    /// NCBI's name of the running application, the prefix of the run's diagnostics
+    /// (`BlastxArgs::app_name`).
+    pub app_name: &'static str,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-193
@@ -636,6 +648,27 @@ impl ResolvedOptions {
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 impl BlastxArgs {
+    /// NCBI's name of the running application, the prefix of the run's diagnostics: the
+    /// application of an imported strategy's command line (`app`), else the program's own
+    /// (`ProgramName::lower`: `rpstblastn` for RPSTBLASTN's runs, which import no strategy).
+    pub(crate) fn app_name(&self) -> &'static str {
+        match &self.import {
+            Some(run) => run.app.ncbi_name(),
+            None => ProgramName::of(&self.rpstblastn).lower,
+        }
+    }
+
+    /// The running application: the program of the command line, the library call or the Web run,
+    /// which is not this program's when it runs another program's strategy
+    /// (`ImportRun::app`). Its name prefixes the run's diagnostics and its formatting handler
+    /// checks the formats.
+    pub(crate) fn app(&self) -> crate::blastinput::app::Program {
+        crate::report::archive::read::import::ImportRun::running(
+            self.import.as_ref(),
+            crate::blastinput::app::Program::Blastx,
+        )
+    }
+
     /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
     /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
     /// sets for such a search; a gapped one refuses the name first).
@@ -907,6 +940,7 @@ impl BlastxArgs {
             query_range: None,
             rpstblastn: self.rpstblastn.clone(),
             db_mask: None,
+            app_name: self.app_name(),
         };
         // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
         super::parameters::check_gapped_x_drops(&options)?;
@@ -927,7 +961,10 @@ impl BlastxArgs {
 
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
-        ProgramName::of(&self.rpstblastn)
+        ProgramName {
+            app: self.app_name(),
+            ..ProgramName::of(&self.rpstblastn)
+        }
     }
 
     /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).

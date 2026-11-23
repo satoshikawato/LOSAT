@@ -4769,6 +4769,8 @@ struct SamTarget<'a> {
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
+    /// NCBI's name of the running application, the prefix of the run's diagnostics (`BlastnArgs::app`).
+    app: &'static str,
     /// The pairwise report's name of the subjects (`ShownSubjects::pairwise_name`).
     pairwise_subject_title: &'a str,
     queries: &'a [FastaRecord],
@@ -4911,6 +4913,8 @@ struct BlastnReportInputs<'a> {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`ShownSubjects::tabular_taxdb_found`).
     tabular_taxdb_found: bool,
+    /// The running application (`BlastnArgs::app`), the prefix of the formatter's warnings.
+    app: crate::blastinput::app::Program,
     /// The taxonomy database of a `-subject` search's organism report (`BlastnArgs::subject_taxdb`).
     subject_taxdb: Option<&'a crate::algorithm::common::database::SubjectTaxdb>,
 }
@@ -5827,6 +5831,7 @@ fn post_process_hits_and_write(
                     format_warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
+                    report.app,
                 )?;
             } else if output_format == BlastnOutputFormat::Archive {
                 // The BLAST archive (outfmt 11): one document per query batch of the call.
@@ -6010,7 +6015,7 @@ fn write_custom_tabular(
         Some(database) => database.tabular_names(spec, &taxonomy)?,
         None => report
             .subject_taxdb
-            .map(|taxdb| taxdb.report_names("BLASTN")),
+            .map(|taxdb| taxdb.report_names(report.app)),
     };
     let subjects = match (report.database_ordinals, report.database_reader) {
         (Some(ordinals), Some(reader)) => TabularSubjects::Database {
@@ -6067,6 +6072,7 @@ fn write_custom_tabular(
             false,
             names.as_ref(),
             "BLASTN",
+            report.app,
             &queries,
             writer,
             warnings,
@@ -6088,6 +6094,7 @@ fn write_custom_tabular(
             .epilog
             .then_some(report.queries_before + hit_lists.len()),
         taxdb_found: report.tabular_taxdb_found,
+        app: report.app,
         names: names.as_ref(),
     };
     write_blastn_tabular(&tab, hit_lists, writer, warnings, probe)
@@ -6190,16 +6197,18 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args
-            .db_filter
-            .resolve(&settings, "blastn", &mut *diagnostics)
-        {
-            Ok(list) => list,
-            Err(error) => {
-                write_run_error_archive(&args, archive.as_ref(), &error);
-                return Err(error);
+        Some(_) => {
+            match args
+                .db_filter
+                .resolve(&settings, args.app().ncbi_name(), &mut *diagnostics)
+            {
+                Ok(list) => list,
+                Err(error) => {
+                    write_run_error_archive(&args, archive.as_ref(), &error);
+                    return Err(error);
+                }
             }
-        },
+        }
         None => None,
     };
     let cli_subjects = if args.db.is_some() {
@@ -6472,6 +6481,7 @@ fn open_search_database(
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
+                args.app().ncbi_name(),
             )?
             .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
@@ -6634,9 +6644,9 @@ fn search_cli(
     let mut query_source = FastaInputSource::from_file(query_file, query_config);
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [blastn] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         // NCBI returns from `Run` here, before its `PrintErrorArchive`: the message is not an
         // archive's.
         if let Some(handle) = &args.archive {
@@ -6853,7 +6863,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        app::formatting_handler_check(&choice, Program::Blastn)?;
+        app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastn)?;
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report, with the formatting
@@ -7173,9 +7183,9 @@ fn search_database(
     within: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
-    let list = args
-        .db_filter
-        .resolve(&settings, "blastn", &mut *outputs.diagnostics)?;
+    let list =
+        args.db_filter
+            .resolve(&settings, args.app().ncbi_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.resolve_dust()?;
@@ -7245,9 +7255,9 @@ fn search(
     // reported an empty query file and read its queries; the records of the other callers
     // get NCBI's warning for an input without records.
     if query_records.is_empty() && matches!(reading, QueryReading::Records) {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [blastn] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         return Ok(());
     }
     // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
@@ -7267,10 +7277,13 @@ fn search(
     if let (Subjects::Database(database), Some(option)) = (subjects, args.db_mask.option()) {
         let archive = args.archive.clone();
         let diagnostics = &mut *outputs.diagnostics;
-        let resolved = database.resolve_mask_option(&option, &mut |text| match &archive {
-            Some(handle) => handle.write_warning(diagnostics, text),
-            None => diagnostics.write_all(text),
-        })?;
+        let resolved =
+            database.resolve_mask_option(&option, args.app().ncbi_name(), &mut |text| {
+                match &archive {
+                    Some(handle) => handle.write_warning(diagnostics, text),
+                    None => diagnostics.write_all(text),
+                }
+            })?;
         crate::algorithm::common::database::note_archive_database_masking(
             args.archive.as_ref(),
             args.strategy.as_ref(),
@@ -7292,7 +7305,7 @@ fn search(
         write_empty_subject_warnings_by_length(
             subject_set.records(),
             |index| subject_set.len(index),
-            "blastn",
+            args.app().ncbi_name(),
             outputs.diagnostics,
         )?;
     }
@@ -7812,6 +7825,8 @@ struct ShownSubjects {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
     tabular_taxdb_found: bool,
+    /// The running application (`BlastnArgs::app`), the prefix of the formatter's warnings.
+    app: crate::blastinput::app::Program,
 }
 
 impl ShownSubjects {
@@ -7830,6 +7845,7 @@ impl ShownSubjects {
                 total_letters: metadata.db_len_total,
                 database: None,
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                app: args.app(),
             },
             SubjectSource::Database(database) => ShownSubjects {
                 name: database.name().to_string(),
@@ -7838,6 +7854,7 @@ impl ShownSubjects {
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                app: args.app(),
             },
         }
     }
@@ -9148,7 +9165,7 @@ fn run_in_pool(
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             let text = query_warning(
-                "blastn",
+                args.app().ncbi_name(),
                 args.first_query_ordinal + query_input.ordinal(start + index),
                 &batch_records.searched()[index],
                 &messages,
@@ -9402,7 +9419,7 @@ fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputForm
 fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
     BlastnIntro {
-        megablast: args.megablast_reference(),
+        megablast: args.pairwise_megablast_reference(),
         indexed_megablast: args.megablast_index_loaded.is_some(),
         matrix_only: super::super::coordination::matrix_only_scoring(reward, penalty),
     }
@@ -9426,6 +9443,7 @@ fn write_pairwise_prologs(
             super::super::tabular::write_tabular_prolog_warning(
                 spec,
                 shown.tabular_taxdb_found,
+                shown.app,
                 &mut *outputs.diagnostics,
             )?;
         }
@@ -9658,7 +9676,7 @@ fn write_reports_untimed(
             "BLASTN",
         )?;
     }
-    let megablast = args.megablast_reference();
+    let megablast = args.structured_megablast_reference();
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
     // The SAM documents (outfmt 17), one per SAM format: the stream's, which only its last call
@@ -9830,6 +9848,7 @@ fn write_reports_untimed(
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
+        app: args.app().ncbi_name(),
         pairwise_subject_title: &subjects.shown.pairwise_name,
         query_reads: &query_reads,
         queries: query_records,
@@ -9919,6 +9938,7 @@ fn write_reports_untimed(
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
         tabular_taxdb_found: subjects.shown.tabular_taxdb_found,
+        app: subjects.shown.app,
         subject_taxdb: args.subject_taxdb.as_ref(),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496

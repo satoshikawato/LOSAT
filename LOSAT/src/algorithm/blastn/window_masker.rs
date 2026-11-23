@@ -39,17 +39,19 @@ pub struct WindowMasker {
     /// (`UnitCounts::warnings`, at every load).
     first_load: Posts,
     later_loads: Posts,
+    /// The running application (`BlastnArgs::app`), the prefix of the warnings of a load.
+    app: &'static str,
 }
 
 /// The posts of a load of the masker: those of the registry (`registry`), then the counts
 /// reader's warnings when the masker was made (NCBI 2.17.0, line NP M3d: an ascii file's
 /// second, higher `>t_low` writes its warning at each load, after the post of a malformed
 /// `.ncbirc`).
-fn load_posts(registry: &Posts, masker: &Result<SeqMasker, WinMaskError>) -> Posts {
+fn load_posts(registry: &Posts, masker: &Result<SeqMasker, WinMaskError>, app: &str) -> Posts {
     let mut posts = registry.clone();
     if let Ok(masker) = masker {
         for warning in masker.warnings() {
-            posts.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
+            posts.lines(format!("Warning: [{app}] {warning}\n").as_bytes());
         }
     }
     posts
@@ -71,7 +73,11 @@ impl fmt::Debug for WindowMasker {
 /// line); a format other than the two binary ones is the input error of the filtering options
 /// (exit 1). LOSAT's check reads the file on the stream functions NCBI's does; its other
 /// errors (the stream could not seek) give the unknown format, as NCBI's stream failure does.
-pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker, NativeError> {
+pub(crate) fn open(
+    name: &str,
+    source: &dyn CountsSource,
+    app: &'static str,
+) -> Result<WindowMasker, NativeError> {
     match source.discover(name) {
         Ok(found) if matches!(found.stat_type, StatType::OBinary | StatType::Binary) => {}
         Err(error) if error.discover_exception().is_some() => {
@@ -91,13 +97,14 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
         }
     }
     let masker = build(name, source);
-    let posts = load_posts(&Posts::new(), &masker);
+    let posts = load_posts(&Posts::new(), &masker, app);
     Ok(WindowMasker {
         name: name.to_string(),
         taxid: None,
         masker,
         first_load: posts.clone(),
         later_loads: posts,
+        app,
     })
 }
 
@@ -126,6 +133,7 @@ pub(crate) fn open_taxid(
     taxid: i32,
     registry: &WindowMaskerRegistry,
     source: &dyn CountsSource,
+    app: &'static str,
 ) -> anyhow::Result<WindowMasker> {
     let directory = registry.path.as_deref();
     let file = crate::utils::winmask::taxid_stat_file(directory, taxid, source).map_err(|error| {
@@ -150,9 +158,9 @@ pub(crate) fn open_taxid(
     {
         return Err(rejection(&name, error));
     }
-    let first_load = load_posts(&registry.load_posts, &masker);
+    let first_load = load_posts(&registry.load_posts, &masker, app);
     let later_loads = if registry.posts_once {
-        load_posts(&Posts::new(), &masker)
+        load_posts(&Posts::new(), &masker, app)
     } else {
         first_load.clone()
     };
@@ -162,6 +170,7 @@ pub(crate) fn open_taxid(
         masker,
         first_load,
         later_loads,
+        app,
     })
 }
 
@@ -209,6 +218,7 @@ impl WindowMasker {
             queries,
             self.load_posts(first),
             self.load_posts(false),
+            self.app,
         )
     }
 
@@ -279,6 +289,7 @@ pub(crate) fn batch_error(
     queries: usize,
     first_load: &Posts,
     later_loads: &Posts,
+    app: &str,
 ) -> Option<(Posts, NativeError)> {
     let text = match error {
         WinMaskError::BadIndex { .. } => error.to_string().into_bytes(),
@@ -290,7 +301,7 @@ pub(crate) fn batch_error(
     for query in 0..queries {
         warnings.append(if query == 0 { first_load } else { later_loads });
         for warning in error.warnings() {
-            warnings.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
+            warnings.lines(format!("Warning: [{app}] {warning}\n").as_bytes());
         }
         message.extend_from_slice(b"Warning: ");
         message.extend_from_slice(&text);

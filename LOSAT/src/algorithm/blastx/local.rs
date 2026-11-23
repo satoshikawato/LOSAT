@@ -162,7 +162,9 @@ fn search_records(
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
     if query_records.is_empty() && query_end.is_input() {
-        diagnostics.write_all(b"Warning: [blastx] Query is Empty!\n")?;
+        diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -181,7 +183,7 @@ fn search_records(
         args.parse_deflines,
         args.scope_refusal.as_ref(),
     )?;
-    write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
+    write_empty_subject_warnings(&subjects, args.app_name(), &mut **diagnostics)?;
     // NCBI's error of an XInclude format without a file name, where the command line gives it
     // (`native::run_inner`, blastx_app.cpp:251).
     outputs.xinclude_check(args.out.as_deref())?;
@@ -1164,9 +1166,9 @@ fn search_database(
         .ok_or_else(app::missing_subject_error)?;
     // The handler of the database arguments reads the list before the other handlers
     // (`native::run_inner`).
-    let list = args
-        .db_filter
-        .resolve(&settings, "blastx", &mut *outputs.diagnostics)?;
+    let list =
+        args.db_filter
+            .resolve(&settings, args.app().ncbi_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
     outputs.open_out()?;
     check_filtering(args)?;
@@ -1181,6 +1183,7 @@ fn search_database(
         args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
+        args.app().ncbi_name(),
     )?
     .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
@@ -1226,17 +1229,22 @@ fn search_database(
         }
     }
     if query_records.is_empty() && query_end.is_input() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [blastx] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
     // The formatter resolves the database masking before its other work (`native::run_inner`).
     if let Some(option) = args.db_mask.option() {
-        let mask =
-            database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
+        let mask = database.resolve_mask_option(
+            &option,
+            args.app().ncbi_name(),
+            archive,
+            None,
+            &mut *outputs.diagnostics,
+        )?;
         if let Some(mask) = &mask {
             database.check_mask_limits(mask)?;
         }
@@ -1437,11 +1445,11 @@ fn check_resolutions(
     diagnostics: &mut dyn Write,
 ) -> Result<Vec<ResolvedOptions>> {
     for choice in choices {
-        app::formatting_handler_check(choice, Program::Blastx)?;
+        app::formatting_handler_check_of_run(choice, args.app(), Program::Blastx)?;
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
-        "blastx",
+        args.app().ncbi_name(),
         &outfmts,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,

@@ -78,9 +78,10 @@ pub(crate) fn open_database(
 /// database), as NCBI's `CSeqDB` opened with the list (`SeqDb::restrict`), then reads what its
 /// alias files' counts and the reports need: NCBI's errors are `BLAST Database error: <text>`
 /// with exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
-/// (`LOG_POST` at the warning level: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
-/// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
-/// before a throw: `Error: [<program>] <text>`), before an error too.
+/// (`LOG_POST` at the warning level: the text alone; `ERR_POST`: `Warning: [<app>] <text>`,
+/// the running application `app` in lower case as `SetDiagPostPrefix` names it (the program's
+/// own, or that of a command line that runs another program's strategy); an `ERR_POST` of an
+/// error before a throw: `Error: [<app>] <text>`), before an error too.
 ///
 /// The one owner of the order of a search database's errors, which is NCBI's (probes p4c_e*,
 /// p4c_f2 of line RG D1a-2): the alias files' tree and ranges (`open_database`), the list, the
@@ -98,9 +99,10 @@ pub(crate) fn restrict_database(
     diagnostics: &mut dyn std::io::Write,
     settings: &ApplicationSettings,
     program: &str,
+    app: &str,
 ) -> Result<bool> {
     if let Some(list) = list {
-        apply_list(db, list, diagnostics, program)?;
+        apply_list(db, list, diagnostics, program, app)?;
     }
     // NCBI's `CSeqDB` of the search meets the errors of the alias files' counts after the
     // list (`SeqDb::check_alias_values`); its formatter then opens each name of the list again
@@ -124,10 +126,11 @@ fn apply_list(
     list: &crate::seqdb::DbList,
     diagnostics: &mut dyn std::io::Write,
     program: &str,
+    app: &str,
 ) -> Result<()> {
     let mut warnings = Vec::new();
     let restricted = db.restrict(list, &mut warnings);
-    let prefix = program.to_ascii_lowercase();
+    let prefix = app.to_ascii_lowercase();
     // The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
     for warning in warnings {
         let line = match warning {
@@ -246,7 +249,8 @@ pub(crate) fn note_archive_database_masking(
 // `blastinput::db_mask::DbMaskOption::resolve`)
 /// The formatter's step of the database masking `option` of a search of `db` (the `-db` value
 /// `db_name`) by `program` (NCBI's upper-case name; series NP, M4b: BLASTP and BLASTX, and the
-/// translated programs that take it): the resolution (`DbMaskOption::resolve`), whose warning goes
+/// translated programs that take it) run by the application `app` (NCBI's lower-case name, the
+/// prefix of the warning): the resolution (`DbMaskOption::resolve`), whose warning goes
 /// to `warning` (one diagnostic, which an archive saves as one message), or whose database error
 /// ends the run before the formatter's other work; then the program options of the archive
 /// `archive` and of the search strategy `strategy` (`note_archive_database_masking`). The result
@@ -256,11 +260,12 @@ pub(crate) fn resolve_database_masking(
     db_name: &str,
     option: &crate::blastinput::db_mask::DbMaskOption,
     program: &str,
+    app: &str,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
 ) -> Result<Option<crate::blastinput::db_mask::ResolvedMask>> {
-    let resolved = option.resolve(db, db_name, program, warning)?;
+    let resolved = option.resolve(db, db_name, program, app, warning)?;
     note_archive_database_masking(
         archive,
         strategy,
@@ -3716,6 +3721,15 @@ pub(crate) struct TaxdbRun {
     /// The texts of the loads that the model of the reads placed where NCBI makes no load
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:128
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:100
+    /// NCBI's name of the running application, in lower case, which every text of the run's
+    /// lookups names as its prefix (`SetDiagPostPrefix`, set once per process by the application)
+    /// where it is not the program's own: the application of a command line that runs another
+    /// program's search strategy ([`TaxdbRun::running`]). `None`: the program's name in lower
+    /// case ([`TaxdbRun::prefix`]).
+    app: Option<&'static str>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3946,6 +3960,22 @@ impl VolumeLookups {
 }
 
 impl TaxdbRun {
+    /// The run of the application `app` (NCBI's lower-case name), whose posts all carry its
+    /// prefix, also where the search it runs is another program's.
+    pub(crate) fn running(app: &'static str) -> Self {
+        TaxdbRun {
+            app: Some(app),
+            ..TaxdbRun::default()
+        }
+    }
+
+    /// The prefix of the run's posts: the running application's name, else `program`'s in lower
+    /// case.
+    fn prefix(&self, program: &str) -> String {
+        self.app
+            .map_or_else(|| program.to_ascii_lowercase(), str::to_owned)
+    }
+
     /// Back to the state of a run that has looked nothing up, for a search of the batches before
     /// again (BLASTP's `HeaderReadError`: a later batch failed, and the batches before it are
     /// searched again alone): their prefetch and reports write the texts of opening the database
@@ -4743,7 +4773,7 @@ where
     }
     let taxdb = run.taxdb(search_path);
     let mut notes = TaxdbNotes {
-        program: program.to_ascii_lowercase(),
+        program: run.prefix(program),
         ..TaxdbNotes::default()
     };
     // NCBI opens the database at its first lookup; the texts are written at the first `Hit`.
@@ -4949,14 +4979,14 @@ pub(crate) fn tabular_names<'t>(
                 taxdb_error,
             )
             .where_loads_throw(run.load_throws(db)),
-            program,
+            &run.prefix(program),
         )));
     }
     let names = crate::report::tabular::TabularNames::look_up(
         spec,
         &run.taxdb(search_path),
         taxonomies,
-        program,
+        &run.prefix(program),
     )
     .map_err(|error| taxdb_error(error, program))?;
     // No NCBI counterpart: NCBI writes these texts where its first lookup opens the taxonomy
@@ -5085,7 +5115,7 @@ fn load_read_texts<'s>(
     };
     run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
-    let lower = program.to_ascii_lowercase();
+    let lower = run.prefix(program);
     let texts = run.load_texts(db);
     let offset_taxid = run.prefetch_texts(db).offset_error_taxid;
     let mut reads = Vec::new();
@@ -5193,7 +5223,7 @@ pub(crate) fn pssm_load_texts(
         &taxdb,
         blob,
         lookups,
-        &program.to_ascii_lowercase(),
+        &run.prefix(program),
         &mut text,
         program,
     )?;
@@ -5529,7 +5559,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     let mut posts = crate::report::diag_log::Posts::new();
     posts.loads(reads);
     if failed_lookup.is_some() || fails {
-        posts.lines(&prefetch_warning(program));
+        posts.lines(&prefetch_warning(&run.prefix(program)));
     }
     Ok(posts)
 }
@@ -5538,13 +5568,13 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 /// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's
 /// Seq-align of empty subject rows, `blastx::empty_rows::prefetch_reads_empty_row`): the one
 /// producer of its text.
-pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
+pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
     // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
     // stream failed).
     crate::ncbi_exception::post_line(
         crate::ncbi_exception::Severity::Warning,
         None,
-        Some(&program.to_ascii_lowercase()),
+        Some(&app.to_ascii_lowercase()),
         b"Error pre-fetching sequence data",
     )
 }

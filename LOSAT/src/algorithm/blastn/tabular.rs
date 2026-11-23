@@ -59,6 +59,8 @@ pub(crate) struct BlastnTabular<'a> {
     pub epilog: Option<usize>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath`).
     pub taxdb_found: bool,
+    /// The running application (`BlastnArgs::app`), the prefix of the taxonomy warning.
+    pub app: crate::blastinput::app::Program,
     /// The names of the taxonomy database that the rows look up (`None`: every lookup fails).
     pub names: Option<&'a TabularNames>,
 }
@@ -82,10 +84,11 @@ pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -
 pub(crate) fn write_tabular_prolog_warning(
     spec: &TabularSpec,
     taxdb_found: bool,
+    app: crate::blastinput::app::Program,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if spec.kind == TabularKind::CsvWithHeader && spec.checks_taxdb() && !taxdb_found {
-        diagnostics.write_all(taxdb_warning_line("blastn").as_bytes())?;
+        diagnostics.write_all(taxdb_warning_line(app.ncbi_name()).as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -122,7 +125,7 @@ pub(crate) fn write_blastn_tabular(
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
     let taxdb_warning =
-        (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line("blastn"));
+        (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line(tab.app.ncbi_name()));
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;

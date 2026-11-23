@@ -5974,6 +5974,7 @@ fn search(
             database.name(),
             option,
             args.app.name(),
+            args.app.ncbi_name(),
             archive,
             args.strategy.as_ref(),
             &mut |text| match archive {

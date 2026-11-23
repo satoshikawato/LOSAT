@@ -1703,6 +1703,7 @@ pub fn write_query(
 pub(crate) fn write_query_to(
     format: SerialFormat,
     run: &RunRecord<'_>,
+    app: &str,
     query: &QueryRecord<'_>,
     subjects: &[SubjectRecord<'_>],
     hsps: &[HspRecord<'_>],
@@ -1721,7 +1722,7 @@ pub(crate) fn write_query_to(
                 subjects,
                 hsps,
             };
-            write_query_posting(format, byte, &document, buf, writer, diagnostics)?;
+            write_query_posting(format, byte, app, &document, buf, writer, diagnostics)?;
         }
         Err(error) => return Err(error.into()),
     }
@@ -1755,16 +1756,15 @@ struct QueryDocument<'r, 'a> {
 fn write_query_posting(
     format: SerialFormat,
     byte: u8,
+    app: &str,
     document: &QueryDocument<'_, '_>,
     buf: &mut Vec<u8>,
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    let prefix =
-        crate::report::archive::options::RequestKind::from(document.run.program).application();
     let post = |replaced: &ReplacedChar| {
-        diagnostics.write_all(&replaced.post(Some(prefix)))?;
+        diagnostics.write_all(&replaced.post(Some(app)))?;
         diagnostics.flush()
     };
     match format {
@@ -1811,6 +1811,7 @@ fn write_traced<E: Encoder>(
 pub(crate) fn write_hit_list_seqaligns<'a, L>(
     format: SerialFormat,
     run: &RunRecord<'_>,
+    app: &str,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
     writer: &mut dyn Write,
@@ -1830,6 +1831,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
         write_query_to(
             format,
             run,
+            app,
             &queries.record(q_idx),
             &subject_records,
             &hsp_records,

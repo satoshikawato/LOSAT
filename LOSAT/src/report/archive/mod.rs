@@ -184,7 +184,9 @@ impl ArchiveRequest {
             .filter(|&iterations| iterations != 0 && database.is_some());
         Self {
             program: inputs.kind.program(),
-            application: inputs.kind.application(),
+            application: inputs
+                .application
+                .unwrap_or_else(|| inputs.kind.application()),
             service: options::service(inputs.kind, &inputs.task),
             algorithm: options::algorithm_options(inputs),
             database: database.map(|name| name.as_bytes().to_vec()),

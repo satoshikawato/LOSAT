@@ -769,7 +769,7 @@ fn read_believed_defline(
     let parsed = parse_believed_defline(
         line,
         protein,
-        read.program.lower,
+        read.program.app,
         line_number,
         &mut |message| {
             if written.is_ok() {

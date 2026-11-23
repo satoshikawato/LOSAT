@@ -328,6 +328,17 @@ pub(crate) fn identity_named_matrix_refusal(name: &str, program: &str) -> anyhow
 }
 
 impl TblastxArgs {
+    /// The running application: the program of the command line, the library call or the Web run,
+    /// which is not this program's when it runs another program's strategy
+    /// (`ImportRun::app`). Its name prefixes the run's diagnostics and its formatting handler
+    /// checks the formats.
+    pub(crate) fn app(&self) -> crate::blastinput::app::Program {
+        crate::report::archive::read::import::ImportRun::running(
+            self.import.as_ref(),
+            crate::blastinput::app::Program::Tblastx,
+        )
+    }
+
     /// The `-matrix` name as typed, BLOSUM62 when omitted (the pairwise report prints it so).
     pub fn matrix_name(&self) -> &str {
         self.matrix.as_deref().unwrap_or("BLOSUM62")

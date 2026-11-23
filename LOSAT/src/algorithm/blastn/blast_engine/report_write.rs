@@ -394,6 +394,7 @@ pub(super) fn write_structured_xml(
     let xml = crate::algorithm::blastn::blast_xml::BlastnXml {
         run: crate::report::blast_xml::XmlRun {
             program: "blastn",
+            app: report.app,
             version: &version,
             reference: if report.megablast {
                 crate::report::blast_xml::REFERENCE_MEGABLAST

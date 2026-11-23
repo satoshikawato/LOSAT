@@ -251,8 +251,9 @@ function sectionKey(section: string): string {
  * The subject headings of outfmt 0 in order with their offsets, the query they belong to (the index
  * among the registered queries, matched by id in order) and the sections of their HSPs. `raw` is the
  * bytes as written (the offsets are the records' coordinates; under `-html` a raw `>` at a line's start
- * is always a heading, NCBI writes a title's `>` as `&gt;`); `shown` gives the text of a range (the ids
- * and the sections' lines).
+ * is always a heading, NCBI writes a title's `>` as `&gt;`); `shown` gives the text of a range (the ids,
+ * the sections' lines, and the query lines: `Query= ` as shown, which under `-html` NCBI writes
+ * `<b>Query=</b> `).
  */
 function headingsOf(
   raw: string,
@@ -269,17 +270,18 @@ function headingsOf(
     section = undefined;
   };
   for (const line of raw.split('\n')) {
-    if (line.startsWith('Query= ')) {
+    const text = shown(line);
+    if (text.startsWith('Query= ')) {
       close();
       current = undefined;
-      const id = shown(line).slice(7).trim().split(/\s+/)[0]!;
+      const id = text.slice(7).trim().split(/\s+/)[0]!;
       do qIdx++;
       while (qIdx < queryIds.length && queryIds[qIdx] !== id);
     } else if (line.startsWith('>') && qIdx >= 0) {
       close();
       current = { qIdx, offset, id: shown(line).slice(1).trim().split(/\s+/)[0]!, hsps: [] };
       found.push(current);
-    } else if (line.startsWith(' Score =') && current !== undefined) {
+    } else if (text.startsWith(' Score =') && current !== undefined) {
       close();
       section = [line];
     } else if (section !== undefined) {

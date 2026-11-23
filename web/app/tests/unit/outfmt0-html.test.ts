@@ -1,9 +1,12 @@
-// The text that the viewer shows for outfmt 0 of a run made with -html (line RG T4a2, decision
-// T4a2-5): NCBI's HTML with the tags removed and the four entities decoded. The expected strings
-// are written by hand from the engine's fixtures (LOSAT/tests/fixtures/outfmt0).
+// The text that the viewer shows for outfmt 0 of a run made with -html (line RG T4a2, decisions
+// T4a2-5 and T4a2-17): NCBI's HTML as a browser's HTML tokenizer reads it, the tags, comments and
+// doctypes removed and the character references decoded. The expected strings are written by hand
+// from the engine's fixtures (LOSAT/tests/fixtures/outfmt0), NCBI BLAST+ 2.17.0's bytes of local ids
+// (line RG T4a2 review e S3) and the tokenizer's rules (WHATWG HTML, section "Tokenization").
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LEGACY_NAMES, NAMED_REFERENCES } from '../../src/domain/html-named-references';
 import { headingTitle, htmlShownText } from '../../src/domain/outfmt0';
 
 const fixture = (name: string) => readFileSync(resolve(import.meta.dirname, '../../../../LOSAT/tests/fixtures/outfmt0', name), 'utf8');
@@ -66,7 +69,7 @@ describe('htmlShownText', () => {
 
   it('removes a tag up to the ">" outside its quoted attribute values, and decodes in one pass from left to right', () => {
     expect(htmlShownText('a<a title="x > y" href=\'z>\'>b</a>c')).toBe('abc');
-    expect(htmlShownText('&amp;lt;&amp;&lt;&quot;&gt;&#38;&auml;&')).toBe('&lt;&<">&#38;&auml;&');
+    expect(htmlShownText('&amp;lt;&amp;&lt;&quot;&gt;&#38;&auml;&')).toBe('&lt;&<">&\u00e4&');
     expect(htmlShownText('no markup\n')).toBe('no markup\n');
     // A "<" that closes nowhere starts a tag to the end of the text.
     expect(htmlShownText('x<b')).toBe('x');
@@ -83,5 +86,81 @@ describe('htmlShownText', () => {
     expect(htmlShownText("<a title='say \"> hi\"' href=u>t</a>")).toBe('t');
     // After an unquoted value and a space the next attribute may be quoted.
     expect(htmlShownText('<a name=a\'b title="p>q">t</a>')).toBe('t');
+    // Only tab, LF, FF, CR and space end an unquoted value (review e N2): with U+00A0 the value goes on,
+    // "=" and the quote are its letters, and the first ">" ends the tag.
+    expect(htmlShownText('<a name=x\u00a0b="p>q">t</a>')).toBe('q">t');
+    expect(htmlShownText('<a name=x\fb="p>q">t</a>')).toBe('t');
+    expect(htmlShownText('<a name=x\rb="p>q">t</a>')).toBe('t');
+    // A quote or "=" that starts an attribute is a letter of its name, not the start of a value.
+    expect(htmlShownText('<a ="x>y" b>z')).toBe('y" b>z');
+    expect(htmlShownText('<a b"c="d>e">f')).toBe('f');
+    expect(htmlShownText('<a b="c"d="e>f">g')).toBe('g');
+    expect(htmlShownText('<br/>a<a / b="c>d">e')).toBe('ae');
+  });
+
+  it('shows the local ids that NCBI writes raw as a browser shows them (review e S3)', () => {
+    // NCBI BLAST+ 2.17.0, `blastp -subject -parse_deflines -html -outfmt 0` (T/t4/review_t4a2_e/out/web.ids.pd.ncbi.out).
+    expect(htmlShownText('>x<1y<a name=x<1y></a> title 0\nLength=150\n')).toBe('>x<1y title 0\nLength=150\n');
+    expect(htmlShownText('>m&#62;n<a name=m&#62;n></a> title 2\nLength=150\n')).toBe('>m>n title 2\nLength=150\n');
+    expect(htmlShownText('>k&ltz<a name=k&ltz></a> title 3\nLength=150\n')).toBe('>k<z title 3\nLength=150\n');
+    expect(headingTitle(htmlShownText('>k&ltz<a name=k&ltz></a> title 3\nLength=150\n'))).toBe('k<z title 3');
+  });
+
+  it('starts a tag only at "<" before an ASCII letter, "/", "!" or "?"', () => {
+    for (const text of ['a<1b', 'a< b', 'a<=b', 'a<<1', 'a<\u00e9b', 'a<']) expect(htmlShownText(text), text).toBe(text);
+    expect(htmlShownText('a</')).toBe('a</');
+    expect(htmlShownText('a</>b')).toBe('ab');
+    expect(htmlShownText('a</ x>b')).toBe('ab');
+    expect(htmlShownText('a</1>b')).toBe('ab');
+    expect(htmlShownText('a</b c="d>e">f')).toBe('af');
+    expect(htmlShownText('a<?x y="z>w">b')).toBe('aw">b');
+    expect(htmlShownText('a<!x>b<!>c')).toBe('abc');
+    expect(htmlShownText('a<!doctype html>b<!DOCTYPE x "y>z">c')).toBe('abz">c');
+    expect(htmlShownText('a<!-x>b')).toBe('ab');
+  });
+
+  it('ends a comment as the tokenizer does', () => {
+    expect(htmlShownText('a<!-- b > c -->d')).toBe('ad');
+    expect(htmlShownText('a<!-->b')).toBe('ab');
+    expect(htmlShownText('a<!--->b')).toBe('ab');
+    expect(htmlShownText('a<!---->b')).toBe('ab');
+    expect(htmlShownText('a<!-- x --!> y')).toBe('a y');
+    expect(htmlShownText('a<!--!>b-->c')).toBe('ac');
+    expect(htmlShownText('a<!-- -- --->b')).toBe('ab');
+    expect(htmlShownText('a<!--b')).toBe('a');
+  });
+
+  it('decodes every character reference as a browser does', () => {
+    // Numeric: decimal and hexadecimal, with and without ";".
+    expect(htmlShownText('&#62;&#62&#x3e;&#X3E&#x3Eg')).toBe('>>>>>g');
+    // No digit: the text stays.
+    expect(htmlShownText('&#;&#x;&#xg&#a')).toBe('&#;&#x;&#xg&#a');
+    // 0, a surrogate and a number past U+10FFFF give U+FFFD; 0x80-0x9F windows-1252's letters, the
+    // numbers of that range that it does not use stay; other controls and noncharacters stay.
+    expect(htmlShownText('&#0;&#xD800;&#x110000;&#99999999999999999999;')).toBe('\ufffd'.repeat(4));
+    expect(htmlShownText('&#128;&#x9F;&#x81;&#1;&#xFFFF;&#13;')).toBe('\u20ac\u0178\u0081\u0001\uffff\r');
+    expect(htmlShownText('&#x1F600;')).toBe('\u{1f600}');
+    // Named, with ";" (every name of the table) and without it (the legacy names only, the longest
+    // that starts the letters).
+    expect(htmlShownText('&hearts;&hearts&CounterClockwiseContourIntegral;')).toBe('\u2665&hearts\u2233');
+    expect(htmlShownText('&amp&ampx&AMP;&LT&notin;&notin&notit;&ltz;')).toBe('&&x&<\u2209\u00acin\u00acit;<z;');
+    expect(htmlShownText('&frac12&frac123&iexcl!')).toBe('\u00bd\u00bd3\u00a1!');
+    expect(htmlShownText('&nbsp;&NewLine;&Tab;')).toBe('\u00a0\n\t');
+    // An "&" before anything else, or before a name that the table does not have, is text.
+    expect(htmlShownText('& &; &x; &unknown; &')).toBe('& &; &x; &unknown; &');
+  });
+
+  it('reads CR LF and CR as LF, as the input stream does', () => {
+    expect(htmlShownText('a\r\nb\rc\n')).toBe('a\nb\nc\n');
+    expect(htmlShownText('<a\rname=x\r>t</a>')).toBe('t');
+  });
+});
+
+describe('the named character references', () => {
+  it('are the table of the WHATWG HTML standard (2,231 identifiers, 106 of them without ";")', () => {
+    expect(NAMED_REFERENCES.size).toBe(2125);
+    expect(LEGACY_NAMES.size).toBe(106);
+    for (const name of LEGACY_NAMES) expect(NAMED_REFERENCES.has(name), name).toBe(true);
+    expect([NAMED_REFERENCES.get('amp'), NAMED_REFERENCES.get('nGt'), NAMED_REFERENCES.get('zwnj')]).toEqual(['&', '\u226b\u20d2', '\u200c']);
   });
 });

@@ -514,8 +514,8 @@ export class ResultsBrowser {
 
   /**
    * The outfmt 0 bytes of a range of the loaded run as text. A run made with `-html` has NCBI's HTML there;
-   * the viewer shows the text that it displays (tags removed, four entities decoded), the one place that
-   * reads outfmt 0 ranges. The stored bytes and the export stay as written.
+   * the viewer shows the text that a browser displays (as its HTML tokenizer reads it: `htmlShownText`), the
+   * one place that reads outfmt 0 ranges. The stored bytes and the export stay as written.
    */
   private readOutfmt0(loaded: LoadedRun, range: readonly [number, number]): Promise<string> {
     const html = flagGiven(loaded.run.snapshot.argv, '-html');

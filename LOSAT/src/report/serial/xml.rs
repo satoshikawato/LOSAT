@@ -1036,12 +1036,25 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         }
     }
 
-    /// The XML documents have no delayed member (`Auth-list.names`, a PSSM file's member read
-    /// into a delay buffer, `asn_types::write`), which NCBI parses before it writes it in XML:
-    /// LOSAT's psiblast refuses `-outfmt 11` and its tblastn `-in_pssm` refuses the archive of a
-    /// search, so no archive of a PSSM query is written as XML.
-    fn delayed(&mut self, _text: &[u8]) {
-        self.fail(SerialError::Unwritten("a member read into a delay buffer"));
+    /// The member's tag was opened (`member`); the bytes read from XML follow as they were read,
+    /// and the member's closing tag follows them (`CObjectOStream::WriteClassMember` of a buffer of
+    /// its format: `Write` of the buffer's source writes no tag of its own).
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:919-933
+    fn delayed(&mut self, bytes: &[u8]) {
+        self.out.extend_from_slice(bytes);
+    }
+
+    fn unread_delayed(&mut self) {
+        self.fail(SerialError::Unwritten(
+            "a member read into a delay buffer of another format whose value NCBI reads with an \
+                 error or with a message other than a replaced character",
+        ));
+    }
+
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let Some(first) = posts.first() {
+            self.fail(SerialError::NonVisibleChar(first.byte));
+        }
     }
 
     /// `WriteBytes` of the object mode: the bytes as upper-case hex digits, unwrapped

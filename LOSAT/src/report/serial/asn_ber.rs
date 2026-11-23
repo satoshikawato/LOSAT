@@ -14,7 +14,7 @@
 use super::asn_ber_reader::{
     REAL_DECIMAL, REAL_MINUS_INFINITY, REAL_NOT_A_NUMBER, REAL_PLUS_INFINITY,
 };
-use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
+use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, Stream, StreamPosition};
 use super::real::double_to_string_posix;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2` of `data` with `DBL_DIG`).
@@ -302,12 +302,25 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.out.extend_from_slice(value);
     }
 
-    /// NCBI parses a delay buffer read from text before it writes it in binary
-    /// (`CMemberInfoFunctions::WriteLongMember`, member.cpp:1084-1119): no BLAST document that
-    /// LOSAT writes in ASN.1 binary holds one.
-    fn delayed(&mut self, _text: &[u8]) {
+    /// The member's tag and length were written (`member`); the bytes of the value follow as
+    /// they were read (`CObjectOStreamAsnBinary::WriteClassMember` of a buffer of its format).
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1458-1500
+    fn delayed(&mut self, bytes: &[u8]) {
+        self.out.extend_from_slice(bytes);
+    }
+
+    fn unread_delayed(&mut self) {
         if self.error.is_none() {
-            self.error = Some(SerialError::Unwritten("a member read into a delay buffer"));
+            self.error = Some(SerialError::Unwritten(
+                "a member read into a delay buffer of another format whose value NCBI reads with an \
+                 error or with a message other than a replaced character",
+            ));
+        }
+    }
+
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let (None, Some(first)) = (&self.error, posts.first()) {
+            self.error = Some(SerialError::NonVisibleChar(first.byte));
         }
     }
 

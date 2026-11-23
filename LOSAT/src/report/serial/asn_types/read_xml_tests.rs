@@ -351,6 +351,57 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
     assert_eq!(posts, vec![replaced("Dbtag.tag", 0x02, tag_line)]);
 }
 
+/// Namespace prefixes and declarations (`ReadName`): a prefixed tag is read by the name after its
+/// last `:`; `xmlns` and `xmlns:<prefix>` attributes are read with their values; a `nil`
+/// attribute whose prefix is not declared or names the schema-instance namespace holds a boolean
+/// (else `NStr::StringToBool`'s exception at position 0, through the frames), one of another
+/// namespace is skipped (NCBI 2.17.0 probes ns_root, ns_tags, ns_member, nil_true, nil_bad,
+/// xsnil_bad, othernil_bad of line RG-F3 agent D6, 2026-11-23).
+// NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:432-524
+#[test]
+fn namespace_prefixes_and_nil_are_read_as_ncbi_reads_them() {
+    let document = xml(named::DBTAG, "NCBI-General", DBTAG);
+    let prefixed = document
+        .replace("<Dbtag", "<x:Dbtag")
+        .replace("</Dbtag", "</x:Dbtag")
+        .replace("<Object-id", "<x:Object-id")
+        .replace("</Object-id", "</x:Object-id");
+    let prefixed = replace(&prefixed, "<x:Dbtag>", "<x:Dbtag xmlns:x=\"u\">");
+    assert_eq!(outcome(&prefixed, named::DBTAG), Ok(DBTAG.into()));
+    let declared = replace(
+        &document,
+        "<Dbtag>",
+        "<Dbtag xmlns=\"http://www.ncbi.nlm.nih.gov\" \
+         xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\" xs:schemaLocation=\"a b\">",
+    );
+    assert_eq!(outcome(&declared, named::DBTAG), Ok(DBTAG.into()));
+    let nil = |attribute: &str, root: &str| {
+        let text = replace(&document, "<Dbtag_db>", &format!("<Dbtag_db {attribute}>"));
+        replace(&text, "<Dbtag>", &format!("<Dbtag{root}>"))
+    };
+    assert_eq!(
+        outcome(&nil("nil=\"true\"", ""), named::DBTAG),
+        Ok(DBTAG.into())
+    );
+    let other = nil("o:nil=\"x\"", " xmlns:o=\"http://example.org\"");
+    assert_eq!(outcome(&other, named::DBTAG), Ok(DBTAG.into()));
+    let schema = " xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"";
+    for bad in [nil("nil=\"x\"", ""), nil("xs:nil=\"x\"", schema)] {
+        match read(bad.as_bytes(), named::DBTAG).0 {
+            Err(ReadError::Exception(e)) => {
+                let report = String::from_utf8_lossy(&e.ncbi_what()).into_owned();
+                assert!(
+                    report.contains("NStr::StringToBool() - String cannot be converted to bool")
+                        && report.contains("(m_Pos = 0)")
+                        && report.contains("Member name= db"),
+                    "{report}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
 /// The standard-XML style (`SetEnforcedStdXml` on, the search strategy) is not read yet: the
 /// stream refuses it at the header.
 #[test]

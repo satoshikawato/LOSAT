@@ -21,11 +21,12 @@
 //! end of the input inside a document is therefore its failure, as LOSAT reads it.
 //!
 //! What LOSAT does not read is `XmlError::Unsupported`, refused where the reader meets it, also in
-//! a document that NCBI would then reject for another reason: XML attributes (NCBI skips unknown
-//! ones, with its own handling of `xmlns` and `nil`), names with a namespace prefix (NCBI strips
-//! the prefix and keeps namespace maps), control characters in character data (NCBI replaces
-//! them with `#` and posts a warning with its stack of the read). NCBI's BLAST XML writers produce
-//! none of them.
+//! a document that NCBI would then reject for another reason: in rpsbproc's reader, XML
+//! attributes (NCBI skips unknown ones, with its own handling of `xmlns` and `nil`), names with a
+//! namespace prefix (NCBI strips the prefix and keeps namespace maps), control characters in
+//! character data (NCBI replaces them with `#` and posts a warning with its stack of the read);
+//! NCBI's BLAST XML writers produce none of them. The object stream reads all three as NCBI does
+//! (`read_name`, `read_undefined_attributes`, `x_VerifyChar`).
 
 use super::asn_text_reader::{buffer_number, AsnSource, NumberStop};
 use crate::ncbi_str::{is_space, string_to_double_posix};
@@ -37,6 +38,9 @@ pub(crate) enum XmlError {
     Format(String),
     /// What LOSAT does not read (an explicit refusal, the whole message).
     Unsupported(String),
+    /// The value of a `nil` attribute that `NStr::StringToBool` does not convert: its
+    /// `CStringException` (`read_name`), which the object stream throws as NCBI's.
+    NotBool,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, XmlError>;
@@ -254,7 +258,17 @@ pub(crate) struct XmlReader<S: AsnSource> {
     /// The bytes replaced by `#` (`ReplaceVisibleChar` of `x_VerifyChar`) and the line of each,
     /// for the object stream to post.
     pub(super) replaced: Vec<(u8, usize)>,
+    /// `m_Attlist`: an attribute list being read (`read_undefined_attributes`).
+    attlist: bool,
+    /// `m_CurrNsPrefix`: the prefix of the last name read with one (`read_name`).
+    ns_prefix: Vec<u8>,
+    /// `m_NsPrefixToName`: the namespaces declared (`xmlns`, `xmlns:<prefix>`), by prefix.
+    namespaces: Vec<(Vec<u8>, Vec<u8>)>,
 }
+
+/// `s_SchemaInstanceNamespace`: the namespace whose `nil` attribute NCBI's reader reads.
+// NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:50-50
+const SCHEMA_INSTANCE_NAMESPACE: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
 
 impl<S: AsnSource> XmlReader<S> {
     pub(crate) fn new(src: S) -> Self {
@@ -270,6 +284,9 @@ impl<S: AsnSource> XmlReader<S> {
             object: false,
             line: 1,
             replaced: Vec::new(),
+            attlist: false,
+            ns_prefix: Vec::new(),
+            namespaces: Vec::new(),
         }
     }
 
@@ -450,13 +467,18 @@ impl<S: AsnSource> XmlReader<S> {
     // reads; the `nil` value's own check (`NStr::StringToBool`) is not made.)
     pub(super) fn read_undefined_attributes(&mut self) -> Result<u8> {
         if self.object {
+            self.attlist = true;
             loop {
                 let c = self.skip_ws()?;
                 if is_end_of_tag_char(c) {
+                    self.attlist = false;
                     return Ok(c);
                 }
                 self.read_name(c)?;
-                self.read_attribute_value()?;
+                // (`read_name` reads an `xmlns` or `nil` attribute itself.)
+                if !self.last_tag.is_empty() {
+                    self.read_attribute_value()?;
+                }
             }
         }
         let c = self.skip_ws()?;
@@ -535,34 +557,117 @@ impl<S: AsnSource> XmlReader<S> {
     }
 
     /// `ReadName` of `c`: the name that starts with `c` (not read yet), into `last_tag`.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:432-469
+    ///
+    /// rpsbproc's reader refuses a name with a namespace prefix. The object stream reads it as
+    /// NCBI does for the types of an ASN.1 module: the name after the last `:`, the prefix kept as
+    /// `m_CurrNsPrefix` (none for `xml`); an `xmlns:` declaration, and an `xmlns` attribute in an
+    /// attribute list (`m_Attlist`), read with its value into the namespace map, and the name
+    /// after it read in its place (none, an empty `last_tag`, at the end of the tag); a `nil`
+    /// attribute in an attribute list whose prefix is not declared or names the schema-instance
+    /// namespace read with its value, which `NStr::StringToBool` converts (`XmlError::NotBool`
+    /// where it throws), and the name after it read in its place. (The namespace maps decide
+    /// nothing else in the reading of such a type; `SetNamespacePrefix` of a type with a
+    /// namespace name only changes what NCBI's writers write.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:432-524
     // (`m_Doctype_found` is false for the types of an ASN.1 module (ReadFileHeader:
-    // `GetDataSpec()` is `EDataSpec::eDTD`). A `:` after the first byte makes a namespace prefix,
-    // refused; the `xmlns` and `nil` names of `m_Attlist` are attributes, refused before.)
+    // `GetDataSpec()` is `EDataSpec::eDTD`).)
     pub(super) fn read_name(&mut self, c: u8) -> Result<()> {
         if !is_first_name_char(c) {
             return fail("Name begins with an invalid character");
         }
         let mut i = 1;
+        let mut colon = 0;
         let next = loop {
             let next = self.peek(i)?;
             if !is_name_char(next) {
                 break next;
             }
             if next == b':' {
-                return Err(unsupported("a name with a namespace prefix"));
+                if !self.object {
+                    return Err(unsupported("a name with a namespace prefix"));
+                }
+                colon = i + 1;
             }
             i += 1;
         };
         self.last_tag.clear();
-        let name = self.src.bytes(self.pos..self.pos + i);
+        let name = self.src.bytes(self.pos + colon..self.pos + i);
         self.last_tag.extend_from_slice(name);
+        let prefix = (colon > 1).then(|| self.src.bytes(self.pos..self.pos + colon - 1).to_vec());
         self.skip(i);
         if next == b'\n' || next == b'\r' {
             self.skip(1);
             self.skip_end_of_line(next);
         }
+        if self.object {
+            return self.name_namespaces(prefix);
+        }
         Ok(())
+    }
+
+    /// The namespace part of `read_name` in the object stream, after the name (`prefix`: the
+    /// bytes before its last `:`).
+    #[cold]
+    fn name_namespaces(&mut self, prefix: Option<Vec<u8>>) -> Result<()> {
+        match prefix {
+            Some(prefix) if prefix == b"xmlns" => {
+                let value = self.read_attribute_value()?;
+                let declared = std::mem::take(&mut self.last_tag);
+                self.declare(declared, value);
+                return self.name_after_attribute();
+            }
+            Some(prefix) if prefix == b"xml" => {}
+            Some(prefix) => self.ns_prefix = prefix,
+            None => {
+                if !self.attlist {
+                    self.ns_prefix.clear();
+                }
+                if self.attlist && self.last_tag == b"xmlns" {
+                    let value = self.read_attribute_value()?;
+                    self.declare(b"xmlns".to_vec(), value);
+                    return self.name_after_attribute();
+                }
+            }
+        }
+        if self.attlist && self.last_tag == b"nil" {
+            let schema = self
+                .namespaces
+                .iter()
+                .find(|(prefix, _)| *prefix == self.ns_prefix)
+                .is_none_or(|(_, name)| name.as_slice() == SCHEMA_INSTANCE_NAMESPACE);
+            if schema {
+                let value = self.read_attribute_value()?;
+                let text = String::from_utf8_lossy(&value);
+                if crate::ncbi_str::string_to_bool(&text).is_none() {
+                    return Err(XmlError::NotBool);
+                }
+                return self.name_after_attribute();
+            }
+        }
+        Ok(())
+    }
+
+    /// `m_NsPrefixToName[prefix] = name` (and the map the other way, which reading does not use).
+    fn declare(&mut self, prefix: Vec<u8>, name: Vec<u8>) {
+        match self
+            .namespaces
+            .iter_mut()
+            .find(|(known, _)| *known == prefix)
+        {
+            Some(entry) => entry.1 = name,
+            None => self.namespaces.push((prefix, name)),
+        }
+    }
+
+    /// The name after an attribute that `read_name` read itself: none (`last_tag` empty) at the
+    /// end of the tag, else the next one.
+    fn name_after_attribute(&mut self) -> Result<()> {
+        let c = self.skip_ws()?;
+        if is_end_of_tag_char(c) {
+            self.last_tag.clear();
+            return Ok(());
+        }
+        self.read_name(c)
     }
 
     /// `UndoClassMember`: gives back the name of the opening tag being read.

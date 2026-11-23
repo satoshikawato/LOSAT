@@ -409,6 +409,11 @@ impl<S: AsnSource> XmlInput<S> {
         match error {
             XmlError::Format(message) if message == EOF_MESSAGE => Fail::Eof,
             XmlError::Format(message) => self.throw(lexer_site(&message), message),
+            XmlError::NotBool => Fail::exception(NcbiException::with_pos(
+                crate::ncbi_str::STRING_TO_BOOL,
+                "String cannot be converted to bool",
+                0,
+            )),
             XmlError::Unsupported(what) => Fail::unsupported(format!(
                 "{what} in an XML {} is not read by LOSAT's {} ({})",
                 self.names.document,

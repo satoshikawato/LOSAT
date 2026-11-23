@@ -4,7 +4,7 @@
 
 const fs = require("fs");
 const { WASI } = require("wasi");
-const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports, blockingStdioWrite, endOnAbortTrap } = require("./wasi_artifact");
 const { sharedFileTable, sharedFileImports } = require("./wasi_files");
 
 // NCBI reference (598d8ae6):
@@ -65,6 +65,8 @@ const wasi = new WASI({
   // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
   process.exitCode = wasi.start(instance);
 })().catch((error) => {
+  // The module's abort ends this process by SIGABRT, as the native command's (wasi_artifact.js).
+  endOnAbortTrap(error);
   console.error(error && error.stack ? error.stack : String(error));
   // process.exitCode, not process.exit(): Node's exit handler shuts down V8's worker threads
   // before it frees the main isolate, so a background compile there that waits for a garbage

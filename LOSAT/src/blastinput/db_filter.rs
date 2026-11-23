@@ -40,7 +40,6 @@ pub struct DbFilterArgs {
     #[arg(
         long = "seqidlist",
         value_name = "filename",
-        conflicts_with_all = ["negative_seqidlist", "taxids", "taxidlist", "negative_taxids", "negative_taxidlist", "no_taxid_expansion", "subject"],
         help = "Restrict search of database to list of SeqIDs"
     )]
     pub seqidlist: Option<String>,
@@ -48,7 +47,6 @@ pub struct DbFilterArgs {
     #[arg(
         long = "negative_seqidlist",
         value_name = "filename",
-        conflicts_with_all = ["taxids", "taxidlist", "negative_taxids", "negative_taxidlist", "no_taxid_expansion", "subject"],
         help = "Restrict search of database to everything except the specified SeqIDs"
     )]
     pub negative_seqidlist: Option<String>,
@@ -56,7 +54,6 @@ pub struct DbFilterArgs {
     #[arg(
         long = "taxids",
         value_name = "taxids",
-        conflicts_with_all = ["taxidlist", "negative_taxids", "negative_taxidlist", "subject"],
         help = "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
     )]
     pub taxids: Option<String>,
@@ -64,7 +61,6 @@ pub struct DbFilterArgs {
     #[arg(
         long = "taxidlist",
         value_name = "filename",
-        conflicts_with_all = ["negative_taxids", "negative_taxidlist", "subject"],
         help = "Restrict search of database to include only the specified taxonomy IDs and their descendants"
     )]
     pub taxidlist: Option<String>,
@@ -72,7 +68,6 @@ pub struct DbFilterArgs {
     #[arg(
         long = "negative_taxids",
         value_name = "taxids",
-        conflicts_with_all = ["negative_taxidlist", "subject"],
         help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
     )]
     pub negative_taxids: Option<String>,
@@ -80,14 +75,12 @@ pub struct DbFilterArgs {
     #[arg(
         long = "negative_taxidlist",
         value_name = "filename",
-        conflicts_with_all = ["subject"],
         help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants"
     )]
     pub negative_taxidlist: Option<String>,
     /// `-no_taxid_expansion`: the taxids alone, without their descendants.
     #[arg(
         long = "no_taxid_expansion",
-        conflicts_with_all = ["subject"],
         help = "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs "
     )]
     pub no_taxid_expansion: bool,

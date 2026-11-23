@@ -199,7 +199,7 @@ pub(super) fn strings(values: Span) -> impl Iterator<Item = &'static str> {
 }
 
 /// The values of a set of integers (rows of `INTEGER_VALUES`).
-fn integers(values: Span) -> &'static [i32] {
+pub(super) fn integers(values: Span) -> &'static [i32] {
     values.of(&super::INTEGER_VALUES)
 }
 

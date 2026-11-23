@@ -38,7 +38,6 @@ pub struct DbMaskArgs {
     #[arg(
         long = "db_soft_mask",
         value_name = "filtering_algorithm",
-        conflicts_with_all = ["subject", "subject_loc", "db_hard_mask"],
         help = "Filtering algorithm ID to apply to the BLAST database as soft masking"
     )]
     pub db_soft_mask: Option<String>,
@@ -46,7 +45,6 @@ pub struct DbMaskArgs {
     #[arg(
         long = "db_hard_mask",
         value_name = "filtering_algorithm",
-        conflicts_with_all = ["subject", "subject_loc"],
         help = "Filtering algorithm ID to apply to the BLAST database as hard masking"
     )]
     pub db_hard_mask: Option<String>,

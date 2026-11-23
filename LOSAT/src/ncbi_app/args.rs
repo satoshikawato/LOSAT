@@ -255,8 +255,45 @@ pub fn string_values(program: &str, name: &str) -> Option<Vec<&'static str>> {
     }
 }
 
+/// The values that `program`'s key `name` allows where its constraint is a set (`CArgAllow_Strings`,
+/// `CArgAllowStringSet`, `CArgAllowIntegerSet`), as LOSAT's descriptions of the program list them:
+/// in the order of `DISPLAY_ORDERS` where it has a row (line RG DECISIONS K4i-2b-1), else of NCBI's
+/// set; `None` for a key of another constraint or none, and for a flag. The library API's and LOSAT
+/// Web's descriptions (`api::describe`, `web_adapter`) and the check of a task that a caller set
+/// (`value_parsers::TaskParser::check`) read it.
+pub fn choices(program: &str, name: &str) -> Option<Vec<String>> {
+    let display = DISPLAY_ORDERS
+        .iter()
+        .find(|(of, key, _)| (of.is(program) || of.is("*")) && key.is(name));
+    if let Some((_, _, values)) = display {
+        if find_desc(arguments(program)?, name).is_some() {
+            return Some(constraint::strings(*values).map(str::to_string).collect());
+        }
+    }
+    match find_desc(arguments(program)?, name)?.constraint? {
+        Constraint::Strings(values) | Constraint::StringSet(values) => {
+            Some(constraint::strings(values).map(str::to_string).collect())
+        }
+        Constraint::IntegerSet(values) => Some(
+            constraint::integers(values)
+                .iter()
+                .map(i32::to_string)
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// The default of `program`'s key `name` in NCBI's XML (`<default>`, a key of `AddDefaultKey`);
+/// `None` for a key without one, a flag and a name that is no argument of `program`. What the
+/// library API's and LOSAT Web's descriptions of a program give as an option's default (line RG
+/// DECISIONS K4i-2b-1 (3)).
+pub fn default_value(program: &str, name: &str) -> Option<&'static str> {
+    find_desc(arguments(program)?, name)?.default()
+}
+
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
-// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `PROGRAMS`), written by `LOSAT/build.rs`
+// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by `LOSAT/build.rs`
 // (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
 // arguments of every `CArgDescriptions` before the program's own (the help flags of its
 // constructor), `FILE_ARGUMENTS` those of every application after them
@@ -332,10 +369,9 @@ pub(crate) enum Dep {
 /// `m_Dependencies` in the order of its `multimap` (`Arguments::dependencies`), of the arguments
 /// that `given` says were given: the first exclusion between two given arguments is the error
 /// (`Err`, its message, bytes as `arg_message` gives them), else the arguments that the given
-/// ones require, each with its first requester, and those they exclude. The one port of the
-/// walk: the programs on NCBI's reader (`post_check`) and makeblastdb, whose command line LOSAT
-/// reads with its own parser (`writedb::makeblastdb::dependency_error`), use it.
-pub(crate) fn walk_dependencies<'a>(
+/// ones require, each with its first requester, and those they exclude: the walk of the reader's
+/// `post_check`.
+fn walk_dependencies<'a>(
     deps: impl IntoIterator<Item = (&'a str, Dep, &'a str)>,
     given: &dyn Fn(&str) -> bool,
 ) -> Result<DependencyWalk<'a>, Vec<u8>> {

@@ -47,7 +47,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
     argv.extend_from_slice(extra);
     // v1's reader and its messages (`web_v1_argv`), frozen.
     let argv = argv.into_iter().map(Into::into).collect();
-    match crate::web_v1_argv::parse(crate::cli::command_of("tblastn"), argv) {
+    match crate::web_v1_argv::parse(crate::web_v1_argv::command("tblastn"), argv) {
         Ok(crate::cli::Commands::Tblastn(args)) => Ok(args),
         Ok(_) => unreachable!("fixed TBLASTN subcommand"),
         Err(message) => Err(anyhow::Error::msg(message)),

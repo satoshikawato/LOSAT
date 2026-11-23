@@ -46,7 +46,7 @@ pub struct RpsbprocArgs {
         long = "e",
         value_name = "REAL",
         default_value = "0.01",
-        value_parser = rpsbproc_real,
+        value_parser = ncbi_double,
         help = "E-value cut-off, shown in the header (also --evalue); it drops the HSPs above it in the XML input and selects no hit of an ASN.1 archive."
     )]
     pub evalue: f64,
@@ -55,7 +55,6 @@ pub struct RpsbprocArgs {
         long = "m",
         value_name = "MODE",
         default_value = "rep",
-        value_parser = ["rep", "std", "full"],
         help = "Redundancy level of domain hit data: rep (concise), std (standard) or full (all hits) (also --data-mode)"
     )]
     pub data_mode: String,
@@ -64,7 +63,6 @@ pub struct RpsbprocArgs {
         long = "t",
         value_name = "DATA",
         default_value = "both",
-        value_parser = ["doms", "feats", "both"],
         help = "Target data: doms (domain hits), feats (sites and motifs) or both (also --target-data)"
     )]
     pub target_data: String,
@@ -85,11 +83,6 @@ pub struct RpsbprocArgs {
         help = "Quiet mode: no progress on stderr (also --quiet; the program information is still shown)"
     )]
     pub quiet: bool,
-}
-
-/// A real argument as NCBI's `CArg_Double` reads it (`ncbi_double`).
-fn rpsbproc_real(value: &str) -> Result<f64, String> {
-    crate::blastinput::value_parsers::ncbi_double(value)
 }
 
 impl RpsbprocArgs {

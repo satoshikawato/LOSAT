@@ -28,25 +28,25 @@ pub const HELP: &str = include_str!("help.txt");
 #[command(rename_all = "snake_case")]
 pub struct RpstblastnArgs {
     // *** Input query options
-    #[arg(long, default_value = "-", value_parser = ncbi_input_path(), value_name = "PATH")]
+    #[arg(long, default_value = "-", value_parser = ncbi_path(), value_name = "PATH")]
     pub query: PathBuf,
-    #[arg(long, default_value_t = 1, value_parser = genetic_code)]
+    #[arg(long, default_value_t = 1, value_parser = ncbi_integer_as::<u8>)]
     pub query_gencode: u8,
     #[arg(long = "query_loc", value_name = "RANGE")]
     pub query_loc: Option<String>,
-    #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
+    #[arg(long, default_value = "both")]
     pub strand: String,
     // *** General search options
     #[arg(long, value_name = "NAME")]
     pub db: Option<String>,
-    #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
     /// are read.
-    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    #[arg(long, value_name = "filename", value_parser = ncbi_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
-    #[arg(long, value_parser = rpstblastn_real)]
+    #[arg(long, value_parser = ncbi_double)]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     /// Read as RPS-BLAST reads it (`rpsblast::args::rps_composition_mode`).
@@ -57,9 +57,9 @@ pub struct RpstblastnArgs {
     pub outfmt: String,
     #[arg(long = "show_gis", default_value_t = false)]
     pub show_gis: bool,
-    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count)]
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = ncbi_integer_as::<usize>)]
     pub num_descriptions: Option<usize>,
-    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count)]
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = ncbi_integer_as::<usize>)]
     pub num_alignments: Option<usize>,
     /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler, `FormattingArgs`),
     /// handed to BLASTX's arguments: the width of the outfmt 0 alignment rows; the sorts are read
@@ -75,16 +75,16 @@ pub struct RpstblastnArgs {
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
     // *** Restrict search or results
-    #[arg(long = "qcov_hsp_perc", value_parser = rpstblastn_query_coverage)]
+    #[arg(long = "qcov_hsp_perc", value_parser = ncbi_double)]
     pub qcov_hsp_perc: Option<f64>,
-    #[arg(long = "max_hsps", value_parser = blastn_count)]
+    #[arg(long = "max_hsps", value_parser = ncbi_integer_as::<usize>)]
     pub max_hsps_per_subject: Option<usize>,
-    #[arg(long, value_parser = blastn_count, conflicts_with_all = ["num_descriptions", "num_alignments"])]
+    #[arg(long, value_parser = ncbi_integer_as::<usize>)]
     pub max_target_seqs: Option<usize>,
     // *** Statistical options
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS")]
     pub dbsize: Option<i64>,
-    #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE")]
+    #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE")]
     pub searchsp: Option<i64>,
     /// `-sum_stats`: `false` is rpstblastn's default; `true` is refused where the search starts
     /// (`rps_search::translated`), after NCBI's errors of the options, the database and the
@@ -92,13 +92,13 @@ pub struct RpstblastnArgs {
     #[arg(long = "sum_stats", value_name = "bool_value", value_parser = ncbi_boolean)]
     pub sum_stats: Option<bool>,
     // *** Extension options
-    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = rpstblastn_real)]
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = ncbi_double)]
     pub xdrop_ungap: Option<f64>,
-    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = rpstblastn_real)]
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = ncbi_double)]
     pub xdrop_gap: Option<f64>,
-    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = rpstblastn_real)]
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = ncbi_double)]
     pub xdrop_gap_final: Option<f64>,
-    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    #[arg(long, value_parser = ncbi_integer)]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917
     /// `-ungapped`: NCBI's options error with composition-based statistics (BLASTX's
@@ -111,10 +111,10 @@ pub struct RpstblastnArgs {
     pub parse_deflines: bool,
     /// `-num_threads`: LOSAT's pool size (0: the number of volumes, NCBI's "auto"); the output
     /// is the same at every value.
-    #[arg(long, default_value_t = 1, value_parser = nonnegative_ncbi_integer)]
+    #[arg(long, default_value_t = 1, value_parser = ncbi_integer)]
     pub num_threads: i32,
     /// `-mt_mode` is read and has no effect, as rpsblast's.
-    #[arg(long, value_name = "int_value", value_parser = rpsblast_mt_mode)]
+    #[arg(long, value_name = "int_value", value_parser = ncbi_integer_as::<u8>)]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     /// `-use_sw_tback`: the composition-based redo (modes 1 to 3) is NCBI's Smith-Waterman redo

@@ -35,7 +35,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     argv.extend_from_slice(extra);
     // ABI v1 is frozen (plan TD-1): its `-outfmt` keeps the values and the parser errors of
     // the CLI's BLASTX parser before it read `-outfmt` as NCBI (`v1_outfmt`).
-    let command = crate::cli::command_of("blastx").mut_subcommand("blastx", |blastx| {
+    let command = crate::web_v1_argv::command("blastx").mut_subcommand("blastx", |blastx| {
         blastx.mut_arg("outfmt", |outfmt| outfmt.value_parser(v1_outfmt))
     });
     let argv = argv.into_iter().map(Into::into).collect();

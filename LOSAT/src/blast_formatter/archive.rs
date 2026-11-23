@@ -56,7 +56,7 @@ use crate::seqdb::{DbList, SeqDb, SeqDbError, SeqType, TaxidList};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::ParsedSeqId;
 use crate::writedb::metadata::{OStreamBuffer, ObjectOStream};
-use crate::writedb::ofstream::{DiskFile, IoState, RawFile, Stream};
+use crate::writedb::ofstream::{DiskFile, IoState, OutArea, RawFile, Stream};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:506-529
 /// The formatting of the archive `archive` with the command line's `options` and the
@@ -119,7 +119,7 @@ struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
     /// The opened stream, and whether it is `cout`.
-    stream: Option<(Stream<OutFile<'o>>, bool)>,
+    stream: Option<(Stream<OutFile<'o>, OutArea>, bool)>,
     /// Whether an object's formatter holds the stream (`begin_object`, `end_object`).
     formatting: bool,
 }
@@ -194,7 +194,7 @@ impl<'o> Output<'o> {
             .map_err(|error| command_line_argument_error(error.message()))?;
         let (mut stream, file, is_stdout) = match file {
             OutputFile::Stdout(out) => (Stream::cout(), OutFile::Stdout(out, Vec::new()), true),
-            OutputFile::File(file) => (Stream::new(), OutFile::Disk(DiskFile::from(file)), false),
+            OutputFile::File(file) => (Stream::file(), OutFile::Disk(DiskFile::from(file)), false),
         };
         stream.open_with(move || Ok(file));
         self.stream = Some((stream, is_stdout));
@@ -202,7 +202,7 @@ impl<'o> Output<'o> {
     }
 
     /// The opened stream and whether it is `cout`.
-    fn opened(&mut self) -> (&mut Stream<OutFile<'o>>, bool) {
+    fn opened(&mut self) -> (&mut Stream<OutFile<'o>, OutArea>, bool) {
         let (stream, is_stdout) = self
             .stream
             .as_mut()
@@ -336,7 +336,7 @@ fn is_thrown(error: &anyhow::Error) -> bool {
 /// a throw of the stream is `thrown`. `flush` is `cerr`'s tie to `cout` before a post of a
 /// replaced byte (`tie`): what the buffer and `cout` hold is written; otherwise nothing.
 struct AnnotSink<'b, 'a, 'o> {
-    buffer: &'b mut OStreamBuffer<'a, OutFile<'o>>,
+    buffer: &'b mut OStreamBuffer<'a, OutFile<'o>, OutArea>,
     tie: bool,
 }
 

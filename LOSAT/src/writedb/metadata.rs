@@ -6,7 +6,9 @@ use std::io::Write;
 use std::path::Path;
 
 use super::build_db::VOLUME_EXTENSIONS;
-use super::ofstream::{DiskFile, IoState, OfStream, RawFile, Stream, IOS_FAILURE_WHAT};
+use super::ofstream::{
+    DiskFile, FileArea, IoState, OfStream, PutArea, RawFile, Stream, IOS_FAILURE_WHAT,
+};
 
 /// `CBlast_db_metadata` (`c++/src/objects/blastdb/blastdb.asn:79-97`) as makeblastdb fills it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -345,9 +347,9 @@ impl IoException {
 // line positions and the wrapping of other formats; they write nothing here.
 /// `COStreamBuffer` over an `ofstream`: the metadata file's, and blast_formatter's `-out` file
 /// (`blast_formatter::archive`, a Seq-annot's bytes through `write_bytes`).
-pub(crate) struct OStreamBuffer<'a, F: RawFile = DiskFile> {
+pub(crate) struct OStreamBuffer<'a, F: RawFile = DiskFile, B: PutArea = FileArea> {
     /// `m_Output`.
-    output: &'a mut Stream<F>,
+    output: &'a mut Stream<F, B>,
     /// `m_Closed`.
     closed: bool,
     /// `m_Error`.
@@ -362,8 +364,8 @@ pub(crate) struct OStreamBuffer<'a, F: RawFile = DiskFile> {
     current: usize,
 }
 
-impl<'a, F: RawFile> OStreamBuffer<'a, F> {
-    pub(crate) fn new(output: &'a mut Stream<F>) -> Self {
+impl<'a, F: RawFile, B: PutArea> OStreamBuffer<'a, F, B> {
+    pub(crate) fn new(output: &'a mut Stream<F, B>) -> Self {
         Self {
             output,
             closed: false,
@@ -376,7 +378,7 @@ impl<'a, F: RawFile> OStreamBuffer<'a, F> {
     }
 
     /// `m_Output`.
-    pub(crate) fn output(&mut self) -> &mut Stream<F> {
+    pub(crate) fn output(&mut self) -> &mut Stream<F, B> {
         self.output
     }
 
@@ -528,7 +530,7 @@ impl<'a, F: RawFile> OStreamBuffer<'a, F> {
 // `IncIndentLevel` and `DecIndentLevel` step by 2 (strbuffer.hpp:244-245). The strings of the
 // metadata object are written byte by byte (`x_WriteString`); `PutString` gets the numbers
 // and the escapes, all shorter than 1024 bytes.
-impl<F: RawFile> JsonOut for OStreamBuffer<'_, F> {
+impl<F: RawFile, B: PutArea> JsonOut for OStreamBuffer<'_, F, B> {
     type Error = BufferError;
     fn put_char(&mut self, c: u8) -> Result<(), BufferError> {
         let pos = self.skip(1)?;
@@ -564,9 +566,9 @@ const F_NOT_OPEN: u32 = 1 << 7;
 /// The parts of `CObjectOStream` that act on its stream after the object is written: the fail
 /// flags and the close of its destructor, with the posts of the application's diagnostic prefix
 /// `prefix` (makeblastdb's metadata file; blast_formatter's `-out` file, no prefix).
-pub(crate) struct ObjectOStream<'a, F: RawFile = DiskFile> {
+pub(crate) struct ObjectOStream<'a, F: RawFile = DiskFile, B: PutArea = FileArea> {
     /// `m_Output`.
-    pub(crate) output: OStreamBuffer<'a, F>,
+    pub(crate) output: OStreamBuffer<'a, F, B>,
     /// `m_Fail`.
     fail: u32,
     /// `SetDiagPostPrefix` of the application.
@@ -587,8 +589,8 @@ struct SerialException {
     predecessor: IoException,
 }
 
-impl<'a, F: RawFile> ObjectOStream<'a, F> {
-    pub(crate) fn new(output: OStreamBuffer<'a, F>, prefix: Option<&'static str>) -> Self {
+impl<'a, F: RawFile, B: PutArea> ObjectOStream<'a, F, B> {
+    pub(crate) fn new(output: OStreamBuffer<'a, F, B>, prefix: Option<&'static str>) -> Self {
         ObjectOStream {
             output,
             fail: 0,

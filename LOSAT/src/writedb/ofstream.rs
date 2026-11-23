@@ -179,143 +179,187 @@ impl RawFile for DiskFile {
     }
 }
 
-/// What the buffer holds of the bytes it takes, and when it writes them.
-#[derive(Clone, Copy, Debug)]
-enum Buffering {
-    /// `basic_filebuf`'s put area of `PUT_AREA` bytes: a file.
-    File,
-    /// The C library's `stdout` under `cout` (`cli::NcbiBuffer`): standard output.
-    Cout(crate::cli::NcbiBuffer),
+/// Writes all of `segments` (the first call as given, the calls after a short count with the
+/// segments the count finished dropped). `false` when a call fails; the file keeps the bytes the
+/// earlier calls took.
+fn write_all<F: RawFile>(file: &mut F, segments: &mut [&[u8]]) -> bool {
+    let mut segments = segments;
+    loop {
+        if segments.iter().all(|s| s.is_empty()) {
+            return true;
+        }
+        let mut taken = match file.write(segments) {
+            // A call that takes nothing of bytes still to go would repeat for ever.
+            Ok(0) => return false,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => return false,
+        };
+        while let Some(first) = segments.first() {
+            if taken < first.len() || segments.len() == 1 {
+                break;
+            }
+            taken -= first.len();
+            segments = &mut std::mem::take(&mut segments)[1..];
+        }
+        if let Some(first) = segments.first_mut() {
+            *first = &first[taken..];
+        }
+    }
 }
 
-/// The file buffer: the held bytes and the file.
-struct FileBuf<F: RawFile> {
-    file: Option<F>,
-    /// The bytes held; `len()` is `b` of the rules.
-    held: Vec<u8>,
-    buffering: Buffering,
+/// What a file buffer holds of the bytes it takes, and when it writes them: the stream's type
+/// parameter, so that each kind of buffer is compiled on its own and a database file's stream
+/// (`FileArea`) has no test of another kind in its writes.
+pub(crate) trait PutArea {
+    /// `sputn` of `data` with `held` held: whether all `data` was taken (held or written).
+    fn put_bytes<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, data: &[u8]) -> bool;
+    /// `sputc` of `byte` with `held` held.
+    fn put_byte<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, byte: u8) -> bool;
+    /// `sync` wrote all that was held.
+    fn synced(&mut self) {}
 }
 
-impl<F: RawFile> FileBuf<F> {
-    /// Writes all of `segments` (the first call as given, the calls after a short count with
-    /// the segments the count finished dropped). `false` when a call fails; the file keeps the
-    /// bytes the earlier calls took.
-    fn write_all(file: &mut F, segments: &mut [&[u8]]) -> bool {
-        let mut segments = segments;
-        loop {
-            if segments.iter().all(|s| s.is_empty()) {
-                return true;
-            }
-            let mut taken = match file.write(segments) {
-                // A call that takes nothing of bytes still to go would repeat for ever.
-                Ok(0) => return false,
-                Ok(n) => n,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return false,
-            };
-            while let Some(first) = segments.first() {
-                if taken < first.len() || segments.len() == 1 {
-                    break;
-                }
-                taken -= first.len();
-                segments = &mut std::mem::take(&mut segments)[1..];
-            }
-            if let Some(first) = segments.first_mut() {
-                *first = &first[taken..];
-            }
+/// `basic_filebuf`'s put area of `PUT_AREA` bytes: a file (the rules at the top).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct FileArea;
+
+impl PutArea for FileArea {
+    fn put_bytes<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, data: &[u8]) -> bool {
+        if data.len() < PUT_AREA - held.len().min(PUT_AREA) {
+            held.extend_from_slice(data);
+            return true;
+        }
+        if write_all(file, &mut [&held[..], data]) {
+            held.clear();
+            true
+        } else {
+            // The held bytes stay; a call of no bytes takes all of them.
+            data.is_empty()
         }
     }
 
-    /// `sputn`: whether all `data` was taken (held or written).
-    fn put_bytes(&mut self, data: &[u8]) -> bool {
-        let FileBuf {
-            file,
-            held,
-            buffering,
-        } = self;
-        let Some(file) = file.as_mut() else {
-            return data.is_empty();
-        };
-        match buffering {
-            Buffering::File => {
-                if data.len() < PUT_AREA - held.len().min(PUT_AREA) {
-                    held.extend_from_slice(data);
-                    return true;
-                }
-                if FileBuf::write_all(file, &mut [&held[..], data]) {
-                    held.clear();
-                    true
-                } else {
-                    // The held bytes stay; a call of no bytes takes all of them.
-                    data.is_empty()
-                }
-            }
-            Buffering::Cout(buffer) => {
-                held.extend_from_slice(data);
-                let mut next = *buffer;
-                next.sputn(data.len(), held);
-                if FileBuf::write_out(file, held, next.held()) {
-                    *buffer = next;
-                    true
-                } else {
-                    // The held bytes stay, as in a file's buffer.
-                    held.truncate(held.len() - data.len());
-                    data.is_empty()
-                }
-            }
-        }
-    }
-
-    /// `sputc`.
-    fn put_byte(&mut self, byte: u8) -> bool {
-        let FileBuf {
-            file,
-            held,
-            buffering,
-        } = self;
-        let Some(file) = file.as_mut() else {
-            return false;
-        };
-        let overflow = match buffering {
-            Buffering::File => held.len() >= PUT_AREA,
-            Buffering::Cout(buffer) => {
-                held.push(byte);
-                let mut next = *buffer;
-                next.sputc(held);
-                return if FileBuf::write_out(file, held, next.held()) {
-                    *buffer = next;
-                    true
-                } else {
-                    held.pop();
-                    false
-                };
-            }
-        };
+    fn put_byte<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, byte: u8) -> bool {
+        let overflow = held.len() >= PUT_AREA;
         held.push(byte);
         if !overflow {
             return true;
         }
-        if FileBuf::write_all(file, &mut [&held[..]]) {
+        if write_all(file, &mut [&held[..]]) {
             held.clear();
             true
         } else {
             false
         }
     }
+}
 
-    /// Standard output's write of what its buffer no longer holds: all of `held` but its last
-    /// `keep` bytes, which stay; `false` when the write fails (nothing is dropped then).
-    fn write_out(file: &mut F, held: &mut Vec<u8>, keep: usize) -> bool {
-        let written = held.len() - keep;
-        if written == 0 {
-            return true;
-        }
-        if FileBuf::write_all(file, &mut [&held[..written]]) {
-            held.drain(..written);
+/// The C library's `stdout` under `cout`: what reaches the device at each insertion and `put` is
+/// what `cli::NcbiBuffer` no longer holds, written in one call (a failed write drops nothing).
+impl PutArea for crate::cli::NcbiBuffer {
+    fn put_bytes<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, data: &[u8]) -> bool {
+        held.extend_from_slice(data);
+        let mut next = *self;
+        next.sputn(data.len(), held);
+        if write_out(file, held, next.held()) {
+            *self = next;
             true
         } else {
+            // The held bytes stay, as in a file's buffer.
+            held.truncate(held.len() - data.len());
+            data.is_empty()
+        }
+    }
+
+    fn put_byte<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, byte: u8) -> bool {
+        held.push(byte);
+        let mut next = *self;
+        next.sputc(held);
+        if write_out(file, held, next.held()) {
+            *self = next;
+            true
+        } else {
+            held.pop();
             false
         }
+    }
+
+    fn synced(&mut self) {
+        self.flush();
+    }
+}
+
+/// Standard output's write of what its buffer no longer holds: all of `held` but its last `keep`
+/// bytes, which stay; `false` when the write fails (nothing is dropped then).
+fn write_out<F: RawFile>(file: &mut F, held: &mut Vec<u8>, keep: usize) -> bool {
+    let written = held.len() - keep;
+    if written == 0 {
+        return true;
+    }
+    if write_all(file, &mut [&held[..written]]) {
+        held.drain(..written);
+        true
+    } else {
+        false
+    }
+}
+
+/// The buffer of a stream that is a file or standard output, chosen when the stream is made
+/// (blast_formatter's `-out`, `AsOutputFile`: the file's `ofstream` or `cout`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum OutArea {
+    File(FileArea),
+    Cout(crate::cli::NcbiBuffer),
+}
+
+impl PutArea for OutArea {
+    fn put_bytes<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, data: &[u8]) -> bool {
+        match self {
+            OutArea::File(area) => area.put_bytes(file, held, data),
+            OutArea::Cout(area) => area.put_bytes(file, held, data),
+        }
+    }
+
+    fn put_byte<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, byte: u8) -> bool {
+        match self {
+            OutArea::File(area) => area.put_byte(file, held, byte),
+            OutArea::Cout(area) => area.put_byte(file, held, byte),
+        }
+    }
+
+    fn synced(&mut self) {
+        match self {
+            OutArea::File(area) => area.synced(),
+            OutArea::Cout(area) => area.synced(),
+        }
+    }
+}
+
+/// The file buffer: the held bytes and the file.
+struct FileBuf<F: RawFile, B: PutArea> {
+    file: Option<F>,
+    /// The bytes held; `len()` is `b` of the rules.
+    held: Vec<u8>,
+    area: B,
+}
+
+impl<F: RawFile, B: PutArea> FileBuf<F, B> {
+    /// `sputn`: whether all `data` was taken (held or written).
+    fn put_bytes(&mut self, data: &[u8]) -> bool {
+        let FileBuf { file, held, area } = self;
+        let Some(file) = file.as_mut() else {
+            return data.is_empty();
+        };
+        area.put_bytes(file, held, data)
+    }
+
+    /// `sputc`.
+    fn put_byte(&mut self, byte: u8) -> bool {
+        let FileBuf { file, held, area } = self;
+        let Some(file) = file.as_mut() else {
+            return false;
+        };
+        area.put_byte(file, held, byte)
     }
 
     /// `sync`: the held bytes go out; a stream with no file is in sync.
@@ -326,11 +370,9 @@ impl<F: RawFile> FileBuf<F> {
         if self.held.is_empty() {
             return true;
         }
-        if FileBuf::write_all(file, &mut [&self.held]) {
+        if write_all(file, &mut [&self.held]) {
             self.held.clear();
-            if let Buffering::Cout(buffer) = &mut self.buffering {
-                buffer.flush();
-            }
+            self.area.synced();
             true
         } else {
             false
@@ -359,14 +401,14 @@ impl<F: RawFile> FileBuf<F> {
     }
 }
 
-/// An output-only `std::ofstream` of makeblastdb 2.17.0 (Linux x64).
-pub(crate) struct Stream<F: RawFile> {
+/// An output-only `std::ofstream` of makeblastdb 2.17.0 (Linux x64), whose file buffer is `B`.
+pub(crate) struct Stream<F: RawFile, B: PutArea = FileArea> {
     state: IoState,
     /// `exceptions()`.
     exceptions: IoState,
     /// Whether a state change met `exceptions` since [`Stream::take_thrown`] was last asked.
     thrown: bool,
-    buf: FileBuf<F>,
+    buf: FileBuf<F, B>,
 }
 
 /// The stream on a file on disk, as the writer uses it.
@@ -375,7 +417,21 @@ pub(crate) type OfStream = Stream<DiskFile>;
 impl<F: RawFile> Stream<F> {
     /// A stream with no file.
     pub(crate) fn new() -> Self {
-        Self::with_buffering(Buffering::File)
+        Self::with_area(FileArea)
+    }
+
+    /// `ofstream(path)`: the file created or truncated; a failure leaves the stream failed.
+    pub(crate) fn create(path: &Path) -> Self {
+        let mut stream = Self::new();
+        stream.open(path);
+        stream
+    }
+}
+
+impl<F: RawFile> Stream<F, OutArea> {
+    /// A stream with no file whose buffer is a file's (`FileArea`).
+    pub(crate) fn file() -> Self {
+        Self::with_area(OutArea::File(FileArea))
     }
 
     /// A stream with no file whose buffer is the C library's `stdout` of this process
@@ -387,10 +443,12 @@ impl<F: RawFile> Stream<F> {
 
     /// A stream with no file whose buffer is a `stdout` of `stdio` (`cli::NcbiStdio::Cout`).
     pub(crate) fn cout_of(stdio: crate::cli::NcbiStdio) -> Self {
-        Self::with_buffering(Buffering::Cout(crate::cli::NcbiBuffer::new(stdio)))
+        Self::with_area(OutArea::Cout(crate::cli::NcbiBuffer::new(stdio)))
     }
+}
 
-    fn with_buffering(buffering: Buffering) -> Self {
+impl<F: RawFile, B: PutArea> Stream<F, B> {
+    fn with_area(area: B) -> Self {
         Stream {
             state: IoState::GOOD,
             exceptions: IoState::GOOD,
@@ -398,16 +456,9 @@ impl<F: RawFile> Stream<F> {
             buf: FileBuf {
                 file: None,
                 held: Vec::with_capacity(BUFSIZ),
-                buffering,
+                area,
             },
         }
-    }
-
-    /// `ofstream(path)`: the file created or truncated; a failure leaves the stream failed.
-    pub(crate) fn create(path: &Path) -> Self {
-        let mut stream = Self::new();
-        stream.open(path);
-        stream
     }
 
     /// `open` of `path` for binary output.
@@ -553,7 +604,7 @@ impl<F: RawFile> Stream<F> {
     }
 }
 
-impl<F: RawFile> std::fmt::Debug for Stream<F> {
+impl<F: RawFile, B: PutArea> std::fmt::Debug for Stream<F, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OfStream")
             .field("state", &self.state)
@@ -563,7 +614,7 @@ impl<F: RawFile> std::fmt::Debug for Stream<F> {
     }
 }
 
-impl<F: RawFile> Drop for Stream<F> {
+impl<F: RawFile, B: PutArea> Drop for Stream<F, B> {
     fn drop(&mut self) {
         self.buf.close();
     }

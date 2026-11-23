@@ -292,10 +292,10 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:218-221
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
-    // SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
-    // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
+    // `SetInitialWordOptionsDefaults` sets ungapped X-drop to `BLAST_UNGAPPED_X_DROPOFF_NUCL`,
+    // whereas `SetMBInitialWordOptionsDefaults` sets `BLAST_WINDOW_SIZE_NUCL` without setting X-drop.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
-    // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
+    // Discontiguous megablast overrides `SetMBInitialWordOptionsDefaults` to set `BLAST_UNGAPPED_X_DROPOFF_NUCL`.
     // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
     // its raw X-drop is the subject's word cutoff in ParametersUpdate
     // (`batch_setup::batch_cutoffs`). `-xdrop_ungap` replaces the task's bits (`configure_task`).

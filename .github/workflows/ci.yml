@@ -183,7 +183,7 @@ jobs:
       - name: Platform certification driver tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_certify_platform_native_v010.py'
       # NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1094-1099
-      # BOOST_AUTO_TEST_CASE(testHSPListSort). Ported NCBI unit-test cases are
+      # `BOOST_AUTO_TEST_CASE` case `testHSPListSort`. Ported NCBI unit-test cases are
       # cited above their Rust tests and counted in docs/evidence/ncbi_unit_cases.
       - name: NCBI unit-case ledger
         run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .

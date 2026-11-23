@@ -154,6 +154,7 @@ mod parsed {
                 taxid: Some(0),
                 ..BlastDefline::default()
             }],
+            utf8: false,
         }
     }
 
@@ -255,6 +256,7 @@ mod parsed {
                 ..BlastDefline::default()
             })
             .collect(),
+            utf8: false,
         };
         assert_eq!(
             encode(&three),
@@ -338,6 +340,7 @@ mod parsed {
                     ..BlastDefline::default()
                 },
             ],
+            utf8: false,
         };
         encode(&set);
     }

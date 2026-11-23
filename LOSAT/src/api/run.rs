@@ -625,16 +625,29 @@ fn taxdb_setting(
 // names and the organism report (outfmt 18) and the file of a `-matrix` that NCBI's tables do not
 // have (TBLASTX, ungapped BLASTX). The settings are the call's application start's
 // (`start::CallStart::settings`).
+/// How a `run_local` call's run ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RunEnd {
+    /// After its last query.
+    Searched,
+    /// Where NCBI's `CATCH_ALL` ends the run with exit status 0 and no word (a `CEofException`:
+    /// a header record's, `common::database::database_error_of`, or the `-in_pssm` reader's,
+    /// `pssm_search::in_pssm`): the reports written before it are the run's, and no query is
+    /// searched after it (`batches::Batches`).
+    WithoutPost,
+}
+
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`
 /// (`run_local_entry`), whose end is the command line's run's: a run that NCBI ends with exit
-/// status 0 and no word ends the call without an error, and an NCBI error after NCBI's main-thread
-/// diagnostic stream failed is the text that the command line writes for it.
+/// status 0 and no word ends the call without an error (`RunEnd::WithoutPost`), and an NCBI error
+/// after NCBI's main-thread diagnostic stream failed is the text that the command line writes for
+/// it.
 pub(super) fn run_local(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RunEnd> {
     // The call's code runs on this thread with the call's own diagnostic stream (one batch of
     // `run_batches` after another's of another call, too), and its searches' workers with it
     // (`utils::threading::with_search_pool`).
@@ -643,18 +656,20 @@ pub(super) fn run_local(
     // The `-out` file of `run_to_file` ends as the command line's run ends its `-out` stream
     // (`ReportOutputs::finish_out`), before the run's error is written as `CATCH_ALL` writes it.
     let Err(error) = outputs.finish_out(result) else {
-        return Ok(());
+        return Ok(RunEnd::Searched);
     };
     let Some(native) = error.downcast_ref::<crate::cli::NativeError>() else {
         return Err(error);
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: the `-in_pssm` reader's
-    // `CEofException`, the object manager's failed write after its diagnostic stream failed): NCBI's
-    // run returns 0 without a word, so the call succeeds with what it wrote (tblastn's error
-    // archive of the saved messages, `report::archive::silent_end_lines`, or nothing).
+    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: a `CEofException` of the `-in_pssm`
+    // reader's, `pssm_search::in_pssm`, or of a header record's,
+    // `common::database::database_error_of`; the object manager's failed write after its
+    // diagnostic stream failed): NCBI's run returns 0 without a word, so the call succeeds with
+    // what it wrote (tblastn's error archive of the saved messages,
+    // `report::archive::silent_end_lines`, or nothing).
     if crate::cli::is_silent_end(&error) {
-        return Ok(());
+        return Ok(RunEnd::WithoutPost);
     }
     // After NCBI's object manager failed the stream (`ncbi_exception::main_diag_failbit`, this
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
@@ -1047,7 +1062,7 @@ pub fn run_to_file(
             let _ = messages.drain();
             result
         };
-        result.map_err(|error| sink.failed(&error))
+        result.map(drop).map_err(|error| sink.failed(&error))
     })
 }
 

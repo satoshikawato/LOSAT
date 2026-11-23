@@ -174,8 +174,8 @@ fn std_seg_forms() {
     assert_eq!(length(0, 0x7fff_fffe), (0, 0x7fff_ffff));
 }
 
-// biodata_blast.cpp:63 (cited at `parse_std_align`): `seqlocs[0]->IsNull() ||
-// seqlocs[1]->IsNull()` reads the second location only when the first is not `null`. A
+// biodata_blast.cpp:63 (cited at `parse_std_align`): checks `IsNull` on `seqlocs[0]` first, then
+// on `seqlocs[1]`, so the second location is read only when the first is not `null`. A
 // segment whose only location is `null` is skipped (PS16c review oracle `nullone`: NCBI's
 // output is that of the archive without the segment); a segment without locations, or whose
 // only location is not `null`, is read past its end: refused.

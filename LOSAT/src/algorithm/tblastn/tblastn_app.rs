@@ -14,7 +14,7 @@ use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::blast_engine::QueryReading;
-use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::algorithm::common::database::PreliminaryReadError;
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::api::QueryEnd;
@@ -1880,8 +1880,8 @@ fn search(
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
-        // the search's batches (`database::fetch_excluded`).
-        let fetch_excluded = database.and_then(super::database::fetch_excluded);
+        // the search's batches (`database::fetch_excluded`), and their reads of headers.
+        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -1914,14 +1914,14 @@ fn search(
                 genetic_code: resolved.db_gencode,
                 expect_value: resolved.evalue,
                 max_target_seqs: resolved.hitlist_size,
-                query_records: &whole_records[range],
+                query_records: &whole_records[range.clone()],
                 subject_set,
                 engine_positives,
                 culling_limit: resolved.culling_limit,
                 best_hit: resolved.best_hit,
                 subject_besthit: resolved.subject_besthit,
                 pssm: pssm.as_deref(),
-                fetch_excluded: fetch_excluded.as_ref(),
+                fetch_excluded: reads.of_batch(&range),
                 query_cov_hsp_perc: resolved.query_cov_hsp_perc,
             },
             compo_adjust_mode,
@@ -1995,7 +1995,7 @@ fn search(
                             best_hit: resolved.best_hit,
                             subject_besthit: resolved.subject_besthit,
                             pssm: pssm.as_deref(),
-                            fetch_excluded: fetch_excluded.as_ref(),
+                            fetch_excluded: reads.of_batch(&range),
                             query_cov_hsp_perc: resolved.query_cov_hsp_perc,
                         },
                         compo_adjust_mode,
@@ -2045,6 +2045,7 @@ fn search(
                     }
                     Err(error) => match batch_failure(error) {
                         Ok(failure) => {
+                            reads.fetched_before_failure(&range);
                             failed = Some((range, failure));
                             break;
                         }
@@ -2073,18 +2074,10 @@ fn search(
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.
-            if let Some(database) = database {
-                super::database::drop_unaligned(database, &mut batch_results);
-                if let Err(error) =
-                    super::database::read_titles(database, &batch_results, range.start, &mut titles)
-                {
-                    match error.downcast::<HeaderReadError>() {
-                        Ok(failure) => {
-                            failed = Some((range, failure.error));
-                            break;
-                        }
-                        Err(error) => return Err(error),
-                    }
+            if database.is_some() {
+                if let Some(error) = reads.titles(&mut batch_results, &range, &mut titles)? {
+                    failed = Some((range, error));
+                    break;
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-299
@@ -2125,7 +2118,7 @@ fn search(
             }
             ungapped_karlin.extend(batch_karlin);
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
-            // if (CheckInternalData() != 0) each result in this Run() batch
+            // When `CheckInternalData` returns a nonzero status, each result in this `Run` batch
             // receives an unsearched ancillary state and null align set.
             let skipped = batch_validity.iter().all(|&valid| !valid);
             query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
@@ -2407,6 +2400,15 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
+            let xml2_reads = (reported, &mut subject_reads);
+            let after = super::database::after_throw(&outputs.formats, outputs.other_outfmts);
+            prefetch_posts.extend(reads.xml2(
+                first_xml2,
+                xml2_reads,
+                &results,
+                &batch_spans,
+                after.run(),
+            )?);
             if first_prefetches && (taxdb_found || database.parsed_seqids()) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
@@ -2445,6 +2447,7 @@ fn search(
                     if !reaches(span.start) {
                         break;
                     }
+                    reads.reach(span);
                     let hitlists = &results[span.clone()];
                     // The batch's Seq-aligns, one for each HSP of a gapped search, one for each
                     // subject of an ungapped one (`database::seq_aligns_of`).
@@ -2460,8 +2463,8 @@ fn search(
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-                        if !taxdb_found {
+                        // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
+                        if !taxdb_found && !database.scope_utf8_seen() {
                             continue;
                         }
                         let rows = first_rows;
@@ -2549,6 +2552,7 @@ fn search(
         // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
+            reads.reach(&span);
             // The batches before are those of `results`, which the stop truncated (above).
             let prefetched = |query: usize| {
                 prefetch_posts
@@ -2697,6 +2701,7 @@ fn search(
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
             prefetch_posts,
             |query| batches.warnings[query].len(),
+            reads.header_read(queries.len()),
         );
         // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let query_posts = crate::report::diag_log::Posts::with_later(query_posts, &later_lines);
@@ -2766,12 +2771,13 @@ fn search(
         // The failed batch's reading messages, NCBI's posts of the bytes replaced in its search
         // strategy request (written before its search), then its error.
         if let Some((range, error)) = failed {
-            for warnings in &batches.warnings[range] {
+            for warnings in &batches.warnings[range.clone()] {
                 outputs.diagnostics.write_all(warnings)?;
             }
             if let Some(strategy) = args.strategy.as_ref() {
                 strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
+            reads.write_failed(&range, &mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(error);
         }
     }

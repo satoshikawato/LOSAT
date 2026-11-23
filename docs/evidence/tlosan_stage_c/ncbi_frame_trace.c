@@ -1,11 +1,10 @@
 /* Comparison-only probe. Never link this into LOSAT.
- * NCBI c++/src/algo/blast/core/blast_engine.c:804-841:
- *   subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
- *   subject->sequence = translation_buffer + frame_offsets[context] + 1;
- *   subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
- *   status = s_BlastSearchEngineOneContext(...);
- * NCBI c++/include/algo/blast/core/blast_def.h:242-247:
- *   Uint1* sequence; Uint1* sequence_start; Int4 length; Int2 frame;
+ * NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-841
+ * For each translated frame context, sets the subject frame, sequence pointer,
+ * and frame length from `translation_buffer` and `frame_offsets` before invoking
+ * `s_BlastSearchEngineOneContext`.
+ * NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:242-247
+ * Leading layout of `BLAST_SequenceBlk`: `sequence`, `sequence_start`, `length`, and `frame`.
  * The WordFinder entry receives the translated preliminary-search subject.
  */
 #define _GNU_SOURCE

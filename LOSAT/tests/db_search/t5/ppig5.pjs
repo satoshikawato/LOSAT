@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "ppig5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "ppig5",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T22:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49532,
+  "bytes-to-cache": 218,
+  "files": [
+    "ppig5.pdb",
+    "ppig5.phr",
+    "ppig5.pin",
+    "ppig5.pog",
+    "ppig5.pos",
+    "ppig5.pot",
+    "ppig5.psq",
+    "ppig5.ptf",
+    "ppig5.pto"
+  ]
+}

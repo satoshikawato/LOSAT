@@ -289,7 +289,9 @@ fn loaded(
             volume,
             looks_up: true,
             offset,
+            lead: 0,
             opening,
+            scope_utf8: false,
         }),
     }
 }
@@ -397,6 +399,7 @@ fn a_prefetch_takes_the_texts_that_a_cut_report_before_it_left() {
         vec![(1, request)],
         vec![(1, prefetch)],
         |query| [0, 3][query],
+        None,
     );
     let log = Log::default();
     let mut report = log.clone();
@@ -461,6 +464,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
         Vec::new(),
         vec![(1, prefetch.clone())],
         |_| 0,
+        None,
     );
     let log = Log::default();
     let (mut report, mut sink) = (log.clone(), log.clone());
@@ -519,6 +523,7 @@ fn request_posts_follow_the_reader_messages_of_their_batch() {
         vec![(0, post(b"P0\n")), (2, post(b"P2a\n")), (2, post(b"P2b\n"))],
         Vec::new(),
         |query| reader[query],
+        None,
     );
     let texts: Vec<Vec<u8>> = posts.iter().map(Posts::text).collect();
     assert_eq!(
@@ -540,8 +545,24 @@ fn request_posts_follow_the_reader_messages_of_their_batch() {
         vec![(1, post(b"P1\n"))],
         Vec::new(),
         |_| 0,
+        None,
     );
     assert_eq!(posts[0].text(), b"W0\nP1\n");
+    // NCBI's first read of a UTF8String header (RG-T5d fix 1) after the request's posts of
+    // its batch, before the rest; a batch without a request has it after its reader messages.
+    let header = || Some((2, Posts::of_lines(b"U2\n".to_vec())));
+    let lines = || vec![b"R0\nW0\n".to_vec(), b"W1\n".to_vec(), b"R2\nT2\n".to_vec()];
+    let with = query_posts(
+        lines(),
+        vec![(0, post(b"P0\n")), (2, post(b"P2\n"))],
+        vec![(2, Posts::of_lines(b"F2\n".to_vec()))],
+        |q| reader[q],
+        header(),
+    );
+    assert_eq!(with[2].text(), b"R2\nP2\nU2\nF2\nT2\n");
+    let without = query_posts(lines(), Vec::new(), Vec::new(), |q| reader[q], header());
+    assert_eq!(without[2].text(), b"R2\nU2\nT2\n");
+    assert_eq!(without[0].text(), b"R0\nW0\n");
 }
 
 #[test]

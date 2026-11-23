@@ -75,10 +75,10 @@ pub fn compute_length_adjustment_ncbi(
     }
 
     // Choose ell_max to be the largest nonnegative value that satisfies:
-    //   K * (m - ell) * (n - N * ell) > MAX(m, n)
+    //   K * (m - ell) * (n - N * ell) > max(m, n)
     //
     // Use quadratic formula: 2c / (-b + sqrt(b*b - 4*a*c))
-    // where a = N, b = -(m*N + n), c = n*m - MAX(m,n)/K
+    // where a = N, b = -(m*N + n), c = n*m - max(m, n)/K
     let a = n_seqs;
     let mb = m * n_seqs + n; // This is -b (negated)
     let c = n * m - m.max(n) / k;
@@ -116,8 +116,7 @@ pub fn compute_length_adjustment_ncbi(
                 break;
             }
             if ell_min == ell_max {
-                // There are no more points to check
-                // NCBI: if(ell_min == ell_max) { /* There are no more points to check */ break; }
+                // Stop iterating when the lower and upper bounds meet (no more points to check).
                 break;
             }
         } else {
@@ -139,21 +138,21 @@ pub fn compute_length_adjustment_ncbi(
     }
 
     // Determine the final length adjustment
-    // Match NCBI BLAST's exact behavior: (Int4) ell_min (direct cast, not floor)
+    // Match NCBI BLAST's exact behavior: truncate `ell_min` directly to `Int4` (not floor).
     // Note: f64 as i64 truncates toward zero, which is equivalent to floor for positive values
     let mut length_adjustment = ell_min as i64;
 
     if converged {
-        // If ell_fixed is the (unknown) true fixed point, then we
-        // wish to set length_adjustment to floor(ell_fixed).
-        // We assume that floor(ell_min) = floor(ell_fixed)
-        // But verify that ceil(ell_min) != floor(ell_fixed)
-        // This matches NCBI BLAST's logic exactly
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5106-5119
+        // The converged lower bound `ell_min` brackets the fixed point from below, so its
+        // truncated integer part is normally the floor of the fixed point. Check whether
+        // rounding `ell_min` up to `ell_ceil` still stays within `ell_max` and at or below
+        // the fixed-point curve; if so, the fixed point's floor is `ell_ceil`.
         let ell_ceil = ell_min.ceil();
         if ell_ceil <= ell_max {
             let ss = (m - ell_ceil) * (n - n_seqs * ell_ceil);
             if alpha_d_lambda * (log_k + ss.glibc_ln()) + beta >= ell_ceil {
-                // ceil(ell_min) == floor(ell_fixed)
+                // `ell_ceil` does not exceed the fixed point, so use it as the integer adjustment.
                 length_adjustment = ell_ceil as i64;
             }
         }

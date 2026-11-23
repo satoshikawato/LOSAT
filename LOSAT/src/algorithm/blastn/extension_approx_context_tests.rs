@@ -24,7 +24,7 @@ fn packed(text: &str) -> Vec<u8> {
         .collect()
 }
 
-// Two contexts and the sentinel between them (blast_encoding.c:121, kNuclSentinel = 0xF):
+// Two contexts and the sentinel between them (blast_encoding.c:121, `kNuclSentinel` is `0xF`):
 // context 0 at 0..16, the sentinel at 16, context 1 at 17..35. The seed is the first letter
 // of context 1 and the subject offset is 2 mod 4, so the first left block holds the last
 // letter of context 0, the sentinel and the first two letters of context 1.

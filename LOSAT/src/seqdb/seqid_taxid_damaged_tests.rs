@@ -121,7 +121,10 @@ fn string_isam_pages_larger_than_the_data_file_are_errors() {
         SiOid::new(b"xp_000011.2".to_vec()),
         SiOid::new(b"0008123a".to_vec()),
     ];
-    let error = isam.ids_to_oids(0, &mut ids).unwrap_err().to_string();
+    let error = isam
+        .ids_to_oids(0, &mut ids, &mut false)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("string ISAM data page"), "{error}");
     let mut negative = NegativeOids::new();
     let mut list = vec![b"xp_000011.2".to_vec()];
@@ -137,7 +140,7 @@ fn string_isam_pages_larger_than_the_data_file_are_errors() {
     )
     .unwrap();
     let mut ids = [SiOid::new(b"xp_000011.2".to_vec())];
-    intact.ids_to_oids(0, &mut ids).unwrap();
+    intact.ids_to_oids(0, &mut ids, &mut false).unwrap();
     assert_eq!(ids[0].oid, Some(11));
 }
 
@@ -449,7 +452,7 @@ fn read_isams(dir: &Path, stem: &str, seqtype: SeqType, queries: &IsamQueries, t
             trace.read(isam.string_to_oids(key, true, false));
         }
         let mut ids: Vec<SiOid> = keys.iter().map(|key| SiOid::new(key.clone())).collect();
-        trace.read(isam.ids_to_oids(0, &mut ids));
+        trace.read(isam.ids_to_oids(0, &mut ids, &mut false));
         trace.note(&ids);
         let mut negative_ids = keys.to_vec();
         let mut negative = NegativeOids::new();

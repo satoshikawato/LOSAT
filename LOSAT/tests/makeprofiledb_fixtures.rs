@@ -261,11 +261,12 @@ fn posted_date_masked(text: &str) -> String {
 }
 
 // `rps/<row>.<fmt>`: NCBI rpsblast 2.17.0 `-query q3.faa -db db/db -outfmt <fmt>` on the database
-// NCBI makeprofiledb built for the row (survey rows R01 and R05, 2026-11-21), its output in
-// LOSAT's words; the database's build date (outfmt 0's `Posted date:`) is the day of the run.
+// NCBI makeprofiledb built for the row (survey rows R01 and R05, 2026-11-21; QC01, a query of
+// lower-case IUPACaa letters, 2026-11-23), its output in LOSAT's words; the database's build date
+// (outfmt 0's `Posted date:`) is the day of the run.
 #[test]
 fn rpsblast_on_losat_databases_gives_ncbis_bytes() {
-    for (row, case) in [("R01", "O00"), ("R05", "S_f2")] {
+    for (row, case) in [("R01", "O00"), ("R05", "S_f2"), ("QC01", "QC01")] {
         let (_, words) = cases().into_iter().find(|(name, _)| name == case).unwrap();
         let dir = scratch(&format!("rps-{row}"));
         let (_, err, status, _) = run(&dir, &words);

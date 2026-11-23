@@ -257,9 +257,9 @@ pub(crate) fn iupac_letters<R: Read>(inst: SeqInst, reader: &mut FastaReader<R>)
             ..
         } => Vec::new(),
         SeqInst::Raw {
-            seq_data: SeqData::Iupacaa(_) | SeqData::Ncbistdaa(_),
+            seq_data: SeqData::Iupacaa(_) | SeqData::Ncbistdaa(_) | SeqData::Iupacna(_),
             ..
-        } => unreachable!("the FASTA reader makes no IUPACaa or NCBIstdaa data"),
+        } => unreachable!("the FASTA reader makes no IUPACaa, NCBIstdaa or IUPACna data"),
         SeqInst::Delta {
             residues, pieces, ..
         } => {

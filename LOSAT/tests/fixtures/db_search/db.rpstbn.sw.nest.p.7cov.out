@@ -1,0 +1,27 @@
+# RPSTBLASTN 2.17.0+
+# Query: nest_p
+# Database: rps_mini
+# Fields: query id, subject id, % query coverage per subject
+# 21 hits found
+nest_p	gnl|CDD|101	99
+nest_p	gnl|CDD|101	99
+nest_p	gnl|CDD|101	99
+nest_p	gnl|CDD|101	99
+nest_p	gnl|CDD|101	99
+nest_p	gnl|CDD|101	99
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|102	28
+nest_p	gnl|CDD|103	26
+nest_p	gnl|CDD|103	26
+nest_p	gnl|CDD|103	26
+nest_p	gnl|CDD|103	26
+nest_p	gnl|CDD|103	26
+nest_p	gnl|CDD|103	26
+# BLAST processed 1 queries

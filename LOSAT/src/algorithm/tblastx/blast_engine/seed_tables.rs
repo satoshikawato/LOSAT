@@ -117,7 +117,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     }
     let diag_mask: i32 = diag_array_size - 1;
     if trace_hsp_target().is_some() {
-        // NCBI: diag_array_length = next_power_of_2(qlen + window_size).
+        // Diagonal table length is the next power of two above query length plus window size.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
         eprintln!(
             "[TRACE_HSP] diag_table query_length={} window={} diag_array_size={} diag_mask={}",
@@ -126,7 +126,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     }
 
     // [C] array_size for offset_pairs
-    // NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain
+    // `GetOffsetArraySize` sums `OFFSET_ARRAY_SIZE` (4096) and `lookup->longest_chain`.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/lookup_wrap.h + c++/src/algo/blast/core/lookup_wrap.c
     const OFFSET_ARRAY_SIZE: i32 = 4096;
     let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
@@ -161,9 +161,9 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
                 || diag_enabled
                 || debug_hsp_saving
                 || x_soft_subjects
-                // The one-hit word finder (`-window_size 0`) runs in the reference frame loop
-                // only (`scan_chunk_one_hit`).
-                || window == 0,
+                // The one-hit word finder (`-window_size 0` or less) runs in the reference frame
+                // loop only (`scan_chunk_one_hit`).
+                || window <= 0,
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,

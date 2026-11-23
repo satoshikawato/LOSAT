@@ -418,6 +418,7 @@ impl import::StrategyArgs for TblastxArgs {
             out: self.out,
             outfmt: self.outfmt,
             show_gis: self.show_gis,
+            html: self.html,
             num_descriptions: self.num_descriptions,
             num_alignments: self.num_alignments,
             max_target_seqs: self.max_target_seqs.map(|n| n as i64),
@@ -449,6 +450,7 @@ impl import::StrategyArgs for TblastxArgs {
         self.out = kept.out;
         self.outfmt = kept.outfmt;
         self.show_gis = kept.show_gis;
+        self.html = kept.html;
         self.num_descriptions = kept.num_descriptions;
         self.num_alignments = kept.num_alignments;
         self.max_target_seqs = kept
@@ -494,20 +496,10 @@ impl import::StrategyArgs for TblastxArgs {
             Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
             Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
             Setter::QueryGeneticCode(n) => {
-                self.query_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this query genetic code",
-                        program,
-                    )
-                })?
+                self.query_gencode = import::Start::genetic_code(*n, "query", program)?
             }
             Setter::DbGeneticCode(n) => {
-                self.db_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this database genetic code",
-                        program,
-                    )
-                })?
+                self.db_gencode = import::Start::genetic_code(*n, "database", program)?
             }
             Setter::SubjectBestHit => self.subject_besthit = true,
             Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),

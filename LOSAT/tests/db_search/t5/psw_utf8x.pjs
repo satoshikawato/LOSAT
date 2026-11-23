@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psw_utf8x",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psw_utf8x",
+  "number-of-letters": 240,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-21T21:45:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49804,
+  "bytes-to-cache": 355,
+  "files": [
+    "psw_utf8x.pdb",
+    "psw_utf8x.phr",
+    "psw_utf8x.pin",
+    "psw_utf8x.pog",
+    "psw_utf8x.pos",
+    "psw_utf8x.pot",
+    "psw_utf8x.psq",
+    "psw_utf8x.ptf",
+    "psw_utf8x.pto"
+  ]
+}

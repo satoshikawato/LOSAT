@@ -85,7 +85,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
-    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
+    inputs.application = args.import.as_ref().map(|_| args.app_name());
     inputs.hitlist_size = hitlist_size;
     inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
@@ -503,6 +503,7 @@ impl import::StrategyArgs for BlastxArgs {
             out: self.out,
             outfmt: self.outfmt,
             show_gis: self.show_gis,
+            html: self.html,
             num_descriptions: self.num_descriptions,
             num_alignments: self.num_alignments,
             max_target_seqs: self.max_target_seqs.map(i64::from),
@@ -533,6 +534,7 @@ impl import::StrategyArgs for BlastxArgs {
         self.out = kept.out;
         self.outfmt = kept.outfmt;
         self.show_gis = kept.show_gis;
+        self.html = kept.html;
         self.num_descriptions = kept.num_descriptions;
         self.num_alignments = kept.num_alignments;
         self.max_target_seqs = kept
@@ -585,12 +587,7 @@ impl import::StrategyArgs for BlastxArgs {
             Setter::GappedMode(gapped) => self.ungapped = !*gapped,
             Setter::SumStatisticsMode(on) => self.sum_stats = Some(*on),
             Setter::QueryGeneticCode(n) => {
-                self.query_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this query genetic code",
-                        program,
-                    )
-                })?
+                self.query_gencode = import::Start::genetic_code(*n, "query", program)?
             }
             Setter::LongestIntronLength(n) => self.max_intron_length = *n,
             Setter::SubjectBestHit => self.subject_besthit = true,

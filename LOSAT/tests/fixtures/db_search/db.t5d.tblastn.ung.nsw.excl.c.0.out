@@ -1,0 +1,118 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: excl
+           3 sequences; 1,092 total letters
+
+
+
+Query= qpre20
+
+Length=20
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB300001.1 sok1_nt sok1 in frame +1                                   48.2    3e-12
+
+
+>AB300001.1 sok1_nt sok1 in frame +1
+Length=372
+
+ Score = 48.2 bits (99),  Expect = 3e-12
+ Identities = 19/19 (100%), Positives = 19/19 (100%), Gaps = 0/19 (0%)
+ Frame = +1
+
+Query  2   ATAPAALPFGKANAAACGN  20
+           ATAPAALPFGKANAAACGN
+Sbjct  4   ATAPAALPFGKANAAACGN  60
+
+
+
+Lambda      K        H
+   0.317    0.125    0.437 
+
+
+Effective search space used: 1000
+
+
+Query= tks_W
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB300002.1 sfail_rc sfail in frame -1                                 196     1e-56
+
+
+>AB300002.1 sfail_rc sfail in frame -1
+Length=480
+
+ Score = 196 bits (419),  Expect = 1e-56
+ Identities = 79/79 (100%), Positives = 79/79 (100%), Gaps = 0/79 (0%)
+ Frame = -1
+
+Query  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+            QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT
+Sbjct  477  QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  298
+
+Query  62   IVTHAGEVIEGCTTVSSIK  80
+            IVTHAGEVIEGCTTVSSIK
+Sbjct  297  IVTHAGEVIEGCTTVSSIK  241
+
+
+ Score = 196 bits (419),  Expect = 1e-56
+ Identities = 79/79 (100%), Positives = 79/79 (100%), Gaps = 0/79 (0%)
+ Frame = -1
+
+Query  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+            QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT
+Sbjct  237  QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  58
+
+Query  62   IVTHAGEVIEGCTTVSSIK  80
+            IVTHAGEVIEGCTTVSSIK
+Sbjct  57   IVTHAGEVIEGCTTVSSIK  1
+
+
+ Score = 15.3 bits (27),  Expect = 0.024
+ Identities = 8/22 (36%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +1
+
+Query  22   MFAGKSTYLKNIYQQENGGNKH  43
+            MF      L NI+Q     +KH
+Sbjct  112  MFITTIFLLINIFQISRFTSKH  177
+
+
+ Score = 15.3 bits (27),  Expect = 0.024
+ Identities = 8/22 (36%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +1
+
+Query  22   MFAGKSTYLKNIYQQENGGNKH  43
+            MF      L NI+Q     +KH
+Sbjct  352  MFITTIFLLINIFQISRFTSKH  417
+
+
+
+Lambda      K        H
+   0.320    0.135    0.418 
+
+
+Effective search space used: 1000
+
+
+  Database: excl
+    Posted date:  Nov 20, 2026  11:14 PM
+  Number of letters in database: 1,092
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

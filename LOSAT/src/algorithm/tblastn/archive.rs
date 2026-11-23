@@ -456,6 +456,7 @@ impl import::StrategyArgs for TblastnArgs {
             out: self.out,
             outfmt: self.outfmt,
             show_gis: self.show_gis,
+            html: self.html,
             num_descriptions: self.num_descriptions,
             num_alignments: self.num_alignments,
             max_target_seqs: self.max_target_seqs.map(|n| n as i64),
@@ -484,6 +485,7 @@ impl import::StrategyArgs for TblastnArgs {
         self.out = kept.out;
         self.outfmt = kept.outfmt;
         self.show_gis = kept.show_gis;
+        self.html = kept.html;
         self.num_descriptions = kept.num_descriptions;
         self.num_alignments = kept.num_alignments;
         self.max_target_seqs = kept
@@ -538,12 +540,7 @@ impl import::StrategyArgs for TblastnArgs {
             Setter::GappedMode(gapped) => self.ungapped = !*gapped,
             Setter::SumStatisticsMode(on) => self.sum_stats = Some(*on),
             Setter::DbGeneticCode(n) => {
-                self.db_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this database genetic code",
-                        program,
-                    )
-                })?
+                self.db_gencode = import::Start::genetic_code(*n, "database", program)?
             }
             Setter::LongestIntronLength(n) => self.max_intron_length = Some(*n),
             Setter::SubjectBestHit => self.subject_besthit = true,

@@ -21,7 +21,7 @@ use super::local_blast::{
 use super::parts::Parts;
 use super::run::{
     check_inputs, query_range_of, run_local, searched_queries, CountingWriter, HspRecord,
-    QueryRounds, QueryStats,
+    QueryRounds, QueryStats, RunEnd,
 };
 use super::search::Search;
 use super::start::{CallStart, RunLog};
@@ -29,8 +29,8 @@ use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::blastinput::query_batch::BatchCount;
 use crate::blastinput::query_batch::ScopeRefusal;
+use crate::blastinput::query_batch::{BatchCount, LoopBatchSizes};
 use crate::blastinput::seq_range::{record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -55,6 +55,28 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// The batch `range` in which the run ended without a post and with exit status 0
+    /// (`run::RunEnd::WithoutPost`: NCBI's end at a header record that ends before its read
+    /// enters the set's elements): no HSPs, the statistics and rounds of queries that were not
+    /// searched, and what the command line writes to its standard error for the batch,
+    /// `diagnostics`.
+    fn ended(range: Range<usize>, diagnostics: Vec<u8>) -> Self {
+        let queries = range.len();
+        Batch {
+            query_indices: range,
+            hsps: Vec::new(),
+            query_stats: vec![None; queries],
+            rounds: vec![
+                QueryRounds {
+                    stats: vec![None],
+                    converged: false,
+                };
+                queries
+            ],
+            diagnostics,
+        }
+    }
+
     /// The results of each query of the batch, in the order of the inputs.
     pub fn queries(&self) -> impl Iterator<Item = QueryHits<'_>> + '_ {
         let first = self.query_indices.start;
@@ -73,39 +95,33 @@ impl Batch {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-272
-/// The size of NCBI's query batches: BLASTN's follows the extensions of the batch before.
-enum BatchSizes {
-    Fixed(u32),
-    Blastn(QueryBatchSizes),
-}
+/// The size of NCBI's query batches: BLASTN's application's follow the extensions of the batch
+/// before (`LoopBatchSizes`).
+type BatchSizes = LoopBatchSizes;
 
-impl BatchSizes {
-    fn current(&self) -> u32 {
-        match self {
-            BatchSizes::Fixed(size) => *size,
-            BatchSizes::Blastn(sizes) => sizes.batch_size(),
-        }
-    }
-}
-
-/// The batch sizes of `command`, as each program's application reads them (`GetQueryBatchSize`);
-/// BLASTN's of a database reads the call's settings (`start`).
+/// The batch sizes of `command`, as its running application reads them (`GetQueryBatchSize`,
+/// `Program::fixed_query_batch_size`), also where it runs another program's strategy; BLASTN's
+/// application's over a database reads the call's settings (`start`).
 fn batch_sizes(
     command: &Commands,
     inputs: Inputs<'_>,
     start: &CallStart,
 ) -> anyhow::Result<BatchSizes> {
     Ok(match command {
-        Commands::Blastn(args) => BatchSizes::Blastn(match args.database_name() {
+        Commands::Blastn(args) => match args.database_name() {
             Some(name) => {
                 let settings = start.settings();
                 QueryBatchSizes::of_database(args, name, &settings)?
             }
-            None => QueryBatchSizes::new(args, inputs.subject)?,
-        }),
+            None => QueryBatchSizes::of_subjects(args, inputs.subject)?,
+        },
         Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size(10000)?),
         Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size(20000)?),
-        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size(10002)?),
+        Commands::Tblastx(args) => crate::algorithm::tblastx::blast_engine::library_batch_sizes(
+            args,
+            inputs.subject,
+            &start.settings(),
+        )?,
         Commands::Blastx(_) => BatchSizes::Fixed(query_batch_size(
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
@@ -211,7 +227,10 @@ pub struct Batches<'a> {
 /// A caller reports progress between batches (`Batch::query_indices`), and stops the search by not
 /// asking for the next batch. A batch that fails gives its error (`Error::Search`) and ends the
 /// iterator: the batches before it stand, as the reports that the command line has written by
-/// then do. A batch is searched by one `run_local` call, each with its own thread pool of
+/// then do. A batch in which the run ends with exit status 0 and no message (a database header
+/// record that ends before NCBI's read enters its elements, which NCBI's search programs take as
+/// the end of the run) is the last: it has no HSPs and carries its diagnostics (with the first
+/// batch, the run's own), what the command line writes to its standard error up to that end. A batch is searched by one `run_local` call, each with its own thread pool of
 /// `-num_threads` threads; of a database, each opens the database again, so what NCBI writes once
 /// per run about a taxonomy database comes with every batch that reads one.
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
@@ -367,10 +386,17 @@ impl Batches<'_> {
         }
     }
 
-    /// Searches the batch `range`, as the command line's loop searches it. The end of the query
-    /// records comes in the batch that reads past the last record before reaching its size
+    /// Searches the batch `range`, as the command line's loop searches it, and whether the run
+    /// ended in it without a post and with exit status 0 (`run::RunEnd::WithoutPost`), where
+    /// NCBI's loop ends: no batch is searched after it, and the batch itself has no HSPs (NCBI
+    /// wrote no report of it) and its diagnostics (`Batch::ended`). The end of the query records
+    /// comes in the batch that reads past the last record before reaching its size
     /// (`reads_on`), and only there (line WQA's D10, 2026-11-19).
-    fn search_batch(&mut self, range: Range<usize>, reads_on: bool) -> Result<Batch, Error> {
+    fn search_batch(
+        &mut self,
+        range: Range<usize>,
+        reads_on: bool,
+    ) -> Result<(Batch, bool), Error> {
         let ends_reading = reads_on && range.end == self.lengths.len();
         let inputs = match self.inputs.query_file {
             Some(_) => self.inputs,
@@ -415,6 +441,7 @@ impl Batches<'_> {
                 args.scope_refusal = scope_refusal;
             }
             Commands::Tblastx(args) => {
+                args.one_query_batch = true;
                 args.first_query_ordinal = range.start;
                 args.scope_refusal = scope_refusal;
             }
@@ -463,6 +490,7 @@ impl Batches<'_> {
             let mut sink = self.log.sink(&mut diagnostics, false);
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -484,7 +512,9 @@ impl Batches<'_> {
         if !self.searched_one {
             bytes.splice(0..0, std::mem::take(&mut self.start_messages));
         }
-        result.map_err(|error| self.log.failed(&error))?;
+        if result.map_err(|error| self.log.failed(&error))? == RunEnd::WithoutPost {
+            return Ok((Batch::ended(range, bytes), true));
+        }
         let finished = observer
             .parts
             .finish(
@@ -503,18 +533,19 @@ impl Batches<'_> {
             hsp.q_idx += range.start;
         }
         self.hsps_before += hsps.len();
-        if let (BatchSizes::Blastn(sizes), Some(extensions)) =
-            (&mut self.sizes, observer.extensions)
-        {
-            sizes.searched(extensions);
+        if let Some(extensions) = observer.extensions {
+            self.sizes.searched(extensions);
         }
-        Ok(Batch {
-            query_indices: range,
-            hsps,
-            query_stats: finished.query_stats,
-            rounds: finished.rounds,
-            diagnostics: bytes,
-        })
+        Ok((
+            Batch {
+                query_indices: range,
+                hsps,
+                query_stats: finished.query_stats,
+                rounds: finished.rounds,
+                diagnostics: bytes,
+            },
+            false,
+        ))
     }
 }
 
@@ -546,8 +577,8 @@ impl Iterator for Batches<'_> {
         self.next_query = range.end;
         let batch = self.search_batch(range, !reached);
         self.searched_one = true;
-        self.finished = batch.is_err();
-        Some(batch)
+        self.finished = !matches!(batch, Ok((_, false)));
+        Some(batch.map(|(batch, _)| batch))
     }
 }
 

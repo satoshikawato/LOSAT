@@ -92,6 +92,9 @@ pub(super) struct TwoStageScanState<'s> {
     pub(super) diag_hash: &'s mut DiagHashTable,
     /// The batch of offset pairs (NCBI's `offset_pairs`, allocated for `offset_array_size` pairs).
     pub(super) offset_pairs: &'s mut Vec<OffsetPair>,
+    /// The diagonal table of a window below 0 (`neg_window.rs`), which takes the batches of
+    /// offset pairs in place of the steps of `pair_extend`; `None` for every other search.
+    pub(super) neg: Option<&'s mut super::neg_window::NegTable>,
     /// The debug counters (written only when `debug_enabled`).
     pub(super) dbg_total_s_positions: &'s mut usize,
     pub(super) dbg_seeds_found: &'s mut usize,
@@ -243,6 +246,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         dbg_ungapped_ext_calls: &mut dbg_ungapped_ext_calls,
         dbg_ungapped_low: &mut *dbg_ungapped_low,
         dbg_gapped_attempted: &mut *dbg_gapped_attempted,
+        neg: state.neg.as_deref_mut(),
     };
 
     let mut on_word = |kmer_start: usize,

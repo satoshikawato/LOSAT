@@ -44,6 +44,8 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 
 `-num_descriptions`, `-num_alignments`, `-line_length`, `-sorthits` and `-sorthsps` shape these formats. For formats above `4` they are ignored with a warning, as in NCBI.
 
+With `-html`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` write format `0` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Formats `1` to `4` with `-html` are not supported yet.
+
 ## Tabular and custom fields (6, 7, 10, 20)
 
 All four write one line per alignment. They differ only in layout:
@@ -116,9 +118,11 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 
 `blastn` writes SAM with `-outfmt 17`. `-outfmt "17 SQ"` adds the target sequence in the SEQ column and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI. With `-ungapped`, each subject has one line that joins all of its alignments with the query, as in NCBI: the CIGAR is the summed length of the alignments as one `M`, the position and clipping span all of them, `AS`, `EV` and `BS` are the best alignment's, and `PI` divides the best alignment's identities by the summed length. The document is NCBI's byte for byte except two things in the `@PG` line: the `CL:` tag holds LOSAT's own command line, and `VN:` reads `LOSAT 0.2.0` where NCBI writes `2.17.0+`. Like NCBI, LOSAT writes the document when the search ends.
 
+`blastn -import_search_strategy` with a `tblastx` strategy writes SAM too, as NCBI's formatter does for translated alignments: one line per subject, whose CIGAR is the summed length of its alignments in bases as one `M`, with the position and clipping spanning all of them, `NM:i:0` as the only tag, and `PN:tblastx` in the `@PG` line. A subject whose alignments lie on different strands of the query or of the subject has no line: NCBI's formatter cannot convert it and posts an exception for it (one post for each such subject, as NCBI writes them), and a search in which that happens to every subject writes no document at all. `tblastx` and `blastx` give NCBI's own error for `-outfmt 17` (`SAM format is only applicable to blastn`).
+
 ## Organism report (18)
 
-`-outfmt 18` is NCBI's "Tax BLAST report". It groups the subjects of each query by the tax id of each definition line, under the names of NCBI's `taxdb.bti` and `taxdb.btd`. A `-subject` record has tax id 0. Without a taxonomy database the report has its headers only. As in NCBI, a subject whose tax id the database does not know is left out of the report but still widens its columns.
+`-outfmt 18` is NCBI's "Tax BLAST report". It groups the subjects of each query by the tax id of each definition line, under the names of NCBI's `taxdb.bti` and `taxdb.btd`. A `-subject` record has tax id 0. Without a taxonomy database the report has its headers only. With `-html` it is written as NCBI's HTML. As in NCBI, a subject whose tax id the database does not know is left out of the report but still widens its columns.
 
 ## Differences from NCBI BLAST+
 

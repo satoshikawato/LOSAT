@@ -45,7 +45,8 @@ use crate::algorithm::blastn::interval_tree::{IndexMethod, TreeHsp};
 use crate::algorithm::blastp;
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::extension::{
-    extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
+    extend_one_hit_blosum62, extend_one_hit_for, extend_one_hit_of, extend_two_hit_blosum62,
+    extend_two_hit_table,
 };
 use crate::algorithm::blastp::gapalign::{BlastpGappedAlignmentMode, BlastpPreliminaryHsp};
 use crate::algorithm::blastp::hsp::{reap_hsplist_by_evalue, update_best_evalue};
@@ -132,7 +133,7 @@ impl BlastpPrelimKernel<'_> {
             .and_then(|all| all.get(s_idx))
             .filter(|ranges| !ranges.is_empty())
             .map(Vec::as_slice);
-        self.search_subject_in(
+        self.search_subject_in_any(
             scratch,
             s_idx,
             subject,
@@ -141,6 +142,45 @@ impl BlastpPrelimKernel<'_> {
             x_soft,
             false,
         );
+    }
+
+    /// [`Self::search_subject_in`] for a search with a window of 0 or more, and for a negative
+    /// `-window_size` (a search strategy's; the command line takes none) [`Self::search_subject_in_neg`]:
+    /// the choice is made here, once for a subject, and the scan's loops of `search_subject_in` read
+    /// no window's sign. The masked kernels (`db_masked.rs`) call this one.
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn search_subject_in_any(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject: BlastpSubjectRef<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        scan_ranges: Option<&[(i32, i32)]>,
+        chunk: bool,
+    ) {
+        if self.window < 0 {
+            self.search_subject_in_neg(
+                scratch,
+                s_idx,
+                subject,
+                subject_result,
+                values,
+                scan_ranges,
+                chunk,
+            );
+        } else {
+            self.search_subject_in(
+                scratch,
+                s_idx,
+                subject,
+                subject_result,
+                values,
+                scan_ranges,
+                chunk,
+            );
+        }
     }
 
     /// [`Self::search_subject`] with the scan ranges `scan_ranges` (`-lcase_masking`'s of a
@@ -182,6 +222,11 @@ impl BlastpPrelimKernel<'_> {
             timing,
             ..
         } = *self;
+        // A negative window goes to `search_subject_in_neg` (`search_subject_in_any`).
+        debug_assert!(
+            window >= 0,
+            "a negative window is searched by search_subject_in_neg"
+        );
         subject_result.reset(s_idx);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
         // A subject without letters (its warning was written when the subjects were set
@@ -736,6 +781,185 @@ impl BlastpPrelimKernel<'_> {
         // lists in `subject_result`, with the subject's letters and word cutoffs made above. An
         // ungapped search (`-ungapped`) takes `ungapped_subject` instead: its HSPs are the ungapped
         // hits (decision D2 of task O4b: the one place where the mode enters the kernel).
+        let scanned = ScannedSubject {
+            subject,
+            subject_sequence,
+            values,
+            word_cutoff_scores,
+        };
+        if args.ungapped {
+            self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+        } else {
+            self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+        }
+    }
+
+    /// [`Self::search_subject_in`] for a negative `-window_size` (a hand-edited search strategy: the
+    /// command line takes none): the one-hit scan of NCBI's word finder, which runs for a window of 0
+    /// or less (`multiple_hits` is a window above 0), on NCBI's diagonal table of a window below 0,
+    /// which keeps its state from one subject to the next. The table starts at offset `window` with
+    /// every entry 0 (it can be shorter than the query: `compute_diag_table_shape`, the diagonals
+    /// then share entries), an entry the scan sets holds the end of its extension plus the offset
+    /// in the 31 bits of `last_hit`, a hit is extended only where it lies at or past the entry's
+    /// `last_hit` less the offset (`neg_window_diff`), and after each subject the offset moves on by
+    /// the subject's length plus the window, or goes back to the window with every entry set to
+    /// minus the window where it has reached a quarter of `INT4_MAX` (`neg_window_exit`). A fresh entry reads
+    /// as `-window` letters ahead, so a word of the first `-window` letters of a subject is not
+    /// extended on a diagonal that no earlier subject has written. The caller runs the subjects on
+    /// one thread in NCBI's order (`run_call`'s pool), which is what makes the table's state NCBI's.
+    /// The offset and the differences are 64-bit (`BlastpSubjectScratch::neg_offset`): where NCBI's
+    /// `Int4` arithmetic is defined they are its values, where it would overflow they are the widened
+    /// ones. The scan, the extension and the gapped half are `search_subject_in`'s for a window of 0.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:713-808
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,87-106,128-157,162-172
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn search_subject_in_neg(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject: BlastpSubjectRef<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        scan_ranges: Option<&[(i32, i32)]>,
+        chunk: bool,
+    ) {
+        let Self {
+            args,
+            contexts,
+            context_lookup_bounds,
+            concatenated_query,
+            lookup,
+            x_dropoff_per_context,
+            window,
+            word_size,
+            diag_mask,
+            total_query_span,
+            timing_enabled,
+            timing,
+            ..
+        } = *self;
+        subject_result.reset(s_idx);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
+        // A subject without letters is not searched, and the diagonal offset does not move for it.
+        if subject.aa_len == 0 {
+            return;
+        }
+        let word_cutoff_scores = values.word_cutoff_scores;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:114-116,127
+        let subject_sequence = &subject.aa_seq[1..];
+        let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+        let mut init_hsps = std::mem::take(&mut scratch.init_hsps);
+        init_hsps.clear();
+        let diag_offset = scratch.neg_offset;
+        let matrix = args.scoring.matrix;
+
+        let scan_ungapped_start = blastp_timing_start(timing_enabled);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:772-802
+        let mut one_hit = |pair: OffsetPair| {
+            let query_offset =
+                i32::try_from(pair.q_off).expect("NCBI BLAST query offset must fit in Int4");
+            let subject_offset =
+                i32::try_from(pair.s_off).expect("NCBI BLAST subject offset must fit in Int4");
+            let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
+            let diag_entry = &mut scratch.diag_array[diag_coord];
+            if neg_window_diff(subject_offset, diag_entry.last_hit(), diag_offset) < 0 {
+                return;
+            }
+            let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
+                contexts.as_slice(),
+                context_lookup_bounds,
+                query_offset,
+            );
+            let x_drop = x_dropoff_per_context[ctx_idx];
+            let cutoff = word_cutoff_scores[ctx_idx];
+            let Some(ungapped_hit) = extend_one_hit_for(
+                matrix,
+                concatenated_query.as_slice(),
+                subject_raw,
+                usize::try_from(query_offset)
+                    .expect("NCBI BLAST one-hit query offset must be non-negative"),
+                usize::try_from(subject_offset)
+                    .expect("NCBI BLAST one-hit subject offset must be non-negative"),
+                x_drop,
+                args.word_size,
+            ) else {
+                return;
+            };
+            if ungapped_hit.ungapped_data.score >= cutoff {
+                blastp_save_init_hsp(
+                    &mut init_hsps,
+                    ungapped_hit.ungapped_data.q_start,
+                    ungapped_hit.ungapped_data.s_start,
+                    query_offset,
+                    subject_offset,
+                    ungapped_hit.ungapped_data.length,
+                    ungapped_hit.ungapped_data.score,
+                );
+            }
+            diag_entry.set_last_hit(neg_window_last_hit(
+                ungapped_hit.s_last_off,
+                word_size,
+                diag_offset,
+            ));
+        };
+        if let Some(ranges) = scan_ranges {
+            x_soft_subject::x_for_each_hit(
+                lookup,
+                subject_sequence,
+                subject.aa_len,
+                ranges,
+                &mut scratch.offset_pairs,
+                false,
+                &mut |pair, _| one_hit(pair),
+            );
+        } else if matrix == ScoringMatrix::Blosum62 {
+            blastp_for_each_offset_pair(
+                lookup,
+                subject_sequence,
+                subject.aa_len,
+                &mut scratch.offset_pairs,
+                BlastpOffsetPairScanMode::OneHit,
+                one_hit,
+            );
+        } else {
+            blastp_for_each_offset_pair_of(
+                lookup,
+                subject_sequence,
+                subject.aa_len,
+                &mut scratch.offset_pairs,
+                BlastpOffsetPairScanMode::OneHit,
+                one_hit,
+            );
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+        let (next_offset, cleared) = neg_window_exit(diag_offset, window, subject.aa_len);
+        if cleared {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-106
+            for diag in &mut scratch.diag_array {
+                *diag = DiagStruct::default();
+                diag.set_last_hit(neg_window_cleared_last_hit(window));
+            }
+        }
+        scratch.neg_offset = next_offset;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+        let interval_tree = &mut scratch.preliminary_interval_tree;
+        interval_tree.reset_with_bounds_cells(
+            0,
+            total_query_span,
+            0,
+            subject.aa_len as i32 + 1,
+            x_bp_tree_max_cells(),
+        );
+        if let Some(timing) = timing.as_ref() {
+            BlastpTiming::record_call(
+                &timing.scan_ungapped_ns,
+                &timing.scan_ungapped_calls,
+                scan_ungapped_start,
+            );
+        }
         let scanned = ScannedSubject {
             subject,
             subject_sequence,
@@ -1435,6 +1659,50 @@ impl BlastpPrelimKernel<'_> {
 /// scores did not change).
 fn delete_failed_hsp_tests(hsps: &mut Vec<BlastpPreliminaryHsp>) {
     hsps.retain(|hsp| hsp.query_end - hsp.query_start >= 0);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:776-782
+/// The `diff` of the one-hit test for a negative window (`search_subject_in_neg`): the subject
+/// offset (an `Uint4` in NCBI) less the entry's `last_hit` less the diagonal offset. Where NCBI's
+/// `Int4` subtraction of the offset is defined the difference wraps in 32 bits as its unsigned
+/// arithmetic does; where that subtraction would overflow it is the 64-bit difference.
+fn neg_window_diff(subject_offset: i32, last_hit: i32, diag_offset: i64) -> i64 {
+    let behind = i64::from(last_hit) - diag_offset;
+    match i32::try_from(behind) {
+        Ok(behind) => i64::from((subject_offset as u32).wrapping_sub(behind as u32) as i32),
+        Err(_) => i64::from(subject_offset) - behind,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:799-800
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
+/// What a one-hit extension stores in its diagonal entry for a negative window: the last subject
+/// offset it reached less the word's overlap plus the diagonal offset, as the 31 bits that the
+/// entry's `last_hit` holds (`DiagStruct::set_last_hit` keeps them), from the 64-bit sum.
+fn neg_window_last_hit(s_last_off: i32, word_size: i32, diag_offset: i64) -> i32 {
+    (i64::from(s_last_off) - i64::from(word_size - 1) + diag_offset) as i32
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+/// The diagonal offset after a subject of `subject_length` letters (`Blast_ExtendWordExit`) and
+/// whether the table is cleared: from an offset of a quarter of `INT4_MAX` or more it goes back to `window`
+/// with every entry cleared, else it moves on by the length plus `window` (64-bit, so that a very
+/// negative window does not wrap).
+fn neg_window_exit(diag_offset: i64, window: i32, subject_length: usize) -> (i64, bool) {
+    if diag_offset >= i64::from(i32::MAX / 4) {
+        (i64::from(window), true)
+    } else {
+        (
+            diag_offset + subject_length as i64 + i64::from(window),
+            false,
+        )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-106
+/// The `last_hit` of a cleared entry: minus the window, in the entry's 31 bits.
+fn neg_window_cleared_last_hit(window: i32) -> i32 {
+    (-i64::from(window)) as i32
 }
 
 #[cfg(test)]

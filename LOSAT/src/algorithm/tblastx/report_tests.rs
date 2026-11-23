@@ -59,6 +59,7 @@ fn rows_keep_the_seqalign_identities_of_their_hsps() {
         &code,
         &placements,
         &placements,
+        None,
     );
     let counts: Vec<(usize, usize)> = rows
         .iter()
@@ -452,7 +453,8 @@ fn mask_seek_lowercases_the_letters_of_the_full_scan() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:993 (BlastSeqLocCombine(filter_out, 0)) joins
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:993
+// `BlastSeqLocCombine` (with `link_value` 0) joins
 // only intervals that overlap (adjacent ones stay apart), per frame, before the conversion
 // to nucleotides; the XML writer reads that list (blast_aux.cpp:930-959), in context order,
 // each mask with its context's frame, moved into the record by the interval's start.
@@ -645,7 +647,20 @@ fn the_query_anchored_formats_are_pairwise_views_and_others_unsupported() {
             "{outfmt}"
         );
     }
-    assert_eq!(output_format("17"), TblastxOutputFormat::Unsupported);
+    // SAM (17) reads its custom words (`SQ`, `SR`; BLASTN's application writes it for a TBLASTX
+    // strategy, `tblastx::sam`).
+    use crate::report::sam::SamSpec;
+    assert_eq!(
+        output_format("17"),
+        TblastxOutputFormat::Sam(SamSpec::default())
+    );
+    assert_eq!(
+        output_format("17 SQ SR"),
+        TblastxOutputFormat::Sam(SamSpec {
+            subject_as_reference: true,
+            sequence: true
+        })
+    );
     assert_eq!(output_format("99"), TblastxOutputFormat::Unsupported);
 }
 

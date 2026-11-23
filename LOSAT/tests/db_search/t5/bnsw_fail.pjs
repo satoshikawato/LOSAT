@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "bnsw_fail",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "bnsw_fail",
+  "number-of-letters": 364,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-23T05:07:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50078,
+  "bytes-to-cache": 488,
+  "files": [
+    "bnsw_fail.pdb",
+    "bnsw_fail.phr",
+    "bnsw_fail.pin",
+    "bnsw_fail.pog",
+    "bnsw_fail.pos",
+    "bnsw_fail.pot",
+    "bnsw_fail.psq",
+    "bnsw_fail.ptf",
+    "bnsw_fail.pto"
+  ]
+}

@@ -528,9 +528,8 @@ impl Args {
     /// It names the first such argument in the command line's order, in the words of the
     /// programs on clap (`cli::non_utf8_value_refusal`). The values read by their bytes are not
     /// refused: an `eOutputFile` key, which the programs open by its name's bytes (`output_file`,
-    /// `os_value`), and `-logfile`, which the application opens before the reader
-    /// (`ncbi_environment`; a `-conffile` name that is not UTF-8 is refused there, before the
-    /// reader).
+    /// `os_value`), `-logfile`, which the application opens before the reader, and `-conffile`,
+    /// whose file the application loads before the reader (`ncbi_environment`).
     pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
         let read_as_bytes = |name: &str| {
             FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))

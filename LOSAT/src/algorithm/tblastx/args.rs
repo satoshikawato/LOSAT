@@ -59,6 +59,11 @@ pub struct TblastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -142,6 +147,10 @@ pub struct TblastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
+    // The `-html` links of the run, which `check_ncbi_options` makes
+    // (`blastinput::app::html_links`). Not a public option.
+    #[arg(skip)]
+    pub html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-207
     #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
     pub max_hsps: Option<usize>,
@@ -193,7 +202,10 @@ pub struct TblastxArgs {
     pub xdrop_ungap: Option<f64>,
 
     // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
-    // NCBI's, as tblastn's.
+    // NCBI's, as tblastn's. The command line takes 0 or more; an imported search strategy carries
+    // any `Int4`, which NCBI runs: a negative window takes the one-hit word finder too, on a table
+    // that keeps its state across the batch's calls (`blast_engine::word_finder::WideOffset`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:479-480
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 
@@ -270,6 +282,12 @@ pub struct TblastxArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-264
+    // `api::run_batches` hands over one of NCBI's query batches at a time, sized as the running
+    // application's loop sizes them (BLASTN's mixer where blastn runs a TBLASTX strategy); these
+    // records are that batch, whatever its size. No argument of the command line sets this.
+    #[arg(skip)]
+    pub(crate) one_query_batch: bool,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
     /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
     /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
@@ -283,6 +301,14 @@ pub struct TblastxArgs {
     /// option.
     #[arg(skip)]
     pub matrix_file: Option<std::path::PathBuf>,
+    // The command line of the run as the SAM `@PG` line shows it: every argument followed by one
+    // space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the library, the
+    // web ABIs). Set by `run` from the process's arguments; only a TBLASTX strategy that BLASTN's
+    // application runs writes SAM (`tblastx::sam`).
+    //
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:877-885
+    #[arg(skip)]
+    pub command_line: Option<Vec<u8>>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.
@@ -377,12 +403,19 @@ impl TblastxArgs {
         Ok(())
     }
 
-    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
+    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject; a
+    /// search strategy without one keeps the handle's 13 (`BLAST_WORD_THRESHOLD_TBLASTX`): after
+    /// an import NCBI runs only the handlers that `SetOptionsForSavedStrategy` names.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (TBLASTX's default
     /// threshold is always the suggestion's)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:115
     pub fn word_threshold(&self) -> f64 {
         self.threshold.unwrap_or_else(|| {
+            if self.import.is_some() {
+                return 13.0;
+            }
             crate::stats::protein_options::suggested_threshold(
                 crate::stats::protein_options::SuggestionProgram::TranslatedSubject,
                 self.matrix_name(),
@@ -390,11 +423,16 @@ impl TblastxArgs {
         })
     }
 
-    /// The two-hit window: `-window_size`, or the matrix's suggestion.
+    /// The two-hit window: `-window_size`, or the matrix's suggestion; a search strategy without
+    /// one keeps the handle's 40 (`BLAST_WINDOW_SIZE_PROT`, as `word_threshold`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:57
     pub fn window(&self) -> i32 {
         self.window_size.unwrap_or_else(|| {
+            if self.import.is_some() {
+                return 40;
+            }
             crate::stats::protein_options::suggested_window_size(self.matrix_name())
         })
     }

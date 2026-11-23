@@ -72,8 +72,10 @@ pub struct TaskConfig {
     pub scan_range: usize,
     pub min_diag_separation: i32, // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
     /// The two-hit window (`-window_size`, else the task's: 40 for dc-megablast, 0 (one hit)
-    /// otherwise).
-    pub window_size: usize,
+    /// otherwise), as NCBI's `Int4` holds it: the command line takes 0 or more, an imported
+    /// search strategy any value, and below 0 the word finder is the one-hit word finder with a
+    /// diagonal table that starts at the window (`neg_window.rs`).
+    pub window_size: i32,
     /// The discontiguous template (`mb_template_type`, `mb_template_length`); a length
     /// of 0 is a contiguous word.
     pub mb_template_type: DiscWordType,
@@ -138,7 +140,7 @@ struct TaskDefaults {
     x_drop_gapped: f64,
     x_drop_ungapped: f64,
     min_diag_separation: i32,
-    window_size: usize,
+    window_size: i32,
     template_type: DiscWordType,
     template_length: u8,
 }
@@ -292,16 +294,14 @@ pub fn calculate_initial_scan_step(effective_word_size: usize, user_scan_step: u
     }
 }
 
-/// The two-hit window of a run: `-window_size` when given, else the task's (40 for
-/// dc-megablast, 0 otherwise; `task_defaults`).
+/// The two-hit window of a run: `-window_size` when given (any `Int4` from an imported search
+/// strategy), else the task's (40 for dc-megablast, 0 otherwise; `task_defaults`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:487-497
 /// BLASTN has no matrix, so no suggested window replaces the task's.
-pub fn determine_window_size(args: &BlastnArgs) -> usize {
+pub fn determine_window_size(args: &BlastnArgs) -> i32 {
     args.window_size
-        .map_or(task_defaults(&args.task).window_size, |window| {
-            window as usize
-        })
+        .unwrap_or_else(|| task_defaults(&args.task).window_size)
 }
 
 /// The matrix-only flag and the engine pair of an option pair (reward, penalty).
@@ -354,7 +354,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
 
     // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks), in bits
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:146
-    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100; `-xdrop_gap_final` replaces it
+    // Default `BLAST_GAP_X_DROPOFF_FINAL_NUCL` is 100; `-xdrop_gap_final` replaces it
     // (blast_args.cpp:284-286). The raw value is at least the gapped one (`gap_x_dropoffs`).
     let x_drop_final = args
         .xdrop_gap_final

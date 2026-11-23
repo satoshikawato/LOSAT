@@ -70,7 +70,7 @@ pub(super) fn subject_frames(
     // letters (`Subjects::x_letter_frames`).
     let x_kept;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
-    // if (subject->length < min_subj_seq_length) { ... continue; }
+    // Skip subjects shorter than the minimum translatable length (`min_subj_seq_length`).
     // Statistics include all records, including ones too short to search: such a subject
     // gets no frame (`None`). A `-db` sequence's length is read with its block, in the
     // frames' one look-up (it holds no length per sequence).
@@ -132,6 +132,9 @@ pub(super) struct UnitPathArgs<'a> {
     pub(super) x_read_failure: &'a XReadFailure,
     /// `-subject_besthit` (`x_pair_par::XSubject::subject_besthit`).
     pub(super) subject_besthit: bool,
+    /// NCBI's count of the batch's successful initial extensions, where the running application
+    /// sizes its batches by it (`word_finder::WordFinderCx::extensions`).
+    pub(super) extensions: Option<&'a std::sync::atomic::AtomicU64>,
 }
 
 /// Dispatch points 2 and 3 of PAIRPAR and of the seed release (per subject): when the batch has a
@@ -169,6 +172,7 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
         x_pair_lut_is_stub,
         x_read_failure,
         subject_besthit,
+        extensions,
     } = args;
     // The batch's unit path, borrowed from the subject's units stage (dispatch point 2 of the
     // seed release): it cannot be used after `x_units_stage.end()` (dispatch point 3).
@@ -214,6 +218,17 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
             let x_units = x.run_subject_units(&x_subject, parallel_pool);
             x_lap.lap(XStage::Units);
             x_pipe_seed.units_done(x_units.records());
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:616-617
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_diagnostics.c:102-115
+            // The units' saved extensions are those of the frame loop's word finder calls (one
+            // per frame chunk), which add them to the batch's `good_init_extends`
+            // (`word_finder::finish_chunk_scan` in the frame loop).
+            if let Some(extensions) = extensions {
+                extensions.fetch_add(
+                    x_units.records() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
             // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of the batch taken: the next batch
             // may build its tables (tblastx/x_batch_pipe.rs `XSeedEnd::units_taken`).
             if let (Some((_, batch)), Some(seed_end)) = (x_board_batch.as_ref(), x_seed_end) {

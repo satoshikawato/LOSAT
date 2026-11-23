@@ -112,6 +112,7 @@ fn render(params: &[crate::report::archive::options::Param]) -> String {
                 ParamValue::Real(value) => format!("real:{}", posix(*value)),
                 ParamValue::Str(value) => format!("string:{value}"),
                 ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
+                ParamValue::StrandType(value) => format!("strand-type:{value}"),
             };
             format!("{}={value}", param.name())
         })

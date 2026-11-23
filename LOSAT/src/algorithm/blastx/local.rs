@@ -162,9 +162,8 @@ fn search_records(
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
     if query_records.is_empty() && query_end.is_input() {
-        diagnostics.write_all(
-            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
-        )?;
+        diagnostics
+            .write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -527,6 +526,7 @@ fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> R
         later_warnings,
         hits: hits_sink,
         observer,
+        html_posts,
     } = outputs;
     let mut later = later_warnings.as_deref_mut().filter(|_| keeps_later);
     // The caller's receivers of the side files of outfmt 13 and 14.
@@ -598,6 +598,7 @@ fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> R
         wants_hits,
         only_archive,
         diagnostics,
+        html_posts,
         &mut later,
         observer,
         other_outfmts,
@@ -659,7 +660,9 @@ impl Write for SharedWarnings<'_> {
 /// `later`: by format, the receivers of the queries' warnings that the first format does not write
 /// (a structured format): each later format that writes them writes its own there, as the
 /// command line's run of it writes them to standard error (`ReportOutputs::later_warnings`).
-/// Returns the run's hit list (`wants_hits`) and the database sequences it names.
+/// `html_posts`: where the `-html` reports' posts go apart from `diagnostics`
+/// (`ReportOutputs::html_posts`). Returns the run's hit list (`wants_hits`) and the database
+/// sequences it names.
 #[allow(clippy::too_many_arguments)]
 fn write_run(
     run: &RunReports<'_>,
@@ -670,6 +673,7 @@ fn write_run(
     wants_hits: bool,
     only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
+    html_posts: &mut Option<&mut (dyn Write + Send)>,
     later: &mut Option<&mut [Vec<u8>]>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
     other_outfmts: &[&str],
@@ -719,18 +723,34 @@ fn write_run(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
         let mut quiet = io::sink();
-        let warnings: &mut dyn Write = if index == 0 {
-            &mut **diagnostics
+        // A later format's `-html` prolog posts its references' reads as a run of it alone
+        // (`report::write_prolog`'s `html_posts`; line RG T4a2 fix round 2, review c C3).
+        let (warnings, posts): (&mut dyn Write, Option<&mut dyn Write>) = if index == 0 {
+            (
+                &mut **diagnostics,
+                html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn Write),
+            )
         } else {
-            &mut quiet
+            let posts = crate::report::query_warnings::html_posts_sink(
+                html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn Write),
+                &mut **diagnostics,
+            );
+            (&mut quiet, Some(posts))
         };
-        report::write_prolog(writer, warnings, options, subjects, &shown).map_err(report_error)?;
+        report::write_prolog(writer, warnings, posts, options, subjects, &shown)
+            .map_err(report_error)?;
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
             writer.write_all(&start).map_err(output_error)?;
         }
-        writer.flush().map_err(output_error)?;
+        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
+            writer.flush().map_err(output_error)?;
+        }
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -814,6 +834,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
+                &mut *diagnostics,
             )?,
             None => None,
         };
@@ -850,6 +871,7 @@ fn write_run(
                         .map_or(subjects, ReportedSubjects::records),
                     &batch_shown(database.as_ref(), reported.as_ref(), shown),
                     results,
+                    None,
                 )
                 .map_err(report_error)?,
             ),
@@ -910,11 +932,23 @@ fn write_run(
                 diagnostics: &mut *diagnostics,
                 wrote: false,
             };
-            let warnings: &mut dyn Write = match (warns || seq_annot, own_later) {
-                (true, _) => &mut shared,
-                (false, Some(later)) => later,
-                _ => &mut quiet,
-            };
+            // A `-html` report's posts of its reads of NCBI's formatter registries are what a run
+            // of its format alone posts, at any place among the formats, as in the other four
+            // programs (`query_warnings::report_posts`): the diagnostics also where a later
+            // format's standard error goes to its receiver or nowhere (line RG T4a2 fix round 2,
+            // review c C3 = review d D5), or the call's receiver of them
+            // (`ReportOutputs::html_posts`).
+            let mut caller_posts = html_posts
+                .as_deref_mut()
+                .map(|posts| posts as &mut dyn Write);
+            let (warnings, report_posts): (&mut dyn Write, Option<&mut dyn Write>) =
+                match (warns || seq_annot, own_later) {
+                    (true, _) => (&mut shared, caller_posts.take()),
+                    (false, Some(later)) => {
+                        (later, Some(caller_posts.take().unwrap_or(&mut shared)))
+                    }
+                    _ => (&mut quiet, Some(caller_posts.take().unwrap_or(&mut shared))),
+                };
             // The values of a custom tabular field list are each format's (`reported_batch`
             // read the first format's).
             if let (Some(run), Some(reported), Some(spec), true) =
@@ -988,6 +1022,8 @@ fn write_run(
                     first_hsp,
                     hits: hits.as_deref(),
                     refusal,
+                    report: index,
+                    html_posts: report_posts,
                 }),
             )
             .map_err(report_error)
@@ -1166,9 +1202,9 @@ fn search_database(
         .ok_or_else(app::missing_subject_error)?;
     // The handler of the database arguments reads the list before the other handlers
     // (`native::run_inner`).
-    let list =
-        args.db_filter
-            .resolve(&settings, args.app().ncbi_name(), &mut *outputs.diagnostics)?;
+    let list = args
+        .db_filter
+        .resolve(&settings, args.app_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
     outputs.open_out()?;
     check_filtering(args)?;
@@ -1183,7 +1219,7 @@ fn search_database(
         args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
-        args.app().ncbi_name(),
+        args.app_name(),
     )?
     .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
@@ -1193,7 +1229,7 @@ fn search_database(
         database.list_taxids(),
         &database.statistics(),
         false,
-        args.searchsp.is_some_and(|space| space > 0),
+        args.searchsp.is_some_and(|space| space != 0),
         args.dbsize.is_some_and(|size| size > 0),
         "BLASTX",
     )?;
@@ -1229,9 +1265,9 @@ fn search_database(
         }
     }
     if query_records.is_empty() && query_end.is_input() {
-        outputs.diagnostics.write_all(
-            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
-        )?;
+        outputs
+            .diagnostics
+            .write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -1240,7 +1276,7 @@ fn search_database(
     if let Some(option) = args.db_mask.option() {
         let mask = database.resolve_mask_option(
             &option,
-            args.app().ncbi_name(),
+            args.app_name(),
             archive,
             None,
             &mut *outputs.diagnostics,
@@ -1446,10 +1482,18 @@ fn check_resolutions(
 ) -> Result<Vec<ResolvedOptions>> {
     for choice in choices {
         app::formatting_handler_check_of_run(choice, args.app(), Program::Blastx)?;
+        app::html_format_check(choice.number, args.app(), args.html)?;
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
+    let html = app::html_links(
+        args.html,
+        args.app(),
+        Program::Blastx,
+        args.database_name(),
+        &outfmts,
+    )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
-        args.app().ncbi_name(),
+        args.app_name(),
         &outfmts,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
@@ -1464,7 +1508,11 @@ fn check_resolutions(
     }
     resolutions
         .into_iter()
-        .map(|resolution| resolution.map_err(options_error))
+        .map(|resolution| {
+            let mut options = resolution.map_err(options_error)?;
+            options.html = html.clone();
+            Ok(options)
+        })
         .collect()
 }
 

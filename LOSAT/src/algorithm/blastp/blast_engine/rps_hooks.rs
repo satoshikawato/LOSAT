@@ -405,7 +405,7 @@ pub(super) fn rps_search(
         // `run_call` checked): LOSAT's refusal (`RpsUnit::check_engine_length`; none where no
         // query is searched).
         if searches {
-            unit.check_engine_length(args.window_size as i32, "RPSBLAST")?;
+            unit.check_engine_length(args.window_size, "RPSBLAST")?;
         }
         let masked: Vec<Option<Vec<u8>>> = run
             .contexts
@@ -514,7 +514,7 @@ pub(super) fn rps_search(
             sbp: sbp.as_ref(),
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
-            window: args.window_size as i32,
+            window: args.window_size,
             // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over one
             // volume).
             concat_length: unit.concat_length(),
@@ -632,11 +632,11 @@ pub(super) fn rps_search(
             units.searches_volumes_bare(),
         ) {
             Ok(None) => {}
-            Ok(Some(counts)) => {
+            Ok(Some(dropped)) => {
                 if unlisted.is_empty() {
                     unlisted = vec![0; hit_lists.len()];
                 }
-                unlisted[batch.clone()].copy_from_slice(&counts);
+                unlisted[batch.clone()].copy_from_slice(&dropped.hsps);
             }
             Err(refusal) => {
                 failed = Some((number, refusal));
@@ -690,9 +690,11 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
     if !error.is::<crate::cli::NativeError>() {
         return error;
     }
+    // The traceback fails before the batch's Seq-aligns: NCBI read none of its headers.
     database::HeaderReadError {
         query: run.batches[batch].start,
         error,
+        utf8: None,
     }
     .into()
 }

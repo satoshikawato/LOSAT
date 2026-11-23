@@ -844,7 +844,8 @@ fn query_row_masks(
 /// the hits move into the records (`shift_to_records`) with the records' frames and
 /// lengths. The subjects' titles come from `subjects`, their letters and lengths from
 /// `subject_letters`. `seqalign_identities` holds the Seq-align's `num_ident` of each HSP of
-/// `hits` when the report reads them (`seqalign_identities`).
+/// `hits` when the report reads them (`seqalign_identities`). Under `-html` (`html_masks`) each
+/// row's masks are added to `html_masks` in the order of `hits` (`report::pairwise::HtmlRowMasks`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
@@ -857,6 +858,7 @@ pub(crate) fn pairwise_hits(
     db_code: &GeneticCode,
     query_placements: &Placements,
     subject_placements: &Placements,
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Vec<PairwiseHit> {
     let rows = PairwiseRows::new(
         queries,
@@ -874,12 +876,16 @@ pub(crate) fn pairwise_hits(
     hits.iter()
         .enumerate()
         .map(|(index, hsp)| {
-            rows.hit(
+            let hit = rows.hit(
                 hsp,
                 seqalign_identities.map(|identities| identities[index]),
                 &mut window,
                 &mut row_masks,
-            )
+            );
+            if let Some(table) = html_masks.as_deref_mut() {
+                table.push(row_masks.copy_rows());
+            }
+            hit
         })
         .collect()
 }
@@ -1015,7 +1021,9 @@ impl<'a> PairwiseRows<'a> {
     /// subject), whose Seq-align's `num_ident` is `seqalign_num_ident` (`seqalign_identities`)
     /// when the report reads it; without it the row keeps the HSP's identities there, which
     /// nothing reads. `window` is the buffer of a stored subject's letters, `row_masks` the
-    /// masks of the rows (`query_row_masks`), both kept from HSP to HSP.
+    /// masks of the rows (`query_row_masks`), both kept from HSP to HSP: after the call it holds
+    /// this HSP's (the query row's, set at every HSP; the subject row has none), which `-html`
+    /// copies (`HspMasks::copy_rows`).
     #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub(crate) fn hit(
         &self,
@@ -1307,7 +1315,11 @@ pub(crate) enum TblastxOutputFormat {
     Xml2(crate::report::blast_xml2::Xml2Kind),
     /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
     Archive,
-    /// A value that TBLASTX does not write (17, and a value that NCBI cannot read), which the
+    /// SAM (outfmt 17, `tblastx/sam.rs`), which only BLASTN's application writes: a TBLASTX search
+    /// strategy that it runs (a TBLASTX run itself fails at its formatting handler, `app::
+    /// formatting_handler_check`). The document is written at the end of the run.
+    Sam(crate::report::sam::SamSpec),
+    /// A value that TBLASTX does not write (a value that NCBI cannot read), which the
     /// command line, the library and LOSAT Web refuse before the search
     /// (`ReportFormat::writes`, `app::report_format`): its writer refuses it, no report is
     /// written for it.
@@ -1360,6 +1372,7 @@ impl TblastxOutputFormat {
                 | Self::Xml
                 | Self::Xml2(_)
                 | Self::Archive
+                | Self::Sam(_)
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
@@ -1419,6 +1432,7 @@ impl TblastxOutputFormat {
                 _ => 6,
             }),
             Self::Seqalign(serial) => Some(serial.outfmt()),
+            Self::Sam(_) => Some(17),
             // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
             // (`TaxdbPrinter`).
             Self::Archive | Self::Xml2(_) | Self::Unsupported => None,
@@ -1437,6 +1451,12 @@ impl TblastxOutputFormat {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
+    // SAM reads its custom specification (`SQ`, `SR`) and ignores a delimiter.
+    if let Ok(choice) = &choice {
+        if choice.number == crate::blastinput::app::output_format::SAM {
+            return TblastxOutputFormat::Sam(crate::report::sam::SamSpec::parse(&choice.spec));
+        }
+    }
     // Only a value with a custom specification, or outfmt 10 or 20, reads the field list;
     // outfmt 18 (the organism report) is written from the same hit list.
     if let Ok(choice) = &choice {

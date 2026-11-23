@@ -556,6 +556,7 @@ impl import::StrategyArgs for BlastnArgs {
             out: self.out,
             outfmt: self.outfmt,
             show_gis: self.show_gis,
+            html: self.html,
             num_descriptions: self.num_descriptions,
             num_alignments: self.num_alignments,
             max_target_seqs: self.max_target_seqs.map(|n| n as i64),
@@ -587,6 +588,7 @@ impl import::StrategyArgs for BlastnArgs {
         self.out = kept.out;
         self.outfmt = kept.outfmt;
         self.show_gis = kept.show_gis;
+        self.html = kept.html;
         self.num_descriptions = kept.num_descriptions;
         self.num_alignments = kept.num_alignments;
         self.max_target_seqs = kept
@@ -647,6 +649,23 @@ impl import::StrategyArgs for BlastnArgs {
             Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
             Setter::GappedMode(gapped) => self.ungapped = !*gapped,
             Setter::WindowMaskerTaxId(n) => self.window_masker_taxid = Some(*n),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:458-462
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1967-1993
+            // The strategy's query strand (`Blast4-strand-type`: forward 1, reverse 2, both 3)
+            // with the command line's `-strand`, which `keep` set: a strategy's single strand
+            // where the command line searches both, the command line's where the strategy
+            // searches both or the same one. LOSAT refuses the other combinations.
+            Setter::StrandOption(n) => match (*n, self.strand.as_str()) {
+                (3, _) => {}
+                (1, "both" | "plus") => self.strand = "plus".to_string(),
+                (2, "both" | "minus") => self.strand = "minus".to_string(),
+                _ => {
+                    return Err(import::Start::unported_setter(
+                        setter,
+                        Program::Blastn.name(),
+                    ))
+                }
+            },
             _ => return Ok(false),
         }
         Ok(true)
@@ -666,16 +685,16 @@ impl import::StrategyArgs for BlastnArgs {
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:701-704
         // `-no_greedy` sets both algorithms to dynamic programming; the greedy pair is
-        // megablast's default.
-        match (collected.extension, collected.traceback) {
-            (None, None) => {}
-            (Some(0), Some(0)) => self.no_greedy = true,
-            (Some(1), Some(1)) if self.task == "megablast" => {}
-            _ => {
-                return Err(import::Start::unported(
-                    "a search strategy with this pair of gapped extension algorithms",
-                    program,
-                ))
+        // megablast's default (the task's pair where the strategy sets one algorithm only).
+        let task_algorithm = i32::from(self.task == "megablast");
+        if collected.extension.is_some() || collected.traceback.is_some() {
+            match (
+                collected.extension.unwrap_or(task_algorithm),
+                collected.traceback.unwrap_or(task_algorithm),
+            ) {
+                (0, 0) => self.no_greedy = true,
+                (1, 1) if self.task == "megablast" => {}
+                pair => self.strategy_algorithms = Some(pair),
             }
         }
         match (collected.template_type, collected.template_length) {
@@ -685,11 +704,11 @@ impl import::StrategyArgs for BlastnArgs {
                     0 => super::disc_lookup::DiscWordType::Coding,
                     1 => super::disc_lookup::DiscWordType::Optimal,
                     2 => super::disc_lookup::DiscWordType::TwoTemplates,
+                    // NCBI's options check refuses it (`scoring::check_scoring_options`); the
+                    // search never starts.
                     _ => {
-                        return Err(import::Start::unported(
-                            "a search strategy with this discontiguous template type",
-                            program,
-                        ))
+                        self.strategy_template_type = Some(kind);
+                        super::disc_lookup::DiscWordType::Coding
                     }
                 });
                 self.template_length = Some(length);

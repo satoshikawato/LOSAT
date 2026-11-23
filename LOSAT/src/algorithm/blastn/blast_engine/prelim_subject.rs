@@ -112,6 +112,9 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) scan_step: usize,
     pub(super) scan_range: usize,
     pub(super) window_size: usize,
+    /// The window when it is below 0 (an imported search strategy's), else 0: the batch's word
+    /// finder is then `neg_window.rs`'s.
+    pub(super) neg_window: i32,
     pub(super) offset_array_size: usize,
     pub(super) use_direct_lookup: bool,
     pub(super) small_na_compressed_query: &'a [u8],
@@ -252,6 +255,8 @@ pub(super) struct ScanBatch<'a> {
     pub(super) scan_step: usize,
     pub(super) scan_range: usize,
     pub(super) window_size: usize,
+    /// `PrelimBatch::neg_window`.
+    pub(super) neg_window: i32,
     pub(super) two_hits: bool,
     pub(super) offset_array_size: usize,
     pub(super) use_direct_lookup: bool,
@@ -326,6 +331,7 @@ impl<'a> ScanBatch<'a> {
             scan_step: batch.scan_step,
             scan_range: batch.scan_range,
             window_size,
+            neg_window: batch.neg_window,
             two_hits,
             offset_array_size: batch.offset_array_size,
             use_direct_lookup: batch.use_direct_lookup,
@@ -444,6 +450,20 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             );
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1695
+    // A window below 0 has the word finder of `neg_window.rs` (one test per chunk, outside the
+    // scans).
+    if scan.neg_window != 0 {
+        return super::neg_window::neg_chunk_hits::<UNGAPPED>(
+            scan,
+            subject,
+            chunk,
+            soft_ranges,
+            gap_scratch,
+            subject_scratch,
+            reuse_prelim_hits,
+        );
+    }
     let &PrelimSubject {
         s_idx,
         s_id,
@@ -496,7 +516,8 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // return for an empty list, blast_gapalign.c:3706-3707,3826-3831).
 
     // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824
+    // Asserts that `init_hitlist` is sorted by score (`Blast_InitHitListIsSortedByScore`).
     // This is critical for correct containment checking: high-score HSPs must be processed first
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     let ungapped_hits = &mut subject_scratch.ungapped_hits;
@@ -691,6 +712,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     hit_len_array: &mut *hit_len_array,
                     diag_hash: &mut *diag_hash,
                     offset_pairs: &mut subject_scratch.offset_pairs,
+                    neg: None,
                     dbg_total_s_positions: &mut dbg_total_s_positions,
                     dbg_seeds_found: &mut dbg_seeds_found,
                     dbg_window_seeds: &mut dbg_window_seeds,

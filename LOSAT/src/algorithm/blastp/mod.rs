@@ -11,7 +11,7 @@ pub mod blast_engine;
 // BLASTP and TBLASTN both encode an untranslated protein query in NCBISTDAA.
 pub(crate) mod encoding;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:217-228
-// status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
+// `s_BlastAaWordFinder_TwoHit` runs the protein two-hit word finder and extension.
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
 // The ungapped X-drop walks of aa_ungapped.c:804-883 with a byte score table, same results.
@@ -20,8 +20,8 @@ pub(crate) mod x_ungapped_fast;
 // fused loop's candidate closure, walks stopped by the sentinels, same results.
 pub(crate) mod x_ungapped_sent;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-// max_offset = BlastGetStartForGappedAlignment(...);
-// status = s_BlastProtGappedAlignment(...);
+// `BlastGetStartForGappedAlignment` selects the seed point and `s_BlastProtGappedAlignment`
+// runs the protein gapped alignment.
 // BLASTP and TBLASTN use the same protein gapped-score path.
 mod blast_xml;
 pub(crate) mod gapalign;

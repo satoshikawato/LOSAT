@@ -898,6 +898,23 @@ impl Start {
 
     /// LOSAT's refusal of a setter that the program does not take from a strategy, the option
     /// named by its field in the strategy file and its value.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1021-1036
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/gencode_singleton.c:65-69
+    /// The genetic code `n` of a strategy (`QueryGeneticCode`, `DbGeneticCode`; `which` names
+    /// it): the command line takes only the codes of NCBI's tables, and NCBI's search fails
+    /// without a table for the code (it ends on a signal), so LOSAT refuses a code without one.
+    pub(crate) fn genetic_code(n: i32, which: &str, program: &str) -> anyhow::Result<u8> {
+        u8::try_from(n)
+            .ok()
+            .filter(|id| crate::utils::genetic_code::GeneticCode::try_from_id(*id).is_ok())
+            .ok_or_else(|| {
+                unported(
+                    &format!("a search strategy with this {which} genetic code"),
+                    program,
+                )
+            })
+    }
+
     pub(crate) fn unported_setter(setter: &Setter, program: &str) -> anyhow::Error {
         unported(
             &format!("a search strategy with the option {}", option_text(setter)),
@@ -937,6 +954,7 @@ fn option_text(setter: &Setter) -> String {
                         .map(i32::to_string)
                         .collect::<Vec<_>>()
                         .join(","),
+                    ParamValue::StrandType(n) => n.to_string(),
                 };
                 format!("{} {value}", param.name())
             }
@@ -1064,19 +1082,44 @@ impl SegSetters {
         true
     }
 
-    /// The `-seg` value of the options the setters left, `None` when untouched.
+    /// The `-seg` value of the options the setters left, `None` when untouched. The program's
+    /// reader of `-seg` (`app::read_seg_option`) reads each cut back as the strategy's real: a
+    /// finite one in Rust's shortest form that reads back as the same double, and the values
+    /// that NCBI's ASN.1 reader takes and its argument reader does not (an infinity, NaN) with a
+    /// sign, which its reader of the first byte takes and `strtod` reads.
     pub(crate) fn value(&self) -> Option<String> {
         self.state.map(|state| match state {
             None => "no".to_string(),
-            Some((window, locut, hicut)) => format!("{window} {locut} {hicut}"),
+            Some((window, locut, hicut)) => {
+                format!("{window} {} {}", seg_cut_text(locut), seg_cut_text(hicut))
+            }
         })
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-813
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1312-1319
+/// A SEG cut of a strategy as the text `read_seg_option` reads back as that value.
+fn seg_cut_text(cut: f64) -> String {
+    if cut.is_nan() {
+        // The sign of the NaN too (NCBI's reader gives the one with the sign bit set).
+        if cut.is_sign_negative() {
+            "-nan"
+        } else {
+            "+nan"
+        }
+        .to_string()
+    } else if cut.is_infinite() {
+        if cut > 0.0 { "+inf" } else { "-inf" }.to_string()
+    } else {
+        format!("{cut}")
     }
 }
 
 /// The parameters a setter of the builder records in the options handle (`CBlastOptions`'s
 /// `Set*` calls `m_Remote->SetValue` with the field of the value it takes): the archive of an
-/// imported run lists them where NCBI's handle does. `StrandOption`, whose `strand-type` value
-/// LOSAT never writes, records nothing here (no program takes it from a strategy).
+/// imported run lists them where NCBI's handle does. `StrandOption` (blastn's: the values 1 to 3,
+/// the others are refused) records its `strand-type`.
 fn recorded_params(setter: &Setter) -> Vec<Param> {
     use crate::report::archive::fields as f;
     use ParamValue::{BigInteger, Boolean, Evalue, Integer, Real, Str};
@@ -1122,6 +1165,9 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::QueryCovHspPerc(v) => one(f::QUERY_COV_HSP_PERC, Real(*v)),
         Setter::RepeatFiltering(v) => one(f::REPEAT_FILTERING, Boolean(*v)),
         Setter::RepeatFilteringDb(v) => one(f::REPEAT_FILTERING_DB, Str(v.clone())),
+        Setter::StrandOption(v) if (1..=3).contains(v) => {
+            one(f::STRAND_OPTION, ParamValue::StrandType(*v))
+        }
         Setter::StrandOption(_) => Vec::new(),
         Setter::SegFiltering(v) => one(f::SEG_FILTERING, Boolean(*v)),
         Setter::SegFilteringWindow(v) => one(f::SEG_FILTERING_WINDOW, Integer(*v)),
@@ -1212,6 +1258,8 @@ pub(crate) struct Kept {
     pub(crate) out: Option<std::path::PathBuf>,
     pub(crate) outfmt: String,
     pub(crate) show_gis: bool,
+    /// `-html`, a formatting option of the command line that no strategy records.
+    pub(crate) html: bool,
     pub(crate) num_descriptions: Option<usize>,
     pub(crate) num_alignments: Option<usize>,
     /// `-max_target_seqs` as given (blastx keeps values below 1 for its own error).
@@ -1393,14 +1441,19 @@ impl Collected {
         Self::refuse_unless(self.template_length.is_none(), "MBTemplateLength", program)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3041-3043
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1447-1456
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1525-1531
     /// The `-comp_based_stats` value of the setters (`None` when untouched): a mode 0 to 3,
-    /// with the unified P-value (`u`) where the program takes it (`unified`).
+    /// with the unified P-value (`u`) where the program takes it (`unified`). NCBI's redo reads
+    /// a `UnifiedP` above 0 as unified P-values and any other value as none (a strategy can carry
+    /// any `int`; the command line sets 1).
     pub(crate) fn composition_value(&self, unified: bool, program: &str) -> Result<Option<String>> {
         let unified_p = self.unified_p.unwrap_or(0);
         let Some(mode) = self.composition else {
-            return Self::refuse_unless(unified_p == 0, "UnifiedP", program).map(|()| None);
+            return Self::refuse_unless(unified_p <= 0, "UnifiedP", program).map(|()| None);
         };
-        if !(0..=3).contains(&mode) || (unified_p != 0 && !unified) {
+        if !(0..=3).contains(&mode) || (unified_p > 0 && !unified) {
             return Err(unported(
                 &format!("a search strategy with composition-based statistics {mode} (unified P {unified_p})"),
                 program,
@@ -1408,7 +1461,7 @@ impl Collected {
         }
         Ok(Some(format!(
             "{mode}{}",
-            if unified_p != 0 { "u" } else { "" }
+            if unified_p > 0 { "u" } else { "" }
         )))
     }
 }
@@ -1575,7 +1628,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                 }
             }
             // Else the strategy's subjects. The Owner's decision F2-Q1 (2026-11-20 「Q1=C」,
-            // PD-LOSAT-NCBI-DEFECTS exception 27): they are searched once with the command line's
+            // PD-LOSAT-NCBI-DEFECTS exception 28): they are searched once with the command line's
             // `-num_threads`, as `-subject`'s records are, and the output is the `-num_threads 1`
             // output (NCBI searches them once per thread or aborts: its thread check reads only
             // the command line's `-subject`). The run keeps the threads: nothing here changes them

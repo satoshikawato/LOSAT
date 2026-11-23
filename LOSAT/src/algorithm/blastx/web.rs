@@ -143,6 +143,7 @@ pub(crate) fn run_pair(
     report::write_prolog(
         &mut output,
         &mut *diagnostics.borrow_mut(),
+        None,
         &options,
         &subjects,
         &shown,

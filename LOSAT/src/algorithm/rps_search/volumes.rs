@@ -537,8 +537,9 @@ pub(crate) fn search_sets(
 /// volumes, whose merged lists are longer than the hit list size) leaves its list: nothing reads
 /// it again but its header, which NCBI's Seq-aligns read by OID (a header file that fails there
 /// is the batch's error, as NCBI's), and its HSPs, which outfmt 7's count and the prefetch's
-/// limit still count: the returned counts (by list; `None` where no list lost a profile). Nothing
-/// changes where the ordinal ids are the OIDs (`SeqDb::ordinal_ids_are_oids`: no range).
+/// limit still count, and whose subject rows NCBI's prefetch reads (`Unlisted`; `None` where no
+/// list lost a profile). Nothing changes where the ordinal ids are the OIDs
+/// (`SeqDb::ordinal_ids_are_oids`: no range).
 ///
 /// The alias files' `OID_MASK_TYPE` (line RG D1b-2) reaches the Seq-aligns of a database of one
 /// volume, searched by the `-db` name: a profile it leaves without a line gets none. The volumes
@@ -554,7 +555,7 @@ pub(crate) fn report_ordinal_ids(
     cut: usize,
     program: &str,
     bare: bool,
-) -> Result<Option<Vec<usize>>> {
+) -> Result<Option<Unlisted>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1580-1586 (cited at
     // `SeqDb::drops_lineless_hits`)
     // In a database of one volume, searched by the `-db` name, a profile whose every definition
@@ -586,7 +587,16 @@ pub(crate) fn report_ordinal_ids(
         return Ok(None);
     }
     let queries = lists.len();
-    let mut unlisted: Option<Vec<usize>> = None;
+    let mut unlisted: Option<Unlisted> = None;
+    // Whether a dropped profile's HSP has a subject row that starts with a gap.
+    let starts_with_gap = |hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList| {
+        hsp_list.hsps.iter().any(|hsp| {
+            super::redo::starts_with_row_gap(
+                hsp,
+                crate::report::serial::seqalign::AlignRow::Subject,
+            )
+        })
+    };
     for (index, slot) in lists.iter_mut().enumerate() {
         let Some(list) = slot.as_mut() else {
             continue;
@@ -596,6 +606,7 @@ pub(crate) fn report_ordinal_ids(
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         let mut position = 0usize;
         let mut dropped_hsps = 0usize;
+        let mut dropped_gap_start = false;
         let mut failed = None;
         list.hsplist_array.retain_mut(|hsp_list| {
             if failed.is_some() {
@@ -603,10 +614,11 @@ pub(crate) fn report_ordinal_ids(
             }
             let reported = position < cut;
             position += 1;
-            // A profile of the bare volumes whose lines the alias files' `OID_MASK_TYPE` removes:
-            // the formatter does not find it among those it reports, and nothing reads it past
-            // the cut but its stored header (the Seq-align's read; `erases_a_line_of_oid` reads
-            // the same bytes).
+            // A profile of the bare volumes whose lines the alias files remove (their
+            // `OID_MASK_TYPE` or their id lists, `SeqDb::drops_lineless_hits`): the formatter
+            // does not find it among those it reports, and nothing reads it past the cut but its
+            // stored header (the Seq-align's read; `erases_a_line_of_oid` reads the same bytes,
+            // and meets NCBI's exception of an id list's lookup there).
             if erasing && bare {
                 match db.erases_a_line_of_oid(hsp_list.oid) {
                     Err(error) => {
@@ -617,13 +629,14 @@ pub(crate) fn report_ordinal_ids(
                     }
                     Ok(true) if reported => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files' OID_MASK_TYPE removes, in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST or SEQIDLIST), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;
                     }
                     Ok(true) => {
                         dropped_hsps += hsp_list.hsps.len();
+                        dropped_gap_start |= starts_with_gap(hsp_list);
                         return false;
                     }
                     Ok(false) => {}
@@ -679,6 +692,7 @@ pub(crate) fn report_ordinal_ids(
                     }
                     // Every HSP of the RPS traceback scores above 0: each is a Seq-align.
                     dropped_hsps += hsp_list.hsps.len();
+                    dropped_gap_start |= starts_with_gap(hsp_list);
                     false
                 }
             }
@@ -688,10 +702,28 @@ pub(crate) fn report_ordinal_ids(
             return Err(error);
         }
         if dropped_hsps > 0 {
-            unlisted.get_or_insert_with(|| vec![0; queries])[index] = dropped_hsps;
+            let unlisted = unlisted.get_or_insert_with(|| Unlisted {
+                hsps: vec![0; queries],
+                subject_row_throws: false,
+            });
+            unlisted.hsps[index] = dropped_hsps;
+            unlisted.subject_row_throws |= dropped_gap_start;
         }
     }
     Ok(unlisted)
+}
+
+/// The HSPs of the profiles that left the lists of a query batch past the formatter's cut
+/// (`report_ordinal_ids`): NCBI's Seq-aligns still hold them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Unlisted {
+    /// Their number in each query's list: outfmt 7's count and the prefetch's limit count them.
+    pub(crate) hsps: Vec<usize>,
+    /// Whether one of them starts with a gap in the subject's row
+    /// (`serial::seqalign::gapped_row_range`): RPSTBLASTN's prefetch, which reads the subject row
+    /// of every Std-seg Seq-align, throws there (`blastx::runtime::BatchResults::
+    /// unlisted_subject_row_throws`). RPSBLAST's Seq-aligns are Dense-segs: it does not read it.
+    pub(crate) subject_row_throws: bool,
 }
 
 /// What NCBI's reports find of a reported profile that the alias files' ranges leave out

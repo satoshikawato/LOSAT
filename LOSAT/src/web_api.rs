@@ -79,7 +79,7 @@ impl FastaStore {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
-// catch (const std::exception& e) { LOG_POST(Error << "Error: " << e.what()); }
+// Catch standard exceptions and report their message through `LOG_POST`.
 // Preserve the Rust engine context and its underlying cause across the ABI.
 fn engine_error(err: anyhow::Error) -> String {
     format!("{err:#}")
@@ -220,6 +220,8 @@ fn parse_blastn_args(
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
+        html: false,
+        html_links: None,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,
@@ -247,7 +249,8 @@ fn parse_blastn_args(
         penalty: None,
         gap_open: None,
         gap_extend: None,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48
+        // Default DUST settings: `kDustLevel` 20, `kDustWindow` 64, `kDustLinker` 1.
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
@@ -291,6 +294,8 @@ fn parse_blastn_args(
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        strategy_algorithms: None,
+        strategy_template_type: None,
         given: Default::default(),
         strategy: None,
         command_line: None,
@@ -389,6 +394,7 @@ fn parse_tblastx_args(
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
+        html: false,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,
@@ -407,9 +413,11 @@ fn parse_tblastx_args(
         num_descriptions: None,
         num_alignments: None,
         report_counts: Default::default(),
+        html_links: None,
         max_hsps: None,
         qcov_hsp_perc: None,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85
+        // Default SEG parameters from `kSegWindow`, `kSegLocut`, and `kSegHicut`.
         seg: "yes".to_string(),
         soft_masking: None,
         sum_stats: None,
@@ -436,8 +444,10 @@ fn parse_tblastx_args(
         subject_taxdb: None,
         taxdb_setting: None,
         first_query_ordinal: 0,
+        one_query_batch: false,
         scope_refusal: None,
         matrix_file: None,
+        command_line: None,
     };
 
     let mut index = 0;
@@ -526,6 +536,7 @@ fn parse_blastp_args(
         db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
+        html: false,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,

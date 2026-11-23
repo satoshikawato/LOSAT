@@ -214,9 +214,9 @@ fn evalues_without_linking(
 }
 
 /// The first linking call of the subject's HSP list from its frame loop (`hits`): an empty list
-/// stays as it is; a list of the one-hit word finder (`window` 0) that holds an HSP of length 0 or
-/// less links with NCBI's `Int4` ends (`link_subject_hits_int4`); any other, and every list of a
-/// search without sum statistics, goes to `link_subject_hits`.
+/// stays as it is; a list of the one-hit word finder (`window` 0 or less) that holds an HSP of
+/// length 0 or less links with NCBI's `Int4` ends (`link_subject_hits_int4`); any other, and every
+/// list of a search without sum statistics, goes to `link_subject_hits`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-890 (cited at the call in
 /// `process_subject`).
@@ -227,7 +227,7 @@ pub(super) fn first_link_subject_hits(
 ) -> Vec<UngappedHit> {
     match link.linking_params {
         _ if hits.is_empty() => hits,
-        Some(linking_params) if window == 0 && holds_int4_inverted(&hits) => {
+        Some(linking_params) if window <= 0 && holds_int4_inverted(&hits) => {
             link_subject_hits_int4(link, linking_params, hits)
         }
         _ => link_subject_hits(link, hits),
@@ -373,9 +373,9 @@ pub(super) fn sort_and_reap_after_first_link(
 }
 
 /// In a search without sum statistics, the HSPs of length 0 or less of the one-hit word finder
-/// (`window` 0) removed from the subject's list (`hits`) before its re-evaluation, which deletes
-/// them in NCBI. With sum statistics none is left here: `link_subject_hits_int4` dropped them
-/// after the first linking call.
+/// (`window` 0 or less) removed from the subject's list (`hits`) before its re-evaluation, which
+/// deletes them in NCBI. With sum statistics none is left here: `link_subject_hits_int4` dropped
+/// them after the first linking call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
 /// `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
@@ -393,7 +393,7 @@ pub(super) fn drop_unread_without_linking(
     window: i32,
     hits: &mut Vec<UngappedHit>,
 ) {
-    if window == 0 && link.linking_params.is_none() {
+    if window <= 0 && link.linking_params.is_none() {
         hits.retain(|hit| !hit.is_int4_inverted());
     }
 }

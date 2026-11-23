@@ -159,6 +159,18 @@ impl Diag<'_> {
         ));
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
+    /// NCBI's warning of a UTF8String that its read of a header record took for a VisibleString
+    /// (`seqid::ber::utf8_string_warning` of the member `path`), with the application's prefix:
+    /// blastdbcmd's post level shows it (NCBI 2.17.0, probe RG-T5d review u01-u06); the
+    /// maskers read the record without it (`seqmasks_io::bdb_reader`).
+    pub(crate) fn post_utf8_string(&mut self, path: &str) {
+        self.write_text(&crate::seqid::ber::utf8_string_warning(
+            self.tool.post_prefix,
+            path,
+        ));
+    }
+
     /// The posts of the bytes that NCBI's object stream replaced while it wrote an object
     /// (`ReplacedChar`: an `ERR_POST_X` of subcode 7 with a message, of error code 803 for each
     /// byte, as `Error: (803.7) <prefix> <message>`).

@@ -1390,6 +1390,8 @@ pub(super) fn scan_shape<'a>(
         args,
         subject_records,
         x_block_inputs,
+        query_chunk,
+        ranges,
         ..
     } = *setup;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:195-221
@@ -1402,7 +1404,7 @@ pub(super) fn scan_shape<'a>(
         .iter()
         .map(|ctx| blastp_x_dropoff_init_for_context(ctx, args.x_drop_ungapped_bits))
         .collect();
-    let window = args.window_size as i32;
+    let window = args.window_size;
     let word_size = lookup.word_length();
     // EXPERIMENT (LOSAT_X_BPUNGAPSENT): this block made ready for the inlined two-hit extension of
     // the fused loop (`x_ungapped_sent.rs`); None when the switch is off or a check fails. Another
@@ -1429,6 +1431,27 @@ pub(super) fn scan_shape<'a>(
     };
     if x_ungap_sent.is_none() && x_blocks.is_none() && x_ungapped_sent::on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
+    // A negative `-window_size` (a search strategy's): the diagonal table of each NCBI query batch
+    // keeps what the subjects before left in it, so the batches are not one table. The
+    // preliminary stage plans a block for each batch (`x_prelim_block_plan`); where it cannot
+    // (an ungapped search, a batch without a searched query, a call of the batches before a
+    // failing one) a call of more than one batch is LOSAT's refusal. A query chunk of a split
+    // batch and a block are one table's call.
+    if window < 0 && x_blocks.is_none() && x_block_inputs.is_none() && !query_chunk {
+        let searched_batches = ranges
+            .query_input
+            .batches(args.query_batch_size()?)
+            .iter()
+            .filter(|batch| !batch.searched.is_empty())
+            .count();
+        if searched_batches > 1 {
+            anyhow::bail!(
+                "a -window_size of {window} with queries in more than one NCBI query batch is not supported by LOSAT's {}",
+                args.app.name()
+            );
+        }
     }
     let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
     let query_length = blastp_concatenated_query_length(contexts);

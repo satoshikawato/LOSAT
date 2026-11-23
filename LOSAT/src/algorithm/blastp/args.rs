@@ -120,9 +120,9 @@ pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, Strin
     };
 
     // CLI v2 requires the complete mode token. NCBI blast_args.cpp:879-883:
-    // if (program == eBlastp && compo_mode != eNoCompositionBasedStats &&
-    //     tolower(comp_stat_string[1]) == 'u') { opt.SetUnifiedP(1); }
-    // The sole suffix is lowercase u, and only on enabled modes.
+    // for BLASTP with composition-based statistics enabled, NCBI accepts 'u' or 'U'
+    // (it lowercases first) to enable unified p-values (`SetUnifiedP`); LOSAT accepts
+    // only lowercase 'u', and only on enabled modes.
     let unified_p = match (chars.next(), chars.next()) {
         (None, None) => false,
         (Some('u'), None) if mode != BlastpCompositionMode::NoCompositionBasedStats => true,
@@ -205,6 +205,11 @@ pub struct BlastpArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -512,6 +517,12 @@ pub struct ResolvedBlastpArgs {
     pub parse_deflines: bool,
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
+    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
+    /// `-html` or outfmt 0, and for psiblast and rpsblast, which have no `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// outfmt 0 and 18 reports (the organism report takes no links).
+    pub is_html: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
     /// `-db_soft_mask` or `-db_hard_mask` as the command line keeps it (`DbMaskArgs::option`;
@@ -579,7 +590,12 @@ pub struct ResolvedBlastpArgs {
     /// composition-based redo, and lowers the cutoff scores of the HSPs it keeps
     /// (`BlastHitSavingParametersUpdate`).
     pub sum_stats: bool,
-    pub window_size: usize,
+    /// `-window_size` as the options hold it, a signed `Int4`: the command line takes 0 and more, a
+    /// search strategy any value, and NCBI runs it (blast_options.c has no check of it; a window
+    /// of 0 or less is the one-hit search: only a positive window sets the multiple-hit flag).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
+    pub window_size: i32,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
@@ -776,6 +792,13 @@ impl BlastpArgs {
         if let Some(evalue) = self.evalue {
             options.evalue = evalue;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
         let (matrix_gap_open, matrix_gap_extend) = self
             .matrix
             .as_deref()
@@ -783,16 +806,16 @@ impl BlastpArgs {
             .unwrap_or((0, 0));
         match (self.gap_open, &self.matrix) {
             (Some(gap_open), _) => options.gap_open = gap_open,
-            (None, Some(_)) => options.gap_open = matrix_gap_open,
-            (None, None) => {}
+            (None, Some(_)) if command_line => options.gap_open = matrix_gap_open,
+            (None, _) => {}
         }
         match (self.gap_extend, &self.matrix) {
             (Some(gap_extend), _) => options.gap_extend = gap_extend,
-            (None, Some(_)) => options.gap_extend = matrix_gap_extend,
-            (None, None) => {}
+            (None, Some(_)) if command_line => options.gap_extend = matrix_gap_extend,
+            (None, _) => {}
         }
         if let Some(word_size) = self.word_size {
-            if word_size > 4 {
+            if word_size > 4 && command_line {
                 options.lookup_table_type = BlastpLookupTableType::CompressedAaLookupTable;
                 options.threshold = 19.3;
                 if word_size > 5 {
@@ -820,14 +843,15 @@ impl BlastpArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
         if let Some(threshold) = self.threshold {
             options.threshold = threshold;
-        } else if options.threshold as i32 == 11 {
+        } else if command_line && options.threshold as i32 == 11 {
             options.threshold =
                 suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         options.window_size = match self.window_size {
             Some(window) => window,
-            None => suggested_window_size(&options.matrix_name),
+            None if command_line => suggested_window_size(&options.matrix_name),
+            None => options.window_size,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
@@ -846,6 +870,18 @@ impl BlastpArgs {
         crate::blastinput::app::formatting_handler_check(
             &choice,
             crate::blastinput::app::Program::Blastp,
+        )?;
+        crate::blastinput::app::html_format_check(
+            choice.number,
+            crate::blastinput::app::Program::Blastp,
+            self.html,
+        )?;
+        let html = crate::blastinput::app::html_links(
+            self.html,
+            crate::blastinput::app::Program::Blastp,
+            crate::blastinput::app::Program::Blastp,
+            self.db.as_deref().map(crate::seqdb::db_argument_name),
+            &[choice.number],
         )?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings.
@@ -983,6 +1019,9 @@ impl BlastpArgs {
             x_dropoff: self
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
+            culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
         })?;
         // NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166 (cited at
         // `blastx::args::blastx_matrix`)
@@ -1041,6 +1080,8 @@ impl BlastpArgs {
             subject: self.subject.clone().unwrap_or_default(),
             parse_deflines: self.parse_deflines,
             show_gis: self.show_gis,
+            html,
+            is_html: self.html,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // The name without the white space at its ends: what the reader resolves and
             // what the reports show.
@@ -1103,7 +1144,7 @@ impl BlastpArgs {
                 .gap_trigger
                 .unwrap_or(crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE),
             sum_stats: self.sum_stats,
-            window_size: usize::try_from(options.window_size).unwrap_or(0),
+            window_size: options.window_size,
             matrix_name: options.matrix_name,
             unknown_matrix,
             matrix_file,

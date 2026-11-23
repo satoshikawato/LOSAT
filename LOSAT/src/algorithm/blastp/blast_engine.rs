@@ -259,6 +259,12 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
+    // The diagonal offset of a search with a negative `-window_size` (a search strategy's: the
+    // command line takes none), which the one-hit scan of `BlastpPrelimKernel::search_subject_in_neg`
+    // reads and moves in 64 bits where NCBI's `Int4` would overflow; `diag_offset` is the offset of
+    // the searches with a window of 0 or more and does not move for it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
+    neg_offset: i64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -479,6 +485,7 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
+            neg_offset: i64::from(window),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -782,7 +789,7 @@ fn blastp_should_parallelize_stage(
     worker_jobs: usize,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1475
-    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
+    // Iterate subject OIDs with `BlastSeqSrcIteratorNext` until `BLAST_SEQSRC_EOF`.
     // This stage selects existing independent jobs within the verified pool.
     let parallel = effective_threads > 1 && worker_jobs > 1;
     crate::utils::threading::report_stage("blastp", stage, worker_jobs, parallel);
@@ -1937,6 +1944,16 @@ fn blastp_for_each_offset_pair_of<F>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4209-4319
 fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     let program = args.app.name();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137,162-172
+    // A negative `-window_size` (a search strategy's; the command line takes none) runs in
+    // BLASTP's scan, one-hit, on NCBI's one table; PSI-BLAST's and RPS-BLAST's scans (a later
+    // round's PSSM, the profiles' database) do not take it.
+    if args.window_size < 0 && args.app != BlastpApp::Blastp {
+        bail!(
+            "a -window_size of {} is not supported by LOSAT's {program}",
+            args.window_size
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
@@ -1960,19 +1977,12 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
             bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
-        // An ungapped search has no `kbp_gap` array (blast_setup.c:517-527, cited at
-        // `call_setup::gapped_block`), and its traceback runs the Smith-Waterman redo all the
-        // same (blast_traceback.c:1486-1487 above), which reads it: NCBI BLAST+ 2.17.0's
-        // `blastp -ungapped -comp_based_stats 0 -use_sw_tback` ends with a segmentation fault
-        // (exit 139, task O4b). Refused by name before the refusal of `-comp_based_stats 0` below,
-        // which a later item lifts (X4-c0) while this one stays.
-        if args.ungapped {
-            bail!(
-                "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's {program}"
-            );
-        }
-        if !args.comp_based_stats.is_enabled() {
+        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
+        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
+        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
+        // batches before, which have no valid context. A run without such a batch ends as NCBI's
+        // does.
+        if !args.ungapped && !args.comp_based_stats.is_enabled() {
             bail!(
                 "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
             );
@@ -2708,14 +2718,20 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 /// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
 /// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
 /// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
-/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row,
+/// except under `-html`, where each HSP's go to `html_masks` in the order of `hits`
+/// (`HspMasks::copy_rows`, `report::pairwise::HtmlRowMasks`: their spans).
 fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
     subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) {
     let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
+        if html_masks.is_some() {
+            masks.clear();
+        }
         let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
         // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
         // starts) has no mask.
@@ -2774,6 +2790,9 @@ fn set_row_masks(
             );
             masks.lower_row(1, &mut letters);
             *shown = String::from_utf8(letters).expect("ASCII alignment row");
+        }
+        if let Some(table) = html_masks.as_deref_mut() {
+            table.push(masks.copy_rows());
         }
     }
 }
@@ -4123,7 +4142,7 @@ fn rebuild_preliminary_interval_tree_from_list(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3419-3420,3435-3437
 // The one-hit extension's best segment can end before the last reset of its running
 // sum, so the Int4 length can be negative (a low -threshold with -window_size 0). NCBI
-// passes it as Uint4: above HSP_MAX_WINDOW, and q_start + MIN(q_length, s_length) wraps
+// passes it as Uint4: above HSP_MAX_WINDOW, and `q_start` plus `min(q_length, s_length)` wraps
 // back to q_start + length, so only the first window of HSP_MAX_WINDOW letters is scored.
 // A window that runs past the context or the subject holds its NULLB, whose
 // BLAST_SCORE_MIN makes the sum negative whatever letters follow, so it gives q_start.
@@ -4622,7 +4641,7 @@ fn open_search_database(
                     database.list_taxids(),
                     &database.statistics(),
                     false,
-                    rps || args.searchsp.is_some_and(|space| space > 0),
+                    rps || args.searchsp.is_some_and(|space| space != 0),
                     !rps && args.dbsize.is_some_and(|size| size > 0),
                     args.app.name(),
                 )?;
@@ -5521,6 +5540,9 @@ fn resolve_for_formats(
         options.outfmt.clear();
         options.num_descriptions = 0;
         options.num_alignments = 0;
+        // The `-html` links belong to the format as well: only the pairwise report reads them
+        // (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
+        options.html = None;
         format!("{options:?}")
     };
     let mut resolved_formats = resolved_formats.into_iter();
@@ -5528,8 +5550,13 @@ fn resolve_for_formats(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no output format was requested"))?;
     let first_options = search_options(&first);
-    if resolved_formats.any(|resolved| search_options(&resolved) != first_options) {
-        bail!("the requested output formats resolve to different search options");
+    for resolved in resolved_formats {
+        if search_options(&resolved) != first_options {
+            bail!("the requested output formats resolve to different search options");
+        }
+        // The run's `-html` links are those of the format that reads them (outfmt 0, in any
+        // place among the formats).
+        first.html = first.html.or(resolved.html);
     }
     first.num_descriptions = shared.num_descriptions;
     first.num_alignments = shared.num_alignments;
@@ -6381,6 +6408,7 @@ fn search(
             later_warnings,
             hits,
             observer,
+            html_posts,
         } = &mut *outputs;
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
         let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
@@ -6592,6 +6620,9 @@ fn search(
                             .collect(),
                         diagnostics: &mut **diagnostics,
                         later_warnings: later_warnings.as_deref_mut(),
+                        html_posts: html_posts
+                            .as_deref_mut()
+                            .map(|posts| posts as &mut (dyn std::io::Write + Send)),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -6738,16 +6769,17 @@ fn search(
                 Ok(failure) => failure,
                 Err(other) => return other,
             };
-            let searched_start = loop {
+            let (searched_start, failed_end) = loop {
                 let (input_start, searched_start) = batches.start_of(failure.query);
                 // The failed batch's search strategy request, which NCBI writes before its
                 // search: after the requests of the batches before, which their search again
                 // releases with it (`NextRequest`), or alone, before any output.
                 let span = batches.searched_span(failure.query);
+                let failed_end = span.end;
                 if searched_start == 0 {
                     write_alone(span)?;
                     write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-                    break searched_start;
+                    break (searched_start, failed_end);
                 }
                 // The first search looked the taxonomy up for the batches before (their
                 // prefetch and reports): the search again writes those texts again, from the
@@ -6765,7 +6797,7 @@ fn search(
                     Some(next_request(span)),
                 )) {
                     Ok(earlier) => failure = earlier,
-                    Err(Ok(())) => break searched_start,
+                    Err(Ok(())) => break (searched_start, failed_end),
                     Err(other) => return other,
                 }
             };
@@ -6773,6 +6805,18 @@ fn search(
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;
             write_request_posts(&args, &mut *outputs.diagnostics)?;
+            // NCBI's warning of its first read of a UTF8String header, where the failed batch
+            // made it (before its failure; a batch before posted its own in its reports).
+            if let Some(posts) = database.and_then(|database: &database::BlastpDatabase| {
+                database::Utf8Read::post_in(
+                    failure.utf8.as_ref(),
+                    0..failed_end,
+                    database.seqdb(),
+                    args.app.ncbi_name(),
+                )
+            }) {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
             Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
@@ -6880,8 +6924,11 @@ fn x_query_block_plan(
     // P-values without a search space given (`-searchsp`): the redo's set-up may refuse a query
     // batch (`redo_run::evalue_adjust_contexts`: a query before one without a search space, known
     // only once the queries are set up), after the reports of the batches before
-    // (`database::HeaderReadError`). An ungapped search plans no blocks (`args.ungapped`).
+    // (`database::HeaderReadError`). An ungapped search plans no blocks (`args.ungapped`). A search
+    // with a negative `-window_size` has its own blocks in the preliminary stage only
+    // (`x_prelim_block_plan`: one batch each, NCBI's diagonal table of each batch).
     if args.query_range.is_some()
+        || args.window_size < 0
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
@@ -7118,6 +7165,12 @@ fn x_prelim_block_plan(
         return None;
     }
     let query_batches = query_input.batches(batch_size);
+    // A negative `-window_size`: one block for each batch, whatever its letters.
+    if args.window_size < 0 {
+        let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+        let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, 0, None)?;
+        return (blocks.len() > 1).then_some(blocks);
+    }
     let blocks = x_batch_blocks(args, queries, &query_batches)?;
     let (blocks, _) = x_word_blocks(args, queries, query_input, batch_size, &blocks, pool)?;
     (blocks.len() > 1).then_some(blocks)
@@ -7175,7 +7228,7 @@ fn x_block_search_refuses_nothing(
     let Ok(query_length) = i32::try_from(query_length) else {
         return false;
     };
-    let window = args.window_size as i32;
+    let window = args.window_size;
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
@@ -7545,6 +7598,13 @@ fn write_pairwise_prologs(
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
+                args.html.as_deref().map(|links| {
+                    let posts = crate::report::query_warnings::html_posts_sink(
+                        outputs.html_posts.as_deref_mut(),
+                        &mut *outputs.diagnostics,
+                    );
+                    (links, posts as &mut dyn Write)
+                }),
             )?;
             writer.flush()?;
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
@@ -7651,7 +7711,7 @@ fn write_reports_without_queries(
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
-                    window_size: args.window_size as i32,
+                    window_size: args.window_size,
                     // None for an ungapped search, whose gap costs NCBI does not read
                     // (`call_setup::gapped_block`).
                     gapped_karlin: call_setup::gapped_block(args).unwrap_or_default(),
@@ -7678,8 +7738,25 @@ fn write_reports_without_queries(
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
+                    html: args
+                        .html
+                        .as_ref()
+                        .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                     unreadable_query: None,
                 };
+                // No query writes warnings; an `-html` prolog's references post on the
+                // diagnostics (`pairwise::html_with_diagnostics`).
+                let mut warnings = crate::report::query_warnings::QueryWarnings::of_posts(
+                    &[],
+                    None,
+                    &mut *outputs.diagnostics,
+                )
+                .with_html_posts(
+                    outputs
+                        .html_posts
+                        .as_deref_mut()
+                        .map(|posts| posts as &mut dyn std::io::Write),
+                );
                 write_blastp_pairwise_report(
                     &[],
                     &mut writer,
@@ -7693,7 +7770,7 @@ fn write_reports_without_queries(
                     None,
                     pairwise_database.as_ref(),
                     None,
-                    None,
+                    Some(&mut warnings),
                     true,
                     true,
                     None,
@@ -8479,9 +8556,11 @@ fn search_split_query_batches(
             if args.psi_search.is_some() {
                 refusal
             } else {
+                // Before the batch's search: nothing of it read a header.
                 database::HeaderReadError {
                     query: range.start,
                     error: refusal,
+                    utf8: None,
                 }
                 .into()
             }
@@ -8701,7 +8780,7 @@ fn x_bplk16() -> bool {
 /// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
 /// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
 fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
-    args.window_size != 0 && !x_chunk
+    args.window_size > 0 && !x_chunk
 }
 
 // No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
@@ -9216,6 +9295,19 @@ fn run_resolved_in_pool(
         call_requests: call.as_ref(),
         ..*reports
     };
+    // A negative `-window_size` (a search strategy's; the command line takes none): NCBI's one
+    // diagonal table passes from each subject to the next, so the call searches the subjects one
+    // after the other on one thread, in NCBI's one-thread order, at any `-num_threads`; every
+    // stage of `run_call`, a query chunk's and a block's calls included, takes this pool. A window of 0 or
+    // more keeps the caller's.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+    let x_neg_window_pool;
+    let blastp_parallel_pool = if args.window_size < 0 {
+        x_neg_window_pool = crate::utils::threading::SearchPool::x_serial();
+        &x_neg_window_pool
+    } else {
+        blastp_parallel_pool
+    };
     let result = run_call(
         args,
         query_records,
@@ -9280,7 +9372,10 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+    // An ungapped search, and a negative `-window_size` (whose diagonal offset NCBI moves after
+    // each part of a subject: `negative_window_long_subject`), over a subject longer than NCBI's
+    // part length: LOSAT's refusals.
+    if (args.ungapped || args.window_size < 0) && query_valid.iter().any(|valid| *valid) {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
                 .iter()
@@ -9301,9 +9396,11 @@ fn ungapped_setup_failure(
             }
         };
         if let Some((what, length)) = longest {
-            return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
-                &what, length,
-            )));
+            return Some(UngappedSetupFailure::Refusal(if args.ungapped {
+                too_long_subject_refusal(&what, length)
+            } else {
+                negative_window_long_subject(args, &what, length)
+            }));
         }
     }
     None
@@ -9919,6 +10016,7 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -9927,7 +10025,7 @@ fn run_call(
         Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
     } else if ordinary_traceback && args.psi_search.is_some() {
         // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
-        // the position-based redo of modes 1 to 3).
+        // the position-based redo of modes 1 to 3, `FetchNotes::pssm_redo`).
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -9941,11 +10039,13 @@ fn run_call(
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
+            &|heaps: &[_]| fetch_notes.pssm_redo(heaps),
             sorts_results,
         )?)
     } else if args.ungapped {
         // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
         // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
+        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
         let finish = traceback::UngappedFinish {
             contexts: &contexts,
             subjects,
@@ -10020,6 +10120,7 @@ fn run_call(
         fetch_excluded: listed_subjects
             .as_ref()
             .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
+        fetch_notes: &fetch_notes,
         x_win_expand,
         ordinary_traceback,
         #[cfg(all(
@@ -10093,6 +10194,7 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
+    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches);
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {
@@ -10158,15 +10260,9 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let listed_titles = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => Some(if x_listed_lean {
-            listed.x_read_titles_lean(database, &hit_lists)?
-        } else {
-            listed.read_titles(database, &hit_lists)?
-        }),
-        _ => None,
-    };
-    report_prep::refuse_prefetch_environment(&setup, outputs)?;
+    let reads = database::CallTitles::new(database, &query_batches);
+    let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
+    report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }
@@ -10353,7 +10449,8 @@ fn run_call(
         &prep,
         &mut query_warning_lines,
         &mut psiblast_pssms,
-    )?;
+    )
+    .map_err(|error| database::HeaderReadError::after_reads(error, reads.utf8()))?;
     // An ungapped HSP of length 0 at the first letter of a `-subject`'s searched part ends the call
     // with NCBI's exception after the formats' prologs (`empty_alignments`).
     let subject_start_exception = empty_alignments::subject_start_exception(
@@ -10609,6 +10706,7 @@ fn run_call(
             .map_or_else(Vec::new, CallRequests::take_posts),
         prefetched.posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
+        reads.header_read(args.app.ncbi_name()),
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
         if let Some(after) = query_posts.get_mut(query).filter(|_| !posts.is_empty()) {
@@ -10734,7 +10832,10 @@ fn run_call(
         let own = format.later_warnings(kept.is_some(), &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
             || own.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                args.html.is_some(),
+            )
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)
@@ -10746,7 +10847,14 @@ fn run_call(
                 args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             )
-            .with_later(&query_posts, own);
+            .with_later(&query_posts, own)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,
@@ -10902,6 +11010,25 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
         crate::core::subject_split::MAX_DBSEQ_LEN
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,476-584
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+/// LOSAT's refusal of a search with a negative `-window_size` over a subject longer than
+/// `MAX_DBSEQ_LEN`: NCBI searches it in overlapping parts, and the diagonal offset that passes from
+/// a subject to the next moves after each part (`Blast_ExtendWordExit`), which LOSAT's scan of the
+/// whole subject does not do. A window of 0 or more does not read the offset of an earlier part.
+fn negative_window_long_subject(
+    args: &ResolvedBlastpArgs,
+    what: &str,
+    length: usize,
+) -> anyhow::Error {
+    anyhow::anyhow!(
+        "a -window_size of {} with {what} of {length} residues, a subject which NCBI BLAST+ searches in overlapping parts of {} residues, is not supported by LOSAT's {}",
+        args.window_size,
+        crate::core::subject_split::MAX_DBSEQ_LEN,
+        args.app.name()
     )
 }
 

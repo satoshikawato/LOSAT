@@ -34,6 +34,8 @@ pub enum ParamValue {
     Str(String),
     /// `integer-list`.
     IntegerList(Vec<i32>),
+    /// `strand-type` (`Blast4-strand-type`: forward 1, reverse 2, both 3).
+    StrandType(i32),
 }
 
 impl ParamValue {
@@ -47,6 +49,7 @@ impl ParamValue {
             ParamValue::Real(_) => ValueType::Real,
             ParamValue::Str(_) => ValueType::String,
             ParamValue::IntegerList(_) => ValueType::IntegerList,
+            ParamValue::StrandType(_) => ValueType::StrandType,
         }
     }
 }

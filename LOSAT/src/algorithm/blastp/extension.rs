@@ -3,6 +3,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c
 
 use super::x_ungapped_fast;
+pub(crate) use crate::algorithm::common::translated_chunks::ChunkLetters;
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score};
 
@@ -472,6 +473,200 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
         right_extend,
         s_last_off,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 (the two-hit
+// extension), :897 (the left walk counts the letters down to the subject's first one), :841 (the
+// right walk up to the subject's length) and :1020-1083 (the one-hit extension), on the letters
+// around a chunk as NCBI's extensions read them there (`ChunkLetters`).
+/// `s_BlastAaExtendTwoHit` with the matrix `matrix` of a hit whose first hit (`s_left_off`) lies
+/// before its chunk, on the letters around the chunk (`ChunkLetters`).
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn extend_two_hit_outside(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    chunk: ChunkLetters<'_>,
+    s_left_off: i32,
+    s_right_off: i32,
+    q_right_off: i32,
+    dropoff: i32,
+    word_size: i32,
+) -> BlastpTwoHitUngappedResult {
+    if matrix == ScoringMatrix::Blosum62 {
+        extend_two_hit_outside_impl::<true>(
+            matrix,
+            query,
+            chunk,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    } else {
+        extend_two_hit_outside_impl::<false>(
+            matrix,
+            query,
+            chunk,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn extend_two_hit_outside_impl<const BLOSUM62: bool>(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    chunk: ChunkLetters<'_>,
+    s_left_off: i32,
+    s_right_off: i32,
+    q_right_off: i32,
+    dropoff: i32,
+    word_size: i32,
+) -> BlastpTwoHitUngappedResult {
+    let mut right_d = 0i32;
+    let mut left_score = 0i32;
+    let mut score = 0i32;
+    for i in 0..word_size {
+        score += residue_score::<BLOSUM62>(
+            matrix,
+            query,
+            chunk.letters,
+            q_right_off + i,
+            chunk.lead as i32 + s_right_off + i,
+        );
+        if score > left_score {
+            left_score = score;
+            right_d = i + 1;
+        }
+    }
+    let q_right_off = q_right_off + right_d;
+    let s_right_off = s_right_off + right_d;
+    // From the letter before the best end down to the chunk's first letter: none where that end is
+    // at or before the chunk's start (the walk's count is then below 0).
+    let (left_score, left_d) = extend_left::<BLOSUM62>(
+        matrix,
+        query,
+        chunk.chunk_onward(),
+        q_right_off - 1,
+        s_right_off - 1,
+        dropoff,
+        0,
+    );
+    let mut right_score = 0i32;
+    let mut right_d = 0i32;
+    let mut right_extend = false;
+    let mut s_last_off = s_right_off;
+    if left_d >= (s_right_off - s_left_off) {
+        right_extend = true;
+        let lead = chunk.lead as i32;
+        let (best, length, last) = extend_right::<BLOSUM62>(
+            matrix,
+            query,
+            chunk.to_chunk_end(),
+            q_right_off,
+            lead + s_right_off,
+            dropoff,
+            left_score,
+        );
+        (right_score, right_d, s_last_off) = (best, length, last - lead);
+    }
+    BlastpTwoHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_right_off - left_d,
+            s_start: s_right_off - left_d,
+            length: left_d + right_d,
+            score: left_score.max(right_score),
+        },
+        right_extend,
+        s_last_off,
+    }
+}
+
+/// `s_BlastAaExtendOneHit` with the matrix `matrix` of a word (at `s_off`) that starts before its
+/// chunk, on the letters around the chunk (`ChunkLetters`).
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn extend_one_hit_outside(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    chunk: ChunkLetters<'_>,
+    q_off: i32,
+    s_off: i32,
+    dropoff: i32,
+    word_size: i32,
+) -> BlastpOneHitUngappedResult {
+    if matrix == ScoringMatrix::Blosum62 {
+        extend_one_hit_outside_impl::<true>(matrix, query, chunk, q_off, s_off, dropoff, word_size)
+    } else {
+        extend_one_hit_outside_impl::<false>(matrix, query, chunk, q_off, s_off, dropoff, word_size)
+    }
+}
+
+fn extend_one_hit_outside_impl<const BLOSUM62: bool>(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    chunk: ChunkLetters<'_>,
+    q_off: i32,
+    s_off: i32,
+    dropoff: i32,
+    word_size: i32,
+) -> BlastpOneHitUngappedResult {
+    let lead = chunk.lead as i32;
+    let mut score = 0i32;
+    let mut sum = 0i32;
+    let mut q_left_off = q_off;
+    let mut q_right_off = q_off + word_size;
+    let mut q_best_left_off = q_off;
+    for i in 0..word_size {
+        sum += residue_score::<BLOSUM62>(matrix, query, chunk.letters, q_off + i, lead + s_off + i);
+        if sum > score {
+            score = sum;
+            q_best_left_off = q_left_off;
+            q_right_off = q_off + i;
+        } else if sum <= 0 {
+            sum = 0;
+            q_left_off = q_off + i + 1;
+        }
+    }
+    let init_hit_width = q_right_off - q_left_off + 1;
+    let q_left_off = q_best_left_off;
+    let s_left_off = q_left_off + (s_off - q_off);
+    let s_right_off = q_right_off + (s_off - q_off);
+    let (left_score, left_disp) = extend_left::<BLOSUM62>(
+        matrix,
+        query,
+        chunk.chunk_onward(),
+        q_left_off - 1,
+        s_left_off - 1,
+        dropoff,
+        score,
+    );
+    let (total_score, right_disp, s_last_off) = extend_right::<BLOSUM62>(
+        matrix,
+        query,
+        chunk.to_chunk_end(),
+        q_right_off + 1,
+        lead + s_right_off + 1,
+        dropoff,
+        left_score,
+    );
+    BlastpOneHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_left_off - left_disp,
+            s_start: s_left_off - left_disp,
+            length: left_disp + right_disp + init_hit_width,
+            score: total_score,
+        },
+        s_last_off: s_last_off - lead,
+    }
 }
 
 #[cfg(test)]

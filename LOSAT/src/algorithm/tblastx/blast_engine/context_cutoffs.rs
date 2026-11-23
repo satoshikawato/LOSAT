@@ -124,7 +124,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // 1. gap_trigger from ungapped params (kbp_std)
     // 2. cutoff_score_max from BlastHitSavingParametersNew (uses user's E-value)
     // 3. Initial word cutoff: cutoff_score_for_update_tblastx with CUTOFF_E_TBLASTX=1e-300
-    // 4. Final cutoff = MIN(update_cutoff, gap_trigger, cutoff_score_max)
+    // 4. Final cutoff is the minimum of `update_cutoff`, `gap_trigger`, and `cutoff_score_max`.
     //
     // The word cutoff uses the average subject nucleotide length. With E = 1e-300 (step 3) its
     // score exceeds gap_trigger whatever the lengths (above 2,000 against about 40), so step 4
@@ -141,7 +141,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:320-324
     let mut cutoff_scores: Vec<i32> = vec![0; contexts_ref.len()];
-    // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
+    // Minimum cutoff score across all contexts (NCBI `word_params->cutoff_score_min`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:401-403
     let mut cutoff_score_min = i32::MAX;
 
@@ -189,10 +189,10 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
         let ctx_params = &ctx.karlin_params;
 
-        // NCBI: query_length = query_info->contexts[context].query_length
+        // Query length for this context in amino acids (NCBI `query_info->contexts[context].query_length`).
         let query_len_aa = ctx.aa_len as i64;
 
-        // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
+        // Compute `gap_trigger` from the per-context `kbp_std` `Lambda` and `logK`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:340-345
         let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
 
@@ -337,8 +337,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-110
-    // if (kbp[index] && query_info->contexts[index].is_valid &&
-    //     kbp[index]->Lambda > 0.0 && kbp[index]->Lambda < min_lambda) { ... }
+    // Select the valid context Karlin block with the smallest positive `Lambda`; on equal `Lambda` the earlier context is kept (strict less-than).
     let context_params: Vec<KarlinParams> = contexts_ref
         .iter()
         .filter(|ctx| ctx.is_valid)

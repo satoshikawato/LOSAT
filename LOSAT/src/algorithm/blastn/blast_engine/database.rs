@@ -247,7 +247,7 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 /// (`BlastnArgs::database_name`: the `-db` value without white space at its ends) and its
 /// numbers as the search uses them.
 pub(super) struct BlastnDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     metadata: SubjectMetadata,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
@@ -575,7 +575,7 @@ impl BlastnDatabase {
                 &hit_list.hsplist_array[..count]
             })
             .filter(|hsp_list| !hsp_list.hsps.is_empty())
-            .filter(|hsp_list| loads.loaded(hsp_list.oid as usize))
+            .filter(|hsp_list| loads.reached(hsp_list.oid as usize))
             .map(|hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -620,9 +620,44 @@ impl BlastnDatabase {
         };
         let subjects = ordinals
             .into_iter()
-            .filter(|&oid| loads.loaded(oid as usize))
+            .filter(|&oid| loads.reached(oid as usize))
             .map(|oid| (oid, oid, parsed(oid)));
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
+    }
+
+    /// The XML2 and JSON formats, a batch of `hit_lists` (by query) whose prefetch is off: each
+    /// query's report's `Hit` loads (`shared::scope_utf8_hit_reads`, the subjects in the hit
+    /// list's order), into `reads` by query.
+    fn scope_utf8_hit_reads(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        after: Option<crate::report::db_subject::RunThrow>,
+        reads: &mut [crate::report::query_warnings::QueryReads],
+    ) {
+        if !self.db.scope_utf8_seen() {
+            return;
+        }
+        for (index, hit_list) in hit_lists.iter().enumerate() {
+            let subjects = hit_list.iter().flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| {
+                        let parsed = match titles.get(&hsp_list.oid) {
+                            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+                            _ => None,
+                        };
+                        (hsp_list.oid, hsp_list.oid, parsed)
+                    })
+            });
+            let query =
+                shared::scope_utf8_hit_reads(&self.db, &self.taxdb, after, subjects, PROGRAM);
+            if !query.is_empty() {
+                reads[index] = query;
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:307-308
@@ -657,17 +692,22 @@ impl BlastnDatabase {
         )
     }
 
-    /// The stop of NCBI's prefetch of the query batch of `queries` whose final hit lists are
-    /// `hit_lists`, for the XML2 and JSON formats, which write the taxonomy
-    /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
-    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`;
-    /// `spans`: the queries of each of those batches, numbered from 0, as BLASTN holds them all;
-    /// the reports read every reported subject that they load: `hit_loads` of `batches_prefetch`,
-    /// the reports' own answer, which leaves out a subject whose `Hit` throws and one shown only
-    /// after it, with `after`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which
-    /// BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
+    /// NCBI's prefetch of the query batch of `queries` whose final hit lists are `hit_lists`, for
+    /// the XML2 and JSON formats, which write the taxonomy texts at each `Hit`: where
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off (`shared::prefetch_off`), the `Hit` loads of each
+    /// query's report (`scope_utf8_hit_reads`, into `reads`, by query of the batch) and `None`;
+    /// where it is on and loads a sequence (a batch with Seq-aligns), its stop
+    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
+    /// before, whose final hit lists are `before` (by ordinal id, as `hit_lists`; `spans`: the
+    /// queries of each of those batches, numbered from 0, as BLASTN holds them all; the reports
+    /// read every reported subject that they load: `hit_loads` of `batches_prefetch`, the reports'
+    /// own answer, which leaves out a subject whose `Hit` throws and one shown only after it, with
+    /// `after`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which BLASTN writes
+    /// after the stop (the XML formats are not streamed, `x_rpt_stream`). `Some(Ok)`: the warning
+    /// of a UTF8String header that a load of a batch that does not stop posts
+    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn batch_prefetch_stop(
+    pub(super) fn xml2_prefetch(
         &self,
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
@@ -676,21 +716,30 @@ impl BlastnDatabase {
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<()> {
-        let prefetch = batches_prefetch(before, 0, spans, gapped);
-        let loads = hit_loads(before, &prefetch, after, None, |ordinal| {
-            titled_parsed(titles, ordinal)
-        });
-        shared::held_batch_prefetch_stop(
-            &self.db,
-            &self.taxdb,
-            Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every)
-                .filter(|subject| loads.loaded(subject.ordinal as usize)),
-            std::iter::empty(),
-            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
-            PROGRAM,
-            queries,
-        )
+        reads: &mut [crate::report::query_warnings::QueryReads],
+    ) -> Option<Result<crate::report::diag_log::Posts>> {
+        let seq_aligns = seq_aligns_of(hit_lists, gapped);
+        if shared::prefetch_off(seq_aligns) {
+            self.scope_utf8_hit_reads(titles, hit_lists, after.run(), reads);
+            return None;
+        }
+        (seq_aligns > 0).then(|| {
+            let prefetch = batches_prefetch(before, 0, spans, gapped);
+            let loads = hit_loads(before, &prefetch, after, None, |ordinal| {
+                titled_parsed(titles, ordinal)
+            });
+            shared::held_batch_prefetch_stop(
+                &self.db,
+                &self.taxdb,
+                Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every)
+                    .filter(|subject| loads.loaded(subject.ordinal as usize)),
+                std::iter::empty(),
+                Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
+                PROGRAM,
+                queries,
+            )
+            .map(crate::report::diag_log::Posts::of_lines)
+        })
     }
 
     /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
@@ -1587,20 +1636,50 @@ pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::
     shared::FetchExcluded::refusal(failed, PROGRAM)
 }
 
+impl BlastnDatabase {
+    /// The titles of the sequences that the final hit lists `hit_lists` of a query batch name,
+    /// read where NCBI makes the batch's Seq-aligns ([`read_titles`], into the titles of `reads`),
+    /// after those of no Seq-align leave the lists ([`drop_unaligned`]) and after the batch's
+    /// fetches (`fetched`: the first that read a UTF8String header). NCBI's warning of the batch's
+    /// first read of such a header goes to the posts of `reads` (the batch's reader messages and
+    /// request posts, before its prefetch), also where the read fails after it
+    /// (`shared::Utf8Read::of_read`). The error is `read_titles`'.
+    pub(super) fn batch_titles(
+        &self,
+        fetched: Option<crate::seqdb::SeqLocation>,
+        hit_lists: &mut [Option<BlastnHitList>],
+        (titles, posts): (&mut DatabaseTitles, &mut crate::report::diag_log::Posts),
+    ) -> Result<()> {
+        let aligned = drop_unaligned(self, hit_lists);
+        let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
+        let read = read_titles(self, hit_lists, earlier, titles);
+        let first = shared::Utf8Read::of_read(&read, Option::as_ref);
+        if let Some(warning) =
+            shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"))
+        {
+            posts.append(&warning);
+        }
+        read.map(|_| ())
+    }
+}
+
 /// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
 /// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
-/// `read_titles`.
-pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<BlastnHitList>]) {
+/// `read_titles`. The first of its reads that took a UTF8String for a VisibleString is returned
+/// (`shared::SeqAligned::first_utf8`).
+pub(super) fn drop_unaligned(
+    database: &BlastnDatabase,
+    hit_lists: &mut [Option<BlastnHitList>],
+) -> Option<crate::seqdb::SeqLocation> {
     // Every blastn search fetches its subjects with `check_oid_exclusion`: the gapped traceback,
     // or the ungapped re-evaluation of a nucleotide subject (`fetch_excluded`).
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
-        return;
-    };
+    let mut aligned = shared::SeqAligned::of(&database.db, true)?;
     for hit_list in hit_lists.iter_mut().flatten() {
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
         aligned.retain(&mut hit_list.hsplist_array, |list| Some(list.oid));
         hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
+    aligned.first_utf8()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -1617,13 +1696,17 @@ pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
 /// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
 /// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
-/// of their own.
+/// of their own. The batch's first read of a record with a UTF8String where a VisibleString is
+/// expected, its fetches' and Seq-aligns' (`earlier`) or these, is returned
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
-) -> Result<()> {
+) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
+    headers.note_earlier(earlier);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -1637,7 +1720,7 @@ pub(super) fn read_titles(
             titles.insert(hsp_list.oid, title);
         }
     }
-    Ok(())
+    Ok(headers.first_utf8())
 }
 
 /// What the reports `output_formats` show of a reported sequence with parsed Seq-ids

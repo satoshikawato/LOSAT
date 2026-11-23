@@ -69,6 +69,11 @@ pub struct TblastnArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -361,6 +366,8 @@ pub struct ResolvedTblastnArgs {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
     pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// The `-html` links of the run (`blastinput::app::html_links`); `None` without `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// What NCBI's score block makes of an ungapped search's `-matrix` that its tables do not
     /// have (`unknown_matrix_name`); `None` for a matrix of the tables and for a gapped search,
     /// which refuses such a name first (`validate_protein_options`).
@@ -497,6 +504,13 @@ impl TblastnArgs {
         if let Some(value) = self.evalue {
             evalue = value;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
         let (matrix_gap_open, matrix_gap_extend) = self
             .matrix
             .as_deref()
@@ -504,13 +518,13 @@ impl TblastnArgs {
             .unwrap_or((0, 0));
         match (self.gap_open, &self.matrix) {
             (Some(value), _) => gap_open = value,
-            (None, Some(_)) => gap_open = matrix_gap_open,
-            (None, None) => {}
+            (None, Some(_)) if command_line => gap_open = matrix_gap_open,
+            (None, _) => {}
         }
         match (self.gap_extend, &self.matrix) {
             (Some(value), _) => gap_extend = value,
-            (None, Some(_)) => gap_extend = matrix_gap_extend,
-            (None, None) => {}
+            (None, Some(_)) if command_line => gap_extend = matrix_gap_extend,
+            (None, _) => {}
         }
         if let Some(value) = self.xdrop_gap {
             xdrop_gap = value;
@@ -519,14 +533,18 @@ impl TblastnArgs {
             xdrop_gap_final = value;
         }
         if let Some(value) = self.word_size {
+            // NCBI's setter of the word size makes the table compressed above 4 for an import too
+            // (blast_options_local_priv.hpp:612-619); the threshold is the command line's.
             if value > 4 {
                 compressed_lookup = true;
-                threshold = 19.3;
-                if value > 5 {
-                    threshold = 21.0;
-                }
-                if value > 6 {
-                    threshold = 20.25;
+                if command_line {
+                    threshold = 19.3;
+                    if value > 5 {
+                        threshold = 21.0;
+                    }
+                    if value > 6 {
+                        threshold = 20.25;
+                    }
                 }
             }
             word_size = value;
@@ -551,13 +569,16 @@ impl TblastnArgs {
             .unwrap_or_else(|| "BLOSUM62".to_string());
         if let Some(value) = self.threshold {
             threshold = value;
-        } else if threshold as i32 == 13 {
+        } else if command_line && threshold as i32 == 13 {
             threshold = suggested_threshold(SuggestionProgram::TranslatedSubject, &matrix_name);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
-        let window_size = self
-            .window_size
-            .unwrap_or_else(|| suggested_window_size(&matrix_name));
+        // (tblastn's handle: window 40)
+        let window_size = match self.window_size {
+            Some(window) => window,
+            None if command_line => suggested_window_size(&matrix_name),
+            None => 40,
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
         // formatting handler (tblastn_args.cpp:44-135).
@@ -578,6 +599,20 @@ impl TblastnArgs {
         // (`blastinput::report_counts`), with the handler's warnings. The formats of a
         // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
         let own_outfmt = [choice.number];
+        for &number in outfmts.unwrap_or(&own_outfmt) {
+            crate::blastinput::app::html_format_check(
+                number,
+                crate::blastinput::app::Program::Tblastn,
+                self.html,
+            )?;
+        }
+        let html = crate::blastinput::app::html_links(
+            self.html,
+            crate::blastinput::app::Program::Tblastn,
+            crate::blastinput::app::Program::Tblastn,
+            self.database_name(),
+            outfmts.unwrap_or(&own_outfmt),
+        )?;
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
             "tblastn",
             outfmts.unwrap_or(&own_outfmt),
@@ -638,6 +673,9 @@ impl TblastnArgs {
             psiblast: false,
             psi_tblastn: psi,
             x_dropoff: self.xdrop_ungap,
+            culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
         })?;
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),
@@ -675,6 +713,7 @@ impl TblastnArgs {
             num_threads: self.num_threads,
             query_range,
             pssm,
+            html,
             unknown_matrix: self.unknown_matrix_name(),
             matrix_file: self.matrix_file.clone(),
             db_mask: None,
@@ -822,7 +861,8 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // threshold and window are the options' (the matrix's suggested values by default). The
     // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
     // the two-hit one (a window above 0) or the one-hit one (a window of 0,
-    // `XTwoHit::x_pairs_one_hit`).
+    // `XTwoHit::x_pairs_one_hit`; below 0, which only a hand-edited search strategy gives,
+    // `XTwoHit::x_pairs_one_hit_negative`).
     let profile_supported = (2..=7).contains(&args.word_size);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(

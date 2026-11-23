@@ -1,0 +1,4 @@
+# BLASTP 2.17.0+
+# Query: qinv invalid letters
+# Database: User specified sequence set (Input: tests/db_search/x16_taxid.faa)
+# BLAST processed 1 queries

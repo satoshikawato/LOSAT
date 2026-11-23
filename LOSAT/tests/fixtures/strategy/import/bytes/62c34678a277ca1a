@@ -1,0 +1,3 @@
+Warning: [tblastn] mt_mode cannot be overridden when using a search strategy
+BLAST query/options error: Word-size must be less than 8 for a tblastn, blastp or blastx search
+Please refer to the BLAST+ user manual.

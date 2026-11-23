@@ -78,7 +78,12 @@ pub(super) fn batch_flags<S: TbxScore>(
     let num_threads = parallel_pool.threads();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    let requested_parallel = parallel_pool.enabled();
+    //
+    // A negative `-window_size` (an imported strategy's) searches serially, in NCBI's order of
+    // subjects and chunks on one diagonal table, which is NCBI's `-num_threads 1` search: its
+    // table keeps its state from one call of the word finder to the next, so what NCBI's threads
+    // find would depend on how they share the subjects (`word_finder::WideOffset`).
+    let requested_parallel = parallel_pool.enabled() && args.window() >= 0;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003
     //
     // The scan-chunk experiment keeps the canonical two-hit state serial inside
@@ -99,9 +104,9 @@ pub(super) fn batch_flags<S: TbxScore>(
     // local `-s/--subject` searches. Unlike BLAST+, search/scoring and reporting
     // both honor the explicit subject code.
 
-    // [C] window = diag->window;
+    // Two-hit window size (NCBI `diag->window`).
     let window = args.window();
-    // [C] wordsize = lookup->word_length;
+    // Seed word length (NCBI `lookup->word_length`).
     // (`-word_size`; BLOSUM62's instance of the search is for 3, `TbxScore::word`)
     let wordsize: i32 = sc.word() as i32;
 
@@ -354,9 +359,9 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
                 || diag_enabled
                 || debug_hsp_saving
                 || x_soft_subjects
-                // The one-hit word finder (`-window_size 0`) runs in the reference frame loop
-                // only (`scan_chunk_one_hit`).
-                || window == 0,
+                // The one-hit word finder (`-window_size 0` or less) runs in the reference frame
+                // loop only (`scan_chunk_one_hit`).
+                || window <= 0,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
@@ -416,16 +421,16 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // NCBI counterpart.
     crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
 
-    // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
-    // Compute per-context x_dropoff using kbp[context]->Lambda.
+    // Initial per-context ungapped X-dropoff (NCBI `word_params->cutoffs[context].x_dropoff_init`).
+    // Compute per-context x_dropoff using `kbp[context]->Lambda`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
-    // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
-    //   if (check_ideal && kbp->Lambda >= kbp_ideal->Lambda) Blast_KarlinBlkCopy(kbp, kbp_ideal);
+    // For translated queries, NCBI computes `kbp_std` per context and applies `check_ideal`,
+    // copying `kbp_ideal` into `kbp` via `Blast_KarlinBlkCopy` whenever `kbp->Lambda` is at least `kbp_ideal->Lambda`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
     //
     // NCBI BLAST dynamic x_dropoff (c++/src/algo/blast/core/blast_parameters.c:380-383):
-    //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
+    // when initialized to zero, `curr_cutoffs->x_dropoff` is set dynamically to the cutoff score.
     //
     // For TBLASTX, x_dropoff_init is non-zero, so this dynamic update is not triggered.
     // However, we store x_dropoff_init here and apply the logic during subject processing

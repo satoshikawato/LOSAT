@@ -72,8 +72,8 @@ impl QueryStrand {
 
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
-// arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
-// arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
+// Constrains `kArgMaxHSPsPerSubject` to integers >= 1 via `CArgAllowValuesGreaterThanOrEqual`,
+// and registers `kArgNumThreads` with its default integer value.
 // The single-dash lexical translation is owned by crate::cli.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
@@ -134,6 +134,11 @@ pub struct BlastnArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -225,6 +230,10 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
+    // The `-html` links of the run, which `process_options` sets
+    // (`blastinput::app::html_links`). Not a public option.
+    #[arg(skip)]
+    pub html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     // Remove word seeds with high frequency in the searched database (off).
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:257 (limit_lookup)
     // NCBI blastn has no such option: it is magicblast's (c++/src/algo/blast/blastinput/blast_args.cpp:1492-1501), so
@@ -269,6 +278,17 @@ pub struct BlastnArgs {
     /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
+    /// A search strategy's gapped extension and traceback algorithms (`GapExtnAlgorithm`,
+    /// `GapTracebackAlgorithm`, the task's where one is missing) other than the pairs that LOSAT
+    /// runs (dynamic programming, and megablast's greedy pair): NCBI's options check reads them
+    /// where it comes (`scoring::check_scoring_options`), and LOSAT refuses them after NCBI's
+    /// checks. `None` from the command line.
+    #[arg(skip)]
+    pub(crate) strategy_algorithms: Option<(i32, i32)>,
+    /// A search strategy's discontiguous template type above 2 (`MBTemplateType`, NCBI's
+    /// `Uint1`), which NCBI's options check refuses (`scoring::check_scoring_options`).
+    #[arg(skip)]
+    pub(crate) strategy_template_type: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-182,262-271
     // An omitted option keeps the default of the task (`coordination.rs`); a given one is

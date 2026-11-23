@@ -511,13 +511,14 @@ pub(super) fn write_blastp_tabular(
 /// `Query=` block of its title (`tab.query_titles`) with the length of its record
 /// (`record_lengths`), and the table of its reported HSPs in the hit lists' order. The report is
 /// made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's refusals come
-/// before it; `tab.names` carries the run's taxonomy database.
+/// before it; `tab.names` carries the run's taxonomy database; `html`: `-html`.
 pub(super) fn write_blastp_tax_report(
     tab: &BlastpTabular<'_>,
     record_lengths: &[usize],
     hit_lists: &[Option<BlastpHitList>],
     writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut QueryWarnings<'_>>,
+    html: bool,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};
     let parsed = match &tab.subjects {
@@ -581,6 +582,7 @@ pub(super) fn write_blastp_tax_report(
         tab.names,
         tab.app.name(),
         tab.app.ncbi_name(),
+        html,
     )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())
@@ -763,6 +765,15 @@ fn write_tabular_rows<const RPS: bool>(
                     (q_idx as u32, list_index as u32, index_in_list as u32),
                     hsp.num_ident,
                 );
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // A row that reads the subject loads it first where the query's batch did not
+                // prefetch it: the texts of its taxonomy lookups follow the rows before it
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(seqalign_num_ident) {
+                        warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
+                    }
+                }
                 // A row that reads a subject whose load throws outside the subject block ends
                 // the run (`TabularWriter::ends_run`).
                 if let Some(exception) = table.ends_run(
@@ -780,18 +791,6 @@ fn write_tabular_rows<const RPS: bool>(
                             }
                         },
                     ));
-                }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-                // A row that reads the subject loads it first where the query's batch did not
-                // prefetch it: the texts of its taxonomy lookups follow the rows before it
-                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx)
-                        && fetch.reads(seqalign_num_ident)
-                        && !subject.throws()
-                    {
-                        warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
-                    }
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

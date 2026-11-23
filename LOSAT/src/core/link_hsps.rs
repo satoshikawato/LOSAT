@@ -50,12 +50,15 @@ pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:77-78
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:788-815
-/// The option is not negative (the command line refuses a negative value, as NCBI's does), so
-/// `longest_intron - 2` cannot pass the range of `Int4`; C's division truncates toward zero, as
-/// Rust's does.
+/// The command line refuses a negative value, as NCBI's does; a search strategy can carry any
+/// `int` (`LongestIntronLength`), and the subtraction of 2 passes the range of `Int4` for the
+/// two smallest values, where NCBI's arithmetic is undefined: LOSAT computes the difference in 64
+/// bits (its mathematical value) and NCBI's division of it, which truncates toward zero as Rust's
+/// does and falls in the range of `Int4` again.
 pub(crate) fn translated_longest_intron(max_intron_length: i32, gapped: bool) -> Option<i32> {
     const DEFAULT_LONGEST_INTRON: i32 = 122;
-    let max_protein_gap = (max_intron_length - 2) / 3;
+    // Within the range of `i32`: |(i32::MIN - 2) / 3| < 2^31.
+    let max_protein_gap = ((i64::from(max_intron_length) - 2) / 3) as i32;
     if !gapped {
         Some(max_protein_gap.max(0))
     } else if max_intron_length == 0 {

@@ -4,10 +4,13 @@
 //! (`x_RPSUpdateStatistics`).
 
 use crate::algorithm::pssm_search::in_pssm::{engine_score_block, query_ungapped_block};
+use crate::config::ScoringMatrix;
 use crate::core::blast_util::BLASTAA_SIZE;
+use crate::report::serial::asn_types::Value;
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, PssmFinalData, PssmWithParameters, SeqData,
 };
+use crate::writedb::convert;
 
 use super::rps_files::{freq_ratio_matrix, RpsError, VolumeParams};
 
@@ -27,10 +30,14 @@ pub(super) enum ProfileError {
     Input(Vec<u8>),
     /// The RPS files' errors (`CBlastException`, ...).
     Rps(RpsError),
-    /// `CBlastException` with a message of the engine: exit status 1.
+    /// `CBlastException` with a message of the engine (`CPssmEngineException` too, which derives
+    /// from it): exit status 1.
     Blast(String),
-    /// Another `CException` (`CPssmEngineException`): exit status 255.
-    Exception(String),
+    /// Another `CException` (`CSeqUtilException` of the query's conversion): exit status 255.
+    Exception(crate::ncbi_exception::NcbiException),
+    /// A `std::exception` (the `runtime_error` of the query's conversion from a coding that
+    /// `CSeqUtil` lacks): the handler's "Unknown exception", exit status 255.
+    Unknown,
 }
 
 impl From<RpsError> for ProfileError {
@@ -142,46 +149,111 @@ pub(super) fn fill_in_rps_db_parameters(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:76-99
-// `CSeqportUtil::Convert` of NCBIeaa and IUPACaa: LOSAT takes the capital letters, `*` and `-`
-// (NCBIeaa), whose NCBIstdaa codes are those of every protein table; other bytes are refused.
-/// `GetQuerySequenceData`: the query's NCBIstdaa codes (none without data).
-fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, ProfileError> {
-    let seq_data = pssm_w_parameters
+fn query_seq_data(pssm_w_parameters: &PssmWithParameters) -> Option<&SeqData> {
+    pssm_w_parameters
         .pssm
         .query
         .as_ref()
         .and_then(|query| query.seq())
-        .and_then(|seq| seq.inst.seq_data.as_ref());
-    let refuse = |what: String| {
-        ProfileError::Rps(RpsError::Refused(format!(
-            "a profile of frequency ratios whose query has {what} (NCBI's sequence conversion \
-             of it is not followed)"
-        )))
+        .and_then(|seq| seq.inst.seq_data.as_ref())
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:346-358
+/// The `Seq-data` CHOICE numbers of the codings that `SeqData` keeps as `Other`.
+const NCBI8NA: u8 = 4;
+const NCBIPNA: u8 = 5;
+const NCBI8AA: u8 = 6;
+const NCBIPAA: u8 = 8;
+const GAP: u8 = 10;
+
+// NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:76-99
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:1947-1959,2009-2066
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.hpp:50-70
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:150-225
+// NCBIstdaa is copied; every other coding goes through `CSeqportUtil::Convert`. Its table of the
+// `CSeqUtil` codings has none for NCBIpna and NCBIpaa (a `runtime_error`: the handler's unknown
+// exception, NCBI BLAST+ 2.17.0 row PS10d review O3) and ends before the gap's number, which it
+// reads past (refused). `CSeqConvert` then returns before the conversion for empty data (an empty
+// query), and converts with the tables that the database writer converts with
+// (`writedb::convert`): NCBIeaa and IUPACaa by their tables (255 for a byte that is no residue:
+// NCBIeaa other than a capital letter, `*` or `-`, IUPACaa other than a letter of either case),
+// NCBI8aa by a copy of its bytes; it has no conversion from a nucleotide coding (IUPACna,
+// NCBI2na, NCBI4na, NCBI8na) to NCBIstdaa (`Unknown conversion.`, exit status 255; row PS10d
+// survey `FA_*`, review O1).
+/// `GetQuerySequenceData`: the query's NCBIstdaa codes (none without data).
+fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, ProfileError> {
+    let Some(data) = query_seq_data(pssm_w_parameters) else {
+        return Ok(Vec::new());
     };
-    let letters = |data: &[u8], extra: &[u8]| -> Result<Vec<u8>, ProfileError> {
-        data.iter()
-            .map(|&letter| {
-                if letter.is_ascii_uppercase() || extra.contains(&letter) {
-                    Ok(crate::utils::matrix::aa_char_to_ncbistdaa(letter))
-                } else {
-                    Err(refuse(format!("the letter 0x{letter:02x}")))
-                }
-            })
-            .collect()
-    };
-    match seq_data {
-        None => Ok(Vec::new()),
-        Some(SeqData::Ncbistdaa(codes)) => {
-            match codes.iter().find(|&&code| code as usize >= BLASTAA_SIZE) {
-                Some(code) => Err(refuse(format!("the NCBIstdaa code {code}"))),
-                None => Ok(codes.clone()),
+    let (_, choice, _) = data.variant();
+    let bytes = match data {
+        SeqData::Iupacna(bytes)
+        | SeqData::Iupacaa(bytes)
+        | SeqData::Ncbi2na(bytes)
+        | SeqData::Ncbi4na(bytes)
+        | SeqData::Ncbieaa(bytes)
+        | SeqData::Ncbistdaa(bytes) => bytes,
+        SeqData::Other(Value::Choice(_, value)) => match (choice, &**value) {
+            (NCBIPNA | NCBIPAA, _) => return Err(ProfileError::Unknown),
+            (GAP, _) => {
+                return Err(ProfileError::Rps(RpsError::Refused(
+                    "a profile of frequency ratios whose query's Seq-data is a gap (NCBI's \
+                     sequence conversion reads its coding past the end of its table)"
+                        .to_string(),
+                )))
             }
-        }
-        Some(SeqData::Ncbieaa(data)) => letters(data, b"*-"),
-        Some(SeqData::Iupacaa(data)) => letters(data, b""),
-        Some(SeqData::Other(_)) => Err(refuse("data in another coding".to_string())),
+            (NCBI8NA | NCBI8AA, Value::Octets(bytes)) => bytes,
+            (_, other) => unreachable!("Seq-data {choice} read as {other:?}"),
+        },
+        SeqData::Other(other) => unreachable!("a Seq-data is a CHOICE, not {other:?}"),
+    };
+    if bytes.is_empty() {
+        return Ok(Vec::new());
     }
+    match data {
+        SeqData::Ncbieaa(_) => Ok(convert::ncbieaa_codes(bytes)),
+        SeqData::Iupacaa(_) => Ok(convert::iupacaa_codes(bytes)),
+        SeqData::Ncbistdaa(_) => Ok(bytes.clone()),
+        SeqData::Other(_) if choice == NCBI8AA => Ok(bytes.clone()),
+        _ => Err(ProfileError::Exception(convert::unknown_conversion())),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-515
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1962-1971,1984-2007
+// The engine's score block reads the matrix first (a name it does not know is its error, the
+// engine's `Unknown error code -1`), then counts the query's composition in an array of the 28
+// codes: a code past them (255 for a byte that is no residue) is counted outside the array, the
+// first access of NCBI's run outside its data (valgrind's first invalid access). What NCBI BLAST+
+// 2.17.0 does after it depends on the code (row PS10c probes `PR/ps10c/probe*`): for 28, 29, 64,
+// 128 and 255 it ends with SIGSEGV where the PSSM conversion reads the matrix's row of the code,
+// for 31 malloc aborts on its corrupted heap (also where a negative frequency ratio is otherwise
+// reported), for 32 it builds the database. Before the count, the lengths, the frequency ratios
+// and the matrix are NCBI's.
+/// The refusal of a query with a code past the 28 residues of NCBIstdaa, for a matrix that
+/// NCBI's engine reads; `None` otherwise.
+fn query_code_past_residues(
+    pssm_w_parameters: &PssmWithParameters,
+    query: &[u8],
+    matrix_name: &str,
+) -> Option<ProfileError> {
+    matrix_name.parse::<ScoringMatrix>().ok()?;
+    let position = query
+        .iter()
+        .position(|&code| usize::from(code) >= BLASTAA_SIZE)?;
+    let what = match query_seq_data(pssm_w_parameters) {
+        Some(SeqData::Ncbieaa(data) | SeqData::Iupacaa(data)) => {
+            format!("the letter 0x{:02x}", data[position])
+        }
+        Some(SeqData::Other(_)) => format!("the NCBI8aa code {}", query[position]),
+        _ => format!("the NCBIstdaa code {}", query[position]),
+    };
+    Some(ProfileError::Rps(RpsError::Refused(format!(
+        "a profile of frequency ratios whose query has {what} at position {}, no residue of \
+         NCBIstdaa (NCBI's PSSM engine writes outside its table of residues as it counts the \
+         query's composition)",
+        position + 1
+    ))))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:841-882
@@ -190,8 +262,9 @@ fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, Pr
 // The engine takes the gap costs 0 as 11 and 1 (`IPssmInputFreqRatios`'s defaults) and the
 // IMPALA scale factor 0 as 1 (`kPSSM_NoImpalaScaling`). Its score block's errors come first
 // (`x_InitializeScoreBlock` in the constructor), then the negative ratios (`s_Validate`), then
-// the status of `PSICreatePssmFromFrequencyRatios`. A query whose ungapped Karlin-Altschul
-// block cannot be computed leaves NCBI's `kbp_psi[0]` null, which the scaling reads (a crash).
+// the status of `PSICreatePssmFromFrequencyRatios`, which reads the matrix's frequency ratios
+// (a null table for IDENTITY) and the query's ungapped Karlin-Altschul block: one that cannot be
+// computed leaves NCBI's `kbp_psi[0]` null, which the scaling reads (a crash).
 /// `x_RPSUpdateStatistics`: the profile's `finalData` (the scores, lambda, kappa and h of the
 /// engine, the scale factor of the volume) made from its frequency ratios.
 pub(super) fn update_statistics(
@@ -234,6 +307,9 @@ pub(super) fn update_statistics(
         1
     };
     let matrix_name = String::from_utf8_lossy(&params.matrix).into_owned();
+    if let Some(refusal) = query_code_past_residues(pssm_w_parameters, &query, &matrix_name) {
+        return Err(refusal);
+    }
     let refuse = |what: String| ProfileError::Rps(RpsError::Refused(what));
     let (scoring, sbp) = match engine_score_block(&matrix_name, gap_open, gap_extend, &query)
         .map_err(|error| refuse(format!("the scoring system of a profile ({error:#})")))?
@@ -241,17 +317,17 @@ pub(super) fn update_statistics(
         Ok(block) => block,
         Err(message) => return Err(ProfileError::Blast(message)),
     };
+    if matrix.iter().any(|&ratio| ratio < 0.0) {
+        return Err(ProfileError::Blast(
+            "PSSM frequency ratios cannot have negative values".to_string(),
+        ));
+    }
     let Some(sbp) = sbp else {
         return Err(refuse(format!(
             "a profile of frequency ratios for the matrix {matrix_name}, which has no frequency \
              ratios of its own (NCBI's PSSM engine reads a null table there)"
         )));
     };
-    if matrix.iter().any(|&ratio| ratio < 0.0) {
-        return Err(ProfileError::Exception(
-            "PSSM frequency ratios cannot have negative values".to_string(),
-        ));
-    }
     let Some(kbp_psi) = query_ungapped_block(scoring, &query) else {
         return Err(refuse(
             "a profile of frequency ratios whose query has no ungapped Karlin-Altschul \
@@ -293,3 +369,7 @@ pub(super) fn update_statistics(
     pssm_w_parameters.pssm.final_data = Some(final_data);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "profile_tests.rs"]
+mod tests;

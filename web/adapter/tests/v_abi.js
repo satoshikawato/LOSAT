@@ -890,7 +890,8 @@ function checkSurface(reactor, native) {
 // The words with which the command line prints its help or its version (line WQA's D14, 2026-11-20; abi_v2.md §5 stream
 // 11, §9 `prints`), for every program and word, and the words, registry file and file of -logfile around them, each
 // compared with the native CLI's run of the same argv from an empty directory.
-const HELP_WORDS = ["-h", "-help", "-help-full", "--help", "-xmlhelp"];
+// `--help` is no word of NCBI's reader (`Unknown argument: "-help"`, line RG item K4i-2b, 2026-11-23).
+const HELP_WORDS = ["-h", "-help", "-help-full", "-xmlhelp"];
 const VERSION_WORDS = ["-version", "-version-full", "-version-full-xml", "-version-full-json"];
 
 function checkPrints(reactor, native) {

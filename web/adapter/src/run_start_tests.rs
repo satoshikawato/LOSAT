@@ -375,6 +375,58 @@ fn the_logfile_is_a_file_of_the_run() {
     }
 }
 
+/// NCBI's frozen file `<program>.<extension>` of `LOSAT/tests/fixtures/syntax_logfile` (the
+/// standard error, `err`, and the file of `-logfile`, `log`, of NCBI BLAST+ 2.17.0's
+/// `<program> <inputs> -logfile log -bogus 1`), in LOSAT's words.
+fn frozen_logfile_case(program: &str, extension: &str) -> String {
+    let path = format!(
+        "{}/../../LOSAT/tests/fixtures/syntax_logfile/{program}.{extension}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    losat::web_adapter::losat_text(&std::fs::read_to_string(path).unwrap()).into_owned()
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112 (cited at
+// `ncbi_app::Diag::report_arg_exception`)
+// An argument error with `-logfile` (line RG item K4i-2b round 2, R-H1): NCBI writes the usage, its
+// line that points to the error logs and the rule to the standard error, and its two posts to the
+// file (NCBI's case `<program>.log.unk`). A run's error is that standard error, and the file of
+// `-logfile` (stream 8) holds the posts; nothing goes to stream 3. `validate`, whose start keeps no
+// file, gives the report as the command line writes it without `-logfile`, its posts included.
+#[test]
+fn an_argument_error_posts_to_the_runs_logfile() {
+    for (program, _, _) in SEARCHES {
+        let words = argv(program, &["-logfile", "run.log", "-bogus", "1"]);
+        let (result, streams) = run_of(&words);
+        assert_eq!(
+            result.unwrap_err(),
+            frozen_logfile_case(program, "err"),
+            "{program}"
+        );
+        assert_eq!(
+            run_files(&streams),
+            Some(vec![(
+                "run.log".to_string(),
+                frozen_logfile_case(program, "log")
+            )]),
+            "{program}"
+        );
+        assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "", "{program}");
+        let rule = format!("{}\n\n", "=".repeat(72));
+        let usage = frozen_logfile_case(program, "err")
+            .replace(
+                "Error in command-line arguments. See error logs for more details.\n",
+                "",
+            )
+            .replace(&rule, "");
+        assert_eq!(
+            validate(&words).unwrap_err(),
+            format!("{usage}{rule}{}", frozen_logfile_case(program, "log")),
+            "{program}: validate"
+        );
+    }
+}
+
 /// NCBI's error for an argv without `-subject` and `-db`, which the command line raises after
 /// `-outfmt`'s number and before its other checks (the ranges, the options, the formats that the
 /// program does not write); a dry run ends before it. `blastp -query -h` is such an argv: `-h` is
@@ -794,8 +846,8 @@ fn printing_run(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) 
 }
 
 // Line WQA's D14 (2026-11-20): the help and version words print what the command line prints to
-// its standard output (the parser's help, the XML of `-xmlhelp`, NCBI's version texts with LOSAT's
-// values: `printed_text` and `ncbi_version_request`, the command line's own producers), on stream
+// its standard output (NCBI's help, the XML of `-xmlhelp`, NCBI's version texts with LOSAT's
+// values: `ncbi_app::read` and `ncbi_version_request`, the command line's own producers), on stream
 // 11, with no input and no search; `validate` accepts them. `web/adapter/tests/v_abi.js` compares
 // the bytes with the native command line.
 #[test]
@@ -805,7 +857,6 @@ fn help_and_version_words_print_the_command_lines_text() {
             "-h",
             "-help",
             "-help-full",
-            "--help",
             "-xmlhelp",
             "-version",
             "-version-full",
@@ -842,14 +893,22 @@ fn help_and_version_words_print_the_command_lines_text() {
                 _ => {
                     let error = losat::web_adapter::try_parse_cli(
                         std::iter::once("losat").chain(words.iter().copied()),
+                        None,
                     )
                     .unwrap_err();
-                    losat::web_adapter::printed_text(&error, false).unwrap()
+                    match error {
+                        losat::web_adapter::ArgvError::Printed(text) => text,
+                        error => panic!("{program} {word}: {error:?}"),
+                    }
                 }
             };
             assert_eq!(text, expected, "{program} {word}");
         }
-        // The words before a help word are read first, as the command line reads them.
+        // `--help` is no word of NCBI's reader (`Unknown argument: "-help"`, line RG DECISIONS
+        // K4i-2 D3), and the words before a help word are read first, as the command line reads
+        // them.
+        let unknown = argv(program, &["--help"]);
+        assert!(validate(&unknown).is_err(), "{program}");
         let refused = argv(program, &["-evalue", "x", "-h"]);
         assert!(validate(&refused).is_err(), "{program}");
         assert!(printing_run(&refused).0.is_err(), "{program}");

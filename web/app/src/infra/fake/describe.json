@@ -56,11 +56,7 @@
    {
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-db_soft_mask",
@@ -80,32 +76,17 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-html",
     "help": "Produce HTML output?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-searchsp",
@@ -128,12 +109,22 @@
    {
     "flag": "-template_type",
     "help": "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal",
-    "takes_value": true
+    "takes_value": true,
+    "choices": [
+     "coding",
+     "optimal",
+     "coding_and_optimal"
+    ]
    },
    {
     "flag": "-template_length",
     "help": "Discontiguous MegaBLAST template length: 16, 18 or 21",
-    "takes_value": true
+    "takes_value": true,
+    "choices": [
+     "16",
+     "18",
+     "21"
+    ]
    },
    {
     "flag": "-word_size",
@@ -223,17 +214,13 @@
    {
     "flag": "-lcase_masking",
     "help": "",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: true]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "true"
    },
    {
     "flag": "-filtering_db",
@@ -274,12 +261,7 @@
    {
     "flag": "-subject_besthit",
     "help": "Apply subject best hit filtering (disabled by default)",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-culling_limit",
@@ -299,11 +281,7 @@
    {
     "flag": "-ungapped",
     "help": "Perform ungapped alignment only",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-xdrop_ungap",
@@ -323,11 +301,7 @@
    {
     "flag": "-no_greedy",
     "help": "Use non-greedy dynamic programming extension",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-min_raw_gapped_score",
@@ -342,7 +316,8 @@
    {
     "flag": "-off_diagonal_range",
     "help": "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)",
-    "takes_value": true
+    "takes_value": true,
+    "default": "0"
    }
   ],
   "defaults": {
@@ -533,11 +508,7 @@
    {
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-db_soft_mask",
@@ -557,32 +528,17 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-html",
     "help": "Produce HTML output?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-searchsp",
@@ -678,20 +634,12 @@
    {
     "flag": "-subject_besthit",
     "help": "Return only the best HSP for each non overlapping query region",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-ungapped",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-xdrop_ungap",
@@ -737,30 +685,24 @@
    {
     "flag": "-seg",
     "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "no"
    },
    {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "false"
    },
    {
     "flag": "-lcase_masking",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-use_sw_tback",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-query_loc",
@@ -1181,11 +1123,7 @@
    {
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-db_soft_mask",
@@ -1205,32 +1143,17 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-html",
     "help": "Produce HTML output?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-searchsp",
@@ -1254,9 +1177,8 @@
    },
    {
     "flag": "-evalue",
-    "help": "",
-    "takes_value": true,
-    "default": "10"
+    "help": "Expectation value (E) threshold for saving hits [default: 10]",
+    "takes_value": true
    },
    {
     "flag": "-word_size",
@@ -1354,38 +1276,22 @@
    {
     "flag": "-subject_besthit",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-ungapped",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-lcase_masking",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-use_sw_tback",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-strand",
@@ -1769,11 +1675,7 @@
    {
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-db_soft_mask",
@@ -1793,32 +1695,17 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-html",
     "help": "Produce HTML output?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-searchsp",
@@ -1869,7 +1756,8 @@
    {
     "flag": "-max_intron_length",
     "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "0"
    },
    {
     "flag": "-matrix",
@@ -1915,30 +1803,24 @@
    {
     "flag": "-seg",
     "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: 12 2.2 2.5]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "12 2.2 2.5"
    },
    {
     "flag": "-lcase_masking",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-use_sw_tback",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "false"
    },
    {
     "flag": "-sum_stats",
@@ -2008,20 +1890,12 @@
    {
     "flag": "-subject_besthit",
     "help": "Return only the best HSP for each non overlapping query region",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-ungapped",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    }
   ],
   "subject_gencodes": [
@@ -2364,11 +2238,7 @@
    {
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-db_soft_mask",
@@ -2388,32 +2258,17 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-html",
     "help": "Produce HTML output?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-searchsp",
@@ -2422,9 +2277,8 @@
    },
    {
     "flag": "-evalue",
-    "help": "",
-    "takes_value": true,
-    "default": "10"
+    "help": "Expectation value (E) threshold for saving hits [default: 10]",
+    "takes_value": true
    },
    {
     "flag": "-threshold",
@@ -2461,7 +2315,8 @@
    {
     "flag": "-max_intron_length",
     "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "0"
    },
    {
     "flag": "-max_target_seqs",
@@ -2512,7 +2367,8 @@
    {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
-    "takes_value": true
+    "takes_value": true,
+    "default": "false"
    },
    {
     "flag": "-sum_stats",
@@ -2522,11 +2378,7 @@
    {
     "flag": "-lcase_masking",
     "help": "",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-strand",
@@ -2567,11 +2419,7 @@
    {
     "flag": "-subject_besthit",
     "help": "Return only the best HSP for each non overlapping query region",
-    "takes_value": false,
-    "choices": [
-     "true",
-     "false"
-    ]
+    "takes_value": false
    },
    {
     "flag": "-query_loc",

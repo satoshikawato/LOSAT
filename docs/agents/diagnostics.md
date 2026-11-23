@@ -6887,6 +6887,22 @@ Scheduling (each value computed by one thread with the original function; order 
   `walk_right`, 30.6 % of the cycles in `perf record`) and 38 fewer with the switch (from the cycle
   totals), about 197; what is left is the latency of the first query loads and the mispredicted
   exits of the walks (as in TBXUNGAP).
+  From DT1-10 (2026-11-21) the walks are the key walks of BLASTP and BLASTX (item SC2e, #940), shared in
+  `algorithm/common/x_key_walk.rs`: the score and the step are one `i64` (`score << 32 - (i + 1)`
+  after step `i`), so one comparison keeps the best and its length, and the word loop adds the same
+  keys (`KeyTable`, `(t << 32) - 1` at `q << 5 | s`, beside BLOSUM62's table and each
+  `MatrixWalkTable`). The keys hold the scores of the bytes below 32, so a batch or a frame takes the
+  path only if every byte of its buffers is below 32 (`letters` in `sent_contexts` and
+  `sent_frame`); a frame's letters (NCBISTDAA 0..=27) and the sentinel always are. The frame's
+  check reads the whole buffer, so it runs once for each chunk where the units are listed
+  (`XUnit::sent_frame`), not in every unit: run in each unit's `x_unit_sent` (twice, the dispatch
+  and its assertion), it cost ViPTreeGen's Autographivirales.40 the gain (cycles x1.003 of dev
+  against x0.97 without it).
+  On dev 92e2a3044 (one booked core of workstation node 1, `-num_threads 1`, outputs identical):
+  ViPTreeGen's Autographivirales.40 (`-matrix BLOSUM45`) 45.01 -> 43.72 s wall (x0.971; cycles x0.971,
+  instructions x0.911), max RSS the same (25,976 -> 25,968 KiB); the other TBLASTX cases x0.990 to
+  x1.002 in cycles; blastp and BLASTX, which run the moved walks, the same instructions (cycles
+  x0.983 to x1.005). Numbers: `tool-speed-20261115/results/dt19/ab4`.
 - `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of the unit path (`scan_unit`, the
   batched scan of `LOSAT_X_TBXEXTBATCH`, and, from the next pull request (2026-10-19), the scan in slices

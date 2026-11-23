@@ -190,10 +190,7 @@ fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
     ] {
         let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
         argv.extend(extra);
-        assert!(
-            crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_err(),
-            "{extra:?}"
-        );
+        assert!(crate::cli::try_parse_from(argv).is_err(), "{extra:?}");
     }
 }
 
@@ -263,7 +260,7 @@ fn the_best_hit_options_take_their_range_and_exclude_culling() {
         let mut argv = vec!["losat", "blastn"];
         argv.extend_from_slice(&base);
         argv.extend_from_slice(extra);
-        crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_err()
+        crate::cli::try_parse_from(argv).is_err()
     };
     for value in ["0", "0.5", "0.6", "-0.1", "nan", "abc"] {
         assert!(refused(&["-best_hit_overhang", value]), "{value}");

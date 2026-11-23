@@ -67,7 +67,7 @@ export function namedRunFiles(
 
 /**
  * What a run prints in place of a search, as the command line does (ABI v2 §5, stream 11; the *start*
- * field `prints`, §9): its help (`-h`, `-help`, `-help-full`, `--help`, and the XML of `-xmlhelp`), or its
+ * field `prints`, §9): its help (`-h`, `-help`, `-help-full`, and the XML of `-xmlhelp`), or its
  * version (`-version`, `-version-full`, `-version-full-xml`, `-version-full-json`). Such a run needs no
  * inputs and searches nothing. Line WQA's D14, 2026-11-20.
  */

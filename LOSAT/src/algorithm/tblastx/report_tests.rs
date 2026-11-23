@@ -59,6 +59,7 @@ fn rows_keep_the_seqalign_identities_of_their_hsps() {
         &code,
         &placements,
         &placements,
+        None,
     );
     let counts: Vec<(usize, usize)> = rows
         .iter()

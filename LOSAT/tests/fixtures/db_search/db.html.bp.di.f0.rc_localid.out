@@ -1,0 +1,303 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: in/ps_ids.faa
+           11 sequences; 1,610 total letters
+
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>subject one two HSPs                                      <a href=#XP_000101.1>313</a>     5e-109
+http://local.example/s3_local_identifier?db=..%2F..%2F..%2Fof18%2Fps_ids&taxid=9606&p=https:&t=s3_local_identifiers3_local_identifier </a>subject three with a title that is longer tha...  <a href=#s3_local_identifier>247</a>     4e-87 
+<a title="Show report for XP_000111.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000111.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XP_000111.1>211</a>     1e-71 
+<a title="Show report for XP_000109.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000109.1?report=genbank&log$=prottop&blast_rank=4&RID=" >XP_000109.1 </a>subject nine                                              <a href=#XP_000109.1>168</a>     7e-57 
+<a title="Show report for P99902.2" href="https://www.ncbi.nlm.nih.gov/protein/P99902.2?report=genbank&log$=prottop&blast_rank=5&RID=" >P99902.2 </a>subject two                                                  <a href=#P99902.2>159</a>     4e-53 
+testdb:tag_s8 subject eight                                           <a href=#testdb:tag_s8>147</a>     1e-48 
+http://local.example/s7_not_in_taxdb_long_label?db=..%2F..%2F..%2Fof18%2Fps_ids&taxid=777&p=https:&t=s7_not_in_taxdb_long_labels7_not_in_taxdb_long_label </a>subject seven taxid not in taxdb           <a href=#s7_not_in_taxdb_long_label>141</a>     2e-46 
+<a title="Show report for 1ABC_A" href="https://www.ncbi.nlm.nih.gov/protein/1ABC_A?report=genbank&log$=prottop&blast_rank=8&RID=" >1ABC_A </a>subject six                                                    <a href=#1ABC_A>139</a>     1e-45 
+<a title="Show report for AAB00104.1" href="https://www.ncbi.nlm.nih.gov/protein/AAB00104.1?report=genbank&log$=prottop&blast_rank=9&RID=" >AAB00104.1 </a>subject four                                               <a href=#AAB00104.1>138</a>     3e-45 
+<a title="Show report for XP_000105.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000105.1?report=genbank&log$=prottop&blast_rank=10&RID=" >XP_000105.1 </a>subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@...  <a href=#123456>131</a>     9e-43 
+<a title="Show report for BAA00110.1" href="https://www.ncbi.nlm.nih.gov/protein/BAA00110.1?report=genbank&log$=prottop&blast_rank=11&RID=" >BAA00110.1 </a>subject ten                                                <a href=#BAA00110.1>94.0</a>    2e-28 
+
+
+><a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=protalign&blast_rank=1&RID=0" >XP_000101.1</a><a name=XP_000101.1></a> subject one two HSPs
+Length=450
+
+ Score = 313 bits (803),  Expect = 5e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  153
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 2e-75, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+
+Query  152  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  211
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  212  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  271
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  272  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+>http://local.example/s3_local_identifier?db=..%2F..%2F..%2Fof18%2Fps_ids&taxid=9606&p=https:&t=s3_local_identifiers3_local_identifier</a><a name=s3_local_identifier></a> subject three with a title that is longer than the description 
+column of the organism report table so that NCBI cuts it and 
+appends three dots
+Length=150
+
+ Score = 247 bits (630),  Expect = 4e-87, Method: Compositional matrix adjust.
+ Identities = 127/150 (85%), Positives = 128/150 (85%), Gaps = 0/150 (0%)
+
+Query  51   GDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTC  110
+            GDESHIVA  PA PTLTRSVR TISPDPFF CRCRRD SIQYMLQPRLLRPSENVES TC
+Sbjct  1    GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITC  60
+
+Query  111  ANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVP  170
+            AN VMRAV K SAYDFAVKTSNDFDG VCERDKS VTLI SGLSTP  NLVRHAMQL+VP
+Sbjct  61   ANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVP  120
+
+Query  171  SRLAACYTHLAALKGLGSPRLTEYNRCSTH  200
+            SRLA CYTH AA KGLGS  L E NRCSTH
+Sbjct  121  SRLALCYTHGAASKGLGSSPLPESNRCSTH  150
+
+
+><a title="Show report for XP_000111.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000111.1?report=genbank&log$=protalign&blast_rank=3&RID=0" >XP_000111.1</a><a name=XP_000111.1></a> subject eleven strong then planted weak HSP
+Length=250
+
+ Score = 211 bits (537),  Expect = 1e-71, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR
+Sbjct  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+
+
+ Score = 26.9 bits (58),  Expect = 0.002, Method: Compositional matrix adjust.
+ Identities = 13/22 (59%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+
+Query  191  LTEYNRCSTHSGRGLFEPESTL  212
+            L +    S  SGRGLFEPES L
+Sbjct  191  LADCGDWSFDSGRGLFEPESDL  212
+
+
+ Score = 15.8 bits (29),  Expect = 7.7, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+
+Query  151  SGLSTPFVNLVRHAM  165
+            +GLS  F +  RH +
+Sbjct  232  TGLSKRFEHQSRHML  246
+
+
+><a title="Show report for XP_000109.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000109.1?report=genbank&log$=protalign&blast_rank=4&RID=0" >XP_000109.1</a><a name=XP_000109.1></a> subject nine
+Length=100
+
+ Score = 168 bits (426),  Expect = 7e-57, Method: Compositional matrix adjust.
+ Identities = 84/100 (84%), Positives = 86/100 (86%), Gaps = 0/100 (0%)
+
+Query  31   RPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSI  90
+            RPMRGRL LID RHRVPYACGD SHIVAGRPARPT+TRSV  TIS DPFF CRCRRDYSI
+Sbjct  1    RPMRGRLTLIDPRHRVPYACGDPSHIVAGRPARPTVTRSVDATISNDPFFNCRCRRDYSI  60
+
+Query  91   QYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKT  130
+             YMLQPRL RP+ NVESGTCANLVM AVVKVSAYD   KT
+Sbjct  61   TYMLQPRLCRPNGNVESGTCANLVMVAVVKVSAYDTTTKT  100
+
+
+><a title="Show report for P99902.2" href="https://www.ncbi.nlm.nih.gov/protein/P99902.2?report=genbank&log$=protalign&blast_rank=5&RID=0" >P99902.2</a><a name=P99902.2></a> subject two
+Length=120
+
+ Score = 159 bits (402),  Expect = 4e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+
+
+>testdb:tag_s8<a name=testdb:tag_s8></a> subject eight
+Length=100
+
+ Score = 147 bits (371),  Expect = 1e-48, Method: Compositional matrix adjust.
+ Identities = 76/100 (76%), Positives = 78/100 (78%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDY GKGF S+YSLRLT NP+ EI SRVERP RGRLA I   HRVPYAC DE HI AG 
+Sbjct  1   CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLT SV HTISPDP FVC    DYSIQYMLQPRL R
+Sbjct  61  PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR  100
+
+
+>http://local.example/s7_not_in_taxdb_long_label?db=..%2F..%2F..%2Fof18%2Fps_ids&taxid=777&p=https:&t=s7_not_in_taxdb_long_labels7_not_in_taxdb_long_label</a><a name=s7_not_in_taxdb_long_label></a> subject seven taxid not in taxdb
+Length=100
+
+ Score = 141 bits (356),  Expect = 2e-46, Method: Compositional matrix adjust.
+ Identities = 73/99 (74%), Positives = 79/99 (80%), Gaps = 0/99 (0%)
+
+Query  151  SGLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPES  210
+            SGLSTPFV+LVRH MQ+KVPSR AACYTH AALKGL  PRL E + CS    RGL E E 
+Sbjct  1    SGLSTPFVDLVRHTMQMKVPSRRAACYTHAAALKGLPLPRLIEIDNCSNFVKRGLREMEG  60
+
+Query  211  TLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHS  249
+            TLGD SR Q PLTETRC+SRLVTP +N CTS+SREPRHS
+Sbjct  61   TLGDLSRRQTPLTETRCHSRLVTPGSNACTSQSREPRHS  99
+
+
+><a title="Show report for 1ABC_A" href="https://www.ncbi.nlm.nih.gov/protein/1ABC_A?report=genbank&log$=protalign&blast_rank=8&RID=0" >1ABC_A</a><a name=1ABC_A></a> subject six
+Length=100
+
+ Score = 139 bits (351),  Expect = 1e-45, Method: Compositional matrix adjust.
+ Identities = 77/99 (78%), Positives = 80/99 (81%), Gaps = 0/99 (0%)
+
+Query  101  PSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNL  160
+            PSENVES T ANLV+R VVKV A  FAV TSND DG VC RDKSYVTLIPSGLST FVNL
+Sbjct  1    PSENVESHTSANLVIRPVVKVRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNL  60
+
+Query  161  VRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCST  199
+            VR AMQLKVPSR  ACYTHLAAL GL SP L+E+ R ST
+Sbjct  61   VRPAMQLKVPSRSPACYTHLAALLGLPSPNLSEFFRGST  99
+
+
+><a title="Show report for AAB00104.1" href="https://www.ncbi.nlm.nih.gov/protein/AAB00104.1?report=genbank&log$=protalign&blast_rank=9&RID=0" >AAB00104.1</a><a name=AAB00104.1></a> subject four
+Length=100
+
+ Score = 138 bits (348),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 70/94 (74%), Positives = 70/94 (74%), Gaps = 0/94 (0%)
+
+Query  206  FEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSAR  265
+            FEPE TLG P   Q PL ETRCNSR VTPI  YCTSK REPRHS NLVR N  LICNSAR
+Sbjct  6    FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCTSKLREPRHSLNLVRYNGKLICNSAR  65
+
+Query  266  GYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQ  299
+            G LCKR RGTEY KFTSSEF  PPW N T  NYQ
+Sbjct  66   GSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ  99
+
+
+><a title="Show report for XP_000105.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000105.1?report=genbank&log$=protalign&blast_rank=10&RID=0" >XP_000105.1</a><a name=123456></a> subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; 
+a &lt;@descr_text@&gt; d &lt;@table_rows@&gt; end
+Length=80
+
+ Score = 131 bits (330),  Expect = 9e-43, Method: Compositional matrix adjust.
+ Identities = 66/80 (83%), Positives = 67/80 (84%), Gaps = 0/80 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLR   NP PEI SRVE P RG LALI VRHRV YAC  ESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFF  80
+           PARPTLT+SVRH ISPDPFF
+Sbjct  61  PARPTLTKSVRHAISPDPFF  80
+
+
+><a title="Show report for BAA00110.1" href="https://www.ncbi.nlm.nih.gov/protein/BAA00110.1?report=genbank&log$=protalign&blast_rank=11&RID=0" >BAA00110.1</a><a name=BAA00110.1></a> subject ten
+Length=60
+
+ Score = 94.0 bits (232),  Expect = 2e-28, Method: Compositional matrix adjust.
+ Identities = 49/60 (82%), Positives = 50/60 (83%), Gaps = 0/60 (0%)
+
+Query  201  SGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILI  260
+            SG G  EPESTLGDPS VQ PLTETRCNS LVTPIT+YCTSKS EP  S NLVRVNVILI
+Sbjct  1    SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCTSKSCEPVDSPNLVRVNVILI  60
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316389
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39609
+
+
+  Database: in/ps_ids.faa
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 1,610
+  Number of sequences in database:  11
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

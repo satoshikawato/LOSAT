@@ -282,11 +282,12 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) reads: Option<&'a dyn TraceReads>,
 }
 
-/// What an RPS-BLAST traceback without composition-based statistics asks of its profile, whose
-/// `.psq` letters can be fewer than the columns of its preliminary alignments
-/// (`rps_search::profile`): the start of each alignment (before it is made) and the letters of
-/// each traced alignment (NCBI counts its identities and positives there,
-/// blast_traceback.c:589). Each returns whether the loop goes on; after a `false` the list's
+/// What an RPS-BLAST traceback asks of its profile, whose `.psq` letters can be fewer than the
+/// columns of its preliminary alignments (`rps_search::profile`): the start of each alignment
+/// (before it is made; also the composition-based redo's, `redo1::RedoRun::with_profile_reads`),
+/// the letters of each traced alignment without composition-based statistics (NCBI counts its
+/// identities and positives there, blast_traceback.c:589), and the redo's reads past its copy of
+/// the letters. `starts` and `traced` return whether the loop goes on; after a `false` the list's
 /// traceback ends and the caller refuses.
 pub(crate) trait TraceReads {
     /// Whether the alignment that starts at the query (profile) position `q_start` is made.
@@ -294,6 +295,9 @@ pub(crate) trait TraceReads {
     /// Whether the traced alignment from the query (profile) position `query_start` with
     /// `edit_script` reads only what NCBI reads.
     fn traced(&self, query_start: i32, edit_script: &[GapEditOp]) -> bool;
+    /// The composition-based redo's near-identical walk read past the profile's copy of its
+    /// letters or past their words (`redo1::RedoRun::with_profile_reads`).
+    fn copy_read_past(&self);
 }
 
 /// The subject of a list's traceback: its letters, or the frames of a translated subject

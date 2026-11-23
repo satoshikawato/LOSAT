@@ -22,7 +22,7 @@
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
-use super::profile::TracebackProfile;
+use super::profile::{ProfileRead, TracebackProfile};
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
@@ -183,6 +183,8 @@ impl RpsTraceback<'_> {
             matrix.rows.clear();
             matrix.rows.resize(length, [0; 28]);
             let k = RPS_K_MULT * self.karlin_k[oid];
+            // The redo's reads of the profile (reads C and D, `RedoRun::with_profile_reads`).
+            let reads = profile.trace_reads(ProfileRead::Start);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2380-2383
             // `options->gap_x_dropoff_final` is the search's final X-drop in bits
             // (`-xdrop_gap_final`; `RpsRun::gapped_x_drops` has checked the conversion).
@@ -201,7 +203,7 @@ impl RpsTraceback<'_> {
                 std::mem::take(&mut scratch.gap),
             )
             .with_bound_check()
-            .with_profile_reads();
+            .with_profile_reads(&reads);
             if !context_0_valid {
                 run = run.without_valid_context();
             }
@@ -241,10 +243,9 @@ impl RpsTraceback<'_> {
                 Ok(kind.redo(&redo_match, &mut run, list.oid, &hsps, query))
             };
             let exceeded = run.bound_exceeded();
-            let fault = run.profile_fault();
             let (matrix, gap) = run.into_buffers();
-            // The redo's reads of the profile (reads C and D, `RedoRun::with_profile_reads`).
-            profile.redo_fault(fault)?;
+            // The first read of the redo that left NCBI's data (reads C and D).
+            profile.check()?;
             // The bound of every matrix the adjustments built (`RedoRun::with_bound_check`).
             if let Some(bound) = exceeded {
                 anyhow::bail!(

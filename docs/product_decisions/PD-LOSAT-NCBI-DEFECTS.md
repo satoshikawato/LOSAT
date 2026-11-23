@@ -3157,8 +3157,11 @@ file would differ, and NCBI's programs still could not open the database).
   - A, the rows from the profile's offset: `L_pin` `.freq` row pointers with composition-based
     statistics, `L_pin` `.rps` row pointers for RPSBLAST's rescale without them, of NCBI's `R + 1`
     (`blast_traceback.c:968-982`; entry `R`, the row after the rows, read in the file's mapping): the
-    offset plus `L_pin` above `R + 1`, or a column of row `R` past the file's last page (probe
-    A_P23x3L_q3, SIGSEGV; row `db.rps.rej.odd.p23x3l.q3`). READ is "reads past its rows".
+    offset plus `L_pin` above `R + 1`, or a column of row `R` past the file's last page that NCBI
+    reads (the rescale and the `.freq` rows read all of its columns; RPSTBLASTN without
+    composition-based statistics reads the mapped row `R` one letter at a time, so only a letter its
+    alignment reads there counts) (probe A_P23x3L_q3, SIGSEGV; row `db.rps.rej.odd.p23x3l.q3`).
+    READ is "reads past its rows".
   - B, the composition with composition-based statistics (`Blast_ReadAaComposition`,
     `composition_adjustment.c:1162-1199`): a letter of 28 or more, such as the packed bytes of a
     nucleotide-coded profile (B_SC_q2, SIGSEGV; rows `db.rps.rej.odd.sc.q2`, `.sc.q1q2`, `.sc2v.q2`,

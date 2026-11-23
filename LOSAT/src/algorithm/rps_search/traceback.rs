@@ -9,7 +9,7 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::engine::RpsQuery;
-use super::profile::{ProfileRead, TracebackProfile};
+use super::profile::{ProfileRead, RowAfter, TracebackProfile};
 use super::redo::RpsQueryStats;
 use super::rescale::{residue_probabilities, rps_rescale_pssm};
 use super::volumes::ProfileLetters;
@@ -32,7 +32,7 @@ pub(crate) struct RpsTraceback<'a> {
     pub(crate) offsets: &'a [i32],
     /// NCBI's row after the rows (`RpsVolumeFiles::row_after_rows`), the last entry of its row
     /// pointers (`TracebackProfile::rows`, `mapped_rows`).
-    pub(crate) row_after_rows: [Option<i32>; 28],
+    pub(crate) row_after_rows: RowAfter,
     /// The `.psq` letters of the profiles, read when a list first needs them
     /// (`ProfileLetters`; `TracebackProfile` reads them).
     pub(crate) letters: &'a ProfileLetters<'a>,
@@ -322,7 +322,7 @@ impl RpsTraceback<'_> {
                 // The profile's rows at the database's scale, without the rescale and the K of
                 // composition-based statistics 0 (blast_traceback.c:1184-1198); each HSP aligns
                 // on its frame after the containment test (blast_traceback.c:402-417).
-                let rows = profile.mapped_rows(self.rows, &self.row_after_rows, self.alphabet);
+                let rows = profile.mapped_rows(self.rows, &self.row_after_rows);
                 let reads = profile.trace_reads(ProfileRead::StartInMapping);
                 let (hsps, stat_length) = trace_hsps(
                     &TraceHsps {

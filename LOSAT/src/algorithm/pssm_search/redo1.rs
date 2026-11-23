@@ -20,7 +20,7 @@ use anyhow::Result;
 use super::evalue::EvalueStats;
 use super::gapalign::{pssm_gapped_alignment_with_traceback, PssmGapScratch};
 use super::rows::QueryPssm;
-use super::traceback0::final_hsp;
+use super::traceback0::{final_hsp, TraceReads};
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{
     fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
@@ -151,19 +151,9 @@ pub(crate) struct RedoRun<'a> {
     /// rows' best scores), and the first sum that was above it.
     bound_check: bool,
     bound_exceeded: Option<i64>,
-    /// RPS-BLAST: whether the redo's reads of its profile are asked where NCBI's leave the data
-    /// (`with_profile_reads`), and the first that did.
-    profile_reads: bool,
-    profile_fault: std::cell::Cell<Option<RedoFault>>,
-}
-
-/// Where an RPS-BLAST redo's read of its profile leaves NCBI's data (`RedoRun::with_profile_reads`;
-/// `rps_search::profile` reads C and D): the near-identical walk past its copy of the consensus or
-/// past its word table, or an alignment that starts at or past the matrix's rows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RedoFault {
-    Copy,
-    Start,
+    /// RPS-BLAST: what the redo asks of its profile where NCBI's reads leave the data
+    /// (`with_profile_reads`).
+    profile_reads: Option<&'a dyn TraceReads>,
 }
 
 /// `BlastCompo_Alignment`: an incoming (preliminary) alignment, scaled, or a redone one with its
@@ -296,8 +286,7 @@ impl<'a> RedoRun<'a> {
             scratch,
             bound_check: false,
             bound_exceeded: None,
-            profile_reads: false,
-            profile_fault: std::cell::Cell::new(None),
+            profile_reads: None,
         }
     }
 
@@ -338,24 +327,15 @@ impl<'a> RedoRun<'a> {
     }
 
     /// The run of an RPS-BLAST profile, whose `.psq` letters (the redo's query) can be fewer than
-    /// the columns of its preliminary alignments: the near-identical walk reads the query's copy
-    /// as NCBI's does (`test_near_identical_on_copy`) and an alignment that would start at or past
-    /// the matrix's rows is not made; the first such read is `profile_fault`'s (LOSAT's refusal
-    /// of the query batch). With the letters of a consistent profile neither happens.
-    pub(crate) fn with_profile_reads(mut self) -> Self {
-        self.profile_reads = true;
+    /// the columns of its preliminary alignments, asking `reads` (the profile's, as the traceback
+    /// without composition-based statistics does): the near-identical walk reads the query's copy
+    /// as NCBI's does (`test_near_identical_on_copy`) and reports a read past it
+    /// (`TraceReads::copy_read_past`), and each alignment's start is asked before it is made
+    /// (`TraceReads::starts`); the profile keeps the first such read (LOSAT's refusal of the query
+    /// batch). With the letters of a consistent profile neither happens.
+    pub(crate) fn with_profile_reads(mut self, reads: &'a dyn TraceReads) -> Self {
+        self.profile_reads = Some(reads);
         self
-    }
-
-    /// The first read of `with_profile_reads` that left NCBI's data.
-    pub(crate) fn profile_fault(&self) -> Option<RedoFault> {
-        self.profile_fault.get()
-    }
-
-    fn record(&self, fault: RedoFault) {
-        if self.profile_fault.get().is_none() {
-            self.profile_fault.set(Some(fault));
-        }
     }
 
     /// `s_TestNearIdentical` of the window's first alignment `align` on the subject `subject`
@@ -366,7 +346,7 @@ impl<'a> RedoRun<'a> {
         subject: &BlastCompoSequenceData,
         align: &BlastCompoAlignment,
     ) -> bool {
-        if !self.profile_reads {
+        let Some(reads) = self.profile_reads else {
             return test_near_identical(
                 subject,
                 0,
@@ -375,7 +355,7 @@ impl<'a> RedoRun<'a> {
                 Some(&self.query_words),
                 align,
             );
-        }
+        };
         let read_past = std::cell::Cell::new(false);
         let identical = test_near_identical_on_copy(
             subject,
@@ -385,22 +365,20 @@ impl<'a> RedoRun<'a> {
             align,
         );
         if read_past.get() {
-            self.record(RedoFault::Copy);
+            reads.copy_read_past();
         }
         identical
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1924-1946
-    /// Whether the redone alignment of the preliminary HSP `hsp` starts within the matrix's rows
-    /// (`s_RedoOneAlignment` starts at its `gapped_start`, whose row NCBI's left extension reads
-    /// first); else, with `with_profile_reads`, the fault is recorded and the alignment not made.
+    /// Whether the redone alignment of the preliminary HSP `hsp` is made (`s_RedoOneAlignment`
+    /// starts at its `gapped_start`, whose row NCBI's left extension reads first): with
+    /// `with_profile_reads`, as the profile answers its start (`TraceReads::starts`, read D: not
+    /// at or past the matrix's `L_pin` rows, nor after the profile's first fault).
     fn starts_in_rows(&self, hsp: &BlastpPreliminaryHsp) -> bool {
-        let inside = usize::try_from(hsp.gapped_query_start)
-            .is_ok_and(|start| start < self.matrix.rows.len());
-        if !inside && self.profile_reads {
-            self.record(RedoFault::Start);
-        }
-        inside || !self.profile_reads
+        self.profile_reads.is_none_or(|reads| {
+            reads.starts(usize::try_from(hsp.gapped_query_start).unwrap_or(usize::MAX))
+        })
     }
 
     /// The matrix and the alignment scratch, for the next run (RPS-BLAST redoes one profile

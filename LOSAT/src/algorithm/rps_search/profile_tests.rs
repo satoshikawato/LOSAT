@@ -17,7 +17,7 @@ fn letters(n: usize) -> Vec<u8> {
 #[test]
 fn the_rows_from_the_offset_end_at_the_row_after_the_rows() {
     let rows = rows();
-    let after = [Some(7); BLASTAA_SIZE];
+    let after = RowAfter::new([Some(7); BLASTAA_SIZE]);
     // c3 with 21 letters for 20 columns: its own rows and its sentinel row.
     let own = letters(21);
     let profile = TracebackProfile::new(2, &OFFSETS, &own, "RPSBLAST");
@@ -33,8 +33,9 @@ fn the_rows_from_the_offset_end_at_the_row_after_the_rows() {
     assert_eq!(read[21], [7; BLASTAA_SIZE]);
     assert_eq!(profile.fault(), None);
     // Its letter 27 past the file's last page: a 28-column read faults, a 26-column one does not.
-    let mut past = after;
+    let mut past = [Some(7); BLASTAA_SIZE];
     past[27] = None;
+    let past = RowAfter::new(past);
     assert!(profile.rows(&rows, &past, 26).is_ok());
     let error = profile.rows(&rows, &past, 28).unwrap_err().to_string();
     assert_eq!(profile.fault(), Some(ProfileRead::Rows));
@@ -71,16 +72,16 @@ fn a_letter_past_the_composition_tables_is_refused_with_the_profiles_numbers() {
     assert_eq!(profile.fault(), None);
 }
 
-// The redo's reads C and D (`RedoRun::profile_fault`) and the first read kept.
+// The redo's reads C and D (`RedoRun::with_profile_reads` asks the profile's `trace_reads`) and
+// the first read kept.
 #[test]
 fn the_redos_reads_name_the_copy_or_the_start_and_the_first_stays() {
     let own = letters(10);
     let profile = TracebackProfile::new(0, &OFFSETS, &own, "RPSBLAST");
-    assert!(profile.redo_fault(None).is_ok());
-    let error = profile
-        .redo_fault(Some(RedoFault::Copy))
-        .unwrap_err()
-        .to_string();
+    let reads = profile.trace_reads(ProfileRead::Start);
+    assert!(profile.check().is_ok());
+    reads.copy_read_past();
+    let error = profile.check().unwrap_err().to_string();
     assert!(
         error.contains("10 letters in .psq for 22 columns"),
         "{error}"
@@ -89,20 +90,15 @@ fn the_redos_reads_name_the_copy_or_the_start_and_the_first_stays() {
         error.contains("traceback reads past its copy of the consensus"),
         "{error}"
     );
-    let error = profile
-        .redo_fault(Some(RedoFault::Start))
-        .unwrap_err()
-        .to_string();
+    // After the first read no alignment is made, and the first read stays.
+    assert!(!reads.starts(0));
+    assert!(!reads.starts(10));
     assert_eq!(profile.fault(), Some(ProfileRead::Copy));
-    assert!(
-        error.contains("reads past its copy of the consensus"),
-        "{error}"
-    );
     let profile = TracebackProfile::new(0, &OFFSETS, &own, "RPSBLAST");
-    let error = profile
-        .redo_fault(Some(RedoFault::Start))
-        .unwrap_err()
-        .to_string();
+    let reads = profile.trace_reads(ProfileRead::Start);
+    assert!(!reads.starts(10));
+    reads.copy_read_past();
+    let error = profile.check().unwrap_err().to_string();
     assert!(
         error.contains("traceback starts an alignment past the consensus"),
         "{error}"
@@ -139,21 +135,83 @@ fn the_mapped_rows_read_through_the_row_after_the_rows() {
     let rows = rows();
     let own = letters(20);
     let profile = TracebackProfile::new(2, &OFFSETS, &own, "RPSTBLASTN");
-    let after = [Some(7); BLASTAA_SIZE];
-    let mapped = profile.mapped_rows(&rows, &after, 28);
+    let after = RowAfter::new([Some(7); BLASTAA_SIZE]);
+    let mapped = profile.mapped_rows(&rows, &after);
     assert_eq!(mapped.len(), 20);
     assert_eq!(mapped.row(0), &[42; BLASTAA_SIZE]);
     assert_eq!(mapped.row(20), &[62; BLASTAA_SIZE]);
     assert_eq!(mapped.row(21), &[7; BLASTAA_SIZE]);
+    // A row after the rows inside the page is not read letter by letter.
+    assert!(!mapped.reads_by_letter(mapped.row(21)));
     assert_eq!(profile.fault(), None);
     assert_eq!(mapped.row(22), &[0; BLASTAA_SIZE]);
     assert_eq!(profile.fault(), Some(ProfileRead::Rows));
+}
+
+// blast_gapalign.c:548-578 (cited at `MappedRows::reads_by_letter`): the row after the rows whose
+// letter 3 lies past the `.rps` file's last page faults only where the alignment reads letter 3;
+// its other letters are the file's.
+#[test]
+fn the_row_after_the_rows_past_the_page_is_read_letter_by_letter() {
+    let rows = rows();
+    let own = letters(20);
+    let mut straddle = [Some(7); BLASTAA_SIZE];
+    straddle[3] = None;
+    let after = RowAfter::new(straddle);
     let profile = TracebackProfile::new(2, &OFFSETS, &own, "RPSTBLASTN");
-    let mut past = after;
-    past[3] = None;
-    let mapped = profile.mapped_rows(&rows, &past, 28);
-    assert_eq!(mapped.row(21), &[0; BLASTAA_SIZE]);
+    let mapped = profile.mapped_rows(&rows, &after);
+    let row = mapped.row(21);
+    assert_eq!(row[2], 7);
+    assert_eq!(row[3], 0);
+    assert!(mapped.reads_by_letter(row));
+    assert!(!mapped.reads_by_letter(mapped.row(20)));
+    mapped.letters_read(row, [1u8, 2, 4, 25].into_iter());
+    assert_eq!(profile.fault(), None);
+    mapped.letters_read(row, [1u8, 3].into_iter());
     assert_eq!(profile.fault(), Some(ProfileRead::Rows));
+    let error = profile.check().unwrap_err().to_string();
+    assert!(error.contains("traceback reads past its rows"), "{error}");
+}
+
+// The gapped alignment through the row after the rows (profile 2 with 22 letters: 21 rows of the
+// volume from its offset, then row R): letters inside the page give the alignment of the whole
+// row; a band with letter 3 (past the page) is read A.
+#[test]
+fn an_alignment_through_a_straddling_row_after_the_rows_reads_its_band_letters() {
+    use crate::algorithm::pssm_search::gapalign::{
+        pssm_gapped_alignment_with_traceback, PssmGapScratch,
+    };
+    let rows = rows();
+    let own = letters(22);
+    let mut straddle = [Some(7); BLASTAA_SIZE];
+    straddle[3] = None;
+    let align = |after: &RowAfter, subject: &[u8]| {
+        let profile = TracebackProfile::new(2, &OFFSETS, &own, "RPSTBLASTN");
+        let mapped = profile.mapped_rows(&rows, after);
+        let mut scratch = PssmGapScratch::new();
+        let traced = pssm_gapped_alignment_with_traceback(
+            &mapped,
+            subject,
+            subject.len(),
+            18,
+            2,
+            11,
+            1,
+            30,
+            &mut scratch,
+        );
+        (traced, profile.fault())
+    };
+    let subject = [1u8; 12];
+    let (whole, fault) = align(&RowAfter::new([Some(7); BLASTAA_SIZE]), &subject);
+    assert_eq!(fault, None);
+    // The alignment reaches the row after the rows (profile position 21).
+    assert_eq!(whole.query_stop, 22);
+    let (inside, fault) = align(&RowAfter::new(straddle), &subject);
+    assert_eq!(fault, None);
+    assert_eq!(inside, whole);
+    let (_, fault) = align(&RowAfter::new(straddle), &[3u8; 12]);
+    assert_eq!(fault, Some(ProfileRead::Rows));
 }
 
 // blast_hits.c:796-812 (cited at `ProfileTraceReads::traced`), read E: a profile letter of 28 or

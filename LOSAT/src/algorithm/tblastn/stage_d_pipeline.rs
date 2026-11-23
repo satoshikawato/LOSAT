@@ -1395,7 +1395,20 @@ fn run_local_search_with_redo<R: MatchRedo>(
         )
     };
     let options_searchsp = profile.subject_set.searchsp;
-    let average_subject_length = profile.subject_set.average_subject_length(&subjects);
+    // The query-set inputs of the batch's setup, which the chunks of a split batch take too.
+    let inputs = QuerySetInputs {
+        profile,
+        scoring,
+        gapped,
+        ungapped: &ungapped,
+        gumbel: gumbel.as_ref(),
+        total_nt: stats_nt,
+        num_subjects,
+        min_subject_length: min_subject_length.unwrap_or(0),
+        compo_adjust_mode,
+        do_sum_stats,
+        average_subject_length: profile.subject_set.average_subject_length(&subjects),
+    };
     let QuerySetSetup {
         working_frames,
         contexts,
@@ -1405,19 +1418,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
         recipe,
     } = query_set_setup(
         queries,
-        QuerySetInputs {
-            profile,
-            scoring,
-            gapped,
-            ungapped: &ungapped,
-            gumbel: gumbel.as_ref(),
-            total_nt: stats_nt,
-            num_subjects,
-            min_subject_length: min_subject_length.unwrap_or(0),
-            compo_adjust_mode,
-            do_sum_stats,
-            average_subject_length,
-        },
+        inputs,
         options_searchsp.as_ref().map(std::slice::from_ref),
         true,
         pool,
@@ -1438,24 +1439,12 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // takes the place of this one for a run that NCBI does not finish. It is not a batch failure,
     // so it comes before the reports of the batches before, which NCBI writes before it crashes
     // (line RG D1a-6, review A F2).
-    let protein_split =
-        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
-    // The batch that NCBI splits: the queries, or for the set-up alone NCBI's batch (`SetUpOnly`).
-    let batch_lengths: Vec<usize> = match setup_only.as_ref().map(|set_up| set_up.records) {
-        Some(records) => records.iter().map(|&(length, _)| length).collect(),
-        None => queries.iter().map(Vec::len).collect(),
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
-    // `blastp::blast_engine::psi_round::run_queries`)
-    // A PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's query through a
-    // `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split; the sizes above are
-    // still read, as NCBI's query splitter reads them first.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
-    // NCBI does not split the queries of an ungapped search either.
-    let split = match profile.pssm {
-        None if scoring.gapped => split_protein_batch(&batch_lengths, protein_split),
-        _ => None,
-    };
+    let split = BatchSplit::of(
+        queries,
+        setup_only.as_ref().map(|set_up| set_up.records),
+        &profile,
+        scoring.gapped,
+    )?;
     let setup_checks = || {
         preliminary_setup_checks(
             total_nt,
@@ -1471,7 +1460,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // whole on such a database fails with that read's error (`tblastn_app::search`), with
     // `-searchsp` or `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG
     // item X-short-bat fix 5), as a split batch's chunks meet it first (`SplitBatchSteps`).
-    if split.is_none()
+    if split.chunks.is_none()
         && valid_contexts.iter().any(|&valid| valid)
         && profile.subject_set.read_fails != Some(ReadFails::Setup)
     {
@@ -1495,37 +1484,18 @@ fn run_local_search_with_redo<R: MatchRedo>(
         trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
-    let chunk_inputs = QuerySetInputs {
-        profile,
-        scoring,
-        gapped,
-        ungapped: &ungapped,
-        gumbel: gumbel.as_ref(),
-        total_nt: stats_nt,
-        num_subjects,
-        min_subject_length: min_subject_length.unwrap_or(0),
-        compo_adjust_mode,
-        do_sum_stats,
-        average_subject_length,
-    };
     // The set-up alone (`set_up_batch`): no search. A batch with a valid context reads its
-    // subjects, one searched whole after the checks above, a split one where its chunks first get
-    // to that read (`split_batch_reads`).
+    // subjects, one searched whole after the checks above (`BatchSplit::set_up_reads`).
     if let Some(set_up) = setup_only {
         set_up.reads = valid_contexts.iter().any(|&valid| valid)
-            && match &split {
-                None => true,
-                Some(chunks) => split_batch_reads(
-                    queries,
-                    set_up.records,
-                    chunks,
-                    protein_split,
-                    &parameters,
-                    chunk_inputs,
-                    setup_checks(),
-                    pool,
-                )?,
-            };
+            && split.set_up_reads(
+                queries,
+                set_up.records,
+                &parameters,
+                inputs,
+                setup_checks,
+                pool,
+            )?;
         return Ok(Vec::new());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
@@ -1545,10 +1515,10 @@ fn run_local_search_with_redo<R: MatchRedo>(
     if !valid_contexts.iter().any(|&valid| valid) {
         return no_hits();
     }
-    if split.is_none() && profile.subject_set.read_fails.is_some() {
+    if split.chunks.is_none() && profile.subject_set.read_fails.is_some() {
         return Err(DatabaseReadReached.into());
     }
-    if split.is_none() && subjects.count() == 0 {
+    if split.chunks.is_none() && subjects.count() == 0 {
         return no_hits();
     }
     // Diagnostic (LOSAT_TIMING): from here to the end of the batch's search (the preliminary
@@ -1623,7 +1593,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             total_nt,
         )
     });
-    let preliminary_hitlists = match split {
+    let preliminary_hitlists = match &split.chunks {
         None => run_preliminary_subjects(
             &PreliminaryInputs {
                 queries: &query_refs,
@@ -1655,11 +1625,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
         Some(chunks) => {
             let hitlists = split_preliminary_hitlists(
                 queries,
-                &chunks,
-                protein_split,
+                chunks,
+                split.sizes,
                 &parameters,
                 option_spaces.as_deref(),
-                chunk_inputs,
+                inputs,
                 setup_checks(),
                 subjects,
                 prelim_size,
@@ -2785,6 +2755,72 @@ impl std::fmt::Display for DatabaseReadReached {
 }
 
 impl std::error::Error for DatabaseReadReached {}
+
+/// NCBI's split of a query batch (`run_local_search_with_pool`): the sizes of NCBI's query
+/// splitter (`protein_query_split_sizes`) and the chunks of the batch (`split_protein_batch`;
+/// `None`: the batch is searched whole).
+struct BatchSplit {
+    sizes: SplitSizes,
+    chunks: Option<Vec<ProteinQueryChunk>>,
+}
+
+impl BatchSplit {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
+    // `blastp::blast_engine::psi_round::run_queries`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
+    /// The split of the batch whose records are `records` (for the set-up alone, NCBI's batch:
+    /// `SetUpOnly::records`), or else `queries`. A PSSM query (`-in_pssm`: `CPsiBlast` searches the
+    /// PSSM's query through a `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split;
+    /// the sizes are still read, as NCBI's query splitter reads them first. NCBI does not split the
+    /// queries of an ungapped search (`gapped` false) either.
+    fn of(
+        queries: &[Vec<u8>],
+        records: Option<&[BatchRecord]>,
+        profile: &LocalStageDProfile<'_>,
+        gapped: bool,
+    ) -> Result<Self> {
+        let sizes =
+            crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
+        let lengths: Vec<usize> = match records {
+            Some(records) => records.iter().map(|&(length, _)| length).collect(),
+            None => queries.iter().map(Vec::len).collect(),
+        };
+        let chunks = match profile.pssm {
+            None if gapped => split_protein_batch(&lengths, sizes),
+            _ => None,
+        };
+        Ok(Self { sizes, chunks })
+    }
+
+    /// Whether NCBI's search of the batch, which has a valid context, reads the subjects, for the
+    /// set-up of a batch without its search (`set_up_batch`, NCBI's batch `records`): a batch
+    /// searched whole does, after its setup checks, and a split one where its chunks first get to
+    /// that read (`split_batch_reads`, with the setup checks `setup_checks` and the batch's
+    /// parameters and query-set inputs).
+    fn set_up_reads(
+        &self,
+        queries: &[Vec<u8>],
+        records: &[BatchRecord],
+        batch_parameters: &LocalSubjectParameters,
+        inputs: QuerySetInputs<'_>,
+        setup_checks: impl FnOnce() -> Result<()>,
+        pool: Option<&SearchPool<'_>>,
+    ) -> Result<bool> {
+        match &self.chunks {
+            None => Ok(true),
+            Some(chunks) => split_batch_reads(
+                queries,
+                records,
+                chunks,
+                self.sizes,
+                batch_parameters,
+                inputs,
+                setup_checks(),
+                pool,
+            ),
+        }
+    }
+}
 
 /// The letters of the part `part` of the query `query` (of `queries`) as a chunk of a split batch
 /// reads them: with lower-case masking, the masks of its whole record restricted to the part

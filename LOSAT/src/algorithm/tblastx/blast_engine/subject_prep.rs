@@ -70,7 +70,7 @@ pub(super) fn subject_frames(
     // letters (`Subjects::x_letter_frames`).
     let x_kept;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
-    // if (subject->length < min_subj_seq_length) { ... continue; }
+    // Skip subjects shorter than the minimum translatable length (`min_subj_seq_length`).
     // Statistics include all records, including ones too short to search: such a subject
     // gets no frame (`None`). A `-db` sequence's length is read with its block, in the
     // frames' one look-up (it holds no length per sequence).

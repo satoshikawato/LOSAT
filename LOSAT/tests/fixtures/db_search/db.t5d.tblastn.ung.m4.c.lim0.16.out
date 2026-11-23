@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/t5/ndo5_same tests/db_search/t5/nds5</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-05</expect>
+          <filter>L;</filter>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>q0</query-title>
+              <query-len>120</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gb|DUP00005.1|</id>
+                      <accession>DUP00005</accession>
+                      <title>subject record</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>360</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>326.106</bit-score>
+                      <score>684</score>
+                      <evalue>2.9396e-94</evalue>
+                      <identity>120</identity>
+                      <positive>120</positive>
+                      <query-from>1</query-from>
+                      <query-to>120</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>360</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>120</align-len>
+                      <gaps>0</gaps>
+                      <qseq>CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL</qseq>
+                      <hseq>CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL</hseq>
+                      <midline>CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>326.106</bit-score>
+                      <score>684</score>
+                      <evalue>2.9396e-94</evalue>
+                      <identity>120</identity>
+                      <positive>120</positive>
+                      <query-from>1</query-from>
+                      <query-to>120</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>360</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>120</align-len>
+                      <gaps>0</gaps>
+                      <qseq>CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL</qseq>
+                      <hseq>CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL</hseq>
+                      <midline>CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>2</db-num>
+                  <db-len>720</db-len>
+                  <hsp-len>16</hsp-len>
+                  <eff-space>21632</eff-space>
+                  <kappa>0.13592981972493</kappa>
+                  <lambda>0.327549975459244</lambda>
+                  <entropy>0.478676527494354</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

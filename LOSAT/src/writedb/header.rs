@@ -93,26 +93,26 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
 /// appended to `bad`.
 pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + title.len());
-    // Blast-def-line-set ::= SEQUENCE OF Blast-def-line
+    // Outer `Blast-def-line-set` sequence of `Blast-def-line` entries.
     open(&mut out, TAG_SEQUENCE);
-    // Blast-def-line ::= SEQUENCE
+    // Single `Blast-def-line` sequence.
     open(&mut out, TAG_SEQUENCE);
-    // title VisibleString OPTIONAL
+    // Optional `title` field (VisibleString).
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TITLE);
     write_visible_string(&mut out, title, bad);
     close(&mut out);
-    // seqid SEQUENCE OF Seq-id
+    // `seqid` list of `Seq-id` entries.
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_SEQID);
     open(&mut out, TAG_SEQUENCE);
-    // Seq-id ::= CHOICE { ..., general Dbtag, ... }
+    // `Seq-id` choice variant `general` (`Dbtag`).
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | SEQID_GENERAL);
-    // Dbtag ::= SEQUENCE { db VisibleString, tag Object-id }
+    // `Dbtag` sequence containing `db` (VisibleString) and `tag` (`Object-id`).
     open(&mut out, TAG_SEQUENCE);
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DBTAG_DB);
     write_visible_string(&mut out, b"BL_ORD_ID", &mut Vec::new());
     close(&mut out);
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DBTAG_TAG);
-    // Object-id ::= CHOICE { id INTEGER, str VisibleString }
+    // `Object-id` choice variant `id` (integer; alternative is `str`).
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | OBJECT_ID_ID);
     write_int4(&mut out, oid as i32);
     close(&mut out);
@@ -121,7 +121,7 @@ pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleCha
     close(&mut out);
     close(&mut out);
     close(&mut out);
-    // taxid INTEGER OPTIONAL
+    // Optional `taxid` integer field.
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TAXID);
     write_int4(&mut out, taxid);
     close(&mut out);

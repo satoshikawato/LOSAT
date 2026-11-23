@@ -23,7 +23,7 @@ fn compute_eff_searchsp_tblastx(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:734-847;
-// blast_stat.c:5042-5126: BLAST_ComputeLengthAdjustment(...).
+// blast_stat.c:5042-5126 (`BLAST_ComputeLengthAdjustment`).
 // Expected numbers were evaluated from the extracted NCBI C functions.
 #[test]
 fn complete_subject_set_effective_lengths() {
@@ -89,12 +89,9 @@ fn the_sum_statistics_cutoff_is_at_least_one() {
 fn test_gap_trigger_raw_score() {
     let ungapped = blosum62_ungapped();
 
-    // NCBI: gap_trigger = (Int4)((22.0 * LN2 + ln(0.134)) / 0.3176)
-    // = (Int4)((22.0 * 0.693147 + (-2.0099)) / 0.3176)
-    // = (Int4)((15.249 - 2.0099) / 0.3176)
-    // = (Int4)(13.239 / 0.3176)
-    // = (Int4)(41.69)
-    // = 41 (truncated)
+    // Expected gap_trigger for 22.0 bits with Lambda = 0.3176 and K = 0.134:
+    // (22.0 * ln(2) + ln(0.134)) / 0.3176 = (15.249 - 2.0099) / 0.3176 = 13.239 / 0.3176 = 41.69,
+    // which truncates toward zero to 41.
     let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
     assert_eq!(gap_trigger, 41, "gap_trigger should be 41 (truncated)");
 }
@@ -176,7 +173,7 @@ fn a_cutoff_whose_quotient_overflows_the_double_is_finite() {
 fn test_x_drop_raw_score_blosum62() {
     let ungapped = blosum62_ungapped();
 
-    // NCBI: x_dropoff_init = (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda))
+    // Initial ungapped X-drop scales `ceil` of `x_dropoff` in bits times `NCBIMATH_LN2` over `Lambda` by `scale_factor`.
     // For BLOSUM62: ceil(7.0 * 0.693147 / 0.3176) = ceil(15.27) = 16
     let x_drop = x_drop_raw_score(7.0, &ungapped, 1.0);
     assert_eq!(x_drop, 16, "x_drop should be 16 for BLOSUM62 with 7.0 bits");
@@ -230,7 +227,7 @@ fn test_cutoff_score_for_update_tblastx() {
     let ungapped = blosum62_ungapped();
 
     // NCBI BlastInitialWordParametersUpdate for tblastx ungapped path
-    // Uses CUTOFF_E_TBLASTX = 1e-300 and searchsp = MIN(q_aa, s_nucl) * s_nucl
+    // Uses `CUTOFF_E_TBLASTX` (1e-300) and search space min(`q_aa`, `s_nucl`) times `s_nucl`.
     let query_len_aa = 500;
     let subject_len_nucl = 3000; // NUCLEOTIDE length, NOT AA!
     let gap_trigger = gap_trigger_raw_score(22.0, &ungapped); // 41
@@ -374,7 +371,7 @@ fn test_cutoff_score_max_long_sequence() {
     // For long sequences, cutoff_score_max should typically be > gap_trigger (41)
     // because eff_searchsp is very large
     // Note: cutoff_score_max may be > gap_trigger for very long sequences
-    // The final cutoff will be MIN(update_cutoff, gap_trigger, cutoff_score_max)
+    // The final cutoff is the minimum of `update_cutoff`, `gap_trigger`, and `cutoff_score_max`.
 }
 
 #[test]
@@ -498,7 +495,7 @@ fn test_db_length_integer_division_edge_cases() {
 #[test]
 fn test_db_length_matches_ncbi_integer_division() {
     // Verify that Rust's integer division matches C's integer division behavior
-    // NCBI: Int8 db_length; db_length = db_length/3;
+    // NCBI divides `db_length` (an `Int8`) by 3 using integer division.
     // C integer division truncates toward zero (same as Rust for positive values)
     let test_values = vec![
         600_000i64,   // 200000
@@ -540,8 +537,8 @@ fn test_cutoff_for_update_very_long_sequence() {
     let cutoff_score_max = cutoff_score_max_for_tblastx(eff_lengths.eff_searchsp, 10.0, &ungapped);
 
     // Verify searchsp calculation doesn't overflow
-    // searchsp = MIN(query_len_aa, subject_len_nucl) * subject_len_nucl
-    // = MIN(3,333,333, 10,000,000) * 10,000,000
+    // Search space is `min(query_len_aa, subject_len_nucl) * subject_len_nucl`
+    // = min(3,333,333, 10,000,000) * 10,000,000
     // = 3,333,333 * 10,000,000 = 33,333,330,000,000
     let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
     let searchsp = min_len * (subject_len_nucl as u64);

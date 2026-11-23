@@ -75,7 +75,7 @@ pub fn align_region(
     // For true local alignment, we don't initialize leading gaps - they would be negative
     // and we'd rather start fresh (score 0) than pay gap penalties
     prev_m[BAND_WIDTH] = 0;
-    // tb_state[BAND_WIDTH] = TB_STOP; // Already initialized to STOP
+    // `tb_state` at `BAND_WIDTH` is already initialized to `TB_STOP`.
 
     // Process each row
     for i in 1..=m {

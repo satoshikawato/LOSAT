@@ -1263,9 +1263,9 @@ pub fn build_pv_direct_lookup(
                     }
 
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-                    // Adds ALL hits without any frequency limit - no query-side filtering
-                    // if (backbone[index] == NULL) { initialize new chain }
-                    // else { use existing chain, realloc if full }
+                    // Adds ALL hits without any frequency limit - no query-side filtering:
+                    // initializes a new chain when the backbone slot is null, or appends to the
+                    // existing chain (reallocating when full).
                     let idx = current_kmer as usize;
                     if idx < table_size {
                         counts[idx] = counts[idx].saturating_add(1);

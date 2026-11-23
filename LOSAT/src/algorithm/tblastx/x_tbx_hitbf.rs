@@ -138,6 +138,23 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
     wordsize: i32,
     mut rare: impl FnMut(usize, u32, u32),
 ) {
+    if X_FX_TBXHIT >= 1 {
+        // SAFETY: the caller's bounds, passed on.
+        unsafe {
+            match X_FX_TBXHIT {
+                2 => x_hits_fx::<C, PF, 2, true>(
+                    diag_ptr, pairs, n, cells, width, window, wordsize, rare,
+                ),
+                3 => x_hits_fx::<C, PF, 4, true>(
+                    diag_ptr, pairs, n, cells, width, window, wordsize, rare,
+                ),
+                _ => x_hits_fx::<C, PF, 1, false>(
+                    diag_ptr, pairs, n, cells, width, window, wordsize, rare,
+                ),
+            }
+        }
+        return;
+    }
     let window_u = window as u32;
     // window - wordsize, at least 1 (`fits`): the length of the candidate range of diff - wordsize.
     let k = window.wrapping_sub(wordsize) as u32;
@@ -194,6 +211,144 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
         };
         // SAFETY: as above.
         unsafe { (*entry).set_raw_bits(next) };
+    }
+}
+
+/// PROBE (exp/fx-tbxhit, line FX s4): the form of the native `x_hits_bf`, fixed at build time
+/// (LOSAT_FXTBXHIT_BUILD, a digit; 0 or unset = dev's): 1 = `x_hit_fx` (the cell's next value
+/// stored before the candidate test, a candidate's cell written back unchanged; unmasked, the
+/// cell's address from the 64-bit q - s) in dev's one loop; 2 = `x_hit_fx` in runs of two hits a
+/// step, the per-hit body called from one place after the run (as `x_hits_bf_split`); 3 = 2 with
+/// four hits a step.
+pub(super) const X_FX_TBXHIT: u8 = match option_env!("LOSAT_FXTBXHIT_BUILD") {
+    Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
+    None => 0,
+};
+
+/// PROBE (LOSAT_FXTBXHIT_BUILD >= 1): one hit of `x_hits_bf`: false (its cell holding the word
+/// it held) for a flag-1 cell or a candidate, else its cell's next value written and true. For a
+/// flag-0 cell (raw word L in [0, 2^29), s below 2^29; module doc) s >= L is d >= 0 (too far:
+/// s + window), else the word read back; a candidate (d in [-k, 0)) has d < 0, so the store before
+/// its test writes the word it read. `base` is the table's address minus `cells.lo_exact()` cells
+/// (unmasked: the cell of (q, s) is exactly q - s - lo_exact, in [0, width)).
+///
+/// SAFETY: as `x_hits_bf` for the hit at `p`, and with `PF` the entry X_PREFETCH_AHEAD after it.
+#[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
+unsafe fn x_hit_fx<C: XCells, const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    base: *mut DiagStruct,
+    p: *const OffsetPair,
+    cells: C,
+    window_u: u32,
+    k: u32,
+) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if PF {
+        // SAFETY: the caller's bound (X_PREFETCH_AHEAD initialized entries after the batch).
+        let ahead = unsafe { p.add(X_PREFETCH_AHEAD).read() };
+        let at = if C::MASKED {
+            diag_ptr.wrapping_add(cells.cell(ahead.q_off, ahead.s_off))
+        } else {
+            base.wrapping_offset(ahead.q_off as isize - ahead.s_off as isize)
+        };
+        // SAFETY: a prefetch never faults.
+        unsafe {
+            core::arch::x86_64::_mm_prefetch(at as *const i8, core::arch::x86_64::_MM_HINT_T0)
+        };
+    }
+    // SAFETY: the caller's bound.
+    let OffsetPair {
+        q_off: query_offset,
+        s_off: subject_offset,
+    } = unsafe { p.read() };
+    let entry = if C::MASKED {
+        // SAFETY: a masked cell is at most the mask, width - 1.
+        unsafe { diag_ptr.add(cells.cell(query_offset, subject_offset)) }
+    } else {
+        base.wrapping_offset(query_offset as isize - subject_offset as isize)
+    };
+    // SAFETY: the cell is below width (the caller's bound).
+    let raw = unsafe { (*entry).raw_bits() };
+    if (raw as i32) < 0 {
+        return false;
+    }
+    let next = if subject_offset >= raw {
+        subject_offset.wrapping_add(window_u)
+    } else {
+        raw
+    };
+    // SAFETY: as above.
+    unsafe { (*entry).set_raw_bits(next) };
+    subject_offset.wrapping_sub(raw).wrapping_add(k) >= k
+}
+
+/// PROBE (LOSAT_FXTBXHIT_BUILD >= 1): `x_hits_bf` by `x_hit_fx`, `STEP` hits a step (a
+/// down-counter), the rest one by one; with `SPLIT` the per-hit body runs from one place after the
+/// run that stopped at its hit, else in the loop (dev's one loop).
+///
+/// SAFETY: as `x_hits_bf`.
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+unsafe fn x_hits_fx<C: XCells, const PF: bool, const STEP: usize, const SPLIT: bool>(
+    diag_ptr: *mut DiagStruct,
+    pairs: *const OffsetPair,
+    n: usize,
+    cells: C,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    mut rare: impl FnMut(usize, u32, u32),
+) {
+    let _ = width;
+    let window_u = window as u32;
+    let k = window.wrapping_sub(wordsize) as u32;
+    let base = diag_ptr.wrapping_offset(cells.lo_exact().wrapping_neg());
+    // SAFETY: the caller's bound (n entries).
+    let end = unsafe { pairs.add(n) };
+    let mut p = pairs;
+    if !SPLIT {
+        while p < end {
+            // SAFETY: p < end.
+            if !unsafe { x_hit_fx::<C, PF>(diag_ptr, base, p, cells, window_u, k) } {
+                // SAFETY: p < end.
+                let pair = unsafe { p.read() };
+                rare(cells.cell(pair.q_off, pair.s_off), pair.q_off, pair.s_off);
+            }
+            // SAFETY: p < end, so p + 1 <= end.
+            p = unsafe { p.add(1) };
+        }
+        return;
+    }
+    loop {
+        // SAFETY: pairs <= p <= end; every hit read is below end.
+        let at = 'run: {
+            unsafe {
+                let mut steps = end.offset_from(p) as usize / STEP;
+                while steps != 0 {
+                    for j in 0..STEP {
+                        if !x_hit_fx::<C, PF>(diag_ptr, base, p.add(j), cells, window_u, k) {
+                            break 'run p.add(j);
+                        }
+                    }
+                    p = p.add(STEP);
+                    steps -= 1;
+                }
+                while p < end {
+                    if !x_hit_fx::<C, PF>(diag_ptr, base, p, cells, window_u, k) {
+                        break 'run p;
+                    }
+                    p = p.add(1);
+                }
+            }
+            return;
+        };
+        // SAFETY: at < end, a hit the run left for `rare` (its cell holding the word it held).
+        let pair = unsafe { at.read() };
+        rare(cells.cell(pair.q_off, pair.s_off), pair.q_off, pair.s_off);
+        // SAFETY: at < end, so at + 1 <= end.
+        p = unsafe { at.add(1) };
     }
 }
 

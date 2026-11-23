@@ -441,6 +441,13 @@ pub(super) trait XCells: Copy {
     fn of(lo: u32, mask: u32) -> Self;
     /// The cell of hit (q, s).
     fn cell(self, query_offset: u32, subject_offset: u32) -> usize;
+    /// PROBE (exp/fx-tbxhit, line FX s4): `XUnmasked`'s lowest raw diagonal as an exact integer
+    /// (q_min - (s_len - 1) lies inside i32: query offsets are NCBI's Int4), so that the cell of
+    /// (q, s) is exactly q - s - lo_exact; 0 for `XMasked` (unused).
+    #[inline(always)]
+    fn lo_exact(self) -> isize {
+        0
+    }
 }
 
 /// The unmasked cells: q - s - lo (u32 wrapping).
@@ -460,6 +467,10 @@ impl XCells for XUnmasked {
         query_offset
             .wrapping_sub(subject_offset)
             .wrapping_sub(self.lo) as usize
+    }
+    #[inline(always)]
+    fn lo_exact(self) -> isize {
+        self.lo as i32 as isize
     }
 }
 

@@ -5243,6 +5243,7 @@ fn check_tabular_lookups(
                 Some((ordinals, reader)) => crate::report::tabular::failed_database_subject(
                     reader.oid_map().oid(ordinals[s_idx]),
                     report.database_loads.thrown(s_idx),
+                    report.database_parsed.get(s_idx).and_then(Option::as_deref),
                 ),
                 None => crate::report::tabular::failed_record_title(
                     s_idx,

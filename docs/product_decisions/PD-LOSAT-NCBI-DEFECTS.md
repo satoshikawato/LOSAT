@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.91
+- Version: 1.92
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -502,7 +502,12 @@
   at the merge of dev that brought psiblast line item PS10a's 1.82, then 1.89 at the merge of dev that
   brought 1.83 to 1.88 (line NP items M4b-AX, O4b2-2 and M4b-3c, psiblast line items PS10c and PS10d, line RG
   item D1c-1), then 1.91 at the merge of dev that brought line NP item M4b-T2's 1.89 and line RG
-  item T5d's 1.90)
+  item T5d's 1.90);
+  1.92 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
+  chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
+  every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
+  in the class of 1.37 and of its `-show_gis` description line, whose GI NCBI never sets; line
+  RG-KB item 12, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1825,6 +1830,40 @@ file would differ, and NCBI's programs still could not open the database).
   NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
+- A database sequence whose Seq-align id is a pdb id that its Seq-id handle holds with another
+  chain (version 1.92, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07). The handle normalizes a pdb id (`CSeq_id_PDB_Info::Normalize`,
+  `seq_id_tree.cpp:3381-3464`): where it rebuilds the id (a release date that normalizes, a
+  lower-case letter in the molecule, or a chain and chain-id that disagree) the chain becomes the
+  first byte of the chain-id, or the chain's low byte, read back as a signed char, and `GetSeqId`
+  (`:3293-3346`) gives back the stored id with that chain. NCBI's data loader looks the Seq-align
+  id up as that Seq-id and serves the sequence only where one of its stored ids compares equal to
+  it (`bdbloader.cpp:386-431`); `CPDB_seq_id::Match` compares the chains where both are set
+  (`PDB_seq_id.cpp:53-67`). So a stored chain outside -128 to 127 without a chain-id (321, -191,
+  383), or a chain-id whose first letter is not the chain with a rebuilt id (`1ab1`, chain 66 and
+  chain-id `A`), leaves the report's Bioseq handle empty, without an exception, where no other
+  definition line of the sequence holds the handle's id. Outfmt 0 writes the description line of
+  the `catch` without its links (`x_FillDeflineAndId` returns at once, `showdefline.cpp:388-394`):
+  `1AB1_A Unknown`, and `Sequence with id 1AB1_A no longer exists in database...alignment
+  skipped` for each alignment, no heading counted in the `-html` ranks after it
+  (`showalign.cpp:1952-1981`); outfmt 1 to 4 leave the subject out of the merged alignment and
+  write a line feed alone where every subject is left out (`:1997-2003`, `:2086-2110`); XML the
+  `Hit` of the `catch` (outfmt 5 `Unknown`, `Hit_len` 0, `blastxml_format.cpp:399-407`; XML2 and
+  JSON the `HitDescr` of the id alone and the sequence's own length,
+  `blastxml2_format.cpp:410-415`, as `GetSequenceLength` skips the comparison,
+  `bdbloader.cpp:312-319`) and the `Hsp` of the `catch` (the scores, the Seq-align's identities,
+  the coordinates 0 and no letters, `blastxml_format.cpp:142-165`, `blastxml2_format.cpp:130-153`);
+  the tabular formats the rows of a failed lookup above (`SetSubjectId` clears the subject id and
+  throws, or `GetBioseqLength` does, `tabular.cpp:833-875`); outfmt 18 no row
+  (`taxFormat.cpp:996-998`); psiblast's PSSM reads none of its letters. The same records with a
+  chain of 65 or none, or another definition line that holds the handle's id, are served as
+  before. LOSAT finds it from the decoded Seq-ids alone (`ParsedSubject::scope_finds_none`, the
+  handle's id `seqid::mask_handle::pdb_handle_seq_id`) and writes these outputs in BLASTP, BLASTX,
+  TBLASTN, TBLASTX, BLASTN and psiblast (rows `db.pdbchain.only.*`; probe of item 12: 138 runs of
+  23 formats, 106 the same, the 32 others the refusals below; 264 runs of the six programs over
+  24 databases, 217 the same). A handle whose id another sequence's definition line holds, where
+  NCBI's loader serves that sequence (`share1` of the probe), stays the refusal of a Seq-align id
+  that another sequence holds.
 - makeblastdb, an index file that a failed write left cut short (version 1.62, 2026-11-21, line LIB-O
   item O1e, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07). NCBI opens the
   database it wrote and reads the index through its mapping, where bytes the file lacks read as
@@ -2528,7 +2567,19 @@ file would differ, and NCBI's programs still could not open the database).
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
-  prints what the last loaded row set.
+  prints what the last loaded row set. Since version 1.92 (line RG-KB item 12) also the rows of a
+  subject whose pdb Seq-align id NCBI's data loader serves no sequence for (rule 2 above): exit
+  status 255 after the row's earlier fields, LOSAT's refusal before the batch's report.
+- `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
+  serves no sequence for (version 1.92, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle
+  keeps the GI it was allocated with (`x_GetDeflineInfo` sets no GI before `x_FillDeflineAndId`
+  returns, `showdefline.cpp:1576-1589`, `:388-394`), which the description line prints when it is
+  positive (`:886-892`): three runs of one search gave no GI, `gi|300995824|` and `gi|395411296|`.
+  LOSAT refuses (exit 1, "... whose outfmt 0 to 4 description line with -show_gis prints a GI that
+  NCBI BLAST+ 2.17.0 never sets ...") where such a subject is reported, as the other refusals of
+  the outfmt 0 description line are made (`check_pairwise_parsed`; also with
+  `-num_descriptions 0`, which writes no such line; row `db.pdbchain.only.blastp.0g`).
 - makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
   length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the

@@ -3535,10 +3535,15 @@ pub(crate) fn check_shown_parsed_subject(
     Ok(())
 }
 
+/// The refusal of a description line whose `-show_gis` GI NCBI never sets
+/// (`ParsedSubject::description_gi_unset`, `check_pairwise_parsed`).
+const UNSET_DESCRIPTION_GI: &str = "has a Seq-align id by which NCBI BLAST+'s scope gets no Bioseq, whose outfmt 0 to 4 description line with -show_gis prints a GI that NCBI BLAST+ 2.17.0 never sets (a different number in each run)";
+
 /// [`check_shown_parsed_subject`] of a subject whose load in the pairwise reports is `load`
-/// (`HitLoads::load`): the description line of one whose load throws shows its Seq-align id and
-/// `Unknown` (`ParsedSubject::thrown_description`), with no heading, so that only that id's
-/// length is refused there.
+/// (`HitLoads::load`): the description line of one whose load throws, or whose Bioseq the scope
+/// does not get (`ParsedSubject::scope_finds_none`), shows its Seq-align id and `Unknown`
+/// (`ParsedSubject::thrown_description`), with no heading, so that only that id's length is
+/// refused there, and the latter's GI with `-show_gis` (`ParsedSubject::description_gi_unset`).
 pub(crate) fn check_pairwise_parsed(
     subject: &crate::report::db_subject::ParsedSubject,
     load: crate::report::db_subject::HitLoad,
@@ -3547,8 +3552,11 @@ pub(crate) fn check_pairwise_parsed(
     oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
-    if load != crate::report::db_subject::HitLoad::Throws {
+    if load != crate::report::db_subject::HitLoad::Throws && !subject.scope_finds_none() {
         return check_shown_parsed_subject(subject, protein, taxdb_found, oid, program);
+    }
+    if subject.description_gi_unset() {
+        return Err(parsed_refusal(oid(), UNSET_DESCRIPTION_GI, program));
     }
     if subject.thrown_description().0.len() > 65 {
         return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
@@ -8553,6 +8561,9 @@ pub(crate) fn scope_bioseq(
         Some(FoundInstead::Nothing | FoundInstead::ThrowsOnId(_) | FoundInstead::Failed(_)) => {
             Ok(none)
         }
+        // The loader does not keep the sequence that the lookup gives for the id's handle
+        // (`ParsedSubject::scope_finds_none`): no blob is loaded.
+        _ if subject.scope_finds_none() => Ok(none),
         None
         | Some(
             FoundInstead::AlsoHeld(_)
@@ -8578,7 +8589,8 @@ fn other_bioseq(
     if !loader_keeps(set, subject) {
         return None;
     }
-    let id = subject.alignment_id();
+    let id = subject.loader_id();
+    let id = &*id;
     let kept = set.bioseq_defline(id);
     Some(ScopeBioseq {
         blob: Some(other),
@@ -8594,16 +8606,17 @@ fn other_bioseq(
 
 /// Whether NCBI's data loader keeps the sequence of the definition lines `set` that the lookup of
 /// the Seq-align id of `subject` gives (`CBlastDbDataLoader::x_GetOid`, bdbloader.cpp): one of its
-/// ids compares equal to that id.
+/// ids compares equal to the Seq-id of that id's handle (`ParsedSubject::loader_id`).
 fn loader_keeps(
     set: &crate::seqid::DeflineSet,
     subject: &crate::report::db_subject::ParsedSubject,
 ) -> bool {
+    let loader_id = subject.loader_id();
     set.deflines
         .iter()
         .flat_map(|defline| &defline.ids)
         .any(|id| {
-            crate::seqid::defline_set::compare(id, subject.alignment_id())
+            crate::seqid::defline_set::compare(id, &loader_id)
                 == crate::seqid::defline_set::Sic::Yes
         })
 }

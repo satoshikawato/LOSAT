@@ -95,6 +95,10 @@ pub struct SubjectNames {
     /// `GenerateDefline` threw for the `-subject` record (`of_unknown`): outfmt 5 writes
     /// `Hit_len` 0.
     pub defline_thrown: bool,
+    /// NCBI's scope gets no Bioseq for the database sequence
+    /// (`ParsedSubject::scope_finds_none`): the names are the `catch`'s (`of_unknown`), and so is
+    /// each `Hsp` (`writer::write_unloaded_hsp`).
+    pub unloaded: bool,
 }
 
 impl SubjectNames {
@@ -114,6 +118,7 @@ impl SubjectNames {
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
             defline_thrown: false,
+            unloaded: false,
         })
     }
 
@@ -140,6 +145,7 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             volume_taxids: Vec::new(),
             defline_thrown: true,
+            unloaded: false,
         }
     }
 
@@ -185,6 +191,7 @@ impl SubjectNames {
             descriptions,
             volume_taxids: Vec::new(),
             defline_thrown: false,
+            unloaded: false,
         })
     }
 
@@ -206,6 +213,7 @@ impl SubjectNames {
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
             defline_thrown: false,
+            unloaded: false,
         }
     }
 
@@ -218,6 +226,14 @@ impl SubjectNames {
     /// descriptions before that definition line stay, and the Seq-align id alone follows them.
     /// A `Hit` whose lookup throws has no names (`HitNames::of`).
     pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Self {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
+        // An empty Bioseq handle throws at the first read of the `Hit`: the `catch`'s names.
+        if subject.scope_finds_none() {
+            return SubjectNames {
+                unloaded: true,
+                ..Self::of_unknown(subject.alignment_fasta())
+            };
+        }
         let (id, title, accession) = subject.xml_hit();
         let mut descriptions = subject.hit_descriptions();
         for (at, answer) in taxonomy.iter().enumerate().take(descriptions.len()) {
@@ -243,6 +259,7 @@ impl SubjectNames {
             descriptions,
             volume_taxids: subject.volume_taxids(),
             defline_thrown: false,
+            unloaded: false,
         }
     }
 }

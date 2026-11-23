@@ -649,6 +649,7 @@ impl PreparedXml {
                                     ops: Some(&payload.edit_script),
                                     query_first: q_start - 1,
                                     query_step: 1,
+                                    seqalign_identity: payload.num_ident,
                                 })?;
                             }
                         }

@@ -131,6 +131,9 @@ pub struct XmlHit<'a> {
     /// `GenerateDefline` threw for the `-subject` record (`SubjectNames::defline_thrown`):
     /// outfmt 5's `Hit_len` is 0.
     pub defline_thrown: bool,
+    /// NCBI's scope gets no Bioseq for the subject (`SubjectNames::unloaded`): each `Hsp` is the
+    /// `catch`'s (`writer::write_unloaded_hsp`).
+    pub unloaded: bool,
 }
 
 impl<'a> XmlHit<'a> {
@@ -145,6 +148,7 @@ impl<'a> XmlHit<'a> {
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
             defline_thrown: names.defline_thrown,
+            unloaded: names.unloaded,
         }
     }
 }
@@ -209,4 +213,9 @@ pub struct XmlHsp<'a> {
     /// nucleotide of the first residue).
     pub query_first: i32,
     pub query_step: i32,
+    /// The Seq-align's `num_ident` (the engine's identities), which the `catch` of an HSP whose
+    /// subject's Bioseq the scope does not get writes (`XmlHit::unloaded`,
+    /// `writer::write_unloaded_hsp`); read only there, so a builder may give 0 for the HSPs of
+    /// the other subjects.
+    pub seqalign_identity: i32,
 }

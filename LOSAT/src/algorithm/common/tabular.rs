@@ -126,24 +126,31 @@ pub(crate) struct FailedValues<'a> {
     /// Where the load of the subject throws before both (`report::tabular::ThrownLookup`): the
     /// Seq-align id's GI and the exception.
     pub(crate) thrown: Option<(i64, &'a crate::ncbi_exception::NcbiException)>,
+    /// Whether the scope's Bioseq handle of the subject is empty (`FailedLookup::empty_handle`).
+    pub(crate) empty_handle: bool,
 }
 
 impl<'a> FailedValues<'a> {
     /// The failure of a `-subject` record or a database sequence with parsed Seq-ids whose
     /// `SetSubjectId` throws where `subject_id` (`ParsedSubject::tabular_ids` gave none) and whose
     /// `x_SetSubjectIds` throws where `all_ids` (`AllTabularIds::failed`), `None` where neither.
+    /// A database sequence whose Bioseq the scope does not get (`ParsedSubject::scope_finds_none`)
+    /// fails on its empty handle instead (`FailedLookup::empty_handle`): `SetSubjectId` throws,
+    /// and `GetBioseqLength` before `x_SetSubjectIds`.
     pub(crate) fn of_parsed(
         subject: &ParsedSubject,
         subject_id: bool,
         all_ids: bool,
     ) -> Option<Self> {
-        (subject_id || all_ids).then(|| {
+        let empty_handle = subject.scope_finds_none();
+        (subject_id || all_ids || empty_handle).then(|| {
             let [full, accession] = subject.alignment_tabular_ids();
             FailedValues {
                 align_id: [Cow::Owned(full), Cow::Owned(accession)],
-                subject_id,
-                all_ids,
+                subject_id: subject_id || empty_handle,
+                all_ids: all_ids && !empty_handle,
                 thrown: None,
+                empty_handle,
             }
         })
     }
@@ -160,6 +167,7 @@ impl<'a> FailedValues<'a> {
             subject_id: false,
             all_ids: false,
             thrown: Some((subject.alignment_gi(), exception)),
+            empty_handle: false,
         }
     }
 
@@ -184,6 +192,7 @@ impl<'a> FailedValues<'a> {
                     accession: &self.align_id[1],
                     subject_id: self.subject_id,
                     all_ids: self.all_ids.then_some(all_ids),
+                    empty_handle: self.empty_handle,
                 },
             ),
         }
@@ -274,6 +283,9 @@ pub(crate) fn subject_lookup_failure(
     }
     let failed_id = matches!(ids.get(s_idx), Some(None));
     match parsed.get(s_idx).and_then(Option::as_deref) {
+        Some(subject) if subject.scope_finds_none() => {
+            Some(crate::report::tabular::LookupFailure::empty_handle())
+        }
         Some(subject) if spec.is_some_and(reports_all_ids) => {
             subject.lookup_failure(protein).ok().flatten()
         }
@@ -281,6 +293,7 @@ pub(crate) fn subject_lookup_failure(
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            length: false,
         }),
         None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
     }
@@ -306,8 +319,8 @@ pub(crate) fn lookups_may_fail(ids: &[SubjectId], parsed: &[Option<Arc<ParsedSub
 /// Whether a tabular report of `spec` is checked for rows whose lookups fail
 /// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (`None` for a failed
 /// `SetSubjectId`) and `parsed` are as given: some id failed, a subject with parsed Seq-ids
-/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`), or the load of some subject throws
-/// (`loads`).
+/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`) or has no Bioseq
+/// (`ParsedSubject::scope_finds_none`), or the load of some subject throws (`loads`).
 pub(crate) fn checks_failed_lookups(
     spec: Option<&TabularSpec>,
     ids: &[SubjectId],
@@ -318,7 +331,11 @@ pub(crate) fn checks_failed_lookups(
         || loads.any_throws()
         || (!parsed.is_empty()
             && spec.is_some_and(reports_all_ids)
-            && parsed.iter().any(Option::is_some)))
+            && parsed.iter().any(Option::is_some))
+        || parsed
+            .iter()
+            .flatten()
+            .any(|subject| subject.scope_finds_none()))
         && crate::report::tabular::may_stop_at_failed_lookup(spec)
 }
 
@@ -447,6 +464,7 @@ impl<'a> TabularSubjects<'a> {
                             subject_id: true,
                             all_ids: false,
                             thrown: None,
+                            empty_handle: false,
                         })
                     }
                     _ => None,
@@ -546,6 +564,7 @@ impl<'a> TabularSubjects<'a> {
                                 subject_id: true,
                                 all_ids: true,
                                 thrown: None,
+                                empty_handle: false,
                             }
                         });
                         Ok(SubjectValues {

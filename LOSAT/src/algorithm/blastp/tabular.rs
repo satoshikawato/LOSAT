@@ -264,6 +264,7 @@ impl<'a> TabularSubjects<'a> {
                             subject_id: true,
                             all_ids: false,
                             thrown: None,
+                            empty_handle: false,
                         })
                     }
                     _ => None,
@@ -367,6 +368,7 @@ impl<'a> TabularSubjects<'a> {
                                 subject_id: true,
                                 all_ids: true,
                                 thrown: None,
+                                empty_handle: false,
                             }
                         }),
                     }),

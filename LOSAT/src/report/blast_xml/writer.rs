@@ -619,6 +619,7 @@ impl HitWrite for Xml5Hits<'_> {
                 hit: &mut enc,
                 scratch,
                 hsps: 0,
+                unloaded: hit.unloaded,
             };
             hsps(&mut HspSink::new(&mut writer))?;
             enc.end_list();
@@ -660,6 +661,50 @@ struct Xml5Hsps<'a, 'o> {
     hit: &'a mut XmlEncoder<'o>,
     scratch: &'a mut Scratch,
     hsps: i32,
+    /// The scope gets no Bioseq for the hit's subject (`XmlHit::unloaded`): each `Hsp` is the
+    /// `catch`'s (`write_unloaded_hsp`).
+    unloaded: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:142-165
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:130-153
+/// The `Hsp` number `number` of a subject whose Bioseq NCBI's scope does not get
+/// (`XmlHit::unloaded`), as the `catch` of the HSP's reads writes it, in outfmt 5 and, with `xml2`,
+/// in XML2 and JSON (their members' tags and order): the number, the scores, the Seq-align's
+/// identities (`XmlHsp::seqalign_identity`), the four coordinates 0 and empty rows; no frames,
+/// strands, positives, gaps, length or midline.
+pub(crate) fn write_unloaded_hsp<E: Encoder>(
+    enc: &mut E,
+    number: i32,
+    hsp: &XmlHsp<'_>,
+    xml2: bool,
+) {
+    let (identity, coordinates, rows) = if xml2 {
+        (4, [9, 10, 13, 14], [19, 20])
+    } else {
+        (12, [4, 5, 6, 7], [17, 18])
+    };
+    enc.element();
+    enc.begin_sequence("Hsp");
+    int_member(enc, "num", 0, number);
+    real_member(enc, "bit-score", 1, round6(hsp.bit_score));
+    real_member(enc, "score", 2, f64::from(hsp.score));
+    real_member(enc, "evalue", 3, round6(hsp.evalue));
+    if xml2 {
+        int_member(enc, "identity", identity, hsp.seqalign_identity);
+    }
+    for (name, tag) in ["query-from", "query-to", "hit-from", "hit-to"]
+        .into_iter()
+        .zip(coordinates)
+    {
+        int_member(enc, name, tag, 0);
+    }
+    if !xml2 {
+        int_member(enc, "identity", identity, hsp.seqalign_identity);
+    }
+    string_member(enc, "qseq", rows[0], b"");
+    string_member(enc, "hseq", rows[1], b"");
+    enc.end_sequence();
 }
 
 /// The Dense-seg segments of an edit script as inclusive column ranges (`GetAlnStart` /
@@ -748,6 +793,10 @@ pub(crate) fn count_hsp(
 impl HspWrite for Xml5Hsps<'_, '_> {
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.hsps += 1;
+        if self.unloaded {
+            write_unloaded_hsp(&mut *self.hit, self.hsps, hsp, false);
+            return Ok(());
+        }
         let run = self.run;
         let scratch = &mut *self.scratch;
         let counts = count_hsp(

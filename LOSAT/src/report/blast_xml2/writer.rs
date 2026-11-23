@@ -329,6 +329,7 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
                 masks: self.masks,
                 scratch: &mut *self.scratch,
                 hsps: 0,
+                unloaded: hit.unloaded,
             };
             hsps(&mut HspSink::new(&mut writer))?;
         }
@@ -346,11 +347,23 @@ struct Xml2Hsps<'a, E> {
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hsps: i32,
+    /// The scope gets no Bioseq for the hit's subject (`XmlHit::unloaded`): each `Hsp` is the
+    /// `catch`'s (`blast_xml::writer::write_unloaded_hsp`).
+    unloaded: bool,
 }
 
 impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.hsps += 1;
+        if self.unloaded {
+            crate::report::blast_xml::writer::write_unloaded_hsp(
+                &mut *self.enc,
+                self.hsps,
+                hsp,
+                true,
+            );
+            return Ok(());
+        }
         let program = self.run.program;
         let blastn = program == "blastn";
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:159-170

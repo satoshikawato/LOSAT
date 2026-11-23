@@ -937,6 +937,10 @@ impl TabularSpec {
             ])
         {
             Some(FailedStage::SubjectId)
+        } else if failure.length {
+            // The subject block stops at `GetBioseqLength`, before it sets the other members,
+            // which stay as the rows before left them (as where the load throws).
+            self.reads_subject_bioseq().then_some(FailedStage::Bioseq)
         } else if failure.all_ids
             && self.has_any(&[SubjectAllSeqIds, SubjectAllGis, SubjectAllAccessions])
         {
@@ -1089,13 +1093,18 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
 pub fn failed_database_subject(
     oid: impl std::fmt::Display,
     thrown: Option<&crate::ncbi_exception::NcbiException>,
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
 ) -> String {
-    match thrown {
-        Some(exception) => format!(
+    match (thrown, parsed) {
+        (Some(exception), _) => format!(
             "database sequence {oid} has a Seq-align id whose lookup throws '{}' in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one",
             String::from_utf8_lossy(exception.get_msg())
         ),
-        None => failed_database_title(oid),
+        (None, Some(subject)) if subject.scope_finds_none() => format!(
+            "database sequence {oid} has the Seq-align id {}, by which NCBI BLAST+'s scope gets no Bioseq (its data loader looks up the id with the PDB chain of the id's handle, which no stored id holds)",
+            String::from_utf8_lossy(&subject.alignment_fasta())
+        ),
+        (None, _) => failed_database_title(oid),
     }
 }
 
@@ -1453,15 +1462,21 @@ pub struct FailedLookup<'a> {
     /// after the ids of the definition lines before the first whose `GetSeqIdList` throws
     /// (tabular.cpp:546-556: each line's list is pushed as it is made).
     pub all_ids: Option<&'a [DeflineIds]>,
+    /// Whether the scope's Bioseq handle of the subject is empty (a database sequence whose
+    /// Bioseq NCBI's scope does not get, `report::db_subject::ParsedSubject::scope_finds_none`):
+    /// `SetSubjectId` throws (`subject_id`), and `GetBioseqLength` where no field of it is asked
+    /// (`LookupFailure::length`).
+    pub empty_handle: bool,
 }
 
 impl FailedLookup<'_> {
-    /// Which of NCBI's two lookups throw.
+    /// Which of NCBI's lookups throw.
     pub fn failure(&self) -> LookupFailure {
         LookupFailure {
             subject_id: self.subject_id,
             all_ids: self.all_ids.is_some(),
             bioseq: false,
+            length: self.empty_handle,
         }
     }
 }
@@ -1492,6 +1507,10 @@ pub struct LookupFailure {
     /// Whether the load of the subject's Bioseq by its Seq-align id throws, before both
     /// (`SubjectLookup::Throws`: a lookup that fails on a file where the batch's prefetch is off).
     pub bioseq: bool,
+    /// Whether `GetBioseqLength` throws, after `SetSubjectId` and before `x_SetSubjectIds`: the
+    /// scope's Bioseq handle is empty (`FailedLookup::empty_handle`), on which `SetSubjectId`
+    /// throws too (`subject_id`).
+    pub length: bool,
 }
 
 impl LookupFailure {
@@ -1502,7 +1521,7 @@ impl LookupFailure {
         Self {
             subject_id: true,
             all_ids: database,
-            bioseq: false,
+            ..Self::default()
         }
     }
 
@@ -1511,6 +1530,15 @@ impl LookupFailure {
     pub fn thrown() -> Self {
         Self {
             bioseq: true,
+            ..Self::default()
+        }
+    }
+
+    /// The failure of a subject whose Bioseq handle is empty (`FailedLookup::empty_handle`).
+    pub fn empty_handle() -> Self {
+        Self {
+            subject_id: true,
+            length: true,
             ..Self::default()
         }
     }

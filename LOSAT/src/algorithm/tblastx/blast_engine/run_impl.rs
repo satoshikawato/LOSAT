@@ -2265,6 +2265,7 @@ fn write_tblastx_outputs(
                     Some(database) => crate::report::tabular::failed_database_subject(
                         database.oids.oid(database.reported.ordinals[s_idx]),
                         loads.thrown(s_idx),
+                        parsed.get(s_idx).and_then(Option::as_deref),
                     ),
                     None => crate::report::tabular::failed_record_title(
                         s_idx,

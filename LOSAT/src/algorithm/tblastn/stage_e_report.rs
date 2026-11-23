@@ -527,6 +527,7 @@ pub(super) fn render(
                         crate::report::tabular::failed_database_subject(
                             oids.oid(reported.ordinals[s_idx]),
                             loads.thrown(s_idx),
+                            parsed.get(s_idx).and_then(Option::as_deref),
                         )
                     }
                     ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(

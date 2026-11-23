@@ -187,6 +187,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -204,6 +205,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                         ops: None,
                         query_first: 32,
                         query_step: 1,
+                        seqalign_identity: 0,
                     })?;
                     hsps.hsp(&XmlHsp {
                         score: 20,
@@ -220,6 +222,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                         ops: None,
                         query_first: 23,
                         query_step: 1,
+                        seqalign_identity: 0,
                     })
                 },
             )

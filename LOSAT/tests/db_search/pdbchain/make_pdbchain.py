@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Line RG item K4j: a protein database whose `pdb` Seq-ids hold a chain INTEGER outside 0-255.
 
-Writes, from LOSAT/ (`python3 tests/db_search/pdbchain/make_pdbchain.py NCBI_BIN`, NCBI_BIN the
-directory of NCBI BLAST+ 2.17.0's makeblastdb), the version 4 database `tests/db_search/pdbchain/pdbchain`
-(`.phr .pin .psq .pjs .pog .psd .psi`) of CHAINS: one short protein per record (`pdup.faa` with one
-letter changed), with an EMPTY title and the Seq-ids `gb|AB60000<n>.1|` and `pdb { mol "1AB<n>", chain <N> }`
-with NO chain-id.
+Writes, from LOSAT/ (`python3 tests/db_search/pdbchain/make_pdbchain.py NCBI_BIN [NAME ...]`, NCBI_BIN the
+directory of NCBI BLAST+ 2.17.0's makeblastdb, NAME one of DATABASES, all by default), the version 4 database
+`tests/db_search/pdbchain/pdbchain` (`.phr .pin .psq .pjs .pog .psd .psi`) of CHAINS: one short protein per
+record (`pdup.faa` with one letter changed), with an EMPTY title and the Seq-ids `gb|AB60000<n>.1|` and
+`pdb { mol "1AB<n>", chain <N> }` with NO chain-id; and (line RG-KB item 12) `tests/db_search/pdbchain/pdbonly`,
+the same records with the pdb Seq-id alone.
 
 Why: NCBI's `CDeflineGenerator::x_SetTitleFromPDB` (c++/src/objmgr/util/create_defline.cpp:1842-1843)
 makes the title of a `pdb` Seq-id without a chain-id from `isprint` of `m_PDBChain` cast to
@@ -21,11 +22,13 @@ lengths) are then rewritten: the `chain` INTEGER of the pdb Seq-id set to the wa
 `chain-id` removed, and the header offsets of the index (`.pin`) written again (the approach of
 `../t5/make_t5.py` `patch_first_taxid`).
 
-The gb Seq-id before the pdb one is needed: a record whose only Seq-id is such a pdb one is found by
-NCBI's search but its sequence cannot be loaded for the report (the Seq-id the report asks the Object
-Manager for has the chain-id `A` and chain 65, which `CPDB_seq_id::Match` does not match to the stored
-chain 321): outfmt 0 then prints `Unknown` and `no longer exists in database...alignment skipped`, and
-the tabular formats fail on the subject accession, so that no title is made at all.
+In `pdbchain` the gb Seq-id comes first, so that the report loads the sequence by it. In `pdbonly` a record
+whose only Seq-id is such a pdb one is found by NCBI's search but its sequence is not loaded for the report: the
+data loader looks up the Seq-id of the id's handle, whose chain is the normalized one (the chain's low byte read back as
+a signed char: 65 for 321 and -191, 127 for 383), and serves the sequence only where a stored id compares equal
+to it, which `CPDB_seq_id::Match` (chain against chain) does not for 321, -191 and 383: outfmt 0 then prints
+`Unknown` and `no longer exists in database...alignment skipped`, XML `Unknown`, and the tabular formats the rows
+of a failed lookup (a null pointer exception at the subject accession).
 
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
@@ -112,6 +115,10 @@ def with_chain(record, chain):
     return record[:inner] + new + record[end - 2:]
 
 
+# The databases: name -> whether each record has the gb Seq-id before the pdb one.
+DATABASES = {"pdbchain": True, "pdbonly": False}
+
+
 def patch(base):
     """Rewrites the stored deflines of the version 4 protein database `base` (one record each of CHAINS)
     and the header offsets of its index file."""
@@ -153,28 +160,30 @@ def patch_keys(base):
     open(f"{base}.psd", "wb").write(b"\n".join(out) + b"\n")
 
 
-def main(ncbi_bin):
+def main(ncbi_bin, names):
     work = os.path.join(HERE, "work")
     os.makedirs(work, exist_ok=True)
     env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
     seq = letters(PDUP)
-    fasta = os.path.join(work, "pdbchain.faa")
-    with open(fasta, "w") as f:
-        for k, (name, letter, _) in enumerate(CHAINS):
-            changed = list(seq)
-            at = 10 * (k + 1)
-            changed[at] = "Y" if changed[at] == "W" else "W"
-            f.write(f">gb|AB60000{k + 1}.1|pdb|{name}|{letter}\n" + "".join(changed) + "\n")
-    base = os.path.join(HERE, "pdbchain")
-    subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
-                    "-blastdb_version", "4", "-title", "pdbchain", "-out", base],
-                   check=True, env=env, stdout=subprocess.DEVNULL)
-    patch(base)
-    patch_keys(base)
+    for db in names:
+        fasta = os.path.join(work, f"{db}.faa")
+        with open(fasta, "w") as f:
+            for k, (name, letter, _) in enumerate(CHAINS):
+                changed = list(seq)
+                at = 10 * (k + 1)
+                changed[at] = "Y" if changed[at] == "W" else "W"
+                gb = f"gb|AB60000{k + 1}.1|" if DATABASES[db] else ""
+                f.write(f">{gb}pdb|{name}|{letter}\n" + "".join(changed) + "\n")
+        base = os.path.join(HERE, db)
+        subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+                        "-blastdb_version", "4", "-title", db, "-out", base],
+                       check=True, env=env, stdout=subprocess.DEVNULL)
+        patch(base)
+        patch_keys(base)
     for name in os.listdir(work):
         os.remove(os.path.join(work, name))
     os.rmdir(work)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2:] or list(DATABASES))

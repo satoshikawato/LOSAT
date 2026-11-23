@@ -669,8 +669,11 @@ fn internal(what: &str) -> io::Error {
     ))
 }
 
-/// Writes the section of one query whose HSPs are `hsps` (none: nothing, as `DisplaySeqalign`
-/// returns before its first byte for an empty Seq-align set; `-num_alignments 0`).
+/// Writes the section of one query whose HSPs are `hsps`. The caller writes none for an empty
+/// Seq-align set (`-num_alignments 0`: `DisplaySeqalign` returns before its first byte); a set
+/// whose every aligned subject has no Bioseq (`pairwise::section_hsps` leaves them out of the
+/// merge) gives no HSP here: the line feed alone, as each frame's empty mix throws in the loop's
+/// `try`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1918
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2055-2111
@@ -689,7 +692,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     sequences: &dyn Sequences,
 ) -> io::Result<()> {
     if hsps.is_empty() {
-        return Ok(());
+        return writer.write_all(b"\n");
     }
     let groups = hsps.groups();
     let mut merged = Vec::new();

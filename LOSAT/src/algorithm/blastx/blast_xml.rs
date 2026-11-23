@@ -1546,6 +1546,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     // strand, where the row runs backwards.
                                     query_first: if plus { query_from - 1 } else { query_to - 1 },
                                     query_step: if plus { 3 } else { -3 },
+                                    seqalign_identity: i32::try_from(hsp.identity)?,
                                 })?;
                             }
                         }

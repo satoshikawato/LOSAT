@@ -2550,8 +2550,14 @@ A `pdb` Seq-id whose chain is an INTEGER outside 0-255 without a chain-id (line 
 `pdbchain/pdbchain` of five sequences without a title, each with a `gb|AB60000<n>.1|` Seq-id and a `pdb` one with the
 chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n>|<letter>` and a rewrite of the stored
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
-`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
-(with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report.
+`pdbchain/pdbonly` (line RG-KB item 12; rows `db.pdbchain.only.*`) holds the same records with the pdb Seq-id alone:
+NCBI's data loader looks up the Seq-id of the id's handle, whose chain is the chain's low byte read back as a signed char (65
+for 321 and -191, 127 for 383), and serves no sequence where no stored id `Match`es it, so the Bioseq handle of the
+report is empty for 321, -191 and 383 (`ParsedSubject::scope_finds_none`): outfmt 0 `Unknown` without links and `no
+longer exists in database...alignment skipped`, outfmt 1 to 4 without those subjects, XML the `Hit` and `Hsp` of the
+`catch`, the tabular rows of a failed lookup (`sacc`, `saccver` and the default fields: NCBI's null pointer, LOSAT's
+refusal), no outfmt 18 row; `-show_gis` prints a GI that NCBI never set (refused).
 - `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
   and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
   the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,

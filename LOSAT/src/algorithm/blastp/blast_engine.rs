@@ -2499,6 +2499,7 @@ fn check_tabular_lookups(
                 Some(titles) => crate::report::tabular::failed_database_subject(
                     titles.oid(s_idx),
                     loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
                 ),
                 None => crate::report::tabular::failed_record_title(
                     s_idx,

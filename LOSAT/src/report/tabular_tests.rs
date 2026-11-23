@@ -693,6 +693,7 @@ fn failed_lookups_write_ncbis_catch_row() {
                 accession: align_id,
                 subject_id: true,
                 all_ids: None,
+                empty_handle: false,
             }),
             None => SubjectLookup::Found,
         },
@@ -1005,6 +1006,7 @@ fn a_database_lookup_failing_in_x_set_subject_ids_keeps_the_length() {
                 accession: b"BL_ORD_ID:0",
                 subject_id: true,
                 all_ids: Some(&[]),
+                empty_handle: false,
             })
         } else {
             SubjectLookup::Found
@@ -1055,6 +1057,7 @@ fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
             accession: b"AB000001",
             subject_id: false,
             all_ids: Some(&before),
+            empty_handle: false,
         }),
         index: 0,
     };
@@ -1095,6 +1098,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             subject_id: true,
             all_ids,
             bioseq: false,
+            length: false,
         };
         failed_lookup_stop(spec.as_ref(), failure, first).is_some()
     };
@@ -1112,6 +1116,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         subject_id: false,
         all_ids: true,
         bioseq: false,
+        length: false,
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());

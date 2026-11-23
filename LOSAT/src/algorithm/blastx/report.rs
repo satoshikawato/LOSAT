@@ -500,6 +500,8 @@ impl ShownSubjects<'_> {
                 Some(LookupFailure::thrown())
             }
             ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
+                // The scope's Bioseq handle is empty (`ParsedSubject::scope_finds_none`).
+                Some(parsed) if parsed.scope_finds_none() => Some(LookupFailure::empty_handle()),
                 Some(parsed)
                     if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
                 {
@@ -512,6 +514,7 @@ impl ShownSubjects<'_> {
                         subject_id: true,
                         all_ids: false,
                         bioseq: false,
+                        length: false,
                     }),
                 None => reported
                     .tabular_ids(oid)
@@ -645,6 +648,7 @@ fn check_failed_lookups(
                     crate::report::tabular::failed_database_subject(
                         reported.oid(oid),
                         reported.loads().thrown(oid),
+                        reported.parsed_subject(oid),
                     )
                 }
                 ShownSubjects::Fasta { .. } => {

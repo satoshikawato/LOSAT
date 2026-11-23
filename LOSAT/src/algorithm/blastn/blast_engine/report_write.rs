@@ -89,6 +89,7 @@ pub(super) fn refuse_anchored_reports(
                         crate::report::pairwise::blastn_section_hsps(
                             report.num_alignments,
                             group,
+                            &[],
                             is_query,
                         )
                     },

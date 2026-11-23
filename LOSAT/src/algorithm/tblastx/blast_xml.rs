@@ -388,6 +388,19 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                             hit.s_start.max(hit.s_end) as i32,
                         );
                         let plus = hit.query_frame > 0;
+                        // The engine's identities, counted only for the `Hsp` of a subject whose
+                        // Bioseq the scope does not get (`XmlHsp::seqalign_identity`).
+                        let seqalign_identity = if subject.unloaded {
+                            i32::try_from(run.subject_letters.engine_identities(
+                                hsp,
+                                query.seq(),
+                                &query_code,
+                                &db_code,
+                                &mut window,
+                            ))?
+                        } else {
+                            0
+                        };
                         hsps.hsp(&XmlHsp {
                             score: hit.raw_score,
                             bit_score: hit.bit_score,
@@ -416,6 +429,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                             // where the row runs backwards.
                             query_first: if plus { query_from - 1 } else { query_to - 1 },
                             query_step: if plus { 3 } else { -3 },
+                            seqalign_identity,
                         })?;
                     }
                     Ok(())

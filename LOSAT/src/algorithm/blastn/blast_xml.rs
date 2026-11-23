@@ -199,6 +199,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
                             query_step: 1,
+                            seqalign_identity: hsp.num_ident as i32,
                         })?;
                     }
                     Ok(())

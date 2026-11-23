@@ -1747,6 +1747,7 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            length: false,
         })
     );
     assert_eq!(
@@ -2344,4 +2345,109 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
         let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
+}
+
+fn pdb_id(mol: &str, chain: Option<i32>, chain_id: Option<&str>) -> ParsedSeqId {
+    ParsedSeqId::Pdb(PdbSeqId {
+        mol: mol.as_bytes().to_vec(),
+        chain,
+        rel: None,
+        chain_id: chain_id.map(|c| c.as_bytes().to_vec()),
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:386-431
+// The data loader looks up the Seq-id of the Seq-align id's handle and keeps the sequence only
+// where one of its ids compares equal to it: a record whose only id is `pdb` with chain 321
+// (`char` 65 for the handle) is not served, and NCBI BLAST+ 2.17.0 writes the `catch` of each
+// read (line RG-KB item 12, `i12/ncbi`: `1AB1_A Unknown`, `Sequence with id 1AB1_A no longer
+// exists in database...alignment skipped`).
+#[test]
+fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert!(unserved.scope_finds_none());
+    assert_eq!(
+        unserved.loader_id().into_owned(),
+        pdb_id("1AB1", Some(65), None)
+    );
+    let (start, title, caught) = unserved.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "Unknown", true)
+    );
+    assert_eq!(
+        unserved.heading(true, false, None).unwrap(),
+        Err(b"1AB1_A".to_vec())
+    );
+    assert_eq!(
+        unserved.heading_skipped_id(true, false).as_deref(),
+        Some(&b"1AB1_A"[..])
+    );
+    assert!(matches!(unserved.prefetched(), Prefetched::Nothing));
+    // The record is not refused for what the lookup finds: the formats write the `catch`.
+    assert_eq!(unserved.fetched(true, false, HitLoad::Loaded), Ok(()));
+    // Chains that the handle keeps, and a second id that the handle's Seq-id matches, are served.
+    for served in [
+        lines(vec![vec![pdb_id("1AB1", Some(65), None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(-5), None)]]),
+        lines(vec![vec![pdb_id("1AB1", None, None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(66), Some("A"))]]),
+        lines(vec![vec![
+            gb("AB600001", 1),
+            pdb_id("1AB1", Some(321), None),
+        ]]),
+    ] {
+        assert!(!served.scope_finds_none(), "{:?}", served.alignment_id());
+        assert!(!served.description_line(true).2);
+    }
+    // Where the handle's Seq-id is held by another definition line than the Seq-align id's, the
+    // Bioseq NCBI builds shows that line: LOSAT refuses it.
+    let other_line = ParsedSubject::new(DeflineSet {
+        deflines: vec![
+            BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids: vec![pdb_id("1AB1", Some(321), None)],
+                ..BlastDefline::default()
+            },
+            BlastDefline {
+                title: Some(b"u".to_vec()),
+                ids: vec![pdb_id("1AB1", Some(65), Some("A"))],
+                ..BlastDefline::default()
+            },
+        ],
+        utf8: false,
+    });
+    assert!(other_line
+        .unwrap_err()
+        .contains("other than the Seq-align id's"));
+    // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
+    // the handle's, so its load throws.
+    let one_line = ParsedSubject::new(DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ids: vec![
+                pdb_id("1AB1", Some(321), None),
+                pdb_id("1AB1", Some(65), None),
+            ],
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    });
+    assert!(one_line.unwrap_err().contains("the load throws"));
+}
+
+#[test]
+fn the_scope_keys_of_a_pdb_id_are_its_handle() {
+    // `chain` 321 and 65, with or without the `chain-id` "A", are one handle; "B" is another.
+    let keys = |id: &ParsedSeqId| {
+        let mut keys = Vec::new();
+        crate::seqid::defline_set::scope_keys(id, &mut keys);
+        keys
+    };
+    let a = keys(&pdb_id("1AB1", Some(65), Some("A")));
+    assert_eq!(keys(&pdb_id("1AB1", Some(321), None)), a);
+    assert_eq!(keys(&pdb_id("1AB1", Some(65), None)), a);
+    assert_eq!(keys(&pdb_id("1ab1", Some(65), Some("A"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(66), Some("B"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(200), None)), a);
 }

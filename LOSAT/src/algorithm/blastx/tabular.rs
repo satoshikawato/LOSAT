@@ -265,6 +265,7 @@ fn subject_values<'a>(
                         subject_id: true,
                         all_ids: false,
                         thrown: None,
+                        empty_handle: false,
                     }
                 }),
                 id,
@@ -332,6 +333,7 @@ fn subject_values<'a>(
                             subject_id: true,
                             all_ids: true,
                             thrown: None,
+                            empty_handle: false,
                         }
                     }),
                 },

@@ -344,10 +344,13 @@ pub trait TaxSubjects {
     /// LOSAT's refusal of a title of `subject` (`TaxTitle::Refused`), which names it.
     fn refused(&self, subject: usize, reason: &str) -> anyhow::Error;
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-998
     /// Whether the load of `subject` throws where its query's batch has its prefetch off
     /// (`db_subject::HitLoads::thrown`), or at every load where a file of the taxonomy database
     /// does not open and the load looks a positive taxid up
-    /// (`SubjectTable::with_loads_that_throw`): the report leaves its HSPs out (`organism_report`).
+    /// (`SubjectTable::with_loads_that_throw`), or gives an empty handle (a database sequence
+    /// whose Bioseq the scope does not get, `ParsedSubject::scope_finds_none`): the report leaves
+    /// its HSPs out (`organism_report`).
     fn throws(&self, _subject: usize) -> bool {
         false
     }
@@ -551,6 +554,9 @@ impl TaxSubjects for SubjectTable<'_> {
             || self
                 .loads
                 .is_some_and(|loads| loads.thrown(subject).is_some())
+            || self
+                .parsed(subject)
+                .is_some_and(crate::report::db_subject::ParsedSubject::scope_finds_none)
     }
 }
 

@@ -368,10 +368,8 @@ fn a_dry_run_makes_the_logfile() {
 /// NCBI BLAST+ 2.17.0 (probes `dry_argerr`, `dry_unk`, `dry_badtask`, `dry_incompat`,
 /// `dry_outval`, `dry_after_dd`, `dry_eq`, `dry_pos`, `makeblastdb.dry_argerr`,
 /// `makeblastdb.dry_nodbtype`, `blastdbcmd.dry_argerr`, `blastdbcmd.dry_excl`): an error in the
-/// arguments' definitions is NCBI's USAGE and exit status 1 with `-dryrun` as without it. In
-/// LOSAT it is the same error as without `-dryrun`: the parser's message and exit status 2
-/// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), NCBI's bytes in blastdbcmd (whose reader is
-/// NCBI's).
+/// arguments' definitions is NCBI's USAGE and exit status 1 with `-dryrun` as without it, in
+/// LOSAT too: every program's reader is NCBI's (line RG item K4i).
 #[test]
 fn argument_errors_are_reported_as_without_dryrun() {
     let dir = scratch("argerr");
@@ -386,7 +384,7 @@ fn argument_errors_are_reported_as_without_dryrun() {
             "blastdbcmd" => errors.extend([&["-line_length", "0"][..], &["-info"]]),
             _ => errors.extend([&["-evalue", "abc"][..], &["-task", "bogus"]]),
         }
-        let status = if program == "blastdbcmd" { 1 } else { 2 };
+        let status = 1;
         for error in errors {
             let plain = run_in(&dir, &words_of(program, words, error, false), &[]);
             let mut dry_words = words_of(program, words, error, false);
@@ -432,8 +430,14 @@ fn argument_errors_are_reported_as_without_dryrun() {
     ];
     for words in [&words[..], &[&words[..], &["-dryrun"]].concat()] {
         let run = run_in(&dir, words, &[]);
-        assert_eq!(run.status.code(), Some(2), "{words:?}: {run:?}");
-        assert!(text(&run.stderr).contains("-no_taxid_expansion"), "{run:?}");
+        assert_eq!(run.status.code(), Some(1), "{words:?}: {run:?}");
+        let posts = text(&run.stderr);
+        assert!(
+            posts.contains("Incompatible with argument:  `")
+                && posts.contains("no_taxid_expansion")
+                && posts.contains("window_masker_taxid"),
+            "{run:?}"
+        );
     }
     // makeblastdb's `-dbtype` is mandatory.
     let dry = run_in(
@@ -448,7 +452,7 @@ fn argument_errors_are_reported_as_without_dryrun() {
         ],
         &[],
     );
-    assert_eq!(dry.status.code(), Some(2), "{dry:?}");
+    assert_eq!(dry.status.code(), Some(1), "{dry:?}");
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -58,9 +58,9 @@ impl Write for Noted {
 }
 
 /// A tool has written its failure to standard error, so `main` adds nothing: the error of its
-/// run, and the parser's refusal of makeblastdb's argv, which the tool writes as the command line
-/// does (`wrote`). The parser's help (`-h`, `-help`), which the tool does not write, is the
-/// error's text, which `main` writes.
+/// run, and NCBI's argument reader's report or LOSAT's refusal of makeblastdb's argv, which the
+/// tool writes as the command line does (`wrote`). A tool writes its help (`-h`, `-help`) to its
+/// output and succeeds, as the command line.
 fn reported(result: Result<(), Error>, wrote: bool) -> Result<(), Error> {
     match result {
         Err(Error::Search(_)) => Err(Error::Search(Vec::new())),

@@ -616,10 +616,11 @@ pub(crate) fn report_ordinal_ids(
             }
             let reported = position < cut;
             position += 1;
-            // A profile of the bare volumes whose lines the alias files' `OID_MASK_TYPE` removes:
-            // the formatter does not find it among those it reports, and nothing reads it past
-            // the cut but its stored header (the Seq-align's read; `erases_a_line_of_oid` reads
-            // the same bytes).
+            // A profile of the bare volumes whose lines the alias files remove (their
+            // `OID_MASK_TYPE` or their id lists, `SeqDb::drops_lineless_hits`): the formatter
+            // does not find it among those it reports, and nothing reads it past the cut but its
+            // stored header (the Seq-align's read; `erases_a_line_of_oid` reads the same bytes,
+            // and meets NCBI's exception of an id list's lookup there).
             if erasing && bare {
                 match db.erases_a_line_of_oid(hsp_list.oid) {
                     Err(error) => {
@@ -630,7 +631,7 @@ pub(crate) fn report_ordinal_ids(
                     }
                     Ok(true) if reported => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files' OID_MASK_TYPE removes, in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST or SEQIDLIST), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;

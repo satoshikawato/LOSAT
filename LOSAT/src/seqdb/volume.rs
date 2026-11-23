@@ -689,9 +689,9 @@ impl Volume {
             (None, Some(lines)) => lines.volume_start,
             (None, None) => return Ok(Some(vec![true; set.deflines.len()])),
         };
-        let tests_ids = alias.is_some() || user.is_some_and(|rule| rule.rule.tests_ids());
+        let reads_seqids = alias.is_some() || user.is_some_and(|rule| rule.rule.reads_seqids());
         let adjusted;
-        let set = if volume_start > 0 && tests_ids && super::has_ordinal_tag(set) {
+        let set = if volume_start > 0 && reads_seqids && super::has_ordinal_tag(set) {
             let mut copy = set.clone();
             super::adjust_ordinal_tags(&mut copy, volume_start)
                 .map_err(|error| error.error(&self.base, volume_start + oid))?;
@@ -787,11 +787,14 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the volume's rule is a negative seqid list's with at least one id
-    /// (`SeqDb::excludes_lineless_at_fetch`).
-    pub(super) fn has_negative_seqid_ids(&self) -> bool {
+    /// Whether the volume's rule is a negative seqid list's, also one the version 5 processing
+    /// emptied (`SeqDb::excludes_lineless_at_fetch`).
+    pub(super) fn has_negative_seqid_list(&self) -> bool {
         self.defline_rule.as_ref().is_some_and(|line_rule| {
-            matches!(&*line_rule.rule, super::filter::DeflineRule::NegativeSeqids(ids) if !ids.is_empty())
+            matches!(
+                &*line_rule.rule,
+                super::filter::DeflineRule::NegativeSeqids(_)
+            )
         })
     }
 

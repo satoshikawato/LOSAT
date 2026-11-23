@@ -1061,7 +1061,7 @@ impl<'a> LineCheck<'a> {
 }
 
 /// NCBI's fetches with `check_oid_exclusion` of a database search (line DBID item lineless2):
-/// under a negative seqid list with ids (`SeqDb::excludes_lineless_at_fetch`), a sequence that
+/// under a negative seqid list (`SeqDb::excludes_lineless_at_fetch`), a sequence that
 /// the list keeps without any of its definition lines is excluded where the gapped traceback,
 /// the composition-based redo or the ungapped re-evaluation of a nucleotide subject fetches it
 /// (seqsrc_seqdb.cpp:302-313). It was searched and counts in the statistics; a gapped search's
@@ -1165,8 +1165,8 @@ impl<'a> FetchExcluded<'a> {
 }
 
 /// Which lists of a composition-based redo's stream, by their place in it, are on a subject
-/// that NCBI's fetch excludes (`FetchExcluded::marks`; none without a negative seqid list with
-/// ids, `FetchMarks::default`). NCBI's redo loop tests such a list's early termination first,
+/// that NCBI's fetch excludes (`FetchExcluded::marks`; none without a negative seqid list,
+/// `FetchMarks::default`). NCBI's redo loop tests such a list's early termination first,
 /// like any other's; where the test does not stop the list, the fetch excludes the subject and
 /// NCBI sets the status of the thread back to 0 and goes on with the next list, with no redo and
 /// no heap insert, so a failed Smith-Waterman redo before it no longer fails the batch; where
@@ -1226,7 +1226,7 @@ impl std::error::Error for FetchRefusal {}
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
 /// the reported sequences; a check reads each sequence's header once (one check per query
 /// batch or search call; the reads of the reports decode the kept ones again). Under a
-/// negative seqid list with ids the search's fetches have excluded them before
+/// negative seqid list the search's fetches have excluded them before
 /// (`FetchExcluded`), except a protein subject of an ungapped search, which no fetch checks.
 pub(crate) struct SeqAligned<'a>(LineCheck<'a>);
 
@@ -1235,7 +1235,7 @@ impl<'a> SeqAligned<'a> {
     /// lines, or the search's fetches have excluded the sequences without a line before
     /// (`fetched`, the caller's: the search fetches its subjects with `check_oid_exclusion`, a
     /// gapped search or an ungapped one of a nucleotide database; and the database's list is
-    /// negative with ids, `SeqDb::excludes_lineless_at_fetch`).
+    /// negative, `SeqDb::excludes_lineless_at_fetch`).
     pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
         (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch()))
             .then(|| SeqAligned(LineCheck::new(db)))
@@ -3243,8 +3243,17 @@ pub(crate) fn reports_may_refuse(
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
         // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
-        // reported, so it cannot make a report refuse (an error of its header comes below).
-        if lineless_dropped && matches!(db.keeps_line(ordinal), Ok(false)) {
+        // reported, so it cannot make a report refuse (an error of its header comes below). The
+        // header read here is the filtered one (`SeqDb::keeps_line` decides alike): a set of no
+        // line is such a sequence; only a read that failed is asked again (a seqid list's read
+        // of a sequence it leaves no line refuses; review 1 of line RG D1c-1b, F2).
+        if lineless_dropped
+            && match &header {
+                Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) => lines.is_empty(),
+                Ok(crate::seqdb::SequenceHeader::Parsed(set)) => set.deflines.is_empty(),
+                Err(_) => matches!(db.keeps_line(ordinal), Ok(false)),
+            }
+        {
             return Ok(());
         }
         match reported_header(headers, header, ordinal, 0, program) {

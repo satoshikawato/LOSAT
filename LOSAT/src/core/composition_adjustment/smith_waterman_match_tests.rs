@@ -373,7 +373,7 @@ fn an_excluded_list_clears_the_status_unless_early_termination_stops_it() {
     let redone = status.redone(Ok(7), || anyhow::anyhow!("not endless"));
     assert!(matches!(redone, Ok(Some(7))));
     assert!(!status.failed());
-    // Without a negative seqid list with ids no list of the stream is marked.
+    // Without a negative seqid list no list of the stream is marked.
     let lists = [3u32, 1, 2];
     let marks = crate::algorithm::common::database::FetchMarks::of(None, &lists, |&oid| Some(oid))
         .expect("no header to read");

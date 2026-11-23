@@ -389,15 +389,6 @@ impl DeflineRule {
         )
     }
 
-    /// Whether the rule compares the Seq-ids of a line with ids (`HasIdFilters`): a seqid list
-    /// with at least one id ([`DeflineRule::includes_id`]).
-    pub(crate) fn tests_ids(&self) -> bool {
-        matches!(
-            self,
-            DeflineRule::Seqids(list) | DeflineRule::NegativeSeqids(list) if !list.is_empty()
-        )
-    }
-
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:946-954
     /// The search list's test of one Seq-id `id` of a line (`x_ListIncludesId`): `None` for a
     /// list without ids (`HasIdFilters` false: every line passes), else whether the list includes
@@ -1821,11 +1812,15 @@ impl SeqDb {
     // ungapped re-evaluation of a nucleotide subject (blast_hits.c:2651-2665, the subject's
     // HSPs freed) ask for this check.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1929-1943
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:108-113
     // `x_InitIdSet` (seqdbimpl.cpp:1909-1946) leaves the id set blank for a positive list of
     // Seq-ids (`-seqidlist` reads only strings, `CSeqDBFileGiList::eSiList`, and the branch
     // above it fills the set from a user list's gis or tis only), and fills it from the ids
-    // of a negative list (on a version 5 database those left after `s_ProcessSeqIDsForV5`
-    // drops the gis; a list left empty sets no rule here: `restrict`). The fetches with
+    // of a negative list as read: the constructor makes the set before its first OID list
+    // processes the list (`s_ProcessSeqIDsForV5`, which drops the gis on a version 5
+    // database), so a list of gis only that the processing empties fills it too (review 1 of
+    // line RG D1c-1b, F1), and every negative list does (a list file without an id is no list,
+    // `DbFilterArgs::resolve`). The fetches with
     // `check_oid_exclusion` then exclude a sequence without a line: a negative list's such
     // sequence is searched, takes its place in the preliminary hit lists of a gapped search,
     // and leaves the search at the traceback's or the composition-based redo's fetch, before
@@ -1834,12 +1829,12 @@ impl SeqDb {
     // protein subject of an ungapped search is fetched by none of them and reaches the
     // Seq-align (`drops_lineless_hits`).
     /// Whether NCBI's fetches with `check_oid_exclusion` exclude the sequences that keep no
-    /// line (`keeps_line`): the database's rule is a negative seqid list with at least one id
+    /// line (`keeps_line`): the database's rule is a negative seqid list
     /// (`algorithm::common::database::FetchExcluded`).
     pub fn excludes_lineless_at_fetch(&self) -> bool {
         self.volumes
             .iter()
-            .any(|volume| volume.has_negative_seqid_ids())
+            .any(|volume| volume.has_negative_seqid_list())
     }
 
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's list

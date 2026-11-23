@@ -903,7 +903,7 @@ fn exclude_fetched(
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<Vec<FetchExcludedMatch>> {
     let excluded = shared::FetchExcluded::of(&database.db);
-    // Without a negative seqid list with ids the fetches exclude nothing: no list is read here.
+    // Without a negative seqid list the fetches exclude nothing: no list is read here.
     if excluded.is_none() {
         return Ok(Vec::new());
     }

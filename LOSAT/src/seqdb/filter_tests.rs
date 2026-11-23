@@ -666,8 +666,10 @@ fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
     assert!(positive.drops_lineless_hits());
     assert!(!positive.excludes_lineless_at_fetch());
     // A list of gis only is empty on a version 5 database once the gis are dropped
-    // (`s_ProcessSeqIDsForV5`): no id set, but still the volumes' list, which erases the lines
-    // without a Seq-id (review 2 of line RG D1c, R2). prot_v5's lines all have one.
+    // (`s_ProcessSeqIDsForV5`), but it is still the volumes' list, which erases the lines
+    // without a Seq-id (review 2 of line RG D1c, R2), and NCBI's id set was made from the
+    // negative one as read, before that processing (review 1 of D1c-1b, F1): its fetches still
+    // exclude. prot_v5's lines all have a Seq-id.
     for negative in [true, false] {
         let mut gis = ids_db("prot_v5", SeqType::Protein);
         gis.restrict(
@@ -676,7 +678,7 @@ fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
         )
         .unwrap();
         assert!(gis.drops_lineless_hits());
-        assert!(!gis.excludes_lineless_at_fetch());
+        assert_eq!(gis.excludes_lineless_at_fetch(), negative);
         assert!((0..gis.num_seqs() as u32).all(|ordinal| gis.keeps_line(ordinal).unwrap()));
     }
 }
@@ -795,7 +797,6 @@ fn every_list_tests_each_line_as_ncbis() {
             Ok(Some(vec![false, true])),
             "{empty:?}"
         );
-        assert!(!empty.tests_ids());
     }
     assert_eq!(line_mask(None, &[], &bare), Ok(Some(vec![true, true])));
     // A sequence of lines without Seq-ids keeps none: a seqid list's reads refuse it, a taxid

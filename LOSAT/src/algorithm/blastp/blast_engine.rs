@@ -2185,20 +2185,14 @@ fn recounts_rps_identities(reports: &[BlastpReport]) -> bool {
     })
 }
 
-/// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
-/// outfmt 0, and the query-anchored 1 to 4 of BLASTP and RPSBLAST (`Program::writes`; psiblast
-/// refuses those, item PS15b). NCBI's application writes 0 to 4 through one frame
-/// (`PrintProlog`, the query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the
-/// other formats.
-fn blastp_pairwise_view_of(
-    app: BlastpApp,
-    number: i32,
-) -> Option<crate::report::pairwise::PairwiseView> {
+/// The pairwise view (`PairwiseView::of`) of the format number `number`: outfmt 0 and the
+/// query-anchored 1 to 4, which BLASTP, RPSBLAST and PSIBLAST all write (psiblast's since item
+/// PS15b-2, each round's section as its outfmt 0 round). NCBI's application writes 0 to 4 through
+/// one frame (`PrintProlog`, the query batches, `PrintOneResultSet`), and so does LOSAT; `None`
+/// for the other formats.
+fn blastp_pairwise_view_of(number: i32) -> Option<crate::report::pairwise::PairwiseView> {
     crate::blastinput::app::ReportFormat::from_number(number)
         .and_then(crate::report::pairwise::PairwiseView::of)
-        .filter(|view| {
-            *view == crate::report::pairwise::PairwiseView::Pairwise || app != BlastpApp::Psiblast
-        })
 }
 
 /// The format of a `-outfmt` value that is outfmt 0, 6 or 7 to LOSAT's own writers (not a custom
@@ -2220,19 +2214,15 @@ fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String>
     }
 }
 
-/// The query-anchored view of a `-outfmt` value of 1 to 4 that `app` writes
-/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. The
+/// The query-anchored view of a `-outfmt` value of 1 to 4 (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. The
 /// words after the number (the library's value as given) are dropped, as NCBI drops them for
 /// every format but the tables (`parse_formatting_string`) and the command line's value does
 /// (`FormatChoice::normalized`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851
-fn blastp_query_anchored_view(
-    app: BlastpApp,
-    outfmt: &str,
-) -> Option<crate::report::pairwise::PairwiseView> {
+fn blastp_query_anchored_view(outfmt: &str) -> Option<crate::report::pairwise::PairwiseView> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
-    blastp_pairwise_view_of(app, choice.number)
+    blastp_pairwise_view_of(choice.number)
         .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
 }
 
@@ -4424,10 +4414,8 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast refuses 1 to 4 before its search): the
-    // stream of NCBI's `CBlastFormat`.
-    let pairwise =
-        format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
+    // Outfmt 0 to 4 (`blastp_pairwise_view_of`): the stream of NCBI's `CBlastFormat`.
+    let pairwise = format.is_some_and(|format| blastp_pairwise_view_of(format as i32).is_some());
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; a custom
@@ -7059,12 +7047,12 @@ fn x_query_block_plan(
             Some(XBlockReport::Tabular)
         }
         Ok(OutputFormat::Pairwise) => Some(XBlockReport::Pairwise),
-        // Outfmt 1 to 4 (BLASTP's, `blastp_pairwise_view_of`): outfmt 0's report with each
+        // Outfmt 1 to 4 (`blastp_pairwise_view_of`): outfmt 0's report with each
         // query's alignments as one section, which reads only that query's hits and the
         // sequences (`report::query_anchored`).
         Err(_)
             if crate::blastinput::app::parse_formatting_string(outfmt)
-                .is_ok_and(|choice| blastp_pairwise_view_of(args.app, choice.number).is_some()) =>
+                .is_ok_and(|choice| blastp_pairwise_view_of(choice.number).is_some()) =>
         {
             Some(XBlockReport::Pairwise)
         }
@@ -7634,9 +7622,9 @@ fn blastp_scan_mode_definition(tag: &str) -> String {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// Writes and flushes the prolog of every outfmt 0 to 4, 15, 16 and 20 format (`PrintProlog`;
-/// 1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`), for a run that stops at its
-/// first query batch (outfmt 20's line of the field names; its formatter's warning came before
-/// the search, `search`).
+/// 0 to 4 are `blastp_pairwise_view_of`'s), for a run that stops at its first query batch
+/// (outfmt 20's line of the field names; its formatter's warning came before the search,
+/// `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -7649,7 +7637,7 @@ fn write_pairwise_prologs(
         .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-        if blastp_pairwise_view_of(args.app, number).is_some() {
+        if blastp_pairwise_view_of(number).is_some() {
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
@@ -7751,7 +7739,7 @@ fn write_reports_without_queries(
             continue;
         }
         // Outfmt 1 to 4 write what outfmt 0 writes without a query.
-        let view = blastp_query_anchored_view(args.app, format.outfmt);
+        let view = blastp_query_anchored_view(format.outfmt);
         let outfmt = match view {
             Some(_) => OutputFormat::Pairwise,
             None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,
@@ -8328,8 +8316,7 @@ fn unsearched_batches_then_engine_error(
         .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
     let ported_formats = outputs.formats.iter().all(|format| {
         crate::blastinput::app::parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            matches!(choice.number, 6 | 7 | 10)
-                || blastp_pairwise_view_of(args.app, choice.number).is_some()
+            matches!(choice.number, 6 | 7 | 10) || blastp_pairwise_view_of(choice.number).is_some()
         })
     });
     let Some(batch) = first_searched

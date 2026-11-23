@@ -758,6 +758,30 @@ pub fn write_document_posts(
     write_hit_posts(report, &hits, 0, writer, warnings)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+/// Writes `report`, the end of a structured document or a held report written there
+/// (`StructuredXml::finish`, `StructuredXml::unwritten`), whose writing returned `written`, as
+/// `write_document_posts`; where the held report raised an exception that NCBI's report function
+/// catches (`CaughtException`: the stream forms 15 and 16 have written their end, the report is
+/// left out), the post of it by `program` (`blast_xml::writer::caught_post`) after the other
+/// posts. Any other error is returned and `report` is not written.
+pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?Sized>(
+    written: Result<()>,
+    report: &[u8],
+    document: &mut D,
+    program: &str,
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    let mut hits = HitPosts::default();
+    if let Some(post) = crate::report::blast_xml::writer::caught_post(written, &*document, program)?
+    {
+        hits.caught(post);
+    }
+    hits.document(document.take_posts());
+    write_hit_posts(report, &hits, 0, writer, warnings)
+}
+
 /// Writes query `query`'s structured report `report` with the posts of its `Hit`s
 /// (`HitPosts::write`): the model's reads through the warnings' cursor
 /// (`QueryWarnings::subject_read`) and the writer's texts, both to the warnings' sink (the run's

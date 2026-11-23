@@ -497,11 +497,14 @@ impl PreparedXml {
                 warnings.before_query(q_idx, &mut *writer)?;
             }
             if q_idx == self.texts.len() {
-                // The held report that is never written (`prepare`, `written_queries`).
-                document.unwritten(&mut buf)?;
-                crate::report::query_warnings::write_document_posts(
+                // The held report that is never written (`prepare`, `written_queries`); the one
+                // held before it is written, or fails (`CaughtException`: its post follows).
+                let written = document.unwritten(&mut buf);
+                crate::report::query_warnings::write_document_end(
+                    written,
                     &buf,
-                    document.take_posts(),
+                    &mut *document,
+                    "tblastn",
                     writer,
                     warnings.as_deref_mut(),
                 )?;
@@ -680,9 +683,11 @@ impl PreparedXml {
             // (`CaughtException`: the `Hit` of a subject whose lookup throws, `HitNames`): the XML2 and
             // JSON documents leave its report out (`Xml2Document::report`), and the post of the
             // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
-            // query leaves its partial bytes in `buf`, which the error return drops.
+            // query leaves its partial bytes in `buf`, which the error return drops. The post's
+            // prefix is the application's name, `tblastn` under `-in_pssm` too (whose program is
+            // `psitblastn`).
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, run.program)?
+                crate::report::blast_xml::writer::caught_post(written, &*document, "tblastn")?
             {
                 posts.caught(post);
             }
@@ -697,10 +702,14 @@ impl PreparedXml {
             buf.clear();
         }
         if ranges.epilog {
-            document.finish(&mut buf)?;
-            crate::report::query_warnings::write_document_posts(
+            // The held report of a `-subject` or `-in_pssm` run (`Xml2Run::holds_back`) is
+            // written here, or fails (`CaughtException`: the document's end, then its post).
+            let written = document.finish(&mut buf);
+            crate::report::query_warnings::write_document_end(
+                written,
                 &buf,
-                document.take_posts(),
+                &mut *document,
+                "tblastn",
                 writer,
                 warnings,
             )?;

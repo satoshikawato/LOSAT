@@ -85,7 +85,7 @@ The files, messages and exit status are those of NCBI's `makeblastdb` 2.17.0, wi
 
 NCBI's programs and LOSAT's look for the GI-mask files from the current directory and the `BLASTDB` path, not from the database's directory, so they find them when they run where the build ran (or with `BLASTDB` set to that directory, or with an absolute `-gi_mask_name`). From elsewhere they stop with `Could not open gi-mask index files.`
 
-LOSAT's `blastdbcmd`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` read the GI-indexed masks as NCBI's do (`-info`, `-outfmt %m`, `-mask_sequence_with`, `-db_soft_mask`, `-db_hard_mask`), every search program searches such a database, and `-input_type blastdb` copies its masks (see [Copying databases](#copying-databases)). A sequence without a GI has no masks of its own: like NCBI's programs, LOSAT's give it the masks of GI 4294967295 when the database has that GI. See [Databases](../databases.md) for when `MASKLIST` applies.
+LOSAT's `blastdbcmd`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` read the GI-indexed masks as NCBI's do (`-info`, `-outfmt %m`, `-mask_sequence_with`, `-db_soft_mask`, `-db_hard_mask`), every search program searches such a database, `-input_type blastdb` copies its masks (see [Copying databases](#copying-databases)), and [`makembindex -db_mask`](makembindex.md) leaves them out of an index. A sequence without a GI has no masks of its own: like NCBI's programs, LOSAT's give it the masks of GI 4294967295 when the database has that GI. See [Databases](../databases.md) for when `MASKLIST` applies.
 
 ### Hash index
 

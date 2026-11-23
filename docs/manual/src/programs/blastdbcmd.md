@@ -41,7 +41,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-line_length` | `80` | Letters per line in FASTA. |
 | `-target_only` | off | Write only the definition line of the entry you asked for. |
 | `-get_dups` | off | Also write sequences with duplicate accessions. |
-| `-mask_sequence_with` | none | Write masked letters in lower case, using the numeric id of a masking algorithm. |
+| `-mask_sequence_with` | none | Write masked letters in lower case, using the numeric id of a masking algorithm (or, on a database with GI-indexed masks, its name). |
 | `-tax_info` | off | Print the taxonomy information in the database. |
 | `-list` | none | List the databases in a directory. |
 | `-show_blastdb_search_path` | off | Print the directories searched for databases. |

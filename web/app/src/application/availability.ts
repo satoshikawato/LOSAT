@@ -30,6 +30,7 @@ export interface AvailabilityDeps {
 export class Availability {
   readonly state = new Store<AvailabilityState>({});
   private ended: string | undefined;
+  private draftWasUnavailable = false;
 
   constructor(private readonly deps: AvailabilityDeps) {
     deps.draft.state.subscribe(() => this.update());
@@ -57,9 +58,14 @@ export class Availability {
   }
 
   private update(): void {
+    const draftProblem = unavailableOf(this.deps.draft.state.get());
     const toolState = this.deps.toolDraft?.state.get();
-    const problem =
-      this.ended ?? unavailableOf(this.deps.draft.state.get()) ?? (toolState === undefined ? undefined : unavailableOfTool(toolState));
+    const toolProblem = toolState === undefined ? undefined : unavailableOfTool(toolState);
+    if (this.draftWasUnavailable && draftProblem === undefined && toolProblem !== undefined && this.ended === undefined) {
+      void this.deps.toolDraft?.askAgain();
+    }
+    this.draftWasUnavailable = draftProblem !== undefined;
+    const problem = this.ended ?? draftProblem ?? toolProblem;
     if (problem === this.state.get().problem) return;
     this.state.set(problem === undefined ? {} : { problem });
   }

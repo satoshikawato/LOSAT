@@ -236,6 +236,7 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
       },
       debounceMs: 0,
     });
+    draft.ensureLoaded();
     return { draft, coordinator, data, submitted };
   }
 

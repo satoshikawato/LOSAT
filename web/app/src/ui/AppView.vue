@@ -64,10 +64,15 @@ const tab = computed<MainTab>({
     navigation.choose(value);
   },
 });
+// Load windowmasker's `-xmlhelp` lazily on the first visit to the WindowMasker tab so startup on
+// Search does not issue extra engine calls.
+watchEffect(() => {
+  if (shown.value === 'windowmasker') props.toolDraft.ensureLoaded();
+});
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
-/** Search, Results, and WindowMasker: tabs, each with its panel (WA2-AX-12, WW3b Q9). */
+/** Search, Results, and WindowMasker: tabs, each with its panel (WA2-AX-12). */
 const ids = useId();
 const MAIN_TABS = [
   { value: 'search', label: 'Search', testid: 'tab-search', id: `${ids}-search-tab`, panel: `${ids}-search` },
@@ -108,7 +113,7 @@ async function showSearch(): Promise<void> {
   mainTabs.value?.focus();
 }
 
-/** "Make counts…" in BLASTN's repeats row: switches to WindowMasker on Make counts (Q4). */
+/** "Make counts…" in BLASTN's repeats row: switches to WindowMasker on Make counts. */
 async function showMakeCounts(): Promise<void> {
   props.toolDraft.setStage('mk_counts');
   tab.value = 'windowmasker';

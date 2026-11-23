@@ -124,7 +124,14 @@ export class ToolDraft {
       validation: { state: 'idle' },
       submitting: false,
     });
-    void this.loadDescription();
+  }
+
+  /** Loads `-xmlhelp` once when the WindowMasker tab is first opened. */
+  ensureLoaded(): void {
+    const state = this.state.get();
+    if (state.description === undefined && this.descriptionRequest === undefined) {
+      void this.loadDescription();
+    }
   }
 
   // --- stage and options ------------------------------------------------------------------
@@ -312,6 +319,7 @@ export class ToolDraft {
 
   /** Switches to Mask and preselects a counts file produced by an earlier run in this session. */
   useCountsForMask(runId: string, runNumber: number, key: string, name: string, size: number): void {
+    this.ensureLoaded();
     this.set({
       stage: 'mask',
       ustatSource: { kind: 'session', runId, runNumber, key, name, size },
@@ -414,7 +422,7 @@ export class ToolDraft {
   async askAgain(): Promise<void> {
     const state = this.state.get();
     const tasks: Array<Promise<unknown>> = [...this.asking];
-    if (state.description === undefined) {
+    if (state.descriptionUnavailable === true) {
       const task = this.loadDescription(true);
       this.trackAsking(task);
       tasks.push(task);

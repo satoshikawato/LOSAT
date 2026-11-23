@@ -6,8 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use clap::CommandFactory;
-use losat::web_adapter::{Cli, Commands};
+use losat::web_adapter::Commands;
 
 use crate::json;
 use crate::run::Program;
@@ -265,15 +264,9 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
         let values = resolved(&words(program, &task, &[]))?;
         out.tasks.insert(task, values);
     }
-    let described = |flag: &str| {
-        Cli::command()
-            .find_subcommand(program.name())
-            .is_some_and(|command| {
-                command
-                    .get_arguments()
-                    .any(|arg| arg.get_long() == flag.strip_prefix('-'))
-            })
-    };
+    // The options of the program in NCBI's argument tables (`describe`'s rows).
+    let options = losat::web_adapter::described_parameters(program.api());
+    let described = |flag: &str| options.iter().any(|option| option.flag == flag);
     let matrices: Vec<String> = losat::web_adapter::ScoringMatrix::ALL
         .iter()
         .map(|matrix| matrix.ncbi_name().to_string())
@@ -439,57 +432,34 @@ mod tests {
         Program::Blastx,
     ];
 
-    /// The help text and the default of NCBI's argument reader (`describe`'s) of a program's
-    /// option.
-    fn help(program: Program, flag: &str) -> (String, Option<String>) {
-        let root = Cli::command();
-        let arg = root
-            .find_subcommand(program.name())
-            .and_then(|command| {
-                command
-                    .get_arguments()
-                    .find(|arg| arg.get_long() == flag.strip_prefix('-'))
-            })
-            .unwrap_or_else(|| panic!("{} has no {flag}", program.name()));
-        let name = flag.strip_prefix('-').unwrap_or(flag);
-        (
-            arg.get_help().map(ToString::to_string).unwrap_or_default(),
-            losat::web_adapter::default_value(program.name(), name).map(str::to_string),
-        )
-    }
-
-    /// Whether `text` holds `value` as a word of its own ("3", not the 3 of "BLOSUM62" or "13").
-    fn names(text: &str, value: &str) -> bool {
-        text.match_indices(value).any(|(at, _)| {
-            let before = text[..at].chars().next_back();
-            let after = text[at + value.len()..].chars().next();
-            !before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '-'))
-                && !after.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.'))
-        })
-    }
-
-    // The CLI states each default that the engine resolves for a task, as NCBI's reader's default
-    // or in the help: the help and the resolution agree (before, programs.ts held a copy of the
-    // help, checked the same way).
+    // NCBI's reader adds the default of a key that its argument table gives one (`<default>`,
+    // `describe`'s `default`): the engine resolves that value in every task. The other options'
+    // defaults depend on the task and on other options, which NCBI's help text does not state
+    // (line RG DECISIONS K4i-3-1: the help is NCBI's), and the engine's resolution is their source.
     #[test]
-    fn every_task_default_is_a_value_that_the_help_names() {
-        let mut unnamed = Vec::new();
+    fn every_task_resolves_the_default_of_ncbis_table() {
+        let (mut checked, mut differ) = (0, Vec::new());
         for program in PROGRAMS {
             let defaults = defaults(program).unwrap();
             for (task, values) in &defaults.tasks {
                 for (flag, value) in values {
-                    let (text, default) = help(program, flag);
-                    let stated = match &default {
-                        Some(default) => default == value,
-                        None => text.to_lowercase().contains("default") && names(&text, value),
+                    let name = flag.strip_prefix('-').unwrap_or(flag);
+                    let Some(default) = losat::web_adapter::default_value(program.name(), name)
+                    else {
+                        continue;
                     };
-                    if !stated {
-                        unnamed.push(format!("{} {task} {flag} {value}: {text}", program.name()));
+                    checked += 1;
+                    if default != value {
+                        differ.push(format!(
+                            "{} {task} {flag}: {value}, NCBI's {default}",
+                            program.name()
+                        ));
                     }
                 }
             }
         }
-        assert!(unnamed.is_empty(), "{unnamed:#?}");
+        assert!(differ.is_empty(), "{differ:#?}");
+        assert!(checked > 0);
     }
 
     #[test]

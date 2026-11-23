@@ -677,12 +677,13 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
-    const LOWER: [&str; 22] = [
+    const LOWER: [&str; 23] = [
         "name",
         "kind",
         "default",
         "constraint",
         "mandatory",
+        "description",
         "first",
         "count",
         "at",
@@ -889,4 +890,53 @@ fn display_orders_are_the_tables_sets() {
     assert_eq!(default_value("blastp", "task"), Some("blastp"));
     assert_eq!(default_value("blastp", "evalue"), None);
     assert_eq!(default_value("blastn", "ungapped"), None);
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1. The tables keep the comments (`<description>`) of
+// the programs that LOSAT's descriptions list (`DESCRIBED` in build/ncbi_args.rs), which are the
+// library API's (`api::Program::ALL`), of every argument of theirs, and of no other program's.
+#[test]
+fn the_tables_keep_the_comments_of_the_described_programs() {
+    let described: Vec<&str> = crate::api::Program::ALL
+        .iter()
+        .map(|program| program.name())
+        .collect();
+    for (program, arguments) in &PROGRAMS {
+        let kept = described.contains(&program.get());
+        for desc in arguments.descs() {
+            assert_eq!(
+                desc.description.is_some(),
+                kept,
+                "{} -{}",
+                program.get(),
+                desc.name()
+            );
+        }
+    }
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1 (Q3 = A). LOSAT's descriptions list a program's
+// arguments in the order of NCBI's `-help`: each one is in the usage's synopsis, in its order; those
+// refused by name are not listed, the others are.
+#[test]
+fn the_described_arguments_follow_the_usage() {
+    for program in crate::api::Program::ALL {
+        let tool = crate::cli::reader::tool(program.name()).expect("a program on the reader");
+        let listed: Vec<Described> = described(tool).collect();
+        let positions: Vec<usize> = listed
+            .iter()
+            .map(|argument| usage_position(tool.help, argument.name))
+            .collect();
+        assert!(!positions.contains(&usize::MAX), "{program}: {positions:?}");
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{program}"
+        );
+        let arguments = arguments(tool.program).expect("its XML");
+        for desc in arguments.descs() {
+            let refused = matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_)));
+            let shown = listed.iter().any(|argument| argument.name == desc.name());
+            assert_eq!(shown, !refused, "{program} -{}", desc.name());
+        }
+    }
 }

@@ -90,7 +90,7 @@ export interface KnownDefault {
 
 /**
  * The default of a field: the value that the engine resolves for the task (`describe`), the
- * value that a set -matrix or -word_size gives it, or else the clap default, or else the value
+ * value that a set -matrix or -word_size gives it, or else NCBI's default (`describe`'s `default`), or else the value
  * of NCBI's page of an option read with others (a section's `together`, which the argv writes
  * when another of them is written); undefined when unknown (two of the options that change it
  * are set, one of them at a value that the engine's table does not hold, or an option that
@@ -130,7 +130,7 @@ function togetherValue(program: ProgramDescriptor, flag: string): string | undef
   return undefined;
 }
 
-/** An option's default for a task alone: the engine's resolved value, or else the clap default. */
+/** An option's default for a task alone: the engine's resolved value, or else NCBI's default (`describe`'s `default`). */
 function taskDefault(option: EngineOption, task: string): string | undefined {
   return option.resolvedDefault?.byTask[task] ?? option.defaultValue;
 }

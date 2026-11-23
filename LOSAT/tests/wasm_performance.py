@@ -2,9 +2,9 @@
 """PR01 explicit-artifact baseline; frozen hashes are never learned from LOSAT.
 
 NCBI 2.17.0 c++/src/algo/blast/format/blast_format.cpp:794-808,828-832:
-  ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) { ... tabinfo.Print(); }
+Iterates over alignments in `copy_aln_set` and prints each tabular row via `tabinfo`'s `Print` method.
 c++/src/objtools/align_format/tabular.cpp:1098-1108:
-  x_PrintField(*iter); ... m_Ostream << "\n";
+Emits each selected tabular field in order via `x_PrintField` and terminates each row on `m_Ostream` with a newline.
 This test-only orchestration preserves ordered bytes and lexical input paths.
 It supplies process/runtime measurement, never search behavior or a fallback.
 """
@@ -334,7 +334,7 @@ def freeze(args):
             "flags": [],
             "runners": runners,
             # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
-            # x_PrintField(*iter); ... m_Ostream << "\n";
+            # Emit each tabular field in order via `x_PrintField` and terminate each row on `m_Ostream` with a newline.
             # Freeze the memory adapter and the table of files too: they affect the executed module.
             "runner_hashes": {
                 p: digest(p)
@@ -536,7 +536,7 @@ def execute(argv, cwd, directory, env, timeout):
         "raw_output_bytes": output.stat().st_size if output.is_file() else None,
     }
     # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-    # (*thread)->Join(&result); ... BlastSeqSrcSetNumberOfThreads(..., 0);
+    # Join every preliminary-search worker thread and reset the sequence-source thread count to zero via `BlastSeqSrcSetNumberOfThreads`.
     # End-to-end evidence ends after process/worker completion, including failures.
     result["started_utc"] = started_utc
     result["ended_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -550,7 +550,7 @@ def execute(argv, cwd, directory, env, timeout):
     return result
 
 
-# NCBI tabular.cpp:1098-1108: m_Ostream << m_FieldDelimiter; ... << "\n";
+# NCBI tabular.cpp:1098-1108: tabular rows emit fields separated by `m_FieldDelimiter` and terminated by a newline.
 # No whitespace/header/order normalization is permissible in this acceptance gate.
 def raw_gate(result, expected):
     if result["status"] != "PASS":

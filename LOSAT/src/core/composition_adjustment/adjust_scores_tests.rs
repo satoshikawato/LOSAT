@@ -42,7 +42,7 @@ fn pinned_tblastn_mode2_adjustment_rules_match_ncbi_call_inputs() {
         let rows: Vec<_> = trace.lines().collect();
         assert_eq!(rows.len() % 6, 0);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2229-2236:
-        //                          self->startFreqRatios, self->ungappedLambda);
+        // Initializes `Blast_MatrixInfo` from `startFreqRatios` and `ungappedLambda`.
         let matrix_row: Vec<_> = rows[1].split('\t').collect();
         assert_eq!(matrix_row[0], "K_MATRIX");
         let matrix_lambda: f64 = matrix_row[5].parse().unwrap();

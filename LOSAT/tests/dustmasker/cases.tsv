@@ -334,6 +334,15 @@ db_t5b_kingdom_past_page_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt f
 db_t5b_kingdom_past_page_interval	-infmt blastdb -in ../db_search/t5b/nmv -outfmt interval -conffile conf/t5b_kingdom_past_page.ini
 db_t5b_names_past_page_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt seqloc_asn1_text -conffile conf/t5b_names_past_page.ini
 db_t5b_names_past_page_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt maskinfo_asn1_text -conffile conf/t5b_names_past_page.ini
+# Line RG item T5d (2026-11-16, the local official release; tests/db_search/t5/make_t5.py --header-only): header records that NCBI's read fails on, after the records before.
+db_t5d_vstr	-infmt blastdb -in ../db_search/t5/nhd_vstr
+db_t5d_title	-infmt blastdb -in ../db_search/t5/nhd_title
+db_t5d_seqid	-infmt blastdb -in ../db_search/t5/nhd_seqid
+# Fix 1 of line RG item T5d (2026-11-17, the local official release; make_t5.py --header-only utf8 utf8id long longx): records that NCBI reads (a UTF8String where a VisibleString is expected, with no warning in the maskers; a member tag in the long form), and a long-form member tag of no member.
+db_t5d_utf8	-infmt blastdb -in ../db_search/t5/nhd_utf8
+db_t5d_utf8id	-infmt blastdb -in ../db_search/t5/nhd_utf8id
+db_t5d_long	-infmt blastdb -in ../db_search/t5/nhd_long
+db_t5d_longx	-infmt blastdb -in ../db_search/t5/nhd_longx
 # OIDLIST (line RG, series D, D1b-1, 2026-11-21): the alias files of ../db_search/oidlist (make_oidlist.py). The reader reads every OID of the volumes, the OIDs the list leaves out too; a missing OID list file stops it before the first sequence, at the constructor's scan and, under NSEQ and LENGTH, at the reader's first use of the OID list. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-21, ad-RG-D-26.
 db_oidlist_n_interval	-infmt blastdb -in ../db_search/oidlist/n_n -outfmt interval
 db_oidlist_missl_interval	-infmt blastdb -in ../db_search/oidlist/n_missl -outfmt interval

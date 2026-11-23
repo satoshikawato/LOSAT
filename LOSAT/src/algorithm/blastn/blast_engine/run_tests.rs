@@ -838,7 +838,7 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
         })
         .collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4170-4189
-    // if (subject_length < MAX_SUBJECT_OFFSET) { *start_shift = 0; return; }
+    // Subjects shorter than `MAX_SUBJECT_OFFSET` keep a zero `start_shift` and return early.
     // Exercise a real subject shift and more than one 16-HSP batch.
     let mut subject = vec![b'N'; 91_000];
     for i in 0..20 {

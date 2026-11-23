@@ -1011,7 +1011,7 @@ fn fold_t<const PT: bool, const TRACK: bool>(
             s_range,
             word_length,
             lut_word_length,
-            false, // check_double = FALSE (not in two-hit block)
+            false, // skip double-word check (not in two-hit block)
             &mut is_seed_masked,
         );
         if wt == 0 {

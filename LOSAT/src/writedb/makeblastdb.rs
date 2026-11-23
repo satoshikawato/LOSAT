@@ -901,7 +901,11 @@ fn copy_input_databases(
         ));
     }
     let input = SeqDb::open_in(&combine_and_quote(names), seqtype, &search).map_err(input_error)?;
-    db.set_leaf_tax_ids(scan_leaf_tax_ids(&input).map_err(raw_copy_error)?);
+    let leafs = {
+        let mut warn = warn_to(err);
+        scan_leaf_tax_ids(&input, &mut warn, db.utf8_once())
+    };
+    db.set_leaf_tax_ids(leafs.map_err(raw_copy_error)?);
     let mut source = RawSeqDbSource::new(&input, db, randomize).map_err(raw_copy_error)?;
     let copied = {
         let mut warn = warn_to(err);

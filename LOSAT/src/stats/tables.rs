@@ -426,7 +426,7 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:814-819
 ///
-/// For tblastx, scoring_options->gapped_calculation = TRUE (default),
+/// For tblastx, `gapped_calculation` in `scoring_options` defaults to true,
 /// so BLAST_GetAlphaBeta returns gapped alpha/beta values.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3107-3116

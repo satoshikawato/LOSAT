@@ -1,0 +1,3 @@
+Error: (CSerialException::eFormatError) byte 6: unexpected tag: OctetString (4), should be: VisibleString (26)
+Error: (CSerialException::eFormatError) error while reading title ( at Blast-def-line-set.[].[].title)
+Error: (106.16) Application's execution failed (CSerialException::eFormatError) byte 6: unexpected tag: OctetString (4), should be: VisibleString (26)

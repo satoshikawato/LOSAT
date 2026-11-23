@@ -4,7 +4,7 @@ set -euo pipefail
 # Comparison-only NCBI oracle. Run from any directory with a new output path.
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1056:
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2538-2557:
-#   m_Scope = ReadSequencesToBlast(... subjects ...);
+# Loads subject sequences into `m_Scope` using `ReadSequencesToBlast`.
 root=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: run_cli_oracles.sh NEW_OUTPUT_DIRECTORY}
 mkdir "$out"

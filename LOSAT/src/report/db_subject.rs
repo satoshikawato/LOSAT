@@ -1165,15 +1165,15 @@ impl ParsedSubject {
         match self.weak_match.as_ref().filter(|_| one_by_one) {
             None => Ok(()),
             Some(WeakMatch::Held(other)) => Err(format!(
-                "has the Seq-align id {}, which can match an id of database sequence {other} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
+                "has the Seq-align id {}, which can match an id of database sequence {other} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format that NCBI BLAST+ 2.17.0 does not prefetch for), where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
                 id()
             )),
             Some(WeakMatch::Unlisted) => Err(format!(
-                "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
+                "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format that NCBI BLAST+ 2.17.0 does not prefetch for), where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
                 id()
             )),
             Some(WeakMatch::Failed(message)) => Err(format!(
-                "has the Seq-align id {}, for which LOSAT cannot look up the sequences that can match it weakly ({message}): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
+                "has the Seq-align id {}, for which LOSAT cannot look up the sequences that can match it weakly ({message}): in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format that NCBI BLAST+ 2.17.0 does not prefetch for), where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
                 id()
             )),
         }

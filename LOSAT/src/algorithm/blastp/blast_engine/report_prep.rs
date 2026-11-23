@@ -672,7 +672,16 @@ pub(super) fn prefetch_reported_subjects(
                 &prefetched_ranks,
             )?;
         }
-        if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only || scope_loads {
+        // What the batches' prefetches and reports load is modelled here where it can write a
+        // text (`reports_model`); psiblast's PSSM reads of a query whose batch reads one by one
+        // load what they read whatever the first format, also after Seq-annot and archive reports
+        // that load nothing (M1), and with `taxdb.bti` their loads look the taxids up
+        // (`ListedTitles::pssm_load_texts`; review 5 of line DBID pfoff-4, H2: psiblast's outfmt
+        // 8, 9 and 11, whose batches NCBI never prefetches but at `PRE_FETCH_SEQS_LIMIT=INT_MAX`).
+        let reports_model =
+            prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only || scope_loads;
+        let pssm_loads = pssm_made && database.taxdb_found();
+        if reports_model || pssm_loads {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -699,14 +708,15 @@ pub(super) fn prefetch_reported_subjects(
                 let lists = &hit_lists[batch.searched.clone()];
                 let seq_aligns = batch_seq_aligns(batch.searched.clone());
                 if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns) {
-                    if !prefetch_taxids && !scope_loads {
+                    let report_loads = prefetch_taxids || scope_loads;
+                    if !report_loads && !pssm_loads {
                         continue;
                     }
                     for query in batch.searched.clone() {
                         if !hit_loads.reaches(query) {
                             break;
                         }
-                        if rows != crate::report::tabular::SubjectFetch::Never {
+                        if report_loads && rows != crate::report::tabular::SubjectFetch::Never {
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
                             // read none of a query whose HSPs have none, which looks no taxid up.
@@ -781,6 +791,9 @@ pub(super) fn prefetch_reported_subjects(
                             }
                         }
                     }
+                    continue;
+                }
+                if !reports_model {
                     continue;
                 }
                 // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
@@ -1579,7 +1592,9 @@ pub(super) fn report_values(
             hit_lists,
             &batch_prefetch,
             args.inclusion_ethresh,
-            prefetch_taxids,
+            // The PSSM's own loads look the taxids up whatever the first format
+            // (`prefetch_reported_subjects`'s `pssm_loads`).
+            database.taxdb_found(),
             &|query| match psiblast_kept.as_ref() {
                 _ if !prunes_lists => usize::MAX,
                 Some(kept) => kept[query],

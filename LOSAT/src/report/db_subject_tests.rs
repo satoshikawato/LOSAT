@@ -1495,7 +1495,7 @@ fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
         );
         let error = subject.fetched(false, true, HitLoad::Loaded).unwrap_err();
         assert!(
-            error.contains("in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off"),
+            error.contains("in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format"),
             "{error}"
         );
         assert_eq!(subject.prefetched(), Prefetched::Itself, "{weak:?}");

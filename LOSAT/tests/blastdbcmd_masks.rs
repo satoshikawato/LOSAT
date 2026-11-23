@@ -10,18 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result (as
-/// `blastdbcmd_retrieve.rs`).
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::{blastdbcmd_bytes_on_platform, canonical};
 
 fn run_dir() -> PathBuf {
     canonical(
@@ -82,6 +71,8 @@ fn blastdbcmd(words: &[&str], config: &Path) -> (Vec<u8>, Vec<u8>, i32) {
 /// (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let text = fs::read(run_dir().join("expected").join(name)).unwrap();
+    // The paths of `-info` with the platform's separator (no case here has `-metadata`).
+    let text = blastdbcmd_bytes_on_platform(&text, &["{R}"], &[]);
     let root = run_dir();
     let root = root.to_str().unwrap().as_bytes();
     let mut placed = Vec::with_capacity(text.len());
@@ -290,10 +281,6 @@ const CASES: &[(&str, &[&str], i32)] = &[
 fn masks_are_ncbi_s_bytes() {
     let config = TestDir::new("cases");
     for &(id, words, status) in CASES {
-        // The lines of `-info` name a path with the platform's separator.
-        if cfg!(windows) && words.contains(&"-info") {
-            continue;
-        }
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);
         let (want_out, want_err) = (
             expected(&format!("{id}.stdout")),

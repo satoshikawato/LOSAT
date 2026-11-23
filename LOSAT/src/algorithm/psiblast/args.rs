@@ -189,7 +189,7 @@ pub struct PsiblastArgs {
     pub subject_loc: Option<String>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7, 10 and 20", "6, 7, 10 and 20", "; with -in_pssm or -in_msa: 0, 6 and 7"))]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 5 to 11 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     #[arg(
@@ -339,10 +339,9 @@ impl PsiblastArgs {
             || ((self.in_pssm.is_some() || self.in_msa.is_some())
                 && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
         .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
-        let request_inputs = self
-            .export_search_strategy
-            .is_some()
-            .then(|| Box::new(self.option_inputs()));
+        // The options of the search strategy's request and of the archive's (outfmt 11), which
+        // record psiblast's own (`service "psi"`, the PSSM engine's options).
+        let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
@@ -506,13 +505,17 @@ impl PsiblastArgs {
             if !matches!(
                 format,
                 ReportFormat::Pairwise
+                    | ReportFormat::Xml
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
+                    | ReportFormat::AsnText
+                    | ReportFormat::AsnBinary
                     | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::ArchiveFormat
                     | ReportFormat::CommaSeparatedValuesWithHeader
             ) {
                 bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST",
+                    "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
                 );
             }

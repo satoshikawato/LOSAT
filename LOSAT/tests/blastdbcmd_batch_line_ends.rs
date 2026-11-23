@@ -12,18 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result (as
-/// `blastdbcmd_retrieve.rs`).
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::canonical;
 
 fn run_dir() -> PathBuf {
     canonical(

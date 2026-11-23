@@ -1941,19 +1941,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
     // ungapped search, `prelim_kernel::BlastpPrelimKernel::ungapped_subject`).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
-    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
-    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
-    // and NCBI's blastp dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
-    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
-    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // smaller -evalue such as 1e308 runs.
-    if args.evalue >= f64::MAX {
-        bail!(
-            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s blastp crashes on some inputs, is not supported by LOSAT's {program}",
-            args.evalue
-        );
-    }
+    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
+    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    crate::blastinput::protein_options_check::check_evalue_limit(
+        args.evalue,
+        args.comp_based_stats.is_enabled(),
+        program,
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
@@ -7654,6 +7648,7 @@ fn write_reports_without_queries(
                         None
                     },
                     gapped: !args.ungapped,
+                    show_linked_set_size: false,
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };

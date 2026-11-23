@@ -593,8 +593,8 @@ Errors that makeblastdb does not detect, or detects elsewhere:
   above). From the code; not run on Windows.
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
   `-parse_seqids` or with `-taxid`, `-mask_id` without `-mask_data`, `-mask_desc` without
-  `-mask_id`) end with exit status 2 and the text of LOSAT's option
-  parser, as in every LOSAT subcommand; makeblastdb uses 1.
+  `-mask_id`) end with exit status 1 and NCBI's usage and error lines, as makeblastdb does
+  (since line RG item K4i-2b, 2026-11-23; before, LOSAT's option parser's text and exit status 2).
 - With more volumes than the process may hold open files, makeblastdb writes the database
   and ends with exit status 2 ("Too many open files"). LOSAT resolves the finished
   database without opening its volumes and ends with 0.
@@ -862,8 +862,9 @@ search code with a different subject source.
   record's text, and before `Entry not found` where the version check of `-entry` or
   `-entry_batch` read it; segmasker and dustmasker write none. A tag in the long form is read
   with no message (`PeekLongTag`), or fails as NCBI's read does.
-- `-db` with `-subject` or `-subject_loc` is a usage error (LOSAT's parser text and exit
-  status 2; NCBI prints its usage and exits 1). LOSAT Web rejects `-db` until stage DB-7.
+- `-db` with `-subject` or `-subject_loc` is a usage error: NCBI's usage and error lines, exit
+  status 1, as in NCBI (since line RG item K4i-2b, 2026-11-23; before, LOSAT's parser text and exit
+  status 2). LOSAT Web rejects `-db` until stage DB-7.
 
 Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what it does):
 

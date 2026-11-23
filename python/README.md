@@ -48,7 +48,7 @@ For development, `maturin develop` builds the extension into the active virtual 
 
 ## Options
 
-`Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's parser checks the rest, so an option means, and fails, as it does there (`ArgumentError`).
+`Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's argument reader (NCBI's) checks the rest, so an option means, and fails, as it does there (`ArgumentError`, with the command line's own error text).
 
 `-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
 

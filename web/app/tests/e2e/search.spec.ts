@@ -466,9 +466,8 @@ test("the options form: the engine's defaults are not written; tasks, templates 
     await task(page, 'blastn');
     await page.getByTestId('param-word_size').selectOption('other');
     await page.getByTestId('param-word_size-other').fill('3');
-    await expect(page.getByTestId('argv-validation')).toContainText(
-      "error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4",
-    );
+    // The engine's argument error: the usage, a line of 72 "=", and the posts.
+    await expect(page.getByTestId('argv-validation')).toContainText(/Error: Argument "word_size"\. Illegal value, expected >=4:\s+`3'/);
     await page.getByTestId('param-word_size-other').fill('');
     // Templates with the megablast task (the default, not written): the section stays, and the engine refuses them.
     // The type alone set writes the length shown with it (WA-FM-03).
@@ -1523,7 +1522,8 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(extra).toHaveAccessibleName('Additional options');
   // The engine reads the words as the command line does, and says what it does not read.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
+  // The fake engine and the engine both end with NCBI's two posts.
+  await expect(validation).toContainText('Error: Unknown argument: "foo"');
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   // The CLI's options that a search in the browser cannot have (WA-FM-04). The engine prints the CLI's help, as the CLI

@@ -31,7 +31,7 @@ pub const STREAM_DISCARD: u32 = 9;
 /// 2026-11-20.
 pub const STREAM_MESSAGES: u32 = 10;
 /// The text that the command line prints to its standard output in place of a run, exit status 0
-/// (docs/web/abi_v2.md §5): its help (`-h`, `-help`, `-help-full`, `--help`), the XML of
+/// (docs/web/abi_v2.md §5): its help (`-h`, `-help`, `-help-full`), the XML of
 /// `-xmlhelp`, or a version (`-version`, `-version-full`, `-version-full-xml`,
 /// `-version-full-json`). Line WQA's D14, 2026-11-20.
 pub const STREAM_PRINTED: u32 = 11;

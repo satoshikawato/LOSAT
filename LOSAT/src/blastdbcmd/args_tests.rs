@@ -177,7 +177,7 @@ fn help_words_stop_the_reader_where_they_stand() {
     // Known to NCBI's reader: its help with the hidden arguments (none), its XML help.
     assert_eq!(
         parse(&words(&["-info", "-help-full"])).unwrap_err(),
-        ArgsError::Help
+        ArgsError::HelpFull
     );
     assert_eq!(
         parse(&words(&["-info", "-xmlhelp"])).unwrap_err(),

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::library_examples::example_binary;
-use crate::ncbi_windows_paths::ncbi_paths_on_windows;
+use crate::ncbi_windows_paths::{alias_list_path_on_windows, canonical, ncbi_paths_on_windows};
 
 /// The fixtures of `program`.
 fn fixtures(program: &str) -> PathBuf {
@@ -245,6 +245,7 @@ fn expected(program: &str, case: &Case) -> Streams {
                         &format!(" - {missing_name}\n"),
                         &format!(" - {directory}\n"),
                     )
+                    .replace(&format!(": {missing_name}\n"), &format!(": {directory}\n"))
                     .into_bytes()
             };
             let (out, err, status) = expected_row(program, missing);
@@ -361,6 +362,24 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     })
 }
 
+/// Whether `case` of windowmasker names a list that NCBI reads as the lines of a text stream
+/// (`-ids`, `-exclude_ids`, and `-in` with `-fa_list`) in a file that has a `\r\n`: the text
+/// mode of the stream on Windows reads each `\r\n` as `\n` (`ncbi_app::files::LineEnds`), where
+/// on Linux the `\r` stays in the line, so NCBI's bytes from Linux are not those of its build for
+/// Windows there.
+fn crlf_text_list(program: &str, case: &Case) -> bool {
+    let fa_list = case.words.windows(2).any(|pair| {
+        pair[0] == "-fa_list" && ["t", "true", "1"].contains(&pair[1].to_ascii_lowercase().as_str())
+    });
+    program == "windowmasker"
+        && case.words.windows(2).any(|pair| {
+            let list = matches!(pair[0].as_str(), "-ids" | "-exclude_ids")
+                || (fa_list && pair[0] == "-in");
+            list && fs::read(fixtures(program).join(&pair[1]))
+                .is_ok_and(|bytes| bytes.windows(2).any(|two| two == b"\r\n"))
+        })
+}
+
 /// Whether `case` is a row of windowmasker's `-convert`.
 fn converts_counts(program: &str, case: &Case) -> bool {
     program == "windowmasker" && case.words.iter().any(|word| word == "-convert")
@@ -374,6 +393,41 @@ fn counts_directory(program: &str, case: &Case) -> bool {
         && input(case)
             .is_some_and(|name| !name.trim().is_empty() && fixtures(program).join(name).is_dir())
 }
+
+/// The rows whose error quotes an `OIDLIST` value that starts with `/`, which NCBI joins to a
+/// directory on Windows (`alias_list_path_on_windows`): the program, the row, that directory
+/// relative to the program's fixtures and the value. The directory is the alias file's, or, where
+/// the first name of its `DBLIST` is a volume, that volume's (`seqdb::alias::compute_masks`):
+/// `n_miss` and `n_missl` name the alias `tfn`, `p_miss` and `p_missl` the volume `tfp`.
+const OIDLIST_ROWS: &[(&str, &str, &str, &str)] = &[
+    (
+        "dustmasker",
+        "db_oidlist_miss_interval",
+        "../db_search/oidlist",
+        MISSING_OIDLIST,
+    ),
+    (
+        "dustmasker",
+        "db_oidlist_missl_interval",
+        "../db_search/oidlist",
+        MISSING_OIDLIST,
+    ),
+    (
+        "segmasker",
+        "db_oidlist_miss_interval",
+        "../db_search/taxfilter",
+        MISSING_OIDLIST,
+    ),
+    (
+        "segmasker",
+        "db_oidlist_missl_interval",
+        "../db_search/taxfilter",
+        MISSING_OIDLIST,
+    ),
+];
+
+/// The `OIDLIST` value of `tests/db_search/oidlist/{n,p}_miss{,l}` (make_oidlist.py `MISSING`).
+const MISSING_OIDLIST: &str = "/losat-oidlist-fixture-missing/none.msk";
 
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
 /// output and error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8:
@@ -402,6 +456,17 @@ fn expected_row(program: &str, name: &str) -> Streams {
     } else {
         err
     };
+    let err = match OIDLIST_ROWS
+        .iter()
+        .find(|(each, row, ..)| *each == program && *row == name)
+    {
+        Some(&(_, _, dir, value)) if cfg!(windows) => {
+            let dir = canonical(&fixtures(program).join(dir));
+            let text = String::from_utf8(err).unwrap();
+            alias_list_path_on_windows(&text, &dir.to_string_lossy(), value).into_bytes()
+        }
+        _ => err,
+    };
     (
         losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),
         losat::wording::losat_bytes(&err).into_owned(),
@@ -412,9 +477,13 @@ fn expected_row(program: &str, name: &str) -> Streams {
 /// Whether `case` of `program` runs on this platform: a row that writes its output to a device
 /// file runs where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null`
 /// means no log file on every platform: NCBI's `SetLogFile` compares the name,
-/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix.
+/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix; a `crlf_text_list` row runs
+/// off Windows.
 fn runs_here(program: &str, case: &Case) -> bool {
     if counts_directory(program, case) && !cfg!(unix) {
+        return false;
+    }
+    if crlf_text_list(program, case) && cfg!(windows) {
         return false;
     }
     let out = case

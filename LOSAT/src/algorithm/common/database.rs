@@ -1621,8 +1621,11 @@ impl<'a> FetchExcluded<'a> {
 /// subject excluded at the fetch", with two readers: TBLASTN's `stage_d_pipeline` keeps the marked
 /// lists in its stream and asks `SwBatchStatus::reaches_redo` at each (the X-drop redo has no
 /// status, so a marked list is a list skipped there); BLASTP's `exclude_fetched` removes them and
-/// keeps their places (`blastp::blast_engine::database::FetchExcludedMatch`), which its redo loop
-/// reads after each query's loop through the same rule. The other programs remove such lists with
+/// keeps their places (`blastp::blast_engine::database::FetchExcludedMatch`), which both of its
+/// redo loops read through the same rule with one function
+/// (`blastp::blast_engine::redo_run::query_fetch_excluded_reached`): the one-thread loop after
+/// each query's loop, and the replay of the parallel redo's windows when it passes the query
+/// (`blastp::x_redo_par`, `XSwBatch`). The other programs remove such lists with
 /// `FetchExcluded::retain`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540

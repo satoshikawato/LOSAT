@@ -114,32 +114,6 @@ pub(crate) trait RawFile: Sized {
     fn close(self) -> io::Result<()>;
 }
 
-/// A file on disk.
-pub(crate) struct DiskFile(File);
-
-/// Creates or truncates the file at `path` for writing (`RawFile::open` of a file on disk).
-fn create_disk_file(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-}
-
-/// One `write` or `writev` of `segments` on a file on disk (`RawFile::write`).
-fn write_disk_file(file: &mut File, segments: &[&[u8]]) -> io::Result<usize> {
-    match segments {
-        [one] => file.write(one),
-        [a, b] => file.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
-        _ => unreachable!("the stream writes one or two segments"),
-    }
-}
-
-/// `lseek` of a file on disk (`RawFile::seek`).
-fn seek_disk_file(file: &mut File, pos: u64) -> io::Result<()> {
-    file.seek(SeekFrom::Start(pos)).map(|_| ())
-}
-
 /// `close(2)` of a file on disk (`RawFile::close`).
 #[cfg(unix)]
 fn close_disk_file(file: File) -> io::Result<()> {
@@ -157,36 +131,28 @@ fn close_disk_file(file: File) -> io::Result<()> {
     Ok(())
 }
 
-impl RawFile for DiskFile {
-    fn open(path: &Path) -> io::Result<Self> {
-        create_disk_file(path).map(DiskFile)
-    }
-
-    fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize> {
-        write_disk_file(&mut self.0, segments)
-    }
-
-    fn seek(&mut self, pos: u64) -> io::Result<()> {
-        seek_disk_file(&mut self.0, pos)
-    }
-
-    fn close(self) -> io::Result<()> {
-        close_disk_file(self.0)
-    }
-}
-
-/// The file of an `eOutputFile` argument (`crate::ncbi_app::files::OutputFile::File`): on disk,
-/// the system calls of `DiskFile`; LOSAT Web's file (`OpenedFile::Shared`, `Discard`, `Full`)
-/// takes every segment of a call through its `Write` (`/dev/full`'s fails), has no position to
-/// seek to, and closes without an error (its drop delivers the file).
+/// The stream's file: a file on disk (`OpenedFile::Disk`, the one `open` makes and the one an
+/// `eOutputFile` argument opened on the file system), with one `write` or `writev` per call,
+/// `lseek` and `close(2)`; or LOSAT Web's file of an `eOutputFile` argument (`Shared`,
+/// `Discard`, `Full`), which takes every segment of a call through its `Write` (`/dev/full`'s
+/// fails), has no position to seek to, and closes without an error (its drop delivers the file).
 impl RawFile for OpenedFile {
     fn open(path: &Path) -> io::Result<Self> {
-        create_disk_file(path).map(OpenedFile::Disk)
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .map(OpenedFile::Disk)
     }
 
     fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize> {
         if let OpenedFile::Disk(file) = self {
-            return write_disk_file(file, segments);
+            return match segments {
+                [one] => file.write(one),
+                [a, b] => file.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
+                _ => unreachable!("the stream writes one or two segments"),
+            };
         }
         let mut taken = 0;
         for segment in segments {
@@ -198,7 +164,7 @@ impl RawFile for OpenedFile {
 
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         match self {
-            OpenedFile::Disk(file) => seek_disk_file(file, pos),
+            OpenedFile::Disk(file) => file.seek(SeekFrom::Start(pos)).map(|_| ()),
             _ => Err(io::Error::from(io::ErrorKind::Unsupported)),
         }
     }
@@ -379,13 +345,11 @@ pub(crate) struct BasicStream<B> {
 /// An output-only `std::ofstream` of makeblastdb 2.17.0 (Linux x64).
 pub(crate) type Stream<F> = BasicStream<FileBuf<F>>;
 
-/// The stream on a file on disk, as the writer uses it.
-pub(crate) type OfStream = Stream<DiskFile>;
+/// The stream on a file, as the writer uses it: on disk, or the file of an `eOutputFile`
+/// argument (LOSAT Web's too).
+pub(crate) type OfStream = Stream<OpenedFile>;
 
-/// The stream on the file of an `eOutputFile` argument: on disk, or LOSAT Web's file.
-pub(crate) type OutputFileStream = Stream<OpenedFile>;
-
-impl OutputFileStream {
+impl OfStream {
     /// The stream of the file `file`, open already: the `CNcbiOfstream` that an `eOutputFile`
     /// argument opened (`crate::ncbi_app::files::open_output_file`).
     pub(crate) fn of_file(file: OpenedFile) -> Self {

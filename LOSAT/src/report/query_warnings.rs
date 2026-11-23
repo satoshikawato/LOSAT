@@ -152,6 +152,40 @@ pub struct ReadLoad {
     pub cut_refusal: Option<std::sync::Arc<str>>,
 }
 
+/// LOSAT's refusal of a load that NCBI's BLAST XML stream leaves out where LOSAT's model of the
+/// taxonomy cache's slot followed the slot through it ([`ReadLoad::cut_refusal`]): no error of
+/// NCBI's output stream. It travels as the `io::Error` of the report's writes
+/// ([`CutRefusal::error`]), and a program that turns its report's write errors into NCBI's takes
+/// it out as LOSAT's refusal ([`CutRefusal::of`]), which drops what the run holds.
+#[derive(Debug)]
+pub(crate) struct CutRefusal(std::sync::Arc<str>);
+
+impl CutRefusal {
+    /// The refusal `text` as the error of the report's writes.
+    fn error(text: &std::sync::Arc<str>) -> io::Error {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            CutRefusal(std::sync::Arc::clone(text)),
+        )
+    }
+
+    /// The refusal's text, where `error` is a [`CutRefusal`] of the report's writes.
+    pub(crate) fn of(error: &io::Error) -> Option<&str> {
+        error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<CutRefusal>())
+            .map(|refusal| &*refusal.0)
+    }
+}
+
+impl std::fmt::Display for CutRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CutRefusal {}
+
 impl ReadLoad {
     /// The load of a subject whose Seq-align id's lookup reads a header with a UTF8String where a
     /// VisibleString is expected and whose blob's taxonomy writes no text (no `taxdb.bti`, or no
@@ -243,7 +277,7 @@ impl ReadLoad {
     /// (`cut_refusal`).
     pub fn left_out(&self, text: &[u8]) -> io::Result<()> {
         if let Some(refusal) = &self.cut_refusal {
-            return Err(io::Error::other(refusal.to_string()));
+            return Err(CutRefusal::error(refusal));
         }
         let (lead, text) = text.split_at(self.lead.min(text.len()));
         let (opening, offset) = text.split_at(self.opening.min(text.len()));

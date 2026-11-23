@@ -637,5 +637,8 @@ fn a_cut_of_a_load_of_the_cache_slot_is_refused() {
     let mut cursor = ReadCursor::in_ledger(&reads, &texts);
     let error = cursor.cut(0, &mut Vec::new(), &mut Vec::new()).unwrap_err();
     assert_eq!(error.to_string(), "refused");
+    // LOSAT's refusal, not a failed write (review 1 of item O4b2-5, H2).
+    assert_eq!(CutRefusal::of(&error), Some("refused"));
+    assert_eq!(CutRefusal::of(&io::Error::other("refused")), None);
     assert!(texts.is_empty());
 }

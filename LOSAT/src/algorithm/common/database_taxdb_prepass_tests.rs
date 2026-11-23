@@ -2883,20 +2883,50 @@ fn a_read_again_loads_nothing_where_ncbi_keeps_every_sequence() {
         ..VolumeLookups::default()
     };
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, 0, &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, 0, &[L, 150], L),
         Ok(vec![false, false])
     );
-    assert_eq!(record.offset_slot(0, 1, &[L], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 3, &[L], L), Ok(vec![true]));
-    // The bounds: a batch of 20 sequences keeps them all; of 21, one may be dropped.
-    assert!(!batch_may_load_again(2 * RELEASED_KEPT));
-    assert!(batch_may_load_again(2 * RELEASED_KEPT + 1));
+    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, 2, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![true]));
+    // A read again by another subject's Seq-align id is another blob of NCBI's data loader (the
+    // sequence with that id's handle, review 1 of item O4b2-5, H1): a load or none, as before
+    // item O4b2-5. Sequence 2 by subject 4's id may put 150 in the slot: it holds either.
+    assert_eq!(record.offset_slot(0, 2, 4, &[150], L), Ok(vec![false]));
+    // Sequence 3 again by its own id loads nothing; a first load of `L` after it is not certain.
+    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![false]));
+    assert!(record.offset_slot(0, 5, 5, &[L], L).is_err());
+}
+
+/// The bounds of NCBI's object manager: a database of at most 10 sequences keeps every load, of
+/// at most 20 loses none at the reports' reads; an environment variable of its parameters leaves
+/// both to LOSAT's refusals (review 1 of item O4b2-5, M2).
+#[test]
+fn the_object_managers_bounds_follow_its_sizes() {
+    let cwd = empty_cwd("om_bounds");
+    let three = db_search("tm_cache150", Some(&variant("offset_last_past_end")), &cwd);
+    let twelve = db_search("tm_cache_gi", Some(&variant("offset_last_past_end")), &cwd);
+    if default_object_manager() {
+        assert!(keeps_every_load(&three));
+        assert!(!reads_may_load_again(&twelve));
+    }
+    assert!(!keeps_every_load(&twelve));
+    let var = |name: &str| {
+        (
+            std::ffi::OsString::from(name),
+            std::ffi::OsString::from("0"),
+        )
+    };
+    assert!(object_manager_default_in([var("PATH")]));
+    assert!(!object_manager_default_in([var("OBJMGR_BLOB_CACHE")]));
+    assert!(!object_manager_default_in([var(
+        "objmgr_scope_autorelease_size"
+    )]));
 }
 
 #[test]
@@ -2910,11 +2940,11 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     // H1 (cc_m): one load of L, 150, L; again: its own 150 is between.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, 0, &[L, 150, L], L),
         Ok(vec![true, false, true])
     );
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, 0, &[L, 150, L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
@@ -2926,16 +2956,16 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     // there (Either), and B's read again is not certain.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, 0, &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, 0, &[L, 150], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 1, &[L], L),
+        record.offset_slot(0, 1, 1, &[L], L),
         Err(SlotUncertain {
             ordinal: 1,
             again: true,
@@ -2945,17 +2975,17 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     );
     // A first load after such a read again (C of 99990 + 256 * 2 is not L).
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, 2, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 3, &[9606, L + 512, L], L),
+        record.offset_slot(0, 3, 3, &[9606, L + 512, L], L),
         Ok(vec![false, false, true])
     );
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 4, &[L], L),
+        record.offset_slot(0, 4, 4, &[L], L),
         Err(SlotUncertain {
             ordinal: 4,
             again: false,
@@ -2965,16 +2995,16 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     );
     // M1 (a) (cc_ax): 150 never looked up: L's reads again write nothing.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
     for _ in 0..3 {
-        assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![false]));
+        assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![false]));
     }
     // cc_ac: A (L), C (150), then A again: refused, after C's fetch.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 0, &[L], L),
+        record.offset_slot(0, 0, 0, &[L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
@@ -2984,18 +3014,18 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     );
     // C, then A in another volume (cc_c1 cc_a1), then both again; taxids of other slots.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(1, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, 1, &[L, 9606], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(1, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, 1, &[L, 9606], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 5, &[9606, 151], L),
+        record.offset_slot(0, 5, 5, &[9606, 151], L),
         Ok(vec![false, false])
     );
     assert!(!record.slot_loads.contains(&5));
@@ -3019,7 +3049,12 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
             let subject = &parsed[ordinal as usize];
             let lookups = blob_taxids(&db, ordinal, Some(subject), ordinal, "PSIBLAST")?;
             text.extend(pssm_load_texts(
-                &db, &run, None, ordinal, &lookups, "PSIBLAST",
+                &db,
+                &run,
+                None,
+                (ordinal, ordinal),
+                &lookups,
+                "PSIBLAST",
             )?);
         }
         Ok(String::from_utf8(text).unwrap())

@@ -107,6 +107,21 @@ impl XmlRefusal {
             error
         }
     }
+
+    /// The error of a query's writes: LOSAT's refusal of a load that the stream leaves out
+    /// (`report::query_warnings::CutRefusal`) becomes a refusal that carries its message (it drops
+    /// what the run holds, as the run's other refusals of the taxonomy cache's slot do); any other
+    /// error is returned as it is.
+    pub(super) fn of_cut(error: anyhow::Error) -> anyhow::Error {
+        let refusal = error
+            .downcast_ref::<io::Error>()
+            .and_then(crate::report::query_warnings::CutRefusal::of)
+            .map(str::to_string);
+        match refusal {
+            Some(text) => XmlRefusal(text).into(),
+            None => error,
+        }
+    }
 }
 
 /// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
@@ -1580,7 +1595,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 &mut *writer,
                 &mut *diagnostics,
                 reads.as_mut(),
-            )?;
+            )
+            .map_err(XmlRefusal::of_cut)?;
             if let Some(post) = caught {
                 writer.flush()?;
                 diagnostics.write_all(&post)?;

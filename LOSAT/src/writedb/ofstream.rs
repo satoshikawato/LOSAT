@@ -73,6 +73,8 @@ use std::io::{self, IoSlice, Seek, SeekFrom, Write};
 use std::ops::BitOr;
 use std::path::Path;
 
+use crate::report::run_files::OpenedFile;
+
 /// `BUFSIZ` of the Linux x64 build: the file buffer's size. Its put area is one byte shorter.
 pub(crate) const BUFSIZ: usize = 8192;
 
@@ -115,41 +117,101 @@ pub(crate) trait RawFile: Sized {
 /// A file on disk.
 pub(crate) struct DiskFile(File);
 
+/// Creates or truncates the file at `path` for writing (`RawFile::open` of a file on disk).
+fn create_disk_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+}
+
+/// One `write` or `writev` of `segments` on a file on disk (`RawFile::write`).
+fn write_disk_file(file: &mut File, segments: &[&[u8]]) -> io::Result<usize> {
+    match segments {
+        [one] => file.write(one),
+        [a, b] => file.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
+        _ => unreachable!("the stream writes one or two segments"),
+    }
+}
+
+/// `lseek` of a file on disk (`RawFile::seek`).
+fn seek_disk_file(file: &mut File, pos: u64) -> io::Result<()> {
+    file.seek(SeekFrom::Start(pos)).map(|_| ())
+}
+
+/// `close(2)` of a file on disk (`RawFile::close`).
+#[cfg(unix)]
+fn close_disk_file(file: File) -> io::Result<()> {
+    use std::os::fd::IntoRawFd;
+    let fd = file.into_raw_fd();
+    // SAFETY: `fd` was just taken out of the `File`, which no longer owns it, and nothing
+    // else closes it.
+    unsafe { rustix::io::try_close(fd) }.map_err(io::Error::from)
+}
+
+/// Other targets close by dropping the file and never see a close error.
+#[cfg(not(unix))]
+fn close_disk_file(file: File) -> io::Result<()> {
+    drop(file);
+    Ok(())
+}
+
 impl RawFile for DiskFile {
     fn open(path: &Path) -> io::Result<Self> {
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .map(DiskFile)
+        create_disk_file(path).map(DiskFile)
     }
 
     fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize> {
-        match segments {
-            [one] => self.0.write(one),
-            [a, b] => self.0.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
-            _ => unreachable!("the stream writes one or two segments"),
-        }
+        write_disk_file(&mut self.0, segments)
     }
 
     fn seek(&mut self, pos: u64) -> io::Result<()> {
-        self.0.seek(SeekFrom::Start(pos)).map(|_| ())
+        seek_disk_file(&mut self.0, pos)
     }
 
-    #[cfg(unix)]
     fn close(self) -> io::Result<()> {
-        use std::os::fd::IntoRawFd;
-        let fd = self.0.into_raw_fd();
-        // SAFETY: `fd` was just taken out of the `File`, which no longer owns it, and nothing
-        // else closes it.
-        unsafe { rustix::io::try_close(fd) }.map_err(io::Error::from)
+        close_disk_file(self.0)
+    }
+}
+
+/// The file of an `eOutputFile` argument (`crate::ncbi_app::files::OutputFile::File`): on disk,
+/// the system calls of `DiskFile`; LOSAT Web's file (`OpenedFile::Shared`, `Discard`, `Full`)
+/// takes every segment of a call through its `Write` (`/dev/full`'s fails), has no position to
+/// seek to, and closes without an error (its drop delivers the file).
+impl RawFile for OpenedFile {
+    fn open(path: &Path) -> io::Result<Self> {
+        create_disk_file(path).map(OpenedFile::Disk)
     }
 
-    #[cfg(not(unix))]
+    fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize> {
+        if let OpenedFile::Disk(file) = self {
+            return write_disk_file(file, segments);
+        }
+        let mut taken = 0;
+        for segment in segments {
+            Write::write_all(self, segment)?;
+            taken += segment.len();
+        }
+        Ok(taken)
+    }
+
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        match self {
+            OpenedFile::Disk(file) => seek_disk_file(file, pos),
+            _ => Err(io::Error::from(io::ErrorKind::Unsupported)),
+        }
+    }
+
     fn close(self) -> io::Result<()> {
-        drop(self.0);
-        Ok(())
+        match self {
+            OpenedFile::Disk(file) => close_disk_file(file),
+            mut other => {
+                let _ = Write::flush(&mut other);
+                drop(other);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -320,12 +382,15 @@ pub(crate) type Stream<F> = BasicStream<FileBuf<F>>;
 /// The stream on a file on disk, as the writer uses it.
 pub(crate) type OfStream = Stream<DiskFile>;
 
-impl OfStream {
+/// The stream on the file of an `eOutputFile` argument: on disk, or LOSAT Web's file.
+pub(crate) type OutputFileStream = Stream<OpenedFile>;
+
+impl OutputFileStream {
     /// The stream of the file `file`, open already: the `CNcbiOfstream` that an `eOutputFile`
     /// argument opened (`crate::ncbi_app::files::open_output_file`).
-    pub(crate) fn of_file(file: File) -> Self {
+    pub(crate) fn of_file(file: OpenedFile) -> Self {
         let mut stream = Self::new();
-        stream.open_with(|| Ok(DiskFile(file)));
+        stream.open_with(|| Ok(file));
         stream
     }
 }

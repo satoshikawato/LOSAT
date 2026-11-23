@@ -2247,9 +2247,12 @@ impl<'a> HeaderReader<'a> {
         // The first was compared above. Besides a sequence given instead, any other holder
         // (also a copy of the subject's record) is one the scope can read for it.
         let mut also_held = None;
-        // Every line: of a lookup that does not fail LOSAT asks the two places as one, the data
-        // loader's every line among them (`Lines`), so a holder that only the loader may give is
-        // refused too.
+        // Every line: the checks of a lookup that does not fail still ask every definition line
+        // for the scope's keys too (`Lines`), so a holder that only the loader may give is
+        // refused as well. Review 4 of line DBID's item pfoff-4 measured it: 800 runs of its probe
+        // were refused where NCBI writes the subject itself (also on dev before pfoff-4), and no
+        // hold was missed. NCBI's two places for these checks (the scope's by the line of the
+        // load, the loader's by the exact handle) are line DBID's next item.
         for other in in_case
             .holders(&oids, Lines::Every)
             .filter(|&oid| oid != own && Some(oid) != first)
@@ -2473,6 +2476,10 @@ impl<'a> HeaderReader<'a> {
         let own = self.db.oid(ordinal).get();
         Ok(match self.weak_matches(lookup, subject, oids)? {
             WeakMatches::Unlisted => Some(WeakMatch::Unlisted),
+            // Every line, as at `found_instead`'s also-held scan: a lookup that does not fail
+            // still asks every definition line, which refuses more often than NCBI holds
+            // (review 4 of item pfoff-4: no hold missed); NCBI's two places are line DBID's next
+            // item.
             weak => weak
                 .holders(self, Lines::Every)
                 .filter(|&oid| oid != own)
@@ -6307,6 +6314,8 @@ fn stop_lookup_unsure(
     let handle = crate::seqid::mask_handle::mask_handle_key(id)
         .ok()
         .flatten();
+    // Every line is exact here, not a wide choice: the data loader's handle is the id's own and
+    // the loader keeps the ids of every line of a sequence it loaded.
     let holds = |oid: u32| {
         handle
             .as_deref()

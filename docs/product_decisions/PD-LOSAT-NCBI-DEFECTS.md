@@ -2002,8 +2002,8 @@ file would differ, and NCBI's programs still could not open the database).
   and that NCBI gives for its Seq-align id without the lookup (listed in the LMDB files that have
   the accession table), from one of two places: NCBI's data loader keeps the ids of every
   definition line of every sequence that it loaded for the whole run and gives that sequence for
-  an id of the same type, accession and version (`gi|5001|ref|NP_100001.1|` for
-  `ref|NP_100001.1|`), and NCBI's scope keeps the sequences that it loaded, each with the ids of
+  an id of the same type, accession and version, in any letter case (`gi|5001|ref|NP_100001.1|`
+  for `ref|NP_100001.1|`, also for `ref|np_100001.1|`), and NCBI's scope keeps the sequences that it loaded, each with the ids of
   the definition line that its load made its Bioseq of (the line of its own Seq-align id: its
   first line with a gi, else its first line; since version 1.90, review 3 of item pfoff-4, M1),
   until the end of the query batch (in outfmt 5 until the end of the run) and gives one of them
@@ -2028,7 +2028,10 @@ file would differ, and NCBI's programs still could not open the database).
   and 18, and the scope's holders only while NCBI keeps them, so a sequence of another type or a
   weak match loaded in an earlier batch leaves it thrown outside outfmt 5, as NCBI's run does;
   review 3 of item pfoff-4, M2: with `-html` outfmt 0 ends NCBI's run at the first description
-  line of such a sequence, exit 2, so a holder after that line is not reached).
+  line of such a sequence, exit 2, so a holder after that line is not reached). A lookup that
+  does not fail still checks every definition line of the other sequences, for the scope's keys
+  too, so LOSAT refuses more often than NCBI holds (review 4 of item pfoff-4: 800 runs of its
+  probe, no hold missed); NCBI's two places for those checks are line DBID's next item.
   Where the holder comes first in its report, NCBI's output can equal what LOSAT wrote before
   (a table's row of a thrown lookup repeats the previous row's names, here the holder's), and
   those runs are refused too (review 2 of item pfoff-4, M2: 534 runs of the review's

@@ -3263,7 +3263,9 @@ impl HitLoads {
             if description_end.is_some() {
                 ended.set(true);
             } else {
-                // The description lines that the end above did not read (all, without `-html`).
+                // The description lines that the end above did not read (all, without `-html`; where `-html`
+                // read them all, no line threw, and the loop reads them again, which changes nothing:
+                // `read` keeps `Loads` and `Held`).
                 for &hit in &reads.described {
                     read(hit);
                 }

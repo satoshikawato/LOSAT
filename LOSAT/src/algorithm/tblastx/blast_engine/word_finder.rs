@@ -80,6 +80,11 @@ pub(super) struct WordFinderCx<'a> {
     /// `-subject_besthit`: each subject frame's list is filtered after each merge of a chunk
     /// (`frame_chunks::add_chunk_result`).
     pub(super) subject_besthit: bool,
+    /// NCBI's count of the batch's successful initial extensions (`good_init_extends`), which
+    /// each chunk's scan adds its saved ones to (`finish_chunk_scan`), where the running
+    /// application sizes its batches by it (BLASTN's, running a TBLASTX strategy); `None`
+    /// elsewhere.
+    pub(super) extensions: Option<&'a AtomicU64>,
 }
 
 /// The subject's and the subject frame's values the word finder reads, made per frame by the
@@ -709,6 +714,7 @@ where
     let &WordFinderCx {
         window,
         contexts_ref,
+        extensions,
         ..
     } = cx;
     let &FrameCx {
@@ -717,6 +723,13 @@ where
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614
     advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:616-617 (two-hit; one-hit :809-810)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_diagnostics.c:102-115
+    // The word finder adds the chunk's saved extensions (`ungapped_hsps->total`) to the batch's
+    // `good_init_extends` (each thread's, summed after the search, blast_diagnostics.c:133-134).
+    if let Some(extensions) = extensions.filter(|_| !init_hsps.is_empty()) {
+        extensions.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
     // BlastAaWordFinder sorts the chunk's init hit list by

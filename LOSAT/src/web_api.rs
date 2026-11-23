@@ -440,6 +440,7 @@ fn parse_tblastx_args(
         subject_taxdb: None,
         taxdb_setting: None,
         first_query_ordinal: 0,
+        one_query_batch: false,
         scope_refusal: None,
         matrix_file: None,
     };

@@ -85,7 +85,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
-    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
+    inputs.application = args.import.as_ref().map(|_| args.app_name());
     inputs.hitlist_size = hitlist_size;
     inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs

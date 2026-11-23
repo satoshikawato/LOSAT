@@ -19,7 +19,7 @@ use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
     ReaderConfig,
 };
-use crate::blastinput::query_batch::BatchCount;
+use crate::blastinput::query_batch::{BatchCount, LoopBatchSizes};
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
     RangeRole, SequenceRange,
@@ -1705,9 +1705,20 @@ fn search(
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:136-137
-    // The batch size is read before the formatter is made and before the queries, which
-    // NCBI reads one batch at a time after the outfmt 0 prolog (`run_in_pool`).
-    let batch_size = crate::blastinput::app::query_batch_size(10002)?;
+    // The batch size of the running application is read before the formatter is made and before
+    // the queries, which NCBI reads one batch at a time after the outfmt 0 prolog (`run_in_pool`):
+    // tblastx's and blastx's (running this strategy) `BATCH_SIZE` or 10002. BLASTN's application,
+    // running a TBLASTX strategy, reads its sizes after the prolog (`None`:
+    // `blastn_app_batch_sizes`). The library's batch is one batch (`one_query_batch`), sized by the
+    // library as the application's loop sizes it.
+    let batch_size = if args.one_query_batch {
+        Some(i32::MAX as u32)
+    } else {
+        args.app()
+            .fixed_query_batch_size()
+            .map(crate::blastinput::app::query_batch_size)
+            .transpose()?
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-136
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // The formatter, made after the query batch size and before the outfmt 0 prolog, sets
@@ -1978,6 +1989,92 @@ fn tblastx_database_name(args: &TblastxArgs) -> String {
 /// imported strategy name no input (`report::pairwise::scan_mode_definition`).
 fn tblastx_pairwise_database_name(args: &TblastxArgs) -> String {
     crate::report::pairwise::scan_mode_definition(&args.subject_label().to_string())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-140
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:338-345
+/// The database's total length that BLASTN's application gives its batch sizes
+/// (`GetDbTotalLength`, the sum of the formatter's `m_DbInfo`): a database's `Int8` total; the
+/// subjects of `-subject` (the formatter's scan mode) through the `int` of their total.
+fn db_total_length(subjects: &ShownSubjects<'_>) -> i64 {
+    match subjects {
+        ShownSubjects::Fasta { records, x_stored } => {
+            let total: i64 = match x_stored {
+                Some((stores, _)) => stores.iter().map(|store| store.len() as i64).sum(),
+                None => records.iter().map(|record| record.seq().len() as i64).sum(),
+            };
+            i64::from(total as i32)
+        }
+        ShownSubjects::Database { pairwise, .. } => pairwise.total_letters,
+    }
+}
+
+/// The query batch sizes of a search of TBLASTX's options for a caller that hands over one batch
+/// at a time (`api::run_batches`, `TblastxArgs::one_query_batch`), as the running application's
+/// loop takes them (`search`, `run_in_pool`): its fixed size, or BLASTN's application's
+/// (`blastn_app_batch_sizes`) over the database's total (a database's `Int8`; the subject
+/// records `subjects` through the `int` of the formatter's scan mode, `db_total_length`).
+pub(crate) fn library_batch_sizes(
+    args: &TblastxArgs,
+    subjects: &[FastaRecord],
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<LoopBatchSizes> {
+    if let Some(size) = args.app().fixed_query_batch_size() {
+        return Ok(LoopBatchSizes::Fixed(
+            crate::blastinput::app::query_batch_size(size)?,
+        ));
+    }
+    let total_length = match args.database_name() {
+        Some(name) => super::super::database::TblastxDatabase::open_restricted(
+            name,
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            args.app().ncbi_name(),
+        )
+        .map_or(0, |database| database.pairwise_database().total_letters),
+        None => i64::from(crate::blastinput::seq_range::subject_letters(
+            args.subject_loc.as_deref(),
+            subjects,
+        )? as i32),
+    };
+    blastn_app_batch_sizes(total_length)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-273
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:54-104
+/// The batch sizes of BLASTN's application running a TBLASTX strategy (`LoopBatchSizes::
+/// of_blastn_app`), read after the prolog and before the loop: the mixer's maximum is the chunk
+/// size of the options' program less 1000 (`SplitQuery_GetChunkSize` of TBLASTX: `CHUNK_SIZE`,
+/// else 10002, so 9002), where a `CHUNK_SIZE` that `NStr::StringToInt` cannot convert is its
+/// `CStringException` and one that is not divisible by 3 NCBI's engine error (a translated query),
+/// then `BATCH_SIZE` (`get_query_batch_size`), whose size, when it is set and not 0, is fixed.
+/// `total_length` is the database's (`db_total_length`).
+pub(crate) fn blastn_app_batch_sizes(total_length: i64) -> Result<LoopBatchSizes> {
+    let chunk_size = match crate::blastinput::app::read_query_split_variable("CHUNK_SIZE")? {
+        Some(chunk_size) => {
+            if !(i64::from(chunk_size) as u64).is_multiple_of(3) {
+                return Err(crate::blastinput::app::engine_error(
+                    "Split query chunk size must be divisible by 3",
+                ));
+            }
+            chunk_size
+        }
+        None => 10002,
+    };
+    let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
+        std::env::var_os("BATCH_SIZE").as_deref(),
+    )
+    .map_err(|e| crate::cli::NativeError::exception(&e))?;
+    // `SplitQuery_GetChunkSize` is a `size_t` (a negative value converted) less 1000, given to the
+    // mixer's `Int4`.
+    let max_batch_size = (i64::from(chunk_size) as u64).wrapping_sub(1000) as u32 as i32;
+    Ok(LoopBatchSizes::of_blastn_app(
+        fixed_batch_size,
+        max_batch_size,
+        total_length,
+    ))
 }
 
 /// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
@@ -3017,7 +3114,7 @@ fn run_in_pool(
     stores_error: Option<anyhow::Error>,
     outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    batch_size: u32,
+    batch_size: Option<u32>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // What the run writes before its query batches ends here.
@@ -3096,18 +3193,33 @@ fn run_in_pool(
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173
     write_pairwise_prologs(outputs, &args, &subjects.shown, true)?;
+    // The loop's batch sizes: the running application's fixed size, or BLASTN's application's,
+    // read here, after the prolog and before the loop, where a value of its environment that NCBI
+    // cannot take stops the run (`blastn_app_batch_sizes`).
+    let sizes = match batch_size {
+        Some(size) => LoopBatchSizes::Fixed(size),
+        None => match blastn_app_batch_sizes(db_total_length(&subjects.shown)) {
+            Ok(sizes) => sizes,
+            Err(error) => {
+                reports.write_before_failed_batch(outputs, SearchedBatches::default(), &[])?;
+                return Err(error);
+            }
+        },
+    };
     if no_batch {
         return reports.write(outputs, SearchedBatches::default(), &[], true);
     }
     // EXPERIMENT (LOSAT_X_TBXPIPE), dispatch: the batches the loop below will search, planned
     // before it (`x_pipe_plan`), when the pipe may run (`x_pipe_wanted`); `None` keeps the loop's
     // own searches.
+    // The pipe plans the batches before the loop: never where their sizes follow the extensions
+    // of the batches before (`LoopBatchSizes::mixes`).
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let x_plan = x_pipe_wanted(parallel_pool).then(|| {
+    let x_plan = (x_pipe_wanted(parallel_pool) && !sizes.mixes()).then(|| {
         x_pipe_plan(
             input,
             &reading,
-            batch_size,
+            sizes.current(),
             query_records,
             query_runs.input_records,
             batch_count(&args, subjects, outputs),
@@ -3198,7 +3310,7 @@ fn run_in_pool(
         query_runs,
         subjects,
         stores_error.is_some(),
-        batch_size,
+        sizes.current(),
         parallel_pool,
     );
     // Diagnostic (LOSAT_X_STATS): whether the loop writes each batch's reports, or why not. No NCBI
@@ -3221,7 +3333,7 @@ fn run_in_pool(
             subjects,
             stores_error,
             outputs,
-            batch_size,
+            sizes,
             &reports,
             stream,
             take,
@@ -3360,7 +3472,7 @@ fn run_batch_loop(
     subjects: &RunSubjects<'_>,
     mut stores_error: Option<anyhow::Error>,
     outputs: &mut ReportOutputs<'_>,
-    batch_size: u32,
+    mut sizes: LoopBatchSizes,
     reports: &BatchReports<'_>,
     stream: bool,
     take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>,
@@ -3530,7 +3642,7 @@ fn run_batch_loop(
             &input.input_lengths,
             &input.skipped,
             input_start,
-            batch_size,
+            sizes.current(),
         );
         let std::ops::Range { start, end } = input.searched_in(input_start..input_end);
         let reading_ends_here =
@@ -3733,6 +3845,15 @@ fn run_batch_loop(
                             &batch.queries[0],
                         ),
                     )?;
+                }
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:298-300
+                // BLASTN's application sizes the next batch from the batch's successful initial
+                // extensions after its search (`LoopBatchSizes::searched`); a caller that sizes
+                // the batches itself takes them (`api::run_batches`).
+                let extensions = batch.good_init_extends as u32 as i32;
+                sizes.searched(extensions);
+                if let Some(observer) = outputs.observer.as_deref_mut() {
+                    observer.batch_extensions(extensions);
                 }
                 batch
             }
@@ -4715,6 +4836,7 @@ fn search_query_batch<S: TbxScore>(
             searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            good_init_extends: 0,
         });
     }
     let t_read_subjects = t_phase_read_subjects.elapsed();
@@ -4772,6 +4894,9 @@ fn search_query_batch<S: TbxScore>(
     let reeval_calls = AtomicU64::new(0);
     let linking_ns = AtomicU64::new(0);
     let linking_calls = AtomicU64::new(0);
+    // NCBI's `good_init_extends` of the batch (`word_finder::WordFinderCx::extensions`), counted
+    // where the running application sizes its batches by it: BLASTN's.
+    let extensions = AtomicU64::new(0);
     // No NCBI counterpart: the stage timer of LOSAT_TIMING (x_search_timing.rs). It reads the
     // clock only when `timing_enabled`, and the search reads nothing from it.
     let x_times = x_search_timing::XSearchTimes::new(timing_enabled);
@@ -4897,6 +5022,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            good_init_extends: 0,
         });
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
@@ -4950,6 +5076,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            good_init_extends: 0,
         });
     }
 
@@ -5008,6 +5135,7 @@ fn search_query_batch<S: TbxScore>(
         x_read_failure: &x_read_failure,
         query_batch: QueryBatch::new(contexts_ref, &x_read_failure),
         subject_besthit: args.subject_besthit,
+        extensions: (args.app() == crate::blastinput::app::Program::Blastn).then_some(&extensions),
     };
     // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
     // of each subject (a database length of 0) with the preliminary stage's option spaces.
@@ -5499,6 +5627,7 @@ fn search_query_batch<S: TbxScore>(
         searched: true,
         queries: query_stats,
         x_timing,
+        good_init_extends: extensions.load(AtomicOrdering::Relaxed),
     })
 }
 

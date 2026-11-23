@@ -264,7 +264,7 @@ fn run_inner(
     let list = match args.database_name() {
         Some(_) => args
             .db_filter
-            .resolve(&settings, args.app().ncbi_name(), &mut stderr)
+            .resolve(&settings, args.app_name(), &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };
@@ -669,7 +669,7 @@ fn run_inner(
     if let (Some(database), Some(option)) = (&database, args.db_mask.option()) {
         options.db_mask = database.resolve_mask_option(
             &option,
-            args.app().ncbi_name(),
+            args.app_name(),
             archive.as_ref(),
             strategy.as_ref(),
             &mut *stderr,

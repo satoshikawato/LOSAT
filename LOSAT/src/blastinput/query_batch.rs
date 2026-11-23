@@ -82,6 +82,63 @@ impl BatchSizeMixer {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-273
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:298-300
+/// The query batch sizes of a run's batch loop: a fixed size, or those of BLASTN's application
+/// without `BATCH_SIZE` (`mixed`), which its `CBatchSizeMixer` gives: the first from the
+/// database's total length, each later one from the successful initial extensions of the batch
+/// before (`searched`). Which one a run has is its running application's (`Program::
+/// fixed_query_batch_size`), whatever program's options it runs.
+#[derive(Clone, Debug)]
+pub(crate) enum LoopBatchSizes {
+    Fixed(u32),
+    Mixed { size: u32, mixer: BatchSizeMixer },
+}
+
+impl LoopBatchSizes {
+    /// The sizes of BLASTN's application: `fixed_batch_size` is `BATCH_SIZE` (0 when it is not
+    /// set, and a size of 0 is no size: `if (batch_size)`), `max_batch_size` the mixer's maximum
+    /// (the chunk size of the options' program less 1000) and `total_length` the database's
+    /// (`GetDbTotalLength`, which sets the target hits only when it is positive).
+    pub(crate) fn of_blastn_app(
+        fixed_batch_size: i32,
+        max_batch_size: i32,
+        total_length: i64,
+    ) -> Self {
+        if fixed_batch_size != 0 {
+            return Self::Fixed(fixed_batch_size as u32);
+        }
+        let mut mixer = BatchSizeMixer::new(max_batch_size);
+        if total_length > 0 {
+            mixer.set_target_hits((total_length / 3000) as i32);
+        }
+        // `SetBatchSize` of the input, given `GetBatchSize` of the mixer, converts the `Int4` to
+        // `TSeqPos`.
+        let size = mixer.batch_size(None) as u32;
+        Self::Mixed { size, mixer }
+    }
+
+    /// The size of the next batch (`TSeqPos`).
+    pub(crate) fn current(&self) -> u32 {
+        match self {
+            Self::Fixed(size) | Self::Mixed { size, .. } => *size,
+        }
+    }
+
+    /// Whether the sizes follow the extensions of each batch.
+    pub(crate) fn mixes(&self) -> bool {
+        matches!(self, Self::Mixed { .. })
+    }
+
+    /// The batch just searched made `extensions` successful initial extensions (NCBI's `Int4`
+    /// `good_init_extends` of the batch's diagnostics, `GetNumExtensions`).
+    pub(crate) fn searched(&mut self, extensions: i32) {
+        if let Self::Mixed { size, mixer } = self {
+            *size = mixer.batch_size(Some(extensions)) as u32;
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2313
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-259 (each program's batch loop)
 /// The query records that NCBI's scope holds while it reports a query batch under

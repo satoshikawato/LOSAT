@@ -377,6 +377,27 @@ impl Program {
         }
     }
 
+    /// The query batch size that the program's application reads (`GetQueryBatchSize` of its
+    /// arguments, with an imported strategy's task set on them) when `BATCH_SIZE` is not set:
+    /// tblastx's and blastx's 10002 nucleotides (blastx's for any task of the application without
+    /// its multi-threaded mode, a TBLASTX one too), tblastn's 20000 and blastp's 10000 residues.
+    /// `None` for BLASTN's application, which asks without a default (its `CBatchSizeMixer`,
+    /// `query_batch::LoopBatchSizes::of_blastn_app`). A run's batches are its running
+    /// application's, also where it runs another program's options (`ImportRun::app`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:131-135
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:129-133
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:143-149
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:69-141
+    pub(crate) fn fixed_query_batch_size(self) -> Option<u32> {
+        match self {
+            Program::Blastn => None,
+            Program::Tblastx | Program::Blastx => Some(10002),
+            Program::Tblastn => Some(20000),
+            Program::Blastp => Some(10000),
+        }
+    }
+
     /// Whether NCBI's formatting arguments of the program have `eIsSAM` (blastn only).
     pub fn is_sam(self) -> bool {
         self == Program::Blastn

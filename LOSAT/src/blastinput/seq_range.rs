@@ -105,6 +105,27 @@ pub fn parse_optional_range(value: Option<&str>, role: RangeRole) -> Result<Opti
         .transpose()
 }
 
+/// The letters of the subject records `records` that the search reads, cut by the range
+/// `subject_loc` (`-subject_loc`) as the subjects' reader cuts them (`record_interval`): the total
+/// of the formatter's scan mode (before its `int`), which BLASTN's application's batch sizes read
+/// (`query_batch::LoopBatchSizes::of_blastn_app`).
+pub(crate) fn subject_letters(
+    subject_loc: Option<&str>,
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+) -> Result<i64> {
+    let subject_range = parse_optional_range(subject_loc, RangeRole::Subject)?;
+    Ok(records
+        .iter()
+        .map(|record| match subject_range.as_ref() {
+            Some(range) => match record_interval(range, record.seq().len()) {
+                RecordInterval::Letters { from, to } => (to - from + 1) as i64,
+                RecordInterval::Empty | RecordInterval::PastEnd => 0,
+            },
+            None => record.seq().len() as i64,
+        })
+        .sum())
+}
+
 /// What a range makes of one record (`x_FastaToSeqLoc`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordInterval {

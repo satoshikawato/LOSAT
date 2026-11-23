@@ -94,7 +94,7 @@ use crate::blastinput::fasta_reader::{
 use crate::blastinput::input_files::{
     check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::{BatchCount, BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
+use crate::blastinput::query_batch::{BatchCount, LoopBatchSizes, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
     RangeRole, SequenceRange,
@@ -6647,7 +6647,7 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_QSTREAM): what its rule reads (`x_query_stream::Rule`): the largest query
     // batch.
     let x_rule = x_query_stream::Rule {
-        batch_letters: x_query_batch_letters(&args.task),
+        batch_letters: x_query_batch_letters(&args),
     };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
@@ -7311,6 +7311,9 @@ fn search(
         )?;
         return Ok(());
     }
+    // Another running application (TBLASTX's, running a BLASTN strategy) reads its batch size
+    // here, after `Query is Empty!` and before anything of its formatter (`app_query_batch_size`).
+    let app_batch_size = app_query_batch_size(&args)?;
     // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
     // and before the formatter (`mb_index::megablast_index`); LOSAT's refusal of an index comes
     // with its other limits below.
@@ -7391,13 +7394,14 @@ fn search(
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
+        app_batch_size,
     )
     .map(|(mut batching, overlap_error)| {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
         // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
         // records do not reach, fixed as `BATCH_SIZE` fixes it.
         if args.one_query_batch {
-            batching.fixed_batch_size = i32::MAX;
+            batching.fixed = Some(i32::MAX as u32);
             batching.batch_size = i32::MAX as u32;
         }
         (batching, overlap_error)
@@ -7526,30 +7530,17 @@ fn database_search_error(
     }
 }
 
-/// NCBI's query batch sizes of a search of `subjects`, one batch at a time, as `run_in_pool`
+/// NCBI's query batch sizes of a search of BLASTN's options, one batch at a time, as `run_in_pool`
 /// takes them: for a caller that hands over one batch at a time (`api::run_batches`,
 /// `BlastnArgs::one_query_batch`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-270
-pub(crate) struct QueryBatchSizes {
-    batching: QueryBatching,
-    mixer: BatchSizeMixer,
-}
+pub(crate) struct QueryBatchSizes;
 
 impl QueryBatchSizes {
-    pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<Self> {
-        use crate::blastinput::seq_range::{record_interval, RecordInterval};
-        let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
-        let total_length: i64 = subjects
-            .iter()
-            .map(|record| match subject_range.as_ref() {
-                Some(range) => match record_interval(range, record.seq().len()) {
-                    RecordInterval::Letters { from, to } => (to - from + 1) as i64,
-                    RecordInterval::Empty | RecordInterval::PastEnd => 0,
-                },
-                None => record.seq().len() as i64,
-            })
-            .sum();
+    pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<LoopBatchSizes> {
+        let total_length =
+            crate::blastinput::seq_range::subject_letters(args.subject_loc.as_deref(), subjects)?;
         Self::of_total_length(args, total_length)
     }
 
@@ -7562,71 +7553,98 @@ impl QueryBatchSizes {
         args: &BlastnArgs,
         name: &str,
         settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    ) -> Result<Self> {
+    ) -> Result<LoopBatchSizes> {
         let total_length = database::BlastnDatabase::open(name, settings)
             .map_or(0, |database| database.pairwise_database().total_letters);
         Self::of_total_length(args, total_length)
     }
 
-    fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<Self> {
-        let (mut batching, _) = query_batching_from_environment(
+    fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<LoopBatchSizes> {
+        let (batching, _) = query_batching_from_environment(
             super::super::coordination::task_uses_megablast_chunks(&args.task),
+            app_query_batch_size(args)?,
         )?;
-        let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
-        if batching.fixed_batch_size == 0 {
-            if total_length > 0 {
-                mixer.set_target_hits((total_length / 3000) as i32);
-            }
-            batching.batch_size = mixer.batch_size(None) as u32;
-        }
-        Ok(Self { batching, mixer })
-    }
-
-    /// The size of the next batch (`TSeqPos`).
-    pub(crate) fn batch_size(&self) -> u32 {
-        self.batching.batch_size
-    }
-
-    /// The batch just searched made `extensions` successful initial extensions.
-    pub(crate) fn searched(&mut self, extensions: i32) {
-        if self.batching.fixed_batch_size == 0 {
-            self.batching.batch_size = self.mixer.batch_size(Some(extensions)) as u32;
-        }
+        Ok(batching.sizes(|| total_length))
     }
 }
 
-/// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
-/// query chunk sizes, as a query batch of the search uses them.
+/// The batch size of the running application where it is not BLASTN's (TBLASTX's, running a
+/// BLASTN strategy): `BATCH_SIZE`, else its own size (`Program::fixed_query_batch_size`), which
+/// its arguments read before the formatter is made (`CBlastInput`'s), where a `BATCH_SIZE` that
+/// NCBI cannot convert stops the run (`app::query_batch_size`). `None` for BLASTN's application,
+/// which reads its sizes after the prolog (`query_batching_from_environment`).
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:136-137
+fn app_query_batch_size(args: &BlastnArgs) -> Result<Option<u32>> {
+    args.app()
+        .fixed_query_batch_size()
+        .map(app::query_batch_size)
+        .transpose()
+}
+
+/// NCBI's query batch rule and query chunk sizes, as a query batch of the search uses them.
 #[derive(Clone, Copy, Debug)]
 struct QueryBatching {
-    /// The `BATCH_SIZE` value; 0 when it is not set.
-    fixed_batch_size: i32,
-    /// The size of the current batch (`TSeqPos`).
+    /// The fixed size of the batches (`TSeqPos`): `BATCH_SIZE` under BLASTN's application (where
+    /// a size of 0 is none), or another running application's (`app_query_batch_size`, where 0
+    /// is a size); `None` where BLASTN's application's `CBatchSizeMixer` sizes them (`sizes`).
+    fixed: Option<u32>,
+    /// The size of the current batch (`TSeqPos`): the loop's (`LoopBatchSizes::current`).
     batch_size: u32,
     split: SplitSizes,
 }
 
+impl QueryBatching {
+    /// The loop's sizes over a database of `total_length()` letters (read only for the mixer).
+    fn sizes(&self, total_length: impl FnOnce() -> i64) -> LoopBatchSizes {
+        match self.fixed {
+            Some(size) => LoopBatchSizes::Fixed(size),
+            None => {
+                LoopBatchSizes::of_blastn_app(0, self.split.mixer_max_batch_size(), total_length())
+            }
+        }
+    }
+}
+
 /// Reads the environment variables that set NCBI's query batches and chunks, in NCBI's
-/// order: `CHUNK_SIZE` (the `CBatchSizeMixer` maximum), `BATCH_SIZE`, then
-/// `OVERLAP_CHUNK_SIZE` (the query splitter of the first batch).
+/// order. Under BLASTN's application (`app_batch_size` `None`): `CHUNK_SIZE` (the
+/// `CBatchSizeMixer` maximum), `BATCH_SIZE`, then `OVERLAP_CHUNK_SIZE` (the query splitter of the
+/// first batch). Under another running application, whose batch size (`app_batch_size`) it read
+/// before its formatter: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`, both read first by the query
+/// splitter of the first batch.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-262
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:55-59
-/// A `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot convert is the `Err`: its
-/// `CStringException` (`app::environment_int`), which stops NCBI after the outfmt 0 prolog and
-/// before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE` is read by the query
-/// splitter of each batch, after the batch is read: one that it cannot convert is the second
-/// value, its exception, which stops the first batch there (`run_in_pool`); no batch is split
-/// with it, so the sizes count it as unset. The batch sizes alone (`QueryBatchSizes`) do not
-/// depend on it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where it splits
-/// a query batch (`search_query_chunks`), and otherwise searches as NCBI.
-fn query_batching_from_environment(megablast: bool) -> Result<(QueryBatching, Result<()>)> {
+/// Under BLASTN's application, a `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot
+/// convert is the `Err`: its `CStringException` (`app::environment_int`), which stops NCBI after
+/// the outfmt 0 prolog and before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE`
+/// (and under another application `CHUNK_SIZE` too) is read by the query splitter of each batch,
+/// after the batch is read: one that it cannot convert is the second value, its exception, which
+/// stops the first batch there (`run_in_pool`); no batch is split with it, so the sizes count it
+/// as unset. The batch sizes alone (`QueryBatchSizes`) do not depend on it. A negative
+/// `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where it splits a query batch
+/// (`search_query_chunks`), and otherwise searches as NCBI.
+fn query_batching_from_environment(
+    megablast: bool,
+    app_batch_size: Option<u32>,
+) -> Result<(QueryBatching, Result<()>)> {
     use crate::blastinput::app::read_query_split_variable;
-    let chunk_size = read_query_split_variable("CHUNK_SIZE")?;
-    let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
-        std::env::var_os("BATCH_SIZE").as_deref(),
-    )
-    .map_err(|e| crate::cli::NativeError::exception(&e))?;
+    let (chunk_size, chunk_error) = match (app_batch_size, read_query_split_variable("CHUNK_SIZE"))
+    {
+        (_, Ok(chunk_size)) => (chunk_size, Ok(())),
+        (None, Err(error)) => return Err(error),
+        (Some(_), Err(error)) => (None, Err(error)),
+    };
+    let fixed = match app_batch_size {
+        Some(size) => Some(size),
+        None => {
+            let size = crate::blastinput::query_batch::get_query_batch_size(
+                std::env::var_os("BATCH_SIZE").as_deref(),
+            )
+            .map_err(|e| crate::cli::NativeError::exception(&e))?;
+            (size != 0).then_some(size as u32)
+        }
+    };
     let (overlap, overlap_error) = match read_query_split_variable("OVERLAP_CHUNK_SIZE") {
         Ok(overlap) => (overlap, Ok(())),
         Err(error) => (None, Err(error)),
@@ -7634,11 +7652,11 @@ fn query_batching_from_environment(megablast: bool) -> Result<(QueryBatching, Re
     let split = SplitSizes::new(megablast, chunk_size, overlap);
     Ok((
         QueryBatching {
-            fixed_batch_size,
-            batch_size: fixed_batch_size as u32,
+            fixed,
+            batch_size: fixed.unwrap_or(0),
             split,
         },
-        overlap_error,
+        chunk_error.and(overlap_error),
     ))
 }
 
@@ -8189,22 +8207,18 @@ fn run_in_pool(
             return Err(error);
         }
     };
-    let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
-    if batching.fixed_batch_size == 0 {
-        // A database's total is the `Int8` of its index files (`GetDbTotalLength` sums
-        // `m_DbInfo`, `GetBlastDbInfo`: the whole database's, also with a list).
-        let total_length = shown
+    // The loop's batch sizes: BLASTN's application's mixer starts from the database's total, the
+    // `Int8` of its index files (`GetDbTotalLength` sums `m_DbInfo`, `GetBlastDbInfo`: the whole
+    // database's, also with a list); another running application's size is fixed.
+    let mut sizes = batching.sizes(|| {
+        shown
             .database
             .as_ref()
             .map_or(source.metadata().db_len_total, |database| {
                 database.total_letters
-            });
-        if total_length > 0 {
-            mixer.set_target_hits((total_length / 3000) as i32);
-        }
-        // `SetBatchSize` of the input, given `GetBatchSize` of the mixer, converts the `Int4` to `TSeqPos`.
-        batching.batch_size = mixer.batch_size(None) as u32;
-    }
+            })
+    });
+    batching.batch_size = sizes.current();
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-280
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // A reader at the end of its input reads no batch (its `End()` is true): the report of no
@@ -8481,9 +8495,10 @@ fn run_in_pool(
             batch_title_warnings.append(&strategy.take_all_posts());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
-        // The query splitter of the batch reads `CHUNK_SIZE` (converted already by the mixer) and
-        // `OVERLAP_CHUNK_SIZE` before the batch's queries are set up (their masks below): a value
-        // that NCBI cannot convert stops the first batch here, after its reader's messages
+        // The query splitter of the batch reads `CHUNK_SIZE` (converted already by the mixer of
+        // BLASTN's application; another application's first reading) and `OVERLAP_CHUNK_SIZE`
+        // before the batch's queries are set up (their masks below): a value that NCBI cannot
+        // convert stops the first batch here, after its reader's messages
         // (`query_batching_from_environment`).
         if input_start == 0 {
             if let Err(error) = std::mem::replace(&mut overlap_error, Ok(())) {
@@ -9237,10 +9252,8 @@ fn run_in_pool(
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
         // NCBI's `Int4` count of the batch's successful initial extensions.
-        if batching.fixed_batch_size == 0 {
-            batching.batch_size =
-                mixer.batch_size(Some(batch.good_init_extends as u32 as i32)) as u32;
-        }
+        sizes.searched(batch.good_init_extends as u32 as i32);
+        batching.batch_size = sizes.current();
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:299-300
         // For a caller that sizes the batches itself (`QueryBatchSizes`).
         if let Some(observer) = outputs.observer.as_deref_mut() {
@@ -9404,18 +9417,25 @@ fn run_in_pool(
 }
 
 // No NCBI counterpart (when LOSAT reads the records only): it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_QSTREAM): the letters of the largest query batch of a search of `task`, as
-/// `run_in_pool` reads its batches (`query_batching_from_environment`): `BATCH_SIZE` when it is
-/// set (a `TSeqPos`), else the `CBatchSizeMixer` maximum (`CHUNK_SIZE`, or the task's chunk size,
-/// less 1000: 999,000 letters for blastn, 4,999,000 for megablast and dc-megablast; as the loop's
-/// `TSeqPos`, so a maximum below 0 is a batch of about 4.29e9 letters); 0 when the variables cannot
-/// be read (the search stops at them before its first batch).
-fn x_query_batch_letters(task: &str) -> u64 {
-    match query_batching_from_environment(super::super::coordination::task_uses_megablast_chunks(
-        task,
-    )) {
-        Ok((batching, _)) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
-        Ok((batching, _)) => u64::from(batching.split.mixer_max_batch_size() as u32),
+/// EXPERIMENT (LOSAT_X_QSTREAM): the letters of the largest query batch of a search of `args`, as
+/// `run_in_pool` reads its batches (`query_batching_from_environment`): the fixed size when there
+/// is one (`BATCH_SIZE`, or another running application's, a `TSeqPos`), else the
+/// `CBatchSizeMixer` maximum (`CHUNK_SIZE`, or the task's chunk size, less 1000: 999,000 letters
+/// for blastn, 4,999,000 for megablast and dc-megablast; as the loop's `TSeqPos`, so a maximum
+/// below 0 is a batch of about 4.29e9 letters); 0 when the variables cannot be read (the search
+/// stops at them before its first batch).
+fn x_query_batch_letters(args: &BlastnArgs) -> u64 {
+    let batching = app_query_batch_size(args).and_then(|app_batch_size| {
+        query_batching_from_environment(
+            super::super::coordination::task_uses_megablast_chunks(&args.task),
+            app_batch_size,
+        )
+    });
+    match batching {
+        Ok((batching, _)) => match batching.fixed {
+            Some(size) => u64::from(size),
+            None => u64::from(batching.split.mixer_max_batch_size() as u32),
+        },
         Err(_) => 0,
     }
 }

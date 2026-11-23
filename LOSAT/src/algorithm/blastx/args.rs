@@ -659,13 +659,13 @@ impl ResolvedOptions {
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 impl BlastxArgs {
-    /// NCBI's name of the running application, the prefix of the run's diagnostics: the
-    /// application of an imported strategy's command line (`app`), else the program's own
-    /// (`ProgramName::lower`: `rpstblastn` for RPSTBLASTN's runs, which import no strategy).
+    /// NCBI's name of the running application (`app`), the prefix of the run's diagnostics:
+    /// BLASTX's own runs name their program (`ProgramName::lower`: `rpstblastn` for RPSTBLASTN's,
+    /// which import no strategy), another running application its own.
     pub(crate) fn app_name(&self) -> &'static str {
-        match &self.import {
-            Some(run) => run.app.ncbi_name(),
-            None => ProgramName::of(&self.rpstblastn).lower,
+        match self.app() {
+            crate::blastinput::app::Program::Blastx => ProgramName::of(&self.rpstblastn).lower,
+            app => app.ncbi_name(),
         }
     }
 

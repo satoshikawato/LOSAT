@@ -279,6 +279,12 @@ pub struct TblastxArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-264
+    // `api::run_batches` hands over one of NCBI's query batches at a time, sized as the running
+    // application's loop sizes them (BLASTN's mixer where blastn runs a TBLASTX strategy); these
+    // records are that batch, whatever its size. No argument of the command line sets this.
+    #[arg(skip)]
+    pub(crate) one_query_batch: bool,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
     /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
     /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch

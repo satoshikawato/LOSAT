@@ -162,9 +162,8 @@ fn search_records(
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
     if query_records.is_empty() && query_end.is_input() {
-        diagnostics.write_all(
-            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
-        )?;
+        diagnostics
+            .write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -1202,9 +1201,9 @@ fn search_database(
         .ok_or_else(app::missing_subject_error)?;
     // The handler of the database arguments reads the list before the other handlers
     // (`native::run_inner`).
-    let list =
-        args.db_filter
-            .resolve(&settings, args.app().ncbi_name(), &mut *outputs.diagnostics)?;
+    let list = args
+        .db_filter
+        .resolve(&settings, args.app_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
     outputs.open_out()?;
     check_filtering(args)?;
@@ -1219,7 +1218,7 @@ fn search_database(
         args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
-        args.app().ncbi_name(),
+        args.app_name(),
     )?
     .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
@@ -1265,9 +1264,9 @@ fn search_database(
         }
     }
     if query_records.is_empty() && query_end.is_input() {
-        outputs.diagnostics.write_all(
-            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
-        )?;
+        outputs
+            .diagnostics
+            .write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -1276,7 +1275,7 @@ fn search_database(
     if let Some(option) = args.db_mask.option() {
         let mask = database.resolve_mask_option(
             &option,
-            args.app().ncbi_name(),
+            args.app_name(),
             archive,
             None,
             &mut *outputs.diagnostics,
@@ -1493,7 +1492,7 @@ fn check_resolutions(
         &outfmts,
     )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
-        args.app().ncbi_name(),
+        args.app_name(),
         &outfmts,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,

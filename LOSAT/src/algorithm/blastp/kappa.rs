@@ -747,7 +747,8 @@ fn blastp_redo_one_alignment_callback(
         &mut redone_hit.edit_script,
     )));
     Ok(Some(blast_compo_alignment_new(
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767: obj = BlastCompo_AlignmentNew(gap_align->score, matrix_adjust_rule, ...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767
+        // Wraps the redone score, matrix adjust rule, and alignment range via `BlastCompo_AlignmentNew`.
         redone_hit.score,
         matrix_adjust_rule,
         redone_hit.query_start,
@@ -776,7 +777,7 @@ fn redone_hit_from_alignment_owned(
     // c++/src/algo/blast/core/blast_gapalign.c:4620-4653
     // The actual BLASTP protein-range getter copies NCBISTDAA 0..27,
     // adds NULLB=0, and SEG writes X=21; it never constructs FENCE_SENTRY=201.
-    // Valid seeded starts therefore reach found_end=TRUE. Report conversion
+    // Valid seeded starts therefore reach `found_end` as true. Report conversion
     // enforces that domain; it must never silently drop a signed raw payload.
     let query_start = usize::try_from(align.query_start)
         .expect("NCBI full-protein Kappa query start must be non-negative");

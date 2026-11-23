@@ -275,7 +275,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:686-688
         let cutoff = cutoff_scores[hit.ctx_idx as usize];
 
-        // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
+        // Start of this context's residues in the query buffer (`query_blk->sequence` offset by `query_info->contexts[context].query_offset`).
         // query->sequence points past the leading NULLB sentinel.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315, c++/src/algo/blast/core/blast_util.c:112-116.
         let query_full = &ctx.aa_seq;
@@ -283,7 +283,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         let subject_full = &s_frame_scoring.aa_seq;
         let subject = &subject_full[1..subject_full.len() - 1];
 
-        // NCBI: query = query_start + hsp->query.offset (0-based offsets)
+        // Context-relative 0-based query and subject start offsets (`hsp->query.offset`).
         let qs = hit.q_aa_start as usize;
         let ss = hit.s_aa_start as usize;
         let len_u = (hit.q_aa_end as usize).saturating_sub(hit.q_aa_start as usize);

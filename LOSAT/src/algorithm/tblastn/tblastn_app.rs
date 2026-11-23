@@ -2115,7 +2115,7 @@ fn search(
             }
             ungapped_karlin.extend(batch_karlin);
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
-            // if (CheckInternalData() != 0) each result in this Run() batch
+            // When `CheckInternalData` returns a nonzero status, each result in this `Run` batch
             // receives an unsearched ancillary state and null align set.
             let skipped = batch_validity.iter().all(|&valid| !valid);
             query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));

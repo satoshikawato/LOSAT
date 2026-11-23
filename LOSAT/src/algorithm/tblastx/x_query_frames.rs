@@ -80,7 +80,7 @@ pub(super) fn mask_frame(seg: &SegMasker, frame: &mut QueryFrame) {
             if frame.aa_seq_nomask.is_none() {
                 frame.aa_seq_nomask = Some(frame.aa_seq.clone());
             }
-            const X_MASK_NCBISTDAA: u8 = 21; // NCBI: kProtMask = 21
+            const X_MASK_NCBISTDAA: u8 = 21; // NCBI protein mask residue `kProtMask` (21)
             let raw_end_exclusive = frame.aa_seq.len().saturating_sub(1); // keep last sentinel untouched
             for &(s, e) in &frame.seg_masks {
                 let raw_s = 1usize.saturating_add(s);
@@ -284,7 +284,7 @@ pub(super) fn mask_lcase(
             if !soft && !frame.seg_masks.is_empty() {
                 frame.aa_seq_nomask = Some(frame.aa_seq.clone());
                 for &(from, to) in &frame.seg_masks {
-                    // NCBI: kProtMask = 21 (X in NCBISTDAA), past the leading sentinel.
+                    // NCBI `kProtMask` is 21 (X in NCBISTDAA), past the leading sentinel.
                     frame.aa_seq[1 + from..1 + to].fill(21);
                 }
             }

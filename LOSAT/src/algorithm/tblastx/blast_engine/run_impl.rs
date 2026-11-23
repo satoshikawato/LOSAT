@@ -3654,8 +3654,8 @@ fn run_batch_loop(
         // One message per query of the batch (`TSearchMessages::ToString` above, after
         // `RemoveDuplicates` in each query's list), `Error: ` first (`GetMessage`).
         // A query without letters keeps its own message (`Sequence contains no data`,
-        // blast_setup_cxx.cpp:631-638, id = the query's index) after the error (id
-        // kBlastMessageNoContext = -1), which `RemoveDuplicates` sorts first
+        // blast_setup_cxx.cpp:631-638, id is the query's index) after the error (context id
+        // `kBlastMessageNoContext`, -1), which `RemoveDuplicates` sorts first
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
@@ -4774,12 +4774,12 @@ fn search_query_batch<S: TbxScore>(
     // TBLASTX is explicitly ungapped-only (blast_options.c line 869-873):
     //   "Gapped search is not allowed for tblastx"
     //
-    // For bit score and E-value calculation, NCBI uses sbp->kbp (ungapped):
-    //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-    //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
+    // For bit score and E-value calculation, NCBI uses the ungapped `kbp` table on `sbp`:
+    //   blast_hits.c line 1833 selects `kbp_gap` when gapped or `kbp` when ungapped;
+    //   blast_hits.c line 1918 follows the same selection in `Blast_HSPListGetBitScores`.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:768
-    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // For tblastx, `gapped_calculation` is false, so `kbp_ptr` points to the ungapped `kbp` table on `sbp`.
     // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
     //
     // (the contexts' blocks, `QueryContext::karlin_params`).
@@ -4908,7 +4908,7 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
     // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
-    // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+    // When total database length is zero, NCBI updates parameters per subject via `BLAST_OneSubjectUpdateParameters`.
     // The set's numbers are read once per run (`SubjectSetNumbers`: the records' sums, or the
     // database index's numbers).
     let db_length_nucl = numbers.total;
@@ -4917,7 +4917,7 @@ fn search_query_batch<S: TbxScore>(
     // (`SubjectSetNumbers::link_total`).
     let link_db_length_nucl = numbers.link_total;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:535-560
-    // if (valid_context_found) { return 0; } else { return 1; }
+    // NCBI returns success only when at least one valid query context exists.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-178,206-208
     // A batch without a valid context is not searched; each of its queries is reported
     // with the `-1` statistics.
@@ -5166,13 +5166,13 @@ fn search_query_batch<S: TbxScore>(
         };
         x_lap.lap(XStage::Translate);
 
-        // [C] BlastOffsetPair *offset_pairs
+        // Reusable buffer for scanned word offset pairs (NCBI `BlastOffsetPair`).
         let offset_pairs = &mut st.offset_pairs;
 
-        // [C] DiagStruct *diag_array = diag->hit_level_array;
+        // Diagonal tracking array for hit extension (NCBI `diag->hit_level_array`).
         let diag_array = &mut st.diag_array;
 
-        // [C] diag_offset = diag->offset;  (reset to window per-subject)
+        // Diagonal offset for this subject (NCBI `diag->offset`, reset to `window` per subject).
         let mut diag_offset: i32 = st.diag_offset;
 
         // The subject's linking parameters (`subject_link::subject_linking_params`), computed once
@@ -5188,7 +5188,8 @@ fn search_query_batch<S: TbxScore>(
         );
 
         // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491 BlastInitHitListReset(init_hitlist)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491
+        // Resets `init_hitlist` via `BlastInitHitListReset` between frames.
         // After each frame, init_hsps are converted and merged into combined_ungapped_hits.
 
         // Statistics for HSP saving analysis (long sequences only)
@@ -5200,8 +5201,8 @@ fn search_query_batch<S: TbxScore>(
         let stats_hsp_filtered_by_hsp_test = 0usize;
         let mut stats_score_distribution: Vec<i32> = Vec::new();
 
-        // NCBI: Combined HSP list across all subject frames
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438 BlastHSPList* combined_hsp_list
+        // NCBI: Combined HSP list across all subject frames (`combined_hsp_list`).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
 
         // EXPERIMENT (PAIRPAR), dispatch points 2 and 3 (per subject): the unit path, when the

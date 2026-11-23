@@ -3284,9 +3284,9 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:540-557
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2535
-    // Preliminary BLASTN HSPs use purge=TRUE, so common-start/common-end
+    // Preliminary BLASTN HSPs run with `purge` enabled, so common-start/common-end
     // duplicates are deleted, not trimmed. The full traceback stage still uses
-    // the later purge=FALSE/TRUE passes over final HSPs with edit scripts.
+    // the later trim (`purge` disabled) then delete (`purge` enabled) passes over final HSPs with edit scripts.
     qsort_prelim_hits_by(&mut hsps, query_offset_compare_prelim_hits);
     // In place: `dedup_by` drops an HSP that matches the last one kept, as the copy into a
     // second vector did.

@@ -377,7 +377,7 @@ pub fn p_to_e(p: f64) -> f64 {
     if p == 1.0 {
         return i32::MAX as f64;
     }
-    // NCBI: -BLAST_Log1p(-p)
+    // Negated `BLAST_Log1p` at -p.
     -blast_log1p(-p)
 }
 
@@ -388,7 +388,7 @@ pub fn e_to_p(e: f64) -> f64 {
     if e < 0.0 {
         return 0.0;
     }
-    // NCBI: -BLAST_Expm1(-e)
+    // Negated `BLAST_Expm1` at -e.
     -blast_expm1(-e)
 }
 
@@ -437,7 +437,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
         if s > 8.0 {
             return (-s).glibc_exp();
         }
-        // -BLAST_Expm1(-exp(-s))
+        // Negated `BLAST_Expm1` at -exp(-s).
         return -blast_expm1(-(-s).glibc_exp());
     }
     if r < 1 {
@@ -723,7 +723,7 @@ pub fn small_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
     }
 
-    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
+    // Clamp to `INT4_MAX` when `weight_divisor` is zero or `sum_e` divided by `weight_divisor` exceeds `INT4_MAX`; otherwise `sum_e` keeps the divided value.
     if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {
@@ -779,7 +779,7 @@ pub fn uneven_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
     }
 
-    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
+    // Clamp to `INT4_MAX` when `weight_divisor` is zero or `sum_e` divided by `weight_divisor` exceeds `INT4_MAX`; otherwise `sum_e` keeps the divided value.
     if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {

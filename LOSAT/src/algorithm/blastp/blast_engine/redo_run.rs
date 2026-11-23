@@ -81,7 +81,7 @@ pub(super) struct RedoParamsBuilder<'a> {
     pub(super) ideal_ungapped_lambda: f64,
     pub(super) x_drop_gapped_final: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2228-2236
-    //                              self->startFreqRatios, self->ungappedLambda);
+    // Initializes `Blast_MatrixInfo` from `startFreqRatios` and `ungappedLambda`.
     // This non-position-based initial matrix is invariant within this search.
     // Initialize at the existing first params request, preserving no-hit/error
     // boundaries, and clone completed values into independently mutable params.

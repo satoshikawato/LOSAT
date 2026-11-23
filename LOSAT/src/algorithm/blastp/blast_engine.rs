@@ -782,7 +782,7 @@ fn blastp_should_parallelize_stage(
     worker_jobs: usize,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1475
-    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
+    // Iterate subject OIDs with `BlastSeqSrcIteratorNext` until `BLAST_SEQSRC_EOF`.
     // This stage selects existing independent jobs within the verified pool.
     let parallel = effective_threads > 1 && worker_jobs > 1;
     crate::utils::threading::report_stage("blastp", stage, worker_jobs, parallel);
@@ -4125,7 +4125,7 @@ fn rebuild_preliminary_interval_tree_from_list(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3419-3420,3435-3437
 // The one-hit extension's best segment can end before the last reset of its running
 // sum, so the Int4 length can be negative (a low -threshold with -window_size 0). NCBI
-// passes it as Uint4: above HSP_MAX_WINDOW, and q_start + MIN(q_length, s_length) wraps
+// passes it as Uint4: above HSP_MAX_WINDOW, and `q_start` plus `min(q_length, s_length)` wraps
 // back to q_start + length, so only the first window of HSP_MAX_WINDOW letters is scored.
 // A window that runs past the context or the subject holds its NULLB, whose
 // BLAST_SCORE_MIN makes the sum negative whatever letters follow, so it gives q_start.

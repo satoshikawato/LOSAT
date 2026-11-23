@@ -908,8 +908,8 @@ pub(super) fn round_outcome(
         }
         Some(FoundBefore { found, unsure })
     };
-    // NCBI makes the next PSSM after `Advance` when another round follows or the last PSSM is
-    // saved (`itr || GetSaveLastPssm()`), and after a round with alignments only.
+    // NCBI makes the next PSSM after `Advance` when another round follows (`itr`) or the last PSSM
+    // is saved (`GetSaveLastPssm`), and after a round with alignments only.
     let makes_next = if has_alignments {
         let mut after = io.state.clone();
         after.advance(set.clone());

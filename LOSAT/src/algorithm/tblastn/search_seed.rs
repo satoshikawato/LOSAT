@@ -128,7 +128,7 @@ pub(super) fn tblastn_report_mask_intervals(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
-//     struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+// Pairs the query and subject seed offsets (`q_off`, `s_off`) of `qs_offsets`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:808-812:
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

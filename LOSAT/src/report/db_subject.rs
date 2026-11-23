@@ -32,6 +32,7 @@ use super::defline::{
     bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline, SourceTaxname,
     UnknownEncoding,
 };
+use super::html_ids::{self, HtmlHeading};
 
 /// A reported database sequence with parsed Seq-ids: its definition lines, its Seq-align id
 /// and the definition line of its Bioseq.
@@ -1318,18 +1319,29 @@ impl ParsedSubject {
     }
 
     /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and
-    /// its title: `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix` (`Unknown`
-    /// where NCBI's `HtmlDecode` throws), after two spaces where `gi|N|` was written.
+    /// its title (`description_line`).
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
+        let (start, title, _) = self.description_line(protein);
+        (start, title)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1585-1613
+    /// The outfmt 0 description line: the start (`description_id` of `GetDisplayIds`' id) and the
+    /// title, `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix`, after two spaces
+    /// where `gi|N|` was written; and whether it is the line of NCBI's `catch`
+    /// (`x_GetDeflineInfo`): where the title throws (NCBI's `HtmlDecode` cannot decode it), the
+    /// `catch` keeps the Seq-align id and `Unknown` (`thrown_description`; line RG T4a2 review O1:
+    /// `>gi|777|ref|XP_000009.1| ...` with `-subject -parse_deflines` shows `gi|777 Unknown`).
+    pub fn description_line(&self, protein: bool) -> (Vec<u8>, Defline, bool) {
+        let Ok(mut title) = self.bioseq_title(protein, true) else {
+            let (start, title) = self.thrown_description();
+            return (start, title, true);
+        };
         let (start, wrote_gi) = self.description_id();
-        let mut title = self.bioseq_title(protein, true).unwrap_or(Defline {
-            text: b"Unknown".to_vec(),
-            reads_past_end: false,
-        });
         if wrote_gi {
             title.text.splice(0..0, *b"  ");
         }
-        (start, title)
+        (start, title, false)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1576-1604
@@ -1373,13 +1385,35 @@ impl ParsedSubject {
     fn description_id(&self) -> (Vec<u8>, bool) {
         let mut start = Vec::new();
         let mut wrote_gi = false;
-        if let Some((defline, found)) = self.display_defline() {
-            if let Some(id) = defline.display_id() {
-                let gi = if found { defline.gi() } else { 0 };
-                wrote_gi = description_id(id, gi, self.show_gis, &mut start);
-            }
+        if let Some((id, gi)) = self.description_ids() {
+            wrote_gi = description_id(id, gi, self.show_gis, &mut start);
         }
         (start, wrote_gi)
+    }
+
+    /// The display id of the description line and its GI (`GetDisplayIds`' `wid` and `gi`: the
+    /// GI of `display_defline` where it holds the Seq-align id, else 0).
+    pub fn description_ids(&self) -> Option<(&ParsedSeqId, i64)> {
+        let (defline, found) = self.display_defline()?;
+        let id = defline.display_id()?;
+        Some((id, if found { defline.gi() } else { 0 }))
+    }
+
+    /// The ids of the subject Bioseq (`handle.GetBioseqCore()->GetId()` of the Seq-align id: its
+    /// definition line's, a `-subject` record's own), whose link `-html` writes
+    /// (`report::html_ids::id_url`).
+    pub fn bioseq_ids(&self) -> &[ParsedSeqId] {
+        &self.target().ids
+    }
+
+    /// The taxid of the first definition line that has one (0 for none; a `-subject` record has
+    /// no Blast-def-line), the `<@taxid@>` of a local id's `-html` link (showdefline.cpp:484-491).
+    pub fn first_taxid(&self) -> i32 {
+        self.set
+            .deflines
+            .iter()
+            .find_map(|defline| defline.taxid)
+            .unwrap_or(0)
     }
 
     /// The definition line whose id the description line shows (`DeflineSet::display_defline`
@@ -1410,17 +1444,64 @@ impl ParsedSubject {
     /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above). The generated title
     /// is made once, for the first line without a title; where it throws, `Err` with the Seq-id
     /// text of NCBI's line in place of each alignment (`heading_skipped_id`).
-    pub fn heading(&self, protein: bool, every_line: bool) -> Result<Vec<u8>, Vec<u8>> {
+    ///
+    /// With `-html` (`html`): each line's id is its link, the id, `</a>` after a link and its
+    /// anchor (`HtmlHeading::line_id`; a `-subject` record's anchor without the version, as
+    /// `x_PrintDefLine` writes a Bioseq without definition lines), then always a space and the
+    /// HTML-encoded title wrapped; a heading with more than 8 lines (NCBI's `maxNumBdl`: the
+    /// definition lines, or the strings of the positive list) hides those after the third in the
+    /// "more sequence titles" box (`html_ids::more_titles`, cited there). The id link precedes
+    /// the title of each line (`x_FillAlnDispParams`); where the registry throws, `Err` with the
+    /// Seq-id text too (`HtmlHeading::skips`). The outer error is the report's.
+    pub fn heading(
+        &self,
+        protein: bool,
+        every_line: bool,
+        html: Option<HtmlHeading<'_>>,
+    ) -> std::io::Result<Result<Vec<u8>, Vec<u8>>> {
         let mut out = Vec::new();
         let mut generated = None;
         let mut first = true;
+        let max_lines = if every_line || self.use_this_seqid.is_empty() {
+            self.set.deflines.len()
+        } else {
+            self.use_this_seqid.len()
+        };
+        let (mut shown, mut id_label, mut hides) = (0, Vec::new(), false);
         for defline in &self.set.deflines {
             if !every_line && !self.heading_shows(defline) {
                 continue;
             }
+            shown += 1;
             let start = out.len();
             out.push(if first { b'>' } else { b' ' });
-            alignment_line_id(defline, self.show_gis, &mut out);
+            match html {
+                None => alignment_line_id(defline, self.show_gis, &mut out),
+                Some(html) => {
+                    if max_lines > html_ids::MAX_SHOWN_LINES && shown == html_ids::SHOWN_LINES + 1 {
+                        let hidden = max_lines - html_ids::SHOWN_LINES;
+                        html_ids::more_titles(&id_label, hidden, &mut out);
+                        hides = true;
+                    }
+                    if let Some(display) = defline.display_id() {
+                        match html.line_id(
+                            &defline.ids,
+                            display,
+                            defline.gi(),
+                            defline.taxid.unwrap_or(0),
+                            !self.record,
+                            |out| alignment_line_id(defline, self.show_gis, out),
+                            &mut out,
+                        ) {
+                            Ok(label) => id_label = label,
+                            Err(error) => {
+                                return HtmlHeading::skips(error, || self.skipped_id().to_vec())
+                                    .map(Err)
+                            }
+                        }
+                    }
+                }
+            }
             if !first || out.len() - start > 1 {
                 out.push(b' ');
             }
@@ -1431,14 +1512,20 @@ impl ParsedSubject {
                     Some(text) => text,
                     None => match self.bioseq_title(protein, false) {
                         Ok(defline) => generated.insert(defline.text),
-                        Err(UnknownEncoding) => return Err(self.skipped_id().to_vec()),
+                        Err(UnknownEncoding) => return Ok(Err(self.skipped_id().to_vec())),
                     },
                 },
             };
-            wrap_title(title, &mut out);
+            match html {
+                None => wrap_title(title, &mut out),
+                Some(_) => wrap_title(&crate::report::html::html_encode(title), &mut out),
+            }
             out.push(b'\n');
         }
-        Ok(out)
+        if hides {
+            out.extend_from_slice(b"</div>");
+        }
+        Ok(Ok(out))
     }
 
     /// Whether the heading shows the generated title for a definition line with the title

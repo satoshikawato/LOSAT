@@ -61,6 +61,20 @@
 //! `x_scan_byte_equals_ncbi_scan_on_random_subjects`). On a CPU without AVX2 and with the plain
 //! loops nothing changes. `LOSAT_X_CHAINRUN=0` runs the copy before.
 //!
+//! EXPERIMENT (LOSAT_X_LISTSTEP): with the AVX2 forms, the candidate list of a block is written
+//! `X_LIST_STEP` words a step (`list_steps`) instead of a word a step (`list`), each store at the
+//! entry pointer alone. `list` moves the entry pointer by each word's presence byte; unrolled,
+//! LLVM folds the adds into the next stores' addresses (pointer + index), and on the workstation's
+//! Ice Lake cores such a store is issued as two µops instead of one (one protein x the human
+//! genome: a count form of four words a step ran 5.75 instructions per word instead of `list`'s 7
+//! but issued 7.55 µops per word instead of 6.97, and took x1.075 of the candidate stage's cycles).
+//! `list_steps` passes the pointer through an empty `asm!` after each add (no instruction;
+//! `opaque_entry`), so every store keeps the pointer alone as its address; with the loop's
+//! counter, test and index pointer once per step, the stage issues fewer µops per word. The
+//! candidates and their order are those of `list` (unit test
+//! `indexes_and_presence_equal_the_rolled_index_and_pv`). The plain loops (WebAssembly, x86-64
+//! without AVX2) keep `list`. `LOSAT_X_LISTSTEP=0` takes `list` with the AVX2 forms too.
+//!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
 //! returned count are not part of the result. `presence` depends on the lookup table only; the
 //! first thread that asks for a table builds it once and every thread reads it (`presence_bytes`).
@@ -389,9 +403,10 @@ pub(crate) fn x_kept_presence(
 }
 
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
-/// Units scanned by `x_scan_one_range_byte`, their scan calls, and the calls whose AVX2 copy wrote
-/// chains as runs (`[0]`, `[1]`, `[2]`; LOSAT_X_CHAINRUN).
-static COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+/// Units scanned by `x_scan_one_range_byte`, their scan calls, the calls whose AVX2 copy wrote
+/// chains as runs (`[0]`, `[1]`, `[2]`; LOSAT_X_CHAINRUN), and the calls whose AVX2 candidate stage
+/// listed in steps (`[3]`; LOSAT_X_LISTSTEP).
+static COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): counts one unit and its `calls` for the
 /// `[X_STATS] TBNSCANBYTE` line (`LOSAT_X_STATS` set).
@@ -402,6 +417,9 @@ pub(crate) fn x_count_unit(calls: u64) {
         if x_scan_byte() == (XScanByte::On { avx2: true }) && x_chain_run() {
             COUNTS[2].fetch_add(calls, Ordering::Relaxed);
         }
+        if x_scan_byte() == (XScanByte::On { avx2: true }) && x_list_step() {
+            COUNTS[3].fetch_add(calls, Ordering::Relaxed);
+        }
     }
 }
 
@@ -409,11 +427,13 @@ pub(crate) fn x_count_unit(calls: u64) {
 /// path scanned any unit this way.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let [units, calls, runs] = COUNTS.each_ref().map(|c| c.load(Ordering::Relaxed));
+    let [units, calls, runs, steps] = COUNTS.each_ref().map(|c| c.load(Ordering::Relaxed));
     let mode = x_scan_byte_if_read();
     if units > 0 {
         let avx2 = matches!(mode, Some(XScanByte::On { avx2: true }));
-        eprintln!("[X_STATS] TBNSCANBYTE units={units} calls={calls} avx2={avx2} runs={runs}");
+        eprintln!(
+            "[X_STATS] TBNSCANBYTE units={units} calls={calls} avx2={avx2} runs={runs} steps={steps}"
+        );
     }
 }
 
@@ -472,6 +492,7 @@ pub(crate) fn x_scan_one_range_held(
         XScanByte::On { .. } | XScanByte::Sparse => scan(
             mode == XScanByte::On { avx2: true },
             x_chain_run(),
+            x_list_step(),
             lookup,
             presence,
             subject,
@@ -531,14 +552,23 @@ fn x_chain_run() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_CHAINRUN"))
 }
 
+// No NCBI counterpart: reads LOSAT_X_LISTSTEP once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_LISTSTEP): whether the AVX2 candidate stage lists in steps (`list_steps`,
+/// module text). A switch of the strict set, on unless it is `0`.
+fn x_list_step() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_LISTSTEP"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-127
 /// The scan of one call (module text), with the AVX2 forms when `avx2` (and their chain runs when
-/// `run`, LOSAT_X_CHAINRUN); the block where it stops is kept in `held`, and copied on from there
-/// when this call resumes it.
+/// `run`, LOSAT_X_CHAINRUN; their list in steps when `step`, LOSAT_X_LISTSTEP); the block where it
+/// stops is kept in `held`, and copied on from there when this call resumes it.
 #[allow(clippy::too_many_arguments)]
 fn scan(
     avx2: bool,
     run: bool,
+    step: bool,
     lookup: &BlastAaLookupTable,
     presence: &XPresence,
     subject: &[u8],
@@ -592,7 +622,14 @@ fn scan(
         let block_last = s_last.min(block_first + X_BLOCK - 1);
         if first == 0 {
             let letters = &subject[block_first..block_last + 3];
-            held.n = candidates_any(avx2, letters, presence, &mut held.index, &mut held.cand);
+            held.n = candidates_any(
+                avx2,
+                step,
+                letters,
+                presence,
+                &mut held.index,
+                &mut held.cand,
+            );
         }
         // SAFETY: `presence` has an entry for every 15-bit index and is 1 only at indexes of the
         // backbone (`build_presence`), so every candidate's cell is inside it; `dest` has
@@ -634,10 +671,12 @@ fn scan(
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107,121-127,55-57
 // (cited at `candidates`).
-/// The candidate stage of a block (`candidates`, or `candidates_avx2` when `avx2`).
+/// The candidate stage of a block (`candidates`, or `candidates_avx2` when `avx2`, listing in
+/// steps when `step` too).
 #[inline(always)]
 fn candidates_any(
     avx2: bool,
+    step: bool,
     letters: &[u8],
     presence: &[u8; X_MASK + 1],
     index: &mut [u16; X_BLOCK],
@@ -646,9 +685,9 @@ fn candidates_any(
     #[cfg(target_arch = "x86_64")]
     if avx2 {
         // SAFETY: AVX2 only when the caller detected it.
-        return unsafe { candidates_avx2(letters, presence, index, cand) };
+        return unsafe { candidates_avx2(letters, presence, index, cand, step) };
     }
-    let _ = avx2;
+    let _ = (avx2, step);
     candidates(letters, presence, index, cand)
 }
 
@@ -787,7 +826,7 @@ unsafe fn list(
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107,121-127,55-57
 // (cited at `candidates`)
 /// The AVX2 candidate stage: `candidates` with the indexes made 16 at a time (three shifted loads
-/// of 16 letters each); the same values.
+/// of 16 letters each), listed in steps when `step` (`list_steps`); the same values.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline(never)]
@@ -796,6 +835,7 @@ unsafe fn candidates_avx2(
     presence: &[u8; X_MASK + 1],
     index: &mut [u16; X_BLOCK],
     cand: &mut [MaybeUninit<u16>; X_BLOCK],
+    step: bool,
 ) -> usize {
     use std::arch::x86_64::*;
     let words = letters.len() - 2;
@@ -821,7 +861,83 @@ unsafe fn candidates_avx2(
         k += 1;
     }
     // SAFETY: every index was masked with `X_MASK` (the vector loop's `mask`, the tail's `&`).
+    if step {
+        return list_steps(&index[..words], presence, cand);
+    }
     list(&index[..words], presence, cand)
+}
+
+// No NCBI counterpart: how many words `list_steps` takes at a time; NCBI tests one word at a time.
+/// EXPERIMENT (LOSAT_X_LISTSTEP): the words a step of `list_steps`.
+#[cfg(target_arch = "x86_64")]
+const X_LIST_STEP: usize = 8;
+
+// No NCBI counterpart: a code-generation hint (no instruction); it changes no value.
+/// `entry`, with how it was computed hidden from the compiler (an empty `asm!`), so that the add
+/// that made it stays an add and is not folded into the next store's address (module text).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+// The block reads and writes no memory: the pointer only passes through a register (`nomem` holds).
+#[allow(clippy::pointers_in_nomem_asm_block)]
+fn opaque_entry(mut entry: *mut u16) -> *mut u16 {
+    // SAFETY: no instruction (an assembler comment that names the register): the register keeps
+    // the pointer; no memory, stack or flags are touched.
+    unsafe {
+        std::arch::asm!(
+            "/* {entry} */",
+            entry = inout(reg) entry,
+            options(pure, nomem, nostack, preserves_flags),
+        );
+    }
+    entry
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83,90 (cited at `list`)
+/// EXPERIMENT (LOSAT_X_LISTSTEP): `list` with `X_LIST_STEP` words a step: the step's presence
+/// bytes read first, then each word's position written at the entry pointer and the pointer moved
+/// on by its byte, through `opaque_entry` (module text); the words after the last whole step one
+/// by one, as `list`. The same candidates in the same order.
+///
+/// # Safety
+/// As `list`.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn list_steps(
+    index: &[u16],
+    presence: &[u8; X_MASK + 1],
+    cand: &mut [MaybeUninit<u16>; X_BLOCK],
+) -> usize {
+    let start = cand.as_mut_ptr().cast::<u16>();
+    let mut out = start;
+    let p = presence.as_ptr();
+    let (steps, rest) = index.as_chunks::<X_LIST_STEP>();
+    let mut k = 0u16;
+    for w in steps {
+        debug_assert!(w.iter().all(|&ix| ix as usize <= X_MASK));
+        // SAFETY: (caller) every index is at most `X_MASK`, the last index of `presence` (its type
+        // has `X_MASK + 1` bytes); every presence byte is 0 or 1 (`XPresence`), so `out` stays
+        // `start + n` with `n` at most the words before it, inside `cand` (as `list`).
+        unsafe {
+            let bits = w.map(|ix| *p.add(ix as usize) as usize);
+            for (j, &bit) in bits.iter().enumerate() {
+                out.write(k + j as u16);
+                out = opaque_entry(out.add(bit));
+            }
+        }
+        k += X_LIST_STEP as u16;
+    }
+    for &ix in rest {
+        debug_assert!(ix as usize <= X_MASK);
+        // SAFETY: as above.
+        unsafe {
+            let bit = *p.add(ix as usize) as usize;
+            out.write(k);
+            out = out.add(bit);
+        }
+        k += 1;
+    }
+    // SAFETY: `out` was moved on from `start` inside `cand`, never back.
+    unsafe { out.offset_from_unsigned(start) }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:96,100

@@ -50,6 +50,33 @@ fn harmless_entries_are_the_listed_ones() {
     assert!(!is_harmless_entry("OBJECTS", "PACK_TEXTID"));
     assert!(!is_harmless_entry("OBJECTS", "PACK_GENERAL"));
     assert!(is_harmless_entry("blast", "blast_usage_report"));
+    // The formatter's entries (Q5 of line RG T4): accepted for every run.
+    for (section, name) in [
+        ("BLASTFMTUTIL", "PROTOCOL"),
+        ("blastfmtutil", "protocol"),
+        ("TAX_BROWSER", "BLASTFMTUTIL"),
+        ("LOCAL_ID", "TOOL_URL"),
+        ("LOCAL_ID", "TOOL_URL_ALIGN"),
+        ("FEATURE_INFO", "FEATURE_FILE"),
+        ("FEATURE_INFO", "FEATURE_FILE_INDEX"),
+        ("BLASTFMTUTIL", "INCLUDE_BASE_DIR"),
+        ("BLASTFMTUTIL", "LOCAL_ID_HOST_PORT"),
+        ("BLASTFMTUTIL", "local_id_host_port_0"),
+        ("BLASTFMTUTIL", "LOCAL_ID_FORMAT"),
+        ("BLASTFMTUTIL", "LOCAL_ID_FORMAT_12"),
+    ] {
+        assert!(is_harmless_entry(section, name), "[{section}] {name}");
+    }
+    for (section, name) in [
+        ("BLASTFMTUTIL", "LOCAL_ID_FORMAT_"),
+        ("BLASTFMTUTIL", "LOCAL_ID_FORMATX"),
+        ("BLASTFMTUTIL", "LOCAL_ID_FORMAT_-1"),
+        ("BLASTFMTUTIL", "ENTREZ_TM_FORMAT"),
+        ("LOCAL_ID", "LOCAL_ID_FORMAT"),
+    ] {
+        assert!(!is_harmless_entry(section, name), "[{section}] {name}");
+    }
+    assert!(rejected_variable(OsStr::new("NCBI_CONFIG__BLASTFMTUTIL__PROTOCOL")).is_none());
     let other = read_registry(b"[BLAST]\nLONG_SEQID=1\n", Layer::SystemWide).unwrap();
     let refusal = check_registry_entries(Path::new("f"), &other.entries).unwrap_err();
     assert!(

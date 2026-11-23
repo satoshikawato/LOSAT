@@ -299,6 +299,30 @@ impl LocFrame {
     }
 }
 
+/// The frames of the innermost Seq-loc that the Seq-loc reader entered and has not left, while it
+/// may hold no Seq-loc: none (`open` 0), its choice frame (1), or that and its variant frame (2,
+/// with the variant once `begin_variant` has read it). They move to `Rd::loc_frames` when the
+/// variant is a `mix` or `equiv`, under the frames of its elements, so that a mask file whose
+/// Seq-locs hold none puts no frame on the heap.
+#[derive(Clone, Copy, Default)]
+struct LocTail {
+    open: u8,
+    variant: Option<u8>,
+}
+
+impl LocTail {
+    /// The innermost frame open, which is left first.
+    fn pop(&mut self) -> Option<LocFrame> {
+        let frame = match self.open {
+            0 => return None,
+            1 => LocFrame::Choice,
+            _ => LocFrame::Variant(self.variant),
+        };
+        self.open -= 1;
+        Some(frame)
+    }
+}
+
 /// A `mix` or `equiv` that the Seq-loc reader is reading the elements of: the walk of its Seq-loc
 /// (`None` while it is `IdWalk::Same(None)`, as it is until an element gives it a Seq-id, so that a
 /// level of a deep nest holds one word) and which of the two it is.
@@ -354,6 +378,8 @@ pub(super) struct Rd<I: Input> {
     /// that the masks of a file reuse their room.
     loc_frames: Vec<LocFrame>,
     loc_levels: Vec<LocLevel>,
+    /// The frames of the innermost Seq-loc while it may hold no Seq-loc, above `loc_frames`.
+    loc_tail: LocTail,
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:712-756
@@ -389,6 +415,7 @@ impl<I: Input> Rd<I> {
             posts: Vec::new(),
             loc_frames: Vec::new(),
             loc_levels: Vec::new(),
+            loc_tail: LocTail::default(),
         }
     }
 
@@ -1167,15 +1194,18 @@ impl<I: Input> Rd<I> {
     /// [`read_seq_loc_variant`](Self::read_seq_loc_variant).
     fn read_seq_loc_parts(&mut self, parts: &mut Vec<MaskPart>, walk: &mut IdWalk) -> R<()> {
         debug_assert!(self.loc_frames.is_empty() && self.loc_levels.is_empty());
+        debug_assert!(self.loc_tail.open == 0);
         if let Err(fail) = self.read_seq_loc_steps(parts, walk) {
             return Err(self.unwind_seq_loc(fail));
         }
         debug_assert!(self.loc_frames.is_empty() && self.loc_levels.is_empty());
+        debug_assert!(self.loc_tail.open == 0);
         Ok(())
     }
 
     /// [`read_seq_loc_parts`](Self::read_seq_loc_parts) up to its end or its error: the frames it
-    /// entered and has not left are on `Rd::loc_frames`, the mixes and equivs it reads on
+    /// entered and has not left are on `Rd::loc_frames` and `Rd::loc_tail` (those of the innermost
+    /// Seq-loc, until it is a `mix` or `equiv`), the mixes and equivs it reads on
     /// `Rd::loc_levels`. The walk of a Seq-loc inside a mix or equiv is its own, which the walk
     /// of the mix or equiv takes ([`LocLevel::nested`]); the outermost Seq-loc's is `walk`.
     fn read_seq_loc_steps(&mut self, parts: &mut Vec<MaskPart>, walk: &mut IdWalk) -> R<()> {
@@ -1183,14 +1213,23 @@ impl<I: Input> Rd<I> {
         loop {
             step = match step {
                 LocStep::Begin => {
-                    // `read_choice` of a Seq-loc
-                    self.enter_loc(LocFrame::Choice);
+                    // `read_choice` of a Seq-loc, its frames on `Rd::loc_tail`
+                    self.enter();
+                    self.loc_tail = LocTail {
+                        open: 1,
+                        variant: None,
+                    };
                     self.inp.begin_choice()?;
-                    self.enter_loc(LocFrame::Variant(None));
+                    self.enter();
+                    self.loc_tail.open = 2;
                     let index = self.inp.begin_variant(&SEQ_LOC)?;
                     self.set_loc_variant(index);
                     if index == SEQ_LOC_MIX || index == SEQ_LOC_EQUIV {
-                        // `read_container` of its elements, each a Seq-loc by `read_pointer`
+                        // its frames move to the list, under those of `read_container` of its
+                        // elements, each a Seq-loc by `read_pointer`
+                        self.loc_tail.open = 0;
+                        self.loc_frames.push(LocFrame::Choice);
+                        self.loc_frames.push(LocFrame::Variant(Some(index as u8)));
                         let equiv = index == SEQ_LOC_EQUIV;
                         self.enter_loc(LocFrame::Array);
                         self.inp.begin_container(equiv)?;
@@ -1266,7 +1305,7 @@ impl<I: Input> Rd<I> {
     #[cold]
     #[inline(never)]
     fn unwind_seq_loc(&mut self, mut fail: Fail) -> Fail {
-        while let Some(frame) = self.loc_frames.pop() {
+        while let Some(frame) = self.pop_loc_frame() {
             let depth = self.depth - 1;
             fail = match self.exit(depth, frame.frame(), Err::<(), Fail>(fail)) {
                 Err(fail) => fail,
@@ -1284,13 +1323,19 @@ impl<I: Input> Rd<I> {
         self.loc_frames.push(frame);
     }
 
-    /// `END_OBJECT_FRAME` of the top frame of `Rd::loc_frames` once what it holds has been read
-    /// (`exit`).
+    /// The innermost frame of the Seq-loc reader still open, taken off `Rd::loc_tail` or
+    /// `Rd::loc_frames`.
+    #[inline(always)]
+    fn pop_loc_frame(&mut self) -> Option<LocFrame> {
+        self.loc_tail.pop().or_else(|| self.loc_frames.pop())
+    }
+
+    /// `END_OBJECT_FRAME` of the innermost frame of the Seq-loc reader once what it holds has been
+    /// read (`exit`).
     #[inline(always)]
     fn exit_loc(&mut self) {
         let frame = self
-            .loc_frames
-            .pop()
+            .pop_loc_frame()
             .expect("the Seq-loc reader's frame is open");
         let depth = self.depth - 1;
         let left: R<()> = self.exit_of(depth, || frame.frame(), Ok(()));
@@ -1298,17 +1343,14 @@ impl<I: Input> Rd<I> {
     }
 
     /// `SetTopMemberId` of the Seq-loc's variant `index` on its variant frame, the top of
-    /// `Rd::loc_frames`.
+    /// `Rd::loc_tail`.
     #[inline(always)]
     fn set_loc_variant(&mut self, index: usize) {
+        debug_assert!(self.loc_tail.open == 2, "the variant frame is open");
         let mut frame = LocFrame::Variant(None).frame();
         self.set_member(&mut frame, &SEQ_LOC.variants[index].name);
-        let top = self
-            .loc_frames
-            .last_mut()
-            .expect("the variant frame is open");
         // Seq-loc has 11 variants.
-        *top = LocFrame::Variant(Some(index as u8));
+        self.loc_tail.variant = Some(index as u8);
     }
 
     /// The value of the variant `index` of a Seq-loc that holds no Seq-loc (every variant but

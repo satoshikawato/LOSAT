@@ -30,17 +30,23 @@ pub(in crate::algorithm::blastp::blast_engine) enum XShownResidues {
 impl ListedSubjects {
     /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists` (the lists not
     /// expanded yet, `x_prelim_compact.rs`) and their lengths, read from the index, without a copy
-    /// of the residues; the subjects of both are renamed to their ranks. The subjects that NCBI's
-    /// fetches of the redo or the traceback exclude leave both lists first, each list leaving a
-    /// mark of its place (`exclude_fetched`, `fetch_excluded`; a header that the fetch cannot read
-    /// is LOSAT's refusal).
+    /// of the residues; the subjects of both are renamed to their ranks. Where NCBI fetches the
+    /// subjects (`fetched`: a gapped search, whose redo or traceback fetches them), those that its
+    /// fetches exclude leave both lists first, each list leaving a mark of its place
+    /// (`exclude_fetched`, `fetch_excluded`; a header that the fetch cannot read is LOSAT's
+    /// refusal); an ungapped search fetches none, and they leave at the Seq-aligns
+    /// (`drop_unaligned`).
     pub(in crate::algorithm::blastp::blast_engine) fn x_list(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+        fetched: bool,
     ) -> Result<Self> {
-        let (fetch_excluded, fetched_utf8) =
-            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
+        let (fetch_excluded, fetched_utf8) = if fetched {
+            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?
+        } else {
+            Default::default()
+        };
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
         let x_lengths = ordinals
             .iter()

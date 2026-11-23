@@ -10,6 +10,7 @@
 //! 2 MiB, below what a recursion through them would take.
 
 use super::*;
+use crate::report::serial::asn_types::Post;
 use crate::seqid::model::ObjectId;
 use std::path::{Path, PathBuf};
 
@@ -732,9 +733,8 @@ fn a_value_of_another_type_at_a_middle_level_is_refused_where_it_stands() {
     }
 }
 
-/// Strings that post in many elements of one object: each post gets its stack trace, and the
-/// reader takes time linear in their number (the traces that wait for a frame are the last ones
-/// made, `Rd::trace_frame`).
+/// Strings that post in many elements of one object: each post gets its stack trace, made from
+/// the frames as it is posted (`TypedReader::stack_trace`), in time linear in their number.
 #[test]
 fn many_strings_that_post_get_their_traces() {
     const ELEMENTS: usize = 100_000;
@@ -753,7 +753,7 @@ fn many_strings_that_post_get_their_traces() {
     let posts = reader.take_posts();
     assert_eq!(posts.len(), ELEMENTS);
     for post in &posts {
-        let MaskPost::BadChar(replaced) = post else {
+        let Post::BadChar(replaced) = post else {
             panic!("{post:?}")
         };
         assert_eq!(

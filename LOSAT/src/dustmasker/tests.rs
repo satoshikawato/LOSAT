@@ -14,7 +14,7 @@ fn run_words(line: &[&str]) -> (i32, String, String) {
 
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     assert_eq!(usage.len(), 443);
     assert!(usage.starts_with("USAGE\n  dustmasker [-h] [-help] [-xmlhelp] [-in input_file_name]"));
     assert_eq!(HELP.len(), 1673);

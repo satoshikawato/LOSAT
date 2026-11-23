@@ -8,6 +8,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin, OutputFile};
 use crate::ncbi_app::Diag;
+use crate::report::run_files::OpenedFile;
 use crate::report::serial::asn_types::{Post, ReadError};
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::{BlastDefline, DeflineSet};
@@ -151,7 +152,7 @@ struct Params<'a> {
     /// `m_LogFile` without a file of `-logfile`.
     stdout: &'a mut dyn Write,
     /// `m_LogFile` when `-logfile` names a file (`None`: the standard output).
-    log_file: Option<std::fs::File>,
+    log_file: Option<OpenedFile>,
     /// The list of profile files (`m_InPssmList`), read whole.
     in_list: Vec<u8>,
     title: String,
@@ -197,6 +198,9 @@ fn init<'a>(
         match args.output_file("logfile", &mut *out) {
             Ok(OutputFile::File(file)) => Some(file),
             Ok(OutputFile::Stdout(_)) => None,
+            // LOSAT Web's refusal of a name that it does not write (`OpenFiles::create`), which
+            // the files of the command line and the library never give.
+            Ok(OutputFile::Refused(reason)) => return Err(diag.refuse(&unsupported(&reason))),
             Err(error) => return Err(diag.init_arg_exception(error)),
         }
     } else {
@@ -893,6 +897,11 @@ fn add_to_database(
                     "binary definition lines (a user object ASN1_BlastDefLine) that LOSAT's \
                      reader of database headers does not read ({reason})"
                 )),
+                BioseqDeflinesError::NullDescriptor => RunError::Refused(
+                    "a query descriptor stated as NULL (an empty element of Seq-descr), which \
+                     NCBI's makeprofiledb dereferences where it makes the definition lines"
+                        .to_string(),
+                ),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
             if !extracted.binary {

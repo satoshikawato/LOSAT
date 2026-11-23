@@ -183,8 +183,10 @@ pub(crate) fn prepare_unit_queries(
     if records.is_empty() {
         bail!("cannot prepare an empty BLASTX query batch");
     }
-    crate::blastinput::value_parsers::genetic_code(&options.query_gencode.to_string())
-        .map_err(anyhow::Error::msg)?;
+    // A code that a library caller set itself (NCBI's reader allows only its codes).
+    if !crate::ncbi_app::args::is_genetic_code(i32::from(options.query_gencode)) {
+        bail!("unsupported genetic code");
+    }
     let code = GeneticCode::try_from_id(options.query_gencode).map_err(anyhow::Error::msg)?;
     // Diagnostic (LOSAT_TIMING): the contexts' layout and the six-frame translation for the
     // common line (utils/xtiming.rs). No NCBI counterpart.

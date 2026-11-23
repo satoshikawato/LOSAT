@@ -1401,6 +1401,11 @@ pub enum DiagTarget {
     /// (`Write for &File`), and a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds
     /// one; a `RefCell` would take both away from that public type).
     Memory(std::sync::Mutex<Vec<u8>>),
+    /// The file of `-logfile` of a tool's run whose files LOSAT Web gives its host
+    /// (`report::run_files::OpenFiles`, line NP WW3a, 2026-11-22): an opening of the run's file of
+    /// that path that appends to it, as NCBI's does, and that the run's other openings of the
+    /// file share (`-out x -logfile x`, D-WW3-9). Behind a lock, as `Memory`.
+    Stream(std::sync::Mutex<Box<dyn Write + Send>>),
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host, where the name is the
     /// process's standard error (`report::run_files::RunFiles::log_target`: `/dev/stderr`): a file,
     /// as NCBI opens one there (`CFileHandleDiagHandler`), whose bytes go to `cerr`. It differs from
@@ -1428,7 +1433,9 @@ impl DiagTarget {
     pub fn place(&self) -> TextPlace {
         match self {
             DiagTarget::Stderr | DiagTarget::StderrFile => TextPlace::StandardError,
-            DiagTarget::File(_) | DiagTarget::Memory(_) => TextPlace::LogFile,
+            DiagTarget::File(_) | DiagTarget::Memory(_) | DiagTarget::Stream(_) => {
+                TextPlace::LogFile
+            }
             DiagTarget::Discard => TextPlace::Nowhere,
         }
     }
@@ -1462,6 +1469,12 @@ impl DiagTarget {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend_from_slice(text),
+            DiagTarget::Stream(writer) => {
+                let _ = writer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .write_all(text);
+            }
             DiagTarget::Stderr | DiagTarget::Discard | DiagTarget::StderrFile => {}
         }
     }
@@ -1524,6 +1537,9 @@ impl DiagTarget {
             }
             DiagTarget::Memory(_) => {
                 return Err(refusal("the file is kept in memory".to_string()));
+            }
+            DiagTarget::Stream(_) => {
+                return Err(refusal("the file goes to LOSAT Web's host".to_string()));
             }
         };
         replace_standard_error(file).map_err(refusal)
@@ -1954,7 +1970,7 @@ pub enum Preparsed<S> {
 /// application start's configuration (`ApplicationStart::of_process`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
 /// the command line's entry (the versions, before the configuration load, and the words that
-/// the argument reader gets, `cli::try_parse_from_start`), `ApplicationStart::of_process`,
+/// the argument reader gets, `cli::reader::read_argv`), `ApplicationStart::of_process`,
 /// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
@@ -2065,7 +2081,7 @@ impl ApplicationStart {
     /// The application start of `program` in this process (its environment, its registry files
     /// and its facts, `ProcessFacts`): what the command line's entry writes before the program's
     /// arguments are read, and the settings that it leaves (`settings`). The entry makes one
-    /// and gives it to what reads after it (the argument reader, `cli::try_parse_from_start`; the
+    /// and gives it to what reads after it (the argument reader, `cli::reader::read_argv`; the
     /// program's run), as NCBI's application starts once.
     ///
     /// `words` are the arguments after the program's name: the file of their last `-conffile`

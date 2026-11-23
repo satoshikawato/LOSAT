@@ -856,7 +856,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
     let queries = read_fasta(Program::Blastn, Role::Query, &copied).unwrap();
     let subjects = read_fasta(Program::Blastn, Role::Subject, &once).unwrap();
     for task in ["blastn", "megablast"] {
-        let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>([
+        let cli = crate::cli::try_parse_from([
             "losat", "blastn", "-query", "q", "-subject", "s", "-task", task,
         ])
         .unwrap();

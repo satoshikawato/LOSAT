@@ -198,6 +198,7 @@ fn initial_tabular_oracle_bytes() {
                 queries: &Default::default(),
                 subjects: &Default::default(),
                 epilog: true,
+                query_scopes: None,
             },
             super::super::blast_xml::XmlValues {
                 expect: 10.0,
@@ -207,6 +208,7 @@ fn initial_tabular_oracle_bytes() {
                 db_gencode: 1,
                 identity_warned: 0,
                 filtered_empty: false,
+                pssm: false,
             },
             Default::default(),
             None,

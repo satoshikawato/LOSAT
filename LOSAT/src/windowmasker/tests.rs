@@ -17,7 +17,7 @@ fn run_words(line: &[&str]) -> (i32, String, String) {
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
     assert_eq!(HELP.len(), 5740);
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     assert_eq!(usage.len(), 994);
     assert!(usage.starts_with("USAGE\n  windowmasker [-h] [-help] [-xmlhelp] [-ustat unit_counts]"));
 }
@@ -323,4 +323,159 @@ fn the_dependencies_are_ncbi_s() {
     }
     assert!(list.windows(2).all(|pair| pair[0].0 <= pair[1].0));
     assert_eq!(list[0], ("checkdup", Dep::Excludes, "ustat"));
+}
+
+/// A run of LOSAT Web (`run_in`, `RunFiles::Receiver`) gives the bytes of the command line's run in
+/// the same directory (here the crate's, `run_with` on the file system): the exit status, the
+/// standard output and error, and each file that the run writes (`-out FILE`, `-logfile FILE`),
+/// which the receiver gets under its name in place of the disk; the files of `-mk_counts` (binary,
+/// with `-t_low_pct`, which a named file alone takes), `-convert` and the masking; a folder that the
+/// directory does not have opens no counts file (NCBI's writer then loses the counts) and no masking
+/// output (NCBI's `File is not accessible`); `-xmlhelp` prints NCBI's XML, as the command line's run
+/// does (line NP WW3a, 2026-11-22).
+#[test]
+fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
+    use crate::report::run_files::{FileReceiver, RunFiles};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Kept(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+    impl FileReceiver for Kept {
+        fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+            self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+            Ok(())
+        }
+    }
+    let disk = crate::utils::test_dir::temp_dir()
+        .join(format!("ww3a-wm-{}", crate::utils::test_dir::process_id()));
+    std::fs::create_dir_all(&disk).unwrap();
+    let fasta = "tests/winmask/fasta/dm2L_3k.fa";
+    let counts = "tests/winmask/counts/dm2L_u9.binary";
+    let rows: [&[&str]; 5] = [
+        &[
+            "-mk_counts",
+            "-in",
+            fasta,
+            "-unit",
+            "5",
+            "-sformat",
+            "binary",
+            "-t_low_pct",
+            "50",
+            "-out",
+            "@/c.counts",
+            "-logfile",
+            "@/run.log",
+        ],
+        &[
+            "-convert",
+            "-in",
+            "tests/windowmasker/counts/u4.ascii",
+            "-sformat",
+            "obinary",
+            "-out",
+            "@/c.obinary",
+        ],
+        &[
+            "-ustat",
+            counts,
+            "-in",
+            fasta,
+            "-outfmt",
+            "fasta",
+            "-out",
+            "@/masked.fa",
+        ],
+        &[
+            "-mk_counts",
+            "-in",
+            fasta,
+            "-unit",
+            "5",
+            "-out",
+            "ww3a-no-such-folder/c.counts",
+        ],
+        &[
+            "-ustat",
+            counts,
+            "-in",
+            fasta,
+            "-out",
+            "ww3a-no-such-folder/masked.fa",
+        ],
+    ];
+    for row in rows {
+        // The command line's names under a directory of the disk; LOSAT Web's in the working
+        // directory, as the run's own names.
+        let named = |prefix: &str| -> Vec<String> {
+            row.iter().map(|word| word.replace('@', prefix)).collect()
+        };
+        let cli = named(disk.to_str().unwrap());
+        let web = named(".");
+        let cli_words: Vec<OsString> = cli.iter().map(OsString::from).collect();
+        let web_words: Vec<OsString> = web.iter().map(OsString::from).collect();
+        let (mut cli_out, mut cli_err) = (Vec::new(), Vec::new());
+        let cli_status = run_with(
+            &cli_words,
+            &mut std::io::empty(),
+            &mut cli_out,
+            &mut cli_err,
+        );
+        let kept = Arc::new(Kept::default());
+        let (mut web_out, mut web_err) = (Vec::new(), Vec::new());
+        let web_status = run_in(
+            &web_words,
+            &RunFiles::Receiver(kept.clone()),
+            &mut std::io::empty(),
+            &mut web_out,
+            &mut web_err,
+        );
+        assert_eq!(web_status, cli_status, "{row:?}");
+        assert_eq!(web_out, cli_out, "{row:?}");
+        let disk_prefix = format!("{}/", disk.to_str().unwrap());
+        assert_eq!(
+            String::from_utf8(web_err).unwrap(),
+            String::from_utf8(cli_err)
+                .unwrap()
+                .replace(&disk_prefix, "./"),
+            "{row:?}"
+        );
+        let mut made: Vec<(Vec<u8>, Vec<u8>)> = std::fs::read_dir(&disk)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let name = format!("./{}", path.file_name().unwrap().to_str().unwrap());
+                let bytes = std::fs::read(&path).unwrap();
+                std::fs::remove_file(&path).unwrap();
+                (name.into_bytes(), bytes)
+            })
+            .collect();
+        let mut given = kept.0.lock().unwrap().clone();
+        made.sort();
+        given.sort();
+        assert_eq!(given, made, "{row:?}");
+        assert_eq!(
+            row.iter().filter(|word| word.starts_with('@')).count(),
+            made.len(),
+            "{row:?}"
+        );
+    }
+    std::fs::remove_dir_all(&disk).unwrap();
+    let mut out = Vec::new();
+    let status = run_in(
+        &[OsString::from("-xmlhelp")],
+        &RunFiles::Disk,
+        &mut std::io::empty(),
+        &mut out,
+        &mut Vec::new(),
+    );
+    assert_eq!(
+        (status, out),
+        (
+            0,
+            crate::ncbi_xmlhelp::print("windowmasker", |_| false)
+                .unwrap()
+                .into_bytes()
+        )
+    );
 }

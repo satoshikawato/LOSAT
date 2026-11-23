@@ -16,10 +16,10 @@ A refusal comes before the first byte of output unless an item says otherwise. I
 
 LOSAT names the option and the program. There are three forms.
 
-An option refused by name, found while the command line is read (exit status 2):
+An option refused by name, after NCBI's argument reader has accepted the command line (so NCBI's own argument errors come first, as in NCBI; exit status 1):
 
 ```text
-error: the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTP
+Error: the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTP
 ```
 
 A value or setting refused after the options are read (exit status 1):
@@ -31,7 +31,7 @@ Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's 
 An output format the program does not write (exit status 1):
 
 ```text
-Error: output format 5 is not supported by LOSAT's PSIBLAST
+Error: output format 1 is not supported by LOSAT's PSIBLAST yet
 ```
 
 For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
@@ -53,11 +53,11 @@ There is one section for each program, and one for the five search programs toge
 | `-gilist`, `-negative_gilist` | Five search programs, `psiblast` | Out of scope (GI lists) |
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
-| `-html` | `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` with `-outfmt 1` to `4`; `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
+| `-html` | `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
-| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (`0, 6, 7, 10, 20`; `-in_pssm` / `-in_msa`: `0, 6, 7`) |
+| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
 
@@ -67,7 +67,6 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-html` with `-outfmt 1` to `4` | Refused: not yet supported. With `-outfmt 0` and `18`, `-html` writes the HTML report as NCBI does; the other formats are the same as without it. |
 | `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
 | `-export_search_strategy -` (standard output) | Refused where NCBI writes its request into the report: LOSAT holds the report's bytes from NCBI's formatter until NCBI's first request (after its prolog and the first batch of queries is read, before the search), refuses there and writes none of them. A file name works. A run that NCBI ends before that point (an empty query, a database error, an error of an option or of `-outfmt`, a first query record it cannot read, a `-query_loc` past the end, `BATCH_SIZE=abc`, a PSSM run with `-subject`) ends as in NCBI: the held bytes (its prolog) are written, then its error and exit status. NCBI's warnings from before its formatter come before the refusal. |
 | `-export_search_strategy` into the file of `-out`, or into standard output | Refused where NCBI writes its request into the report or over it, at the same point as the row above, with no byte written to the stream. A run that NCBI ends before its first request ends as in NCBI, including the held prolog. |
@@ -76,7 +75,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
 | `-export_search_strategy` in the library API and pylosat | Refused. The command line writes the file. |
 | `-parse_deflines` with two subjects of one id | Refused. NCBI cannot report it correctly. |
-| `-parse_deflines` with two queries of one id in one query batch | Refused. |
+| `-parse_deflines` with two queries of one id in one query batch, or in any batch with `-subject` or `-outfmt 5` | Refused, except where NCBI stops first because its BLAST XML, XML2 or JSON report (`-outfmt 5`, `13`, `14`, `15`, `16`) does not know the `-matrix` name (such as `blosum62` in lower case): then a repeated query in any batch that NCBI reads up to that error ends with NCBI's error and output, which show nothing of the repeated query, and so does a repeated query that `-query_loc` skips. It stays refused there with `-export_search_strategy`; where every query of a batch is a repeat longer than the first query of its id (NCBI stops with `CSeqVector_CI: cannot locate segment`); where a batch holds only repeats and NCBI's result would depend on the letters of their first queries; where the queries that come first with their ids in a batch have no valid context (for example only `X` letters); and where a query's ids match those of an earlier query only in part, or those of two. `psiblast` refuses these output formats on its own (see psiblast below). |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
 | `-db` with a sequence whose id NCBI cannot report correctly | Refused. The error names the sequence. |
 | An alias file with `SEQIDLIST` or `TAXIDLIST` over a version 5 database, `MEMB_BIT` or `MASKLIST` | Refused. See Alias files below. `MASKLIST` names the GI-indexed masks that `makeblastdb -gi_mask` writes; LOSAT does not read them yet. |
@@ -100,7 +99,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_index true` with a new-style index volume of 36 to 39 bytes or one without read access, an empty first index volume, or an `-index_name` volume range whose loop NCBI never ends (a first volume of 0 or more with a negative last one, such as `oidx,,0,-1`, or a last one of -1) | Refused. NCBI reads such a header undefined, crashes on the empty volume, or never finishes the loop. |
 | `-use_index true` with an index volume whose parts do not fit together (a list, offset or local id outside its sections, an Nmer length of 0, a stride of 32,768 or more), an index not made from the database (a sequence with more chunks than the index has), a seed of the index that starts at or past the last letter of its sequence, or an old-style index (`-index_name`) of fewer sequences than the database when the search runs more than one query batch or query chunk | Refused. NCBI reads past such an index's sections or past the sequence, crashes, or gives a result that depends on the order of its threads. With the old-style index NCBI stops with an error in its second search of the index (a later query batch or query chunk); LOSAT writes the same output of the batches before and refuses there. |
 | `-xdrop_gap` or `-xdrop_gap_final` so large that NCBI's 32-bit arithmetic overflows | Refused. See [Rare and pathological inputs](refusals-edge-cases.md#blastn) for the limits. |
-| A very large `-xdrop_ungap` (such as `1e10`) that leads to an alignment outside its query context | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). |
+| A very large `-xdrop_ungap` (such as `1e10`) that leads to an alignment outside its query context whose query coordinates leave the query on the left | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). Where they pass the query's end, LOSAT shows the alignment as NCBI does. |
 | `-db_hard_mask` on a database whose sequences are masked to their end, with `-task blastn-short` | Refused. NCBI can crash. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
@@ -138,7 +137,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-query_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
+| `-query_gencode 32` | NCBI's argument error (exit status 1). Code 32 is not one of NCBI's codes. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastx-fast`), or a name that begins with `IDENTITY` | Refused. NCBI aborts. |
 | An `-evalue` that is not finite (`+inf`, `1e999`, `-nan`) | Refused. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
@@ -176,7 +175,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-query_gencode 32`, `-db_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
+| `-query_gencode 32`, `-db_gencode 32` | NCBI's argument error (exit status 1). Code 32 is not one of NCBI's codes. |
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
@@ -217,17 +216,19 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 1 to 4, 12 to 16 and 18 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
 | `-in_pssm` with an XML PSSM | Refused. |
+| `-outfmt 11` with a database and an `-in_pssm` file that holds frequency ratios only, without `params.rpsdbparams`, in the ASN.1 text archive (no `ARCHIVE_FORMAT`), `ARCHIVE_FORMAT=xml` or `ARCHIVE_FORMAT=bin` (NCBI stops with a C++ exception while it writes the request's PSSM, as it does for `-out_pssm`) | Refused. `-subject`, `-outfmt 6` and `-export_search_strategy` with such a file are answered as NCBI does. |
+| `-outfmt 11` with `ARCHIVE_FORMAT=xml`, `ARCHIVE_FORMAT=bin` or no variable, and an `-in_pssm` file holding what that archive does not write yet: with `xml` an unnamed SEQUENCE or CHOICE (a User-object descriptor, annotations), a NULL, a UTF8String or an author list's names (a Pubdesc's authors) read from ASN.1 text; with `bin` a UTF8String (a User-object's text), such author names or a NaN or infinite real number; with no variable (ASN.1 text) author names read from an ASN.1 binary file; with each of them a list element stated as `NULL` (`05 00` in ASN.1 binary) | Refused: not yet supported. Every other PSSM file is written in all three archives, and so are `-in_msa` and a FASTA query. |
 | `-out_pssm` or `-out_ascii_pssm` with a file that cannot be written | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. Where NCBI stops first with its own error of `-outfmt` (13 or 14 without `-out`, for example), you get that error. |
 | `-out_pssm` into a named pipe, a block device or a symbolic link to a missing file | Refused. |
-| The library calls `run` or `run_collect` with formats that take two searches, `-num_descriptions` or `-num_alignments`, and PSSM files | Refused. One call per format writes the command line's output. |
+| The library calls `run` or `run_collect` with formats that take two searches (two hit list sizes under `-num_descriptions` or `-num_alignments`, or `psiblast`'s outfmt 5 or 11 with other formats) and PSSM files | Refused. One call per format writes the command line's output. |
 
 `-matrix IDENTITY` gives NCBI's own error.
 
@@ -241,10 +242,10 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | :--- | :--- |
 | `-ungapped` | Refused. |
 | `-use_sw_tback` | Refused when the search finds an alignment, after the report's header. Depending on the input, NCBI fails its traceback (`BLAST engine error: Traceback failed`), throws an exception, crashes (with `-subject` and with `-db`), never finishes, or writes rows that change from one run to the next. A search that finds nothing runs, as in NCBI. |
-| `-outfmt 11` | Refused. NCBI searches with it. |
+| `-outfmt 11` | Refused. NCBI searches, then stops with a C++ exception whose report (in its error archive too) changes from run to run. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
 | A PSSM query that `-seg` masks completely | Refused. |
-| `-outfmt` other than 0 to 4, 6, 7 and 10 | Refused. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 12 to 16 and 18 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-db_gencode 32` | Refused. It is not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations. |
 | `-in_pssm` in LOSAT Web | Refused. The library API and pylosat take it as an input. |
 
@@ -257,7 +258,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
-| `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
+| `-subject` | NCBI's argument error, as in NCBI (usage and `Unknown argument: "subject"`, exit status 1). It is not an `rpsblast` option. |
 | `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, `sseq`, `btop`, `nident`, `pident`, `mismatch`, `positive`, `ppos`, as in the default fields, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI takes the query for the entry (the query's title in `Hit_def`, its letters in the identities, its taxonomy in the organism report). `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
 | A query above 5,000,000 letters | Refused. |
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
@@ -279,9 +280,9 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
-| `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
+| `-subject` | NCBI's argument error, as in NCBI (usage and `Unknown argument: "subject"`, exit status 1). It is not an `rpstblastn` option. |
 | `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field of the alignment (such as `qstart`, `length` or the default fields) or a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception (after half a document in BLAST XML, after the header line in `-outfmt 20`) or takes the query for the entry. `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
-| `-query_gencode 32` | Refused (exit status 2). |
+| `-query_gencode 32` | NCBI's argument error (exit status 1). |
 | `rpstblastn` in the library API and the Web engine | Refused. |
 | `-use_sw_tback` with a profile whose Smith-Waterman redo NCBI repeats without end | Refused, for a window of a query frame: the e-value of a score of 0 passes `-evalue`, the window holds two or more of the profile's preliminary HSPs, and the profile's first position scores the window's first letter above 0. With `-strand minus` NCBI's redo reads a search space of 0, so every score passes `-evalue`. The refusal comes with the query batch that holds the profile, after the reports of the batches before it (in `-outfmt 0` after the header that NCBI writes before its first batch). |
 | `-use_sw_tback` with a profile whose Smith-Waterman alignment starts with a gap in the query's row | Refused, at the same place. No search has been found that gives one, so there is no NCBI output to follow. An alignment that starts with a gap in the profile's row is written as NCBI writes it: the warning that the sequence data could not be pre-fetched, and `-outfmt 0` to `5` and `13` to `16` stop where NCBI's do. |
@@ -334,7 +335,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | :--- | :--- |
 | A `-db` list in which an alias and another name give the same volume | Refused. |
 | FASTA output of a sequence with a tax id, or `-outfmt` with `%S`, `%L`, `%B`, `%K`, `%C` or `%N`, or `-tax_info` with a name field, when `taxdb.btd` is empty | Refused. NCBI maps the file as a null pointer and crashes. `-outfmt "%a %T"`, other formats that look nothing up, and `-info` work. |
-| A failed write of the `-metadata` output | Refused. NCBI's serial stream reports it. |
 | `-range ""`, `-taxids abc`, or a `-taxids` or `-taxidlist` id that is empty, blank, too large or not a number | Refused. NCBI crashes or prints a path. |
 | `-mask_sequence_with` below -1 | Refused. NCBI crashes. |
 | `-ipg` or `-ipg_batch` on a database without PIG files | Refused. |
@@ -432,6 +432,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-index false` with a query whose first binary definition line has no Seq-id | Refused, as above. |
 | Binary definition lines (a `user` object `ASN1_BlastDefLine`) that are damaged or hold characters that NCBI's reader replaces | Refused. NCBI's `makeprofiledb` stops with its ASN.1 reader's error, or replaces the characters and reports each. |
 | A profile stored by row without scores whose query length is 4,294,967,295 letters (`numColumns -1`) | Refused. NCBI's `makeprofiledb` writes before its matrix. |
+| A query descriptor stated as `NULL` (an empty element of the query's `descr`) | Refused: not yet supported. NCBI's `makeprofiledb` dereferences the descriptors where it makes the definition lines. |
 | An error after which the database's writer fails again as it closes (a missing input file after the first with an empty `-out` in a version 5 database; a query without definition lines in a version 5 database) | Refused. NCBI's `makeprofiledb` aborts. |
 | A command-line word that is not UTF-8 | Refused. |
 
@@ -444,8 +445,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 - The programs `deltablast` and `blast_formatter`.
 - `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
-- The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`).
-- `-html` with `-outfmt 1` to `4`, and in `psiblast`, `rpsblast` and `rpstblastn`.
+- The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
+- `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 

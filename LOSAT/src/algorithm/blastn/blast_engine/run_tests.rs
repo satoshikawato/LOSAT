@@ -762,13 +762,6 @@ fn test_blastn_context_statistics_rounds_evalue_score_only() {
 // into extra gapped HSPs under an incorrectly lowered per-subject cutoff.
 #[test]
 fn word7_uses_subject_set_cutoffs() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let sequence: String = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fasta/small_test.fasta"
@@ -795,8 +788,9 @@ fn word7_uses_subject_set_cutoffs() {
         &[1]
     };
     for n in threads {
-        let options = crate::cli::try_parse_from::<Options, _, _>([
-            "test",
+        let options = crate::cli::try_parse_from([
+            "losat",
+            "blastn",
             "-query",
             "memory-query",
             "-subject",
@@ -815,7 +809,7 @@ fn word7_uses_subject_set_cutoffs() {
         let mut output = Vec::new();
         let mut stderr = std::io::stderr();
         run_local(
-            options.blastn,
+            options.blastn(),
             &reader_records(&query, ReaderConfig::query("BLASTN", false, false)),
             &crate::api::QueryEnd::Input,
             &reader_records(&subject, ReaderConfig::subject("BLASTN", false, false)),
@@ -833,14 +827,7 @@ fn word7_uses_subject_set_cutoffs() {
 #[cfg(feature = "parallel")]
 #[test]
 fn speculative_traceback_preserves_ordered_gapped_hsps() {
-    use clap::Parser;
     use rayon::prelude::*;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let mut state = 0x12345678_u32;
     let query: Vec<u8> = (0..512)
         .map(|_| {
@@ -883,8 +870,9 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
     )
     .unwrap();
     let execute = |threads: usize, outfmt: &str| {
-        let args = crate::cli::try_parse_from::<Options, _, _>([
-            "test",
+        let args = crate::cli::try_parse_from([
+            "losat",
+            "blastn",
             "-query",
             query_path.to_str().unwrap(),
             "-subject",
@@ -901,7 +889,7 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
             output_path.to_str().unwrap(),
         ])
         .unwrap()
-        .blastn;
+        .blastn();
         run(
             args,
             crate::blastinput::ncbi_environment::ApplicationSettings::default(),
@@ -1101,19 +1089,10 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
 /// 2874-2886, 2975-2977; blastn_app.cpp:255-258).
 #[test]
 fn output_formats_raise_ncbis_errors_where_ncbi_does() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let args = |words: &[&str]| {
-        let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+        let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(words);
-        crate::cli::try_parse_from::<Options, _, _>(argv)
-            .unwrap()
-            .blastn
+        crate::cli::try_parse_from(argv).unwrap().blastn()
     };
     let native = |error: anyhow::Error| {
         let native = error.downcast::<crate::cli::NativeError>().unwrap();
@@ -2076,11 +2055,13 @@ fn a_traceback_start_far_outside_its_context_aligns_on_a_long_subject() {
     );
 }
 
-// The report refuses a batch whose final hit lists keep an HSP outside its query context
-// (`post_process_hits_and_write`): one test, `BlastnHsp::outside_query_context`, for a start
-// below 0 and for an end past the context's length. The drops before it compare NCBI's signed
-// offsets: an HSP left of its context sorts before one at offset 0 with the same score and
-// subject range.
+// An HSP outside its query context (`BlastnHsp::internal_q_offset_0`: a start below 0 or an
+// end past the context's length) reaches the reports; the search fails or refuses a batch
+// where one has a Seq-align query start below 0 (`BlastnHsp::seqalign_query_start`,
+// `left_of_query_refusal`: a plus-strand start left of the context, or a minus-strand
+// end past it), and the reports show one past the query's end (remaining-gaps X1b-p). The
+// drops before it compare NCBI's signed offsets: an HSP left of its context sorts before one
+// at offset 0 with the same score and subject range.
 #[test]
 fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
     let hsp = |offset: i32, end: i32| BlastnHsp {
@@ -2109,12 +2090,27 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
         num_positives: (end - offset) as usize,
     };
     let left = hsp(-13, -1);
-    assert!(left.outside_query_context());
-    assert!(hsp(-1, 11).outside_query_context());
-    assert!(hsp(90, 101).outside_query_context());
-    assert!(hsp(100, 112).outside_query_context());
-    assert!(!hsp(0, 12).outside_query_context());
-    assert!(!hsp(88, 100).outside_query_context());
+    assert_eq!(left.seqalign_query_start(), -13);
+    assert_eq!(hsp(100, 112).seqalign_query_start(), 100);
+    let mut minus = hsp(-12, -2);
+    minus.query_frame = -1;
+    assert_eq!(minus.seqalign_query_start(), 102);
+    // `starts_left_of_record` is `record_query_start(..) < 0`, tested first as X1b-o tested an
+    // HSP outside its context: inside it (and on its right) no start is below 0.
+    assert!(left.outside_query_context() && left.starts_left_of_record(0, false));
+    assert!(left.starts_left_of_record(12, false) && left.starts_left_of_record(12, true));
+    assert!(!left.starts_left_of_record(13, true));
+    assert!(minus.outside_query_context() && !minus.starts_left_of_record(0, true));
+    for inside in [hsp(0, 12), hsp(88, 100)] {
+        assert!(!inside.outside_query_context());
+        assert!(!inside.starts_left_of_record(0, false) && !inside.starts_left_of_record(0, true));
+    }
+    assert!(hsp(-1, 11).outside_query_context() && hsp(100, 112).outside_query_context());
+    assert!(!hsp(100, 112).starts_left_of_record(0, false));
+    (minus.internal_q_offset_0, minus.internal_q_end_0) = (95, 104);
+    assert_eq!(minus.seqalign_query_start(), -4);
+    assert!(minus.starts_left_of_record(0, false) && minus.starts_left_of_record(3, true));
+    assert!(!minus.starts_left_of_record(4, true) && minus.starts_left_of_record(4, false));
     assert_eq!(
         crate::algorithm::blastn::hsp::score_compare_hsps(&left, &hsp(0, 12)),
         std::cmp::Ordering::Less
@@ -2126,19 +2122,10 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
 // populate the counts source, registry, or resolved repeat filter before calling `run_local`.
 #[test]
 fn run_local_refuses_database_and_unresolved_filter_inputs() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let parse = |words: &[&str]| {
-        let mut argv = vec!["test", "-query", "q"];
+        let mut argv = vec!["losat", "blastn", "-query", "q"];
         argv.extend_from_slice(words);
-        crate::cli::try_parse_from::<Options, _, _>(argv)
-            .unwrap()
-            .blastn
+        crate::cli::try_parse_from(argv).unwrap().blastn()
     };
     let call = |args: BlastnArgs, outfmt: &str| {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());

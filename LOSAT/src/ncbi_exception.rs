@@ -25,6 +25,12 @@
 /// and print the same text around it (line NP, M/DECISIONS.md 14).
 pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:965-975
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+/// The message of NCBI's exception at a read through a `CRef` of no object
+/// (`CObject::ThrowNullPointerException`, `CCoreException::eNullPtr`).
+pub const NULL_POINTER: &str = "Attempt to access NULL pointer.";
+
 /// The build tree that NCBI rpsbproc 0.5.1's reports name: that of its Linux x64 binary of the
 /// 2025-05-13 package (the oracle of `tests/fixtures/rpsbproc`), built apart from BLAST+ on its own
 /// toolkit. Its `ncbireg.cpp` throws at the lines of BLAST+ 2.17.0's (env parity probe I of

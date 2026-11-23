@@ -8,12 +8,14 @@
 //!
 //! [`MaskFileReader`] reads such a file as `makeblastdb` does: the format is guessed
 //! once per file (`reader.rs`, `guess.rs`), then the objects follow one another in ASN.1 text
-//! or binary (the primitives of `report::serial::asn_input`); `schema.rs` has the types.
+//! or binary, read by the reader of the type table (`report::serial::asn_types`, whose table
+//! holds these types: `Blast-db-mask-info` and what it reaches).
 //!
 //! What a mask names. Every Seq-id of a file is a [`ParsedSeqId`] of any alternative of the
 //! `Seq-id` CHOICE (`local`, `gibbsq`, `gibbmt`, `giim`, `genbank`, `embl`, `pir`, `swissprot`,
 //! `patent`, `other`, `general`, `gi`, `ddbj`, `prf`, `pdb`, `tpg`, `tpe`, `tpd`, `gpipe`,
-//! `named-annot-track`), built by one builder (`reader.rs`) for text and for binary, as
+//! `named-annot-track`), built by the one Seq-id reader (`asn_types::seq_id`) for text and for
+//! binary, as
 //! `CSeq_loc::GetId` hands `CMaskedRangeSet::Insert` the Seq-id of a mask's Seq-loc
 //! (masked_range_set.cpp:86-106; makeblastdb.cpp:976-995). A Seq-loc of several different Seq-ids
 //! has no Seq-id (`CSeq_loc::GetId` fails, "Cannot get masked range Seq-id":
@@ -27,7 +29,7 @@
 //!
 //! A string's bytes outside 0x20-0x7e are read as `#` with NCBI's diagnostic, and a `UTF8String`
 //! tag where a `VisibleString` belongs with NCBI's warning (once per run): the reader hands them
-//! out (`MaskPost`, `MaskFileReader::take_posts`) and `process` posts them. A file that NCBI's
+//! out (`asn_types::Post`, `MaskFileReader::take_posts`) and `process` posts them. A file that NCBI's
 //! serial reader cannot read ends with NCBI's exception (`MaskFileError::Ncbi`).
 //!
 //! NCBI's pointer syntax is read where NCBI reads a `CRef<>` that is empty at that moment: an
@@ -39,9 +41,10 @@
 //! A Seq-loc holds Seq-locs (`mix`, `equiv`) to any depth: NCBI reads them by recursion, and with
 //! its default stack of 8 MiB a nest of about 6,500 to 6,900 levels (by build and format)
 //! overflows it, which crashes makeblastdb; with a stack large enough it reads every depth. The
-//! reader keeps the frames of such a nest on the heap (`reader.rs`, `Rd::read_seq_loc_parts`) and
-//! reads every depth as far as memory allows, writing what makeblastdb writes with a stack large
-//! enough (PD-LOSAT-NCBI-DEFECTS exception 28).
+//! reader keeps the levels and frames of such a nest on the heap (`reader.rs`,
+//! `Build::seq_loc_parts`, on the object stack's `TypedReader::nest`) and reads every depth as far
+//! as memory allows, writing what makeblastdb writes with a stack large enough
+//! (PD-LOSAT-NCBI-DEFECTS exception 28).
 //!
 //! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): a string
 //! whose length passes the end of the file by an amount that makeblastdb may or may not be able to
@@ -56,13 +59,12 @@
 mod depth_tests;
 mod guess;
 mod reader;
-mod schema;
 #[cfg(test)]
 mod seq_id_tests;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader, MaskPost};
+pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader};
 
 use crate::seqid::ParsedSeqId;
 
@@ -96,8 +98,9 @@ pub(crate) struct MaskList {
 
 /// An element of a list of `CRef`s (`masks`, `mix`, `equiv`, `packed-int`) that the file states
 /// as `NULL` (text) or `05 00` (binary). NCBI's reader leaves the `CRef` empty
-/// (`CObjectIStream::ReadPointer`) and makeblastdb dereferences it in `x_ProcessMaskData`
-/// (`**iter`) or in `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`): a `CCoreException`
+/// (`CObjectIStream::ReadPointer`) and makeblastdb dereferences it in `x_ProcessMaskData` (the
+/// mask through its reference) or in `CSeq_loc::CheckId` (an element of the mix through its
+/// reference, for its range or for its own `CheckId`): a `CCoreException`
 /// `eNullPtr`, whose report prints a stack trace with the run's library addresses and the path of
 /// the installed binary, which no other program can reproduce.
 #[derive(Debug, Clone, PartialEq, Eq)]

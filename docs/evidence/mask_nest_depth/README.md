@@ -46,8 +46,8 @@ levels, 245 s at 5,000 levels, and 4,933 s (253 MB of memory) at 20,000 levels, 
 
 ## What LOSAT does
 
-LOSAT keeps the frames and the lists' Seq-id walks on the heap (`LOSAT/src/writedb/mask_info/reader.rs`,
-`Rd::read_seq_loc_parts`). It reads every depth as far as memory allows, with an 8 MiB or a 2 MiB stack, and writes
+LOSAT keeps the levels and frames on the heap (`TypedReader::nest`, `LOSAT/src/report/serial/asn_types/typed.rs`),
+and the Seq-id walks of the levels (`Build::seq_loc_parts`, `LOSAT/src/writedb/mask_info/reader.rs`). It reads every depth as far as memory allows, with an 8 MiB or a 2 MiB stack, and writes
 what NCBI writes with no stack limit: the exit status, the log, the database and, for a damaged file, the report.
 Its reports take time linear in the depth.
 

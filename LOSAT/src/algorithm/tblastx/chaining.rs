@@ -54,10 +54,10 @@ pub struct UngappedHit {
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
     pub ordering_method: u8,
-    /// NCBI: H->linked_set - TRUE if this HSP is part of a multi-HSP chain
+    /// Whether this HSP belongs to a multi-HSP chain (NCBI `H->linked_set`).
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c lines 959-962, 972
     pub linked_set: bool,
-    /// NCBI: H->start_of_chain - TRUE if this HSP is the head of a chain
+    /// Whether this HSP is the head of a chain (NCBI `H->start_of_chain`).
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 955
     pub start_of_chain: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-65

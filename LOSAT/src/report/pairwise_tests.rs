@@ -560,7 +560,7 @@ fn make_hit() -> Hit {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5088-5340
-// enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
+// Break-priority tiers (`EScore`): `eForced`, `ePunct`, `eComma`, `eSpace`, `eNewline`.
 #[test]
 fn flatfile_wrapping_preserves_ncbi_break_boundaries() {
     for (input, width, expected) in [

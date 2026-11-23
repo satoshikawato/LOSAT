@@ -192,7 +192,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         // Query length for this context in amino acids (NCBI `query_info->contexts[context].query_length`).
         let query_len_aa = ctx.aa_len as i64;
 
-        // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
+        // Compute `gap_trigger` from the per-context `kbp_std` `Lambda` and `logK`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:340-345
         let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
 

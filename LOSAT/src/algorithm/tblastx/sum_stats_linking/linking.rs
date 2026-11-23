@@ -399,7 +399,7 @@ impl DualMaximumTree {
 #[derive(Clone)]
 struct HspLink {
     score: i32,
-    ctx_idx: usize, // NCBI: H->hsp->context - for kbp[context] lookup
+    ctx_idx: usize, // Query context index (`H->hsp->context`, used for `kbp` lookup)
     q_off_trim: i32,
     s_off_trim: i32,
     q_end_trim: i32,
@@ -526,7 +526,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:510-531
-    let total_hits = hits.len(); // Save for pool sizing (NCBI: hsp_list->hspcnt)
+    let total_hits = hits.len(); // Save for pool sizing (NCBI `hsp_list->hspcnt`)
     let mut frame_groups: Vec<Vec<UngappedHit>> = Vec::new();
     let mut current_group: Vec<UngappedHit> = Vec::new();
 
@@ -570,7 +570,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             )),
     );
-    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: at least 1024 or `hspcnt + 5`
+    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: the larger of 1024 and `hspcnt + 5`
 
     // The incremental kernel of linking_incr.rs links every group with the same result as the
     // literal port `link_hsp_group_ncbi`, which stays for LOSAT_LINKING_LEGACY, the linking traces
@@ -1342,7 +1342,7 @@ fn link_hsp_group_ncbi(
         let st = TRIM_SIZE.min(s_len_quarter);
         let score = hit.raw_score;
         let ctx_idx = hit.ctx_idx as usize;
-        // NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
+        // Per-context `Lambda` and `logK` from `kbp` for this HSP's context (link_hsps.c:750-752).
         let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
         let ctx_log_k = log_k_by_ctx[ctx_idx];
         let xscore = normalize_score(score, ctx_lambda, ctx_log_k);

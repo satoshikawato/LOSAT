@@ -126,7 +126,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     }
 
     // [C] array_size for offset_pairs
-    // NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain
+    // `GetOffsetArraySize` sums `OFFSET_ARRAY_SIZE` (4096) and `lookup->longest_chain`.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/lookup_wrap.h + c++/src/algo/blast/core/lookup_wrap.c
     const OFFSET_ARRAY_SIZE: i32 = 4096;
     let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);

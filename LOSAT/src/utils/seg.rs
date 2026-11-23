@@ -533,7 +533,8 @@ impl SegMasker {
     pub fn new(window: usize, locut: f64, hicut: f64) -> Self {
         let params = SegParams::new(window, locut, hicut);
 
-        // downset = (window+1)/2 - 1, upset = window - downset
+        // Split the window around the center residue: `downset` is one less than half the window
+        // rounded up, and `upset` is the remaining length of `window`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2050-2051
         let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;

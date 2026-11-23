@@ -3534,7 +3534,7 @@ fn run_preliminary_subjects_into(
         eprintln!("{line}");
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668:
-    //    argument can be shared between multiple threads */
+    // NCBI keeps per-thread diagnostics separate instead of sharing one structure across threads.
     #[cfg(feature = "parallel")]
     if parallel_selected && diagnose {
         // The search is one entry into the pool; the line adds its chunks and the most finished

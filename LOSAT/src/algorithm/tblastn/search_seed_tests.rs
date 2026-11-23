@@ -188,7 +188,7 @@ fn alternate_matrix_word2_candidates_and_contexts_match_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
-// CRandom random(base_length); ambiguous ncbi4na bases are picked once
+// Seeds `CRandom` with the nucleotide base length; ambiguous ncbi4na bases are picked once
 // for the compressed ncbi2na preliminary subject.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:767-775,804-812
 #[test]
@@ -349,7 +349,7 @@ fn ncbi_lowercase_mask_candidates_match_in_set_and_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
-// CRandom random(base_length); each ambiguous 4na value consumes one GetRand().
+// Seeds `CRandom` with the nucleotide base length; each ambiguous 4na value consumes one `GetRand()` draw.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
 #[test]
 fn ncbi_ambiguity_spectrum_frames_and_candidates_match() {

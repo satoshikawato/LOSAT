@@ -435,7 +435,7 @@ fn link_groups_as(
     // The list may arrive with spare capacity (it was grown by `extend`); give it back first, so
     // the slices below and the replay at the end work on a list of exactly its length.
     hits.shrink_to_fit();
-    let total_hits = hits.len(); // NCBI: hsp_list->hspcnt
+    let total_hits = hits.len(); // Total HSP count (NCBI `hsp_list->hspcnt`)
     let starts = group_starts(&hits);
     let groups = group_slices(&mut hits, &starts);
     lap.lap(LinkStage::Groups);
@@ -454,7 +454,7 @@ fn link_groups_as(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             )),
     );
-    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: at least 1024 or `hspcnt + 5`
+    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: the larger of 1024 and `hspcnt + 5`
     let literal_port = use_legacy || fast_shadow;
     let args = GroupArgs {
         use_legacy,

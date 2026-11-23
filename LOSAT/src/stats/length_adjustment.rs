@@ -143,16 +143,16 @@ pub fn compute_length_adjustment_ncbi(
     let mut length_adjustment = ell_min as i64;
 
     if converged {
-        // If ell_fixed is the (unknown) true fixed point, then we
-        // wish to set length_adjustment to floor(ell_fixed).
-        // We assume that floor(ell_min) = floor(ell_fixed)
-        // But verify that ceil(ell_min) != floor(ell_fixed)
-        // This matches NCBI BLAST's logic exactly
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5106-5119
+        // The converged lower bound `ell_min` brackets the fixed point from below, so its
+        // truncated integer part is normally the floor of the fixed point. Check whether
+        // rounding `ell_min` up to `ell_ceil` still stays within `ell_max` and at or below
+        // the fixed-point curve; if so, the fixed point's floor is `ell_ceil`.
         let ell_ceil = ell_min.ceil();
         if ell_ceil <= ell_max {
             let ss = (m - ell_ceil) * (n - n_seqs * ell_ceil);
             if alpha_d_lambda * (log_k + ss.glibc_ln()) + beta >= ell_ceil {
-                // ceil(ell_min) == floor(ell_fixed)
+                // `ell_ceil` does not exceed the fixed point, so use it as the integer adjustment.
                 length_adjustment = ell_ceil as i64;
             }
         }

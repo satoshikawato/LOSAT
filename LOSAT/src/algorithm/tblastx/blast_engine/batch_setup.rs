@@ -416,8 +416,8 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // NCBI counterpart.
     crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
 
-    // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
-    // Compute per-context x_dropoff using kbp[context]->Lambda.
+    // Initial per-context ungapped X-dropoff (NCBI `word_params->cutoffs[context].x_dropoff_init`).
+    // Compute per-context x_dropoff using `kbp[context]->Lambda`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
     // For translated queries, NCBI computes `kbp_std` per context and applies `check_ideal`,

@@ -268,7 +268,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
     for idx in 0..hsp_len {
         let q = unsafe { *q_ptr.add(idx) };
         let s = unsafe { *s_ptr.add(idx) };
-        // NCBI: matrix[*query & 0xff][*subject]
+        // Look up the substitution score for the current query residue (masked to a byte) and subject residue.
         sum += sc.score(q, s);
 
         if sum < 0 {

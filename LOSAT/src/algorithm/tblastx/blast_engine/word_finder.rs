@@ -646,7 +646,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
             //
             // hsp_q is frame-relative coordinate in query->sequence (0-based),
             // frame_base is the context query_offset in the concatenated buffer.
-            // NCBI: ungapped_data->q_start is absolute query offset.
+            // In NCBI, `ungapped_data->q_start` holds the absolute query offset.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768, c++/src/algo/blast/core/blast_query_info.c:311-315.
             let hsp_q_absolute = ctx.frame_base + hsp_q;
             let hsp_qe_absolute = ctx.frame_base + (hsp_q + hsp_len);

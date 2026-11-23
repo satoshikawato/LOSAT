@@ -624,16 +624,29 @@ fn taxdb_setting(
 // names and the organism report (outfmt 18) and the file of a `-matrix` that NCBI's tables do not
 // have (TBLASTX, ungapped BLASTX). The settings are the call's application start's
 // (`start::CallStart::settings`).
+/// How a `run_local` call's run ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RunEnd {
+    /// After its last query.
+    Searched,
+    /// Where NCBI's `CATCH_ALL` ends the run with exit status 0 and no word (a `CEofException`:
+    /// a header record's, `common::database::database_error_of`, or the `-in_pssm` reader's,
+    /// `pssm_search::in_pssm`): the reports written before it are the run's, and no query is
+    /// searched after it (`batches::Batches`).
+    WithoutPost,
+}
+
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`
 /// (`run_local_entry`), whose end is the command line's run's: a run that NCBI ends with exit
-/// status 0 and no word ends the call without an error, and an NCBI error after NCBI's main-thread
-/// diagnostic stream failed is the text that the command line writes for it.
+/// status 0 and no word ends the call without an error (`RunEnd::WithoutPost`), and an NCBI error
+/// after NCBI's main-thread diagnostic stream failed is the text that the command line writes for
+/// it.
 pub(super) fn run_local(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RunEnd> {
     // The call's code runs on this thread with the call's own diagnostic stream (one batch of
     // `run_batches` after another's of another call, too), and its searches' workers with it
     // (`utils::threading::with_search_pool`).
@@ -642,18 +655,20 @@ pub(super) fn run_local(
     // The `-out` file of `run_to_file` ends as the command line's run ends its `-out` stream
     // (`ReportOutputs::finish_out`), before the run's error is written as `CATCH_ALL` writes it.
     let Err(error) = outputs.finish_out(result) else {
-        return Ok(());
+        return Ok(RunEnd::Searched);
     };
     let Some(native) = error.downcast_ref::<crate::cli::NativeError>() else {
         return Err(error);
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: the `-in_pssm` reader's
-    // `CEofException`, the object manager's failed write after its diagnostic stream failed): NCBI's
-    // run returns 0 without a word, so the call succeeds with what it wrote (tblastn's error
-    // archive of the saved messages, `report::archive::silent_end_lines`, or nothing).
+    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: a `CEofException` of the `-in_pssm`
+    // reader's, `pssm_search::in_pssm`, or of a header record's,
+    // `common::database::database_error_of`; the object manager's failed write after its
+    // diagnostic stream failed): NCBI's run returns 0 without a word, so the call succeeds with
+    // what it wrote (tblastn's error archive of the saved messages,
+    // `report::archive::silent_end_lines`, or nothing).
     if crate::cli::is_silent_end(&error) {
-        return Ok(());
+        return Ok(RunEnd::WithoutPost);
     }
     // After NCBI's object manager failed the stream (`ncbi_exception::main_diag_failbit`, this
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
@@ -920,19 +935,23 @@ pub fn run(
         for (ordinal, group) in groups.iter().enumerate() {
             let command = start.command();
             // The warnings of the first search include the reader's and the queries' warnings
-            // that the next searches repeat; the command line writes them once.
+            // that the next searches repeat; the command line writes them once. A later search's
+            // `-html` posts are its reports' own (`later_html_posts`).
             let mut repeated = Vec::new();
-            let mut sink = if ordinal == 0 {
-                log.sink(&mut *diagnostics, true)
-            } else {
-                log.sink(&mut repeated, false)
-            };
+            let mut later_posts = Vec::new();
             // The formats of the other searches, of which the call's refusals are decided
             // (`ReportOutputs::other_outfmts`).
             let others = other_formats(&formats, group);
             let result = {
+                let mut sink = if ordinal == 0 {
+                    log.sink(&mut *diagnostics, true)
+                } else {
+                    log.sink(&mut repeated, false)
+                };
                 let mut outputs = ReportOutputs {
                     other_outfmts: &others,
+                    html_posts: (ordinal > 0)
+                        .then_some(&mut later_posts as &mut (dyn Write + Send)),
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
@@ -950,10 +969,29 @@ pub fn run(
                 };
                 run_local(command, inputs, &mut outputs, &mut start)
             };
-            result.map_err(|error| sink.failed(&error))?;
+            let posted = later_html_posts(&mut log, &mut *diagnostics, &later_posts);
+            result.map_err(|error| log.failed(&error))?;
+            posted?;
         }
         Ok(())
     })
+}
+
+/// `posts`, the `-html` posts of the reports of a call's later search (`ReportOutputs::html_posts`),
+/// written to the call's diagnostics (`diagnostics`) as the first search's messages are
+/// (`RunLog::sink`), after the search and before its error: each report posts what a run of its
+/// format alone posts, also where its search is not the call's first (line RG T4a2 fix round 2,
+/// review c C3 = review d D5: formats 6 and 0 with `-num_alignments 5 -html`).
+fn later_html_posts(
+    log: &mut RunLog,
+    diagnostics: &mut (dyn Write + Send),
+    posts: &[u8],
+) -> Result<(), Error> {
+    if posts.is_empty() {
+        return Ok(());
+    }
+    let written = log.sink(diagnostics, true).write_all(posts);
+    written.map_err(|error| log.failed(&error.into()))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
@@ -1003,6 +1041,7 @@ pub fn run_to_file(
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -1015,7 +1054,7 @@ pub fn run_to_file(
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        result.map_err(|error| sink.failed(&error))
+        result.map(drop).map_err(|error| sink.failed(&error))
     })
 }
 
@@ -1044,13 +1083,15 @@ struct Searched {
     ordinals: Option<Vec<usize>>,
 }
 
-/// One search of `run_collect`: the formats at `positions` of `formats`.
+/// One search of `run_collect`: the formats at `positions` of `formats`; `html_posts` receives the
+/// `-html` posts of a later search's reports (`ReportOutputs::html_posts`, `later_html_posts`).
 fn collect_one(
     inputs: Inputs<'_>,
     formats: &[&str],
     positions: &[usize],
     start: &mut CallStart,
     mut sink: RunSink<'_>,
+    html_posts: Option<&mut Vec<u8>>,
 ) -> Result<Searched, Error> {
     let command = start.command();
     let query_range = query_range_of(&command);
@@ -1075,6 +1116,7 @@ fn collect_one(
                 .collect(),
             diagnostics: &mut sink,
             later_warnings: None,
+            html_posts: html_posts.map(|posts| posts as &mut (dyn Write + Send)),
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
@@ -1227,7 +1269,9 @@ pub(super) fn records(
 /// reports of that search; the reports of another search give them no span. The diagnostics
 /// are the first search's: the command line's standard error for its first format (the first
 /// tabular format when the formats split, the first requested format otherwise), which holds
-/// the warnings the command line writes once for the run.
+/// the warnings the command line writes once for the run; then the posts of the `-html` reports
+/// of the later searches (their reads of NCBI's formatter registries), which only their search
+/// writes. Each `-html` report posts what the command line's run of its format alone posts.
 ///
 /// Any failure fails the call with the command line's message, for the format whose search
 /// failed. A `-outfmt` value that the command line rejects, and a call without formats, fail
@@ -1273,12 +1317,19 @@ pub fn run_collect(
             // that the next searches repeat; the command line writes them once (the next
             // searches' do not go to the `-logfile` file either; a failure does, as in `run`).
             let mut repeated = Vec::new();
-            let sink = if ordinal == 0 {
-                log.sink(&mut diagnostics, true)
-            } else {
-                log.sink(&mut repeated, false)
+            let mut later_posts = Vec::new();
+            let collected = {
+                let sink = if ordinal == 0 {
+                    log.sink(&mut diagnostics, true)
+                } else {
+                    log.sink(&mut repeated, false)
+                };
+                // A later search's `-html` posts are its reports' own (`later_html_posts`).
+                let posts = (ordinal > 0).then_some(&mut later_posts);
+                collect_one(inputs, formats, group, &mut start, sink, posts)
             };
-            searched.push(collect_one(inputs, formats, group, &mut start, sink)?);
+            later_html_posts(&mut log, &mut diagnostics, &later_posts)?;
+            searched.push(collected?);
         }
         Ok(())
     })?;

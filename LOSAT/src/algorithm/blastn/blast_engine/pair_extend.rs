@@ -464,7 +464,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-683
         // After word_length verification, call type_of_word for two-hit mode
-        //     word_type = s_TypeOfWord(...);
+        // Classify the seed via `s_TypeOfWord` for two-hit handling.
         let mut q_off = q_ext_start;
         let mut s_off = s_ext_start;
         let mut s_end = s_ext_start + word_length;
@@ -547,7 +547,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 s_range,
                 word_length,
                 lut_word_length,
-                true, // check_double = TRUE
+                true, // check for double-word extension
                 &mut is_seed_masked,
             );
             word_type = wt;
@@ -556,14 +556,13 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             q_off = q_off_adj;
             s_off = s_off_adj;
 
-            // NCBI: if (!word_type) return 0;
+            // Skip this seed when `s_TypeOfWord` classifies it as a non-word (zero).
             if word_type == 0 {
                 // Non-word, skip this hit
                 continue;
             }
 
-            // NCBI: s_end += extended;
-            // NCBI: s_end_pos += extended;
+            // Advance `s_end` and `s_end_pos` by the extra bases covered by `extended`.
             s_end += extended;
             s_end_pos += extended;
 
@@ -588,7 +587,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                     s_end_pos,
                 });
 
-                // NCBI: if (!off_found) {
+                // Mark the hit as not ready for extension when no off-diagonal partner is found.
                 if !off_found {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:713-716
                     hit_ready = false;
@@ -607,7 +606,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 s_range,
                 word_length,
                 lut_word_length,
-                false, // check_double = FALSE (not in two-hit block)
+                false, // skip double-word check (not in two-hit block)
                 &mut is_seed_masked,
             );
             if wt == 0 {
@@ -617,8 +616,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-725
             q_off = q_off_adj;
             s_off = s_off_adj;
-            // NCBI: s_end += extended;
-            // NCBI: s_end_pos += extended;
+            // Advance `s_end` and `s_end_pos` by the extra bases covered by `extended`.
             s_end += ext;
             s_end_pos += ext;
             // hit_ready remains true (default) - extension will proceed
@@ -991,7 +989,7 @@ pub(super) fn word_extend_pair(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1120-1136
         let mut ext_right = 0usize;
         if ext_left < ext_to {
-            // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
+            // Skip the seed if extending to the right would pass `s_range`.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1122-1124
             let mut s_off = kmer_start + lut_word_length;
             if s_off + (ext_to - ext_left) > s_range {
@@ -1013,7 +1011,7 @@ pub(super) fn word_extend_pair(
                 if debug_enabled {
                     *dbg_right_ext_iters += 1;
                 }
-                // NCBI BLAST: if (base mismatch) break;
+                // Stop right extension at the first mismatching base.
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1129-1131
                 // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds: `s_off + (ext_to -
                 // ext_left) <= s_range` (tested above) and `s_range` is at most the subject's length
@@ -1034,7 +1032,7 @@ pub(super) fn word_extend_pair(
                 }
             }
 
-            // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
+            // Reject the seed if the combined left and right extensions do not reach `ext_to`.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1139-1140
             if ext_left + ext_right < ext_to {
                 // Word_length match failed, skip this seed
@@ -1043,7 +1041,7 @@ pub(super) fn word_extend_pair(
         }
 
         // Adjust positions for type_of_word and ungapped extension
-        // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
+        // Shift both query and subject seed starts left by `ext_left`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1143-1144
         (
             q_off0 - ext_left,
@@ -1166,7 +1164,7 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
                     (0, 0)
                 }
             };
-            // NCBI: off_s_end >= s_a (signed comparison)
+            // Signed comparison checking that `off_s_end` is at least `s_a` (matching NCBI).
             // Convert to signed for comparison to match NCBI behavior
             if off_s_l > 0
                 && (off_s_end as isize) >= s_a

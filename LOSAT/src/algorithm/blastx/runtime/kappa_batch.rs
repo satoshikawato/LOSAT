@@ -21,7 +21,7 @@ use super::{
 use super::{x_bx_par_rule, x_inner_serial, x_kappa_workers, x_speculate_match, XKappaWorker};
 use crate::algorithm::blastx::kappa::{sw_batch_failed, sw_endless};
 use crate::algorithm::blastx::x_timing::{self, End as XEnd};
-use crate::algorithm::common::database::FetchMarks;
+use crate::algorithm::common::database::{FetchMarks, FetchedUtf8, HeaderReadError, Utf8Read};
 use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 
 /// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BXREDOFLOW, in the strict set: on
@@ -51,9 +51,111 @@ pub(super) struct KappaBatch<'a> {
     pub(super) queries: &'a mut [HitList],
     pub(super) heaps: &'a mut [CompoHeap],
     pub(super) inactive_heaps: &'a mut [CompoHeap],
+    /// The subjects of the stream whose header holds a UTF8String where a VisibleString is
+    /// expected (`FetchExcluded::retain_noting`: with the query of the list, its best E-value and
+    /// whether it has HSPs), the lists left in the stream (query and subject, in the stream's
+    /// order) where there is one, and the first that the redo fetches (`redo_fetched`; the
+    /// Smith-Waterman redo's, `sw_fetched`, which reads its own stream's).
+    pub(super) fetched: (&'a [FetchedRead], &'a [(usize, usize)], &'a mut Option<u32>),
+}
+
+/// A subject of the batch's lists whose header holds a UTF8String where a VisibleString is
+/// expected (`FetchMarks::of_noting`), with its query, its list's best E-value and whether the
+/// list has HSPs.
+pub(super) type FetchedRead = (FetchedUtf8, (usize, f64, bool));
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (cited at
+// `blastp::blast_engine::database::exclude_fetched`)
+/// The first of `reads` (the Smith-Waterman redo's, `FetchMarks::of_noting` of its stream, whose
+/// lists the fetch excludes stay in it as markers) that NCBI's redo fetches, of the matches up to
+/// the stream's place `until` (the match whose redo fails the batch, or every match):
+/// `common::database::first_redo_fetch`, with each query's heap as at the turn (the records of
+/// `heaps`, as the redo left them, from the lists of `stream` before it).
+#[cold]
+#[inline(never)]
+fn sw_fetched(
+    reads: &[FetchedRead],
+    stream: &[(usize, usize)],
+    heaps: &[CompoHeap],
+    until: usize,
+) -> Option<u32> {
+    crate::algorithm::common::database::first_redo_fetch(reads, stream, until, |before| {
+        heaps
+            .iter()
+            .enumerate()
+            .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
+            .collect()
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (cited at
+// `blastp::blast_engine::database::exclude_fetched`)
+/// The first of `reads` that NCBI's composition-based redo fetches, in its order: the stream's
+/// read from its end (`order`: the lists that the fetches left, in the stream's order), each
+/// match's turn where its early termination test leaves it (`common::database::redo_fetches`, the
+/// heaps `heaps` as the redo left them: a record counts at a match's turn where its list came
+/// before the match's).
+#[cold]
+#[inline(never)]
+fn redo_fetched(
+    reads: &[FetchedRead],
+    order: &[(usize, usize)],
+    heaps: &[CompoHeap],
+) -> Option<u32> {
+    // A list's turn: the kept lists the redo takes before it (it reads the stream from its end).
+    let turn_of = |query: usize, oid: usize| {
+        order
+            .iter()
+            .position(|&list| list == (query, oid))
+            .map(|at| order.len() - 1 - at)
+    };
+    reads
+        .iter()
+        .filter(|(_, (_, _, has_hsps))| *has_hsps)
+        .filter(|(read, (_, evalue, _))| {
+            let turn = order.len() - read.before - usize::from(read.kept);
+            let redo_heaps: Vec<_> = heaps
+                .iter()
+                .enumerate()
+                .map(|(query, heap)| {
+                    heap.redo_heap(|oid| turn_of(query, oid).is_some_and(|at| at < turn))
+                })
+                .collect();
+            crate::algorithm::common::database::redo_fetches(*evalue, &redo_heaps)
+        })
+        .max_by_key(|(read, _)| read.index)
+        .map(|(read, _)| read.ordinal)
 }
 
 impl Runtime<'_> {
+    /// `error`, which fails the batch after its Smith-Waterman redo fetched `fetched` (the first
+    /// of the batch's fetches that read a header with a UTF8String where a VisibleString is
+    /// expected, `sw_fetched`): NCBI posted its warning before the error (rows
+    /// `db.t5d.blastx.nsw.fail.*`), which the batch's error then carries
+    /// (`HeaderReadError::utf8`, written before it by `native::failed_batch_reads`).
+    #[cold]
+    #[inline(never)]
+    fn sw_failed_after(&self, error: anyhow::Error, fetched: Option<u32>) -> anyhow::Error {
+        let Some(db) = self.subjects.seqdb() else {
+            return error;
+        };
+        let Some(path) = fetched
+            .and_then(|ordinal| db.location_of(ordinal))
+            .and_then(|at| db.utf8_string_path_at(at))
+        else {
+            return error;
+        };
+        HeaderReadError {
+            query: self.ordinal,
+            error,
+            utf8: Some(Utf8Read {
+                query: self.ordinal,
+                path,
+            }),
+        }
+        .into()
+    }
+
     /// Redo the matches of the batch's stream with composition-based statistics and leave the
     /// result in the queries' hit lists; returns the clock of the finish interval of
     /// `LOSAT_TIMING` (`None` when it is off).
@@ -83,6 +185,7 @@ impl Runtime<'_> {
             queries,
             heaps,
             inactive_heaps,
+            fetched: (fetched_reads, fetched_order, fetched_first),
         } = args;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
         let x_t = x_timing::lap();
@@ -93,20 +196,34 @@ impl Runtime<'_> {
         x_timing::end(XEnd::Read, x_t);
         // `-use_sw_tback`: the lists that NCBI's fetch excludes (a `-negative_seqidlist` that keeps
         // a subject without a line), by their place in the stream, and the batch's status.
-        let (marks, do_link_hsps) = if SW {
+        // The subjects whose header holds a UTF8String where a VisibleString is expected come
+        // from the same read of the headers (`sw_reads`), with the stream's lists, where there is
+        // one (`sw_stream`: query and subject, markers too).
+        let (marks, sw_reads, do_link_hsps) = if SW {
             let excluded = self
                 .subjects
                 .seqdb()
                 .and_then(crate::algorithm::common::database::FetchExcluded::of);
-            let marks = FetchMarks::of(excluded.as_ref(), &matches, |list| {
-                u32::try_from(list.oid).ok()
-            })
+            let (marks, reads) = FetchMarks::of_noting(
+                excluded.as_ref(),
+                &matches,
+                |list| u32::try_from(list.oid).ok(),
+                |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
+            )
             .map_err(|failed| {
                 crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
             })?;
-            (marks, state.do_link_hsps())
+            (marks, reads, state.do_link_hsps())
         } else {
-            (FetchMarks::default(), false)
+            (FetchMarks::default(), Vec::new(), false)
+        };
+        let sw_stream: Vec<(usize, usize)> = if sw_reads.is_empty() {
+            Vec::new()
+        } else {
+            matches
+                .iter()
+                .map(|list| (list.query_index, list.oid))
+                .collect()
         };
         // Whether the Smith-Waterman redo reads the heaps of the batch (e-value mode), so that
         // a match's outcome depends on the matches before it: no speculation then.
@@ -354,7 +471,14 @@ impl Runtime<'_> {
                                 ))
                             },
                         );
-                        match sw_status.redone(result, || sw_endless(do_link_hsps))? {
+                        match sw_status
+                            .redone(result, || sw_endless(do_link_hsps))
+                            .map_err(|error| {
+                                self.sw_failed_after(
+                                    error,
+                                    sw_fetched(&sw_reads, &sw_stream, heaps, match_index),
+                                )
+                            })? {
                             Some(redone) => redone,
                             None => continue,
                         }
@@ -424,9 +548,10 @@ impl Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
         // The status of the last match the redo reached fails the batch.
         if SW && sw_status.failed() {
-            return Err(sw_batch_failed(
-                heaps.first().is_some_and(|heap| !heap.entries.is_empty()),
-            ));
+            let error = sw_batch_failed(heaps.first().is_some_and(|heap| !heap.entries.is_empty()));
+            return Err(
+                self.sw_failed_after(error, sw_fetched(&sw_reads, &sw_stream, heaps, usize::MAX))
+            );
         }
         x_timing::end(XEnd::Loop, x_t_loop);
         x_timing::end_add(XEnd::Matches, matches.len() as u64);
@@ -434,6 +559,11 @@ impl Runtime<'_> {
         x_timing::end_add(XEnd::Serial, x_serial as u64);
         let x_t_finish = x_timing::lap();
         let _ = (x_reused, x_serial);
+        if SW {
+            *fetched_first = sw_fetched(&sw_reads, &sw_stream, heaps, usize::MAX);
+        } else if !fetched_reads.is_empty() {
+            *fetched_first = redo_fetched(fetched_reads, fetched_order, heaps);
+        }
         for (q, (heap, query)) in heaps.iter_mut().zip(&mut *queries).enumerate() {
             loop {
                 let entry = heap.pop();

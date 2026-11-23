@@ -276,7 +276,7 @@ impl PsiRoundIo {
 
 /// The outcome of a round: whether it has alignments (`HasAlignments`), its inclusion set
 /// (`GetSeqIds`), the PSSM made from its Seq-aligns where NCBI makes one (after `Advance`,
-/// `itr || save_last`), with NCBI's error of the PSSM engine, which comes after the round's
+/// when `itr` continues or `save_last` is set), with NCBI's error of the PSSM engine, which comes after the round's
 /// report, and for a round that searched a PSSM the blocks that NCBI writes back into it
 /// (`kbp_psi[0]`, `kbp_gap_psi[0]`; `in_pssm_files::InPssmRounds::written_back`).
 pub(crate) struct RoundOutcome {

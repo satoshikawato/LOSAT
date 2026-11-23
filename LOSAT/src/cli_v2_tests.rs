@@ -165,7 +165,7 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.max_target_seqs, Some(9));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:55-62
-            // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
+            // blast_args.cpp:2726-2731 registers the optional `kArgMaxTargetSequences` key.
             Commands::Tblastn(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, Some(0.001));
@@ -722,7 +722,8 @@ fn defaults_and_task_overrides_remain_distinct() {
     assert_eq!(args.max_hsps_per_subject, None);
     assert_eq!(args.word_size, None);
     assert_eq!(args.resolve().unwrap().max_hsps_per_subject, 0);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-387: Create(eBlastp, locality).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-387
+    // Creates the default `eBlastp` options handle for the chosen locality.
     assert_eq!(args.task, "blastp");
     assert_eq!(args.resolve().unwrap().evalue, 10.0);
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp"]).unwrap().command else {
@@ -1673,6 +1674,64 @@ fn show_gis_is_a_flag_of_every_search_program() {
         panic!()
     };
     assert!(!args.show_gis);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+// `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
+#[test]
+fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-html"]).is_ok(), "{program}");
+        assert!(parse(program, &["-html", "true"]).is_err(), "{program}");
+        let given = match parse(program, &["-html"]).unwrap().command {
+            Commands::Blastn(args) => args.html,
+            Commands::Blastp(args) => args.html,
+            Commands::Blastx(args) => args.html,
+            Commands::Tblastn(args) => args.html,
+            Commands::Tblastx(args) => args.html,
+            _ => panic!("{program}"),
+        };
+        let absent = match parse(program, &[]).unwrap().command {
+            Commands::Blastn(args) => args.html,
+            Commands::Blastp(args) => args.html,
+            Commands::Blastx(args) => args.html,
+            Commands::Tblastn(args) => args.html,
+            Commands::Tblastx(args) => args.html,
+            _ => panic!("{program}"),
+        };
+        assert!(given && !absent, "{program}");
+    }
+    let error = crate::cli::render_message(&parse("psiblast", &["-html"]).unwrap_err());
+    assert!(
+        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
+        "{error}"
+    );
+}
+
+// NCBI BLAST+ 2.17.0's `blastp -help` (probe of 2026-11-13, line RG item E2) lists `-line_length`,
+// `-html`, `-sorthits` in that order, as do the other four search programs: LOSAT's `-help` lists
+// `-html` right after `-line_length` (`cli::with_html_help_place`).
+#[test]
+fn help_lists_html_right_after_line_length() {
+    // `-html` gets its place only where the help is rendered (line RG T4a2 review S1): every
+    // help word of the five programs.
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for word in ["-help", "-help-full", "-h", "--help"] {
+            let error = parse(program, &[word]).unwrap_err();
+            let help = crate::cli::render_message(&error);
+            let at = |option: &str| {
+                help.find(&format!("\n      {option}"))
+                    .unwrap_or_else(|| panic!("{program} {word}: {option}"))
+            };
+            let (line_length, html, sorthits) =
+                (at("-line_length "), at("-html\n"), at("-sorthits "));
+            assert!(line_length < html && html < sorthits, "{program} {word}");
+            assert!(
+                !help[line_length + 1..html].contains("\n      -"),
+                "{program} {word}"
+            );
+        }
+    }
 }
 
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++

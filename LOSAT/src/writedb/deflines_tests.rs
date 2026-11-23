@@ -2,8 +2,8 @@ use super::*;
 use crate::seqid::model::{ObjectId, TextseqId};
 
 fn parsed(defline: &[u8], ids: Vec<ParsedSeqId>, title: Option<&[u8]>) -> ParsedIds {
-    // The DefLine field is PrintableString(defline); for these lines (no backslash,
-    // no control byte but ^A and tab) that is the line with \1 and \t escapes.
+    // The DefLine field encodes the defline as an ASN.1 `PrintableString`; for these lines (no
+    // backslash, no control byte except ^A and tab) that is the line with \1 and \t escapes.
     let mut field = Vec::new();
     for &c in defline {
         match c {

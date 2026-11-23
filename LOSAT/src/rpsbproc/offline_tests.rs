@@ -139,7 +139,7 @@ fn nucleotide_frames() {
     let plus = &q.aligns[0];
     assert!(plus.pr2na && plus.reading_frame == 1);
     assert_eq!(q.translated[1], b"MKV---".to_vec());
-    // Frame -1: bases 4..12, m_iTo = 11: plus index (20 - 1 + 1) % 3 = 2, aligned length 3.
+    // Frame -1: bases 4..12, `m_iTo` 11: plus index (20 - 1 + 1) % 3 = 2, aligned length 3.
     q.hsp(6, &hsp(4, 12, -1, b"WY", b"WY"), 0.01);
     let minus = &q.aligns[1];
     assert_eq!(minus.reading_frame, 2 | (3 << 2));
@@ -281,7 +281,7 @@ fn span_that_overflows_int() {
 // of `hf`). `qf` reaches no limit: `replace` checks it against the string first.
 #[test]
 fn domain_positions_that_overflow_int() {
-    // hf = INT_MAX - 1, then + 1 at the gap, then incremented twice in the run of query gaps.
+    // `hf` starts at `INT_MAX` minus 1, then + 1 at the gap, then incremented twice in the run of query gaps.
     for (hit_from, starts) in [
         (i32::MAX, vec![2_147_483_646, 2_147_483_649]),
         (i32::MAX - 5, vec![2_147_483_641, 2_147_483_644]),

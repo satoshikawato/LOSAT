@@ -1612,7 +1612,7 @@ fn x_build_direct_sel(
         };
         let k = lookup_chain_num_used(offset_list) as u32;
         let list = lists.get_or_make(idx, || {
-            // blast_aalookup.c:490: w = query + offset_list[2];
+            // blast_aalookup.c:490: query word starting at the first stored offset (`offset_list[2]`).
             let first = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
             x_target_list(
                 &concat_query[first..],
@@ -1892,7 +1892,7 @@ pub(super) fn x_build_lean_in(
                 let mut targets: Vec<u16> = Vec::new();
                 let mut ends: Vec<u32> = Vec::with_capacity(range.len());
                 for i in range {
-                    // blast_aalookup.c:490: w = query + offset_list[2];
+                    // blast_aalookup.c:490: query word starting at the first stored offset (`offset_list[2]`).
                     let first = usize::try_from(offsets[starts[i] as usize])
                         .expect("NCBI BLAST query offset must fit");
                     x_lean_target_list(
@@ -1938,7 +1938,7 @@ pub(super) fn x_build_lean_in(
         for i in 0..sources {
             let (start, end) = (starts[i] as usize, starts[i + 1] as usize);
             let from = targets.len();
-            // blast_aalookup.c:490: w = query + offset_list[2];
+            // blast_aalookup.c:490: query word starting at the first stored offset (`offset_list[2]`).
             let first = usize::try_from(offsets[start]).expect("NCBI BLAST query offset must fit");
             x_lean_target_list(
                 &concat_query[first..],
@@ -2425,7 +2425,7 @@ fn x_partitioned_passes(
             counts.fill(0);
             for i in range {
                 let k = source(i).len() as u32;
-                // blast_aalookup.c:490: w = query + offset_list[2];
+                // blast_aalookup.c:490: query word starting at the first stored offset (`offset_list[2]`).
                 let list =
                     lists[cells[i] as usize].get_or_init(|| target_list(source(i)[0] as usize));
                 for &w in list.iter() {

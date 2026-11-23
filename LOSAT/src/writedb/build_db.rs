@@ -22,6 +22,7 @@ use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::seqdb::column::MASK_DATA_TITLE;
 use crate::seqdb::{SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
@@ -51,6 +52,10 @@ pub struct BuildDatabase<'a> {
     /// `m_Id2Leafs` (`SetLeafTaxIds`, with `m_KeepLeafs` set): the leaf taxids of a copied
     /// database's definition lines by the first Seq-id's `AsFastaString`.
     leaf_tax_ids: LeafTaxIds,
+    /// `ERR_POST_X_ONCE` of the run's warning 803.10 of a UTF8String tag (one run is one NCBI
+    /// process): the mask files (`mask_data::process`) and the input database's headers
+    /// (`raw_source::scan_leaf_tax_ids`) post it once between them.
+    utf8_once: Utf8TagOnce,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -328,7 +333,7 @@ const fn create_directories_site(line: u32) -> ThrowSite {
 }
 
 /// `CBuildDatabase::CreateDirectories`.
-fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
+pub(crate) fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
     let Some(at) = dir_entry.rfind(is_any_separator) else {
         return Ok(());
@@ -406,7 +411,7 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //   replaced.
 /// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
 /// of one of their names, with its contents); `true` when one was removed.
-fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
+pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
         SeqType::Protein
@@ -546,6 +551,7 @@ impl<'a> BuildDatabase<'a> {
             found_matching_masks: false,
             address_order: None,
             leaf_tax_ids: LeafTaxIds::new(),
+            utf8_once: Utf8TagOnce::default(),
         })
     }
 
@@ -853,6 +859,11 @@ impl<'a> BuildDatabase<'a> {
         self.leaf_tax_ids = taxids;
     }
 
+    /// The run's flag of the UTF8String warning, which posts once in a run.
+    pub(crate) fn utf8_once(&mut self) -> &mut Utf8TagOnce {
+        &mut self.utf8_once
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:428-442
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1478-1512
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1562-1575
@@ -1016,6 +1027,7 @@ impl<'a> BuildDatabase<'a> {
     pub(crate) fn close_at_destruction(&mut self) -> Vec<Vec<u8>> {
         let mut messages = Vec::new();
         let error = self.output_db.close().err();
+        self.assert_no_stdout();
         let diagnostics = self.output_db.take_diagnostics();
         if !diagnostics.is_empty() {
             messages.push(
@@ -1026,9 +1038,11 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         if let Some(error) = error {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
             messages.push(match error {
-                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_) => {
+                WriteDbError::Creation(_)
+                | WriteDbError::CreationBytes(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. } => {
                     [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
                 }
                 other => other.message(),
@@ -1085,6 +1099,20 @@ impl<'a> BuildDatabase<'a> {
         if !diagnostics.is_empty() {
             warn(diagnostics.strip_suffix(b"\n").unwrap_or(&diagnostics));
         }
+        self.assert_no_stdout();
+    }
+
+    /// The writer writes to the standard output only for NCBI4na data of another size than its
+    /// length needs (`WriteDb::take_stdout`), which makeblastdb's sources never give: the FASTA
+    /// source packs exactly that size, and the sequences of `-input_type blastdb` are copied, not
+    /// converted.
+    fn assert_no_stdout(&mut self) {
+        let stdout = self.output_db.take_stdout();
+        debug_assert!(
+            stdout.is_empty(),
+            "makeblastdb's writer wrote {:?} to the standard output",
+            String::from_utf8_lossy(&stdout)
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1423-1475
@@ -1138,7 +1166,7 @@ impl<'a> BuildDatabase<'a> {
             return Err(refusal);
         }
         if close_error.is_some() {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
         }
         // `NCBI_RETHROW` of the close exception as a `CWriteDBException` of `eArgErr` with the
         // message of the close exception: an exception of the close becomes a creation error with

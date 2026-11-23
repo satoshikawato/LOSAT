@@ -1,7 +1,7 @@
 """Hand-edit a version 4 makeblastdb nucleotide database so that the stored 2-bit base at every ambiguous
 position differs from makeblastdb's (the ambiguity data stay as they are).
 
-makeblastdb stores a random base (CRandom(length) draws, the ones `-subject` uses) at each ambiguous letter and the
+makeblastdb stores a random base (`CRandom` seeded with `length`, the draws `-subject` uses) at each ambiguous letter and the
 ambiguity data beside it. The rule here: the stored base becomes the first base compatible with the letter
 (R: A G, Y: C T, ..., N: A C G T) that is not the stored one (the next base when there is none). A `-db` search that translates the
 stored bases then differs from one that re-resolves the letters as `-subject` does (fixture rows db.tblastx.flipped.*).

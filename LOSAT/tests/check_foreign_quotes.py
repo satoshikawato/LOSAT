@@ -209,13 +209,16 @@ LABEL_START_RE = re.compile(r"^[A-Za-z][\w.+ -]{0,40}\breference\b")
 NCBI_PATH_LABEL_RE = re.compile(
     r"^NCBI(?:\s+[^\s:`]+){0,4}?\s+`?(?P<path>[\w.+/-]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc))\b"
 )
-# A C `case` label: matches a C/C++ identifier (excluding single lowercase English words such as
-# `case insensitive:` or `case study:`), `::`-scoped name, integer, or char literal, while
-# `_is_c_case_label` excludes English prose tails (3+ lowercase words, or backticked spans without
-# C punctuation outside backticks such as `case c_xml_tab: `Bad char ...` for`).
+# A C `case` label: matches a C/C++ identifier, `::`-scoped name, integer, or char literal, while
+# `_is_c_case_label` excludes English prose: a single lowercase word (`case insensitive:`,
+# `case study: foo`) or a backticked tail (`case c_xml_tab: `Bad char ...` for`) without C
+# punctuation outside backticks, or a tail of 3+ lowercase words.
 C_CASE_LABEL_RE = re.compile(
-    r"^\s*case\s+(?:(?![a-z]+\s*:)[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*|-?\d+|'(?:\\.|[^'\\])')\s*:(?P<tail>.*)$"
+    r"^\s*case\s+(?P<label>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*|-?\d+|'(?:\\.|[^'\\])')\s*:(?P<tail>.*)$"
 )
+C_CASE_TAIL_CODE_RE = re.compile(r"[;=]|->|\w\(")
+# A GNU-style quote: a backtick, a word without spaces, and a closing apostrophe (`` `String' ``).
+GNU_QUOTE_RE = re.compile(r"`([^`'\s]+)'(?![\w'])")
 THREE_PROSE_WORDS_RE = re.compile(r"\b[a-z]+ [a-z]+ [a-z]+\b")
 
 
@@ -225,9 +228,9 @@ def _is_c_case_label(text: str) -> bool:
     if match is None:
         return False
     tail = match.group("tail").strip()
-    if "_BT_" in tail or "`" in tail:
-        outside = re.sub(r"`[^`]*`|_BT_", " ", tail)
-        return re.search(r"[;=(]|->", outside) is not None
+    outside = re.sub(r"`[^`]*`|_BT_", " ", tail)
+    if re.fullmatch(r"[a-z]+", match.group("label")) or "_BT_" in tail or "`" in tail:
+        return C_CASE_TAIL_CODE_RE.search(outside) is not None
     return not tail or THREE_PROSE_WORDS_RE.search(tail) is None
 
 
@@ -270,7 +273,7 @@ def is_cited_code_line(text: str, prev_enum: bool = False) -> bool:
     prose = PROSE_RE.search(clean) is not None
     decl = CODE_LINE_C_TYPE_DECL_RE.search(clean)
     if decl:
-        rest = re.sub(r"/\*.*?(?:\*/|$)|///?<.*$", " ", clean[decl.end() :])
+        rest = re.sub(r"/\*.*?(?:\*/|$)|//.*$", " ", clean[decl.end() :])
         if not (clean[decl.end() - 1] == "," and "(" not in clean and PROSE_RE.search(rest)):
             return True
     if not prose and (CODE_LINE_SEMI_RE.search(text) or CODE_LINE_BARE_TYPE_DECL_RE.search(clean)):
@@ -2223,6 +2226,15 @@ def unbackticked_findings(
             if odd_run:
                 _, _, per_line_outside = strip_backticks_in_run([(number, raw)])[0]
                 record_outside(number, raw, per_line_outside)
+        # A GNU-style quote (`` `String' ``) opens with a backtick and closes with an apostrophe.
+        # Two of them in one run give an even backtick total, so the first tick pairs with the
+        # second quote's tick and swallows the C/C++ code between them; also check the run with
+        # each GNU quote's backtick removed.
+        if any(GNU_QUOTE_RE.search(raw) for _, raw in items):
+            gnu = [(number, GNU_QUOTE_RE.sub(r" \1 ", raw)) for number, raw in items]
+            for (number, raw), (_, _, gnu_outside) in zip(items, strip_backticks_in_run(gnu)):
+                if number not in seen_lines:
+                    record_outside(number, raw, gnu_outside)
 
     for run in runs:
         record_run(run)

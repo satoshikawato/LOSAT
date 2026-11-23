@@ -1250,8 +1250,13 @@ class UnbacktickedCodeTest(unittest.TestCase):
             )
         for cited_bad in (
             "// case kFoo: return `x`;\n",
+            "// case done: break;\n",
+            "// case x: break;\n",
+            "// case std::ios::eofbit: break;\n",
             "// Int4 foo(const unsigned long x,\n",
             "//     Int4 query_length, /* the length of the query */\n",
+            "//     Int4 query_length, // the length of the query\n",
+            "//     Int4 query_length, //!< the length of the query\n",
             "//     Int4 hitlist_size, ///< number of hits to keep in a list\n",
             "//     Int4 query_length, /**< [in] Length of the query sequence */\n",
         ):
@@ -1261,7 +1266,8 @@ class UnbacktickedCodeTest(unittest.TestCase):
                 cited_bad,
             )
 
-        # ③ Odd backticks (both multi-line and single-line) must not swallow C code.
+        # ③ Odd backticks (both multi-line and single-line) and paired GNU-style `` `foo' `` quotes
+        # must not swallow C code.
         for single_odd in (
             "// an odd ` tick then hsp_list->hspcnt = hsp_cnt; and `x` y\n",
             "// Error: `foo' and hsp_list->hspcnt = hsp_cnt; see `x`\n",
@@ -1269,6 +1275,18 @@ class UnbacktickedCodeTest(unittest.TestCase):
             self.assertEqual(self.unbackticked(single_odd), [(1, checker.UNBACKTICKED_QUOTE)], single_odd)
         self.assertEqual(
             self.unbackticked("// Error: `foo' and plain prose see `x`\n"),
+            [],
+        )
+        self.assertEqual(
+            self.unbackticked("// see `foo' and hsp_list->hspcnt = hsp_cnt;\n// and `bar' too\n"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked("// see `foo' here\n// hsp_list->hspcnt = hsp_cnt; and `bar' too\n"),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked("// see `foo' here\n// and `bar' too, `don't` and `b'a'` stay intact\n"),
             [],
         )
         odd_three = (
@@ -1367,6 +1385,7 @@ class UnbacktickedCodeTest(unittest.TestCase):
             ("escaped_char_spam", "x.rs", "slash", lambda n: "let a = [" + "'\\''," * (n // 5) + "'a']; // ok\n"),
             ("c_decl_comment_spam", "x.rs", "slash", lambda n: self.CITE + "// Int4 values, " + "/* " * (n // 3) + "a b c d\n"),
             ("case_bt_spam", "x.rs", "slash", lambda n: "// case kFoo: " + "`a` " * (n // 4) + "ok\n"),
+            ("gnu_quote_spam", "x.rs", "slash", lambda n: "// see " + "`a' " * (n // 4) + "ok\n"),
         )
         # Use process CPU time and an 8x size jump (linear ~8x vs quadratic ~64x) so host load
         # preemption spikes never flake the bound.

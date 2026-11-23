@@ -680,7 +680,9 @@ fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
     assert_eq!(oids(&joined), [1, 1, 0]);
     let mut apart = vec![Some(hit_list(&[twin, other, copy]))];
     assert_eq!(
-        report_ordinal_ids(db, &mut apart, 1, PROGRAM, true).unwrap(),
+        report_ordinal_ids(db, &mut apart, 1, PROGRAM, true)
+            .unwrap()
+            .map(|dropped| dropped.hsps),
         Some(vec![1])
     );
     assert_eq!(oids(&apart), [1, 0]);

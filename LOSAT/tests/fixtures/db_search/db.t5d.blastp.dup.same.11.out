@@ -1,0 +1,171 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q0"
+                  }
+                }
+              },
+              title "q0"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 120,
+              seq-data ncbieaa "CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSR
+YIFVGNPAVKTCVRKVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/t5/pdo_same tests/db_search/t5/pds",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -5 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 1
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 20808
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 659
+          },
+          {
+            id str "blast_score",
+            value int 659
+          },
+          {
+            id str "e_value",
+            value real { 813426253947937, 10, -110 }
+          },
+          {
+            id str "bit_score",
+            value real { 25845475280958, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 120
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 120
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            genbank {
+              accession "DUP00001",
+              version 1
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            120
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 327549975459244, 10, -15 },
+        k { 13592981972493, 10, -14 },
+        h { 478676527494354, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 20808",
+      "Effective search space used: 20808",
+      "Length adjustment: 18"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastp] Examining 5 or more matches is recommended"
+    }
+  }
+}

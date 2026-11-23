@@ -40,7 +40,7 @@ impl TranslatedChunk {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
-// while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
+// Advance through overlapping subject chunks via `s_GetNextSubjectChunk` until the full range ends.
 pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
     use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
     let mut chunks = Vec::new();
@@ -59,7 +59,7 @@ pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
-// apply_mask_to_both_strands = true; PackedSeqLocToMaskedQueryRegions(...);
+// Apply lowercase masking to both strands via `PackedSeqLocToMaskedQueryRegions`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
 // both mask copies enter masked_ranges before BlastSeqBlkSetSeqRanges.
@@ -202,6 +202,61 @@ fn soft_chunk_scan_ranges(
         calls.push((chunk, ranges));
     }
     Ok(calls)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
+// c++/src/algo/blast/core/blast_aascan.c:76-77
+// NCBI moves each range of a chunk to the chunk's offsets and raises only the first range's left
+// to 0, so with masks stored out of order (a range's left below the one before it) a later range
+// can start before its chunk. NCBI's scan then reads the frame's letters there, at negative
+// offsets of the chunk, which its hits keep (as Uint4).
+/// The letters before its chunk that the scan of a chunk's `ranges` reads: how far the lowest
+/// left lies below the chunk's start (0 for ranges in order). The scans read the frame from that
+/// many letters before the chunk, on the ranges moved by as many, and give their hits back at the
+/// chunk's offsets (`tblastx::blast_engine::word_finder`, `tblastn::search_seed::x_scan_unit_of`).
+pub(crate) fn scan_lead(ranges: &[(i32, i32)]) -> usize {
+    ranges
+        .iter()
+        .map(|&(left, _)| left)
+        .min()
+        .map_or(0, |left| left.min(0).unsigned_abs() as usize)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158, :897 and :841
+// NCBI's extensions read the word and start the walks wherever the scan's hit lies, also before
+// the chunk (a later range of masks stored out of order): their subject is the chunk's, so the left
+// walks stop at the chunk's first letter and the right walks at its last, and the word and the
+// letters between are the frame's.
+/// The letters of a chunk's frame around it, as NCBI's extensions read them for a hit that lies
+/// before the chunk: `letters` holds the frame from `lead` letters before the chunk on, at least to
+/// the chunk's end, and the chunk has `length` letters. Offsets are the chunk's, as NCBI's (`Int4`,
+/// below 0 before the chunk).
+#[derive(Clone, Copy)]
+pub(crate) struct ChunkLetters<'a> {
+    pub(crate) letters: &'a [u8],
+    pub(crate) lead: usize,
+    pub(crate) length: usize,
+}
+
+impl<'a> ChunkLetters<'a> {
+    /// The frame's letter at offset `s` of the chunk.
+    #[inline]
+    pub(crate) fn at(self, s: i32) -> u8 {
+        self.letters[(self.lead as i32 + s) as usize]
+    }
+
+    /// The letters from the chunk's first one on: the subject of the left walks, which stop there.
+    #[inline]
+    pub(crate) fn chunk_onward(self) -> &'a [u8] {
+        &self.letters[self.lead..]
+    }
+
+    /// The letters up to the chunk's last one: the subject of the right walks from `lead`
+    /// letters before the chunk, which stop at its end.
+    #[inline]
+    pub(crate) fn to_chunk_end(self) -> &'a [u8] {
+        &self.letters[..self.lead + self.length]
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321, 398-405 and

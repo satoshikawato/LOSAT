@@ -269,6 +269,7 @@ impl ArchiveBatch<'_> {
                         results,
                         options.gapped,
                         ReportedAsks::default(),
+                        &mut *diagnostics,
                     )? {
                         None => ReportedSubjects::default(),
                         Some(titles) => ReportedSubjects::for_batch(

@@ -29,13 +29,14 @@ import {
   type EngineInput,
   type EnginePhase,
   type HspRecord,
+  type ProgramDescription,
   type StartResult,
   type ValidationResult,
 } from 'losat/ports';
-import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
+import { buildArgv, optionValue } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
-import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import { inputFileName, outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
+import { isTerminal, type ConffileSnapshot, type InputPart, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
@@ -50,7 +51,15 @@ import { Store } from './store';
  * indexes itself. A run keeps its input in its snapshot (bytes and records), not its sources.
  */
 export type SequenceInput =
-  | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[] } }
+  | {
+      readonly dataset: {
+        /** The user's file name, for the user's file as given (no `from`); a made input has none: the coordinator names it. */
+        readonly name?: string;
+        readonly revisionIds: readonly string[];
+        /** What a file that LOSAT makes (pasted text, several files, a file with records left out) is made of. */
+        readonly from?: readonly InputPart[];
+      };
+    }
   | { readonly text: string }
   | { readonly file: File };
 
@@ -141,6 +150,8 @@ export class Coordinator {
    */
   private stopActive: ((error: Error) => void) | undefined;
   private nextNumber = 1;
+  /** The enqueue before this one, which this one waits for (enqueueAll). */
+  private enqueueTurn: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: CoordinatorDeps) {
     void this.refreshStorage();
@@ -160,14 +171,33 @@ export class Coordinator {
    */
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
+    // One at a time: a made input is named by its run's number and time, which are known before the argv is built (`inputName`) and
+    // must stay the run's own until its snapshot is made.
+    const turn = this.enqueueTurn.then(() => this.enqueueInTurn(requests));
+    this.enqueueTurn = turn.then(() => undefined, () => undefined);
+    return turn;
+  }
+
+  private async enqueueInTurn(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     const prepared: Prepared[] = [];
+    const queuedAt = this.deps.now();
+    // The engine's description of a program, asked once for the requests of this press (a group has one program).
+    const descriptions = new Map<ProgramId, Promise<ProgramDescription | undefined>>();
     // Each registry file read once, with its SHA-256, for the requests of a group that share it.
     const reads = new Map<File, Promise<{ readonly file: Blob; readonly sha256: string }>>();
-    for (const request of requests) {
-      const queryName = inputName(request.query, PASTED_NAMES.query);
-      const subjectName = inputName(request.subject, PASTED_NAMES.subject);
+    for (const [index, request] of requests.entries()) {
+      // The number that the run will have (numbers are given on success only, so that a request that fails leaves no gap) and its time.
+      const number = this.nextNumber + index;
       let argv: readonly string[];
+      let queryName: string;
+      let subjectName: string;
       try {
+        // The task of the run's names is the argv's, whatever the names of the inputs: a made input is named after the task is known.
+        const probe = buildArgv({ program: request.program, queryName: 'query.fa', subjectName: 'subject.fa', parameters: request.parameters, extra: request.extra ?? [] });
+        const task = await this.taskOfArgv(request.program, probe, descriptions);
+        const run = { number, program: request.program, task, queuedAt };
+        queryName = inputName(request.query, 'query', run);
+        subjectName = inputName(request.subject, 'subject', run);
         argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters, extra: request.extra ?? [] });
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
@@ -203,7 +233,7 @@ export class Coordinator {
         return { ok: false, message: uncheckedOptions(error) };
       }
       if (!validation.ok) return validation;
-      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
+      prepared.push({ request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -224,7 +254,7 @@ export class Coordinator {
     /** The bytes of the registry file of each snapshot, in their order. */
     const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
+    for (const [index, { request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
       let query: InputSnapshot;
       let subject: InputSnapshot;
       // The engine's readers of the run's inputs, with the data loaders of its registry (line WQA's D16, 2026-11-20).
@@ -253,7 +283,7 @@ export class Coordinator {
       snapshots.push(
         Object.freeze({
           runId: this.deps.newRunId(),
-          number: 0,
+          number,
           program: request.program,
           ...(title ? { title } : {}),
           argv,
@@ -264,14 +294,15 @@ export class Coordinator {
           ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
           ...(dryRun ? { dryRun: true as const } : {}),
           ...(prints === null ? {} : { prints }),
-          queuedAt: this.deps.now(),
+          queuedAt,
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
       );
       conffiles.push(conffile?.file);
     }
-    // Numbers are given only now, so that a request that fails leaves no gap.
-    const numbered = snapshots.map((snapshot) => Object.freeze({ ...snapshot, number: this.nextNumber++ }));
+    // The numbers that the names were made with are taken only now, so that a request that fails leaves no gap.
+    this.nextNumber += snapshots.length;
+    const numbered = snapshots;
     this.setRuns([
       ...this.state.get().runs,
       ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
@@ -352,6 +383,17 @@ export class Coordinator {
     this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name, runFileOption(file)), file.bytes, 'text/plain');
   }
 
+  /**
+   * Saves the file that a run's query or subject is, where it is not a file of the user's as given (InputSnapshot.from:
+   * pasted text, several inputs together, a file with records left out): its bytes, as the run searched them, under the
+   * name that the run's command gives them, so that the command runs on it (line WQA's D22, 2026-11-23).
+   */
+  async exportInput(runId: string, role: 'query' | 'subject'): Promise<void> {
+    const input = this.find(runId)?.snapshot[role];
+    if (input?.from === undefined) throw new Error(`the run's ${role} is a file of yours as you gave it`);
+    this.deps.downloader.save(input.name, input.bytes, 'text/plain');
+  }
+
   /** The input of a run that reads none (one that prints the command line's help or version): no bytes, no records. */
   private async noInput(name: string): Promise<InputSnapshot> {
     const bytes = new Uint8Array(0);
@@ -382,10 +424,21 @@ export class Coordinator {
   }
 
   /** The task of a run for its files' names: the argv's, or the engine's default; none without the engine's description. */
-  private async taskOf(snapshot: RunSnapshot): Promise<string | undefined> {
+  private taskOf(snapshot: RunSnapshot): Promise<string | undefined> {
+    return this.taskOfArgv(snapshot.program, snapshot.argv);
+  }
+
+  /** `descriptions` keeps what the engine said of each program, for the requests of one press. */
+  private async taskOfArgv(
+    program: ProgramId,
+    argv: readonly string[],
+    descriptions: Map<ProgramId, Promise<ProgramDescription | undefined>> = new Map(),
+  ): Promise<string | undefined> {
+    let asked = descriptions.get(program);
+    if (asked === undefined) descriptions.set(program, (asked = this.deps.engine.describe(program).catch(() => undefined)));
     // Without the engine's default task the name has none; the file is still saved.
-    const description = await this.deps.engine.describe(snapshot.program).catch(() => undefined);
-    return description === undefined ? optionValue(snapshot.argv, '-task') : taskOf(snapshot.argv, description).task;
+    const description = await asked;
+    return description === undefined ? optionValue(argv, '-task') : taskOf(argv, description).task;
   }
 
   /** Opens one output of a run that kept its outputs without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
@@ -462,7 +515,9 @@ export class Coordinator {
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
       const { bytes, sha256, records } = await runInput;
-      return Object.freeze({ name, bytes, sha256, revisionIds, records });
+      // Pasted text is a file that LOSAT made, named by the run (`inputName`): the page offers it with the run (line WQA's D22, DECISIONS 44).
+      const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [], leftOutCount: 0 }] : undefined;
+      return Object.freeze({ name, bytes, sha256, revisionIds, records, ...(from === undefined ? {} : { from: Object.freeze(from) }) });
     } catch (error) {
       // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
       if (isUnavailable(error)) throw error;
@@ -621,6 +676,9 @@ export class Coordinator {
 /** A request that the engine validated, with its argv, the names of its inputs, and what the engine's start read of it. */
 interface Prepared {
   readonly request: SearchRequest;
+  /** The run's number and the time of its "Run LOSAT" (the names of its made inputs have them). */
+  readonly number: number;
+  readonly queuedAt: number;
   readonly argv: readonly string[];
   readonly queryName: string;
   readonly subjectName: string;
@@ -639,9 +697,18 @@ interface Made {
   readonly runInputs: string[];
 }
 
-function inputName(input: SequenceInput, pastedName: string): string {
-  if ('dataset' in input) return input.dataset.name;
-  return 'file' in input ? input.file.name : pastedName;
+/**
+ * The name of an input in the run's argv (line WQA's D22, DECISIONS 44): the user's file name for the user's file as given
+ * (D21), and for every file that the page makes (pasted text, several files together, a file with records left out) the run's
+ * own prefix and the role (`inputFileName`), which the page saves the file under too.
+ */
+function inputName(input: SequenceInput, role: 'query' | 'subject', run: Parameters<typeof inputFileName>[0]): string {
+  if ('file' in input) return input.file.name;
+  if ('dataset' in input && input.dataset.from === undefined) {
+    if (input.dataset.name === undefined) throw new Error(`the ${role} is neither a file of the user's nor made of parts`);
+    return input.dataset.name;
+  }
+  return inputFileName(run, role);
 }
 
 function engineInput(input: InputSnapshot): EngineInput {

@@ -421,7 +421,7 @@ else:
         self.assertNotIn("LOSAT native n8", table)
 
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239,1052-1054
-    #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
+    # Reset `m_NumThreads` to `CThreadable::kMinNumThreads` when local subject input is used.
     # Exercise the shell boundary for every task, preserving translation options.
     def test_distribution_subjects_and_timing_databases_preserve_both_thread_counts(self):
         (self.scripts / "fasta/query.fna").write_text(">q\nACGTACGT\n")

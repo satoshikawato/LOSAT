@@ -851,7 +851,7 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
         })
         .collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4170-4189
-    // if (subject_length < MAX_SUBJECT_OFFSET) { *start_shift = 0; return; }
+    // Subjects shorter than `MAX_SUBJECT_OFFSET` keep a zero `start_shift` and return early.
     // Exercise a real subject shift and more than one 16-HSP batch.
     let mut subject = vec![b'N'; 91_000];
     for i in 0..20 {
@@ -2120,5 +2120,94 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
     assert_eq!(
         crate::algorithm::blastn::hsp::score_compare_hsps(&left, &hsp(0, 12)),
         std::cmp::Ordering::Less
+    );
+}
+
+// No NCBI counterpart (caller contract of LOSAT's `run_local` entry): a `-db` search must call
+// `run_local_database`, and callers of `run_local` with WindowMasker or `-filtering_db` must
+// populate the counts source, registry, or resolved repeat filter before calling `run_local`.
+#[test]
+fn run_local_refuses_database_and_unresolved_filter_inputs() {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct Options {
+        #[command(flatten)]
+        blastn: BlastnArgs,
+    }
+    impl crate::cli::ProgramParser for Options {}
+    let parse = |words: &[&str]| {
+        let mut argv = vec!["test", "-query", "q"];
+        argv.extend_from_slice(words);
+        crate::cli::try_parse_from::<Options, _, _>(argv)
+            .unwrap()
+            .blastn
+    };
+    let call = |args: BlastnArgs, outfmt: &str| {
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs =
+                ReportOutputs::single(outfmt, OutputSink::Writer(&mut sink), &mut diagnostics);
+            run_local(args, &[], &crate::api::QueryEnd::Input, &[], &mut outputs)
+        };
+        (result, sink, diagnostics)
+    };
+
+    let assert_refused = |args: BlastnArgs, outfmt: &str, expected: &str, label: &str| {
+        let (result, sink, diagnostics) = call(args, outfmt);
+        assert_eq!(format!("{:#}", result.unwrap_err()), expected, "{label}");
+        assert!(sink.is_empty() && diagnostics.is_empty(), "{label}");
+    };
+
+    let db_msg = "-db (a database search) is run by run_local_database, not run_local";
+    for outfmt in ["6", "11"] {
+        assert_refused(parse(&["-db", "nt"]), outfmt, db_msg, outfmt);
+    }
+
+    let wm_db_msg = "-window_masker_db (a WindowMasker counts file) needs its counts source set before calling run_local (BlastnArgs::window_masker_counts)";
+    assert_refused(
+        parse(&["-subject", "s", "-window_masker_db", "counts.obinary"]),
+        "6",
+        wm_db_msg,
+        "window_masker_db",
+    );
+
+    let wm_taxid_msg = "-window_masker_taxid (a directory of WindowMasker counts files) needs its registry and counts source set before calling run_local (BlastnArgs::window_masker_registry, BlastnArgs::window_masker_counts)";
+    let taxid_cases: [(&str, fn(&mut BlastnArgs)); 3] = [
+        ("missing both", |_| {}),
+        ("missing counts", |a| {
+            a.window_masker_registry = Some(Ok(
+                crate::blastinput::ncbi_environment::WindowMaskerRegistry::default(),
+            ));
+        }),
+        ("missing registry", |a| {
+            a.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
+        }),
+    ];
+    for (label, configure) in taxid_cases {
+        let mut args = parse(&["-subject", "s", "-window_masker_taxid", "9606"]);
+        configure(&mut args);
+        assert_refused(args, "6", wm_taxid_msg, label);
+    }
+
+    // `-window_masker_taxid 0` disables WindowMasker, so it passes the guard and reaches the
+    // empty-subject check (`check_subjects_not_empty`).
+    let (result, sink, diagnostics) =
+        call(parse(&["-subject", "s", "-window_masker_taxid", "0"]), "6");
+    let native = result
+        .unwrap_err()
+        .downcast::<crate::cli::NativeError>()
+        .expect("taxid 0 reaches check_subjects_not_empty");
+    assert_eq!(native.exit, 3);
+    assert!(String::from_utf8(native.message)
+        .unwrap()
+        .contains("Empty CBlastQueryVector"));
+    assert!(sink.is_empty() && diagnostics.is_empty());
+
+    let rpt_msg = "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)";
+    assert_refused(
+        parse(&["-subject", "s", "-filtering_db", "repeats"]),
+        "6",
+        rpt_msg,
+        "filtering_db",
     );
 }

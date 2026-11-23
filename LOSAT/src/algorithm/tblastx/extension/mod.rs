@@ -19,10 +19,12 @@ mod two_hit;
 mod x_two_hit_fast;
 
 pub(crate) use one_hit::{
-    extend_hit_one_hit_alone, extend_hit_one_hit_resume, OneHit, OneHitAlone,
+    extend_hit_one_hit_alone, extend_hit_one_hit_outside, extend_hit_one_hit_resume, OneHit,
+    OneHitAlone,
 };
 pub(crate) use query_batch::{Again, InBatch, QueryBatch};
 pub(crate) use two_hit::extend_hit_two_hit_fitting;
+pub(crate) use two_hit::extend_hit_two_hit_outside;
 pub(crate) use two_hit::extend_hit_two_hit_with;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.
 pub(crate) use two_hit::extend_hit_two_hit_sent;

@@ -167,7 +167,7 @@ export interface ExportedRun {
 }
 
 /** The start of the name of every file of a run that the page saves (`losat-run3-blastn-megablast-20261104T111530Z`). */
-function exportPrefix(run: ExportedRun): string {
+export function exportPrefix(run: Pick<ExportedRun, 'number' | 'program' | 'task' | 'queuedAt'>): string {
   const time = new Date(run.queuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const task = run.task === undefined ? '' : `-${run.task}`;
   return `losat-run${run.number}-${run.program}${task}-${time}`;
@@ -182,6 +182,16 @@ export function printedFileType(bytes: Uint8Array): { readonly extension: string
   const start = new TextDecoder().decode(bytes.subarray(0, 5));
   if (start === '<?xml') return FILE_TYPES[5]!;
   return start.startsWith('{') ? FILE_TYPES[12]! : TEXT_FILE;
+}
+
+/**
+ * The file name of an input that the page made for a run (pasted text, several files searched together, a file with records left out;
+ * line WQA's D22, DECISIONS 44): the run's start of the names of its files and the input's role
+ * (`losat-run3-tblastx-20261123T101530Z.query.fa`). It is the name in the run's argv and the name the page saves the file under; it has
+ * only letters, digits, `-` and `.`, which every browser keeps, and it differs from the file of any other run (number and time).
+ */
+export function inputFileName(run: Pick<ExportedRun, 'number' | 'program' | 'task' | 'queuedAt'>, role: 'query' | 'subject'): string {
+  return `${exportPrefix(run)}.${role}.fa`;
 }
 
 /**

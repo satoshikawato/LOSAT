@@ -169,7 +169,7 @@ impl<'a> Lines<'a> {
                 }
                 continue;
             }
-            // x_FillBuffer(in_avail()): at most the buffer's size (at least 4096).
+            // `x_FillBuffer` requests at most the buffer's size (at least 4096) based on `in_avail`.
             let buffered = self.filled - self.cursor;
             let available = if buffered != 0 {
                 buffered

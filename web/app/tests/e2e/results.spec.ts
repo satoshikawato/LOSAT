@@ -23,7 +23,7 @@ import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/br
 import { REPOSITORY } from './support/harness-server';
 import { E2E_ORIGIN } from './support/origin';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
+import { chooseRun, commandPattern, fasta, inputNames, madeName, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
 import { axeViolations } from './support/axe';
 
@@ -1516,7 +1516,7 @@ test('many queries; view filters change the view, not the search; the notices te
     await waitStatus(page, 2, 'failed');
     await page.getByTestId('tab-results').click();
     const select = page.getByTestId('results-run');
-    await select.selectOption({ label: 'Run 2 · TBLASTX · query.fa vs subject.fa (failed)' });
+    await select.selectOption({ label: 'Run 2 · TBLASTX · pasted text vs pasted text (failed)' });
     const status = page.getByTestId('results-status');
     await expect(status).toHaveAttribute('data-run-status', 'failed');
     await expect(status).toHaveAttribute('data-phase', 'unavailable');
@@ -2512,7 +2512,9 @@ test('after the browser removed the stored results, the Outputs, Export and Down
   await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
   await expect(output).toHaveCount(0);
   await expect(page.getByTestId('format-0')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('result-command')).toHaveText('losat blastn -query query.fa -subject subject.fa -outfmt 0');
+  await expect(page.getByTestId('result-command')).toHaveText(
+    commandPattern('losat blastn -query ', { source: madeName(1, 'blastn', 'query') }, ' -subject ', { source: madeName(1, 'blastn', 'subject') }, ' -outfmt 0'),
+  );
   // Export saves nothing and says why, in the same place.
   await page.getByTestId('export-output').click();
   await expect(problem).toHaveText(`Not saved: ${removed}`);
@@ -2583,16 +2585,19 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
     await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
     await page.getByTestId('format-custom').click();
     await expect(output).toHaveAttribute('data-shown', `${run}:4`);
-    await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
+    const names = inputNames((await command.textContent()) ?? '');
+    await expect(command).toHaveText(
+      commandPattern(`losat ${id} -query `, { source: madeName(run, id, 'query') }, ' -subject ', { source: madeName(run, id, 'subject') }, ` -outfmt '${outfmt}'`),
+    );
     await expect(page.getByTestId('export-output')).toHaveText(`Export outfmt ${outfmt}`);
     const text = (await output.textContent()) ?? '';
     if (!BUILD_HAS_ENGINE) expect(text).toContain(`# -outfmt ${outfmt}\n`);
     else if (NATIVE !== undefined) {
       const directory = testInfo.outputPath(`custom-${run}`);
       mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
-      writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
-      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory });
+      writeFileSync(join(directory, names.query), inputs[id][0]);
+      writeFileSync(join(directory, names.subject), inputs[id][1]);
+      const cli = spawnSync(NATIVE, [id, '-query', names.query, '-subject', names.subject, '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory });
       expect(cli.status, String(cli.stderr)).toBe(0);
       expect(text, `${id} -outfmt '${outfmt}'`).toBe(String(cli.stdout));
       expect(text.length).toBeGreaterThan(0);
@@ -2600,7 +2605,7 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
     // The formats of every run: their own -outfmt in place of the argv's.
     await page.getByTestId('format-6').click();
     await expect(output).toHaveAttribute('data-shown', `${run}:6`);
-    await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt 6`);
+    await expect(command).toHaveText(`losat ${id} -query ${names.query} -subject ${names.subject} -outfmt 6`);
     // Export and "Download All" save it byte for byte, as BLAST+'s custom format of its number.
     await page.getByTestId('format-custom').click();
     await expect(output).toHaveAttribute('data-shown', `${run}:4`);
@@ -2616,8 +2621,8 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
     }
     // Run details: the command of each output.
     await page.getByTestId('results-view-details').click();
-    await expect(page.getByTestId('run-command-7')).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt 7`);
-    await expect(page.getByTestId('run-command-custom')).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
+    await expect(page.getByTestId('run-command-7')).toHaveText(`losat ${id} -query ${names.query} -subject ${names.subject} -outfmt 7`);
+    await expect(page.getByTestId('run-command-custom')).toHaveText(`losat ${id} -query ${names.query} -subject ${names.subject} -outfmt '${outfmt}'`);
   }
   // A run without -outfmt has the formats of every run only.
   await chooseRun(page, 1);
@@ -2629,7 +2634,14 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
   await page.getByTestId('results-download-all').click();
-  await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
+  // The three formats, and the query and subject that were pasted: files of LOSAT's that the command names (line WQA's D22).
+  await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveText([
+    'Pairwise (outfmt 0)',
+    'Tabular (outfmt 6)',
+    'Tabular with comment lines (outfmt 7)',
+    new RegExp(`^${madeName(cases.length + 1, cases[cases.length - 1]![0], 'query')} \\(-query\\)$`),
+    new RegExp(`^${madeName(cases.length + 1, cases[cases.length - 1]![0], 'subject')} \\(-subject\\)$`),
+  ]);
 });
 
 /** The CRC-32 of ZIP (ISO-HDLC). */
@@ -2743,14 +2755,18 @@ test("Additional options' -outfmt of another format adds its output to the Outpu
     }
     expect(saved[0]!.equals(saved[1]!)).toBe(true);
     if (!binary) expect(saved[0]!.toString('utf8')).toBe(text);
+    // The names that the run's command gives its pasted inputs (the run's own, DECISIONS 44).
+    await page.getByTestId('results-view-details').click();
+    const names = inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
+    expect(names.query).toMatch(new RegExp(`^${madeName(run, id, 'query')}$`));
     if (!BUILD_HAS_ENGINE) expect(saved[0]!.toString('utf8')).toContain(`# -outfmt ${outfmt}\n`);
     else if (NATIVE !== undefined) {
       const directory = testInfo.outputPath(`format-${run}`);
       mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
-      writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
+      writeFileSync(join(directory, names.query), inputs[id][0]);
+      writeFileSync(join(directory, names.subject), inputs[id][1]);
       const out = files ? ['-out', 'results'] : [];
-      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1', ...out], { cwd: directory });
+      const cli = spawnSync(NATIVE, [id, '-query', names.query, '-subject', names.subject, '-outfmt', outfmt, '-num_threads', '1', ...out], { cwd: directory });
       expect(cli.status, String(cli.stderr)).toBe(0);
       expect(saved[0]!.length).toBeGreaterThan(0);
       if (files) {
@@ -2766,14 +2782,14 @@ test("Additional options' -outfmt of another format adds its output to the Outpu
         for (const [index, [name, bytes]] of entries.entries()) expect(bytes.equals(expected[index]![1]), name).toBe(true);
       } else if (outfmt.startsWith('17')) {
         // The run's own command line: the argv that the engine ran, with the form's threads.
-        expect(text).toContain(`\tCL:losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt} -num_threads `);
+        expect(text).toContain(`\tCL:losat ${id} -query ${names.query} -subject ${names.subject} -outfmt ${outfmt} -num_threads `);
         expect(withoutCl(text), `${id} -outfmt '${outfmt}'`).toBe(withoutCl(String(cli.stdout)));
       } else expect(saved[0]!.equals(cli.stdout), `${id} -outfmt '${outfmt}'`).toBe(true);
     }
     // Run details: the command of the output.
     await page.getByTestId('results-view-details').click();
     await expect(page.getByTestId('run-command-custom')).toHaveText(
-      `losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt.includes(' ') ? `'${outfmt}'` : outfmt}${files ? ' -out results' : ''}`,
+      `losat ${id} -query ${names.query} -subject ${names.subject} -outfmt ${outfmt.includes(' ') ? `'${outfmt}'` : outfmt}${files ? ' -out results' : ''}`,
     );
   }
 });

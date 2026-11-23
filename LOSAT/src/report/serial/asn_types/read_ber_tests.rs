@@ -403,7 +403,7 @@ fn the_binary_probes_are_read_as_ncbi_reads_them() {
         );
         let lines: Vec<u8> = posts
             .iter()
-            .flat_map(|post| post.line("makeblastdb"))
+            .flat_map(|post| post.line(Some("makeblastdb")))
             .collect();
         assert_eq!(String::from_utf8_lossy(&lines), *posted, "{case}");
         match probe {

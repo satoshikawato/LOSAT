@@ -53,7 +53,9 @@ kept in `side_sha256` (LOSAT/tests/xinclude_fixtures.py, `FREEZE_LIMIT`).
   rows of the manifest keep their columns.
 
 NCBI reads these environment variables and .ncbirc, and each one changes the report
-(AUTHORITY.md §A.9), so the run refuses to start when one is set or present.
+(AUTHORITY.md §A.9), so the run refuses to start when one is set or present (REPORT_ENV, NCBI,
+LOSAT/.ncbirc, ~/.ncbirc). The manifest's rows need no variable and no run directory of their own: such
+a row is a row of LOSAT/tests/db_search_manifest/ (REPORT_ENV says why).
 
 Usage: run_oracle.py --bin-dir DIR --out DIR [--freeze] [--only PREFIX]
 """
@@ -89,8 +91,16 @@ CULLING_WRAP = "approved_culling_wrap:"
 HITLIST_WRAP = "approved_hitlist_wrap:"
 HITLIST_OPTIONS = ("-max_target_seqs", "-num_descriptions", "-num_alignments")
 # BATCH_SIZE and CHUNK_SIZE change the query batches (blast_input_aux.cpp:86-90,
-# local_blast.cpp:59-62), and with them the report of an invalid query.
-REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ARCHIVE_FORMAT")
+# local_blast.cpp:59-62), and with them the report of an invalid query. FMTCFG, GETURL_DEBUG and
+# NCBI_DONT_USE_NCBIRC change the `-html` report (align_format_util.cpp:3383-3415, `InitConfig`: the
+# formatter's configuration file, its `REGISTRY:` line on stderr; NCBI's registry without `.ncbirc`).
+# A row that needs such a variable or a run directory of its own is a row of db_search_manifest/
+# (`-db`, or `-subject` by a `subject:` cell; `db_search_fixtures.py`: the tokens of ENV_NAMES and
+# `cwd=DIR`), never a row of this manifest: it has no rc column, and its readers (this script,
+# check_losat.py, web/adapter/tools/v_abi_cases.py, web/adapter/src/run.rs,
+# LOSAT/tests/run_local_blastx.rs and web/app's tests) split its extra_args into arguments themselves.
+REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ARCHIVE_FORMAT",
+              "FMTCFG", "GETURL_DEBUG", "NCBI_DONT_USE_NCBIRC")
 
 
 def read_manifest() -> tuple[list[str], list[str], list[dict[str, str]]]:

@@ -42,6 +42,7 @@ pub mod date;
 pub mod file;
 pub mod filter;
 pub mod header;
+pub(crate) mod id_list;
 pub mod index;
 pub mod isam;
 pub mod isam_num;
@@ -296,6 +297,63 @@ impl std::fmt::Display for SeqDbError {
 pub const NCBI_CRASHES_ON_IT: &str = "(NCBI crashes on it)";
 
 impl SeqDbError {
+    /// A copy of the error, met again later (`oid_list::OidListError::Reader`): the system's
+    /// error of an I/O failure is copied as its code, else as its kind and text.
+    pub(super) fn duplicate(&self) -> SeqDbError {
+        let io = |source: &std::io::Error| match source.raw_os_error() {
+            Some(code) => std::io::Error::from_raw_os_error(code),
+            None => std::io::Error::new(source.kind(), source.to_string()),
+        };
+        match self {
+            SeqDbError::NotFound(message) => SeqDbError::NotFound(message.clone()),
+            SeqDbError::MemoryMap(message) => SeqDbError::MemoryMap(message.clone()),
+            SeqDbError::Open { path, source } => SeqDbError::Open {
+                path: path.clone(),
+                source: io(source),
+            },
+            SeqDbError::Io { path, source } => SeqDbError::Io {
+                path: path.clone(),
+                source: io(source),
+            },
+            SeqDbError::Map { path, len, source } => SeqDbError::Map {
+                path: path.clone(),
+                len: *len,
+                source: io(source),
+            },
+            SeqDbError::Read { path, source } => SeqDbError::Read {
+                path: path.clone(),
+                source: io(source),
+            },
+            SeqDbError::Format { path, message } => SeqDbError::Format {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::Integrity { path, message } => SeqDbError::Integrity {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::Unsupported { path, message } => SeqDbError::Unsupported {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::NcbiCrashes { path, message } => SeqDbError::NcbiCrashes {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
+            SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
+            SeqDbError::TaxdbThrows {
+                path,
+                reason,
+                exception,
+            } => SeqDbError::TaxdbThrows {
+                path: path.clone(),
+                reason: reason.clone(),
+                exception: exception.clone(),
+            },
+        }
+    }
+
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
     /// than the `gnl|BL_ORD_ID|n` of the sequence's own number in its volume (a database built
     /// with `-parse_seqids`; `SeqDb::read_header`).
@@ -895,6 +953,14 @@ impl DbStatistics {
 /// (`SeqDb::min_length`).
 pub(crate) const BLAST_SEQSRC_MINLENGTH: i32 = 10;
 
+/// An alias tree after NCBI's `ComputeMasks` and the paths of its volumes in the order of
+/// `SeqDb::volumes` (`SeqDb::listed_tree`).
+#[derive(Debug)]
+struct ListedTree {
+    root: alias::AliasNode,
+    names: Vec<String>,
+}
+
 /// An open database: one volume, or the volumes of an alias file.
 #[derive(Debug)]
 pub struct SeqDb {
@@ -958,6 +1024,14 @@ pub struct SeqDb {
     /// errors of a list (`SeqDb::restrict`), else before the walks of the alias files' counts
     /// (`SeqDb::check_alias_values`).
     oid_list_fails_scan: bool,
+    /// The alias tree, kept where it names id lists that NCBI's OID list translates
+    /// (`alias::reads_id_lists`): a positive list translates them again (`SeqDb::restrict`).
+    listed_tree: Option<Box<ListedTree>>,
+    /// The failure of the alias files' OID list without a list, kept where a positive list then
+    /// translated the alias files' id lists without failing and NCBI's constructor scans the
+    /// totals without a list (`oid_list_fails_scan`): the reports' database, opened again without
+    /// the list, meets it (`SeqDb::read_name_records`).
+    unlisted_oid_list_error: Option<oid_list::OidListError>,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -1117,10 +1191,16 @@ impl SeqDb {
             [one] if one == name => {
                 // The reports' database is this one opened again without the list: after a
                 // list, its walks of the counts meet their errors here (`check_alias_values`),
-                // unless its alias files make it scan the totals too.
-                if self.list_applied && !self.alias_scanned {
-                    use alias::WalkKey;
-                    self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
+                // unless its alias files make it scan the totals too, where the build of its OID
+                // list without the list fails first.
+                if self.list_applied {
+                    if let Some(failure) = &self.unlisted_oid_list_error {
+                        return Err(failure.to_error());
+                    }
+                    if !self.alias_scanned {
+                        use alias::WalkKey;
+                        self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
+                    }
                 }
                 vec![self.name_record(one, masks)]
             }
@@ -1298,6 +1378,7 @@ impl SeqDb {
             seqtype,
             alias::LocalCopy::CurrentDir,
             &SearchPath::current_dir()?,
+            alias::MaskList::Refuse,
         )?;
         Self::open_tree(tree, name, seqtype)
     }
@@ -1319,7 +1400,13 @@ impl SeqDb {
         seqtype: SeqType,
         search: &SearchPath,
     ) -> Result<LocatedDatabase, SeqDbError> {
-        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
+        let tree = alias::resolve_one_name(
+            name,
+            seqtype,
+            alias::LocalCopy::CurrentDir,
+            search,
+            alias::MaskList::Pass,
+        )?;
         let mut headers = Vec::with_capacity(tree.volumes.len());
         for volume_name in &tree.volumes {
             let index_path = volume::with_extension(Path::new(volume_name), seqtype, "in");
@@ -1474,6 +1561,8 @@ impl SeqDb {
             alias_range: (0, num_oids as u32),
             oid_list_error: None,
             oid_list_fails_scan: false,
+            listed_tree: None,
+            unlisted_oid_list_error: None,
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -1492,8 +1581,7 @@ impl SeqDb {
                 Err(error) => return Err(error),
             }
         }
-        let mut root = tree.root;
-        db.read_alias_tree(&mut root, &tree.volumes)?;
+        db.read_alias_tree(tree.root, tree.volumes)?;
         Ok(db)
     }
 
@@ -1517,10 +1605,24 @@ impl SeqDb {
     /// the volumes `names` (the volume paths in the order of `self.volumes`).
     fn read_alias_tree(
         &mut self,
-        root: &mut alias::AliasNode,
-        names: &[String],
+        mut root: alias::AliasNode,
+        names: Vec<String>,
     ) -> Result<(), SeqDbError> {
-        alias::compute_masks(root).map_err(SeqDbError::Ncbi)?;
+        alias::compute_masks(&mut root)?;
+        if self.is_version5() {
+            alias::refuse_v5_lists(&root)?;
+        }
+        let tree = ListedTree { root, names };
+        let read = self.read_listed_tree(&tree);
+        if alias::reads_id_lists(&tree.root) {
+            self.listed_tree = Some(Box::new(tree));
+        }
+        read
+    }
+
+    /// [`SeqDb::read_alias_tree`] of the alias tree `tree`, after NCBI's `ComputeMasks`.
+    fn read_listed_tree(&mut self, tree: &ListedTree) -> Result<(), SeqDbError> {
+        let (root, names) = (&tree.root, tree.names.as_slice());
         let at = |path: &str| {
             names
                 .iter()
@@ -1533,18 +1635,7 @@ impl SeqDb {
         });
         let num_oids = self.num_oids();
         let scan = alias::needs_totals_scan(root);
-        let volumes: Vec<(&str, u32, u32)> = names
-            .iter()
-            .enumerate()
-            .map(|(at, name)| {
-                (
-                    name.as_str(),
-                    self.volume_starts[at],
-                    self.volume_starts[at + 1],
-                )
-            })
-            .collect();
-        let oids = match alias::alias_oids(root, &volumes, num_oids) {
+        let oids = match self.tree_oids(tree, alias::UserList::None) {
             Ok(oids) => oids,
             Err(failure) => {
                 self.oid_list_error = Some(failure);
@@ -1553,12 +1644,11 @@ impl SeqDb {
                     words: None,
                     all_bits_special_set: false,
                     mask_types: Vec::new(),
+                    lists: Vec::new(),
                 }
             }
         };
-        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
-            volume.set_oid_mask_type(mask_type);
-        }
+        let oids = self.set_tree_oids(oids);
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);
@@ -1577,7 +1667,6 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.all_bits_special_set = oids.all_bits_special_set;
         self.alias_totals = totals;
         if self.oid_list_fails_scan {
             return Ok(());
@@ -1594,6 +1683,83 @@ impl SeqDb {
             self.set_included_length(None);
         }
         self.update_first_oid_length()
+    }
+
+    /// NCBI's OID list of the alias tree `tree` ([`alias::alias_oids`]) under the search's
+    /// positive list `user`.
+    fn tree_oids(
+        &self,
+        tree: &ListedTree,
+        user: alias::UserList,
+    ) -> Result<alias::AliasOids, oid_list::OidListError> {
+        let volumes: Vec<alias::TreeVolume<'_>> = tree
+            .names
+            .iter()
+            .enumerate()
+            .map(|(at, name)| alias::TreeVolume {
+                name: name.as_str(),
+                start: self.volume_starts[at],
+                end: self.volume_starts[at + 1],
+            })
+            .collect();
+        alias::alias_oids(
+            &tree.root,
+            &volumes,
+            self.num_oids(),
+            self.seqtype,
+            self.is_version5(),
+            user,
+        )
+    }
+
+    /// Gives the volumes their `OID_MASK_TYPE` and the id lists of `oids`, and the database the
+    /// shape of NCBI's bit set; returns `oids` without them.
+    fn set_tree_oids(&mut self, mut oids: alias::AliasOids) -> alias::AliasOids {
+        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
+            volume.set_oid_mask_type(mask_type);
+        }
+        for (at, lists) in std::mem::take(&mut oids.lists).into_iter().enumerate() {
+            if !lists.is_empty() {
+                let start = self.volume_starts[at];
+                self.volumes[at].set_alias_lists(lists, start);
+            }
+        }
+        self.all_bits_special_set = oids.all_bits_special_set;
+        oids
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
+    // NCBI's `CSeqDB` opened with a positive list translates the alias files' id lists under it
+    // (`alias::UserList`), when its constructor builds the OID list to scan the totals, after the
+    // list's own resolution: the alias files' OID list is made again under the list. Its failure
+    // is the constructor's (`build_oid_list`); the failure without the list stays the reports'
+    // where their database scans the totals (`unlisted_oid_list_error`).
+    /// Makes the alias files' OID list again under the search's positive list `user` of a
+    /// database whose alias tree names id lists (`listed_tree`): the alias files' bits and
+    /// iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set, or the
+    /// failure (`oid_list_error`). Nothing changes for any other database.
+    fn translate_alias_lists(&mut self, user: alias::UserList) {
+        let Some(tree) = self.listed_tree.take() else {
+            return;
+        };
+        let unlisted = self.oid_list_error.take();
+        self.unlisted_oid_list_error = unlisted.filter(|_| self.oid_list_fails_scan);
+        match self.tree_oids(&tree, user) {
+            Ok(oids) => {
+                let oids = self.set_tree_oids(oids);
+                if let Some(words) = oids.words {
+                    let num_oids = self.num_oids();
+                    let range =
+                        alias::top_iteration_range(&tree.root, num_oids).unwrap_or((0, num_oids));
+                    self.alias_range = range;
+                    self.filter = Some(Box::new(
+                        filter::OidFilter::new(words, num_oids).with_range(range),
+                    ));
+                }
+            }
+            Err(failure) => self.oid_list_error = Some(failure),
+        }
+        self.listed_tree = Some(tree);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-938 (at
@@ -2387,12 +2553,14 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1995-1999
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:907-922
     /// Whether NCBI's header read of the sequence at `at` filters the set it read
-    /// (`x_GetFilteredHeader`): the database is restricted by a list (`x_HaveIdFilter`, a list
-    /// attached even where it kept nothing) or the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the
-    /// third case, is refused (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header
-    /// of no bytes, no set, makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
+    /// (`x_GetFilteredHeader`): the database is restricted by a list or the alias files attached
+    /// an id list to the volume (`x_HaveIdFilter`, a list attached even where it kept nothing), or
+    /// the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the third case, is refused
+    /// (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header of no bytes, no set,
+    /// makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
     pub fn filters_header_sets(&self, at: SeqLocation) -> bool {
-        self.is_restricted() || self.volumes[at.volume].has_oid_mask_type()
+        let volume = &self.volumes[at.volume];
+        self.is_restricted() || volume.has_alias_lists() || volume.has_oid_mask_type()
     }
 
     /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has

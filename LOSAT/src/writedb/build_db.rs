@@ -328,7 +328,7 @@ const fn create_directories_site(line: u32) -> ThrowSite {
 }
 
 /// `CBuildDatabase::CreateDirectories`.
-fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
+pub(crate) fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
     let Some(at) = dir_entry.rfind(is_any_separator) else {
         return Ok(());
@@ -406,7 +406,7 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //   replaced.
 /// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
 /// of one of their names, with its contents); `true` when one was removed.
-fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
+pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
         SeqType::Protein
@@ -662,6 +662,12 @@ impl<'a> BuildDatabase<'a> {
         self.output_db.set_max_file_size(max_file_size);
     }
 
+    /// The constructor's `use_gi_mask` (`makeblastdb -gi_mask`): see [`WriteDb::use_gi_masks`].
+    /// Called before the masking algorithms are registered.
+    pub fn use_gi_masks(&mut self) {
+        self.output_db.use_gi_masks();
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:859-876
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-487
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:894-901
@@ -781,11 +787,14 @@ impl<'a> BuildDatabase<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:446-466
     // The Seq-ids are `bs->GetId()`: the parsed ids of a sequence with `-parse_seqids`, its
-    // `local id` without it. A sequence with no 31-bit local id has none.
+    // `local id` without it. A sequence with no 31-bit local id has none. The GIs are those of
+    // the first definition line (the Bioseq's ids), in its order; `-gi_mask` requires
+    // `-parse_seqids`.
     //
     // Where NCBI's order of the ranges is the memory addresses', LOSAT's order is written, so that
     // `SetMaskData`'s checks of all the algorithms and the rest of the build run as in NCBI; the
-    // first such sequence is kept (`sequence`: its first Seq-id) for `end_build`.
+    // first such sequence is kept (`sequence`: its first Seq-id) for `end_build`. With `-gi_mask`
+    // the ranges of a sequence without a GI are written nowhere, and their order does not matter.
     fn add_masks_for_seq_id(
         &mut self,
         ids: &[ParsedSeqId],
@@ -798,9 +807,16 @@ impl<'a> BuildDatabase<'a> {
         if ranges_are_empty(found.ranges) {
             return Ok(());
         }
-        self.output_db.set_mask_data(found.ranges)?;
+        let gi_masks = self.output_db.uses_gi_masks();
+        let gis: Vec<i64> = match gi_masks {
+            true => ids.iter().filter_map(ParsedSeqId::gi).collect(),
+            false => Vec::new(),
+        };
+        self.output_db.set_mask_data(found.ranges, &gis)?;
         self.found_matching_masks = true;
-        if let (None, Some(seq_ids)) = (&self.address_order, &found.address_ordered) {
+        let written = !gi_masks || !gis.is_empty();
+        if let (None, Some(seq_ids), true) = (&self.address_order, &found.address_ordered, written)
+        {
             self.address_order = Some(address_order_refusal(seq_ids, sequence));
         }
         Ok(())
@@ -926,6 +942,19 @@ impl<'a> BuildDatabase<'a> {
                 .add_raw_sequence(raw.sequence, raw.ambiguities)?;
             self.output_db.set_pig(raw_pig(&headers)?);
 
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1010-1031
+            // With `-gi_mask` the masks of a copied sequence go under the GIs of all its
+            // definition lines, in their order; a sequence without a GI writes none, and the
+            // order of its ranges does not matter.
+            let gis: Vec<i64> = match self.output_db.uses_gi_masks() {
+                true => headers
+                    .deflines
+                    .iter()
+                    .flat_map(|defline| defline.ids.iter().filter_map(ParsedSeqId::gi))
+                    .collect(),
+                false => Vec::new(),
+            };
+            let written = !self.output_db.uses_gi_masks() || !gis.is_empty();
             let mut masks = raw.masks;
             if let Some(mask_data) = self.mask_data.as_mut() {
                 for defline in &headers.deflines {
@@ -935,7 +964,9 @@ impl<'a> BuildDatabase<'a> {
                     }
                     masks.extend(found.ranges.iter().cloned());
                     self.found_matching_masks = true;
-                    if let (None, Some(seq_ids)) = (&self.address_order, &found.address_ordered) {
+                    if let (None, Some(seq_ids), true) =
+                        (&self.address_order, &found.address_ordered, written)
+                    {
                         let mut sequence = Vec::new();
                         if let Some(id) = headers.deflines[0].ids.first() {
                             crate::seqid::label::fasta(id, &mut sequence);
@@ -957,7 +988,7 @@ impl<'a> BuildDatabase<'a> {
                 }
             }
             if !ranges_are_empty(&masks) {
-                self.output_db.set_mask_data(&masks)?;
+                self.output_db.set_mask_data(&masks, &gis)?;
             }
             self.post_diagnostics(warn);
             count += 1;
@@ -995,9 +1026,11 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         if let Some(error) = error {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
             messages.push(match error {
-                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_) => {
+                WriteDbError::Creation(_)
+                | WriteDbError::CreationBytes(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. } => {
                     [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
                 }
                 other => other.message(),
@@ -1107,7 +1140,7 @@ impl<'a> BuildDatabase<'a> {
             return Err(refusal);
         }
         if close_error.is_some() {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
         }
         // `NCBI_RETHROW` of the close exception as a `CWriteDBException` of `eArgErr` with the
         // message of the close exception: an exception of the close becomes a creation error with

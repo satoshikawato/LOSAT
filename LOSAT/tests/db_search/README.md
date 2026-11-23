@@ -1363,6 +1363,20 @@ OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of mak
 `db.om.*` (every search program); `segmasker`, `dustmasker`, `windowmasker`, `makembindex` and `blastdbcmd` read the
 databases in their rows `db_oidmask_*`, `oidmask_*` and A242 on.
 
+## Alias files with GILIST, TILIST and SEQIDLIST (line RG, series D, D1c-1)
+
+`idlist/` (`make_idlist.py`, whose docstring lists the sources and databases): `g` (version 5, 14 proteins, some with two
+or three definition lines), `g4` (version 4), `gm` (two volumes), `gu` (no parsed Seq-ids, no ISAM), `gt` (`g4` with a TI
+ISAM written by the script; makeblastdb writes none), `n` and `n4` (nucleotides), and the GI, TI, seqid and taxid list
+files and alias files over them: the list alone, under `NSEQ` and `LENGTH` (read at the search's first use instead of
+the constructor's scan), ANDed with a range or an `OIDLIST`, nested, two alias files over one volume, beside the bare
+volume (sequences left with no line), over one or both volumes of `gm`, and the list files' forms and errors (binary,
+no last separator, a GI past 2^32, `#`, empty, a bad count, missing at the absolute path
+`/losat-idlist-fixture-missing/none.txt`, two files in one value). The rows are `db.il.*` (every search program;
+`rps/ilmiss.pal` and `ilmissw.pal` over `rps_mini` with a missing GILIST) and blastdbcmd's cases A272-A366
+(`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt` and `u_np103.txt` are the searches' own
+`-seqidlist` files beside the alias files' lists.
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -2451,6 +2465,16 @@ chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
 `(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
 (with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+- `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
+  and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
+  the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,
+  written by hand without repeats so that SEG keeps them and the alignments run through them, with an I, an L, a J and
+  an X against an `MTT` codon (I or L) and an A and an X against `NNN`. TBLASTN's search reads the ambiguous codons as
+  X, its reports as B, Z and J (`NNN` stays X in both): the identities and positives of the reports differ from the
+  Seq-aligns'.
+- `tn_ac_q.faa` (rows `db.tn.rej.ungapped.sw.ac.b1.*` and `db.tn.ungapped.ac.b1.nosw.7`, line O4c): a protein of W, C
+  and H alone, from which NCBI computes no ungapped Karlin-Altschul parameters (a query batch without a valid
+  context, which NCBI reports with a warning and does not search), then the five G of `nohit.faa`.
 
 ## Where some inputs come from (provenance)
 
@@ -2470,3 +2494,43 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
 - `xpost/m2b_*_qm.*`: made by agent4's `m2/probe_m2b.py`, and `xpost/db/{nST,pA,pB,pR3}/*.fa` by the probes of K4h review 2,
   as `make_xpost_inputs.py`'s docstring says (commit 135255760, 2026-11-16); neither script is in this repository, and the
   origin of the letters is not recorded.
+
+## `html/`: inputs of the `-html` rows (line RG, item T4a2)
+
+Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 and 18 with `-db`, and the registry
+and environment cases of NCBI's HTML formatter. The inputs are those of the survey T4 of line RG
+(`remaining-gaps-20261112/T/t4`, written by its `scripts/gen.py` and `in2/gen2.py`), copied byte for byte so that the
+frozen bytes can be compared with the survey's runs. The rows also use `of18/ps_ids`, `of18/ns_ids`, `of18/ps_plain`,
+`of18/ps_plain_8890` and `of18/pq.faa` (the T2 ids databases), `dbmask/edge1`, `dbmask/edge2` and `dbmask/q5.fna`, and
+the taxonomy databases `../seqdb/taxdb/good` and `../seqdb/taxdb/of18bl`, and the queries and the `-subject` file of
+`../fasta/html` (the inputs of the `html.*` rows of `../outfmt0_manifest.tsv`; its README.md): `pq_spec.faa`,
+`nq_spec.fna`, `pq_ids.faa` (`-parse_deflines`) and `ps_spec.faa` (the `-subject` of the registry rows, `Subject_N`).
+
+- `pq_nohit.faa` (`pq2`, a query without hits) and `pq_nohitfirst.faa` (that query, then `q1` of `pq_spec.faa`).
+- `pmix_ids` (protein) and `nmix_ids` (nucleotide), version 5 databases of the id kinds that `of18/ps_ids` and `ns_ids`
+  lack: `../fasta/html/pmix_ids.faa` holds `pir||A12345`, `prf||1234567A`, `pat|US|5000000|1`, `tpg|DAA00001.1|`,
+  `gi|1000|gb|AAA00001.1|`, `gnl|TI|12345`, `sp|Q99999.1|NAME_HUMAN` with a second defline `emb|CAA99999.1|` (joined by
+  `\x01`), a sequence with nine deflines `ref|XP_000901.1|` to `ref|XP_000909.1|` (more than NCBI's eight shown: `6 more
+  sequence titles`), `lcl|loc_x` and `gi|999`; `nmix_ids.fna` holds `gi|2000`, `gi|2001|emb|CAA00001.1|`,
+  `tpe|BN000001.1|`, `gnl|TI|54321`, `pat|EP|1000000|2` and `gb|AY000001.1|` with a second defline `ref|NM_000099.1|`.
+  Built by NCBI BLAST+ 2.17.0 in the survey's directory, so their titles are the `-in` text
+  (`BLAST_USAGE_REPORT=false`):
+
+```
+makeblastdb -in in/pmix_ids.faa -dbtype prot -parse_seqids -out db/pmix_ids
+makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
+```
+
+- `rc/<name>/`: the run directories of the `cwd=` rows and the `$NCBI` directories of the `NCBI=` rows, each with the
+  file that NCBI reads there: `.ncbirc` of `p_http` (`[BLASTFMTUTIL]` `PROTOCOL=http:`), `p_https` (`https:`), `p_empty`
+  (`PROTOCOL=` empty), `lower` (`[blastfmtutil]` `protocol=http:`), `taxbr` (`[TAX_BROWSER]` `BLASTFMTUTIL=...`),
+  `localid` (`[LOCAL_ID]` `TOOL_URL=` with the tags `seq_id`, `db_name`, `taxid`, `protocol` and `title`), `feat`
+  (`[FEATURE_INFO]` `FEATURE_FILE`, `FEATURE_FILE_INDEX`), `plain_only` (`[BLAST]` `DATA_LOADERS=blastdb`), `ncbidir` (a
+  `$NCBI` directory: `[LOCAL_ID]` `TOOL_URL`), and the malformed files, whose first line `this line has no equals sign`
+  NCBI's registry refuses: `bad/.ncbirc` (the run directory's), `ncbibad/.ncbirc` (a `$NCBI` directory's),
+  `fmtbad/bad.rc` (the file that `FMTCFG=bad.rc` names in the run directory) and `ncbifmt/bad.rc` (the same in a `$NCBI`
+  directory); `fmtcfg/other.rc` is a valid file named by `FMTCFG=other.rc`. Two files that NCBI's registry reads with a
+  post on stderr at each read (line RG T4a2 fix 1, B1: the references', the description table's and the alignments'
+  reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
+  `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
+  survey T2's `bom` file).

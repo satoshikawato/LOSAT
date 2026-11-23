@@ -360,7 +360,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
         crate::algorithm::blastn::x_subject_store::SubjectLetters::new(&subjects, None),
         &masks,
     );
-    let rows = pairwise_hits(&hit_lists, &rows, None).unwrap();
+    let rows = pairwise_hits(&hit_lists, &rows, None, None).unwrap();
     for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
         for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
             for (descriptions, alignments) in [(0, 0), (1, 2), (2, 1), (500, 500)] {

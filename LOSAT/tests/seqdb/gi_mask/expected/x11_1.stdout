@@ -1,0 +1,13 @@
+
+
+Building a new DB, current time: <T>
+New DB name:   <C>/db
+New DB title:  t
+Sequence type: Nucleotide
+Keep MBits: T
+Maximum file size: 3000000000B
+Mask file: dust_nucl.asnb
+Mask file: dust10_nucl_nogionly.asnb
+Adding sequences from FASTA; added 12 sequences in <S> seconds.
+
+

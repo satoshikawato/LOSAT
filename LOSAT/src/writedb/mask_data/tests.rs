@@ -453,7 +453,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
         offsets: vec![(0, 5)],
     }];
     assert_eq!(
-        db.set_mask_data(&one).unwrap_err().to_string(),
+        db.set_mask_data(&one, &[]).unwrap_err().to_string(),
         "LOSAT database creation error: Need sequence data."
     );
     let id = db
@@ -467,7 +467,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
         offsets: vec![(0, 5)],
     }];
     assert_eq!(
-        db.set_mask_data(&unknown).unwrap_err().to_string(),
+        db.set_mask_data(&unknown, &[]).unwrap_err().to_string(),
         "LOSAT database creation error: Error: Algorithm IDs must be registered before use. \
          Unknown algorithm ID = 21"
     );
@@ -478,7 +478,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
             offsets,
         }];
         assert_eq!(
-            db.set_mask_data(&bad).unwrap_err().to_string(),
+            db.set_mask_data(&bad, &[]).unwrap_err().to_string(),
             "LOSAT database creation error: Error: Masked data offsets out of bounds."
         );
     }
@@ -487,10 +487,10 @@ fn set_mask_data_checks_what_ncbi_checks() {
         algorithm_id: 77,
         offsets: vec![],
     }];
-    db.set_mask_data(&skipped).unwrap();
+    db.set_mask_data(&skipped, &[]).unwrap();
     // The blobs of a sequence are set once.
     assert_eq!(
-        db.set_mask_data(&one).unwrap_err().to_string(),
+        db.set_mask_data(&one, &[]).unwrap_err().to_string(),
         "LOSAT database creation error: Error: Already have blob for this sequence and column"
     );
 }
@@ -526,10 +526,13 @@ fn algorithms_are_registered_until_the_first_volume_is_written() {
             .unwrap(),
         20
     );
-    db.set_mask_data(&[MaskedRanges {
-        algorithm_id: 20,
-        offsets: vec![(2, 4)],
-    }])
+    db.set_mask_data(
+        &[MaskedRanges {
+            algorithm_id: 20,
+            offsets: vec![(2, 4)],
+        }],
+        &[],
+    )
     .unwrap();
     db.close().unwrap();
     let written = files_named(&tmp.0, "db.");
@@ -565,10 +568,13 @@ fn column_dates_come_from_the_hook_or_the_clock() {
         .unwrap();
     for i in 1..=3 {
         db.add_sequence(bioseq(i, 40)).unwrap();
-        db.set_mask_data(&[MaskedRanges {
-            algorithm_id: id,
-            offsets: vec![(0, 5)],
-        }])
+        db.set_mask_data(
+            &[MaskedRanges {
+                algorithm_id: id,
+                offsets: vec![(0, 5)],
+            }],
+            &[],
+        )
         .unwrap();
     }
     db.close().unwrap();
@@ -627,10 +633,13 @@ fn the_column_files_are_the_same_in_version_4_and_5() {
         for i in 1..=3 {
             db.add_sequence(bioseq(i, 40)).unwrap();
             if i != 2 {
-                db.set_mask_data(&[MaskedRanges {
-                    algorithm_id: id,
-                    offsets: vec![(0, 5), (10, 20)],
-                }])
+                db.set_mask_data(
+                    &[MaskedRanges {
+                        algorithm_id: id,
+                        offsets: vec![(0, 5), (10, 20)],
+                    }],
+                    &[],
+                )
                 .unwrap();
             }
         }

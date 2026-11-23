@@ -145,7 +145,12 @@ fn titles_that_ncbi_makes_from_the_seq_ids() {
         "DAA10002.1 unnamed protein product"
     );
     assert_eq!(
-        text(&subject("tpg|DAA10002.1|").heading(true, false).unwrap()),
+        text(
+            &subject("tpg|DAA10002.1|")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">DAA10002.1 TPA: unnamed protein product\n"
     );
     assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -156,7 +161,12 @@ fn titles_that_ncbi_makes_from_the_seq_ids() {
     );
     assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
     assert_eq!(
-        text(&subject("ref|NC_100013.1|").heading(true, false).unwrap()),
+        text(
+            &subject("ref|NC_100013.1|")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">NC_100013.1 \n"
     );
     assert_eq!(
@@ -165,16 +175,31 @@ fn titles_that_ncbi_makes_from_the_seq_ids() {
     );
     assert_eq!(description("lcl|Subject_27"), "subject seven title");
     assert_eq!(
-        text(&subject("lcl|Subject_30").heading(true, false).unwrap()),
+        text(
+            &subject("lcl|Subject_30")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">Subject_30 unnamed protein product\n"
     );
     assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
     assert_eq!(
-        text(&subject("pdb|5ABC|D").heading(true, false).unwrap()),
+        text(
+            &subject("pdb|5ABC|D")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">5ABC_D Chain D\n XP_100015.1 second\n"
     );
     assert_eq!(
-        text(&subject("lcl|Subject_36").heading(true, false).unwrap()),
+        text(
+            &subject("lcl|Subject_36")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
     );
     // A title from the source: the taxonomy database can name its organism.
@@ -350,16 +375,22 @@ fn a_positive_list_names_the_text_ids_or_the_gis() {
     let subject = subject.under_positive_list(true);
     assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
     // The heading leaves out the line the strings do not name, and `>` goes to the next.
-    assert_eq!(subject.heading(true, false).unwrap(), b">AF000001.1 t\n");
+    assert_eq!(
+        subject.heading(true, false, None).unwrap().unwrap(),
+        b">AF000001.1 t\n"
+    );
     // An ungapped Seq-align of two HSPs reaches the report without the strings.
     assert_eq!(
-        subject.heading(true, true).unwrap(),
+        subject.heading(true, true, None).unwrap().unwrap(),
         b">loc t\n AF000001.1 t\n"
     );
     // A local id alone: no string, every line in the heading.
     let subject = lines(vec![vec![local()]]).under_positive_list(true);
     assert!(subject.use_this_seqid().is_empty());
-    assert_eq!(subject.heading(true, false).unwrap(), b">loc t\n");
+    assert_eq!(
+        subject.heading(true, false, None).unwrap().unwrap(),
+        b">loc t\n"
+    );
     // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
     let subject = lines(vec![
         vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
@@ -369,7 +400,7 @@ fn a_positive_list_names_the_text_ids_or_the_gis() {
     .under_positive_list(true);
     assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
     assert_eq!(
-        subject.heading(true, false).unwrap(),
+        subject.heading(true, false, None).unwrap().unwrap(),
         b">GG000001.1 t\n GG000003.1 t\n"
     );
     // A name without an accession is not named; a PDB id is.
@@ -389,7 +420,7 @@ fn a_positive_list_names_the_text_ids_or_the_gis() {
     let subject = lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
     assert!(subject.use_this_seqid().is_empty());
     assert_eq!(
-        subject.heading(true, false).unwrap(),
+        subject.heading(true, false, None).unwrap().unwrap(),
         b">loc t\n AF000001.1 t\n"
     );
 }
@@ -1809,7 +1840,7 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
     );
     // The heading's own making of the title gives the same id (one GenerateDefline).
     assert_eq!(
-        bad.heading(false, false).unwrap_err(),
+        bad.heading(false, false, None).unwrap().unwrap_err(),
         bad.heading_skipped_id(false, false).unwrap()
     );
     assert_eq!(text(&bad.description(false).1.text), "Unknown");
@@ -1820,7 +1851,8 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
     assert_eq!(
         text(
             &subject(None, b"Homo sapiens")
-                .heading(false, false)
+                .heading(false, false, None)
+                .unwrap()
                 .unwrap()
         ),
         ">AB000010.1 Homo sapiens\n"
@@ -1830,7 +1862,8 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
         None
     );
     assert!(subject(Some(b"stored"), b"Bad \x81 name")
-        .heading(true, false)
+        .heading(true, false, None)
+        .unwrap()
         .is_ok());
 }
 
@@ -2048,7 +2081,7 @@ fn records_read_with_parse_deflines_follow_the_ncbi_oracle() {
         assert_eq!(subject.shown_as_record(), local, "{defline}");
         if !local {
             assert_eq!(
-                text(&subject.heading(protein, false).unwrap()),
+                text(&subject.heading(protein, false, None).unwrap().unwrap()),
                 heading,
                 "{defline}"
             );
@@ -2096,7 +2129,7 @@ fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
     );
     assert_eq!(heading.source(), &bacillus());
     assert_eq!(
-        text(&heading.heading(true, false).unwrap()),
+        text(&heading.heading(true, false, None).unwrap().unwrap()),
         ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha [Bacillus sp.]\n"
     );
     assert_eq!(
@@ -2124,7 +2157,7 @@ fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
     .unwrap()
     .with_source(false, |_| panic!("a nucleotide title is not adjusted"));
     assert_eq!(
-        text(&nucleotide.heading(false, false).unwrap()),
+        text(&nucleotide.heading(false, false, None).unwrap().unwrap()),
         ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha, partial [Bacillus sp.]\n"
     );
     // The tabular word of `lcl|Subject_9nn`.

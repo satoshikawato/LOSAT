@@ -646,7 +646,7 @@ pub(crate) fn write_tabular_prolog(
 /// `subjects` (`records`: a subject set's records), each query's warnings before its report. The
 /// report is made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's
 /// refusals come before it; `names` carries the run's taxonomy database (`None`: no `taxdb.bti`
-/// on the search path). `protein`: the subjects are proteins.
+/// on the search path). `protein`: the subjects are proteins. `html`: `-html`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tax_report(
     subjects: &TabularSubjects<'_>,
@@ -657,6 +657,7 @@ pub(crate) fn write_tax_report(
     queries: &[crate::report::tax_report::TaxQuery<'_>],
     writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    html: bool,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report};
     let report = report_batch(
@@ -667,6 +668,7 @@ pub(crate) fn write_tax_report(
         subjects.loads(),
         names,
         program,
+        html,
     )?;
     write_report(writer, warnings, queries, &report)?;
     Ok(())

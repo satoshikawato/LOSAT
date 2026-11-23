@@ -106,6 +106,51 @@ fn write_delayed<E: Encoder>(enc: &mut E, ty: u16, encoding: Encoding, bytes: &[
     write_value(enc, ty, &value);
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// What a write of `value`, a value of the type `ty`, by a stream of the format `written` leaves
+/// of it: NCBI's writer reads each delay buffer of another format into the object
+/// (`CDelayBuffer::Update` parses it in place, `write_delayed`), so every later write of the
+/// object, in any format, writes the values read; a buffer of `written`'s format stays, which a
+/// later stream of that format copies. A buffer whose read fails stays too (NCBI's writer stops
+/// with its exception there, before any later write). What the read posts is the first write's
+/// (`Encoder::delayed_posts`), not kept. The values read are walked too: a delayed member inside
+/// them is a buffer of their format.
+pub(crate) fn update_delayed(ty: u16, value: &mut Value, written: Encoding) {
+    let mut todo = vec![(ty, value)];
+    while let Some((ty, value)) = todo.pop() {
+        if let Value::Delayed { encoding, bytes } = &*value {
+            if *encoding == written {
+                continue;
+            }
+            let (class, member) = super::delayed_member(ty);
+            let (read, _) = super::read::read_delayed(*encoding, bytes, class, member);
+            let Ok(read) = read else {
+                continue;
+            };
+            *value = read;
+            todo.push((ty, value));
+            continue;
+        }
+        match (&type_info(ty).kind, value) {
+            (Kind::Alias(target), value) => todo.push((*target, value)),
+            (Kind::Sequence(span), Value::Sequence(set)) => {
+                let members = span.members();
+                for (position, value) in set.iter_mut() {
+                    todo.push((members[usize::from(*position)].ty, value));
+                }
+            }
+            (Kind::Choice(span), Value::Choice(index, value)) => {
+                todo.push((span.members()[usize::from(*index)].ty, &mut **value));
+            }
+            (Kind::List { element, .. }, Value::List(items)) => {
+                todo.extend(items.iter_mut().map(|item| (*element, item)));
+            }
+            _ => {}
+        }
+    }
+}
+
 /// `value` as one document of its type (an object written to a stream after `MSerial_AsnText`:
 /// `WriteFileHeader`, the object, `EndOfWrite` and the separator), for the named type `ty`.
 #[cfg(test)]

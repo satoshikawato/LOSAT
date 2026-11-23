@@ -43,8 +43,8 @@ use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
 pub use writer::{
-    write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
-    RequestInputs, SearchedContext0,
+    write_archive, write_error_archive, AlignSource, ArchiveOut, ArchiveRound, BatchArchive,
+    KaBlock, RequestInputs, SearchedContext0,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
@@ -97,6 +97,18 @@ impl ArchiveEncoding {
             ArchiveEncoding::Binary
         } else {
             ArchiveEncoding::Nothing
+        }
+    }
+
+    /// The format of the delay buffers that the archive's stream copies as they were read
+    /// (`Encoder::data_format` of its encoder); `None` where NCBI writes nothing.
+    pub(crate) fn data_format(self) -> Option<crate::report::serial::asn_input::Encoding> {
+        use crate::report::serial::asn_input::Encoding;
+        match self {
+            ArchiveEncoding::Text => Some(Encoding::Text),
+            ArchiveEncoding::Binary => Some(Encoding::Binary),
+            ArchiveEncoding::Xml => Some(Encoding::Xml),
+            ArchiveEncoding::Nothing => None,
         }
     }
 
@@ -161,7 +173,8 @@ pub struct ArchiveRequest {
     /// from the records).
     pub database: Option<Vec<u8>>,
     /// The `Web_StepNumber` format option: psiblast's `-num_iterations` with `-db`, when it is not
-    /// 0.
+    /// 0 (the search strategy's; psiblast's archive of a round has the round's number,
+    /// `writer::ArchiveRound`).
     pub step_number: Option<i32>,
 }
 
@@ -723,13 +736,7 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     /// The archive's stream copies a buffer of its format (its strings are written as they were
     /// read) and writes a buffer of another format by its values, whose strings are checked.
     fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
-        use crate::report::serial::asn_input::Encoding;
-        match self.encoding {
-            ArchiveEncoding::Text => Some(Encoding::Text),
-            ArchiveEncoding::Binary => Some(Encoding::Binary),
-            ArchiveEncoding::Xml => Some(Encoding::Xml),
-            ArchiveEncoding::Nothing => None,
-        }
+        self.encoding.data_format()
     }
     fn delayed(&mut self, _: &[u8]) {}
     fn unread_delayed(&mut self) {}
@@ -762,6 +769,77 @@ pub(crate) fn seq_id_written_as_is(
     let mut check = StringsAsIs::new(encoding);
     id.write(&mut check);
     check.as_is
+}
+
+/// An encoder that writes nothing and finds the first value of a PSSM file's members (the values
+/// of the generic reader, `report::serial::asn_types::write`) that LOSAT's stream of the archive
+/// in `encoding` does not write as NCBI's does yet: a member that the reader kept in a delay
+/// buffer of another format (`Auth-list.names` of a binary or XML file in ASN.1 text, of a text
+/// or XML file in ASN.1 binary, of a text or binary file in XML), which NCBI's
+/// `CDelayBuffer::Update` reads again before it writes it, when that read fails
+/// (`Encoder::unread_delayed`: NCBI ends the run with its exception after the part of the archive
+/// that its buffer had written) or posts a replaced byte (`Encoder::delayed_posts`, which NCBI
+/// posts while it writes the archive). A buffer of the stream's own format is copied
+/// (`Encoder::delayed`); the other values are written as NCBI writes them (line RG-F3, PR 2: the
+/// XML stream's anonymous SEQUENCE and CHOICE, NULL and UTF8String, the binary stream's
+/// UTF8String and its NaN and infinite REALs; line PS item PS15b-1's probe XA, 2026-11-23).
+struct PssmGaps {
+    encoding: ArchiveEncoding,
+    gap: Option<&'static str>,
+}
+
+impl crate::report::serial::encoder::Encoder for PssmGaps {
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        self.encoding.data_format()
+    }
+    fn begin_document(&mut self, _: &str) {}
+    fn end_document(&mut self) {}
+    fn begin_sequence(&mut self, _: &str) {}
+    fn end_sequence(&mut self) {}
+    fn member(&mut self, _: &str, _: u8) {}
+    fn end_member(&mut self) {}
+    fn begin_list(&mut self, _: bool) {}
+    fn element(&mut self) {}
+    fn end_list(&mut self) {}
+    fn variant(&mut self, _: &str, _: &str, _: u8) {}
+    fn end_variant(&mut self) {}
+    fn int(&mut self, _: i32) {}
+    fn big_int(&mut self, _: i64) {}
+    fn enumerated(&mut self, _: &str, _: i32) {}
+    fn named_int(&mut self, _: &str, _: i32) {}
+    fn boolean(&mut self, _: bool) {}
+    fn visible_str(&mut self, _: &[u8]) {}
+    fn real(&mut self, _: f64) {}
+    fn octets(&mut self, _: &[u8]) {}
+    fn null(&mut self) {}
+    fn utf8_str(&mut self, _: &[u8]) {}
+    fn delayed(&mut self, _: &[u8]) {}
+    fn unread_delayed(&mut self) {
+        if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
+            self.gap = Some(
+                "a member read into a delay buffer of another format that NCBI reads again with an error or a message",
+            );
+        }
+    }
+    fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
+        None
+    }
+}
+
+/// What the archive's stream of `encoding` does not write yet of `pssm`, the PSSM that a
+/// request holds (`queries pssm`, `report::serial::pssm::write_value`; `PssmGaps`): `None` when
+/// it writes all of it as NCBI's does. The PSSMs that LOSAT makes (a FASTA query's later rounds,
+/// `-in_msa`) have none; a PSSM file's members can.
+pub(crate) fn pssm_unwritten(
+    encoding: ArchiveEncoding,
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> Option<&'static str> {
+    let mut check = PssmGaps {
+        encoding,
+        gap: None,
+    };
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.gap
 }
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for

@@ -31,8 +31,9 @@ export const NPM_LICENSES_FILE = 'THIRD_PARTY_LICENSES_NPM.txt';
  * Virtual modules (ids that start with "\0") whose code comes from a project that no installed
  * package's license files name: the build stops at them. Vite's module preload polyfill was
  * adapted from es-module-shims (MIT, Guy Bedford), as Vite 5's source of it says; Rolldown's
- * copy of it in Vite 8 says nothing. vite.config.ts turns it off: the site has one chunk and no
- * modulepreload link, so it would do nothing.
+ * copy of it in Vite 8 says nothing. vite.config.ts turns it off: the site writes no
+ * modulepreload link (the one chunk that the main chunk imports, outfmt0-html, imports nothing),
+ * so it would do nothing.
  */
 const VIRTUAL_WITHOUT_NOTICE: readonly (readonly [prefix: string, why: string])[] = [
   ['\0vite/modulepreload-polyfill', "Vite's module preload polyfill, adapted from es-module-shims (MIT, Guy Bedford), whose notice no package carries; keep build.modulePreload.polyfill off or give that notice"],

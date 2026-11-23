@@ -58,12 +58,26 @@
 // the CLI runs there (line WQA D12a, 2026-11-20). Each engine runs it on an instance whose `/work` is that
 // directory; the threaded engine's
 // threads share the table of the files it opens (LOSAT/tests/wasi_files.js), as the browser host's
-// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts).
+// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts). A search with `"run_directory"`
+// (BLASTN `-filtering_db` with `-subject`, line RG item D4) has a subject as every search has and runs on the
+// instance of its directory too, where the engine opens the repeat database by the option's name; its subject
+// handle is held and released on that instance.
 //
 // The words with which the command line prints its help or its version (`checkPrints`; line WQA's D14, 2026-11-20) run
 // for every program and word with the host's -num_threads: *start* says what the run prints, `validate` accepts the argv,
 // and `run`, given no inputs (handles 0), writes the CLI's standard output on stream 11 and its standard error on stream
 // 3, and no output format; the words around them, the registry file and the file of -logfile as the CLI reads them.
+//
+// A search with `"tool"` is a run of a tool of the command line (`losat windowmasker <argv>`; line NP WW3a, 2026-11-22):
+// `"run"` calls `losat_web2_tool` on an instance whose `/work` is a folder of the search's `"files"`, and runs the
+// native CLI in another folder of the same files with the standard input at the null device; the exit status
+// (stream 2, `status`), the standard output (stream 11), the standard error (stream 3) and every file the run wrote
+// (the frames of stream 12, abi_v2.md §5, by name) are compared with the CLI's, and the folder of the CLI's run has no
+// file besides those that the frames name; a run of `"expect": "refusal"` is LOSAT's refusal of an output name that LOSAT
+// Web does not write (exit status 1, the refusal on stream 3, no output, no file), which the CLI writes. `"validate"`
+// calls `losat_web2_validate` on the argv: valid -> 0 and nothing emitted, else -1 and the CLI's standard error then the
+// file of -logfile without the last line end (abi_v2.md §4); `"expect": "late_failure"` is an argv that the CLI's run
+// refuses after it opened a file, which validate accepts (its checks stop before the files, D-WW3-10).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -81,6 +95,7 @@ const { WASI } = require("node:wasi");
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
 const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
+const { directoryReads } = require(path.join(ROOT, "LOSAT/tests/wasi_files"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
 // The stream of the output of the argv's -outfmt.
@@ -221,6 +236,7 @@ class Reactor {
     this.exports = exports;
     this.memory = memory;
     this.streams = new Map();
+    this.chunks = new Map();
   }
 
   // Pointers and lengths are unsigned; JavaScript receives an i32 as a signed number
@@ -237,6 +253,7 @@ class Reactor {
   take() {
     const result = new Map();
     for (const [stream, chunks] of this.streams) result.set(stream, Buffer.concat(chunks));
+    this.chunks = new Map(this.streams); // the emits of the last call, one entry each (the frames of stream 12)
     this.streams.clear();
     return result;
   }
@@ -371,12 +388,16 @@ function registerTaxidCounts(reactor, counts, search) {
 // The serial reactor; `directory`, the run's working directory that it preopens as `/work` (a search of -db).
 async function openSerial(wasmPath, directory) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {}, ...(directory === undefined ? {} : { preopens: { "/work": directory } }) });
-  let reactor;
+  let reactor, memory;
+  // A folder of the run's directory opened for reading fails its reads with EISDIR, as on Linux and in the browser
+  // host (directoryReads, LOSAT/tests/wasi_files.js).
+  const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
   const imports = {
-    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
+    wasi_snapshot_preview1: directoryReads(unsignedWasiImports(wasi.wasiImport), guestMemory, directory ?? "/"),
     losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) },
   };
   const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), imports);
+  memory = instance.exports.memory;
   wasi.initialize(instance);
   reactor = new Reactor(instance.exports, () => instance.exports.memory);
   return { reactor, close: async () => {} };
@@ -605,7 +626,7 @@ function checkFailure(run, expected, search, label) {
   }
 }
 
-function checkHits(streams, program, label, queryIds, shownIds, database = false) {
+function checkHits(streams, program, label, queryIds, shownIds, database = false, html = false) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
@@ -664,7 +685,10 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
     // A local id that is not shown leaves "> " before the title; under -parse_deflines the
     // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19),
     // as it does for a subject of a database, whose ids the database holds (line WQA D12a, 2026-11-20).
-    assert.ok(heading.startsWith(shownIds || database ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+    // Under -html NCBI writes an anchor first in a heading whose id is not shown (`><a name=Subject_1></a> s1`,
+    // the bytes of html.bp.s.f0): the raw prefix is "><a ", not "> " (line RG T4a2, 2026-11-23).
+    const prefix = shownIds || database ? ">" : html ? "><a " : "> ";
+    assert.ok(heading.startsWith(prefix) && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
   });
   return records.length;
 }
@@ -1225,6 +1249,149 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
   return rows;
 }
 
+// The frames of stream 12 (abi_v2.md §5): `chunks`, the run's emits, as the files they write in the order of their
+// numbers: [{ name, bytes, writes, ended }], `bytes` the file as the frames leave it and `writes` the number of its
+// frames of bytes. Each frame is one emit of at most 1 MiB: 8 bytes (the file's number from 0, in the order the run
+// opens its files, and the kind, each a u32 LE) and a payload; a file's frames come as beginning (0, its name), bytes
+// (1, at a u64 LE offset, written there with zero bytes before them past the end), truncation (3, a u64 LE length) and
+// end (2), and every file that the run opened ends when the run does, in the order of their numbers.
+function toolFiles(chunks) {
+  const files = [];
+  let ends = 0;
+  for (const chunk of chunks) {
+    assert.ok(chunk.length >= 8 && chunk.length <= 1 << 20, `a frame of ${chunk.length} bytes`);
+    const [number, kind] = [chunk.readUInt32LE(0), chunk.readUInt32LE(4)];
+    const payload = chunk.subarray(8);
+    if (kind === 0) {
+      assert.equal(number, files.length, "files are numbered from 0 in the order they open");
+      assert.equal(ends, 0, "no file opens after the first end (the ends come when the run ends)");
+      files.push({ name: payload.toString("utf8"), bytes: Buffer.alloc(0), writes: 0, ended: false });
+      continue;
+    }
+    assert.ok(number < files.length && !files[number].ended, `frame of kind ${kind} of file ${number}: it is open`);
+    const file = files[number];
+    if (kind === 1 || kind === 3) {
+      assert.ok(payload.length >= 8 && (kind === 1 || payload.length === 8), `frame of kind ${kind} of ${payload.length} bytes`);
+      const at = Number(payload.readBigUInt64LE(0));
+      assert.ok(Number.isSafeInteger(at) && at < 1 << 30, `an offset or length of ${payload.readBigUInt64LE(0)}`);
+      if (kind === 1) {
+        const bytes = payload.subarray(8);
+        assert.ok(bytes.length > 0, "a frame of bytes has bytes");
+        const end = at + bytes.length;
+        if (end > file.bytes.length) file.bytes = Buffer.concat([file.bytes, Buffer.alloc(end - file.bytes.length)]);
+        bytes.copy(file.bytes, at);
+        file.writes++;
+      } else {
+        file.bytes = at <= file.bytes.length ? file.bytes.subarray(0, at) : Buffer.concat([file.bytes, Buffer.alloc(at - file.bytes.length)]);
+      }
+    } else {
+      assert.equal(kind, 2, `the kind of a frame (${kind})`);
+      assert.equal(payload.length, 0, "the end of a file has no payload");
+      assert.equal(number, ends, "the files end in the order of their numbers");
+      file.ended = true;
+      ends++;
+    }
+  }
+  for (const [number, file] of files.entries()) assert.ok(file.ended, `file ${number} (${file.name}) ends with the run`);
+  return files;
+}
+
+// The folder of a tool search's files: `files` (published path -> source file) copied under `directory`.
+function writeToolFiles(directory, files) {
+  for (const [name, source] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(directory, name)), { recursive: true });
+    fs.copyFileSync(source, path.join(directory, name));
+  }
+}
+
+// One search of `"tool"` (see the header): `instance` is the engine's instance whose "/work" is `directory`, a folder of
+// the search's files, which the engine does not write to. Returns the results row.
+async function checkTool(engine, instance, directory, search, options, scratch) {
+  const label = `${engine.name} ${search.cases.join(",")}`;
+  const words = ["windowmasker", ...search.argv];
+  const before = new Set(filesIn(directory).map((file) => path.relative(directory, file)));
+  // The CLI's run, in a folder of the same files.
+  const folder = fs.mkdtempSync(path.join(scratch, "tool."));
+  writeToolFiles(folder, search.files);
+  const known = new Set(filesIn(folder).map((file) => path.relative(folder, file)));
+  const cli = nativeOnPipes(options.native, words, folder);
+  // The CLI writes the folder's path where the run's directory is named (NCBI's search path of a database that is not
+  // found, `[db/none] in search path [<folder>::]`); the engine's directory is `/work` (the host's preopen, abi_v2.md §3).
+  const place = (bytes) => Buffer.from(bytes.toString("latin1").split(folder).join("/work"), "latin1");
+  cli.stdout = place(cli.stdout);
+  cli.stderr = place(cli.stderr);
+  const made = filesIn(folder).map((file) => path.relative(folder, file)).filter((name) => !known.has(name)).sort();
+  const created = made.map((name) => [name, place(fs.readFileSync(path.join(folder, name)))]);
+  fs.rmSync(folder, { recursive: true, force: true });
+  const reactor = instance.reactor;
+  let row;
+  if (search.tool === "validate") {
+    const validated = reactor.call("losat_web2_validate", words.join("\0"));
+    assert.equal(reactor.chunks.size, 0, `${label}: validate emits nothing`);
+    if (search.expect === "late_failure") {
+      // The command line's run fails after it opened a file, where validation stops (abi_v2.md §4).
+      assert.notEqual(cli.status, 0, `${label}: the CLI's run fails`);
+      assert.equal(validated.status, 0, `${label}: validate accepts what the command line checks before its files: ${validated.error}`);
+      assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
+    } else if (search.expect !== "failure") {
+      assert.equal(cli.status, 0, `${label}: the CLI's run of a valid argv (${cli.stderr})`);
+      assert.equal(validated.status, 0, `${label}: validate: ${validated.error}`);
+      assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
+    } else {
+      // The CLI's standard error, then the file of -logfile, without the last line end.
+      const log = created.filter(([name]) => name === search.argv[search.argv.indexOf("-logfile") + 1]).map(([, bytes]) => bytes);
+      let text = Buffer.concat([cli.stderr, ...log]).toString();
+      if (text.endsWith("\n")) text = text.slice(0, -1);
+      assert.notEqual(cli.status, 0, `${label}: the CLI's run of an invalid argv`);
+      assert.equal(validated.status, -1, `${label}: validate refuses the argv (the CLI's exit ${cli.status})`);
+      assert.equal(validated.error, text, `${label}: validate gives the CLI's standard error`);
+      assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
+    }
+    row = { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
+            tool: "validate", status: validated.status };
+  } else {
+    const run = reactor.call("losat_web2_tool", words.join("\0"));
+    const frames = (reactor.chunks.get(12) || []).map((chunk) => Buffer.from(chunk));
+    if (instance.waitForWorkers) await instance.waitForWorkers();
+    assert.equal(run.status, 0, `${label}: ${run.error}`);
+    const status = JSON.parse(run.streams.get(2).toString()).status;
+    if (search.expect === "refusal") {
+      // LOSAT's refusal of an output name that LOSAT Web does not write (abi_v2.md §4), where the command line writes
+      // the file: exit status 1, the refusal on stream 3, no output and no file.
+      const named = search.argv[search.argv.indexOf("-out") + 1];
+      assert.equal(status, 1, `${label}: the refusal's exit status`);
+      assert.match((run.streams.get(3) || "").toString(), /^Error: an output file '.*' .* is not supported by LOSAT's WINDOWMASKER\n$/, `${label}: the refusal`);
+      assert.ok((run.streams.get(3) || "").toString().includes(`'${named}'`), `${label}: the refusal names ${named}`);
+      assert.ok(!run.streams.has(11) && toolFiles(frames).length === 0, `${label}: no output and no file`);
+      assert.deepEqual(filesIn(directory).map((file) => path.relative(directory, file)).sort(), [...before].sort(), `${label}: the run's folder`);
+      console.log(`ok ${label}`);
+      return { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
+               tool: "run", status, files: [] };
+    }
+    assert.equal(status, cli.status, `${label}: the exit status (${run.streams.get(3) || ""})`);
+    assert.equal(status !== 0, search.expect === "failure", `${label}: the run ${status !== 0 ? "fails" : "completes"} (exit ${status})`);
+    assert.equal(sha256(run.streams.get(11) || Buffer.alloc(0)), sha256(cli.stdout), `${label}: stream 11 is the CLI's standard output`);
+    assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), cli.stderr.toString(), `${label}: stream 3 is the CLI's standard error`);
+    for (const stream of [0, 1, 4, 5, 6, 7, 8, 9, 10]) assert.ok(!run.streams.has(stream), `${label}: no stream ${stream}`);
+    const files = toolFiles(frames);
+    assert.deepEqual(files.map((file) => file.name).sort(), created.map(([name]) => name), `${label}: the files of the run`);
+    for (const file of files) {
+      const want = created.find(([name]) => name === file.name)[1];
+      assert.equal(sha256(file.bytes), sha256(want), `${label}: the bytes of ${file.name} (${want.length} bytes)`);
+    }
+    const logfile = search.argv.indexOf("-logfile");
+    if (logfile >= 0 && files.length > 0) assert.equal(files[0].name, search.argv[logfile + 1], `${label}: the file of -logfile opens first`);
+    const largest = Math.max(0, ...files.map((file) => file.writes));
+    if (search.frames !== undefined) assert.ok(largest >= search.frames, `${label}: ${largest} frames of bytes, at least ${search.frames}`);
+    row = { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
+            tool: "run", status, files: files.map((file) => [file.name, file.bytes.length, file.writes]) };
+  }
+  // The engine does not write to the run's directory.
+  assert.deepEqual(filesIn(directory).map((file) => path.relative(directory, file)).sort(), [...before].sort(), `${label}: the run's folder`);
+  console.log(`ok ${label}`);
+  return row;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
@@ -1237,20 +1404,39 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor: own, close, waitForWorkers } = await engine.open();
-    assert.equal(own.exports.losat_web2_abi_version(), 12);
+    assert.equal(own.exports.losat_web2_abi_version(), 13);
     checkSurface(own, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const logRows = await checkLogfileNames(own, options.native, scratch, engine.name, waitForWorkers);
     console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     console.log(`ok ${engine.name} help and version: ${checkPrints(own, options.native)} argvs as the CLI`);
     const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
-    const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
+    const subjectReactors = new Map(); // the same key -> the reactor that holds the handle (a run directory's instance has its own)
+    // Per reactor, the -window_masker_db value or taxid file name -> { handle, file }, kept across runs: a file registered
+    // on one instance (the engine's own or a run directory's) is known there only, and released there.
+    const counts = new Map();
+    const countsOn = (reactor) => counts.get(reactor) ?? counts.set(reactor, new Map()).get(reactor);
     let countsRegistered = 0, countsKept = 0;
     const databases = new Map(); // a -db search's directory -> the engine's instance whose "/work" it is
+    const tools = new Map(); // a tool search's files -> [folder, the engine's instance whose "/work" it is]
     for (const search of all) {
       const program = search.program;
-      if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
-      const instance = search.database ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
+      if (search.tool) {
+        const key = JSON.stringify(search.files);
+        if (!tools.has(key)) {
+          const directory = fs.mkdtempSync(path.join(scratch, "toolfiles."));
+          writeToolFiles(directory, search.files);
+          tools.set(key, [directory, await engine.open(directory)]);
+        }
+        const [directory, instance] = tools.get(key);
+        results.push(await checkTool(engine, instance, directory, search, options, scratch));
+        continue;
+      }
+      // A search with `"run_directory"` has a subject like any other and files in its directory too (the repeat
+      // database of BLASTN `-filtering_db`, line RG item D4): it runs on the instance of that directory.
+      const inDirectory = search.database || search.run_directory;
+      if (inDirectory && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
+      const instance = inDirectory ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
       const reactor = instance.reactor;
       const query = inputPath(search, "-query"), subject = search.database ? undefined : inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
@@ -1264,7 +1450,7 @@ async function main() {
       const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
       const first = reactor.call("losat_web2_validate", [...search.argv, ...custom, "-num_threads", "1"].join("\0"));
       const dataLoaders = first.status === 0 ? JSON.parse(first.streams.get(2).toString()).data_loaders : true;
-      const subjectKey = `${program} ${subject} ${dataLoaders}`;
+      const subjectKey = `${program} ${subject} ${dataLoaders} ${inDirectory ? search.cwd : ""}`;
       // An input that the CLI's reader refuses (a first line that may be a Seq-id with the data loaders on) fails
       // the search as the CLI fails, before any hit: the subject first, as the CLI reads it first. The application
       // shows the error on the input and runs nothing; the CLI has written no output for a subject (read with the
@@ -1288,6 +1474,7 @@ async function main() {
           continue;
         }
         subjects.set(subjectKey, registered.status);
+        subjectReactors.set(subjectKey, reactor);
       }
       const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, fs.readFileSync(query));
       if (q && q.status < 0) {
@@ -1295,8 +1482,8 @@ async function main() {
         continue;
       }
       let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
-      const taxid = registerTaxidCounts(reactor, counts, search);
-      const named = registerCounts(reactor, counts, search) ?? taxid;
+      const taxid = registerTaxidCounts(reactor, countsOn(reactor), search);
+      const named = registerCounts(reactor, countsOn(reactor), search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
@@ -1408,7 +1595,7 @@ async function main() {
         }
         if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
         if (search.fails_alone) row.fails_alone = search.fails_alone;
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds, search.database) : null;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds, search.database, search.argv.includes("-html")) : null;
         if (together) row.inputs = "register_inputs";
         results.push(row);
         console.log(`ok ${label}`);
@@ -1416,9 +1603,10 @@ async function main() {
       if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
       if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
     }
-    for (const handle of subjects.values()) assert.equal(own.call("losat_web2_release", handle).status, 0);
-    for (const { handle } of counts.values()) assert.equal(own.call("losat_web2_file_release", handle).status, 0);
+    for (const [key, handle] of subjects) assert.equal(subjectReactors.get(key).call("losat_web2_release", handle).status, 0);
+    for (const [holder, held] of counts) for (const { handle } of held.values()) assert.equal(holder.call("losat_web2_file_release", handle).status, 0);
     for (const instance of databases.values()) await instance.close();
+    for (const [, instance] of tools.values()) await instance.close();
     if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);
     await close();
   }

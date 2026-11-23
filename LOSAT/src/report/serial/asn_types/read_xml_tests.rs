@@ -329,7 +329,7 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
         ]
     );
     assert_eq!(
-        posts[0].line("blast_formatter"),
+        posts[0].line(Some("blast_formatter")),
         format!(
             "Error: (803.7) [blast_formatter] Dbtag.db\nBad char [0x1] in string at line {line}\n"
         )

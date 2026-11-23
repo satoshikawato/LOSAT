@@ -70,10 +70,10 @@ fn test_get_context_idx_matches_ncbi() {
     // Test get_context_idx against NCBI BSearchContextInfo behavior
     // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/queryinfo_unit_test.cpp:174-180
     //
-    // NCBI test cases:
-    // - BSearchContextInfo(0, query_info) → 0 (first context)
-    // - BSearchContextInfo(length_1 + 1, query_info) → 1 (second context)
-    // - BSearchContextInfo(2 * (length_1 + 1), query_info) → 2 (third context)
+    // Expected `BSearchContextInfo` mapping in NCBI's unit test:
+    // - offset 0 maps to context 0 (first context)
+    // - offset at the start of the second context (first query length plus 1) maps to context 1
+    // - offset at the start of the third context (twice that stride) maps to context 2
     //
     // For tblastx, we have 6 frames per query, so contexts are:
     // - Context 0: query 0, frame 0 (base = 0)

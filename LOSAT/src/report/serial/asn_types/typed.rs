@@ -112,11 +112,7 @@ impl<I: Input> TypedReader<I> {
                             && member.optional()
                             && is_missing_value(&fail);
                         if !taken {
-                            return Err(if member.is_ref() {
-                                fail
-                            } else {
-                                set_flag_error(fail, member)
-                            });
+                            return Err(set_flag_error(fail, member));
                         }
                     }
                 }

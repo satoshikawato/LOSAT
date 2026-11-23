@@ -46,7 +46,11 @@ const PROGRAM: &str = "TBLASTN";
 /// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper` of `m_Program`, a space and `version`).
 const PROGRAM_VERSION: &str = concat!("TBLASTN ", crate::wording::report_version!());
 /// The `# PSITBLASTN 2.17.0+` line of a PSSM search (`-in_pssm`, `in_pssm::PROGRAM`).
-const PSI_PROGRAM_VERSION: &str = concat!("PSITBLASTN ", crate::wording::report_version!());
+const PSI_PROGRAM_VERSION: &str = concat!(
+    super::in_pssm::psi_tblastn_name!(),
+    " ",
+    crate::wording::report_version!()
+);
 
 /// The program line of outfmt 7 (and 20's formatter): tblastn's, or PSI-TBLASTN's with
 /// `-in_pssm` (`pssm`).
@@ -87,6 +91,12 @@ pub(super) struct TabularInputs {
     pub names: Option<TabularNames>,
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
+    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`; its pairwise
+    /// writer reads them here too, `stage_e_report::write_pairwise`); None without them.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
+    /// `-html` (`TblastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
+    /// reports (the organism report takes no links).
+    pub is_html: bool,
 }
 
 /// One custom tabular report of a run: `render`'s inputs that it reads.
@@ -256,6 +266,7 @@ pub(super) fn write_tblastn_tabular(
             &queries,
             writer,
             warnings,
+            tab.inputs.is_html,
         );
     }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
@@ -377,6 +388,11 @@ pub(super) fn write_tblastn_tabular(
                 // own lookups. A row that reads a subject whose load throws outside the subject
                 // block ends the run (`TabularWriter::ends_run`).
                 let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident) {
+                        warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
+                    }
+                }
                 if let Some(end) = table.ends_run(
                     &subject,
                     crate::blastinput::app::Program::Tblastn,
@@ -387,14 +403,6 @@ pub(super) fn write_tblastn_tabular(
                             warnings.end_run();
                         }
                     }));
-                }
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx)
-                        && fetch.reads(engine_ident)
-                        && !subject.throws()
-                    {
-                        warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
-                    }
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

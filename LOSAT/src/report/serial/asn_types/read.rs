@@ -78,24 +78,24 @@ pub(crate) enum Post {
 
 impl Post {
     /// The line that an application of NCBI posts on its standard error, with its diagnostic
-    /// prefix `program` (the program's name in lower case): the one owner of each post's text
-    /// (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
-    pub(crate) fn line(&self, program: &str) -> Vec<u8> {
+    /// prefix `program` (the program's name in lower case, if it has one): the one owner of each
+    /// post's text (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
+    pub(crate) fn line(&self, program: Option<&str>) -> Vec<u8> {
         match self {
-            Post::BadChar(replaced) => replaced.post(Some(program)),
+            Post::BadChar(replaced) => replaced.post(program),
             Post::Error(text) => {
-                crate::ncbi_exception::error_post_line(None, Some(program), text.as_bytes())
+                crate::ncbi_exception::error_post_line(None, program, text.as_bytes())
             }
             Post::Utf8Tag(trace) => crate::ncbi_exception::post_line(
                 Severity::Warning,
                 Some("803.10"),
-                Some(program),
+                program,
                 utf8_tag_message(trace).as_bytes(),
             ),
             Post::UnendedByteBlock => crate::ncbi_exception::post_line(
                 Severity::Error,
                 Some("803.4"),
-                Some(program),
+                program,
                 UNENDED_BYTE_BLOCK.as_bytes(),
             ),
         }
@@ -519,18 +519,24 @@ const MISSING_VALUE_MEMBER: ThrowSite = ThrowSite {
     function: Some("ncbi::CMemberInfoFunctions::ReadWithSetFlagMember"),
 };
 
-/// What `ReadWithSetFlagMember` makes of `fail` that leaves the value of `member`: a
-/// `CSerialException` rethrown with `error while reading <member>` (a missing value of a
-/// mandatory member: `missing value <member>`, `TypedReader::missing_value`).
+/// What reading the value of the SEQUENCE member `member` makes of `fail` that leaves it: a
+/// member with a set flag (one not held by `CRef<>`, `Member::is_ref`, and not delayed) is read
+/// in `ReadWithSetFlagMember`, which rethrows a `CSerialException` with `error while reading
+/// <member>` (a missing value of a mandatory member: `missing value <member>`,
+/// `TypedReader::missing_value`); the others pass `fail` on. The one owner of that rule and its
+/// rethrow, for the generic read (`TypedReader::unwind_values`) and the typed reads (`typed`); a
+/// skip does not call it.
 #[cold]
 #[inline(never)]
 pub(super) fn set_flag_error(fail: Fail, member: &Member) -> Fail {
     match fail {
-        Fail::Serial(e) if e.kind() == MISSING_VALUE => Fail::serial(e.rethrow(
-            MISSING_VALUE_MEMBER,
-            format!("missing value {}", member.name()),
-        )),
-        Fail::Serial(e) => {
+        Fail::Serial(e) if !member.is_ref() && member.flags & DELAYED == 0 => {
+            if e.kind() == MISSING_VALUE {
+                return Fail::serial(e.rethrow(
+                    MISSING_VALUE_MEMBER,
+                    format!("missing value {}", member.name()),
+                ));
+            }
             let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
             let message = format!("error while reading {}", member.name());
             Fail::serial(e.rethrow_same(file, line, function, message))
@@ -1002,7 +1008,7 @@ impl<I: Input> TypedReader<I> {
             {
                 fail = self.unwind(depth, fail);
                 let member = &members[reading];
-                if !skip && !member.is_ref() && member.flags & DELAYED == 0 {
+                if !skip {
                     fail = set_flag_error(fail, member);
                 }
             }
@@ -1351,7 +1357,9 @@ impl<I: Input> TypedReader<I> {
     }
 
     /// The elements of an INTEGER list of the type `element`, each `store`d as the list keeps
-    /// it.
+    /// it. Not inlined, as `reals`: the loop over a PSSM's scores keeps its own registers, which
+    /// the walk of `start` around it would share (line RG-F3, PR 2: callgrind of `-in_pssm` text).
+    #[inline(never)]
     fn integers<T>(
         &mut self,
         element: u16,
@@ -1376,7 +1384,8 @@ impl<I: Input> TypedReader<I> {
         Ok(values)
     }
 
-    /// The elements of a REAL list of the type `element`.
+    /// The elements of a REAL list of the type `element` (not inlined, as `integers`).
+    #[inline(never)]
     fn reals(&mut self, element: u16, skip: bool) -> R<Vec<f64>> {
         let mut values = Vec::new();
         while self.inp.begin_element()? {

@@ -52,6 +52,81 @@ fn groups_follow_the_hit_list_sizes() {
     assert_eq!(search_groups(&same, &[0, 6]), vec![vec![0, 1]]);
 }
 
+// Review of PS15b-1, S1: psiblast's XML cuts each round's results before the round's PSSM, and
+// psiblast's archive keeps the uncut lists (`BlastpApp::list_cut`), so these formats take a
+// search of their own, the first requested format's first.
+#[test]
+fn groups_follow_the_cuts_of_the_hit_lists() {
+    let inputs = Inputs::new(&[], &[]);
+    let command =
+        |program, options: &[&str]| validate(program, options).unwrap().command(inputs).unwrap();
+    let psiblast = command(Program::Psiblast, &[]);
+    assert_eq!(search_groups(&psiblast, &[6, 11]), vec![vec![0], vec![1]]);
+    assert_eq!(search_groups(&psiblast, &[11, 6]), vec![vec![0], vec![1]]);
+    assert_eq!(search_groups(&psiblast, &[8, 5]), vec![vec![0], vec![1]]);
+    assert_eq!(
+        search_groups(&psiblast, &[6, 5, 7, 11, 8, 9, 10]),
+        vec![vec![0, 2, 4, 5, 6], vec![1], vec![3]]
+    );
+    // With the hit list sizes: the tabular formats first, then by cut.
+    let split = command(Program::Psiblast, &["-num_alignments", "1"]);
+    assert_eq!(
+        search_groups(&split, &[0, 5, 6, 11]),
+        vec![vec![1], vec![2], vec![3], vec![0]]
+    );
+    // BLASTP's lists are not cut: one search.
+    let blastp = command(Program::Blastp, &[]);
+    assert_eq!(search_groups(&blastp, &[6, 11, 5]), vec![vec![0, 1, 2]]);
+}
+
+// Review of PS15b-1, S1: each report of a call of psiblast formats of other cuts is the command
+// line's for its format alone, on the case of the rows `db.ps15b.pk.mts2.{5,8,9}` (NCBI BLAST+
+// 2.17.0: outfmt 5 stops after round 2, where 8 has a round 3). The paths are the rows', from the
+// package's directory (the tests' working directory).
+#[test]
+fn psiblast_formats_of_other_cuts_are_each_the_command_lines() {
+    let options = [
+        "-num_iterations",
+        "3",
+        "-inclusion_ethresh",
+        "5",
+        "-max_target_seqs",
+        "2",
+    ];
+    let search = validate(Program::Psiblast, &options).unwrap();
+    let query_name = "tests/fasta/psiblast/ps5_pk.faa";
+    let bytes = std::fs::read(query_name).unwrap();
+    let (records, _) = crate::api::read_inputs(&search, &bytes, b"").unwrap();
+    let inputs = Inputs::database(&records, "tests/db_search/paja").named(query_name, "ignored");
+    let alone = |outfmt: &str| {
+        run_collect(&search, inputs, &[outfmt])
+            .unwrap()
+            .reports
+            .remove(0)
+            .bytes
+    };
+    // The command line's bytes: NCBI's frozen rows, with LOSAT's version (`losat_output_bytes`).
+    for outfmt in ["5", "8"] {
+        let ncbi = std::fs::read(format!(
+            "tests/fixtures/db_search/db.ps15b.pk.mts2.{outfmt}.out"
+        ))
+        .unwrap();
+        assert!(
+            alone(outfmt) == crate::wording::losat_output_bytes(&ncbi).as_ref(),
+            "-outfmt {outfmt} alone"
+        );
+    }
+    for formats in [["6", "11"], ["11", "6"], ["8", "5"]] {
+        let outcome = run_collect(&search, inputs, &formats).unwrap();
+        for (report, outfmt) in outcome.reports.iter().zip(formats) {
+            assert!(
+                report.bytes == alone(outfmt),
+                "{formats:?}: -outfmt {outfmt}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_self_search_gives_one_hsp_with_its_rows_and_sections() {
     let (query, subject) = one_protein();
@@ -139,4 +214,81 @@ fn the_run_writes_to_the_callers_outputs_and_the_errors_are_the_command_lines() 
         error.to_string().contains("Empty CBlastQueryVector"),
         "{error}"
     );
+}
+
+/// `PROTEIN` back-translated, one codon per residue: a nucleotide sequence for the programs whose
+/// query or subjects are nucleotides.
+fn coding_sequence() -> Vec<u8> {
+    PROTEIN
+        .iter()
+        .flat_map(|residue| -> &[u8] {
+            match residue {
+                b'A' => b"GCT",
+                b'R' => b"CGT",
+                b'N' => b"AAT",
+                b'D' => b"GAT",
+                b'Q' => b"CAA",
+                b'E' => b"GAA",
+                b'G' => b"GGT",
+                b'H' => b"CAT",
+                b'I' => b"ATT",
+                b'L' => b"CTG",
+                b'K' => b"AAA",
+                b'M' => b"ATG",
+                b'F' => b"TTT",
+                b'P' => b"CCG",
+                b'S' => b"TCT",
+                b'T' => b"ACC",
+                b'V' => b"GTT",
+                b'Y' => b"TAT",
+                other => panic!("no codon for {}", char::from(*other)),
+            }
+            .as_slice()
+        })
+        .copied()
+        .collect()
+}
+
+/// A query and a subject of `program`, each the AsnA part (`PROTEIN`) or its coding sequence.
+fn self_pair(program: Program) -> (Vec<FastaRecord>, Vec<FastaRecord>) {
+    let dna = coding_sequence();
+    let (query, subject): (&[u8], &[u8]) = match program {
+        Program::Blastn | Program::Tblastx => (&dna, &dna),
+        Program::Blastx => (&dna, PROTEIN),
+        Program::Tblastn => (PROTEIN, &dna),
+        _ => (PROTEIN, PROTEIN),
+    };
+    (
+        vec![FastaRecord::new("Query_1", b"q", query)],
+        vec![FastaRecord::new("Subject_1", b"s", subject)],
+    )
+}
+
+// Line RG item T4a2: only the pairwise report reads `-html`'s links (`blastinput::app::html_links`),
+// so a call of outfmt 6 then 0 has them for its second format: that report is the HTML report of
+// outfmt 0 alone, in each of the five programs.
+#[test]
+fn the_html_links_reach_outfmt_0_in_any_place() {
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let (query, subject) = self_pair(program);
+        let search = validate(program, &["-html"]).unwrap();
+        let alone = run_collect(&search, Inputs::new(&query, &subject), &["0"]).unwrap();
+        assert!(
+            alone.reports[0].bytes.starts_with(b"<HTML>"),
+            "{program}: {}",
+            String::from_utf8_lossy(&alone.reports[0].bytes)
+        );
+        let second = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"]).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&second.reports[1].bytes),
+            String::from_utf8_lossy(&alone.reports[0].bytes),
+            "{program}"
+        );
+    }
 }

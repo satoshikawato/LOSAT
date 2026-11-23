@@ -11,3 +11,9 @@
   replaces a byte outside the visible ASCII range: NCBI's message (803.7) of that read, then `#` in
   the file, as NCBI does. LOSAT refused them. Still refused: author names whose read fails (a number
   too large for its type), where NCBI writes part of the file and stops with an exception.
+- psiblast `-outfmt 11` writes the XML and ASN.1 binary archives (`ARCHIVE_FORMAT=xml`, `bin`) of the
+  PSSM files that LOSAT refused there: unnamed SEQUENCE and CHOICE values (a User-object descriptor,
+  annotations), NULL, UTF8String (in XML with NCBI's message for a control byte), NaN and infinite
+  real numbers in ASN.1 binary, and author names, copied as they were read when the file has the
+  archive's format and read again otherwise, as NCBI BLAST+ 2.17.0 does. Still refused: author names
+  in another format than the archive whose read gives a message or fails.

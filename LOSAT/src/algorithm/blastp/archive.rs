@@ -112,9 +112,10 @@ pub(crate) fn handle_for(
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
-/// mask of each query's lower-case runs (SEG is never one); `pssm` is psiblast's `-in_pssm` as
-/// read, which every request holds in place of the queries (`RunRequests::with_pssm_query`,
-/// `PsiSearch::request`).
+/// mask of each query's lower-case runs (SEG is never one); `pssm` is the PSSM that every request
+/// holds in place of the queries (`RunRequests::with_pssm_query`): the search strategy's of
+/// psiblast's `-in_pssm` as read (`PsiSearch::request`), the archive's of a PSSM round
+/// (`PsiArchive::pssm`).
 pub(crate) fn requests(
     subjects: Option<&[FastaRecord]>,
     lcase_masking: bool,
@@ -141,8 +142,8 @@ pub(crate) struct CallBatches<'a> {
     pub query_placements: &'a Placements,
     /// `-subject`: every subject record, whole (the Bioseqs of the request).
     pub subject_records: Option<&'a [FastaRecord]>,
-    /// The SEG masks and, with `-lcase_masking`, the lower-case runs of each query, in record
-    /// coordinates (`query_record_masks`).
+    /// The SEG masks and, with `-lcase_masking`, the lower-case runs of each query that the
+    /// results carry, in record coordinates (`blast_engine::result_query_masks`).
     pub masks: &'a [Vec<(i32, i32)>],
     /// `-lcase_masking`.
     pub lcase_masking: bool,
@@ -152,14 +153,25 @@ pub(crate) struct CallBatches<'a> {
     pub spans: &'a [Range<usize>],
 }
 
+/// What psiblast's archive of one round sets in its request (`WriteArchive` with the round's
+/// number, `blast_engine::report_write::psi_archive`).
+pub(crate) struct PsiArchive {
+    pub round: crate::report::archive::ArchiveRound,
+    /// The PSSM that the request of a PSSM search holds in place of the query, with the round's
+    /// K/A written back; `None` for a FASTA query's first round (its Bioseq).
+    pub pssm: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+}
+
 /// What the archive of a call needs: the call's batches (the batches of one block, or of the
 /// whole search) and their results.
 pub(crate) struct ArchiveCall<'a> {
     pub handle: &'a ArchiveHandle,
+    /// psiblast's round; `None` for BLASTP and RPS-BLAST.
+    pub psi: Option<&'a PsiArchive>,
     /// `!args.ungapped`: the archive's Seq-aligns are those of outfmt 8 (`write_blastp_seqalign`).
     pub gapped: bool,
-    /// The search is rpsblast's (`RunRecord::rps`).
-    pub rps: bool,
+    /// The app's program type (`BlastpApp::program_type`, `RunRecord::program_type`).
+    pub program_type: Option<crate::report::record::ProgramType>,
     pub batches: CallBatches<'a>,
     pub query_lengths: &'a [usize],
     /// The subject names of the Seq-aligns.
@@ -240,9 +252,11 @@ impl<'a> AlignSource for BlastpAligns<'a> {
 
 /// Calls `each` with the queries and the archive of each batch of `call`, in order
 /// (`BatchArchive`: its request, `RunRequests::with_batch`, and its results).
-/// `first_context(first_query)` gives the values of a batch's first query.
+/// `first_context(first_query)` gives the values of a batch's first query; `psi` is psiblast's
+/// round.
 pub(crate) fn for_each_batch(
     call: &CallBatches<'_>,
+    psi: Option<&PsiArchive>,
     first_context: &dyn Fn(usize) -> FirstContext,
     mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
@@ -252,9 +266,12 @@ pub(crate) fn for_each_batch(
     } else {
         call.spans
     };
-    // psiblast's `-in_pssm` writes no archive (`in_pssm::check_in_pssm_options`): the requests'
-    // queries are the call's records.
-    let requests = requests(call.subject_records, call.lcase_masking, None);
+    // The requests' queries are the call's records, or the PSSM of a PSSM search.
+    let requests = requests(
+        call.subject_records,
+        call.lcase_masking,
+        psi.and_then(|psi| psi.pssm.clone()),
+    );
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;
@@ -265,6 +282,7 @@ pub(crate) fn for_each_batch(
 
         // The results' masks are those of the search, so only a searched batch has them: one
         // `notset` mask per query with the SEG intervals and lower-case runs (a protein query).
+        // `call.masks` are the results' (`blast_engine::result_query_masks`: none for psiblast).
         let mut masks: Vec<MaskEntry> = Vec::new();
         if searched {
             for index in span.clone() {
@@ -302,6 +320,7 @@ pub(crate) fn for_each_batch(
                         space: context.context0_space,
                         query_length: context.context0_length,
                     }),
+                    round: psi.map(|psi| psi.round),
                 };
                 each(span, &batch)
             },
@@ -323,12 +342,12 @@ pub(crate) fn write_blastp_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
-        rps: call.rps,
         db_title: call.subjects.db_title(),
         // An ungapped search's Seq-aligns are Dense-diags, as in outfmt 8 (`seqalign.rs`).
         gapped: call.gapped,
+        program_type: call.program_type,
     };
-    for_each_batch(&call.batches, first_context, |span, batch| {
+    for_each_batch(&call.batches, call.psi, first_context, |span, batch| {
         for index in span.clone() {
             warnings.before_query(index, &mut *writer)?;
         }

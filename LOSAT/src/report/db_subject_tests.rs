@@ -39,6 +39,7 @@ fn a_nucleotide_title_of_punctuation_stops_at_its_end() {
         };
         ParsedSubject::new(DeflineSet {
             deflines: vec![defline],
+            utf8: false,
         })
         .unwrap()
     };
@@ -145,7 +146,12 @@ fn titles_that_ncbi_makes_from_the_seq_ids() {
         "DAA10002.1 unnamed protein product"
     );
     assert_eq!(
-        text(&subject("tpg|DAA10002.1|").heading(true, false).unwrap()),
+        text(
+            &subject("tpg|DAA10002.1|")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">DAA10002.1 TPA: unnamed protein product\n"
     );
     assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -156,7 +162,12 @@ fn titles_that_ncbi_makes_from_the_seq_ids() {
     );
     assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
     assert_eq!(
-        text(&subject("ref|NC_100013.1|").heading(true, false).unwrap()),
+        text(
+            &subject("ref|NC_100013.1|")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">NC_100013.1 \n"
     );
     assert_eq!(
@@ -165,16 +176,31 @@ fn titles_that_ncbi_makes_from_the_seq_ids() {
     );
     assert_eq!(description("lcl|Subject_27"), "subject seven title");
     assert_eq!(
-        text(&subject("lcl|Subject_30").heading(true, false).unwrap()),
+        text(
+            &subject("lcl|Subject_30")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">Subject_30 unnamed protein product\n"
     );
     assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
     assert_eq!(
-        text(&subject("pdb|5ABC|D").heading(true, false).unwrap()),
+        text(
+            &subject("pdb|5ABC|D")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">5ABC_D Chain D\n XP_100015.1 second\n"
     );
     assert_eq!(
-        text(&subject("lcl|Subject_36").heading(true, false).unwrap()),
+        text(
+            &subject("lcl|Subject_36")
+                .heading(true, false, None)
+                .unwrap()
+                .unwrap()
+        ),
         ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
     );
     // A title from the source: the taxonomy database can name its organism.
@@ -217,6 +243,7 @@ fn one_defline(ids: Vec<ParsedSeqId>) -> DeflineSet {
             ids,
             ..BlastDefline::default()
         }],
+        utf8: false,
     }
 }
 
@@ -237,7 +264,11 @@ fn lines(lines: Vec<Vec<ParsedSeqId>>) -> ParsedSubject {
             ..BlastDefline::default()
         })
         .collect();
-    ParsedSubject::new(DeflineSet { deflines }).unwrap()
+    ParsedSubject::new(DeflineSet {
+        deflines,
+        utf8: false,
+    })
+    .unwrap()
 }
 
 fn strings(subject: &ParsedSubject) -> Vec<String> {
@@ -323,7 +354,11 @@ fn a_title_reads_the_source_where_it_is_made_from_it_or_its_end_is_rewritten() {
                 ..BlastDefline::default()
             })
             .collect();
-        ParsedSubject::new(DeflineSet { deflines }).unwrap()
+        ParsedSubject::new(DeflineSet {
+            deflines,
+            utf8: false,
+        })
+        .unwrap()
     };
     // A title made from the source names its organism with the taxonomy database only.
     let empty = titled(&[""]);
@@ -350,16 +385,22 @@ fn a_positive_list_names_the_text_ids_or_the_gis() {
     let subject = subject.under_positive_list(true);
     assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
     // The heading leaves out the line the strings do not name, and `>` goes to the next.
-    assert_eq!(subject.heading(true, false).unwrap(), b">AF000001.1 t\n");
+    assert_eq!(
+        subject.heading(true, false, None).unwrap().unwrap(),
+        b">AF000001.1 t\n"
+    );
     // An ungapped Seq-align of two HSPs reaches the report without the strings.
     assert_eq!(
-        subject.heading(true, true).unwrap(),
+        subject.heading(true, true, None).unwrap().unwrap(),
         b">loc t\n AF000001.1 t\n"
     );
     // A local id alone: no string, every line in the heading.
     let subject = lines(vec![vec![local()]]).under_positive_list(true);
     assert!(subject.use_this_seqid().is_empty());
-    assert_eq!(subject.heading(true, false).unwrap(), b">loc t\n");
+    assert_eq!(
+        subject.heading(true, false, None).unwrap().unwrap(),
+        b">loc t\n"
+    );
     // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
     let subject = lines(vec![
         vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
@@ -369,7 +410,7 @@ fn a_positive_list_names_the_text_ids_or_the_gis() {
     .under_positive_list(true);
     assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
     assert_eq!(
-        subject.heading(true, false).unwrap(),
+        subject.heading(true, false, None).unwrap().unwrap(),
         b">GG000001.1 t\n GG000003.1 t\n"
     );
     // A name without an accession is not named; a PDB id is.
@@ -389,7 +430,7 @@ fn a_positive_list_names_the_text_ids_or_the_gis() {
     let subject = lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
     assert!(subject.use_this_seqid().is_empty());
     assert_eq!(
-        subject.heading(true, false).unwrap(),
+        subject.heading(true, false, None).unwrap().unwrap(),
         b">loc t\n AF000001.1 t\n"
     );
 }
@@ -442,6 +483,7 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
             replaced_title_bytes: 1,
             ..BlastDefline::default()
         }],
+        utf8: false,
     };
     assert!(ParsedSubject::new(replaced).is_err());
     assert!(ParsedSubject::new(DeflineSet::default()).is_err());
@@ -480,6 +522,23 @@ fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
         error.contains("whose lookup in the database fails (DB contains no accession info.;"),
         "{error}"
     );
+}
+
+// Line RG item T5d fixes 3 and 4: the sequence that the lookup gives first, another one whose
+// header holds a UTF8String, is read by NCBI's scope with its warning, which the load of the
+// id posts (`common::database::load_read_texts`), also where the batch reads one by one: no
+// refusal.
+#[test]
+fn a_utf8string_header_that_the_scope_reads_is_no_refusal() {
+    let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+    assert_eq!(subject.scope_utf8_read(), None);
+    let read = subject.scope_utf8(Some(DbSequence::of_unrestricted(3)));
+    assert_eq!(read.scope_utf8_read(), Some(DbSequence::of_unrestricted(3)));
+    for one_by_one in [false, true] {
+        assert_eq!(read.fetched(true, one_by_one, HitLoad::Loaded), Ok(()));
+        assert_eq!(read.fetched(false, one_by_one, HitLoad::Loaded), Ok(()));
+        assert_eq!(read.pssm_read(one_by_one), Ok(()));
+    }
 }
 
 // Line DBID pfoff-1 (DECISIONS 62): where a batch's prefetch is off, the XML2 and JSON `Hit`
@@ -1299,9 +1358,12 @@ fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown
                 ..BlastDefline::default()
             })
             .collect();
-        ParsedSubject::new(DeflineSet { deflines })
-            .unwrap()
-            .found_instead(title_apart.clone())
+        ParsedSubject::new(DeflineSet {
+            deflines,
+            utf8: false,
+        })
+        .unwrap()
+        .found_instead(title_apart.clone())
     };
     let error = check_shown_parsed_subject(
         &titled(&[""]),
@@ -1373,6 +1435,7 @@ fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown
             one_defline(vec![gb("AAA00001", 1)]).deflines.remove(0),
             one_defline(vec![local()]).deflines.remove(0),
         ],
+        utf8: false,
     })
     .unwrap()
     .found_instead(title_apart.clone());
@@ -1391,6 +1454,7 @@ fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown
             ids: vec![local()],
             ..BlastDefline::default()
         }],
+        utf8: false,
     })
     .unwrap()
     .found_instead(title_apart);
@@ -1436,6 +1500,7 @@ fn a_tabular_word_of_a_title_made_from_the_source_names_the_organism() {
                 taxid,
                 ..BlastDefline::default()
             }],
+            utf8: false,
         })
         .unwrap()
         .with_source(true, |taxid| {
@@ -1475,6 +1540,7 @@ fn a_tabular_word_of_a_title_made_from_the_source_names_the_organism() {
             ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()))],
             ..BlastDefline::default()
         }],
+        utf8: false,
     })
     .unwrap()
     .with_source(true, |_| panic!("no source to name"));
@@ -1509,6 +1575,7 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
                 taxid: Some(100009),
                 ..BlastDefline::default()
             }],
+            utf8: false,
         })
         .unwrap()
         .with_source(false, |_| SourceTaxname::Named(std::sync::Arc::from(name)))
@@ -1520,7 +1587,7 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
     );
     // The heading's own making of the title gives the same id (one GenerateDefline).
     assert_eq!(
-        bad.heading(false, false).unwrap_err(),
+        bad.heading(false, false, None).unwrap().unwrap_err(),
         bad.heading_skipped_id(false, false).unwrap()
     );
     assert_eq!(text(&bad.description(false).1.text), "Unknown");
@@ -1531,7 +1598,8 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
     assert_eq!(
         text(
             &subject(None, b"Homo sapiens")
-                .heading(false, false)
+                .heading(false, false, None)
+                .unwrap()
                 .unwrap()
         ),
         ">AB000010.1 Homo sapiens\n"
@@ -1541,7 +1609,8 @@ fn a_heading_that_does_not_decode_names_the_seq_align_id() {
         None
     );
     assert!(subject(Some(b"stored"), b"Bad \x81 name")
-        .heading(true, false)
+        .heading(true, false, None)
+        .unwrap()
         .is_ok());
 }
 
@@ -1759,7 +1828,7 @@ fn records_read_with_parse_deflines_follow_the_ncbi_oracle() {
         assert_eq!(subject.shown_as_record(), local, "{defline}");
         if !local {
             assert_eq!(
-                text(&subject.heading(protein, false).unwrap()),
+                text(&subject.heading(protein, false, None).unwrap().unwrap()),
                 heading,
                 "{defline}"
             );
@@ -1787,6 +1856,7 @@ fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
                 ..BlastDefline::default()
             })
             .collect(),
+        utf8: false,
     };
     let bacillus = || SourceTaxname::Named(std::sync::Arc::from(&b"Bacillus sp."[..]));
     let named = |lines: &[(ParsedSeqId, &str, Option<i32>)], protein| {
@@ -1807,7 +1877,7 @@ fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
     );
     assert_eq!(heading.source(), &bacillus());
     assert_eq!(
-        text(&heading.heading(true, false).unwrap()),
+        text(&heading.heading(true, false, None).unwrap().unwrap()),
         ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha [Bacillus sp.]\n"
     );
     assert_eq!(
@@ -1835,7 +1905,7 @@ fn a_protein_title_ending_in_a_bracket_gets_its_end_from_the_source() {
     .unwrap()
     .with_source(false, |_| panic!("a nucleotide title is not adjusted"));
     assert_eq!(
-        text(&nucleotide.heading(false, false).unwrap()),
+        text(&nucleotide.heading(false, false, None).unwrap().unwrap()),
         ">AC400001.1 alpha, partial [Bacillus sp.]\n AD400001.1 alpha, partial [Bacillus sp.]\n"
     );
     // The tabular word of `lcl|Subject_9nn`.

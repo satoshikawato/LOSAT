@@ -118,6 +118,7 @@ fn unsupported_formats_fail_before_searching() {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -171,6 +172,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -369,6 +371,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
         let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt,
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -426,6 +429,7 @@ fn run_local_outputs(
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -485,6 +489,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -566,6 +571,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -596,6 +602,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -863,6 +870,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
             let mut on_hits = |_| {};
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -939,6 +947,7 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
         let (mut six, mut zero, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",

@@ -93,6 +93,10 @@ pub(crate) struct PssmRedo1<'a> {
     pub(crate) inclusion_ethresh: f64,
     /// psiblast's `-sum_stats true` (`do_link_hsps`), `None` without sum statistics.
     pub(crate) link: Option<RedoLink>,
+    /// Called with the heaps as the redo leaves them (the queries' batch is all of them), before
+    /// they become the final hit lists: the search notes there which subjects the redo's fetches
+    /// read (`blastp::blast_engine::database::ListedSubjects::note_fetched`).
+    pub(crate) redone: &'a dyn Fn(&[BlastCompoHeap]),
 }
 
 /// psiblast's `-sum_stats true` in the redo (`do_link_hsps`): the redone alignments' cutoff and
@@ -382,6 +386,7 @@ impl PssmRedo1<'_> {
                 }
             }
         }
+        (self.redone)(&heaps);
         Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
     }
 
@@ -457,6 +462,21 @@ pub(crate) trait RedoSubject<'a>: Copy {
         hsps: &[BlastpPreliminaryHsp],
         subject: &'a [u8],
     ) -> Option<(BlastpHspList, i32, f64)>;
+    /// The Smith-Waterman redo of one match of this subject (`-use_sw_tback`):
+    /// `RedoMatch::redo_match_smith_waterman` (a protein subject) or
+    /// `RedoMatch::redo_windows_smith_waterman` (frames). `heap` is the query's heap of redone
+    /// matches.
+    #[allow(clippy::too_many_arguments)]
+    fn redo_smith_waterman(
+        self,
+        matching: &RedoMatch<'_>,
+        run: &mut RedoRun<'_>,
+        sw: &mut smith_waterman::RpsSwScratch,
+        heap: &mut BlastCompoHeap,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Result<Option<(BlastpHspList, i32, f64)>, smith_waterman::SwEndless>;
 }
 
 /// A protein subject ([`RedoSubject`]): the redo's subject is its letters.
@@ -480,6 +500,20 @@ impl<'a> RedoSubject<'a> for ProteinSubject {
         subject: &'a [u8],
     ) -> Option<(BlastpHspList, i32, f64)> {
         matching.redo_match(run, oid, hsps, subject)
+    }
+
+    #[inline(always)]
+    fn redo_smith_waterman(
+        self,
+        matching: &RedoMatch<'_>,
+        run: &mut RedoRun<'_>,
+        sw: &mut smith_waterman::RpsSwScratch,
+        heap: &mut BlastCompoHeap,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Result<Option<(BlastpHspList, i32, f64)>, smith_waterman::SwEndless> {
+        matching.redo_match_smith_waterman(run, sw, heap, oid, hsps, subject)
     }
 }
 
@@ -507,6 +541,20 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
     ) -> Option<(BlastpHspList, i32, f64)> {
         matching.redo_windows(run, oid, hsps, subject, self)
     }
+
+    #[inline(always)]
+    fn redo_smith_waterman(
+        self,
+        matching: &RedoMatch<'_>,
+        run: &mut RedoRun<'_>,
+        sw: &mut smith_waterman::RpsSwScratch,
+        heap: &mut BlastCompoHeap,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+    ) -> Result<Option<(BlastpHspList, i32, f64)>, smith_waterman::SwEndless> {
+        matching.redo_windows_smith_waterman(run, sw, heap, oid, hsps, subject, self)
+    }
 }
 
 /// The identities and positives that NCBI's RPS-TBLASTN redo counts for an HSP
@@ -520,8 +568,9 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
 /// (`Blast_RedoAlignmentCore` is called with the profile as `query_blk` and `one_query`, the
 /// user's translated query of all frames, as `subject_blk`, blast_traceback.c:1274-1281; the
 /// HSP's subject offsets are in its frame.) The offsets stay inside the buffer, which holds
-/// every frame, the HSP's own among them.
-fn translation_buffer_counts(
+/// every frame, the HSP's own among them. `C`, the redo's instance, keeps each instance's own
+/// copy (the X-drop redo's code as before the Smith-Waterman redo of frames; DECISIONS 63 S3).
+fn translation_buffer_counts<C: RedoInstance>(
     hsp: &BlastpHsp,
     query_nomask: &[u8],
     buffer: &[u8],
@@ -818,6 +867,29 @@ impl RedoMatch<'_> {
         } else {
             self.redo_window::<S>(run, hsps, subject, SubjectWindow::default(), None)
         };
+        self.evaluate_windows::<S::Instance, S>(run, oid, hsps, subject, kind, alignments)
+    }
+
+    /// The steps of the redo of a match after its windows' alignments `alignments` (the list's
+    /// head first), as `redo_windows` quotes them: `s_HSPListFromDistinctAlignments`,
+    /// `s_HitlistReapContained` (frames compared for a translated subject),
+    /// `s_HitlistEvaluateAndPurge` (the subject's length of `s_GetSubjectLength`) and, for a list
+    /// whose best e-value passes `-evalue`, `s_HSPListNormalizeScores` and
+    /// `s_ComputeNumIdentities`. NCBI runs them after either redo of the windows
+    /// (`Blast_RedoOneMatch` or `Blast_RedoOneMatchSmithWaterman`, blast_kappa.c:3602-3707):
+    /// the X-drop redo (`redo_windows`) and the Smith-Waterman redo of frames
+    /// (`redo_windows_smith_waterman`) share them, each as its own instance `C`, inlined, so that
+    /// the X-drop redo's code stays as it was before the second caller (DECISIONS 63 S3).
+    #[inline(always)]
+    fn evaluate_windows<'a, C: RedoInstance, S: RedoSubject<'a>>(
+        &self,
+        run: &RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &'a [u8],
+        kind: S,
+        alignments: Vec<Align>,
+    ) -> Option<(BlastpHspList, i32, f64)> {
         let mut redone: Vec<Redone> = alignments
             .into_iter()
             .map(|align| Redone {
@@ -828,11 +900,11 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained::<S::Instance>(&mut redone);
+            reap_contained::<C>(&mut redone);
         }
         let query_length = self.query_length;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:364-368
-        let subject_length = if S::Instance::SUBJECT_IS_TRANSLATED {
+        let subject_length = if C::SUBJECT_IS_TRANSLATED {
             (get_nucl_length(subject.len() as i32) - 1) / 3
         } else {
             subject.len() as i32
@@ -841,7 +913,7 @@ impl RedoMatch<'_> {
             Some(link) => {
                 // The RPS redo has no sum statistics (`rps_search::redo`): only psiblast links.
                 assert!(
-                    !S::Instance::SUBJECT_IS_TRANSLATED,
+                    !C::SUBJECT_IS_TRANSLATED,
                     "the redo of frames has no sum statistics"
                 );
                 link_redone(&mut redone, link, run, subject_length)?
@@ -888,7 +960,7 @@ impl RedoMatch<'_> {
                 query_context: template.q_idx as i32,
                 query_frame: template.query_frame,
                 // (`Blast_HSPInit` takes `align->frame` cast to `Int2`, blast_kappa.c:326-330.)
-                subject_frame: if S::Instance::SUBJECT_IS_TRANSLATED {
+                subject_frame: if C::SUBJECT_IS_TRANSLATED {
                     align.frame
                 } else {
                     0
@@ -904,10 +976,10 @@ impl RedoMatch<'_> {
                 kind.frame_letters(subject, align.frame),
                 self.matrix,
             );
-            if S::Instance::SUBJECT_IS_TRANSLATED {
+            if C::SUBJECT_IS_TRANSLATED {
                 // The Seq-align's counts (see `translation_buffer_counts`).
                 (hsp.num_ident, hsp.num_positives) =
-                    translation_buffer_counts(&hsp, run.query_nomask, subject, self.matrix);
+                    translation_buffer_counts::<C>(&hsp, run.query_nomask, subject, self.matrix);
             }
             hsp.e_value = e_value;
             hsp.num = num;
@@ -941,7 +1013,9 @@ impl RedoMatch<'_> {
         subject: &'a [u8],
     ) -> Vec<Align> {
         let mut alignments: Vec<Align> = Vec::new();
-        for (window, order) in frame_windows(hsps, run.query.len() as i32, subject.len() as i32) {
+        for (window, order) in
+            frame_windows::<S::Instance>(hsps, run.query.len() as i32, subject.len() as i32)
+        {
             let window_hsps: Vec<BlastpPreliminaryHsp> = order.iter().map(|&k| hsps[k]).collect();
             alignments =
                 self.redo_window::<S>(run, &window_hsps, subject, window, Some(alignments));
@@ -991,7 +1065,7 @@ impl RedoMatch<'_> {
             }
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
                 subject_data = if S::Instance::SUBJECT_IS_TRANSLATED {
-                    frame_range(
+                    frame_range::<S::Instance>(
                         run,
                         subject,
                         window,
@@ -1016,7 +1090,7 @@ impl RedoMatch<'_> {
                     || near_identical != old_near_identical
                 {
                     let subject_composition = if S::Instance::SUBJECT_IS_TRANSLATED {
-                        window_composition(&subject_data, window, in_align)
+                        window_composition::<S::Instance>(&subject_data, window, in_align)
                     } else {
                         read_aa_composition(&subject_data)
                     };
@@ -1179,7 +1253,8 @@ fn seg_subject(data: &mut [u8], subject_maybe_biased: &mut bool) {
 /// matrix (`windows_from_translated_aligns`, `is_pos_based`) in a translated subject of
 /// `subject_length` bytes (the translation buffer), for a query of `query_length` letters:
 /// each window and the indices in `hsps` of its alignments, in the order the redo reads them.
-fn frame_windows(
+/// `C`, the redo's instance, keeps each instance's own copy (`translation_buffer_counts`).
+fn frame_windows<C: RedoInstance>(
     hsps: &[BlastpPreliminaryHsp],
     query_length: i32,
     subject_length: i32,
@@ -1187,7 +1262,7 @@ fn frame_windows(
     let mut list: Option<Box<BlastCompoAlignment>> = None;
     for (k, hsp) in hsps.iter().enumerate().rev() {
         let mut align = Box::new(
-            Align::incoming::<FrameRedo>(hsp)
+            Align::incoming::<C>(hsp)
                 .compo(Some(BlastCompoAlignmentContext::PreliminaryHspIndex(k))),
         );
         align.next = list;
@@ -1237,7 +1312,8 @@ fn frame_windows(
 /// `l >= 7`. The window's alignments end inside their frame, so before `l`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1597-1643
-fn frame_range(
+/// `C`, the redo's instance, keeps each instance's own copy (`translation_buffer_counts`).
+fn frame_range<C: RedoInstance>(
     run: &RedoRun<'_>,
     subject: &[u8],
     window: SubjectWindow,
@@ -1290,7 +1366,8 @@ fn frame_range(
 /// inside the buffer (`frame_range`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:921-936
-fn window_composition(
+/// `C`, the redo's instance, keeps each instance's own copy (`translation_buffer_counts`).
+fn window_composition<C: RedoInstance>(
     data: &[u8],
     window: SubjectWindow,
     align: &Align,
@@ -1366,6 +1443,7 @@ fn link_redone(
         redone,
         |hsp| LinkHsp {
             context: 0,
+            subject_frame: 0,
             query_offset: hsp.align.query_start,
             query_end: hsp.align.query_end,
             subject_offset: hsp.align.match_start,

@@ -29,6 +29,7 @@ fn the_title_joins_the_later_deflines_with_their_ids() {
             defline(text_ids("emb|X00001.2|"), None),
             defline(vec![], Some("no ids")),
         ],
+        utf8: false,
     };
     assert_eq!(
         set.bioseq_title(),
@@ -60,6 +61,7 @@ fn the_short_header_has_three_forms() {
     let header = |ids: Vec<ParsedSeqId>, range, minus| {
         let set = DeflineSet {
             deflines: vec![defline(ids, Some("title"))],
+            utf8: false,
         };
         let config = Config {
             strand_minus: minus,

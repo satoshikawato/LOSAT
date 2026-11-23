@@ -1,0 +1,85 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+           1 sequences; 340 total letters
+
+
+
+Query= amb_q
+
+Length=112
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+amb_s                                                                 212     2e-73  2
+
+
+> amb_s
+Length=340
+
+ Score = 212 bits (440),  Expect(2) = 2e-73
+ Identities = 74/79 (94%), Positives = 75/79 (95%), Gaps = 0/79 (0%)
+ Frame = +3
+
+Query  34   VFLQFVEBLVGEWWHNEVDWCYHSVQMZWRNLIGIDWDTSMRLYDETWKCYHIFMRQWLN  93
+            VFLQFVEBLVGEWWHNEVDWCYHSVQMZWRNLIGIDW+TSMRLYDETWKCYH FMRQW N
+Sbjct  102  VFLQFVEBLVGEWWHNEVDWCYHSVQMZWRNLIGIDWBTSMRLYDETWKCYHJFMRQWJN  281
+
+Query  94   DCEHJPWTCFXKMHAWXYC  112
+            DCEHJPWTCF KMH WXYC
+Sbjct  282  DCEHJPWTCFJKMHXWXYC  338
+
+
+ Score = 62.9 bits (126),  Expect(2) = 2e-73
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  1   MFPCDVENWCTHCDQQDIDV  20
+           MFPCDVENWCTHCDQQDIDV
+Sbjct  3   MFPCDVENWCTHCDQQDIDV  62
+
+
+ Score = 22.9 bits (42),  Expect = 0.003
+ Identities = 6/17 (35%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = +3
+
+Query  48   HNEVDWCYHSVQMZWRN  64
+            ++E   CYH    +W N
+Sbjct  231  YDETWKCYHJFMRQWJN  281
+
+
+ Score = 19.5 bits (35),  Expect = 0.026
+ Identities = 6/17 (35%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = +3
+
+Query  77   YDETWKCYHIFMRQWLN  93
+            ++E   CYH    +W N
+Sbjct  144  HNEVDWCYHSVQMZWRN  194
+
+
+
+Lambda      K        H
+   0.331    0.142    0.595 
+
+
+Effective search space used: 9702
+
+
+  Database: User specified sequence set (Input: tests/db_search/tn_amb_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 340
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

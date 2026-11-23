@@ -1,0 +1,28 @@
+{
+  "version": "1.2",
+  "dbname": "db",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pt",
+  "number-of-letters": 912,
+  "number-of-sequences": 5,
+  "last-updated": "2026-11-21T22:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 51050,
+  "bytes-to-cache": 1038,
+  "files": [
+    "db.pal",
+    "db.pal",
+    "db.pdb",
+    "db.phr",
+    "db.pin",
+    "db.pnd",
+    "db.pni",
+    "db.pog",
+    "db.pos",
+    "db.pot",
+    "db.psq",
+    "db.ptf",
+    "db.pto"
+  ]
+}

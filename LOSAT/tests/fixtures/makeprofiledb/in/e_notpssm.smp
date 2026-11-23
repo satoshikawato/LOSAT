@@ -1,0 +1,11 @@
+Seq-entry ::= seq {
+  id {
+    local str "x"
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 3,
+    seq-data ncbieaa "MKV"
+  }
+}

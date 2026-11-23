@@ -46,9 +46,8 @@ pub struct BlastxArgs {
     )]
     pub subject_loc: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
-    // NCBI excludes `-subject` and `-subject_loc` with `-db` (c++/src/algo/blast/blastinput/blast_args.cpp:2364-2381). The
-    // exclusion is an error of the argument parser: LOSAT's parser reports it with its own text
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+    // NCBI excludes `-subject` and `-subject_loc` with `-db` (c++/src/algo/blast/blastinput/blast_args.cpp:2364-2381).
+    // NCBI's argument reader reports the exclusion (`cli::reader`).
     #[arg(
         long,
         value_name = "NAME",
@@ -96,7 +95,12 @@ pub struct BlastxArgs {
     #[arg(long, default_value = "blastx")]
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-146
-    #[arg(long, default_value_t = 10.0, value_parser = ncbi_double)]
+    #[arg(
+        long,
+        default_value_t = 10.0,
+        value_parser = ncbi_double,
+        help = "Expectation value (E) threshold for saving hits [default: 10]"
+    )]
     pub evalue: f64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-167
     #[arg(long, value_parser = ncbi_integer, help = "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]")]

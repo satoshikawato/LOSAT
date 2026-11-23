@@ -90,20 +90,13 @@ fn describe_program(program: Program) -> Result<String, String> {
             &arg.get_help().map(ToString::to_string).unwrap_or_default(),
         );
         let _ = write!(out, ",\"takes_value\":{}", arg.get_action().takes_values());
-        let defaults: Vec<String> = arg
-            .get_default_values()
-            .iter()
-            .map(|value| value.to_string_lossy().into_owned())
-            .collect();
-        if !defaults.is_empty() {
+        // The default and the values that NCBI's argument reader allows (the engine's argument
+        // tables, line RG DECISIONS K4i-2b-1): none for a flag.
+        if let Some(default) = losat::web_adapter::default_value(program.name(), long) {
             out.push_str(",\"default\":");
-            json::string(&mut out, &defaults.join(" "));
+            json::string(&mut out, default);
         }
-        let choices: Vec<String> = arg
-            .get_possible_values()
-            .iter()
-            .map(|value| value.get_name().to_string())
-            .collect();
+        let choices = losat::web_adapter::choices(program.name(), long).unwrap_or_default();
         if !choices.is_empty() {
             out.push_str(",\"choices\":[");
             for (index, choice) in choices.iter().enumerate() {

@@ -16,7 +16,7 @@ use crate::blastinput::value_parsers::*;
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` is refused by the parser (its rows of `ncbi_app::args::refusal`).
+// `-phi_pattern` is refused by name after the reader (its rows of `ncbi_app::args::refusal`).
 // The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -32,8 +32,7 @@ pub struct PsiblastArgs {
     #[arg(long, value_parser = ncbi_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // The exclusion is an error of the argument parser: LOSAT's parser reports it with its own
-    // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+    // NCBI's argument reader reports the exclusion (`cli::reader`).
     #[arg(
         long,
         value_name = "NAME",
@@ -248,10 +247,9 @@ pub struct PsiblastArgs {
     )]
     pub save_each_pssm: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1231-1247
-    // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
-    // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
-    // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by the parser
-    // (its rows of `ncbi_app::args::refusal`).
+    // NCBI's argument reader reports the exclusions (`cli::reader`). The file is opened and read with
+    // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by name after the reader (its rows of
+    // `ncbi_app::args::refusal`).
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",
@@ -261,10 +259,8 @@ pub struct PsiblastArgs {
     pub in_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
     // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
-    // refused by name (its rows of `ncbi_app::args::refusal`) before any exclusion is looked at. The
-    // exclusions and requirements are errors of the argument parser, which LOSAT's parser reports
-    // with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is read with
-    // the options (`algorithm::psiblast::in_msa`).
+    // refused by name (its rows of `ncbi_app::args::refusal`) after NCBI's argument reader, which reports the
+    // exclusions and requirements (`cli::reader`). The file is read with the options (`algorithm::psiblast::in_msa`).
     #[arg(
         long = "in_msa",
         value_name = "align_restart",

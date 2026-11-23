@@ -170,9 +170,8 @@ pub struct BlastpArgs {
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
-    // is an error of the argument parser: LOSAT's parser reports it with its own text
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
+    // exclusion (`cli::reader`).
     #[arg(
         long,
         value_name = "NAME",

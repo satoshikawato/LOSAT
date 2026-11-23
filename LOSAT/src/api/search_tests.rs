@@ -354,7 +354,7 @@ fn psiblast_rounds_are_accepted_by_validate_and_every_search() {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-// (cited at `blastinput::value_parsers::blastn_output_path`)
+// (cited at `ncbi_app::constraint::Constraint::MaxFileNameLength`)
 /// `run_to_file`'s file is the parser's `-out` (`Search::writing_to`): any name, one that looks
 /// like a toolkit word (`-dryrun`, `--`) or is not UTF-8 among them, is the file and leaves the
 /// argv as it is; a name of 256 bytes or more is NCBI's error.

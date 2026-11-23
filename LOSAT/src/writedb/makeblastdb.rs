@@ -112,8 +112,7 @@ pub struct MakedbArgs {
     pub oid_masks: Option<i32>,
     /// Copy the sequences of -input_type blastdb in a random order, seeded by the clock's second
     // NCBI's argument is hidden (`fHidden`, makeblastdb.cpp:253-254): its help lists it with
-    // `-help-full` only. LOSAT's help (its own texts, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-    // exception 1) lists it in neither.
+    // `-help-full` only. LOSAT's help is NCBI's text (`cli::reader`): `-help-full` lists it, `-help` does not.
     #[arg(long, hide = true)]
     pub randomize: bool,
 }

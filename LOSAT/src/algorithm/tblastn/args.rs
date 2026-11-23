@@ -32,10 +32,8 @@ pub struct TblastnArgs {
     #[arg(long, value_parser = ncbi_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
-    // is an error of the argument parser: LOSAT's parser reports it with its own text
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The database is searched by
-    // `tblastn/database.rs`.
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
+    // exclusion (`cli::reader`). The database is searched by `tblastn/database.rs`.
     #[arg(
         long,
         value_name = "NAME",
@@ -211,11 +209,9 @@ pub struct TblastnArgs {
     #[arg(long)]
     pub ungapped: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1133-1143,1241-1247
-    // PSI-TBLASTN (line PS, item PS7, DECISIONS 35): the query is a PSSM. The exclusions are
-    // errors of the argument parser, reported with LOSAT's text
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1; `-remote` is refused by the parser,
-    // `cli.rs`). The file is read with the options (`check_options`, `in_pssm.rs`); the default
-    // `-query -` is not read.
+    // PSI-TBLASTN (line PS, item PS7, DECISIONS 35): the query is a PSSM. NCBI's argument reader reports the exclusions
+    // (`cli::reader`; `-remote` is refused by name after it). The file is read with the options (`check_options`,
+    // `in_pssm.rs`); the default `-query -` is not read.
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",

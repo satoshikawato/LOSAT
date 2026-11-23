@@ -23,10 +23,8 @@ pub struct TblastxArgs {
     #[arg(long, value_parser = ncbi_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
-    // is an error of the argument parser: LOSAT's parser reports it with its own text
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The database is searched by
-    // `tblastx/database.rs`.
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
+    // exclusion (`cli::reader`). The database is searched by `tblastx/database.rs`.
     #[arg(
         long,
         value_name = "NAME",
@@ -66,7 +64,12 @@ pub struct TblastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
     #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
-    #[arg(long, default_value_t = 10.0, value_parser = ncbi_double)]
+    #[arg(
+        long,
+        default_value_t = 10.0,
+        value_parser = ncbi_double,
+        help = "Expectation value (E) threshold for saving hits [default: 10]"
+    )]
     pub evalue: f64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
     // (Int4) value and the report prints the double. Omitted, the matrix's suggestion

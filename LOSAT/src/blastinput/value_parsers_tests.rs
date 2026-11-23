@@ -106,8 +106,7 @@ fn integer_arguments_name_what_failed() {
 }
 
 // `CArgAllowGeneticCodeInteger::Verify` (`NStr::StringToInt` of `value`, blast_args.cpp:998-1007):
-// LOSAT says "invalid" for what is not a number of 0 to 255 written without a minus sign and
-// "unsupported" for a number of that range that is not one of NCBI's codes.
+// the number of a code of 0 to 255 written without a minus sign.
 #[test]
 fn genetic_codes_are_read_as_ncbi_reads_them() {
     for (value, expected) in [("1", 1), ("+5", 5), ("005", 5), ("33", 33), ("255", 255)] {
@@ -126,21 +125,6 @@ fn genetic_codes_are_read_as_ncbi_reads_them() {
         "0x5",
     ] {
         assert_eq!(genetic_code_number(value), None, "{value:?}");
-        assert_eq!(
-            genetic_code(value),
-            Err("invalid genetic code".to_string()),
-            "{value:?}"
-        );
-    }
-    for value in ["0", "7", "8", "17", "32", "34", "255"] {
-        assert_eq!(
-            genetic_code(value),
-            Err("unsupported genetic code".to_string()),
-            "{value}"
-        );
-    }
-    for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
-        assert_eq!(genetic_code(value), Ok(expected), "{value}");
     }
 }
 
@@ -218,12 +202,24 @@ fn reals_are_read_as_ncbis_carg_double() {
 // NCBI 2.17.0: `-threshold`'s constraint reads the value with the default flags (`blastp
 // -threshold 1e` and `12345678901234567890e`: "Illegal value, expected >=0", exit 1; `0x10`
 // searches), `-perc_identity`'s with `fDecimalPosixOrLocal` (`1e` and `0x10` search, `0x1p7`
-// is illegal).
+// is illegal): NCBI's argument reader checks them (`cli::reader`), the conversion reads the number.
 #[test]
 fn each_constraint_reads_the_value_with_its_own_conversion() {
-    assert_eq!(blastp_threshold("0x10"), Ok(16.0));
-    assert_eq!(blastp_threshold("11"), Ok(11.0));
-    assert!(blastp_threshold("1e400").unwrap().is_infinite());
+    let read = |program: &str, name: &str, value: &str| {
+        let argv = [
+            "losat", program, "-query", "q", "-subject", "s", name, value,
+        ];
+        crate::cli::try_parse_from(argv)
+    };
+    let illegal = |program: &str, name: &str, value: &str| match read(program, name, value) {
+        Err(crate::cli::ArgvError::Report(stderr)) => {
+            String::from_utf8_lossy(&stderr).contains("Illegal value")
+        }
+        _ => false,
+    };
+    for value in ["0x10", "11", "1e400"] {
+        assert!(read("blastp", "-threshold", value).is_ok(), "{value}");
+    }
     for value in [
         "1e",
         "2.5E",
@@ -233,21 +229,16 @@ fn each_constraint_reads_the_value_with_its_own_conversion() {
         "-1",
         "-0x1",
     ] {
-        assert_eq!(
-            blastp_threshold(value),
-            Err("Illegal value, expected greater or equal to 0".into()),
-            "{value}"
-        );
+        assert!(illegal("blastp", "-threshold", value), "{value}");
     }
-    assert_eq!(blastp_threshold("1x"), Err("expected a number".into()));
-    assert_eq!(blastn_percentage("1e"), Ok(1.0));
-    assert_eq!(blastn_percentage("0x10"), Ok(16.0));
-    assert_eq!(blastp_query_coverage("99.5E"), Ok(99.5));
+    assert!(!illegal("blastp", "-threshold", "1x"));
+    assert!(read("blastp", "-threshold", "1x").is_err());
+    assert_eq!(ncbi_double("0x10"), Ok(16.0));
+    for value in ["1e", "0x10"] {
+        assert!(read("blastn", "-perc_identity", value).is_ok(), "{value}");
+    }
+    assert!(read("blastp", "-qcov_hsp_perc", "99.5E").is_ok());
     for value in ["0x1p7", "1e400", "-nan", "-0.5e"] {
-        assert_eq!(
-            blastn_percentage(value),
-            Err("expected a percentage in 0..=100".into()),
-            "{value}"
-        );
+        assert!(illegal("blastn", "-perc_identity", value), "{value}");
     }
 }

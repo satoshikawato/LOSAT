@@ -98,7 +98,7 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (cited at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `ncbi_app::constraint::Constraint::MaxFileNameLength`)
     /// The search of `run_to_file`, whose `-out` is `path`: the parser checks it as the command
     /// line's `-out` (a file name of 256 bytes or more is NCBI's `Illegal value`, dry run or not),
     /// and the arguments carry it to the search, which makes the file where the command line makes

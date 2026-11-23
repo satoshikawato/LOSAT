@@ -27,9 +27,8 @@ use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2257-2299
 // The exclusions of the four lists with one another, with `-subject` and (on the
-// programs' `-subject_loc`) with `-subject_loc` are clap's: LOSAT's parser reports them with
-// its own text and exit status 2 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, as `-db` with
-// `-subject`; NCBI: usage, `Incompatible with argument`, exit 1).
+// programs' `-subject_loc`) with `-subject_loc` are NCBI's argument reader's (`cli::reader`:
+// its usage, `Incompatible with argument`, exit status 1).
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2245-2259
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2283-2289
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2318

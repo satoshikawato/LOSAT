@@ -15,15 +15,21 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastRedoAlignParams, BlastRedoOneMatchResult,
 };
 // The match body, its memory and its two ends are core's, one owner for BLASTP's and TBLASTN's
-// redo (`core::composition_adjustment::smith_waterman_match`).
-pub(crate) use crate::core::composition_adjustment::smith_waterman_match::SwMatchScratch;
+// redo (`core::composition_adjustment::smith_waterman_match`), as are the answers of its heap test
+// and the state from which a match whose test was left open resumes.
+pub(crate) use crate::core::composition_adjustment::smith_waterman_match::{
+    SwHeapAnswer, SwMatchResume, SwMatchScratch,
+};
 
 /// `Blast_RedoOneMatchSmithWaterman` with a square matrix for the protein windows of BLASTP
 /// (`s_WindowsFromProteinAligns`): core's match body
 /// (`smith_waterman_match::redo_one_match_smith_waterman`) with BLASTP's scaled block (`lambda`,
 /// `params.log_k`, `kbp_gap[0]` of the redo's copy) and BLASTP's heaps. BLASTP's options refuse
 /// `-comp_based_stats 0` with `-use_sw_tback` (item X4), so no window runs without an adjustment
-/// here (`unadjusted` is `None`).
+/// here (`unadjusted` is `None`). Through core's entry that can resume
+/// (`redo_one_match_smith_waterman_from`): `would_insert` answers `SwHeapAnswer` (the one-thread
+/// loop always `Known`; the parallel redo's jobs leave a test open with `Deferred`, which keeps the
+/// test's state in `kept`), and `resume` is such a state, from which the call finishes the match.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3613
 #[allow(clippy::too_many_arguments)]
@@ -37,10 +43,12 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
     composition_workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
     cutoff_e: f64,
-    would_insert: &mut dyn FnMut(usize, f64, i32) -> bool,
+    resume: Option<&SwMatchResume>,
+    would_insert: &mut dyn FnMut(usize, f64, i32) -> SwHeapAnswer,
+    kept: &mut Option<Box<SwMatchResume>>,
     scratch: &mut SwMatchScratch,
 ) -> Result<BlastRedoOneMatchResult> {
-    crate::core::composition_adjustment::smith_waterman_match::redo_one_match_smith_waterman(
+    crate::core::composition_adjustment::smith_waterman_match::redo_one_match_smith_waterman_from(
         incoming_aligns,
         params,
         lambda,
@@ -52,7 +60,9 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         matrix_state,
         None,
         cutoff_e,
+        resume,
         &mut |query_index, evalue, score| Ok(would_insert(query_index, evalue, score)),
+        kept,
         scratch,
     )
 }

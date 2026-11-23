@@ -897,6 +897,11 @@ fn add_to_database(
                     "binary definition lines (a user object ASN1_BlastDefLine) that LOSAT's \
                      reader of database headers does not read ({reason})"
                 )),
+                BioseqDeflinesError::NullDescriptor => RunError::Refused(
+                    "a query descriptor stated as NULL (an empty element of Seq-descr), which \
+                     NCBI's makeprofiledb dereferences where it makes the definition lines"
+                        .to_string(),
+                ),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
             if !extracted.binary {

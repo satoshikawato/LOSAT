@@ -191,7 +191,7 @@ fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
         &request(true, false),
     ))
     .unwrap();
-    let (asn, _, _) = input.files(&request(true, false)).unwrap();
+    let asn = input.files(&request(true, false)).unwrap().asn;
     let asn = String::from_utf8(asn.unwrap()).unwrap();
     assert!(
         asn.contains("comment \"x\"")

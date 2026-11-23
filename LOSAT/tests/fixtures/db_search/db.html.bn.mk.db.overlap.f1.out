@@ -1,0 +1,108 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: edge masks 1
+Masked using: 'dust', options: 'edge overlap'
+           5 sequences; 7,360 total letters
+
+
+
+<b>Query=</b> q5
+
+Length=1000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s5 test subject s5                                                    <a href=#BL_ORD_ID:4>1736</a>    0.0  
+
+
+
+Query_1  1     TAACAAGGGTCACTATGGGACCCGGACTTCCAGGCTCTTACGGCACCAGGATCCATCACG  60
+4        101   ...............g............................................  160
+
+Query_1  61    AAAGGGAAAGAGATTGTCGCGCGAACGTCACAGCTGCAGGTGCTCGAATCTAAACTATCT  120
+4        161   <font color="#000000">............................................................</font>  220
+
+Query_1  121   CAGCCAGGGGCTACAGTATGGGATGCGCATGCGTTTAGCTCGAGCGCGGAGCTCATAGAA  180
+4        221   <font color="#000000">..c.........................................................</font>  280
+
+Query_1  181   GCAAGATTTACATCACGAAATAAGAACCGGTAGTTCAACCGGCATGTGAGTGCCGGGGGA  240
+4        281   <font color="#000000">....................</font>........................c............t..  340
+
+Query_1  241   AACGCAGCCAGTGTGGTGGCTCGATAGCACAAAGTGTCTCGCGAGGTGGGGTAAACCTTT  300
+4        341   <font color="#000000">.........t..................................................</font>  400
+
+Query_1  301   AGGGACTACGGCGGTACCCTATGCCATACTATGCCCAAAAACGATTGGGACAATACACCT  360
+4        401   ...................C................C....................A..  460
+
+Query_1  361   ATGTCTGTAATTCACCCAAAGCCCACGAGAGTATAAGGCAGACCTTCTGCGCGCAAAGGC  420
+4        461   ......................G..............................A......  520
+
+Query_1  421   GCTAGCTTTTGCCGAATGGTTGTCTGGTTTTGGGCTCTGTACGAGTTCGTGGTATATTTA  480
+4        521   ............................................................  580
+
+Query_1  481   GGCTCTTTGCATACTTGCATGCTGTTTAACACTTGCGAGCCCGTTCCTTATCTAGACCAC  540
+4        581   .........................G..................................  640
+
+Query_1  541   GAATATATCTACTTAGATTGTCACTGTTGGGATGGTCATTCGATCCTCTTGGATTTGGAG  600
+4        641   ....G................................................A......  700
+
+Query_1  601   CTTCCCAGTCTTAAAATACCTTAGTATAAGCTGGGAGTGCGACCATCGTGCCCAGTCAGG  660
+4        701   .................G....................................T.....  760
+
+Query_1  661   GCTAATTGATGCAGAGGTCGGGGACCGGTACCTTCGCGTTACGGGCCACCCTTTGATGAT  720
+4        761   ............................................................  820
+
+Query_1  721   CGCAGGGGTGCTCGCCGATTCATACGTTGCCTTTGCAAGCCAGCATAGTAATTATAACTA  780
+4        821   .............A...........A..................................  880
+
+Query_1  781   GACACGCGCTTGGTAATGCGGATGCCCATTAACCTTGGGTCGTACAAAATCACAAACTCG  840
+4        881   ............................................................  940
+
+Query_1  841   CGAACCCTCGAGCCTCCAGTTGGGCCTGCCTTGTGTTAGCCCAGGGCCTGGTATTGTGTC  900
+4        941   ...........C.............................G..................  1000
+
+Query_1  901   GTTTCGCTGTTGAGGGACGTTTGGCTCTTCGTATTAAATACTTAATTGACGAAGACGTGA  960
+4        1001  ...............................................T............  1060
+
+Query_1  961   CAGCAGCTGCCACTCCGATGTAGGCGACGATTACTTACGA  1000
+4        1061  ........................................  1100
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 7175725
+
+
+  Database: edge masks 1
+  Masked using: 'dust', options: 'edge overlap'
+    Posted date:  Nov 14, 2026  6:15 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

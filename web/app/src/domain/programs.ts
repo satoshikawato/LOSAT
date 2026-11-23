@@ -404,10 +404,10 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         shownFor: { flag: '-task', values: ['dc-megablast'] },
         // BLAST+ requires the two together; dc-megablast's template is 18, coding.
         together: { '-template_length': '18', '-template_type': 'coding' },
-        // `describe` lists the template values only in its help text.
+        // `describe` lists the template values (NCBI's reader's sets).
         fields: [
-          { flag: '-template_length', label: 'Template length', kind: 'choice', choices: ['16', '18', '21'] },
-          { flag: '-template_type', label: 'Template type', kind: 'choice', choices: ['coding', 'optimal', 'coding_and_optimal'] },
+          { flag: '-template_length', label: 'Template length', kind: 'choice' },
+          { flag: '-template_type', label: 'Template type', kind: 'choice' },
         ],
       },
       {

@@ -32,6 +32,8 @@ pub(super) enum ProfileError {
     /// `CBlastException` with a message of the engine (`CPssmEngineException` too, which derives
     /// from it): exit status 1.
     Blast(String),
+    /// Another `CException` (`CSeqUtilException` of the query's conversion): exit status 255.
+    Exception(crate::ncbi_exception::NcbiException),
 }
 
 impl From<RpsError> for ProfileError {
@@ -158,6 +160,10 @@ fn query_seq_data(pssm_w_parameters: &PssmWithParameters) -> Option<&SeqData> {
 // the database writer converts with (`writedb::convert`): every byte has a code, 255 for one
 // that is no residue (NCBIeaa: other than a capital letter, `*` or `-`; IUPACaa: other than a
 // letter of either case). NCBIstdaa is copied.
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.hpp:50-70
+// `CSeqConvert` has no conversion from a nucleotide coding to NCBIstdaa: data of IUPACna,
+// NCBI2na or NCBI4na is its exception (NCBI BLAST+ 2.17.0: `Unknown conversion.`, exit status
+// 255, row PS10d survey `FA_*`), but empty data returns before the conversion, an empty query.
 /// `GetQuerySequenceData`: the query's NCBIstdaa codes (none without data).
 fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, ProfileError> {
     match query_seq_data(pssm_w_parameters) {
@@ -165,6 +171,13 @@ fn query_ncbistdaa(pssm_w_parameters: &PssmWithParameters) -> Result<Vec<u8>, Pr
         Some(SeqData::Ncbistdaa(codes)) => Ok(codes.clone()),
         Some(SeqData::Ncbieaa(data)) => Ok(convert::ncbieaa_codes(data)),
         Some(SeqData::Iupacaa(data)) => Ok(convert::iupacaa_codes(data)),
+        Some(SeqData::Iupacna(data) | SeqData::Ncbi2na(data) | SeqData::Ncbi4na(data)) => {
+            if data.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(ProfileError::Exception(convert::unknown_conversion()))
+            }
+        }
         Some(SeqData::Other(_)) => Err(ProfileError::Rps(RpsError::Refused(
             "a profile of frequency ratios whose query has data in another coding (NCBI's \
              sequence conversion of it is not followed)"

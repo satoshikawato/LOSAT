@@ -42,6 +42,24 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   of residues (then a crash, an abort, or a database, by the code), which LOSAT refuses. `q_ng.smp`, `q_ngi.smp`:
   a negative frequency ratio (exit status 1), with BLOSUM62 and with IDENTITY 15/2 (NCBI's error comes before
   IDENTITY's missing table is read).
+- Rows `QD01`-`QD39` (row PS10d, run the same way on 2026-11-23 by `psiblast-20261025/PR/ps10d/fix/run_cases.sh`,
+  twice, with no difference; inputs from `PR/ps10d/scripts/make_fixture_inputs.py`, rows added by
+  `PR/ps10d/scripts/freeze_ps10d.py`): a profile's query in a nucleotide coding, which NCBI's writer stores as
+  the sequence's bytes. `d1.smp`, `d2.smp`, `d3.smp` are `c1.smp`-`c3.smp` cut to 6, 5 and 8 columns (without
+  `weightedResFreqsPerPos`), `e1`, `e2` the first two without `finalData` (frequency ratios only); a suffix
+  `_na`, `_n2`, `_n4` writes the query as `iupacna`, `ncbi2na` or `ncbi4na` (bases `ATGGCG`, `GATTA`,
+  `CCGATAGT`). `QD01`-`QD15`: such a query alone, first, in the middle, last, and all three; `QD16`-`QD27`: in a
+  profile with frequency ratios only, alone, in the middle, last, and with `-max_smp_vol 2` (NCBI's `Unknown
+  conversion.`, exit status 255, after the files it writes); `QD28`, `QD29`: data longer than the length
+  (`ib=..,n4sz=..` lines on the standard output, also with `-logfile`); `QD30`-`QD37`: the unused bits of the
+  last byte set, a pad nibble, a letter more for an odd length, iupacna two and three letters short (NCBI reads
+  the string's terminating zero), a length of 1 with empty iupacna (with frequency ratios only: `Query sequence
+  lengths mismatch` after the line), ncbi4na with `N`; `QD38`: `mol na` in the middle of a list (the writer's
+  molecule error first); `QD39`: iupacna with a two-byte UTF-8 letter (the reader's error for each byte, which it
+  stores as `#`). `l_QR01.lst`-`l_QR05.lst` and their inputs (`d1_n2_less1`, `d1_n4_less1`,
+  `d1_na_less4`, `d1_n2_empty`, `e1_na_empty`) are queries shorter than NCBI's writer reads for their length:
+  NCBI's two runs gave different `.psq` bytes for the first two, and SIGSEGV for empty ncbi2na; they have no
+  row, and the test checks LOSAT's refusal of each.
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 690 KB).
+repository (about 1.05 MB).

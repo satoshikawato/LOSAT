@@ -241,6 +241,60 @@ fn makeprofiledb_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
+// `in/l_QR*.lst` (row PS10d): queries in a nucleotide coding with fewer bytes than NCBI's
+// writer reads for their length (NCBI's two runs of QR01 and QR02 wrote different `.psq` bytes,
+// QR04 ended with SIGSEGV; README.md). LOSAT refuses each, whatever the profile: QR05 has
+// frequency ratios only, where NCBI also stops with its error of the query's length.
+#[test]
+fn makeprofiledb_refuses_nucleotide_data_shorter_than_its_length() {
+    for (list, what) in [
+        (
+            "QR01",
+            "1 byte of ncbi2na data for a length of 6 (NCBI's makeprofiledb reads 2 bytes",
+        ),
+        (
+            "QR02",
+            "2 bytes of ncbi4na data for a length of 6 (NCBI's makeprofiledb reads 3 bytes",
+        ),
+        (
+            "QR03",
+            "2 letters of iupacna data for a length of 6 (NCBI's makeprofiledb reads 3 bytes of \
+             their ncbi4na form",
+        ),
+        (
+            "QR04",
+            "0 bytes of ncbi2na data for a length of 6 (NCBI's makeprofiledb reads 2 bytes",
+        ),
+        (
+            "QR05",
+            "0 letters of iupacna data for a length of 6 (NCBI's makeprofiledb reads 3 bytes of \
+             their ncbi4na form",
+        ),
+    ] {
+        let dir = scratch(list);
+        let words = words(&format!("-in in/l_{list}.lst -out db"));
+        let (out, err, status, _) = run(&dir, &words);
+        assert_eq!(
+            (
+                String::from_utf8_lossy(&out),
+                String::from_utf8_lossy(&err),
+                status
+            ),
+            (
+                "".into(),
+                format!(
+                    "Error: a profile whose query has {what} there, past the data) is not \
+                     supported by LOSAT's MAKEPROFILEDB\n"
+                )
+                .into(),
+                1
+            ),
+            "{list}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
 /// `text` with the date of each `Posted date:` line (outfmt 0's database footer: the build date
 /// that makeprofiledb wrote into the `.pin` file) replaced by `<DATE>`.
 fn posted_date_masked(text: &str) -> String {

@@ -83,3 +83,30 @@ fn a_code_past_the_residues_is_refused_where_the_engine_counts_it() {
     assert_eq!(refusal("seq-data iupacaa \"kd\"", "BLOSUM62"), None);
     assert_eq!(refusal("seq-data ncbistdaa '0A1B'H", "BLOSUM62"), None);
 }
+
+// NCBI makeprofiledb 2.17.0 (row PS10d survey §2, 2026-11-23): the query of a profile with
+// frequency ratios only in a nucleotide coding stops the build with `CSeqConvert`'s exception
+// (`Error: ERROR: Unknown conversion.`, exit status 255) in each coding; empty data is an empty
+// query, whose length NCBI then finds wrong.
+#[test]
+fn a_nucleotide_query_is_ncbis_unknown_conversion() {
+    for data in [
+        "seq-data iupacna \"ACGTACGTACGT\"",
+        "seq-data ncbi2na '1B1B1B'H",
+        "seq-data ncbi4na '124812481248'H",
+    ] {
+        match query_ncbistdaa(&profile(data)) {
+            Err(ProfileError::Exception(exception)) => {
+                assert_eq!(exception.get_msg(), b"Unknown conversion.", "{data}")
+            }
+            other => panic!("{data}: {other:?}"),
+        }
+    }
+    for data in [
+        "seq-data iupacna \"\"",
+        "seq-data ncbi2na ''H",
+        "seq-data ncbi4na ''H",
+    ] {
+        assert_eq!(query_ncbistdaa(&profile(data)).unwrap(), [0u8; 0], "{data}");
+    }
+}

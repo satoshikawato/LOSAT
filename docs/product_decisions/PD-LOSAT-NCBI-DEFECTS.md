@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.79
+- Version: 1.80
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -394,7 +394,12 @@
   item PS10c: NCBI's conversion gives every byte of the query a code, 255 for one that is no residue, so a
   lower-case IUPACaa query is built as NCBI builds it, and only a code past the 28 residues is refused,
   where NCBI's engine counts it, after the errors of the lengths and the matrix that NCBI gives first;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.80 2026-11-23 (the rule-3 rejection of `losat makeprofiledb` of a query in a nucleotide coding
+  whose data is shorter than NCBI's writer reads for its length, psiblast line item PS10d: a query
+  in `iupacna`, `ncbi2na` or `ncbi4na` of enough bytes is built as NCBI builds it, with NCBI's
+  `Unknown conversion.` error in a profile with frequency ratios only; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.79)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2710,6 +2715,18 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     32, with or without a later error such as a negative frequency ratio). A query of the wrong
     length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
     QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
+    1.80, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
+    `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than
+    `ceil(length / 2)` bytes (four letters or more short of an even length, three of an odd one).
+    NCBI's `x_CookSequence` converts the kept sequence when it is published
+    (`writedb_convert.cpp:444-528,569-610`; at the next query, at the close, or at the close after an
+    error, `writedb_impl.cpp:100-108,158-180,324-331`), and its checks of the size are debug-only: it
+    reads past the data (fixture inputs `l_QR01.lst`-`l_QR05.lst`: `.psq` bytes that differ between
+    two runs, SIGSEGV for empty `ncbi2na`). The data of
+    enough bytes (more than the length needs, unused bits set, iupacna up to three letters short of an
+    even length and two of an odd one, whose read ends at the string's zero or before it) is NCBI's
+    (fixture rows QD01-QD39).
   - A profile with frequency ratios only whose matrix has no frequency ratios, or whose query has no
     ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
   - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends

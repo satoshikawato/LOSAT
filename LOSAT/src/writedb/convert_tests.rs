@@ -4,6 +4,7 @@ fn iupacna(letters: &[u8]) -> BinarySequence {
     seq_data_to_binary(
         &SeqData::Ncbi4na(iupacna_to_ncbi4na(letters)),
         letters.len() as u32,
+        &mut Vec::new(),
     )
     .unwrap()
 }
@@ -91,7 +92,8 @@ fn ncbi2na_has_no_ambiguity_data() {
         (&[0x8d, 0x8d, 0x80], 9, "8d8d81"),
     ];
     for (packed, length, seq) in cases {
-        let b = seq_data_to_binary(&SeqData::Ncbi2na(packed.to_vec()), length).unwrap();
+        let b = seq_data_to_binary(&SeqData::Ncbi2na(packed.to_vec()), length, &mut Vec::new())
+            .unwrap();
         assert_eq!(hex(&b.seq), seq);
         assert!(b.ambig.is_empty());
         assert_eq!(find_sequence_length(false, &b.seq), length);
@@ -117,11 +119,12 @@ fn runs_use_the_old_format_up_to_15_and_split_at_4095() {
 
 #[test]
 fn protein_letters_become_ncbistdaa() {
-    let b = seq_data_to_binary(&SeqData::Ncbieaa(b"MK*V-L*".to_vec()), 7).unwrap();
+    let b = seq_data_to_binary(&SeqData::Ncbieaa(b"MK*V-L*".to_vec()), 7, &mut Vec::new()).unwrap();
     assert_eq!(hex(&b.seq), "0c0a1913000b19");
     let b = seq_data_to_binary(
         &SeqData::Ncbieaa(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_vec()),
         26,
+        &mut Vec::new(),
     )
     .unwrap();
     assert_eq!(
@@ -134,7 +137,7 @@ fn protein_letters_become_ncbistdaa() {
 #[test]
 fn other_seq_data_is_not_processable() {
     assert_eq!(
-        seq_data_to_binary(&SeqData::Other, 10),
+        seq_data_to_binary(&SeqData::Other, 10, &mut Vec::new()),
         Err(UnprocessableSequence)
     );
 }
@@ -151,7 +154,9 @@ fn sequence_hashes_are_makeblastdb_s() {
         let data = SeqData::Ncbieaa(letters.to_vec());
         assert_eq!(sequence_hash(&data, letters.len() as u64), Some(expected));
         // The hash runs over the ncbistdaa codes of the sequence file.
-        let stdaa = seq_data_to_binary(&data, letters.len() as u32).unwrap().seq;
+        let stdaa = seq_data_to_binary(&data, letters.len() as u32, &mut Vec::new())
+            .unwrap()
+            .seq;
         let over_codes = stdaa.iter().fold(0u32, |h, &code| {
             h.wrapping_mul(1_103_515_245)
                 .wrapping_add(u32::from(code).wrapping_add(12345))
@@ -195,4 +200,260 @@ fn a_raw_nucleotide_of_no_base_hashes_before_its_ambiguities() {
         raw_sequence_hash(false, &[0x1b, 0x12], &[]).ok(),
         sequence_hash(&na2, 6)
     );
+}
+
+fn unhex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+/// The sequence bytes and the standard output of `x_CookSequence` of `data` and `length`.
+fn cooked(data: SeqData, length: u32) -> (String, String) {
+    let mut cout = Vec::new();
+    let binary = seq_data_to_binary(&data, length, &mut cout).unwrap();
+    (hex(&binary.seq), String::from_utf8(cout).unwrap())
+}
+
+// NCBI makeprofiledb 2.17.0 on profiles whose query is in a nucleotide coding (row PS10d survey
+// `PR/ps10d/probe`, 2026-11-23, two runs equal, valgrind clean): the sequence bytes that it
+// wrote into the protein volume's `.psq` (each sequence ends at the next NUL there) and its
+// standard output, for the cases of the survey's §4 (`SA_*`, `VC_*`, `L*_*`). The query's bases
+// are `ATGGCGTACCTGAAGTTCGACA` (22) and their first 21 or fewer.
+#[test]
+fn nucleotide_codings_give_ncbis_sequence_bytes_and_lines() {
+    let iupacna = |letters: &str| SeqData::Iupacna(letters.as_bytes().to_vec());
+    let na2 = |data: &str| SeqData::Ncbi2na(unhex(data));
+    let na4 = |data: &str| SeqData::Ncbi4na(unhex(data));
+    let c1 = "ATGGCGTACCTGAAGTTCGACA";
+    let cases: Vec<(&str, SeqData, u32, &str, &str)> = vec![
+        ("SA_na", iupacna(c1), 22, "3a6c5e0bd842", ""),
+        ("SA_n2", na2("3A6C5E0BD840"), 22, "3a6c5e0bd842", ""),
+        (
+            "SA_n4",
+            na4("1844248122841148824121"),
+            22,
+            "3a6c5e0bd842",
+            "",
+        ),
+        // ncbi2na: bytes past the length's are not read; the last byte's unused bits stay.
+        (
+            "VC_n2_more2",
+            na2("3A6C5E0BD8400000"),
+            22,
+            "3a6c5e0bd842",
+            "",
+        ),
+        ("VC_n2_pad", na2("3A6C5E0BD84F"), 22, "3a6c5e0bd84e", ""),
+        ("L21_n2_pad", na2("3A6C5E0BD87F"), 21, "3a6c5e0bd87d", ""),
+        // ncbi4na: another byte count is a line; ambiguity codes and gaps are random bases (NCBI's
+        // generator seeded with the length); a pad nibble that is a base beside a base leaks its
+        // 2 bits.
+        (
+            "VC_n4_more1",
+            na4("184424812284114882412111"),
+            22,
+            "3a6c5e0bd842",
+            "ib=11,n4sz=12\n",
+        ),
+        (
+            "VC_n4_more2",
+            na4("18442481228411488241211111"),
+            22,
+            "3a6c5e0bd842",
+            "ib=11,n4sz=13\n",
+        ),
+        (
+            "VC_n4_N",
+            na4("184F24812FF4114882412F"),
+            22,
+            "386c6e0bd842",
+            "",
+        ),
+        (
+            "VC_n4_RY",
+            na4("184524A12284114552412A"),
+            22,
+            "38645e0a1852",
+            "",
+        ),
+        (
+            "VC_n4_gap",
+            na4("0844240122841140024120"),
+            22,
+            "3a685e0b1842",
+            "",
+        ),
+        (
+            "VC_n4_allN",
+            na4("FFFFFFFFFFFFFFFFFFFFFF"),
+            22,
+            "2c00c584c512",
+            "",
+        ),
+        (
+            "VC_n4_codes",
+            na4("0123456789ABCDEF102030"),
+            22,
+            "04a4c5cd2442",
+            "",
+        ),
+        (
+            "L21_n4",
+            na4("1844248122841148824120"),
+            21,
+            "3a6c5e0bd841",
+            "",
+        ),
+        (
+            "L21_n4_padA",
+            na4("1844248122841148824121"),
+            21,
+            "3a6c5e0bd841",
+            "",
+        ),
+        (
+            "L21_n4_padN",
+            na4("184424812284114882412F"),
+            21,
+            "3a6c5e0bd841",
+            "",
+        ),
+        (
+            "L21_n4_padT",
+            na4("1844248122841148824128"),
+            21,
+            "3a6c5e0bd871",
+            "",
+        ),
+        // iupacna: every letter converts (either case, U as T, any other byte N); the line
+        // compares the NCBI4na bytes of the letters with the length's; one byte short reads the
+        // string's terminating zero (N N).
+        (
+            "VC_na_lower",
+            iupacna("atggcgtacctgaagttcgaca"),
+            22,
+            "3a6c5e0bd842",
+            "",
+        ),
+        (
+            "VC_na_U",
+            iupacna("AUGGCGUACCUGAAGuuCGACA"),
+            22,
+            "3a6c5e0bd842",
+            "",
+        ),
+        (
+            "VC_na_amb",
+            iupacna("ANRYKMSWBDHVNACGTACGTA"),
+            22,
+            "0384a246c6c2",
+            "",
+        ),
+        (
+            "VC_na_bad",
+            iupacna("A*C0G9T-AXCZG.T AE#IQJ"),
+            22,
+            "06bc048c3162",
+            "",
+        ),
+        (
+            "VC_na_more1",
+            iupacna("ATGGCGTACCTGAAGTTCGACAG"),
+            22,
+            "3a6c5e0bd842",
+            "ib=11,n4sz=12\n",
+        ),
+        (
+            "L21_na_more1T",
+            iupacna("ATGGCGTACCTGAAGTTCGACT"),
+            21,
+            "3a6c5e0bd871",
+            "",
+        ),
+        ("L21_na_more1A", iupacna(c1), 21, "3a6c5e0bd841", ""),
+        ("VC_na_less1", iupacna(&c1[..21]), 22, "3a6c5e0bd842", ""),
+        (
+            "VC_na_less2",
+            iupacna(&c1[..20]),
+            22,
+            "3a6c5e0bd822",
+            "ib=11,n4sz=10\n",
+        ),
+        (
+            "VC_na_less3",
+            iupacna(&c1[..19]),
+            22,
+            "3a6c5e0bd8b2",
+            "ib=11,n4sz=10\n",
+        ),
+        ("L1_naE", iupacna(""), 1, "81", "ib=1,n4sz=0\n"),
+        ("L2_naE", iupacna(""), 2, "82", "ib=1,n4sz=0\n"),
+        ("L1_na", iupacna("A"), 1, "01", ""),
+        ("L2_na", iupacna("AT"), 2, "32", ""),
+        ("L3_na", iupacna("ATG"), 3, "3b", ""),
+        ("L1_n2", na2("00"), 1, "01", ""),
+        ("L1_n4", na4("10"), 1, "01", ""),
+        ("L4_n2", na2("3A"), 4, "3a00", ""),
+        ("L5_n4", na4("184420"), 5, "3a41", ""),
+    ];
+    for (case, data, length, seq, line) in cases {
+        assert_eq!(
+            cooked(data, length),
+            (seq.to_string(), line.to_string()),
+            "{case}"
+        );
+    }
+}
+
+// NCBI makeprofiledb 2.17.0 reads past the data from these sizes on (row PS10d survey §6: valgrind,
+// SIGSEGV for no bytes, bytes that change between runs); each boundary of the three codings.
+#[test]
+fn short_nucleotide_data_is_found_at_each_boundary() {
+    let short = |data: SeqData, length: u32| {
+        short_nucleotide_data(&data, length).map(|short| (short.coding, short.held, short.read))
+    };
+    let bytes = |n: usize| vec![0x1b; n];
+    // ncbi2na: ceil(length / 4) bytes.
+    for (length, need) in [(1, 1), (4, 1), (5, 2), (21, 6), (22, 6), (24, 6), (66, 17)] {
+        assert_eq!(short(SeqData::Ncbi2na(bytes(need)), length), None);
+        assert_eq!(short(SeqData::Ncbi2na(bytes(need + 1)), length), None);
+        assert_eq!(
+            short(SeqData::Ncbi2na(bytes(need - 1)), length),
+            Some(("ncbi2na", need - 1, need)),
+            "ncbi2na {length}"
+        );
+    }
+    assert_eq!(
+        short(SeqData::Ncbi2na(Vec::new()), 22),
+        Some(("ncbi2na", 0, 6))
+    );
+    // ncbi4na: ceil(length / 2) bytes.
+    for (length, need) in [(1, 1), (2, 1), (3, 2), (21, 11), (22, 11), (66, 33)] {
+        assert_eq!(short(SeqData::Ncbi4na(bytes(need)), length), None);
+        assert_eq!(
+            short(SeqData::Ncbi4na(bytes(need - 1)), length),
+            Some(("ncbi4na", need - 1, need)),
+            "ncbi4na {length}"
+        );
+    }
+    // iupacna: the NCBI4na bytes of its letters and the terminating zero.
+    let letters = |n: usize| SeqData::Iupacna(vec![b'A'; n]);
+    for (length, fewest) in [(1, 0), (2, 0), (3, 1), (4, 1), (21, 19), (22, 19), (66, 63)] {
+        assert_eq!(short(letters(fewest), length), None, "iupacna {length}");
+        if fewest > 0 {
+            let read = length.div_ceil(2) as usize;
+            assert_eq!(
+                short(letters(fewest - 1), length),
+                Some(("iupacna", fewest - 1, read)),
+                "iupacna {length}"
+            );
+        }
+    }
+    assert_eq!(short(letters(0), 3), Some(("iupacna", 0, 2)));
+    assert_eq!(short(letters(0), 22), Some(("iupacna", 0, 11)));
+    // The protein codings and the others are not converted so.
+    assert_eq!(short(SeqData::Ncbieaa(Vec::new()), 22), None);
+    assert_eq!(short(SeqData::Other, 22), None);
 }

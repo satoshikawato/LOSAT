@@ -408,7 +408,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | :--- | :--- |
 | `-binary` | Refused (PSSM files in ASN.1 binary are not read yet). |
 | `-dbtype delta`, `-dbtype cobalt` | Refused. |
-| In a profile with frequency ratios only, a query in a nucleotide coding (`iupacna`, `ncbi2na`, `ncbi4na`) | Refused for now. NCBI's `makeprofiledb` writes the database files and then stops with its conversion error. |
+| A query in a nucleotide coding with fewer bytes than its length needs: `ncbi2na` of fewer than a byte per 4 bases, `ncbi4na` of fewer than a byte per 2 bases, `iupacna` four letters or more short of an even length (three of an odd one) | Refused. NCBI's `makeprofiledb` reads past the query's data (its database then depends on memory outside the data, or it crashes). A query of enough bytes is built as NCBI builds it, and with frequency ratios only stops with NCBI's conversion error. |
 | `-max_smp_vol 0` | Refused. NCBI's `makeprofiledb` crashes (division by zero). |
 | `-in` naming a directory | Refused. NCBI's `makeprofiledb` never ends. |
 | A profile stored by row (`byRow TRUE`) with more than 28 positions | Refused. NCBI's `makeprofiledb` reads its frequency ratios from outside its data. |

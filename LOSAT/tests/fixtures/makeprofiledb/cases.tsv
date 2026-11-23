@@ -71,3 +71,42 @@ QC04	-in in/l_q_ms30.lst -out db
 QC05	-in in/l_q_xp.lst -out db
 QC06	-in in/l_q_ng.lst -out db
 QC07	-in in/l_q_ngi.lst -out db
+QD01	-in in/l_QD01.lst -out db
+QD02	-in in/l_QD02.lst -out db
+QD03	-in in/l_QD03.lst -out db
+QD04	-in in/l_QD04.lst -out db
+QD05	-in in/l_QD05.lst -out db
+QD06	-in in/l_QD06.lst -out db
+QD07	-in in/l_QD07.lst -out db
+QD08	-in in/l_QD08.lst -out db
+QD09	-in in/l_QD09.lst -out db
+QD10	-in in/l_QD10.lst -out db
+QD11	-in in/l_QD11.lst -out db
+QD12	-in in/l_QD12.lst -out db
+QD13	-in in/l_QD13.lst -out db
+QD14	-in in/l_QD14.lst -out db
+QD15	-in in/l_QD15.lst -out db
+QD16	-in in/l_QD16.lst -out db
+QD17	-in in/l_QD17.lst -out db
+QD18	-in in/l_QD18.lst -out db
+QD19	-in in/l_QD19.lst -out db
+QD20	-in in/l_QD20.lst -out db
+QD21	-in in/l_QD21.lst -out db
+QD22	-in in/l_QD22.lst -out db
+QD23	-in in/l_QD23.lst -out db
+QD24	-in in/l_QD24.lst -out db
+QD25	-max_smp_vol 2 -in in/l_QD25.lst -out db
+QD26	-max_smp_vol 2 -in in/l_QD26.lst -out db
+QD27	-max_smp_vol 2 -in in/l_QD27.lst -out db
+QD28	-in in/l_QD28.lst -out db
+QD29	-logfile mp.log -in in/l_QD29.lst -out db
+QD30	-in in/l_QD30.lst -out db
+QD31	-in in/l_QD31.lst -out db
+QD32	-in in/l_QD32.lst -out db
+QD33	-in in/l_QD33.lst -out db
+QD34	-in in/l_QD34.lst -out db
+QD35	-in in/l_QD35.lst -out db
+QD36	-in in/l_QD36.lst -out db
+QD37	-in in/l_QD37.lst -out db
+QD38	-in in/l_QD38.lst -out db
+QD39	-in in/l_QD39.lst -out db

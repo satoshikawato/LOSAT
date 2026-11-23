@@ -5534,8 +5534,8 @@ fn resolve_for_formats(
         .any(|&number| args.app.list_cut(number) != args.app.list_cut(numbers[0]))
     {
         bail!(
-            "the requested output formats cut the {} hit lists differently (outfmt 11 keeps the search's lists, psiblast's outfmt 5 cuts them before each round's PSSM); LOSAT searches once per run, so request them in separate runs",
-            args.app.ncbi_name()
+            "output formats that cut the hit lists differently in one search (outfmt 11 keeps the search's lists, psiblast's outfmt 5 cuts them before each round's PSSM) are not supported by LOSAT's {}; request them in separate runs",
+            args.app.name()
         );
     }
     let search_options = |resolved: &ResolvedBlastpArgs| {
@@ -10405,8 +10405,14 @@ fn run_call(
     // (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
     // does, `query_anchored::fill_loc_list`). It was the first of `refuse_unreportable`'s refusals
     // and its error still comes first; it is made after them because they read `prep`, which
-    // holds the outputs (line WQA's sweep, D7, 2026-11-19).
+    // holds the outputs (line WQA's sweep, D7, 2026-11-19). A PSSM search's results carry no query
+    // masks (`report::record::carries_query_masks`), so neither arm of the refusal applies to
+    // psiblast: its Sbjct rows show the subject's masks on the subject's rows only
+    // (`SetSubjectMasks`, and only query masks are drawn by id).
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1583-1584
     if args.parse_deflines
+        && crate::report::record::carries_query_masks(args.app.program_type())
         && format_plans.iter().any(|outfmt| {
             matches!(
                 outfmt,
@@ -10414,7 +10420,7 @@ fn run_call(
             )
         })
     {
-        let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
+        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
         crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
             outputs
                 .formats

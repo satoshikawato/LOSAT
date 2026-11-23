@@ -1324,7 +1324,7 @@ fn exclude_fetched(
 ) -> Result<(Vec<FetchExcludedMatch>, XFetchedUtf8)> {
     let mut fetched = XFetchedUtf8::default();
     let excluded = shared::FetchExcluded::of(&database.db);
-    // Without a negative seqid list with ids the fetches exclude nothing: no list is read here.
+    // Without a negative seqid list the fetches exclude nothing: no list is read here.
     if excluded.is_none() {
         return Ok((Vec::new(), fetched));
     }

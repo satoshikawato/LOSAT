@@ -96,7 +96,7 @@ fn run_body(
         Err(reason) => return diag.refuse(&refusal(reason)),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
-    let mut out = match args.output_file("out", out) {
+    let mut out_file = match args.output_file("out", out) {
         Ok(out) => out,
         Err(error) => {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
@@ -106,9 +106,10 @@ fn run_body(
             return 1;
         }
     };
-    // NCBI's `ostream` of `-out` for every mode: a failed write drops the later ones, and a
-    // closed pipe ends the program where SIGPIPE ends NCBI's (`files::Ostream`).
-    let mut out = Ostream::new(&mut out);
+    // NCBI's `ostream` of `-out` for every mode but `-metadata`, which takes `out_file` itself
+    // (`metadata::metadata`): a failed write drops the later ones, and a closed pipe ends the
+    // program where SIGPIPE ends NCBI's (`files::Ostream`).
+    let mut out = Ostream::new(&mut out_file);
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,
         Err(error) => return database_error(diag, error),
@@ -166,7 +167,7 @@ fn run_body(
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, args, &path, diag, &mut out);
+            return metadata::metadata(&db, name, args, &path, diag, out_file);
         }
         if args.given("tax_info") {
             return taxonomy::tax_info(&db, args, diag, &mut out);

@@ -1075,8 +1075,10 @@ pub(crate) fn reported_subjects(
         let title = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(
+                    &database.db,
+                    ordinal,
                     stored.replaced_bytes,
-                    || database.db.oid(ordinal),
+                    shown.titles,
                     PROGRAM,
                 )?;
                 if shown.pairwise {

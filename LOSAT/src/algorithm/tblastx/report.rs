@@ -1367,6 +1367,13 @@ impl TblastxOutputFormat {
         )
     }
 
+    /// Whether the format writes the search's Seq-aligns as they are (outfmt 8, 9, 11 and 12,
+    /// `ReportFormat::writes_seqaligns`), so that NCBI's formatter reads no definition line
+    /// (`common::database::TitleReads`).
+    pub(crate) fn writes_seq_aligns(self) -> bool {
+        matches!(self, Self::Seqalign(_) | Self::Archive)
+    }
+
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
     /// are made from the same records and refuse the same names.
     pub(crate) fn is_structured_xml(self) -> bool {

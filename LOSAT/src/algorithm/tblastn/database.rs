@@ -549,6 +549,9 @@ pub(super) struct CallReads<'a> {
     excluded: Option<shared::FetchExcluded<'a>>,
     notes: BTreeMap<usize, crate::seqdb::Utf8Reads>,
     utf8: shared::CallUtf8,
+    /// NCBI's posts of the titles that each batch's Seq-aligns read, by the batch's first query
+    /// (`shared::seq_align_title_posts`, `take_title_posts`).
+    titled: std::sync::Mutex<Vec<(usize, crate::report::diag_log::Posts)>>,
 }
 
 impl<'a> CallReads<'a> {
@@ -571,7 +574,20 @@ impl<'a> CallReads<'a> {
             excluded,
             notes,
             utf8: shared::CallUtf8::default(),
+            titled: Default::default(),
         }
+    }
+
+    /// NCBI's posts of the titles that the batches' Seq-aligns read (`titles`), each with the
+    /// batch's first query: they follow the batch's request posts and its warning of a UTF8String
+    /// header, before its prefetch (`query_warnings::query_posts`, before the prefetches' posts).
+    pub(super) fn take_title_posts(&self) -> Vec<(usize, crate::report::diag_log::Posts)> {
+        std::mem::take(
+            &mut *self
+                .titled
+                .lock()
+                .expect("the title posts are not poisoned"),
+        )
     }
 
     /// The fetches of the batch of the queries `range` (`stage_d_pipeline::BatchFetches`).
@@ -637,12 +653,26 @@ impl<'a> CallReads<'a> {
         let aligned = drop_unaligned(database, hitlists);
         let earlier = shared::EarlierUtf8::of_batch(range.start, fetched, aligned);
         let read = read_titles(database, hitlists, range.start, earlier, titles);
-        self.utf8.note(
-            range.start,
-            shared::Utf8Read::of_read(&read, Option::as_ref),
-        );
+        let first = shared::Utf8Read::of_read(&read, Option::as_ref);
+        let utf8 = first.is_some();
+        self.utf8.note(range.start, first);
         match read {
-            Ok(_) => Ok(None),
+            Ok(_) => {
+                // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`'
+                // order.
+                let aligned = hitlists
+                    .iter()
+                    .flat_map(KappaResultHitList::lists)
+                    .filter_map(|list| u32::try_from(list.oid).ok());
+                let posts = shared::batch_title_posts(&database.db, aligned, utf8, PROGRAM)?;
+                if !posts.is_empty() {
+                    self.titled
+                        .lock()
+                        .expect("the title posts are not poisoned")
+                        .push((range.start, posts));
+                }
+                Ok(None)
+            }
             Err(error) => match error.downcast::<shared::HeaderReadError>() {
                 Ok(failure) => Ok(Some(failure.error)),
                 Err(error) => Err(error),
@@ -1060,6 +1090,7 @@ fn parsed_shown(
             },
         )) && !crate::algorithm::common::database::prefetch_always_off(),
         one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+        titles: crate::algorithm::common::database::TitleReads::of_outfmts(numbers.iter().copied()),
     }
 }
 
@@ -1237,8 +1268,10 @@ pub(super) fn reported_subjects(
         let title = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(
+                    &database.db,
+                    ordinal,
                     stored.replaced_bytes,
-                    || database.db.oid(ordinal),
+                    shown.titles,
                     PROGRAM,
                 )?;
                 if shown.pairwise {

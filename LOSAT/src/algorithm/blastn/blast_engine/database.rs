@@ -1642,10 +1642,25 @@ impl BlastnDatabase {
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
         let read = read_titles(self, hit_lists, earlier, titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
-        if let Some(warning) = shared::Utf8Read::post_of(first, &self.db, "blastn") {
-            posts.append(&warning);
+        let warning = shared::Utf8Read::post_of(first, &self.db, "blastn");
+        if let Some(warning) = &warning {
+            posts.append(warning);
         }
-        read.map(|_| ())
+        read?;
+        // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+        let aligned = hit_lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .map(|hsp_list| hsp_list.oid)
+        });
+        posts.append(&shared::batch_title_posts(
+            &self.db,
+            aligned,
+            warning.is_some(),
+            PROGRAM,
+        )?);
+        Ok(())
     }
 }
 
@@ -1753,6 +1768,19 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(),
         one_by_one: shared::prefetch_may_be_off(),
+        titles: shared::TitleReads::of(
+            !output_formats.is_empty()
+                && output_formats.iter().all(|format| {
+                    matches!(
+                        format,
+                        BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive
+                    )
+                }),
+            output_formats
+                .first()
+                .is_some_and(|format| format.prefetches_subjects())
+                && !shared::prefetch_always_off(),
+        ),
     }
 }
 
@@ -2205,7 +2233,13 @@ pub(super) fn reported_subjects(
             .with_context(|| format!("database sequence {} has no title read", db.oid(ordinal)))?;
         let (title, subject, source) = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, || db.oid(ordinal), PROGRAM)?;
+                shared::check_reported_title(
+                    db,
+                    ordinal,
+                    stored.replaced_bytes,
+                    shown.titles,
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
                     stored.check_shown_source(|| db.oid(ordinal), PROGRAM)?;
                 }

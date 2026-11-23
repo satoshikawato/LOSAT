@@ -1749,19 +1749,62 @@ impl ListedTitles<'_> {
         }
     }
 
-    /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`)
-    /// whose stored title holds a byte outside ' ' ..= '~'
-    /// (`algorithm::common::database::check_reported_title`): NCBI writes an error message
-    /// for the byte each time its formatter reads the definition line.
-    pub(super) fn check_reported_titles(&self, hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
+    /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`) of
+    /// `database` whose stored title holds a byte outside ' ' ..= '~' where the reports read its
+    /// definition line besides the Seq-aligns (`reads`;
+    /// `algorithm::common::database::check_reported_title`): NCBI writes an error message for the
+    /// byte each time it reads the definition line.
+    pub(super) fn check_reported_titles(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+        reads: shared::TitleReads,
+    ) -> Result<()> {
         for rank in Self::reported(hit_lists) {
             shared::check_reported_title(
+                database.seqdb(),
+                self.listed.ordinals[rank],
                 self.replaced_title_bytes[rank],
-                || self.oids.oid(self.listed.ordinals[rank]),
+                reads,
                 self.program,
             )?;
         }
         Ok(())
+    }
+
+    /// NCBI's posts of the titles that each batch of `batches` (the queries of each) reads where
+    /// it makes the Seq-aligns of its final hit lists `hit_lists` (`read_titles`' order;
+    /// `shared::batch_title_posts`), each with the batch's first query; none where no reader met
+    /// a title with a byte outside ' ' ..= '~' (`SeqDb::replaced_titles`).
+    pub(super) fn title_posts<'b>(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+        batches: impl IntoIterator<Item = &'b std::ops::Range<usize>>,
+    ) -> Result<Vec<(usize, crate::report::diag_log::Posts)>> {
+        let db = database.seqdb();
+        let mut posts = Vec::new();
+        if !db.replaced_titles() {
+            return Ok(posts);
+        }
+        for batch in batches {
+            let lists = hit_lists.get(batch.clone()).unwrap_or_default();
+            let aligned = lists.iter().flatten().flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .map(|hsp_list| self.listed.ordinals[hsp_list.oid as usize])
+            });
+            let utf8 = self
+                .utf8
+                .as_ref()
+                .is_some_and(|read| batch.contains(&read.query));
+            let batch_posts = shared::batch_title_posts(db, aligned, utf8, self.program)?;
+            if !batch_posts.is_empty() {
+                posts.push((batch.start, batch_posts));
+            }
+        }
+        Ok(posts)
     }
 
     /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a

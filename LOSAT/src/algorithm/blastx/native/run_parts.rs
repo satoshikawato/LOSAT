@@ -274,8 +274,9 @@ impl ArchiveBatch<'_> {
                         search_subjects,
                         results,
                         options.gapped,
-                        ReportedAsks::default(),
-                        &mut *diagnostics,
+                        // The archive reads no title besides the Seq-aligns' (no prefetch).
+                        ReportedAsks::of_archive(),
+                        (&mut *diagnostics, Some(handle)),
                     )? {
                         None => ReportedSubjects::default(),
                         Some(titles) => ReportedSubjects::for_batch(

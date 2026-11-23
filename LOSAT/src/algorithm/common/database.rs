@@ -3062,6 +3062,9 @@ fn reported_header(
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
             let mut stored = stored_title(Ok(deflines), || db.oid(ordinal), query, program)?;
+            if stored.replaced_bytes {
+                db.note_replaced_title();
+            }
             stored.source = headers.stored_source(&stored.title, stored.taxid, ordinal);
             Ok(ReportedHeader::Stored(stored))
         }
@@ -3607,6 +3610,9 @@ pub(crate) struct ParsedShown {
     /// (`ParsedSubject::fetched`, `WeakMatch`): the prefetch looks for the ids
     /// it has resolved, then loads the others by their own ids.
     pub(crate) one_by_one: bool,
+    /// What the reports read of a definition line besides the Seq-aligns ([`TitleReads`],
+    /// [`check_reported_title`]; by default the batches' prefetch or a formatter).
+    pub(crate) titles: TitleReads,
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1773-1783
@@ -3915,7 +3921,7 @@ pub(crate) fn reports_may_refuse(
         }
         match reported_header(headers, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
-                check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)
+                check_reported_title(db, ordinal, stored.replaced_bytes, shown.titles, program)
                     .map_err(|_| ReportRefusal::Headers)?;
                 // A failed lookup (`TabularSubjectId::Unknown`) is refused only by the field lists
                 // that can stop at it (`report::tabular::failed_lookup_stop`).
@@ -4084,33 +4090,156 @@ fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
-// NCBI BLAST+ 2.17.0 `blastp -db` on a version 4 database whose header file holds
-// the bytes 0xE9 and 0x7F in two titles (campaign dbsearch-20261012,
-// `$BUILD_ROOT/dbsearch/db3/exp_badbyte`): the report shows `#` for the byte, and
-// standard error gets, for each reported subject and bad byte,
-//   Error: (803.7) [blastp] Blast-def-line-set.E.title
-//   Bad char [0xE9] in string at byte 21
-//   <the stored title>
-// as often as the formatter reads the definition line: twice per subject for the
-// default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
-// number of readings is the formatter's, not ported; makeblastdb and `losat makeblastdb`
-// store `#` for such a byte, so only a header file written otherwise holds one.
-/// LOSAT's rejection of a reported database sequence (one with rows in the final hit lists;
-/// `oid` gives its OID, which the rejection names, where it rejects) whose stored title held a byte outside ' ' ..= '~' (`replaced_bytes`,
-/// `StoredTitle`): NCBI writes an error message for the byte each time its formatter
-/// reads the definition line.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:67-70
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-313
+// NCBI BLAST+ 2.17.0 shows `#` for a byte outside ' ' ..= '~' of a stored title and posts, for
+// each such byte, each time it reads the definition line (`seqid::ber::title_replaced_chars`):
+// where it makes a batch's Seq-aligns (`GetSeqIDs` of each subject of each query's hit list, through
+// the volume's cache of header records, `SeqDb::read_header_record`; `seq_align_title_posts`), at
+// each load of the subject's Bioseq (the prefetch, or the first read of a formatter: the header
+// again, and the registration of its ids, `CBlastDbDataLoader`), and at each read of the
+// formatters (two at each description line of outfmt 0 to 4 and each of outfmt 18's Seq-aligns
+// that it reads, one at each outfmt 0 alignment heading, outfmt 5, 13 to 16 `Hit` and row of a
+// table with a title, taxonomy or `sall*` field). Probes of line RG-KB 9(b),
+// `K/kb/i9b/agent1/probe` (1,368 cases, 5 programs). LOSAT writes the Seq-aligns' posts; the
+// loads' and the formatters' are not written yet.
+/// What the reports of a run read of a reported database sequence's definition line besides
+/// NCBI's Seq-aligns of its batch ([`check_reported_title`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TitleReads {
+    /// Nothing: every format writes the Seq-aligns as they are (outfmt 8, 9, 11 and 12,
+    /// `ReportFormat::writes_seqaligns`), and the first one does not prefetch the subjects
+    /// ([`prefetches_subjects`]: a `PRE_FETCH_SEQS_LIMIT` of `INT_MAX` makes 8, 9 and 12 prefetch).
+    SeqAligns,
+    /// The batches' prefetch or a formatter reads it too.
+    #[default]
+    Reports,
+}
+
+impl TitleReads {
+    /// What the reports read where every format writes the Seq-aligns as they are or not
+    /// (`seq_aligns`) and the first format's batches prefetch the subjects or not (`prefetched`,
+    /// `ParsedShown::prefetched`).
+    pub(crate) fn of(seq_aligns: bool, prefetched: bool) -> Self {
+        if seq_aligns && !prefetched {
+            TitleReads::SeqAligns
+        } else {
+            TitleReads::Reports
+        }
+    }
+
+    /// What the reports of the formats `outfmts` (NCBI's numbers, the first format first) read.
+    pub(crate) fn of_outfmts(outfmts: impl IntoIterator<Item = i32>) -> Self {
+        let mut outfmts = outfmts.into_iter().peekable();
+        let first = outfmts.peek().copied();
+        let seq_aligns = first.is_some()
+            && outfmts.all(|number| {
+                crate::blastinput::app::ReportFormat::from_number(number)
+                    .is_some_and(crate::blastinput::app::ReportFormat::writes_seqaligns)
+            });
+        if seq_aligns && !prefetches_subjects(first) {
+            TitleReads::SeqAligns
+        } else {
+            TitleReads::Reports
+        }
+    }
+}
+
+/// LOSAT's refusal of a reported database sequence `ordinal` of `db` whose stored title held a
+/// byte outside ' ' ..= '~' (`replaced_bytes`, `StoredTitle`) where the run's reports read its
+/// definition line besides the Seq-aligns (`reads`, [`TitleReads`]), whose posts LOSAT does not
+/// write yet, or where its volume filters the header records it reads (a seqid or taxid list, of
+/// the search or of an alias, or an OID mask type; `SeqDb::filters_header_sets`): NCBI's traceback
+/// then reads the headers of its fetches too (`check_oid_exclusion`), which LOSAT does not model.
 pub(crate) fn check_reported_title(
+    db: &SeqDb,
+    ordinal: u32,
     replaced_bytes: bool,
-    oid: impl Fn() -> crate::seqdb::Oid,
+    reads: TitleReads,
     program: &str,
 ) -> Result<()> {
-    if replaced_bytes {
+    if replaced_bytes
+        && (reads == TitleReads::Reports
+            || db
+                .location_of(ordinal)
+                .is_none_or(|at| db.filters_header_sets(at)))
+    {
         bail!(
             "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's {program}",
-            oid()
+            db.oid(ordinal)
         );
     }
     Ok(())
+}
+
+/// NCBI's posts where it makes the Seq-aligns of a batch's results (`GetSeqIDs` of each subject,
+/// [`check_reported_title`]): `reads` are the ordinal ids of the subjects of the batch's final hit
+/// lists that get a Seq-align, query by query in the order of each list, every one a read of its
+/// header record through its volume's cache (`SeqDb::read_header_record`); one that reads the
+/// record posts for each byte outside ' ' ..= '~' of its titles (`SeqDb::title_posts_at`), with
+/// the post prefix of `program`. Empty, and nothing read, where no reader met such a title
+/// (`SeqDb::replaced_titles`). The caller writes them after the batch's reader messages, its
+/// search strategy request's posts and NCBI's warning of its first read of a UTF8String header,
+/// before its prefetch's texts.
+#[inline]
+pub(crate) fn seq_align_title_posts(
+    db: &SeqDb,
+    reads: impl IntoIterator<Item = u32>,
+    program: &str,
+) -> crate::report::diag_log::Posts {
+    if !db.replaced_titles() {
+        return crate::report::diag_log::Posts::default();
+    }
+    seq_align_title_reads(db, &mut reads.into_iter(), program)
+}
+
+/// [`seq_align_title_posts`] of a batch whose reads posted NCBI's warning of its first read of a
+/// UTF8String header or not (`utf8_posted`): with both, LOSAT's refusal, which names the first of
+/// `reads` whose title posts (the order of that warning among the Seq-aligns' posts is not
+/// modelled).
+pub(crate) fn batch_title_posts(
+    db: &SeqDb,
+    reads: impl IntoIterator<Item = u32> + Clone,
+    utf8_posted: bool,
+    program: &str,
+) -> Result<crate::report::diag_log::Posts> {
+    let posts = seq_align_title_posts(db, reads.clone(), program);
+    if utf8_posted && !posts.is_empty() {
+        let prefix = program.to_ascii_lowercase();
+        let posting = reads.into_iter().find(|&ordinal| {
+            db.location_of(ordinal)
+                .is_some_and(|at| !db.title_posts_at(at, &prefix).is_empty())
+        });
+        bail!(
+            "database sequence {} has a stored title with a byte outside ' ' to '~', in a query batch whose reads also post NCBI BLAST+'s warning of a UTF8String header (803.10), whose order among their error messages LOSAT does not reproduce; this is not supported by LOSAT's {program}",
+            posting.map_or_else(|| "?".to_string(), |ordinal| db.oid(ordinal).to_string())
+        );
+    }
+    Ok(posts)
+}
+
+/// [`seq_align_title_posts`] of a run whose reader met such a title.
+#[cold]
+#[inline(never)]
+fn seq_align_title_reads(
+    db: &SeqDb,
+    reads: &mut dyn Iterator<Item = u32>,
+    program: &str,
+) -> crate::report::diag_log::Posts {
+    let prefix = program.to_ascii_lowercase();
+    let mut posts = crate::report::diag_log::Posts::default();
+    for ordinal in reads {
+        let Some(at) = db.location_of(ordinal) else {
+            continue;
+        };
+        if db.read_header_record(at) {
+            for text in db.title_posts_at(at, &prefix) {
+                // An error (`eDiag_Error`), which a BLAST archive saves as one message.
+                posts.post(crate::report::diag_log::ERROR, text);
+            }
+        }
+    }
+    posts
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-182 (the ids of a

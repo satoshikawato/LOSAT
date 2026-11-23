@@ -2624,3 +2624,19 @@ makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
   reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
   `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
   survey T2's `bom` file).
+
+## Titles with bytes outside the visible ASCII range (line RG-KB item 9(b))
+
+`tchar/` (rows `db.tchar.*`): `tchar/make_tchar.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb)
+writes the version 4 databases `tc_p`, `tc_b_p`, `tc_big_p`, `tc_x_p` (proteins) and `tc_n`, `tc_b_n`, `tc_big_n`,
+`tc_x_n` (their back-translations), the aliases `tc_alias_p.pal` and `tc_alias_n.nal` (`tc_*` then `tc_b_*`) and the
+queries `tc_q1.faa`, `tc_q2.faa`, `tc_q1.fna`, `tc_q2.fna`. makeblastdb stores each byte outside ' '..'~' of a FASTA
+title as `#`; the script rewrites those stored titles to raw bytes (0x00, 0x01, 0x1B, 0x7F, 0x80, 0xC3 0xA9, 0xE9,
+0xFF; titles of 133, 300 and 1,100 bytes). `tc_big_*` holds 300 sequences, of which the OIDs 0, 1, 256 and 257 have
+such bytes and hit the queries: 0 and 256, 1 and 257 share a slot of NCBI's cache of 256 header records per volume.
+NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the Seq-aligns of its query batch, and
+posts `Error: (803.7) [<program>] Blast-def-line-set.E.title` / `Bad char [0x..] in string at byte N` / the title, for
+each such byte in order, at each read that the cache does not answer (N is the position after the whole title in its
+record; the bytes before the posted one are already `#`). Outfmt 8, 9, 11 and 12 read the definition line there only
+(`PRE_FETCH_SEQS_LIMIT=2147483647` makes 8, 9 and 12 prefetch); the other formats read it again, which LOSAT refuses
+(the `losat-rejection` rows).

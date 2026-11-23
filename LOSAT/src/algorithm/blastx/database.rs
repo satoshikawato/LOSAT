@@ -496,7 +496,7 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        pairwise: bool,
+        (pairwise, title_reads): (bool, shared::TitleReads),
         earlier: shared::EarlierUtf8,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
@@ -529,8 +529,10 @@ impl ReportedSubjects {
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
                             shared::check_reported_title(
+                                &database.db,
+                                ordinal,
                                 stored.replaced_bytes,
-                                || database.db.oid(ordinal),
+                                title_reads,
                                 database.program,
                             )?;
                             if pairwise {

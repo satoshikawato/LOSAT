@@ -403,7 +403,16 @@ pub(super) fn prefetch_reported_subjects(
     // report with its error.
     let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
     if let Some(titles) = listed_titles.as_ref() {
-        titles.check_reported_titles(reported_lists)?;
+        titles.check_reported_titles(
+            database.expect("listed titles are a database's"),
+            reported_lists,
+            crate::algorithm::common::database::TitleReads::of_outfmts(
+                outputs
+                    .formats
+                    .iter()
+                    .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+            ),
+        )?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
         // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
@@ -822,9 +831,23 @@ pub(super) fn prefetch_reported_subjects(
             titles.note_loaded(database, || loaded(hit_lists.len()));
         }
     }
+    // NCBI's posts of the titles that the batches' Seq-aligns read come before their prefetches'
+    // (`query_warnings::query_posts` sorts them by the batch's first query, stably).
+    let posts = match (listed_titles.as_ref(), database) {
+        (Some(titles), Some(database)) => titles
+            .title_posts(
+                database,
+                hit_lists,
+                query_batches.iter().map(|batch| &batch.searched),
+            )?
+            .into_iter()
+            .chain(prefetch_posts)
+            .collect(),
+        _ => prefetch_posts,
+    };
     Ok(ReportedPrefetch {
         subject_reads,
-        posts: prefetch_posts,
+        posts,
         hit_loads,
     })
 }

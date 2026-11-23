@@ -1,0 +1,24 @@
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 16
+g0 badéa
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0x1] in string at byte 16
+g1 badb
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 18
+g256 badéa
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0x1] in string at byte 18
+g257 badb
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 16
+g0 badéa
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0x1] in string at byte 16
+g1 badb
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 18
+g256 badéa
+Error: (803.7) [tblastx] Blast-def-line-set.E.title
+Bad char [0x1] in string at byte 18
+g257 badb

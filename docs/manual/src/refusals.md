@@ -78,6 +78,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-parse_deflines` with two queries of one id in one query batch | Refused. |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
 | `-db` with a sequence whose id NCBI cannot report correctly | Refused. The error names the sequence. |
+| `-db` with a reported sequence whose stored title holds a byte outside `' '` to `'~'`, in a format other than `-outfmt` 8, 9, 11 and 12 (or in 8, 9 and 12 with `PRE_FETCH_SEQS_LIMIT=2147483647`) | Refused. NCBI writes an error message for each such byte each time it reads the title, which these formats do in their own places. With `-outfmt` 8, 9, 11 and 12 LOSAT writes NCBI's messages and output, except in a query batch whose headers also give NCBI's warning of a UTF8String (refused). |
 | An alias file with `SEQIDLIST` or `TAXIDLIST` over a version 5 database, `MEMB_BIT` or `MASKLIST` | Refused. See Alias files below. `MASKLIST` names the GI-indexed masks that `makeblastdb -gi_mask` writes; LOSAT does not read them yet. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI` or `SEQ_ID_AVOID_GI` with a database that has parsed ids | Refused. |
 | `-xmlhelp`, `-version`, `-version-full`, `-version-full-xml`, `-version-full-json` in the library API and pylosat | Refused. They work on the command line and in LOSAT Web, which prints the command line's text. |

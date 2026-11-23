@@ -785,3 +785,44 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
         );
     }
 }
+
+// RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every
+// format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
+// subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process
+// may set); the others read it again (`TitleReads::Reports`, LOSAT's refusal).
+#[test]
+fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
+    assert_eq!(TitleReads::of_outfmts([11]), TitleReads::SeqAligns);
+    assert_eq!(TitleReads::of_outfmts([11, 11]), TitleReads::SeqAligns);
+    for outfmts in [
+        &[][..],
+        &[0],
+        &[3],
+        &[5],
+        &[6],
+        &[7],
+        &[10],
+        &[13],
+        &[17],
+        &[18],
+        &[11, 6],
+        &[11, 0],
+    ] {
+        assert_eq!(
+            TitleReads::of_outfmts(outfmts.iter().copied()),
+            TitleReads::Reports,
+            "{outfmts:?}"
+        );
+    }
+    for outfmt in [8, 9, 12] {
+        assert_eq!(
+            TitleReads::of_outfmts([outfmt, 11]),
+            TitleReads::of(true, prefetches_subjects(Some(outfmt))),
+            "{outfmt}"
+        );
+    }
+    assert_eq!(TitleReads::of(true, false), TitleReads::SeqAligns);
+    assert_eq!(TitleReads::of(true, true), TitleReads::Reports);
+    assert_eq!(TitleReads::of(false, false), TitleReads::Reports);
+    assert_eq!(TitleReads::default(), TitleReads::Reports);
+}

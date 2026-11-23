@@ -3778,14 +3778,31 @@ fn run_batch_loop(
                 // NCBI's warning of its first read of a UTF8String header follows the batch's
                 // reader messages and request posts (`warnings[start]`), before its prefetch.
                 Ok(read) => {
-                    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                    let utf8 = crate::algorithm::common::database::Utf8Read::post_of(
                         read.as_ref(),
                         &database.db,
                         "tblastx",
-                    ) {
-                        warnings[start].append(&posts);
-                        batch_warnings.append(&posts);
+                    );
+                    if let Some(posts) = &utf8 {
+                        warnings[start].append(posts);
+                        batch_warnings.append(posts);
                     }
+                    // NCBI's posts of the titles that the batch's Seq-aligns read: each run of
+                    // HSPs of one query and subject is one Seq-align set's subject, in
+                    // `read_titles`' order.
+                    let mut previous = None;
+                    let aligned = ordered.iter().filter_map(move |hsp| {
+                        let key = (hsp.hit.q_idx, hsp.hit.s_idx);
+                        (previous.replace(key) != Some(key)).then_some(hsp.hit.s_idx)
+                    });
+                    let titled = crate::algorithm::common::database::batch_title_posts(
+                        &database.db,
+                        aligned,
+                        utf8.is_some(),
+                        "TBLASTX",
+                    )?;
+                    warnings[start].append(&titled);
+                    batch_warnings.append(&titled);
                 }
                 Err(error) => {
                     match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
@@ -4372,6 +4389,14 @@ impl BatchReports<'_> {
                         .is_some_and(|format| format.prefetches_subjects())
                         && !crate::algorithm::common::database::prefetch_always_off(),
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+                    titles: crate::algorithm::common::database::TitleReads::of(
+                        !formats.is_empty()
+                            && formats.iter().all(|format| format.writes_seq_aligns()),
+                        formats
+                            .first()
+                            .is_some_and(|format| format.prefetches_subjects())
+                            && !crate::algorithm::common::database::prefetch_always_off(),
+                    ),
                 };
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine

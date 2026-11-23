@@ -3109,3 +3109,30 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
         assert_eq!(throw_site(text.as_bytes()), None, "{text}");
     }
 }
+
+// NCBI's cache of a volume's header records (`SeqDb::read_header_record`, cited there): a read
+// finds the record that its slot (the OID in the volume modulo 256, by volume) holds, else reads
+// it, and the record holds the slot after either.
+#[test]
+fn header_reads_go_through_256_slots_per_volume() {
+    let db = SeqDb::open(&db_name("prot_mv"), SeqType::Protein).unwrap();
+    assert!(!db.replaced_titles());
+    db.note_replaced_title();
+    assert!(db.replaced_titles());
+    let at = |volume, vol_oid| SeqLocation {
+        volume,
+        vol_oid,
+        id: vol_oid,
+    };
+    assert!(db.read_header_record(at(0, 1)));
+    assert!(!db.read_header_record(at(0, 1)));
+    // Another volume has its own slots.
+    assert!(db.read_header_record(at(1, 1)));
+    assert!(!db.read_header_record(at(0, 1)));
+    // OIDs 256 apart share a slot; the last read holds it.
+    assert!(db.read_header_record(at(0, 257)));
+    assert!(db.read_header_record(at(0, 1)));
+    assert!(!db.read_header_record(at(0, 1)));
+    assert!(!db.read_header_record(at(1, 1)));
+    assert!(db.read_header_record(at(0, 2)));
+}

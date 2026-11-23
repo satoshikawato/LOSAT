@@ -1,0 +1,138 @@
+PssmWithParameters ::= {
+  pssm {
+    isProtein TRUE,
+    numRows 28,
+    numColumns 1,
+    byRow FALSE,
+    query seq {
+      id {
+        general {
+          db "CDD",
+          tag id 237975
+        }
+      },
+      descr {
+        title "cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose
+ specific IIB subunit. The bacterial phosphoenolpyruvate: sugar
+ phosphotransferase system (PTS) is a multi-protein system involved in the
+ regulation of a variety of metabolic and transcriptional processes. This
+ family is one of four structurally and functionally distinct group IIB PTS
+ system cytoplasmic enzymes, necessary for the uptake of carbohydrates across
+ the cytoplasmic membrane and their phosphorylation. The active site histidine
+ receives a phosphate group from the IIA subunit and transfers it to the
+ substrate.",
+        org {
+          taxname "Bacteria",
+          common "eubacteria",
+          db {
+            {
+              db "taxon",
+              tag id 2
+            }
+          },
+          syn {
+            "not Bacteria Haeckel 1894"
+          },
+          orgname {
+            name partial {
+              {
+                fixed-level other,
+                level "superkingdom",
+                name "Bacteria"
+              }
+            },
+            gcode 11,
+            div "BCT"
+          }
+        }
+      },
+      inst {
+        repr raw,
+        mol aa,
+        length 1,
+        seq-data iupacna ""
+      }
+    },
+    intermediateData {
+      freqRatios {
+        { 0, 10, 0 },
+        { 245730163391851, 10, -16 },
+        { 0, 10, 0 },
+        { 607987460337552, 10, -17 },
+        { 879108031439258, 10, -17 },
+        { 104438976845656, 10, -16 },
+        { 185093127001601, 10, -16 },
+        { 100544482649583, 10, -16 },
+        { 40079577531739, 10, -16 },
+        { 555614654902386, 10, -15 },
+        { 112531942878369, 10, -16 },
+        { 711946022636929, 10, -16 },
+        { 155759958539309, 10, -16 },
+        { 729281153935272, 10, -17 },
+        { 976197349365736, 10, -17 },
+        { 817639376985111, 10, -17 },
+        { 908056891843906, 10, -17 },
+        { 156877617417294, 10, -16 },
+        { 222285031360543, 10, -16 },
+        { 113497159939239, 10, -15 },
+        { 298290544805979, 10, -17 },
+        { 0, 10, 0 },
+        { 321687717571096, 10, -16 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 }
+      },
+      numIndeptObsr {
+        { 106882158134261, 10, -13 }
+      }
+    },
+    finalData {
+      scores {
+        -32768,
+        -364,
+        -32768,
+        -363,
+        -569,
+        -565,
+        -231,
+        -627,
+        -536,
+        749,
+        -513,
+        -74,
+        -115,
+        -572,
+        -527,
+        -520,
+        -545,
+        -476,
+        -304,
+        178,
+        -470,
+        -100,
+        0,
+        -32768,
+        -32768,
+        -400,
+        -32768,
+        -32768
+      },
+      lambda { 267, 10, -3 },
+      kappa { 642207331173394, 10, -16 },
+      h { 14, 10, -2 },
+      scalingFactor 100,
+      lambdaUngapped { 315681439256936, 10, -15 },
+      kappaUngapped { 20982345864933, 10, -14 },
+      hUngapped { 648159900334225, 10, -15 },
+      wordScoreThreshold { 19656, 10, -3 }
+    }
+  },
+  params {
+    pseudocount 10,
+    rpsdbparams {
+      matrixName "BLOSUM62"
+    }
+  }
+}

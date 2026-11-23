@@ -2463,11 +2463,11 @@ PSSM query `pn1.faa` (the PSSM is `../fixtures/pssm/m4b2_pl1.asn.gz`) and the ha
 |---|---|---|
 | 11 `f1` | `e1` [600, 902) | covers the first base of frame +2's residue 300 (review F1) |
 | 12 `n47` | `e2` [4, 7) | searched |
-| 13 `n1200` | `e2` [1200, 1202) | NCBI crashes (the minus frames start with an empty part), refused |
-| 14 `h01`, 15 `h12` | `e3` [0, 1), [1, 2) | NCBI crashes (the plus frames start with an empty part), refused |
+| 13 `n1200` | `e2` [1200, 1202) | NCBI crashes (the minus frames start with an empty part); searched as a frame without a mask, the masked bases staying masked (PD-LOSAT-NCBI-DEFECTS exception 27, the Owner's answers Q4 = B and Q6 = B of M4b, M4b-3c; near input `te13n`) |
+| 14 `h01`, 15 `h12` | `e3` [0, 1), [1, 2) | NCBI crashes (the plus frames start with an empty part); searched as a frame without a mask, the masked bases staying masked (PD-LOSAT-NCBI-DEFECTS exception 27, the Owner's answers Q4 = B and Q6 = B of M4b, M4b-3c; near input `te14n`, `te15n`) |
 | 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1's part before the mask searched alone (no near input keeps it; NCBI's own rows) |
 | 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3: the part before the mask searched alone, as 16 |
-| 31 `two` | `e4` [0, 3), [1200, 1201) | NCBI crashes (frame -1), refused |
+| 31 `two` | `e4` [0, 3), [1200, 1201) | NCBI crashes (frame -1 starts with an empty part, then a part before the mask [0, 3)); searched as a frame without a mask, the masked bases staying masked (PD-LOSAT-NCBI-DEFECTS exception 27, the Owner's answers Q4 = B and Q6 = B of M4b, M4b-3c; near input `te31n`), frame -1's part searched alone as 16 |
 | 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | the plus frames' parts before the mask searched alone where the subject is searched (from 11 bases at word size 3, 17 at TBLASTN's `-word_size 5`: row `te.34.w5`), else not searched |
 | 36 `s01`, 37 `s1200` | `e3` [0, 1), [600, 700); `e2` [300, 400), [1200, 1202) | searched (near misses of 14 and 13) |
 
@@ -2484,6 +2484,33 @@ rm -f *.njs
 
 makeblastdb numbers nine algorithms per masking program (dust 11-19), so the masks after the ninth name windowmasker
 (31-37); the program only names the algorithm.
+
+The rows of M4b-3c (2026-11-23; `db.tmask.*.hard.te.{13,14,15,31}.*`, `*.hard.tq4.*` and their near rows
+`*.hard.near.te{13,14,15,31}n.*`, `*.hard.near.tq4n.*`) read inputs written by `../make_dbmaskt_q4.py` from `edge.fna`:
+a mask that leaves a reading frame an empty first part makes NCBI crash in every run (PD-LOSAT-NCBI-DEFECTS exception
+27, the Owner's answers Q4 = B of M4b of 2026-11-22 and Q6 = B of 2026-11-23), so each row's expectation is NCBI's
+run of its near input, the same database with that short mask dropped and its bases stored as `N` (not the literal
+mask removal, which keeps the real bases and gives other rows). The near input is equal to LOSAT's reading only as
+long as NCBI's preliminary stage reads no masked residue: makeblastdb stores an `N` as a random base (different from
+the real one at every masked position here), which the near input's seed scan and early extensions read, where
+LOSAT and NCBI's own runs with a far mask read the real base. The near inputs' bases (`edge_n13.fna`: `e2`'s bases 1200 and 1201; `edge_n14.fna`: `e3`'s base 0; `edge_n15.fna`: `e3`'s
+base 1; `edge_n31.fna`: `e4`'s base 1200, its mask [0, 3) kept), with no other mask on a searched sequence (`hedge4_n13`,
+`hedge4_n14`, `hedge4_n15`: `e5`'s last 3 bases, a subject no search reads; `hedge4_n31`: `e4` [0, 3)). `tq4` holds
+`e3`'s empty mask at 0 (`from 0, to 4294967295`) and [1100, 1200) (`hedge4_q4`); its near input `tq4n` the tail 4 bases
+shorter, [1100, 1196), with `e3`'s bases 1196-1199 stored as `N` (`edge_nq4.fna`, `hedge4_nq4`: exception 21's near
+input). The TBLASTN queries `qneq4.faa` are 60 residues at each frame end that holds a masked base, the TBLASTX query
+`qxeq4.fna` (`x4t`) `e4`'s bases 1001-1200. Each database has the one algorithm 11:
+
+```
+python3 ../make_dbmaskt_q4.py . $NCBI_BIN   # writes the files above, then for each of te13n te14n te15n te31n tq4 tq4n:
+makeblastdb -in edge_n13.fna -dbtype nucl -out te13n -title "near te 13" -blastdb_version 4 -mask_data hedge4_n13.asnt
+makeblastdb -in edge_n14.fna -dbtype nucl -out te14n -title "near te 14" -blastdb_version 4 -mask_data hedge4_n14.asnt
+makeblastdb -in edge_n15.fna -dbtype nucl -out te15n -title "near te 15" -blastdb_version 4 -mask_data hedge4_n15.asnt
+makeblastdb -in edge_n31.fna -dbtype nucl -out te31n -title "near te 31" -blastdb_version 4 -mask_data hedge4_n31.asnt
+makeblastdb -in edge.fna -dbtype nucl -out tq4 -title "empty mask at 0 and a tail" -blastdb_version 4 -mask_data hedge4_q4.asnt
+makeblastdb -in edge_nq4.fna -dbtype nucl -out tq4n -title "near tq4" -blastdb_version 4 -mask_data hedge4_nq4.asnt
+rm -f *.njs
+```
 
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 

@@ -26,7 +26,7 @@ use crate::report::blast_xml::{
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::QueryNames;
-use crate::report::serial::seqalign::seqalign_evalue_listed;
+use crate::report::serial::seqalign::seqalign_evalue_read;
 
 /// What the BLASTP document needs besides the final hit lists.
 pub(crate) struct BlastpXml<'a> {
@@ -205,7 +205,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                         hsps.hsp(&XmlHsp {
                             score: hsp.raw_score,
                             bit_score: hsp.bit_score,
-                            evalue: seqalign_evalue_listed(hsp.e_value),
+                            evalue: seqalign_evalue_read(hsp.e_value),
                             query_from: hsp.q_start as i32,
                             query_to: hsp.q_end as i32,
                             hit_from: hsp.s_start as i32,

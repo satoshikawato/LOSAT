@@ -543,7 +543,7 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
         alpha: 1.9,
         beta: -30.0,
     };
-    assert_eq!(blast_spouge_etos(1e-6, &default_kbp, &gbp, 100, 200), 2537);
+    assert_eq!(blast_spouge_etos(1e-6, &default_kbp, &gbp, 100, 200), Ok(2537));
 
     let tight_kbp = KarlinParams {
         lambda: 0.267 / 16.0,
@@ -552,5 +552,56 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
         alpha: 1.9,
         beta: -30.0,
     };
-    assert_eq!(blast_spouge_etos(1e-30, &tight_kbp, &gbp, 64, 96), 3749);
+    assert_eq!(blast_spouge_etos(1e-30, &tight_kbp, &gbp, 64, 96), Ok(3749));
+}
+
+// Line PS item PS7c, review B1: a gapped Lambda that makes NCBI's search pass `Int4` is
+// `SpougeCutoffOverflow`, at the doubling (where NCBI's x86-64 build never ends) or at the
+// bisection's sum; the first upper bound is NCBI's cast (a quotient past `Int4` starts at 2).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5263
+#[test]
+fn a_cutoff_search_that_passes_int4_is_an_overflow() {
+    let gbp = BlastGumbelBlk {
+        lambda: 0.267,
+        c: 0.669720,
+        g: 12.0,
+        a: 1.9,
+        alpha: 42.602800,
+        sigma: 43.636200,
+        a_un: 0.7916,
+        alpha_un: 4.964660,
+        b: 2.0 * 12.0 * (0.7916 - 1.9),
+        beta: 2.0 * 12.0 * (4.964660 - 42.602800),
+        tau: 2.0 * 12.0 * (4.964660 - 43.636200),
+        db_length: 5000,
+    };
+    let kbp = |lambda: f64| KarlinParams {
+        lambda,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
+    };
+    let etos = |lambda: f64| blast_spouge_etos(10.0, &kbp(lambda), &gbp, 100, 200);
+    assert!(etos(1e-8).is_ok());
+    // ln(5000 / 10) / 7e-9 is 887,801,156: its e-value is above 10 and its double's is not, and
+    // the bisection's first sum passes 2^31 - 1.
+    assert_eq!(
+        etos(7e-9),
+        Err(SpougeCutoffOverflow {
+            lambda: 7e-9,
+            doubling: false
+        })
+    );
+    // ln(5000 / 10) / 2e-9 (3.1e9) passes `Int4`: NCBI's cast starts at 2, and the doubling reaches
+    // 2^30 with an e-value above 10.
+    for lambda in [2e-9, 1e-9, 1e-300] {
+        assert_eq!(
+            etos(lambda),
+            Err(SpougeCutoffOverflow {
+                lambda,
+                doubling: true
+            })
+        );
+    }
 }

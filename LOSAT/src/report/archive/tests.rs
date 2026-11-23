@@ -582,7 +582,7 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60 (cited at `ka_block`).
+// Line PS item PS7c: the archive block of a Lambda the results do not keep (`stats::tables::ancillary_kept`).
 #[test]
 fn a_block_of_a_lambda_below_zero_or_not_a_number_is_the_missing_one() {
     let params = |lambda| KarlinParams {

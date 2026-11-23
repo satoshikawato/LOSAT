@@ -341,7 +341,7 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
     ) {
         let rows = self.rows;
         let word_size = self.word_size;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:352-355
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:217-221,380-383
         let x_dropoff = if self.x_dropoff == 0 {
             self.word_cutoff
         } else {

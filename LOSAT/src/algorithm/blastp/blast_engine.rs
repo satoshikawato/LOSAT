@@ -677,13 +677,17 @@ fn blastp_cutoff_score_max(
     search_space: i64,
 ) -> i32 {
     match gumbel_params {
+        // The Gumbel block comes with a gapped search only (`has_gumbel`), whose block is the
+        // matrix's table (`gapped_block`, Lambda 0.17 or more): its search ends below `Int4`
+        // for every e-value down to the smallest one it reads (`SpougeCutoffOverflow`).
         Some(gumbel_params) => blast_spouge_etos(
             blastp_prelim_evalue(expect_value, comp_based_stats),
             gapped_params,
             gumbel_params,
             query_length,
             subject_length_for_hit_cutoff,
-        ),
+        )
+        .expect("a matrix table's gapped Lambda keeps the Spouge cutoff search within Int4"),
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
         None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
             expect_value,
@@ -9480,10 +9484,10 @@ fn query_xml_stats(
             // `kbp_std` (probe 1: kappa 0.12756, lambda 0.314758 of query 1).
             let block = call_setup::context_block(args, &gapped, &contexts[q_idx]);
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
-            // The ancillary data keeps no gapped block whose Lambda is below 0 or a NaN (a PSSM
-            // file's can be), and the XML takes the query's ungapped block then.
+            // A gapped block that the ancillary data does not keep (a PSSM file's,
+            // `stats::tables::ancillary_kept`): the XML takes the query's ungapped block.
             let block =
-                if args.psi_search.is_some() && (gapped.lambda.is_nan() || gapped.lambda < 0.0) {
+                if args.psi_search.is_some() && !crate::stats::tables::ancillary_kept(gapped.lambda) {
                     &contexts[q_idx].karlin_params
                 } else {
                     block

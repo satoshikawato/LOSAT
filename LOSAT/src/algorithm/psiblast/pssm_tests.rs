@@ -431,10 +431,10 @@ fn fixed_formats_as_the_c_library() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60 (cited at
-// `ancillary_blocks`).
+// Line PS item PS7c (review S2): a block of a Lambda below 0 or not a number is left out of the
+// footer, gapped or ungapped (`stats::tables::ancillary_kept`, cited at its definition).
 #[test]
-fn a_gapped_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_footer() {
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_footer() {
     let block = |lambda| KarlinBlk {
         lambda,
         ..BLOSUM62_11_1
@@ -459,12 +459,12 @@ fn a_gapped_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_foot
             ..all
         };
         assert_eq!(labels(gapped_out), ["Standard Ungapped", "PSI Ungapped"]);
-        // An ungapped block is printed as it stands.
-        let ungapped_odd = PssmAncillary {
+        let ungapped_out = PssmAncillary {
+            ungapped: block(lambda),
             psi_ungapped: block(lambda),
             ..all
         };
-        assert_eq!(labels(ungapped_odd).len(), 4);
+        assert_eq!(labels(ungapped_out), ["Standard Gapped", "PSI Gapped"]);
     }
     let infinite = PssmAncillary {
         psi_gapped: block(f64::INFINITY),

@@ -47,13 +47,10 @@ pub use writer::{
     KaBlock, RequestInputs, SearchedContext0,
 };
 
-/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60
-/// The ancillary data keeps no block whose Lambda is below 0 or a NaN (a PSSM file's can be), and
-/// the archive's block is the missing one (-1) then.
+/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes: the missing
+/// one (-1) for a block that the ancillary data does not keep (`stats::tables::ancillary_kept`).
 pub(crate) fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
-    if params.lambda.is_nan() || params.lambda < 0.0 {
+    if !crate::stats::tables::ancillary_kept(params.lambda) {
         return KaBlock::missing(gapped);
     }
     KaBlock {

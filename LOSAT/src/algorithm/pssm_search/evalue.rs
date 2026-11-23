@@ -6,7 +6,9 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
 
-use crate::stats::{blast_spouge_etos, blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::{
+    blast_spouge_etos, blast_spouge_stoe, BlastGumbelBlk, KarlinParams, SpougeCutoffOverflow,
+};
 use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// What the e-values and the hit-saving cutoff of a PSSM search read besides the Karlin block:
@@ -61,10 +63,17 @@ impl<'a> EvalueStats<'a> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4101-4102
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4054-4057
-    /// (`es` is then `BLAST_SCORE_MIN`, not above the cutoff of 1.)
-    pub(crate) fn hit_cutoff(&self, prelim_evalue: f64, kbp: &KarlinParams, m: i32, n: i32) -> i32 {
-        match self.gumbel {
-            Some(gumbel) => blast_spouge_etos(prelim_evalue, kbp, gumbel, m, n),
+    /// (`es` is then `BLAST_SCORE_MIN`, not above the cutoff of 1.) With the Gumbel block, a search
+    /// for the score that passes NCBI's `Int4` is `SpougeCutoffOverflow` (`blast_spouge_etos`).
+    pub(crate) fn hit_cutoff(
+        &self,
+        prelim_evalue: f64,
+        kbp: &KarlinParams,
+        m: i32,
+        n: i32,
+    ) -> Result<i32, SpougeCutoffOverflow> {
+        Ok(match self.gumbel {
+            Some(gumbel) => blast_spouge_etos(prelim_evalue, kbp, gumbel, m, n)?,
             None if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 => 1,
             None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
                 prelim_evalue,
@@ -72,7 +81,7 @@ impl<'a> EvalueStats<'a> {
                 kbp,
             )
             .max(1),
-        }
+        })
     }
 }
 

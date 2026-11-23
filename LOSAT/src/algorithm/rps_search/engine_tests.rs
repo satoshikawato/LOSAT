@@ -120,7 +120,7 @@ fn the_hit_cutoff_reads_the_gumbel_block_or_the_search_space_at_the_scale() {
         .unwrap();
     assert_eq!(
         with_block.hit_cutoff,
-        crate::stats::blast_spouge_etos(10.0, &run.gapped, &gumbel, 300, 250) * 100
+        crate::stats::blast_spouge_etos(10.0, &run.gapped, &gumbel, 300, 250).unwrap() * 100
     );
     // Without the block: ceil(ln(K * searchsp / E) / Lambda) = ceil(ln(4100) / 0.267) = 32.
     run.gumbel = None;

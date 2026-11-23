@@ -2839,7 +2839,7 @@ impl LocalParameterRecipe<'_> {
         db_nt: i64,
         option_spaces: Option<&[i64]>,
         call: LocalParameterCall,
-    ) -> Result<LocalSubjectParameters, crate::stats::setup::SearchSpaceOverflow> {
+    ) -> anyhow::Result<LocalSubjectParameters> {
         super::stage_d_stats::local_parameters_for_blocks(
             &self.query_contexts,
             db_nt,

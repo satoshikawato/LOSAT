@@ -360,8 +360,9 @@ fn sort_hsps_by_evalue(list: &mut KappaResultList) {
 }
 
 /// The E-values and bit scores of a list's HSPs as the Seq-align that NCBI makes of them carries
-/// them (`seqalign_scores`: a NaN or negative E-value and a bit score below 0, which a PSSM
-/// whose gapped Karlin-Altschul block is not valid gives, are not in it, and its readers take -1).
+/// them (`seqalign_scores`: a negative E-value is 0, a NaN one stays as the E-value that the
+/// Seq-align lacks, and a bit score below 0, which a PSSM whose gapped Karlin-Altschul block is
+/// not valid gives, is the readers' -1).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1197
 fn seqalign_scores_of(list: &mut KappaResultList) {

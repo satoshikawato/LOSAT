@@ -30,10 +30,9 @@ fn only_a_shown_unsure_subject_is_refused() {
 // `seqalign_pssm_evalue`).
 #[test]
 fn the_pssm_reads_an_absent_evalue_as_10_and_any_negative_one_as_0() {
-    use crate::report::serial::seqalign::ABSENT_EVALUE;
-    // A NaN's, as the lists of a PSSM's search carry it, and a NaN itself: none in the Seq-align.
-    assert_eq!(seqalign_pssm_evalue(ABSENT_EVALUE), 10.0);
+    // A NaN, which the lists carry for the E-value that the Seq-align lacks: 10.
     assert_eq!(seqalign_pssm_evalue(f64::NAN), 10.0);
+    assert_eq!(seqalign_pssm_evalue(-1.0), 0.0);
     // A database of a negative size gives negative E-values, which are 0 in the Seq-align.
     assert_eq!(seqalign_pssm_evalue(-3.5), 0.0);
     assert_eq!(seqalign_pssm_evalue(-1.0e-200), 0.0);
@@ -41,5 +40,5 @@ fn the_pssm_reads_an_absent_evalue_as_10_and_any_negative_one_as_0() {
     assert_eq!(seqalign_pssm_evalue(0.5), 0.5);
     assert_eq!(seqalign_pssm_evalue(1.0e9), 10.0);
     assert!(included(-3.5, 0.002));
-    assert!(!included(ABSENT_EVALUE, 0.002));
+    assert!(!included(f64::NAN, 0.002));
 }

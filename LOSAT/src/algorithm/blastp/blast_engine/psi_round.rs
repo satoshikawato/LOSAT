@@ -868,15 +868,13 @@ pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
 }
 
 /// The E-value that the PSSM reads of an HSP (`GetLowestEvalue`: the lowest `e_value` or `sum_e`
-/// score of the Seq-align, 10 where it has none). A Seq-align lacks the E-value of a NaN one,
-/// which the lists of a PSSM's search carry as the readers' default `ABSENT_EVALUE`
-/// (`seqalign_scores`); any other value of 1e-180 or less, a negative one of a database with a
-/// negative size too, is 0 in it.
+/// score of the Seq-align, 10 where it has none, `seqalign_evalue_absent`); any other value of
+/// 1e-180 or less, a negative one of a database with a negative size too, is 0 in it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545
 pub(crate) fn seqalign_pssm_evalue(e_value: f64) -> f64 {
     const BLAST_EXPECT_VALUE: f64 = 10.0;
-    if e_value.is_nan() || e_value == crate::report::serial::seqalign::ABSENT_EVALUE {
+    if crate::report::serial::seqalign::seqalign_evalue_absent(e_value) {
         return BLAST_EXPECT_VALUE;
     }
     crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)

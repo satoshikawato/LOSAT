@@ -3,6 +3,7 @@
 use crate::algorithm::tblastx::ncbi_cutoffs::{
     cutoff_score_from_evalue, cutoff_score_sum_stats, gap_trigger_raw_score, x_drop_raw_score,
 };
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::stats::setup::SearchSpaceOverflow;
 use crate::stats::spouge::{blast_spouge_etos, BlastGumbelBlk};
 use crate::stats::tables::KarlinParams;
@@ -199,7 +200,7 @@ pub(super) fn local_parameters_for_call(
     ungapped_params: &[KarlinParams],
     options: LocalParameterOptions<'_>,
     call: LocalParameterCall,
-) -> Result<LocalSubjectParameters, SearchSpaceOverflow> {
+) -> anyhow::Result<LocalSubjectParameters> {
     local_parameters_for_blocks(
         query_contexts,
         subject_nt_length,
@@ -232,7 +233,10 @@ pub(super) struct LocalKarlinBlocks<'a> {
 }
 
 /// `local_parameters_for_call` with each kind of Karlin-Altschul block of its own
-/// (`LocalKarlinBlocks`).
+/// (`LocalKarlinBlocks`). Its errors are a search space past NCBI's `Int8` (`SearchSpaceOverflow`)
+/// and a hit-saving cutoff whose search passes NCBI's `Int4` (`SpougeCutoffOverflow`: a PSSM's
+/// `kbp_gap_psi`), which fails the batch after the reports of the batches before, where NCBI's
+/// search of the batch overflows (`ErrorAfterBatchReports`, `tblastn_app::batch_failure`).
 pub(super) fn local_parameters_for_blocks(
     query_contexts: &[(usize, bool)],
     subject_nt_length: i64,
@@ -240,7 +244,7 @@ pub(super) fn local_parameters_for_blocks(
     blocks: LocalKarlinBlocks<'_>,
     options: LocalParameterOptions<'_>,
     call: LocalParameterCall,
-) -> Result<LocalSubjectParameters, SearchSpaceOverflow> {
+) -> anyhow::Result<LocalSubjectParameters> {
     let gapped_params = blocks.gapped;
     assert!(!query_contexts.is_empty());
     assert_eq!(query_contexts.len(), gapped_params.len());
@@ -321,6 +325,7 @@ pub(super) fn local_parameters_for_blocks(
                 query_length as i32,
                 hit_subject_length,
             )
+            .map_err(|overflow| ErrorAfterBatchReports(overflow.refusal("TBLASTN")))?
         } else {
             cutoff_score_from_evalue(options.expect_value, lengths[context].eff_searchsp, params)
                 .max(1)

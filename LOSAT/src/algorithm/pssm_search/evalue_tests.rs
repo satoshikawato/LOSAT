@@ -73,7 +73,9 @@ fn without_the_gumbel_block_the_e_value_reads_the_search_space() {
 fn without_the_gumbel_block_the_hit_cutoff_reads_the_search_space() {
     let kbp = blosum62_gapped();
     let cutoff = |search_space, evalue| {
-        EvalueStats::new(None, search_space).hit_cutoff(evalue, &kbp, 302, 10)
+        EvalueStats::new(None, search_space)
+            .hit_cutoff(evalue, &kbp, 302, 10)
+            .unwrap()
     };
     // ln(0.041 * 10000 / 10) / 0.267 = 13.2...
     assert_eq!(cutoff(10_000, 10.0), 14);
@@ -83,7 +85,7 @@ fn without_the_gumbel_block_the_hit_cutoff_reads_the_search_space() {
     assert_eq!(cutoff(i64::MAX, 10.0), 143);
     assert_eq!(
         EvalueStats::new(None, 10_000).hit_cutoff(10.0, &kbp, 1, 1_000_000),
-        14
+        Ok(14)
     );
     // blast_stat.c:4054-4057, 4101-4102: a block with a negative value keeps the cutoff 1.
     for invalid in [
@@ -96,7 +98,7 @@ fn without_the_gumbel_block_the_hit_cutoff_reads_the_search_space() {
     ] {
         assert_eq!(
             EvalueStats::new(None, i64::MAX).hit_cutoff(10.0, &invalid, 302, 10),
-            1
+            Ok(1)
         );
     }
     // The largest search space with an E-value below kSmallFloat: the quotient is past the

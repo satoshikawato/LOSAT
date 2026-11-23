@@ -534,14 +534,65 @@ pub fn blast_spouge_stoe(
     area * k * (-lambda * y).glibc_exp() * db_scale_factor
 }
 
+/// The overflow of NCBI's `Int4` scores in `BLAST_SpougeEtoS`'s search for the score of an
+/// e-value (`blast_spouge_etos`): the doubling of the upper bound (`b *= 2`, `doubling`) or the
+/// bisection's sum (`a + b`) would pass 2^31 - 1, a signed overflow (undefined behaviour). At the
+/// doubling the x86-64 build of NCBI BLAST+ 2.17.0 then never ends (the bound wraps to `INT_MIN`
+/// and then 0, whose e-value stays above the target); at the bisection it crashes (a Lambda of
+/// 5e-9, 6e-9 and 7e-9 with psiblast, probes b1b of line PS item PS7c). Where it comes depends on the e-value, the
+/// lengths and the Gumbel block; a gapped Lambda small enough for it (1e-9 with BLOSUM62's block
+/// and `-evalue 10` for a query of 30 letters) comes from a PSSM's file only (line PS item PS7c,
+/// review B1). `lambda` is the block's Lambda, which LOSAT's refusal names (`refusal`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpougeCutoffOverflow {
+    pub lambda: f64,
+    pub doubling: bool,
+}
+
+impl std::fmt::Display for SpougeCutoffOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the Spouge cutoff search of the gapped Lambda {:?} passes 32-bit integers",
+            self.lambda
+        )
+    }
+}
+
+impl std::error::Error for SpougeCutoffOverflow {}
+
+impl SpougeCutoffOverflow {
+    /// LOSAT's refusal of the overflow in `program`'s search (NCBI's name of the program in
+    /// capitals): exit status 1, its message.
+    pub(crate) fn refusal(self, program: &str) -> anyhow::Error {
+        let step = if self.doubling {
+            "doubles its score past 32-bit integers and never ends"
+        } else {
+            "adds its scores past 32-bit integers and crashes"
+        };
+        anyhow::anyhow!(
+            "a gapped Karlin-Altschul Lambda of {:?}, for which NCBI BLAST+ 2.17.0's search for the score of the hit-saving cutoff's E-value (BLAST_SpougeEtoS) {step} (signed overflow, undefined behaviour), is not supported by LOSAT's {program}",
+            self.lambda
+        )
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5263
+// The first upper bound is NCBI's cast of the double (`ncbi_int4_from_double`: `INT_MIN` past
+// `Int4`, then 2). The doubling and the bisection stop with `SpougeCutoffOverflow` where NCBI's
+// `Int4` arithmetic would overflow (`b *= 2` above 2^30 - 1, `a + b` above 2^31 - 1); every other
+// step is NCBI's, so every search that stays inside `Int4` gives NCBI's score.
 pub fn blast_spouge_etos(
     evalue: f64,
     kbp: &KarlinParams,
     gbp: &BlastGumbelBlk,
     query_length: i32,
     subject_length: i32,
-) -> i32 {
+) -> Result<i32, SpougeCutoffOverflow> {
+    let overflow = |doubling| SpougeCutoffOverflow {
+        lambda: kbp.lambda,
+        doubling,
+    };
     let mut a = 0i32;
     let db_scale_factor = if gbp.db_length != 0 {
         gbp.db_length as f64
@@ -549,16 +600,16 @@ pub fn blast_spouge_etos(
         1.0
     };
     let e0 = evalue.max(f64::MIN_POSITIVE);
-    let mut b = ((db_scale_factor / e0).glibc_ln() / kbp.lambda) as i32;
-    if b < 2 {
-        b = 2;
-    }
+    let mut b = crate::core::blast_util::ncbi_int4_from_double(
+        (db_scale_factor / e0).glibc_ln() / kbp.lambda,
+    )
+    .max(2);
 
     let mut e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
     if e > e0 {
         while e > e0 {
             a = b;
-            b *= 2;
+            b = b.checked_mul(2).ok_or_else(|| overflow(true))?;
             e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
         }
     } else {
@@ -566,7 +617,7 @@ pub fn blast_spouge_etos(
     }
 
     while b - a > 1 {
-        let c = (a + b) / 2;
+        let c = a.checked_add(b).ok_or_else(|| overflow(false))? / 2;
         e = blast_spouge_stoe(c, kbp, gbp, query_length, subject_length);
         if e > e0 {
             a = c;
@@ -575,7 +626,7 @@ pub fn blast_spouge_etos(
         }
     }
 
-    a
+    Ok(a)
 }
 
 #[cfg(test)]

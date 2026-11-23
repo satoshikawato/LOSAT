@@ -48,7 +48,7 @@ use crate::report::blast_xml::{
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
-use crate::report::serial::seqalign::seqalign_evalue_listed;
+use crate::report::serial::seqalign::seqalign_evalue_read;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
@@ -160,10 +160,10 @@ pub(super) fn query_stats(
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
             Some(length) if valid => {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
-                // The ancillary data keeps no gapped block whose Lambda is below 0 or a NaN (a
-                // PSSM file's can be), and the XML takes the query's ungapped block then.
+                // A gapped block that the ancillary data does not keep (a PSSM file's,
+                // `stats::tables::ancillary_kept`): the XML takes the query's ungapped block.
                 let karlin = gapped
-                    .filter(|karlin| karlin.lambda >= 0.0)
+                    .filter(|karlin| crate::stats::tables::ancillary_kept(karlin.lambda))
                     .unwrap_or(ungapped_karlin[q_idx]);
                 XmlStats {
                     hsp_len: length.length_adjustment as i32,
@@ -637,7 +637,7 @@ impl PreparedXml {
                                 hsps.hsp(&XmlHsp {
                                     score: hsp.score,
                                     bit_score: payload.bit_score,
-                                    evalue: seqalign_evalue_listed(linked.evalue),
+                                    evalue: seqalign_evalue_read(linked.evalue),
                                     query_from: q_start,
                                     query_to: q_end,
                                     hit_from,

@@ -1580,7 +1580,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
 // PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
 // `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
-// of the M4a-2 survey); neither is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
+// of the M4a-2 survey); neither is refused (`ncbi_app::args::refusal`, series NP, M4a-2b).
 #[test]
 fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     let masks = |program: &str, words: &[&str]| {
@@ -1615,10 +1615,10 @@ fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
                 "{program} {words:?}"
             );
         }
-        assert!(!crate::cli::RUN_REFUSALS
-            .iter()
-            .any(|&(refused, name, _)| refused == program
-                && (name == "db_hard_mask" || name == "db_soft_mask")));
+        for name in ["db_hard_mask", "db_soft_mask"] {
+            let refusal = crate::ncbi_app::args::refusal(program, name);
+            assert_eq!(refusal, None, "{program} -{name}");
+        }
     }
 }
 

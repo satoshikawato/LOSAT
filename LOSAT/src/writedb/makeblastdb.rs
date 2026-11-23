@@ -113,13 +113,6 @@ pub struct MakedbArgs {
     pub randomize: bool,
 }
 
-/// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
-/// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
-/// `-mask_desc`, `-metadata_output_prefix`, `-oid_masks` and `-randomize` are read. `-gi_mask`
-/// and `-gi_mask_name` write GI-indexed mask files (item M4c), which LOSAT does not write yet.
-pub const UNSUPPORTED_OPTIONS: [&str; 2] = ["gi_mask", "gi_mask_name"];
-
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
 #[derive(Debug)]

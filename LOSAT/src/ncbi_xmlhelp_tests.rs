@@ -2,7 +2,8 @@
 //! refuses by name, against the readers themselves.
 
 use super::*;
-use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, Cli, RUN_REFUSALS};
+use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, Cli};
+use crate::ncbi_app::args::{refusal, Refusal};
 use clap::error::ErrorKind;
 use std::ffi::OsString;
 
@@ -62,9 +63,11 @@ fn dependencies(xml: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-// Each argument of NCBI's XML is read by the parser or refused by name (none is unknown), and
-// the XML keeps exactly the ones read: the parser is asked with the argument (a value `1` for a
-// key) before `-h`, whose help ends the reading when the argument passed.
+// Each argument of NCBI's XML is read by the parser or refused by name (none is unknown), the
+// parser refuses by name exactly the rows of the refusals that say so (`Refusal::Read`), and the
+// XML keeps exactly the ones read and not refused at the run (`Refusal::Run`): the parser is asked
+// with the argument (a value `1` for a key) before `-h`, whose help ends the reading when the
+// argument passed.
 #[test]
 fn the_xml_keeps_the_arguments_that_the_parser_reads() {
     for program in CLAP_PROGRAMS {
@@ -94,21 +97,15 @@ fn the_xml_keeps_the_arguments_that_the_parser_reads() {
                 }
             };
             // The arguments whose run LOSAT refuses whatever their value pass the parser.
-            let run_refused = RUN_REFUSALS
-                .iter()
-                .any(|refusal| refusal.0 == program && refusal.1 == name);
-            assert!(!(refused && run_refused), "{program} -{name}");
+            let row = refusal(program, name);
+            let run_refused = matches!(row, Some(Refusal::Run(_)));
+            assert_eq!(
+                refused,
+                matches!(row, Some(Refusal::Read(_))),
+                "{program} -{name}"
+            );
             assert_eq!(kept, !refused && !run_refused, "{program} -{name}");
         }
-    }
-    // Each run refusal is an argument of NCBI's XML of its program.
-    for (program, name, _) in RUN_REFUSALS {
-        assert!(
-            ncbi_argument_names(program)
-                .iter()
-                .any(|(found, _)| found == name),
-            "{program} -{name}"
-        );
     }
 }
 

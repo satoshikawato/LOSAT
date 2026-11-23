@@ -396,7 +396,7 @@ pub fn word_cutoff_score_for_update(
     // (Blastn exception at line 366 does not apply to tblastx)
     new_cutoff = new_cutoff.min(gap_trigger);
 
-    // Multiply the cutoff score by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product).
+    // Multiply the cutoff score by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product; every caller passes 1.0, so the cutoff is NCBI's).
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // Cap the cutoff score at the context's `cutoff_score_max` from `hit_params`.

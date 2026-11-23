@@ -107,7 +107,7 @@ pub fn cutoff_score_for_ungapped_extension(
     // Start from `gap_trigger` in gapped mode.
     let mut new_cutoff = gap_trigger;
 
-    // Multiply the cutoff by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product).
+    // Multiply the cutoff by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product; every caller passes 1.0, so the cutoff is NCBI's).
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // Cap the cutoff at `cutoff_score_max`.
@@ -188,7 +188,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
 
     // Non-blastn programs cap the cutoff at `gap_trigger` here; blastn skips that cap.
 
-    // Multiply the cutoff by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product).
+    // Multiply the cutoff by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product; every caller passes 1.0, so the cutoff is NCBI's).
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // Cap the cutoff at each context's `cutoff_score_max` from `hit_params->cutoffs`.

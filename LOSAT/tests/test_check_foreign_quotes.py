@@ -1194,13 +1194,106 @@ class UnbacktickedCodeTest(unittest.TestCase):
             ],
             [],
         )
-        # True C `case` labels still fail.
+        # True C `case` labels still fail (standalone and under a citation).
         for bad in (
             "// case eBlastp:\n",
+            "// case kFoo:\n",
+            "// case foo_bar:\n",
+            "// case NS::kFoo:\n",
             "// case 3: return 1;\n",
             "// case MY_ENUM: break;\n",
         ):
             self.assert_flagged(bad, 1, bad)
+            self.assertEqual(
+                [f.line for f in checker.check_text("x.rs", (self.CITE + bad).splitlines(), "slash", TABLE) if f.kind == "QUOTE"],
+                [2],
+                bad,
+            )
+
+    def test_comment_names_odd_backticks_and_escaped_char_literals(self) -> None:
+        # ① Comment text inside `/* ... */` or trailing comments must not enter `code_names` / `rust_names`.
+        self.assert_flagged("/* ZapFooBar */\n// see ZapFooBar(alpha, beta);\n", 2, "rs block comment name")
+        self.assert_flagged("let x = 1; // ZapFooBar\n// see ZapFooBar(alpha, beta);\n", 2, "rs trailing comment name")
+        self.assertEqual(
+            self.unbackticked("x=1  # ZapFooBar\n# see ZapFooBar(alpha, beta);\n", "x.sh", "hash"),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        # Positive control: an actual Rust definition of `ZapFooBar` still exempts it as a LOSAT name.
+        self.assertEqual(
+            self.unbackticked("struct ZapFooBar;\n// see ZapFooBar(alpha, beta);\n", "x.rs", "slash"),
+            [],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.rs").write_text("/* ZapFooBar */\n", encoding="utf-8")
+            (root / "b.rs").write_text("// see ZapFooBar(alpha, beta);\n", encoding="utf-8")
+            found = checker.find(root, TABLE)
+            self.assertEqual([(f.path, f.line, f.kind) for f in found], [("b.rs", 1, "QUOTE")])
+
+        # ② Cited prose `case` lines still pass while cited `case kFoo:` / `case foo_bar:` fail.
+        for prose_case in (
+            "// case sensitive: the names differ\n",
+            "// case c_xml_tab: the byte is a tab\n",
+            "// case c_xml_tab: `Bad char [0x1] in string at line 8` for\n",
+            "// case 3: the query is empty and nothing is written\n",
+            "// Int4 values, so the reachable Int4 row length is rounded down\n",
+        ):
+            self.assertEqual(
+                checker.check_text("x.rs", (self.CITE + prose_case).splitlines(), "slash", TABLE),
+                [],
+                prose_case,
+            )
+
+        # ③ Odd backticks in a multi-line run must not swallow C code on following lines.
+        odd_three = (
+            "// an odd ` tick here\n"
+            "// then hsp_list->hspcnt = hsp_cnt; and `x\n"
+            "// y` done\n"
+        )
+        self.assertEqual(
+            self.unbackticked(odd_three),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        odd_two = (
+            "// `first\n"
+            "// second` then hsp_list->hspcnt = hsp_cnt; and odd `\n"
+        )
+        self.assertEqual(
+            self.unbackticked(odd_two),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        odd_four = (
+            "// an odd ` tick here\n"
+            "// `a` note then hsp_list->hspcnt = hsp_cnt; trailing `b`\n"
+            "// `x\n"
+            "// y` done\n"
+        )
+        self.assertEqual(
+            self.unbackticked(odd_four),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        gnu_quote_prose = (
+            "// NCBI prints `String' when the option is missing\n"
+            "// and keeps `first\n"
+            "// second` wrapped across comment lines.\n"
+        )
+        self.assertEqual(self.unbackticked(gnu_quote_prose), [])
+
+        # ④ Escaped single-quote char literals `'\''` must not desynchronize `scan_slash_comments`.
+        self.assert_flagged(
+            "let a = ['\\'','\"']; // hsp_list->hspcnt = hsp_cnt;\n",
+            1,
+            "escaped single quote before double quote",
+        )
+        self.assert_flagged(
+            "let b = ['\\\\','\\'','\\n']; // hsp_list->hspcnt = hsp_cnt;\n",
+            1,
+            "escaped backslash and single quote",
+        )
+        self.assertEqual(
+            self.unbackticked("let a = ['\\'','\"']; // plain prose comment\n"),
+            [],
+        )
 
     def test_unbackticked_regexes_are_linear_time(self) -> None:
         import time
@@ -1244,6 +1337,8 @@ class UnbacktickedCodeTest(unittest.TestCase):
             ("backslash_str_spam", "x.rs", "slash", lambda n: 'let s = "' + "a\\\n" * (n // 3) + '"; /* x */\n'),
             ("toml_ml_spam", "x.toml", "hash", lambda n: 'a = """' + "x" * n + '""" # y\n'),
             ("yaml_quote_spam", "x.yml", "hash", lambda n: "a: " + "it's " * (n // 5) + "# y\n"),
+            ("odd_bt_spam", "x.rs", "slash", lambda n: "// odd `\n// " + "a `b` " * (n // 6) + "`x\n// y` done\n"),
+            ("escaped_char_spam", "x.rs", "slash", lambda n: "let a = [" + "'\\''," * (n // 5) + "'a']; // ok\n"),
         )
         n_small = 2000
         n_large = 8000

@@ -209,11 +209,12 @@ LABEL_START_RE = re.compile(r"^[A-Za-z][\w.+ -]{0,40}\breference\b")
 NCBI_PATH_LABEL_RE = re.compile(
     r"^NCBI(?:\s+[^\s:`]+){0,4}?\s+`?(?P<path>[\w.+/-]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc))\b"
 )
-# A C `case` label: requires an enum/macro/integer/char/scoped label and no 3-word English prose
-# tail, so prose lines such as `case sensitive: the names differ` or `case 3: the query is empty`
-# are not flagged when comments are re-wrapped.
+# A C `case` label: matches any C/C++ identifier (including `::`-scoped), integer, or char literal,
+# while `_is_c_case_label` excludes English prose tails (3+ lowercase words, such as
+# `case sensitive: the names differ`, `case c_xml_tab: the byte is a tab`, or
+# `case 3: the query is empty ...`) when comments are re-wrapped.
 C_CASE_LABEL_RE = re.compile(
-    r"^\s*case\s+(?:e[A-Z]\w*|[A-Z][A-Z0-9_]+|[A-Za-z_]\w*::(?:e[A-Z]\w*|[A-Z][A-Z0-9_]+)|-?\d+|'(?:\\.|[^'\\])')\s*:(?P<tail>.*)$"
+    r"^\s*case\s+(?:[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*|-?\d+|'(?:\\.|[^'\\])')\s*:(?P<tail>.*)$"
 )
 THREE_PROSE_WORDS_RE = re.compile(r"\b[a-z]+ [a-z]+ [a-z]+\b")
 
@@ -224,6 +225,8 @@ def _is_c_case_label(text: str) -> bool:
     if match is None:
         return False
     tail = match.group("tail").strip()
+    if "_BT_" in tail or "`" in tail:
+        return False
     return not tail or THREE_PROSE_WORDS_RE.search(tail) is None
 
 
@@ -264,7 +267,7 @@ def is_cited_code_line(text: str, prev_enum: bool = False) -> bool:
         return True
     clean = _mask_double_quoted(text)
     prose = PROSE_RE.search(clean) is not None
-    if CODE_LINE_C_TYPE_DECL_RE.search(clean):
+    if CODE_LINE_C_TYPE_DECL_RE.search(clean) and (not prose or ";" in clean or "=" in clean):
         return True
     if not prose and (CODE_LINE_SEMI_RE.search(text) or CODE_LINE_BARE_TYPE_DECL_RE.search(clean)):
         return True
@@ -350,20 +353,6 @@ def _python_scan(
     return texts, trailing
 
 
-def python_texts_and_trailing(
-    lines: Sequence[str],
-) -> tuple[list[str | None], dict[int, str]] | None:
-    """The comment text of each line of a Python file: full-line `#` comments (tokenize), the lines
-    of string statements such as docstrings (ast), and trailing `#` comments after code
-    (`{1-based line_no: text}`); None when the file does not parse (callers fall back to
-    line-based `#` / docstring scanning and `_trailing_hash_comment_pos`)."""
-    res = _python_scan(lines)
-    if res is None:
-        return None
-    texts, trailing = res
-    return texts, {row: body for row, (_, body) in trailing.items()}
-
-
 def python_texts(lines: Sequence[str]) -> list[str | None] | None:
     """The comment text of each line of a Python file: full-line `#` comments (tokenize) and the
     lines of string statements, such as docstrings (ast); None when the file does not parse."""
@@ -430,13 +419,6 @@ def _trailing_hash_comment_pos(line: str, suffix: str = "") -> tuple[int, str] |
                     return (i, body) if body else None
         i += 1
     return None
-
-
-def _trailing_hash_comment(line: str, suffix: str = "") -> str | None:
-    """The text of a trailing `# ...` comment after code on a single line (see
-    `_trailing_hash_comment_pos`)."""
-    hit = _trailing_hash_comment_pos(line, suffix)
-    return None if hit is None else hit[1]
 
 
 def hash_comments_and_trailing(
@@ -1058,7 +1040,29 @@ def acted_names(bare: str) -> list[str]:
     return acted
 
 
-def code_names(style: str, lines: Sequence[str], texts: Sequence[str | None]) -> frozenset[str]:
+def _blank_spans(line: str, spans: Sequence[tuple[int, int]]) -> str:
+    """Replace `(start_col, end_col)` comment spans on `line` with spaces."""
+    parts: list[str] = []
+    cursor = 0
+    for start_col, end_col in spans:
+        if start_col > cursor:
+            parts.append(line[cursor:start_col])
+        parts.append(" ")
+        if end_col > cursor:
+            cursor = end_col
+    if cursor < len(line):
+        parts.append(line[cursor:])
+    return "".join(parts)
+
+
+def code_names(
+    style: str,
+    lines: Sequence[str],
+    texts: Sequence[str | None],
+    suffix: str = "",
+    comment_spans: dict[int, list[tuple[int, int]]] | None = None,
+    trailing_comments: dict[int, tuple[int, str]] | None = None,
+) -> frozenset[str]:
     """The names of a file's code: its identifiers outside comments, docstrings and strings."""
     if style == "python":
         try:
@@ -1066,7 +1070,21 @@ def code_names(style: str, lines: Sequence[str], texts: Sequence[str | None]) ->
         except (SyntaxError, tokenize.TokenError, IndentationError, ValueError):
             tokens = []
         return frozenset(t.string for t in tokens if t.type == tokenize.NAME)
-    return frozenset(IDENTIFIER_RE.findall(code_lines(lines, texts))) - RUST_WORDS
+    return (
+        frozenset(
+            IDENTIFIER_RE.findall(
+                code_lines(
+                    lines,
+                    texts,
+                    style=style,
+                    suffix=suffix,
+                    comment_spans=comment_spans,
+                    trailing_comments=trailing_comments,
+                )
+            )
+        )
+        - RUST_WORDS
+    )
 
 
 # The names of LOSAT's Rust anywhere in the tree: the functions it defines (`fn name`) and the
@@ -1075,14 +1093,35 @@ FN_DEFINITION_RE = re.compile(r"\bfn\s+(?P<name>[a-z_]\w*)")
 CAMEL_CASE_NAME_RE = re.compile(r"\b[A-Z][a-z0-9]+[A-Z]\w*\b")
 
 
-def code_lines(lines: Sequence[str], texts: Sequence[str | None]) -> str:
-    """The code of a file without its comments, docstrings and strings (line comments after
-    code too), as one text."""
+def code_lines(
+    lines: Sequence[str],
+    texts: Sequence[str | None],
+    style: str = "slash",
+    suffix: str = "",
+    comment_spans: dict[int, list[tuple[int, int]]] | None = None,
+    trailing_comments: dict[int, tuple[int, str]] | None = None,
+) -> str:
+    """The code of a file without its comments, docstrings and strings (block and trailing
+    comments too), as one text."""
+    if comment_spans is None and style == "slash":
+        if any(text is None and ("//" in line or "/*" in line) for line, text in zip(lines, texts)):
+            _, _, comment_spans = scan_slash_comments(lines, suffix)
+    elif trailing_comments is None and style == "hash":
+        if any(text is None and "#" in line for line, text in zip(lines, texts)):
+            _, trailing_comments = hash_comments_and_trailing(lines, suffix)
     out = []
-    for line, text in zip(lines, texts):
-        if text is None:
-            line = _mask_strings(line, " ")
-            out.append(line.split("//", 1)[0] if "//" in line else line)
+    for number, (line, text) in enumerate(zip(lines, texts), start=1):
+        if text is not None:
+            continue
+        if comment_spans is not None:
+            spans = comment_spans.get(number)
+            if spans:
+                line = _blank_spans(line, spans)
+        elif trailing_comments is not None:
+            hit = trailing_comments.get(number)
+            if hit is not None:
+                line = line[: hit[0]]
+        out.append(_mask_strings(line, " "))
     return "\n".join(out)
 
 
@@ -1094,65 +1133,11 @@ def rust_names(root: Path) -> tuple[frozenset[str], frozenset[str]]:
     for path in source_files(root):
         if path.suffix == ".rs":
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            code = code_lines(lines, comment_texts("slash", lines))
+            code = code_lines(lines, comment_texts("slash", lines), style="slash", suffix=".rs")
             functions.update(match.group("name") for match in FN_DEFINITION_RE.finditer(code))
             functions.update(CAMEL_CASE_NAME_RE.findall(code))
             identifiers.update(IDENTIFIER_RE.findall(code))
     return frozenset(functions), frozenset(identifiers)
-
-
-def inline_statement_findings(
-    rel: str,
-    texts: Sequence[str | None],
-    lines: Sequence[str] = (),
-    style: str = "slash",
-    functions: frozenset[str] = frozenset(),
-    identifiers: frozenset[str] = frozenset(),
-) -> list[Finding]:
-    """QUOTE findings for statements and expressions in backticks across full-line comment runs."""
-    runs: list[list[tuple[int, str]]] = []
-    run: list[tuple[int, str]] = []
-    in_fence = False
-    for number, text in enumerate(texts, start=1):
-        if text is None:
-            if run:
-                runs.append(run)
-                run = []
-            in_fence = False
-            continue
-        if FENCE_RE.match(text):
-            if run:
-                runs.append(run)
-                run = []
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        if not text:
-            if run:
-                runs.append(run)
-                run = []
-            continue
-        run.append((number, text))
-    if run:
-        runs.append(run)
-    known: list[frozenset[str]] = []
-
-    def names() -> frozenset[str]:
-        if not known:
-            known.append(code_names(style, lines, texts) | functions)
-        return known[0]
-
-    suffix = Path(rel).suffix
-    return _check_inline_spans_on_runs(
-        rel,
-        runs,
-        names,
-        identifiers,
-        suffix in NON_C_FAMILY,
-        suffix in (".rs", ".py"),
-        suffix == ".rs",
-    )
 
 
 # Unbackticked C or C++ statements and expressions in comment text outside backticks (line
@@ -1894,8 +1879,14 @@ def strip_backticks_in_run(run: Sequence[tuple[int, str]]) -> list[tuple[int, st
     where text inside balanced backtick spans (including spans that cross comment lines) is
     replaced by a neutral token so adjacent words never merge across a removed span.
     A single unclosed backtick does not swallow subsequent lines in the run."""
-    odd_indices = [idx for idx, (_, text) in enumerate(run) if text.count("`") % 2 == 1]
-    unclosed_line_idx: int | None = odd_indices[-1] if len(odd_indices) % 2 == 1 else None
+    total_bt = 0
+    last_bt_idx: int | None = None
+    for idx, (_, text) in enumerate(run):
+        cnt = text.count("`")
+        if cnt:
+            total_bt += cnt
+            last_bt_idx = idx
+    unclosed_line_idx: int | None = last_bt_idx if total_bt % 2 == 1 else None
     out: list[tuple[int, str, str]] = []
     in_bt = False
     for idx, (number, text) in enumerate(run):
@@ -2075,8 +2066,8 @@ def scan_slash_comments(
             else:
                 if pos + 2 < n and text[pos + 1] not in ("\\", "\n", "'") and text[pos + 2] == "'":
                     i = pos + 3
-                elif pos + 2 < n and text[pos + 1] == "\\":
-                    j = pos + 2
+                elif pos + 3 < n and text[pos + 1] == "\\" and text[pos + 2] != "\n":
+                    j = pos + 3
                     limit = min(n, pos + 16)
                     while j < limit and text[j] not in ("'", "\n"):
                         j += 1
@@ -2187,25 +2178,37 @@ def unbackticked_findings(
 
     def default_names() -> frozenset[str]:
         if not known:
-            known.append(code_names(style, lines, texts) | functions)
+            known.append(code_names(style, lines, texts, suffix=Path(rel).suffix) | functions)
         return known[0]
 
     names = names_fn if names_fn is not None else default_names
 
+    def record_outside(number: int, raw: str, outside: str) -> None:
+        if number in seen_lines:
+            return
+        if unbackticked_c_code(
+            outside,
+            raw,
+            style=style,
+            names=names,
+            cited_line=(number in cited_lines),
+            identifiers=identifiers,
+        ):
+            seen_lines.add(number)
+            findings.append(Finding(rel, number, "QUOTE", UNBACKTICKED_QUOTE, raw))
+
     def record_run(items: Sequence[tuple[int, str]]) -> None:
         for number, raw, outside in strip_backticks_in_run(items):
-            if number in seen_lines:
-                continue
-            if unbackticked_c_code(
-                outside,
-                raw,
-                style=style,
-                names=names,
-                cited_line=(number in cited_lines),
-                identifiers=identifiers,
-            ):
-                seen_lines.add(number)
-                findings.append(Finding(rel, number, "QUOTE", UNBACKTICKED_QUOTE, raw))
+            record_outside(number, raw, outside)
+        # When a multi-line run has an odd number of backticks (for example an unpaired GNU-style
+        # `` `String' `` quote), also check per-line pairing so the stray tick cannot pair across
+        # lines and hide C/C++ code on a following line.
+        if len(items) > 1 and sum(text.count("`") for _, text in items) % 2 == 1:
+            for number, raw in items:
+                if number in seen_lines:
+                    continue
+                _, _, per_line_outside = strip_backticks_in_run([(number, raw)])[0]
+                record_outside(number, raw, per_line_outside)
 
     for run in runs:
         record_run(run)
@@ -2253,6 +2256,8 @@ def check_text(
     findings: list[Finding] = []
     suffix = Path(rel).suffix
     trailing_comments: dict[int, str] = {}
+    hash_trailing: dict[int, tuple[int, str]] | None = None
+    slash_spans: dict[int, list[tuple[int, int]]] | None = None
     blocks_by_start: dict[int, list[list[tuple[int, str, int]]]] = {}
     block_interior_lines: set[int] = set()
     if style == "python":
@@ -2272,11 +2277,12 @@ def check_text(
         trailing_comments = {row: body for row, (_, body) in hash_trailing.items()}
     elif style == "slash":
         texts = comment_texts(style, lines)
+        slash_spans = {}
         if any(
             (text is None and ("//" in line or "/*" in line)) or (text is not None and "/*" in line)
             for line, text in zip(lines, texts)
         ):
-            slash_trailing, blocks, _ = scan_slash_comments(lines, suffix)
+            slash_trailing, blocks, slash_spans = scan_slash_comments(lines, suffix)
             trailing_comments = {row: body for row, (_, body) in slash_trailing.items()}
             for block in blocks:
                 blocks_by_start.setdefault(block[0][0], []).append(block)
@@ -2293,7 +2299,17 @@ def check_text(
 
     def names() -> frozenset[str]:
         if not known_names:
-            known_names.append(code_names(style, lines, texts) | functions)
+            known_names.append(
+                code_names(
+                    style,
+                    lines,
+                    texts,
+                    suffix=suffix,
+                    comment_spans=slash_spans,
+                    trailing_comments=hash_trailing,
+                )
+                | functions
+            )
         return known_names[0]
 
     last_citation: tuple[int, str] | None = None

@@ -1993,7 +1993,11 @@ fn a_deferred_heap_test_that_turns_true_is_finished_by_a_continuation_in_the_nex
 /// bound continues no later match of the query once the heap may be filled before it (review 2 of
 /// X4-mt, N-5: the bound reads only the heap's count). A continuation's result is replayed without
 /// its heap test, so a later match continued by mistake would insert a list that NCBI's loop does
-/// not keep.
+/// not keep. The preliminary E-values are out of order on purpose: the engine sorts each query's
+/// list by E-value before the redo (`blast_engine/prelim_run.rs`), so there a match that the
+/// early termination test may end is followed only by such matches, which the bound never
+/// continues, and the count is not observable there (review 3 of X4-mt, N-1). The rule does not
+/// rely on that order; this test holds it on an order that the engine never gives.
 #[test]
 fn a_carried_test_that_the_early_termination_test_may_end_counts_toward_the_bound() {
     // One query, two lists to keep. The first two matches ask no test (no insert); the third's
@@ -2679,17 +2683,20 @@ fn a_stopped_replay_drops_at_most_a_cap_of_results_at_risk_per_stopped_window() 
 /// (`postprocess_preliminary_hits_smith_waterman` with fresh scratch) whose heap test the
 /// query's heap at the window's start answers, and the job defers exactly the tests that this
 /// heap cannot answer for certain, keeping the redo's state at each; a continuation, resumed from
-/// the state that a deferred call kept, equals the call answered TRUE.
+/// the state that a deferred call kept, equals the call answered TRUE. The windows after a stop
+/// carry the jobs' own results, with their deferred tests and kept states, so the look-ahead and
+/// the bound (`x_sw_continued`) continue carried matches after the stopped one, each of which
+/// must resume from its own state (review 3 of X4-mt, S-2).
 #[test]
 fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
     let fixture = redo_fixture();
     let count = fixture.lists.len();
-    // Two sets of heaps that keep two lists. The first: by query, empty, one list, and full
-    // above the cutoff (worst E 0.5). The second: full within the cutoff (worst E 1e-25), but
-    // for each batch's last query, which stays empty so that no batch ends early: there every
-    // test of an E-value above the cutoff is FALSE for certain (the fixture asks such tests of
-    // the first query of each batch).
-    let heap_sets: Vec<Vec<BlastCompoHeap>> = [false, true]
+    // Three sets of heaps. The first two keep two lists. The first: by query, empty, one list,
+    // and full above the cutoff (worst E 0.5). The second: full within the cutoff (worst E
+    // 1e-25), but for each batch's last query, which stays empty so that no batch ends early:
+    // there every test of an E-value above the cutoff is FALSE for certain (the fixture asks such
+    // tests of the first query of each batch).
+    let mut heap_sets: Vec<Vec<BlastCompoHeap>> = [false, true]
         .into_iter()
         .map(|within| {
             let mut heaps = heaps_of(count, 2);
@@ -2709,6 +2716,11 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
             heaps
         })
         .collect();
+    // The third: heaps that keep three lists, empty, with a cutoff of 0, so a job defers the test
+    // of each match after the window's first three of its query. At a stop the bound then
+    // continues the stopped query's next deferred tests, and the look-ahead a later query's first
+    // deferred test that the copy of its heap takes.
+    heap_sets.push((0..count).map(|_| BlastCompoHeap::new(3, 0.0)).collect());
     let build = |q_idx: usize| -> Result<BlastRedoAlignParams> {
         Ok(BlastRedoAlignParams {
             smith_waterman: true,
@@ -2717,6 +2729,10 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
     };
     let (mut compared, mut with_list, mut deferred_tests, mut certain_false) = (0, 0, 0, 0);
     let mut continuations = 0;
+    // Continuations of carried matches after the stopped one, and the carried windows' continued
+    // matches by reason.
+    let mut later_continuations = 0;
+    let mut continued_by = XContinuedBy::default();
     let stream_end = XMatch {
         q_idx: count,
         position: 0,
@@ -2744,8 +2760,9 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                 window
             })
             .collect();
-        // Windows after a replay that stopped at a match of each window above whose test is
-        // asked (built at the first thread count, with the test's E-value and score).
+        // Windows after a replay that stopped in each window above (built at the first thread
+        // count): at its first match whose test is asked, that test deferred whatever the heap,
+        // and at its first match whose job deferred its test.
         let mut carried_windows: Vec<(XWindow, XCarry)> = Vec::new();
         for threads in [1, 2, 3, 7] {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
@@ -2815,40 +2832,30 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                 let known = |inserts: bool| move |_: f64, _: i32| SwHeapAnswer::Known(inserts);
                 if carried_windows.is_empty() {
                     for window in &windows {
-                        let Some(index) = (0..window.matches.len()).find(|&index| {
-                            !window.ended[index]
-                                && one_thread(window.matches[index], &known(false)).1.is_some()
-                        }) else {
-                            continue;
+                        // The results of the window's jobs (without a carry every match is in a
+                        // job, in order), with the tests they deferred and the states they kept,
+                        // as a replay that stops in the window carries them; the loop below
+                        // checks the jobs against the one-thread call.
+                        let job_results = || {
+                            x_compute_window::<_, true>(
+                                &search,
+                                &fixture.lists,
+                                heaps,
+                                window,
+                                &[],
+                                &Arc::new(XSharedSubjectRanges::new()),
+                                false,
+                            )
+                            .0
                         };
-                        let matched = window.matches[index];
-                        // The job's call that deferred the test: its FALSE result and its state.
-                        let (result, asked, kept) =
-                            one_thread(matched, &|_: f64, _: i32| SwHeapAnswer::Deferred);
-                        assert!(kept.is_some(), "a deferred test keeps the redo's state");
-                        assert_eq!(
-                            x_result_difference(
-                                &result.map_err(|error| anyhow::anyhow!(error)),
-                                &one_thread(matched, &known(false)).0
-                            ),
-                            None,
-                            "a deferred test ends the call as FALSE does"
-                        );
-                        let stopped = XComputed {
-                            result: no_alignment(),
-                            deferred: Some(asked.expect("asked")),
-                            resume: kept,
-                        };
-                        let carry = XCarry {
-                            matches: window.matches[index..].to_vec(),
-                            results: std::iter::once(Some(stopped))
-                                .chain(window.ended[index + 1..].iter().map(|&ended| {
-                                    (!ended).then(|| XComputed::from(no_alignment()))
-                                }))
-                                .collect(),
-                        };
-                        carried_windows.push((
-                            x_window::<true>(
+                        // The window after a stop at `index`, whose match's result is
+                        // `results[index]`.
+                        let mut stop_at = |index: usize, mut results: XWindowResults| {
+                            let carry = XCarry {
+                                matches: window.matches[index..].to_vec(),
+                                results: results.split_off(index),
+                            };
+                            let next = x_window::<true>(
                                 &fixture.lists,
                                 heaps,
                                 &fixture.batches,
@@ -2857,9 +2864,46 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                                 Some(&carry),
                                 window.next.unwrap_or(stream_end),
                                 carry.matches.len().div_ceil(X_JOB_MATCHES) + window.jobs.len() + 2,
-                            ),
-                            carry,
-                        ));
+                            );
+                            continued_by.add(next.continued_by);
+                            carried_windows.push((next, carry));
+                        };
+                        let asked_first = (0..window.matches.len()).find(|&index| {
+                            !window.ended[index]
+                                && one_thread(window.matches[index], &known(false)).1.is_some()
+                        });
+                        if let Some(index) = asked_first {
+                            let matched = window.matches[index];
+                            // The job's call that deferred the test: its FALSE result and its
+                            // state.
+                            let (result, asked, kept) =
+                                one_thread(matched, &|_: f64, _: i32| SwHeapAnswer::Deferred);
+                            assert!(kept.is_some(), "a deferred test keeps the redo's state");
+                            assert_eq!(
+                                x_result_difference(
+                                    &result.map_err(|error| anyhow::anyhow!(error)),
+                                    &one_thread(matched, &known(false)).0
+                                ),
+                                None,
+                                "a deferred test ends the call as FALSE does"
+                            );
+                            let mut results = job_results();
+                            results[index] = Some(XComputed {
+                                result: no_alignment(),
+                                deferred: Some(asked.expect("asked")),
+                                resume: kept,
+                            });
+                            stop_at(index, results);
+                        }
+                        let results = job_results();
+                        let deferred_first = results.iter().position(|computed| {
+                            computed
+                                .as_ref()
+                                .is_some_and(|computed| computed.deferred.is_some())
+                        });
+                        if let Some(index) = deferred_first.filter(|&at| Some(at) != asked_first) {
+                            stop_at(index, results);
+                        }
                     }
                 }
                 let all_windows = windows.iter().map(|window| (window, &[][..])).chain(
@@ -2934,6 +2978,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                                 assert_eq!(computed.deferred, None, "{at:?}");
                                 assert!(computed.resume.is_none(), "{at:?}");
                                 continuations += 1;
+                                later_continuations += usize::from(index > 0);
                                 continue;
                             }
                             let expected = asked.filter(|&(evalue, score)| {
@@ -2962,5 +3007,12 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
             && continuations > 50,
         "compared {compared} with a list {with_list} deferred {deferred_tests} certain FALSE \
              {certain_false} continuations {continuations}"
+    );
+    // With every continuation resumed from the stopped match's state
+    // (`carried[window.continued[0].0]` in `x_compute_window`), these differ from the call
+    // answered TRUE or stop at that function's debug assertion.
+    assert!(
+        later_continuations > 10 && continued_by.ahead > 0 && continued_by.bound > 0,
+        "continuations after the stopped match {later_continuations}, continued {continued_by:?}"
     );
 }

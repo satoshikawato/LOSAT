@@ -211,6 +211,9 @@ pub(crate) fn redo_one_match_smith_waterman_from<'seq>(
     };
     let gap_open = params.gapping_params.gap_open;
     let gap_extend = params.gapping_params.gap_extend;
+    // Whether a resumed call reached the window of its kept test with that window's alignment
+    // (else it would end with the kept values and no alignment of that window).
+    let mut resumed_reached = resume.is_none();
 
     for (window_index, window) in windows.iter().enumerate().skip(first_window) {
         let resumed = resume.filter(|state| state.window == window_index);
@@ -265,6 +268,7 @@ pub(crate) fn redo_one_match_smith_waterman_from<'seq>(
             // The window of the kept test: its rows from the matrix and the rule of its adjustment,
             // which is not repeated.
             (_, Some(state)) => {
+                resumed_reached = true;
                 let matrix = if uses_composition {
                     adjusted_matrix.as_ref()
                 } else {
@@ -434,6 +438,10 @@ pub(crate) fn redo_one_match_smith_waterman_from<'seq>(
             alignments_by_query[query_index] = Some(new_align);
         }
     }
+    debug_assert!(
+        resumed_reached,
+        "a resumed call reaches the window of its kept test"
+    );
     *matrix_state = adjusted_matrix;
     Ok(BlastRedoOneMatchResult {
         alignments_by_query,

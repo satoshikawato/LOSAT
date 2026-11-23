@@ -2525,3 +2525,43 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
 - `xpost/m2b_*_qm.*`: made by agent4's `m2/probe_m2b.py`, and `xpost/db/{nST,pA,pB,pR3}/*.fa` by the probes of K4h review 2,
   as `make_xpost_inputs.py`'s docstring says (commit 135255760, 2026-11-16); neither script is in this repository, and the
   origin of the letters is not recorded.
+
+## `html/`: inputs of the `-html` rows (line RG, item T4a2)
+
+Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 and 18 with `-db`, and the registry
+and environment cases of NCBI's HTML formatter. The inputs are those of the survey T4 of line RG
+(`remaining-gaps-20261112/T/t4`, written by its `scripts/gen.py` and `in2/gen2.py`), copied byte for byte so that the
+frozen bytes can be compared with the survey's runs. The rows also use `of18/ps_ids`, `of18/ns_ids`, `of18/ps_plain`,
+`of18/ps_plain_8890` and `of18/pq.faa` (the T2 ids databases), `dbmask/edge1`, `dbmask/edge2` and `dbmask/q5.fna`, and
+the taxonomy databases `../seqdb/taxdb/good` and `../seqdb/taxdb/of18bl`, and the queries and the `-subject` file of
+`../fasta/html` (the inputs of the `html.*` rows of `../outfmt0_manifest.tsv`; its README.md): `pq_spec.faa`,
+`nq_spec.fna`, `pq_ids.faa` (`-parse_deflines`) and `ps_spec.faa` (the `-subject` of the registry rows, `Subject_N`).
+
+- `pq_nohit.faa` (`pq2`, a query without hits) and `pq_nohitfirst.faa` (that query, then `q1` of `pq_spec.faa`).
+- `pmix_ids` (protein) and `nmix_ids` (nucleotide), version 5 databases of the id kinds that `of18/ps_ids` and `ns_ids`
+  lack: `../fasta/html/pmix_ids.faa` holds `pir||A12345`, `prf||1234567A`, `pat|US|5000000|1`, `tpg|DAA00001.1|`,
+  `gi|1000|gb|AAA00001.1|`, `gnl|TI|12345`, `sp|Q99999.1|NAME_HUMAN` with a second defline `emb|CAA99999.1|` (joined by
+  `\x01`), a sequence with nine deflines `ref|XP_000901.1|` to `ref|XP_000909.1|` (more than NCBI's eight shown: `6 more
+  sequence titles`), `lcl|loc_x` and `gi|999`; `nmix_ids.fna` holds `gi|2000`, `gi|2001|emb|CAA00001.1|`,
+  `tpe|BN000001.1|`, `gnl|TI|54321`, `pat|EP|1000000|2` and `gb|AY000001.1|` with a second defline `ref|NM_000099.1|`.
+  Built by NCBI BLAST+ 2.17.0 in the survey's directory, so their titles are the `-in` text
+  (`BLAST_USAGE_REPORT=false`):
+
+```
+makeblastdb -in in/pmix_ids.faa -dbtype prot -parse_seqids -out db/pmix_ids
+makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
+```
+
+- `rc/<name>/`: the run directories of the `cwd=` rows and the `$NCBI` directories of the `NCBI=` rows, each with the
+  file that NCBI reads there: `.ncbirc` of `p_http` (`[BLASTFMTUTIL]` `PROTOCOL=http:`), `p_https` (`https:`), `p_empty`
+  (`PROTOCOL=` empty), `lower` (`[blastfmtutil]` `protocol=http:`), `taxbr` (`[TAX_BROWSER]` `BLASTFMTUTIL=...`),
+  `localid` (`[LOCAL_ID]` `TOOL_URL=` with the tags `seq_id`, `db_name`, `taxid`, `protocol` and `title`), `feat`
+  (`[FEATURE_INFO]` `FEATURE_FILE`, `FEATURE_FILE_INDEX`), `plain_only` (`[BLAST]` `DATA_LOADERS=blastdb`), `ncbidir` (a
+  `$NCBI` directory: `[LOCAL_ID]` `TOOL_URL`), and the malformed files, whose first line `this line has no equals sign`
+  NCBI's registry refuses: `bad/.ncbirc` (the run directory's), `ncbibad/.ncbirc` (a `$NCBI` directory's),
+  `fmtbad/bad.rc` (the file that `FMTCFG=bad.rc` names in the run directory) and `ncbifmt/bad.rc` (the same in a `$NCBI`
+  directory); `fmtcfg/other.rc` is a valid file named by `FMTCFG=other.rc`. Two files that NCBI's registry reads with a
+  post on stderr at each read (line RG T4a2 fix 1, B1: the references', the description table's and the alignments'
+  reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
+  `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
+  survey T2's `bom` file).

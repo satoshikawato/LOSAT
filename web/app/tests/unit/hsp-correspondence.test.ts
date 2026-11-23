@@ -32,6 +32,7 @@ import { instantiateSerial } from 'losat';
 import type { HspRecord } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { hspTable } from '../../src/domain/hsp-table';
+import { htmlShownText } from '../../src/domain/outfmt0-html';
 import { splitOutfmt6Row } from '../../src/domain/outfmt6';
 import { buildResultIndex } from '../../src/domain/result-index';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../../../packages/losat/src/infra/reactor/abi';
@@ -248,11 +249,16 @@ function sectionKey(section: string): string {
 
 /**
  * The subject headings of outfmt 0 in order with their offsets, the query they belong to (the index
- * among the registered queries, matched by id in order) and the sections of their HSPs.
+ * among the registered queries, matched by id in order) and the sections of their HSPs. `raw` is the
+ * bytes as written (the offsets are the records' coordinates; under `-html` a raw `>` at a line's start
+ * is always a heading, NCBI writes a title's `>` as `&gt;`); `shown` gives the text of a range (the ids,
+ * the sections' lines, and the query lines: `Query= ` as shown, which under `-html` NCBI writes
+ * `<b>Query=</b> `).
  */
 function headingsOf(
-  text: string,
+  raw: string,
   queryIds: readonly string[],
+  shown: (text: string) => string,
 ): Array<{ qIdx: number; offset: number; id: string; hsps: string[] }> {
   const found: Array<{ qIdx: number; offset: number; id: string; hsps: string[] }> = [];
   let qIdx = -1;
@@ -260,21 +266,22 @@ function headingsOf(
   let current: { qIdx: number; offset: number; id: string; hsps: string[] } | undefined;
   let section: string[] | undefined;
   const close = () => {
-    if (section !== undefined && current !== undefined) current.hsps.push(sectionKey(section.join('\n')));
+    if (section !== undefined && current !== undefined) current.hsps.push(sectionKey(shown(section.join('\n'))));
     section = undefined;
   };
-  for (const line of text.split('\n')) {
-    if (line.startsWith('Query= ')) {
+  for (const line of raw.split('\n')) {
+    const text = shown(line);
+    if (text.startsWith('Query= ')) {
       close();
       current = undefined;
-      const id = line.slice(7).trim().split(/\s+/)[0]!;
+      const id = text.slice(7).trim().split(/\s+/)[0]!;
       do qIdx++;
       while (qIdx < queryIds.length && queryIds[qIdx] !== id);
     } else if (line.startsWith('>') && qIdx >= 0) {
       close();
-      current = { qIdx, offset, id: line.slice(1).trim().split(/\s+/)[0]!, hsps: [] };
+      current = { qIdx, offset, id: shown(line).slice(1).trim().split(/\s+/)[0]!, hsps: [] };
       found.push(current);
-    } else if (line.startsWith(' Score =') && current !== undefined) {
+    } else if (text.startsWith(' Score =') && current !== undefined) {
       close();
       section = [line];
     } else if (section !== undefined) {
@@ -293,6 +300,10 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   const out0 = outputs.streams.get(0) ?? new Uint8Array();
   const records = [...outputs.records].sort((a, b) => a.index - b.index);
   const where = (record: HspRecord) => `${fixture.id} HSP ${record.index}`;
+  // A run with -html wrote NCBI's HTML: the ranges are read as the app shows them (`htmlShownText`).
+  const html = fixture.words.includes('-html');
+  const shownText = (text: string): string => (html ? htmlShownText(text) : text);
+  const outfmt0Text = (bytes: Uint8Array): string => shownText(decoder.decode(bytes));
   /** The name of each subject's heading, by subject (-parse_deflines). */
   const headingNames = new Map<number, string>();
 
@@ -343,7 +354,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     if (!sortsPairwise) expect(start, `${where(record)} section order`).toBeGreaterThanOrEqual(previousEnd);
     const [hStart, hEnd] = record.out0_subject!;
     expect(hEnd, `${where(record)} heading before section`).toBeLessThanOrEqual(start);
-    const section = decoder.decode(out0.subarray(start, end));
+    const section = outfmt0Text(out0.subarray(start, end));
     if (skippedLine.test(section)) {
       expect(hEnd, `${where(record)} the empty heading of a skipped alignment`).toBe(hStart);
       skippedHeadings.add(hStart);
@@ -352,7 +363,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       continue;
     }
     sections++;
-    const heading = decoder.decode(out0.subarray(hStart, hEnd));
+    const heading = outfmt0Text(out0.subarray(hStart, hEnd));
     expect(heading.startsWith('>'), `${where(record)} heading text`).toBe(true);
     expect(heading, `${where(record)} heading Length=`).toMatch(/\nLength=\d+\n/);
     // The heading is the record's subject (not another subject with the same coordinates); a record without an ID has
@@ -390,14 +401,16 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // The text has as many sections and subject headings as the records point to: no section or
   // heading of outfmt 0 lacks its records. In a run of two searches outfmt 0 has a hit list of its own:
   // a section or heading that no record points to is a pair whose records are absent or differ.
-  const text = decoder.decode(out0);
+  // The headings are counted and located on the raw bytes (the records' offsets); the shown text serves the contents.
+  const raw = decoder.decode(out0);
+  const text = outfmt0Text(out0);
   const pointed = new Set([...headings.values()].flatMap((range) => (range === null || skippedHeadings.has(range[0]) ? [] : [range[0]])));
   const twice = searchedTwice(fixture);
   let unpointed = 0;
   if (!twice) {
     expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections and records with one`).toBe(sections);
     expect(text.match(/^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped$/gm)?.length ?? 0, `${fixture.id}: skipped alignments`).toBe(skipped);
-    expect(text.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
+    expect(raw.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
   } else {
     const recordsOf = new Map<string, string[]>();
     for (const record of records) {
@@ -405,7 +418,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       recordsOf.set(key, [...(recordsOf.get(key) ?? []), JSON.stringify([record.raw_score, record.q_start, record.q_end, record.s_start, record.s_end])]);
     }
     let seenPointed = 0;
-    for (const heading of headingsOf(text, outputs.queryIds)) {
+    for (const heading of headingsOf(raw, outputs.queryIds, shownText)) {
       if (pointed.has(heading.offset)) {
         seenPointed++;
         continue;

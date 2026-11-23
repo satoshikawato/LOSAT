@@ -26,6 +26,7 @@ LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ comm
 | `windowmasker` | Masks repeats of nucleotide sequences with a unit counts file (`-ustat`) |
 | `convert2blastmask` | Turns lower-case masking in FASTA into masking information for `makeblastdb -mask_data` |
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database |
+| `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files |
 
 Options that need NCBI's servers (`-remote`, `-entrez_query`) or GI lists (`-gilist`), and the few that LOSAT does not run, stop with an error instead of changing the results. See [What LOSAT refuses](https://satoshikawato.github.io/LOSAT/refusals.html).
 

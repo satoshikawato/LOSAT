@@ -1,0 +1,2 @@
+[LOCAL_ID]
+TOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>

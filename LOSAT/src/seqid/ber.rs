@@ -1284,14 +1284,16 @@ pub fn utf8_string_path(record: &[u8]) -> Option<String> {
 /// `utf8_string_path`), whose member is `path`, as the diagnostics of the program with the post
 /// prefix `prefix` (`SetDiagPostPrefix`: `[blastp]`, `[blastdbcmd]`) print it: `Warning:
 /// (803.10) [<prefix>] CObjectIStreamAsnBinary: UTF8String data for VisibleString member <path>,
-/// ASN.1 specification may need an update` and a line feed. NCBI posts it once per process.
+/// ASN.1 specification may need an update` and a line feed. NCBI posts it once per process. The
+/// text is the serial reader's (`asn_input::utf8_tag_message`, also of makeblastdb's mask files).
 pub fn utf8_string_warning(prefix: Option<&str>, path: &str) -> Vec<u8> {
-    let prefix = prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
-    format!(
-        "Warning: (803.10) {prefix}CObjectIStreamAsnBinary: UTF8String data for VisibleString \
-         member {path}, ASN.1 specification may need an update\n"
+    crate::ncbi_exception::post_line_in(
+        crate::ncbi_exception::Severity::Warning,
+        Some("803.10"),
+        prefix,
+        crate::report::serial::asn_input::utf8_tag_message(path).as_bytes(),
+        false,
     )
-    .into_bytes()
 }
 
 /// Blast_def_line_.cpp:91-103: every member has a set flag; `seqid` is the one mandatory.

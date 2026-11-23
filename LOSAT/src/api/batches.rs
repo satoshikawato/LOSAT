@@ -495,6 +495,7 @@ impl Batches<'_> {
             let mut sink = self.log.sink(&mut diagnostics, false);
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,

@@ -149,6 +149,16 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
         // not an engine error.
         error
+    } else if error
+        .downcast_ref::<io::Error>()
+        .is_some_and(|e| crate::ncbi_exception::NcbiException::of_io_error(e).is_some())
+    {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+        // An exception of NCBI's that a report's writer raised (`NcbiException::into_io_error`:
+        // the `-html` registries, `formatter_registry::FormatterNcbirc` in the prolog and
+        // `InitConfig` at the first id link) is `CATCH_ALL`'s `CException` report, exit status 255
+        // (`cli::exit_on_native_error`), not a failed write.
+        error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {
@@ -362,11 +372,19 @@ fn run_inner(
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
     let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
+    app::html_format_check(choice.number, Program::Blastx, args.html)?;
+    let html = app::html_links(
+        args.html,
+        Program::Blastx,
+        args.database_name(),
+        &[choice.number],
+    )?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     let mut options = resolution.map_err(options_error)?;
+    options.html = html;
     options.query_range = query_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
     // The database of `-db` opens after the arguments (the query and output files) and the
@@ -699,16 +717,26 @@ fn run_inner(
         };
         super::blast_xml::xml2_writer(kind, &options, &subjects, &shown_run, files)
     }));
-    report::write_prolog(&mut *writer, &mut *stderr, &options, &subjects, &shown_run)
-        .map_err(report_error)?;
+    report::write_prolog(
+        &mut *writer,
+        &mut *stderr,
+        None,
+        &options,
+        &subjects,
+        &shown_run,
+    )
+    .map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.document_mut().start(&mut start);
         writer.write_all(&start).map_err(output_error)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
-    // batch come after it when both streams go to one place.
-    writer.flush().map_err(output_error)?;
+    // batch come after it when both streams go to one place (a plain report: dev's flush;
+    // `pairwise::flushes_after_prolog`).
+    if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
+        writer.flush().map_err(output_error)?;
+    }
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
     // The database's sequences, read in blocks where they are searched and checked where they are

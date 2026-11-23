@@ -571,3 +571,52 @@ fn a_query_without_texts_reads_nothing() {
     assert!(!warnings.reads_with_texts(0));
     assert!(ReadCursor::new(&reads).is_none());
 }
+
+// Line RG T4a2 fix round 3 (review e S1, N1): a `-html` report's post flushes the report written so
+// far where the post goes to the standard error (NCBI's `cerr`, tied to `cout`); the posts go to the
+// caller's sink of them where it sets one, else to the diagnostics.
+#[test]
+fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
+    /// A report that records its bytes and how many of them its last flush wrote.
+    struct Report {
+        bytes: Vec<u8>,
+        flushed: usize,
+    }
+    impl Write for Report {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushed = self.bytes.len();
+            Ok(())
+        }
+    }
+    // The tests' standard error is not a `-logfile` file (`ncbi_environment::terminal_stderr`).
+    assert!(crate::blastinput::ncbi_environment::terminal_stderr().is_none());
+    let mut report = Report {
+        bytes: b"head\n".to_vec(),
+        flushed: 0,
+    };
+    let mut posts = Vec::new();
+    write_html_post(&mut report, &mut posts, b"Warning: post\n").unwrap();
+    assert_eq!(
+        (report.flushed, posts.as_slice()),
+        (5, &b"Warning: post\n"[..])
+    );
+    // No text, no flush.
+    report.bytes.extend_from_slice(b"more\n");
+    write_html_post(&mut report, &mut posts, b"").unwrap();
+    assert_eq!(report.flushed, 5);
+    let (mut apart, mut diagnostics) = (Vec::new(), Vec::new());
+    html_posts_sink(
+        Some(&mut apart as &mut dyn Write),
+        &mut diagnostics as &mut dyn Write,
+    )
+    .write_all(b"a")
+    .unwrap();
+    html_posts_sink(None, &mut diagnostics as &mut dyn Write)
+        .write_all(b"d")
+        .unwrap();
+    assert_eq!((apart, diagnostics), (b"a".to_vec(), b"d".to_vec()));
+}

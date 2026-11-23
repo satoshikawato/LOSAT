@@ -159,7 +159,10 @@ impl MakedbError {
     pub fn exit_code(&self) -> i32 {
         match self {
             MakedbError::Build(
-                WriteDbError::Exception(_) | WriteDbError::Other(_) | WriteDbError::Io { .. },
+                WriteDbError::Exception(_)
+                | WriteDbError::Other(_)
+                | WriteDbError::InvalidArgument(_)
+                | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
             MakedbError::Output(_) => 6,
@@ -169,8 +172,10 @@ impl MakedbError {
             | MakedbError::Build(
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. }
                 | WriteDbError::Options(_)
-                | WriteDbError::Unsupported(_),
+                | WriteDbError::Unsupported(_)
+                | WriteDbError::OrdinalIdWithoutIds,
             )
             | MakedbError::Unsupported(_)
             | MakedbError::Argument(_) => 1,
@@ -277,7 +282,10 @@ fn is_losat_error(error: &MakedbError) -> bool {
         error,
         MakedbError::Unsupported(_)
             | MakedbError::Build(
-                WriteDbError::Unsupported(_) | WriteDbError::Other(_) | WriteDbError::Io { .. }
+                WriteDbError::Unsupported(_)
+                    | WriteDbError::OrdinalIdWithoutIds
+                    | WriteDbError::Other(_)
+                    | WriteDbError::Io { .. }
             )
     )
 }
@@ -836,6 +844,7 @@ fn build_database_with_log(
         Indices {
             full: args.parse_seqids || blastdb_input,
             hash: args.hash_index,
+            trace: false,
         },
     )?;
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1205,1231-1241
@@ -998,7 +1007,11 @@ fn copy_input_databases(
         ));
     }
     let input = SeqDb::open_in(&combine_and_quote(names), seqtype, &search).map_err(input_error)?;
-    db.set_leaf_tax_ids(scan_leaf_tax_ids(&input).map_err(raw_copy_error)?);
+    let leafs = {
+        let mut warn = warn_to(err);
+        scan_leaf_tax_ids(&input, &mut warn, db.utf8_once())
+    };
+    db.set_leaf_tax_ids(leafs.map_err(raw_copy_error)?);
     let mut source = RawSeqDbSource::new(&input, db, randomize).map_err(raw_copy_error)?;
     let copied = {
         let mut warn = warn_to(err);
@@ -1204,8 +1217,11 @@ fn open_new_database(
         Err(error) => Err((*error.exception).clone()),
     }
     .map_err(|exception| MakedbError::Build(WriteDbError::Exception(exception)))?;
+    // The name of a database makeblastdb built is not empty (`build_lmdb_file_name`'s error).
     let lmdb: Vec<std::path::PathBuf> = version5
-        .then(|| build_lmdb_file_name(new_db, is_protein).into())
+        .then(|| build_lmdb_file_name(new_db, is_protein).ok())
+        .flatten()
+        .map(std::path::PathBuf::from)
         .into_iter()
         .collect();
     let (bytes_total, bytes_to_cache, files) = db_files_metadata(

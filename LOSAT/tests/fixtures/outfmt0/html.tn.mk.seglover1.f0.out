@@ -1,0 +1,73 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_d2.fna).
+           1 sequences; 468 total letters
+
+
+
+<b>Query=</b> pq low complexity in the middle
+
+Length=116
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns back translation                                                   <a href=#Subject_1>171</a>     3e-61
+
+
+><a name=Subject_1></a> ns back translation
+Length=468
+
+ Score = 171 bits (434),  Expect = 3e-61, Method: Compositional matrix adjust.
+ Identities = 116/116 (100%), Positives = 116/116 (100%), Gaps = 0/116 (0%)
+ Frame = +1
+
+Query  1    SYVPLHFRERFFLHSNMGYWLDLCENYPNMPNNAWYINIRT<font color="#000000">crncq</font>qqqqqqqqqqqqqq  60
+            SYVPLHFRERFFLHSNMGYWLDLCENYPNMPNNAWYINIRTCRNCQQQQQQQQQQQQQQQ
+Sbjct  61   SYVPLHFRERFFLHSNMGYWLDLCENYPNMPNNAWYINIRTCRNCQQQQQQQQQQQQQQQ  240
+
+Query  61   <font color="#000000">qqqqqqqqqqq</font>VVMTSTPKPNAYSCVLEHYGDFMLMRFACTKAKDGADCKPILCNW  116
+            QQQQQQQQQQQVVMTSTPKPNAYSCVLEHYGDFMLMRFACTKAKDGADCKPILCNW
+Sbjct  241  QQQQQQQQQQQVVMTSTPKPNAYSCVLEHYGDFMLMRFACTKAKDGADCKPILCNW  408
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.140    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 14241
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_d2.fna).
+    Posted date:  Unknown
+  Number of letters in database: 468
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

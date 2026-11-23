@@ -207,8 +207,7 @@ fn top_level_after_help() -> &'static str {
 #[command(
     version,
     about = "Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions",
-    help_template = LOSAT_HELP_TEMPLATE,
-    after_help = top_level_after_help()
+    help_template = LOSAT_HELP_TEMPLATE
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -220,11 +219,11 @@ pub struct Cli {
 // arguments added by `cli_command`.
 impl CommandFactory for Cli {
     fn command() -> clap::Command {
-        cli_command::<false>(|_| true)
+        cli_command::<false>(|_| true, true)
     }
 
     fn command_for_update() -> clap::Command {
-        cli_command::<true>(|_| true)
+        cli_command::<true>(|_| true, true)
     }
 }
 
@@ -240,17 +239,23 @@ pub trait ProgramParser: Parser {
 }
 
 /// `Cli` reads a command line with the arguments of its program only, the program that the reader
-/// reads (`read_program`), so that each option of another program costs a run nothing.
+/// reads (`read_program`), so that each option of another program costs a run nothing. The top
+/// level's list of the other programs (`top_level_after_help`) is in the top level's help only, so
+/// a command line whose first word is its program's name builds none.
 impl ProgramParser for Cli {
     fn program_command(words: &[OsString]) -> clap::Command {
         let program = read_program(words, <Commands as Subcommand>::has_subcommand);
-        cli_command::<false>(|name| Some(name) == program)
+        let top_level = program.is_none()
+            || words
+                .get(1)
+                .is_some_and(|word| TOP_LEVEL_FLAGS.iter().any(|flag| word.as_os_str() == *flag));
+        cli_command::<false>(|name| Some(name) == program, top_level)
     }
 }
 
 /// `Cli`'s command with the arguments of `program` only (`cli_command`).
 pub(crate) fn command_of(program: &str) -> clap::Command {
-    cli_command::<false>(|name| name == program)
+    cli_command::<false>(|name| name == program, true)
 }
 
 /// The words that LOSAT's reader takes at the top level (`parse_command`), before the program's
@@ -278,8 +283,12 @@ fn read_program(words: &[OsString], is_program: impl Fn(&str) -> bool) -> Option
 /// LOSAT's reader, which reads a program's arguments before clap builds anything
 /// (`parse_command`): it reads only a selected program. clap adds the others' arguments where it
 /// builds them (`#[command(defer = true)]` on `Commands`). `UPDATE` is a constant so that a
-/// program that never calls `command_for_update` carries none of its code.
-fn cli_command<const UPDATE: bool>(selected: impl Fn(&str) -> bool) -> clap::Command {
+/// program that never calls `command_for_update` carries none of its code. With `top_level` the
+/// top level has its list of the other programs (`top_level_after_help`, its help's end).
+fn cli_command<const UPDATE: bool>(
+    selected: impl Fn(&str) -> bool,
+    top_level: bool,
+) -> clap::Command {
     let command = clap::Command::new("losat");
     let (mut command, program_args) = if UPDATE {
         (
@@ -289,6 +298,9 @@ fn cli_command<const UPDATE: bool>(selected: impl Fn(&str) -> bool) -> clap::Com
     } else {
         (<Cli as clap::Args>::augment_args(command), PROGRAM_ARGS)
     };
+    if top_level {
+        command = command.after_help(top_level_after_help());
+    }
     debug_assert_eq!(command.get_subcommands().count(), program_args.len());
     for (program, &args) in command.get_subcommands_mut().zip(program_args) {
         let deferred = std::mem::take(program);

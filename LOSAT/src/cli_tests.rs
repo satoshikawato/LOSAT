@@ -598,6 +598,11 @@ fn the_command_of_one_program_is_its_command_among_every_program() {
             vec!["losat", name.as_str(), "--no_such_option"],
             vec!["losat", name.as_str()],
         ] {
+            // The parser's command for these words (`parse_command(T::program_command(&words), ..)`):
+            // a first word that is not the program's name builds the top level's list too.
+            let argv: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let one =
+                with_toolkit_file_args(Cli::program_command(&argv), |program| program == name);
             assert_eq!(stopped_text(&one, &words), stopped_text(&every, &words));
         }
     }
@@ -686,7 +691,7 @@ fn every_program_keeps_its_description_and_help_template() {
 // argument and help text of the program's command among every program.
 #[test]
 fn a_deferred_program_is_built_with_its_arguments() {
-    let mut deferred = cli_command::<false>(|_| false);
+    let mut deferred = cli_command::<false>(|_| false, true);
     deferred.build();
     let mut every = Cli::command();
     every.build();

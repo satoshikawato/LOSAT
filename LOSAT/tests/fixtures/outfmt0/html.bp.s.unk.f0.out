@@ -1,0 +1,101 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ps_unk.faa).
+           3 sequences; 360 total letters
+
+
+
+<b>Query=</b> uq1 query one
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000001.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000001.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000001.1 </a>Unknown                                                   245     1e-90
+<a title="Show report for XP_000002.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000002.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000002.1 </a>good title two                                            <a href=#XP_000002.1>229</a>     5e-84
+<a title="Show report for XP_000003.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000003.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000003.1 </a>good title three                                          <a href=#XP_000003.1>218</a>     2e-79
+
+
+Sequence with id XP_000001 no longer exists in database...alignment skipped
+><a title="Show report for XP_000002.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000002.1?report=genbank&log$=protalign&blast_rank=2&RID=0" >XP_000002.1</a><a name=XP_000002></a> good title two
+Length=120
+
+ Score = 229 bits (583),  Expect = 5e-84, Method: Compositional matrix adjust.
+ Identities = 112/120 (93%), Positives = 112/120 (93%), Gaps = 0/120 (0%)
+
+Query  1    WSGGVDVPPGADEQKECLMRMCCKCSWIHSWEMQPTNWQPCVTTKLLFCMPSIKAQRTVL  60
+            WSGGVDV PG  EQKECLMRM CKCSWIHSWEMQPTNWQPCVTTKL FCMPSIKAQRTVL
+Sbjct  1    WSGGVDVHPGYCEQKECLMRMQCKCSWIHSWEMQPTNWQPCVTTKLGFCMPSIKAQRTVL  60
+
+Query  61   GHSRVGQCFKEQTIMGLKTMPGVQLHYAPICSDIECMAPRIHSHIPMKYLKAMMNHMRYF  120
+            GHSRVGQCFKEQTIMGLKTMPGVQLHYAPICSDIECMAPRIHSHIP K L AMMNHMRYF
+Sbjct  61   GHSRVGQCFKEQTIMGLKTMPGVQLHYAPICSDIECMAPRIHSHIPRKKLMAMMNHMRYF  120
+
+
+><a title="Show report for XP_000003.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000003.1?report=genbank&log$=protalign&blast_rank=3&RID=0" >XP_000003.1</a><a name=XP_000003></a> good title three
+Length=120
+
+ Score = 218 bits (554),  Expect = 2e-79, Method: Compositional matrix adjust.
+ Identities = 108/120 (90%), Positives = 108/120 (90%), Gaps = 0/120 (0%)
+
+Query  1    WSGGVDVPPGADEQKECLMRMCCKCSWIHSWEMQPTNWQPCVTTKLLFCMPSIKAQRTVL  60
+            W GGVDVP GADEQKE LMRMCCKCSWIHS EMQPTNWQPCVTTKLL CMPSIKAQRTVL
+Sbjct  1    WIGGVDVPFGADEQKEKLMRMCCKCSWIHSSEMQPTNWQPCVTTKLLICMPSIKAQRTVL  60
+
+Query  61   GHSRVGQCFKEQTIMGLKTMPGVQLHYAPICSDIECMAPRIHSHIPMKYLKAMMNHMRYF  120
+             HSRVGQCF EQTI  L TM GVQLHYAPICSDIECMAPRIHSHIPMKYLKAMMNHM YF
+Sbjct  61   WHSRVGQCFWEQTIQLLWTMTGVQLHYAPICSDIECMAPRIHSHIPMKYLKAMMNHMTYF  120
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.136    0.485    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 30000
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ps_unk.faa).
+    Posted date:  Unknown
+  Number of letters in database: 360
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

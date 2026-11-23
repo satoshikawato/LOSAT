@@ -1,0 +1,99 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: in/ps_ids.faa
+           11 sequences; 1,610 total letters
+
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+
+
+Sequence with id XP_000101 no longer exists in database...alignment skipped
+Sequence with id XP_000101 no longer exists in database...alignment skipped
+Sequence with id s3_local_identifier no longer exists in database...alignment skipped
+Sequence with id XP_000111 no longer exists in database...alignment skipped
+Sequence with id XP_000111 no longer exists in database...alignment skipped
+Sequence with id XP_000111 no longer exists in database...alignment skipped
+Sequence with id XP_000109 no longer exists in database...alignment skipped
+Sequence with id P99902 no longer exists in database...alignment skipped
+Sequence with id testdb:tag_s8 no longer exists in database...alignment skipped
+Sequence with id s7_not_in_taxdb_long_label no longer exists in database...alignment skipped
+Sequence with id 1ABC_A no longer exists in database...alignment skipped
+Sequence with id AAB00104 no longer exists in database...alignment skipped
+Sequence with id 123456 no longer exists in database...alignment skipped
+Sequence with id BAA00110 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316389
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39609
+
+
+  Database: in/ps_ids.faa
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 1,610
+  Number of sequences in database:  11
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

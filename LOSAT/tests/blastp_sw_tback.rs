@@ -424,11 +424,14 @@ fn row_run(
     (output.status.code(), output.stdout, output.stderr)
 }
 
-/// The frozen NCBI stdout of a row (`tests/fixtures/db_search/ROW.out`).
+/// The frozen NCBI stdout of a row (`tests/fixtures/db_search/ROW.out`) in LOSAT's words
+/// (`losat::wording::losat_output_bytes`: the program and version line and the messages as LOSAT
+/// writes them), the bytes LOSAT writes for the row.
 fn frozen_stdout(row: &ManifestRow) -> Vec<u8> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    std::fs::read(root.join(format!("tests/fixtures/db_search/{}.out", row.row_id)))
-        .expect("read the frozen stdout")
+    let ncbi = std::fs::read(root.join(format!("tests/fixtures/db_search/{}.out", row.row_id)))
+        .expect("read the frozen stdout");
+    losat::wording::losat_output_bytes(&ncbi).into_owned()
 }
 
 // The rows `db.t5d.blastp.sw*` (`tests/db_search_manifest/blastp.t5d.tsv`, line RG item T5d merge

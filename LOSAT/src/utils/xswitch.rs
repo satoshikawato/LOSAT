@@ -435,6 +435,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXEXTBATCH",
     "LOSAT_X_TBXFEWGROUPS",
     "LOSAT_X_TBXHITBF",
+    "LOSAT_X_TBXHITSTEP",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
     "LOSAT_X_TBXNEXT",

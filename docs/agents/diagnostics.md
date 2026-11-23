@@ -511,6 +511,7 @@ export LOSAT_X_TBXCTXTABLE=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
+export LOSAT_X_TBXHITSTEP=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
@@ -6989,6 +6990,27 @@ Scheduling (each value computed by one thread with the original function; order 
   PemoMJNVA, AvCLPV x PsCLPV at 1 and 8 threads, NZ_CP006932 against itself at 8 threads); the split
   loop against the one loop, the loop's function x0.87-0.93 (AP027131 x AP027133 at 1 and 8 threads,
   MelaMJNV x PemoMJNVA at 8 threads) and whole searches x0.97-0.99.
+- `LOSAT_X_TBXHITSTEP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-11-24; `=0` turns it off; `tblastx/x_tbx_hitbf.rs` `x_hits_steps`, `x_hits_run`, `x_hit_step`,
+  `x_entry`, `steps_on`; `tblastx/x_pair_par.rs` `XCells::lowest_diagonal`): the branch-free hit loop of
+  `LOSAT_X_TBXHITBF` writes a flag-0 cell's next value before the candidate test (`s >= raw` unsigned is
+  `d >= 0` with both below 2^29; a candidate has `d < 0`, so its cell gets back the word it held before
+  the per-hit body runs as before), finds an unmasked cell from 64-bit offsets (the table's address
+  minus the unit's lowest diagonal `lo = q_min - (s_len - 1)`, an exact integer in (-2^29, 2^31), plus
+  `q - s`), and takes two hits a step, the per-hit body called from one place after the run of hits it
+  stopped (the form of the Web's `x_hits_bf_split`). Cause removed: the loop is issue-bound on the
+  workstation's Ice Lake cores, 20 issue slots per hit before; the 32-bit cell address (two more
+  instructions for the hit and the prefetched one), the candidate compare that LLVM repeated after the
+  branch to keep the select, and the loop's count and branch once per hit were about 4 of them
+  (issued µops of the hit loop counted per instruction with PEBS on AP027131 x AP027133, code 4:
+  4.3 fewer per hit).
+  The cells' reads and writes and the per-hit body's calls are those of the loop before, in the same
+  order (unit test `x_hits_bf_takes_the_reference_outcomes`: every form against the reference's
+  statements on random tables, masked and unmasked, with negative and large `lo`;
+  `tests/tblastx_hitbf.rs` `the_hit_steps_change_no_report`: the report of `=0` at one and two threads,
+  in `scan_unit` and the batched scan, with and without the prefetch). Always: wherever
+  `LOSAT_X_TBXHITBF`'s loop runs (`fits`), on every target (on wasm32 `x_hits_run` is a function of its
+  own, as `x_hits_bf_run`). MEASURED_PLACEHOLDER
 - `LOSAT_X_TBXEXTBATCH=256` (TBLASTX, speed; a value switch, in the strict set from the pull request
   that added it, 2026-10-18; x86-64 only; `=0` turns it off) the unit scan of the unit path
   (`tblastx/x_tbx_extbatch.rs`, exactness argument in its header) holds back the two-hit extensions of

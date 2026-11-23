@@ -174,6 +174,7 @@ LOSAT_X_TBXCTXTABLE	tblastx	conditional	required	required	only where the PAIRPAR
 LOSAT_X_TBXEXTBATCH	tblastx	conditional	gap	required	x86-64 only; only units with query-group span >=256 Ki letters (query ~>0.8 Mb); window >= wordsize+16; new gap: needs a query-group span >= 256 Ki letters (query ~0.8 Mb), x86-64
 LOSAT_X_TBXFEWGROUPS	tblastx	conditional	required	gap	a batch in the unit path that needs fewer than six groups for the pool (2 units per thread on the longest subject's share of the bases); ref gap: such a batch above about 65 kb (fast fixtures are shorter; tests/tblastx_few_groups.rs reaches it)
 LOSAT_X_TBXHITBF	tblastx	conditional	required	required	only units of the PAIRPAR unit path (gated by size) with 1<=wordsize<window; not under LOSAT_TIMING/STATS
+LOSAT_X_TBXHITSTEP	tblastx	always			acts wherever TBXHITBF's branch-free hit loop runs (its sides are TBXHITBF's): each hit's cell found from 64-bit offsets (unmasked tables) and its next value written before the candidate test, two hits a step, the per-hit body called from one place after the run of hits it stopped
 LOSAT_X_TBXKMERGE	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by query size)
 LOSAT_X_TBXLUT	tblastx	conditional	required	required	only batches that run the reference frame loop (short queries via PAIRPARGATE, guard); diagnostics keeps chains
 LOSAT_X_TBXNEXT	tblastx	conditional	required	required	2+ threads and more than one subject (native; threaded Wasm since 2026-10-20)

@@ -106,6 +106,38 @@ unsafe fn rare_and_other(table: *mut DiagStruct, width: usize, cell: usize, s: u
     }
 }
 
+// No NCBI counterpart: the forms of the branch-free loop under test.
+/// Form 0 / 1: the loop before LOSAT_X_TBXHITSTEP (`x_hits_before`) without / with `PF`; 2: its
+/// wasm32 form `x_hits_bf_split`; 3 / 4: `x_hits_steps` without / with `PF`; 5: `x_hits_bf`.
+///
+/// SAFETY: as `x_hits_bf` for the first `n` of `pairs`, `X_PREFETCH_AHEAD` entries after them.
+#[allow(clippy::too_many_arguments)]
+unsafe fn run_form<C: XCells>(
+    form: usize,
+    ptr: *mut DiagStruct,
+    pairs: &[OffsetPair],
+    n: usize,
+    cells: C,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    rare: impl FnMut(usize, u32, u32),
+) {
+    assert!(pairs.len() >= n + X_PREFETCH_AHEAD);
+    let pairs = pairs.as_ptr();
+    // SAFETY: the caller's bounds, passed on.
+    unsafe {
+        match form {
+            0 => x_hits_before::<C, false>(ptr, pairs, n, cells, width, window, wordsize, rare),
+            1 => x_hits_before::<C, true>(ptr, pairs, n, cells, width, window, wordsize, rare),
+            2 => x_hits_bf_split(ptr, pairs, n, cells, width, window, wordsize, rare),
+            3 => x_hits_steps::<C, false>(ptr, pairs, n, cells, width, window, wordsize, rare),
+            4 => x_hits_steps::<C, true>(ptr, pairs, n, cells, width, window, wordsize, rare),
+            _ => x_hits_bf::<C, false>(ptr, pairs, n, cells, width, window, wordsize, rare),
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (module doc)
 // `x_hits_bf` against the reference's statements on random tables and hits over the range of
 // `fits`, with the last_hit values on both sides of each boundary of the two tests.
@@ -140,7 +172,17 @@ fn x_hits_bf_takes_the_reference_outcomes() {
         assert!(fits(chunk_len, window, wordsize));
         assert!(!fits(chunk_len + 1, window, wordsize) || round % 7 != 0);
         let width = 1 + rng.below(48) as usize;
-        let lo = rng.next() as u32;
+        // The unit's lowest query offset q_min (below 2^31, as a frame's offsets are; every fifth
+        // round below the chunk length, so that lo is negative) and lo = q_min - (chunk_len - 1),
+        // as `scan_unit` sets it; `lo_exact` is the value `XCells::lowest_diagonal` takes.
+        let q_min: i64 = if round % 5 == 3 {
+            rng.below(chunk_len as u64) as i64
+        } else {
+            rng.below((1u64 << 31) - 64 - chunk_len as u64) as i64
+        };
+        let lo_exact = q_min - (chunk_len as i64 - 1);
+        let lo = lo_exact as u32;
+        assert_eq!(XUnmasked { lo }.lowest_diagonal() as i64, lo_exact);
         let n = rng.below(400) as usize;
         let mut table = vec![DiagStruct::default(); width];
         let mut touched = vec![false; width];
@@ -152,6 +194,8 @@ fn x_hits_bf_takes_the_reference_outcomes() {
                 1 => chunk_len as u32 - 1,
                 _ => rng.below(chunk_len as u64) as u32,
             };
+            // A query offset is not negative: s at least -(lo + cell), which is below chunk_len.
+            let s = s.max((-(lo_exact + cell as i64)).max(0) as u32);
             if !touched[cell] {
                 touched[cell] = true;
                 // The first hit on a cell: a start value on an edge of a test, or any value a
@@ -176,7 +220,10 @@ fn x_hits_bf_takes_the_reference_outcomes() {
                     c.set_raw_bits(v | if rng.below(5) == 0 { 0x8000_0000 } else { 0 });
                 }
             }
-            let q = (cell as u32).wrapping_add(s).wrapping_add(lo);
+            let q = cell as i64 + s as i64 + lo_exact;
+            assert!((0..1 << 31).contains(&q), "a query offset in [0, 2^31)");
+            let q = q as u32;
+            assert_eq!(XUnmasked { lo }.cell(q, s), cell);
             pairs.push(OffsetPair { q_off: q, s_off: s });
         }
         // Stale entries after the batch, as the vector keeps them.
@@ -239,84 +286,41 @@ fn x_hits_bf_takes_the_reference_outcomes() {
             unsafe { rare_and_other(reference.as_mut_ptr(), width, cell, s, window) };
         }
 
-        // The loop with and without `PF`, and the wasm32 form (`x_hits_bf_split`).
-        // LOSAT_X_TBXUNITMASK: the `XMasked` instances too, with the mask of all ones (the same
-        // cells as `XUnmasked`).
-        for (pf, split, masked) in [
-            (false, false, false),
-            (true, false, false),
-            (false, true, false),
-            (false, false, true),
-            (true, false, true),
-            (false, true, true),
-        ] {
-            let all = XMasked { lo, mask: u32::MAX };
-            let mut got = table.clone();
-            let mut log = Vec::new();
-            let ptr = got.as_mut_ptr();
-            let rare = |cell: usize, q: u32, s: u32| {
-                log.push((cell, q, s));
-                // SAFETY: cell < width, the table's length (the loop's bound).
-                unsafe { rare_and_other(ptr, width, cell, s, window) };
-            };
-            // SAFETY: n entries and X_PREFETCH_AHEAD more; every cell is below width; `fits`
-            // holds and every flag-0 value is below chunk_len + window.
-            unsafe {
-                if masked && split {
-                    x_hits_bf_split(ptr, pairs.as_ptr(), n, all, width, window, wordsize, rare)
-                } else if masked && pf {
-                    x_hits_bf::<_, true>(ptr, pairs.as_ptr(), n, all, width, window, wordsize, rare)
-                } else if masked {
-                    x_hits_bf::<_, false>(
-                        ptr,
-                        pairs.as_ptr(),
-                        n,
-                        all,
-                        width,
-                        window,
-                        wordsize,
-                        rare,
-                    )
-                } else if split {
-                    x_hits_bf_split(
-                        ptr,
-                        pairs.as_ptr(),
-                        n,
-                        XUnmasked { lo },
-                        width,
-                        window,
-                        wordsize,
-                        rare,
-                    )
-                } else if pf {
-                    x_hits_bf::<_, true>(
-                        ptr,
-                        pairs.as_ptr(),
-                        n,
-                        XUnmasked { lo },
-                        width,
-                        window,
-                        wordsize,
-                        rare,
-                    )
-                } else {
-                    x_hits_bf::<_, false>(
-                        ptr,
-                        pairs.as_ptr(),
-                        n,
-                        XUnmasked { lo },
-                        width,
-                        window,
-                        wordsize,
-                        rare,
-                    )
-                }
-            };
-            assert_eq!(
-                log, reference_log,
-                "round {round} pf {pf} split {split}: rare calls"
-            );
-            assert_eq!(got, reference, "round {round} pf {pf} split {split}: table");
+        // The loop before LOSAT_X_TBXHITSTEP with and without `PF`, its wasm32 form
+        // (`x_hits_bf_split`), `x_hits_steps` with and without `PF`, and `x_hits_bf` (the switch's
+        // choice). LOSAT_X_TBXUNITMASK: the `XMasked` instances too, with the mask of all ones (the
+        // same cells as `XUnmasked`).
+        for form in 0..6 {
+            for masked in [false, true] {
+                let mut got = table.clone();
+                let mut log = Vec::new();
+                let ptr = got.as_mut_ptr();
+                let rare = |cell: usize, q: u32, s: u32| {
+                    log.push((cell, q, s));
+                    // SAFETY: cell < width, the table's length (the loop's bound).
+                    unsafe { rare_and_other(ptr, width, cell, s, window) };
+                };
+                // SAFETY: n entries and X_PREFETCH_AHEAD more; every cell is below width; `fits`
+                // holds, every flag-0 value is below chunk_len + window, and every hit's q - s -
+                // lo_exact in exact integers is its cell.
+                unsafe {
+                    if masked {
+                        let all = XMasked { lo, mask: u32::MAX };
+                        run_form(form, ptr, &pairs, n, all, width, window, wordsize, rare)
+                    } else {
+                        let cells = XUnmasked { lo };
+                        run_form(form, ptr, &pairs, n, cells, width, window, wordsize, rare)
+                    }
+                };
+                assert_eq!(
+                    log, reference_log,
+                    "round {round} form {form} masked {masked}: rare calls"
+                );
+                assert_eq!(
+                    got, reference,
+                    "round {round} form {form} masked {masked}: table"
+                );
+            }
         }
     }
     assert!(taken.iter().all(|&t| t > 1000), "outcomes {taken:?}");

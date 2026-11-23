@@ -55,15 +55,35 @@
 //! the probes of LOSAT_TIMING / LOSAT_X_STATS run the
 //! reference loop (they count every outcome).
 //!
-//! On wasm32 (LOSAT Web) `x_hits_bf` runs as `x_hits_bf_split`: a function of its own,
-//! `x_hits_bf_run`, takes the hits up to the first one for the per-hit body (flag 1 or a candidate)
-//! and returns it with its cell not written; the caller runs the per-hit body on it and goes on
-//! after it. The same reads and writes of the cells and the same calls of the per-hit body, in the
-//! same order (the caller reads that hit and computes its cell a second time), so the same states
-//! and calls as above. V8's optimized code (TurboFan) kept the table, the bounds and the loop
-//! pointer of the one loop in stack slots (the inlined per-hit body needs every register) and read
-//! or wrote six of them for every hit; no value of `x_hits_bf_run`'s loop lives across a call.
-//! Native builds keep the one loop.
+//! LOSAT_X_TBXHITSTEP (in the strict set; `=0` runs the loop before it, `x_hits_before`): the loop
+//! runs as `x_hits_steps`. A function `x_hits_run` takes the hits by `x_hit_step`, two a step, up to
+//! the first one for the per-hit body and returns it; the caller runs the per-hit body on it and
+//! goes on after it, so the per-hit body is called from one place. `x_hit_step` writes a flag-0
+//! cell's next value before the candidate test: with the raw word L and s both in [0, 2^29),
+//! `s >= raw` (unsigned) is d >= 0, so the value is `s + window` (too far) or the word read; a
+//! candidate has d in [-k, 0), so its cell gets back the word it held before it goes to the per-hit
+//! body as above (a flag-1 cell goes there before any write). An unmasked cell's address comes
+//! from 64-bit offsets: `lo` is q_min - (s_len - 1) of the unit for its lowest query offset q_min,
+//! below 2^31 (x_pair_par.rs `XCells::lowest_diagonal`), and s_len is below 2^29 (`fits`), so as an
+//! i32 `lo` is that exact value, and q - s - lo in exact integers is the cell the 32-bit wrapping
+//! gives, in [0, width); the table's address minus `lo` cells, plus q - s, is the cell's address
+//! (`x_entry`; on wasm32 `isize` has 32 bits, q - s does not wrap and the address wraps to the same
+//! place). Each cell gets the same reads and writes, and the per-hit body the same calls in the same
+//! order, so the same states and calls as above. On the workstation's Ice Lake cores the hit loop
+//! is issue-bound: the cell's address in 32 bits (two instructions more), the candidate compare
+//! that the select could not share (LLVM repeats it in the block after the branch) and the loop's
+//! count and branch once per hit took about 4 of 20 issue slots per hit.
+//!
+//! On wasm32 (LOSAT Web) the loop before LOSAT_X_TBXHITSTEP runs as `x_hits_bf_split`: a function
+//! of its own, `x_hits_bf_run`, takes the hits up to the first one for the per-hit body (flag 1 or
+//! a candidate) and returns it with its cell not written; the caller runs the per-hit body on it
+//! and goes on after it. The same reads and writes of the cells and the same calls of the per-hit
+//! body, in the same order (the caller reads that hit and computes its cell a second time), so the
+//! same states and calls as above. V8's optimized code (TurboFan) kept the table, the bounds and
+//! the loop pointer of the one loop in stack slots (the inlined per-hit body needs every register)
+//! and read or wrote six of them for every hit; no value of `x_hits_bf_run`'s loop lives across a
+//! call. Native builds keep the one loop there (`x_hits_one`). `x_hits_run` is such a function on
+//! wasm32 too, and inlined natively.
 
 use super::x_tbx_qslice::XSliced;
 use super::*;
@@ -110,11 +130,20 @@ pub(super) fn x_reach_not_taken() {
     }
 }
 
+// No NCBI counterpart: which form of the branch-free loop runs (scheduling only). Read once per
+// process, as `on`.
+/// LOSAT_X_TBXHITSTEP: a strict-set switch (`utils/xswitch.rs`).
+fn steps_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXHITSTEP"))
+}
+
+/// LOSAT_X_TBXHITSTEP: the hits of a step of `x_hits_run` (one count and one loop branch a step).
+const X_HIT_STEP: usize = 2;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (module doc)
-// The hit loop of `scan_unit` over one batch: the cell of each hit as there (the raw diagonal minus
-// the unit's lowest one), the too-far and overlap outcomes of the flag-0 branch from one
-// subtraction with the cell's next value selected (module doc), and `rare` for a flag-1 cell or a
-// candidate. One constant (`k`) besides the window, so that both can stay in registers.
+// The hit loop of `scan_unit` over one batch: `x_hits_steps` (LOSAT_X_TBXHITSTEP), or with
+// `LOSAT_X_TBXHITSTEP=0` the loop before it (`x_hits_before`). The switch is read once per batch.
 /// The two-hit test of the `n` hits at `pairs` on the unit table at `diag_ptr` (cell of a hit
 /// (q, s): `cells.cell(q, s)`, q - s - lo or, with LOSAT_X_TBXUNITMASK, that masked), with
 /// `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the test; `PF` prefetches the
@@ -123,12 +152,88 @@ pub(super) fn x_reach_not_taken() {
 /// SAFETY: `pairs` points to `n` entries, and with `PF` to `X_PREFETCH_AHEAD` initialized entries
 /// after them; every hit's cell is below `width`, the length of the table `diag_ptr` points into;
 /// `fits(chunk length, window, wordsize)` holds, every subject offset is below the chunk length and
-/// every flag-0 cell holds a value the unit stored (module doc); `rare` writes only cells of the
-/// table, values the unit's per-hit body stores (the loop keeps no cell value across a call).
-#[cfg(not(target_arch = "wasm32"))]
+/// every flag-0 cell holds a value the unit stored (module doc); with `XUnmasked`, every hit's
+/// q - s - `cells.lowest_diagonal()` in exact integers is its cell (so it is for a unit's hits:
+/// module doc); `rare` writes only cells of the table, values the unit's per-hit body stores (the
+/// loop keeps no cell value across a call).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    pairs: *const OffsetPair,
+    n: usize,
+    cells: C,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    rare: impl FnMut(usize, u32, u32),
+) {
+    if steps_on() {
+        // SAFETY: the caller's bounds, passed on.
+        unsafe { x_hits_steps::<C, PF>(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
+    } else {
+        // SAFETY: as above.
+        unsafe { x_hits_before::<C, PF>(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
+    }
+}
+
+// No NCBI counterpart (scheduling only): the loop of `x_hits_bf` before LOSAT_X_TBXHITSTEP
+// (`LOSAT_X_TBXHITSTEP=0`), in a function of its own: natively the one loop `x_hits_one`.
+/// `x_hits_bf` with the loop before LOSAT_X_TBXHITSTEP.
+///
+/// SAFETY: as `x_hits_bf`.
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+unsafe fn x_hits_before<C: XCells, const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    pairs: *const OffsetPair,
+    n: usize,
+    cells: C,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    rare: impl FnMut(usize, u32, u32),
+) {
+    // SAFETY: the caller's bounds, passed on.
+    unsafe { x_hits_one::<C, PF>(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
+}
+
+// No NCBI counterpart (scheduling only): the loop of `x_hits_bf` before LOSAT_X_TBXHITSTEP
+// (`LOSAT_X_TBXHITSTEP=0`) on wasm32 (LOSAT Web), in a function of its own: `x_hits_bf_split`.
+/// `x_hits_bf` with the loop before LOSAT_X_TBXHITSTEP (`PF` prefetches on x86-64 only).
+///
+/// SAFETY: as `x_hits_bf`.
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+unsafe fn x_hits_before<C: XCells, const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    pairs: *const OffsetPair,
+    n: usize,
+    cells: C,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    rare: impl FnMut(usize, u32, u32),
+) {
+    // SAFETY: the caller's bounds, passed on.
+    unsafe { x_hits_bf_split(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (module doc)
+// The loop of `x_hits_bf` before LOSAT_X_TBXHITSTEP, native builds: the cell of each hit as there
+// (the raw diagonal minus the unit's lowest one), the too-far and overlap outcomes of the flag-0
+// branch from one subtraction with the cell's next value selected (module doc), and `rare` for a
+// flag-1 cell or a candidate. One constant (`k`) besides the window, so that both can stay in
+// registers.
+/// `x_hits_bf` as one loop (same arguments, same safety conditions).
+///
+/// SAFETY: as `x_hits_bf`.
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+unsafe fn x_hits_one<C: XCells, const PF: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
     n: usize,
@@ -197,15 +302,17 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
     }
 }
 
-// No NCBI counterpart (scheduling only): `x_hits_bf` on wasm32 (LOSAT Web), the same statements in
-// two parts (`x_hits_bf_split`).
-/// `x_hits_bf` on wasm32: `x_hits_bf_split` (`PF` prefetches on x86-64 only).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (module doc)
+// LOSAT_X_TBXHITSTEP: the loop of `x_hits_bf` as runs of `x_hit_step` (`x_hits_run`, two hits a
+// step) and this loop, which calls `rare` for the hit a run stopped at and goes on after it (the
+// form of `x_hits_bf_split`).
+/// `x_hits_bf` (same arguments, same safety conditions): the same reads and writes of the cells
+/// and the same calls of `rare`, in the same order (module doc).
 ///
-/// SAFETY: as `x_hits_bf` above.
-#[cfg(target_arch = "wasm32")]
+/// SAFETY: as `x_hits_bf`.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
+unsafe fn x_hits_steps<C: XCells, const PF: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
     n: usize,
@@ -213,21 +320,177 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
     width: usize,
     window: i32,
     wordsize: i32,
-    rare: impl FnMut(usize, u32, u32),
+    mut rare: impl FnMut(usize, u32, u32),
 ) {
-    // SAFETY: the caller's bounds, passed on.
-    unsafe { x_hits_bf_split(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
+    let window_u = window as u32;
+    // window - wordsize, at least 1 (`fits`), as in the loop before.
+    let k = window.wrapping_sub(wordsize) as u32;
+    // The table's address minus the unit's lowest diagonal, in cells (`x_entry`).
+    let base = diag_ptr.wrapping_offset(cells.lowest_diagonal().wrapping_neg());
+    // SAFETY: the caller's bound (n entries).
+    let end = unsafe { pairs.add(n) };
+    let mut p = pairs;
+    loop {
+        // SAFETY: pairs <= p <= end (the bounds `x_hits_run` keeps).
+        p = unsafe { x_hits_run::<C, PF>(diag_ptr, base, p, end, cells, width, window_u, k) };
+        if p == end {
+            break;
+        }
+        // SAFETY: p < end: a hit `x_hits_run` left for `rare` (its cell holding the word it held).
+        let OffsetPair {
+            q_off: query_offset,
+            s_off: subject_offset,
+        } = unsafe { p.read() };
+        // SAFETY: p < end, so p + 1 <= end.
+        p = unsafe { p.add(1) };
+        // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
+        let cell = cells.cell(query_offset, subject_offset);
+        debug_assert!(cell < width, "unit diagonal outside its table");
+        // Dispatch flagged cells or hits passing both distance tests to `rare`.
+        rare(cell, query_offset, subject_offset);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (module doc)
+// LOSAT_X_TBXHITSTEP: the hits from `p` by `x_hit_step`, `X_HIT_STEP` a step, up to the first one
+// for `rare` (`x_hits_steps`). On wasm32 (LOSAT Web) a function of its own, as `x_hits_bf_run`, so
+// that no value of its loop lives across a call; natively inlined.
+/// From `p` up to `end`: `x_hit_step` on each hit. Returns the first hit whose cell has flag 1 or
+/// that passes the test, its cell holding the word it held, or `end`.
+///
+/// SAFETY: `x_hits_bf`'s conditions for the hits from `p` to `end` (`p <= end`, `base` as in
+/// `x_hits_steps`, `window_u` the window, `k` = window - wordsize).
+#[allow(clippy::too_many_arguments)]
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+unsafe fn x_hits_run<C: XCells, const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    base: *mut DiagStruct,
+    mut p: *const OffsetPair,
+    end: *const OffsetPair,
+    cells: C,
+    width: usize,
+    window_u: u32,
+    k: u32,
+) -> *const OffsetPair {
+    // SAFETY: p and end are in the batch (or one past it), p <= end.
+    let mut steps = unsafe { end.offset_from(p) } as usize / X_HIT_STEP;
+    while steps != 0 {
+        for j in 0..X_HIT_STEP {
+            // SAFETY: steps >= 1, so the X_HIT_STEP entries from p are below end.
+            let at = unsafe { p.add(j) };
+            // SAFETY: at < end.
+            if !unsafe { x_hit_step::<C, PF>(diag_ptr, base, at, cells, width, window_u, k) } {
+                return at;
+            }
+        }
+        // SAFETY: as above, p + X_HIT_STEP <= end.
+        p = unsafe { p.add(X_HIT_STEP) };
+        steps -= 1;
+    }
+    while p < end {
+        // SAFETY: p < end.
+        if !unsafe { x_hit_step::<C, PF>(diag_ptr, base, p, cells, width, window_u, k) } {
+            return p;
+        }
+        // SAFETY: p < end, so p + 1 <= end.
+        p = unsafe { p.add(1) };
+    }
+    end
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (module doc)
+// LOSAT_X_TBXHITSTEP: one hit of `x_hits_bf`, the flag-0 cell's next value written before the
+// candidate test (module doc).
+/// The hit at `p`: false for a flag-1 cell (not written) or a candidate (its cell given the word it
+/// held); else true, its cell given its next value (`s + window` too far, the word it held on an
+/// overlap). `PF` prefetches the cell of the hit `X_PREFETCH_AHEAD` entries ahead (x86-64).
+///
+/// SAFETY: `x_hits_bf`'s conditions for the hit at `p` (with `PF`, `X_PREFETCH_AHEAD` initialized
+/// entries after the batch), `base` as in `x_hits_steps`, `window_u` the window, `k` = window -
+/// wordsize.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+unsafe fn x_hit_step<C: XCells, const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    base: *mut DiagStruct,
+    p: *const OffsetPair,
+    cells: C,
+    width: usize,
+    window_u: u32,
+    k: u32,
+) -> bool {
+    // EXPERIMENT (LOSAT_X_TBXPREFETCH): the cell of the hit X_PREFETCH_AHEAD entries ahead, as in
+    // the loop before (a stale entry past the batch is only prefetched).
+    #[cfg(target_arch = "x86_64")]
+    if PF {
+        // SAFETY: the caller's bound (X_PREFETCH_AHEAD initialized entries after the batch).
+        let ahead = unsafe { p.add(X_PREFETCH_AHEAD).read() };
+        let at = x_entry(diag_ptr, base, cells, ahead.q_off, ahead.s_off);
+        // SAFETY: a prefetch never faults.
+        unsafe {
+            core::arch::x86_64::_mm_prefetch(at as *const i8, core::arch::x86_64::_MM_HINT_T0)
+        };
+    }
+    // SAFETY: the caller's bound.
+    let OffsetPair {
+        q_off: query_offset,
+        s_off: subject_offset,
+    } = unsafe { p.read() };
+    // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
+    let entry = x_entry(diag_ptr, base, cells, query_offset, subject_offset);
+    debug_assert!(
+        cells.cell(query_offset, subject_offset) < width
+            && entry == diag_ptr.wrapping_add(cells.cell(query_offset, subject_offset)),
+        "unit diagonal outside its table"
+    );
+    // SAFETY: the cell is below width (the caller's bound; `x_entry`).
+    let raw = unsafe { (*entry).raw_bits() };
+    // A flagged cell goes to `rare` unwritten.
+    if (raw as i32) < 0 {
+        return false;
+    }
+    // Update `last_hit` when outside the window (s - L >= 0); else keep the existing entry (an
+    // overlapping hit, or a candidate, whose s - L is negative too).
+    let next = if subject_offset >= raw {
+        subject_offset.wrapping_add(window_u)
+    } else {
+        raw
+    };
+    // SAFETY: as above.
+    unsafe { (*entry).set_raw_bits(next) };
+    // Not a candidate: diff - wordsize outside [0, k) (module doc).
+    subject_offset.wrapping_sub(raw).wrapping_add(k) >= k
+}
+
+// No NCBI counterpart: the address of a hit's cell in `x_hit_step` (module doc).
+/// The cell of hit (q, s) in the table at `diag_ptr`: `cells.cell(q, s)` (`XMasked`), or `base`
+/// plus q - s in `isize` (`XUnmasked`; `base` the table's address minus the unit's lowest
+/// diagonal). Wrapping arithmetic: the address of a stale entry past the batch is only prefetched.
+#[inline(always)]
+fn x_entry<C: XCells>(
+    diag_ptr: *mut DiagStruct,
+    base: *mut DiagStruct,
+    cells: C,
+    query_offset: u32,
+    subject_offset: u32,
+) -> *mut DiagStruct {
+    if C::MASKED {
+        diag_ptr.wrapping_add(cells.cell(query_offset, subject_offset))
+    } else {
+        base.wrapping_offset((query_offset as isize).wrapping_sub(subject_offset as isize))
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-552 (as `x_hits_bf`)
-// No NCBI counterpart for the function boundary (scheduling of the statements of `x_hits_bf`
-// only): on wasm32 (LOSAT Web) the loop of `x_hits_bf` runs as `x_hits_bf_run`, a function of its
-// own that takes the hits up to the first one for `rare`, and this loop, which calls `rare` for
-// that hit and goes on after it. In `x_hits_bf`'s one loop, V8's optimized code (TurboFan) kept
-// the table, the bounds and the loop pointer in stack slots and read or wrote six of them for every
-// hit, as the inlined per-hit body (`x_hit`, its extension and its calls) needs every register. No
-// value of `x_hits_bf_run`'s loop lives across a call: V8 inlines it into this loop and unrolls it,
-// without stack slots. Elsewhere `x_hits_bf` keeps its one loop.
+// No NCBI counterpart for the function boundary (scheduling of the statements of `x_hits_one`
+// only): on wasm32 (LOSAT Web) the loop before LOSAT_X_TBXHITSTEP runs as `x_hits_bf_run`, a
+// function of its own that takes the hits up to the first one for `rare`, and this loop, which
+// calls `rare` for that hit and goes on after it. In the one loop, V8's optimized code (TurboFan)
+// kept the table, the bounds and the loop pointer in stack slots and read or wrote six of them for
+// every hit, as the inlined per-hit body (`x_hit`, its extension and its calls) needs every
+// register. No value of `x_hits_bf_run`'s loop lives across a call: V8 inlines it into this loop and
+// unrolls it, without stack slots. Native builds keep the one loop (`x_hits_one`).
 /// `x_hits_bf` (same arguments, same safety conditions, without `PF`): the same reads and writes of
 /// the cells and the same calls of `rare`, in the same order.
 #[cfg(any(target_arch = "wasm32", test))]
@@ -244,7 +507,7 @@ unsafe fn x_hits_bf_split<C: XCells>(
     mut rare: impl FnMut(usize, u32, u32),
 ) {
     let window_u = window as u32;
-    // window - wordsize, at least 1 (`fits`), as in `x_hits_bf`.
+    // window - wordsize, at least 1 (`fits`), as in `x_hits_one`.
     let k = window.wrapping_sub(wordsize) as u32;
     // SAFETY: the caller's bound (n entries).
     let end = unsafe { pairs.add(n) };
@@ -272,10 +535,10 @@ unsafe fn x_hits_bf_split<C: XCells>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (module doc)
-// The flag-0 branch's too-far and overlap outcomes of `x_hits_bf`, statement for statement, up to
+// The flag-0 branch's too-far and overlap outcomes of `x_hits_one`, statement for statement, up to
 // the first hit that goes to `rare` (`x_hits_bf_split`).
 /// From `p` up to `end`: each hit whose cell has flag 0 and that does not pass the test gets the
-/// cell's next value (`s + window`, or the word it read), as in `x_hits_bf`. Returns the first hit
+/// cell's next value (`s + window`, or the word it read), as in `x_hits_one`. Returns the first hit
 /// whose cell has flag 1 or that passes the test, its cell not written, or `end`.
 ///
 /// SAFETY: `x_hits_bf`'s conditions for the hits from `p` to `end` (`p <= end`, `window_u` the

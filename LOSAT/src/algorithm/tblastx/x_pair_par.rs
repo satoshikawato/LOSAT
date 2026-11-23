@@ -441,6 +441,10 @@ pub(super) trait XCells: Copy {
     fn of(lo: u32, mask: u32) -> Self;
     /// The cell of hit (q, s).
     fn cell(self, query_offset: u32, subject_offset: u32) -> usize;
+    /// LOSAT_X_TBXHITSTEP (x_tbx_hitbf.rs `x_hits_steps`): the unit's lowest raw diagonal as an
+    /// exact integer, so that the cell of a hit (q, s) of the unit is q - s minus it, without a
+    /// wrap (`XUnmasked`); 0 for `XMasked`, whose cells are masked (`cell`).
+    fn lowest_diagonal(self) -> isize;
 }
 
 /// The unmasked cells: q - s - lo (u32 wrapping).
@@ -460,6 +464,15 @@ impl XCells for XUnmasked {
         query_offset
             .wrapping_sub(subject_offset)
             .wrapping_sub(self.lo) as usize
+    }
+    // No NCBI counterpart: `lo` is q_min - (s_len - 1) of a unit (`scan_unit` and the batched and
+    // sliced scans set it so). q_min is a query offset, below 2^31 (a frame's `frame_base` plus a
+    // position, an i32), and s_len is below 2^29 (x_tbx_hitbf.rs `fits`), so as an i32 `lo` is
+    // that exact value; every hit (q, s) of the unit has q_min <= q and s < s_len, so q - s - lo,
+    // computed without a wrap, is its cell.
+    #[inline(always)]
+    fn lowest_diagonal(self) -> isize {
+        self.lo as i32 as isize
     }
 }
 
@@ -482,6 +495,10 @@ impl XCells for XMasked {
             .wrapping_sub(subject_offset)
             .wrapping_sub(self.lo)
             & self.mask) as usize
+    }
+    #[inline(always)]
+    fn lowest_diagonal(self) -> isize {
+        0
     }
 }
 

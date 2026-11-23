@@ -7562,7 +7562,10 @@ fn database_search_error(
 pub(crate) struct QueryBatchSizes;
 
 impl QueryBatchSizes {
-    pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<LoopBatchSizes> {
+    pub(crate) fn of_subjects(
+        args: &BlastnArgs,
+        subjects: &[FastaRecord],
+    ) -> Result<LoopBatchSizes> {
         let total_length =
             crate::blastinput::seq_range::subject_letters(args.subject_loc.as_deref(), subjects)?;
         Self::of_total_length(args, total_length)

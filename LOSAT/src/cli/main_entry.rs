@@ -308,7 +308,10 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227,252-255
-        Commands::Tblastx(args) => {
+        Commands::Tblastx(mut args) => {
+            // The `@PG` line of SAM (outfmt 17), which a TBLASTX strategy run by BLASTN's
+            // application writes, shows the command line.
+            args.command_line = Some(crate::cli::command_line_bytes());
             // NCBI's application layer reads its environment and registry files before
             // tblastx's own code runs (as for BLASTN); LOSAT rejects the settings that change
             // the output.

@@ -11,7 +11,11 @@
 //! HSP, whose Dense-seg is the one that outfmt 8 and 12 write
 //! (`report::serial::seqalign::gapped_segments`); an ungapped search has a Seq-align per subject,
 //! whose Dense-diags (one per HSP) the formatter joins into one Dense-seg
-//! (`report::serial::seqalign::ungapped_segments`), so a subject has one record.
+//! (`report::serial::seqalign::ungapped_segments`), so a subject has one record. A translated
+//! ungapped search (TBLASTX's strategy run by BLASTN's application) has a Seq-align of Std-segs per
+//! subject, which the formatter converts into one Dense-seg (`translated_segments`): a subject whose
+//! Std-segs change a row's strand has no record (the conversion throws; `SamDocument::query` counts
+//! it), and a record has no score tags (the Seq-align holds no scores).
 
 use std::collections::HashSet;
 use std::io::{self, Write};
@@ -19,9 +23,10 @@ use std::io::{self, Write};
 use anyhow::Result;
 
 use super::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
+use super::seqid::SeqId;
 use super::serial::seqalign::{
-    gapped_segments, seq_align_hsps, seqalign_evalue, ungapped_segments, Segments, Strand,
-    GAP_VALUE,
+    gapped_segments, seq_align_hsps, seqalign_evalue, translated_segments, ungapped_segments,
+    untranslated, Segments, Strand, GAP_VALUE,
 };
 
 /// The words of the custom specification of outfmt 17 that NCBI reads.
@@ -48,6 +53,35 @@ impl SamSpec {
             }
         }
         parsed
+    }
+}
+
+/// The Seq-id that SAM names a FASTA record (a query, or a `-subject` record) by: the local id, or
+/// with `-parse_deflines` the id of the record's Bioseq that `AdjustSeqIdType` with
+/// `eGetId_ForceAcc` finds (`db_subject::forced_accession`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:122-132
+pub fn fasta_sam_id(record: &crate::blastinput::fasta_reader::FastaRecord) -> SeqId<'_> {
+    match record.believed() {
+        Some(ids) => SeqId::Db(crate::report::db_subject::forced_accession(
+            &ids.best, &ids.ids,
+        )),
+        None => SeqId::Local(&record.local_id),
+    }
+}
+
+/// The Seq-id that SAM names a database sequence by: an id of its Bioseq where it has parsed
+/// Seq-ids (`ParsedSubject::sam_id`), else its `BL_ORD_ID` (the OID of `ordinal`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:122-132
+pub fn database_sam_id<'a>(
+    subject: Option<&'a crate::report::db_subject::ParsedSubject>,
+    oids: crate::seqdb::OidMap<'_>,
+    ordinal: u32,
+) -> SeqId<'a> {
+    match subject {
+        Some(subject) => SeqId::Db(subject.sam_id()),
+        None => SeqId::BlOrdId(oids.oid(ordinal)),
     }
 }
 
@@ -170,6 +204,9 @@ pub struct SamDocument {
     spec: SamSpec,
     /// The `@PG` line without its CL tag and newline: `@PG\tID:0\tVN:<version>`.
     program: Vec<u8>,
+    /// The `PN` tag of the `@PG` line: the options' program (`blastn`, or `tblastx` for a TBLASTX
+    /// strategy that BLASTN's application runs).
+    program_name: &'static str,
     /// The raw command line: every argument followed by one space; `None`: no CL tag.
     command_line: Option<Vec<u8>>,
     /// The `@SQ` lines, one per reference in order of first appearance.
@@ -189,6 +226,7 @@ impl SamDocument {
         Self {
             spec,
             program: format!("@PG\tID:0\tVN:{version}").into_bytes(),
+            program_name: "blastn",
             command_line: command_line.filter(|line| !line.is_empty()),
             sq: Vec::new(),
             seen: HashSet::new(),
@@ -197,10 +235,22 @@ impl SamDocument {
         }
     }
 
+    /// The document of the options' program `program` (its `PN` tag): BLASTN's unless the strategy
+    /// that BLASTN's application runs is another program's.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2460-2466
+    pub fn for_program(mut self, program: crate::blastinput::app::Program) -> Self {
+        self.program_name = program.ncbi_name();
+        self
+    }
+
     /// Adds the records of one query's final hit list: `hsps`, grouped by subject in the
     /// Seq-align order, `subjects` indexed by `HspRecord::subject`. `run` says whether the
     /// subjects are remapped (`-subject`) and whether the search is gapped (a Seq-align and a
     /// record per HSP) or ungapped (a Seq-align and a record per subject: its run of HSPs).
+    /// Returns the number of Seq-aligns that the formatter could not convert (a translated search's
+    /// subject whose Std-segs change a row's strand: no record, one post each, `0` for the other
+    /// searches).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:54-82
     pub fn query(
@@ -210,17 +260,21 @@ impl SamDocument {
         subjects: &[SamSequence<'_>],
         hsps: &[HspRecord<'_>],
         letters: &mut dyn SamLetters,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         if hsps.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         let mut scratch = std::mem::take(&mut self.scratch);
         scratch.rows.clear();
         scratch.buf.clear();
-        let result = (|| -> Result<()> {
+        let result = (|| -> Result<usize> {
+            let mut failed = 0;
             for align in seq_align_hsps(run, hsps) {
                 let subject = align[0].subject as usize;
-                self.render(run, query, &subjects[subject], align, letters, &mut scratch)?;
+                if !self.render(run, query, &subjects[subject], align, letters, &mut scratch)? {
+                    failed += 1;
+                    continue;
+                }
                 scratch.rows.last_mut().expect("a row was rendered").subject = subject;
             }
             if !self.spec.subject_as_reference {
@@ -242,7 +296,7 @@ impl SamDocument {
                 self.list_reference(reference, &mut scratch.name);
                 self.body.push(&scratch.buf[row.bytes.clone()]);
             }
-            Ok(())
+            Ok(failed)
         })();
         // A huge query (a chromosome against a chromosome) renders its records here before they
         // are copied into the body: its buffers do not keep that capacity for the rest of the run.
@@ -282,7 +336,9 @@ impl SamDocument {
 
     /// Renders the record of one Seq-align into `scratch` (`CSAM_CIGAR_Formatter::AddRow` after
     /// `CCIGAR_Formatter::x_FormatLine`): `align` is a gapped search's HSP, or an ungapped
-    /// search's HSPs of one subject in the Seq-align's order.
+    /// search's HSPs of one subject in the Seq-align's order. `false`: the formatter cannot convert
+    /// the Seq-align (a translated search's Std-segs on different strands of a row), nothing is
+    /// rendered.
     fn render(
         &self,
         run: &RunRecord<'_>,
@@ -291,12 +347,14 @@ impl SamDocument {
         align: &[HspRecord<'_>],
         letters: &mut dyn SamLetters,
         scratch: &mut Scratch,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let (SamId::Query(query_record), SamId::Subject(subject_record)) =
             (&query.record, &subject.record)
         else {
             unreachable!("the first row is the query and the second the subject")
         };
+        // A translated search's Seq-align is made of Std-segs, and its Dense-seg of `CreateDensegFromStdseg`.
+        let translated = !run.gapped && !untranslated(run.program);
         if run.gapped {
             debug_assert_eq!(align.len(), 1, "a gapped search's Seq-align holds one HSP");
             gapped_segments(
@@ -306,6 +364,12 @@ impl SamDocument {
                 &align[0],
                 &mut scratch.segments,
             );
+        } else if translated {
+            if translated_segments(query_record, subject_record, align, &mut scratch.segments)
+                .is_err()
+            {
+                return Ok(false);
+            }
         } else {
             ungapped_segments(query_record, subject_record, align, &mut scratch.segments);
         }
@@ -458,39 +522,58 @@ impl SamDocument {
             buf.push(b'*');
         }
         buf.extend_from_slice(b"\t*");
-        // The tags: AS, EV, NM, PI, BS, in the order of the code (`AS + EV + NM + PI + BS`).
-        buf.extend_from_slice(b"\tAS:i:");
-        push_int(buf, i64::from(hsp.score));
-        buf.extend_from_slice(b"\tEV:f:");
-        push_g(buf, seqalign_evalue(hsp.evalue));
+        // The tags: AS, EV, NM, PI, BS, in the order of the code (`AS + EV + NM + PI + BS`). The
+        // Seq-align that `AddRow` reads holds no score where it is a translated search's (its
+        // scores are the Std-segs'): NM alone.
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:247-253
+        if !translated {
+            buf.extend_from_slice(b"\tAS:i:");
+            push_int(buf, i64::from(hsp.score));
+            buf.extend_from_slice(b"\tEV:f:");
+            push_g(buf, seqalign_evalue(hsp.evalue));
+        }
         buf.extend_from_slice(b"\tNM:i:");
         push_int(buf, i64::from(num_dif));
-        buf.extend_from_slice(b"\tPI:f:");
-        // `len`, an `int`, is `GetAlignLength` of `aln` with false: from 2^31 on the length is negative, and so is PI
-        // (NCBI BLAST+ 2.17.0 writes `PI:f:-0.01` for a subject whose HSPs add up to 2152959968).
-        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276
-        let len = aligned as i32;
-        let identity = if hsp.num_ident == len {
-            100.0
-        } else {
-            f64::min(99.99, 100.0 * f64::from(hsp.num_ident) / f64::from(len))
-        };
-        push_fixed2(buf, identity);
-        buf.extend_from_slice(b"\tBS:f:");
-        push_g(buf, hsp.bit_score);
+        if !translated {
+            buf.extend_from_slice(b"\tPI:f:");
+            // `len`, an `int`, is `GetAlignLength` of `aln` with false: from 2^31 on the length is negative, and so is PI
+            // (NCBI BLAST+ 2.17.0 writes `PI:f:-0.01` for a subject whose HSPs add up to 2152959968).
+            // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276
+            let len = aligned as i32;
+            let identity = if hsp.num_ident == len {
+                100.0
+            } else {
+                f64::min(99.99, 100.0 * f64::from(hsp.num_ident) / f64::from(len))
+            };
+            push_fixed2(buf, identity);
+            buf.extend_from_slice(b"\tBS:f:");
+            push_g(buf, hsp.bit_score);
+        }
         buf.push(b'\n');
         let end = buf.len();
-        // The sort reads the last e-value of the Seq-align's scores (`GetAlnScores`).
+        // The sort reads the last e-value of the Seq-align's scores (`GetAlnScores`), which a
+        // translated search's Seq-align (Std-segs, sorted before the conversion) holds at its
+        // first Std-seg; the start of the sorted row is the lowest start of the Std-segs' query rows
+        // (`GetSeqStart` and `GetSeqStop` of a Std-seg alignment combine the rows' ranges).
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:229-270
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:815-845
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
-        let last = align.last().expect("a Seq-align holds an HSP");
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:152-300
+        let (start, scored) = if translated {
+            (translated_row_start(segments, offsets[0]), &align[0])
+        } else {
+            (
+                query_row_start(segments, offsets[0]),
+                align.last().expect("a Seq-align holds an HSP"),
+            )
+        };
         scratch.rows.push(Rendered {
-            start: query_row_start(segments, offsets[0]),
-            evalue: seqalign_evalue(last.evalue),
+            start,
+            evalue: seqalign_evalue(scored.evalue),
             bytes: begin..end,
             subject: 0,
         });
-        Ok(())
+        Ok(true)
     }
 
     /// Writes the document and empties it: nothing when no record was added; else `@HD`, the
@@ -510,7 +593,9 @@ impl SamDocument {
             out.write_all(b"\tCL:")?;
             out.write_all(command_line)?;
         }
-        out.write_all(b"\tPN:blastn\n")?;
+        out.write_all(b"\tPN:")?;
+        out.write_all(self.program_name.as_bytes())?;
+        out.write_all(b"\n")?;
         for block in std::mem::take(&mut self.body.blocks) {
             out.write_all(&block)?;
         }
@@ -549,6 +634,20 @@ fn query_row_start(segments: &Segments, offset: i32) -> i32 {
     let start = (starts[2 * start_seg] + offset) as u32;
     let stop = ((starts[2 * stop_seg] + offset + lens[stop_seg]) as u32).wrapping_sub(1);
     start.min(stop) as i32
+}
+
+/// The lowest start of the query row (row 0) of a translated search's Seq-align, in record
+/// coordinates: its Std-segs' intervals (`segments` holds one segment each) start there, and
+/// `GetSeqStart` and `GetSeqStop` of the Seq-align are the lowest start and the highest end of the
+/// intervals; the lesser of them is the lowest start. A `TSeqPos` (unsigned).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:152-300
+fn translated_row_start(segments: &Segments, offset: i32) -> i32 {
+    let starts = segments.starts();
+    (0..segments.lens().len())
+        .map(|seg| (starts[2 * seg] + offset) as u32)
+        .min()
+        .unwrap_or(0) as i32
 }
 
 /// Appends the decimal digits of `value`.

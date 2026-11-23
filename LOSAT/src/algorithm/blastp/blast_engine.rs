@@ -9287,6 +9287,19 @@ fn run_resolved_in_pool(
         call_requests: call.as_ref(),
         ..*reports
     };
+    // A negative `-window_size` (a search strategy's; the command line takes none): NCBI's one
+    // diagonal table passes from each subject to the next, so the call searches the subjects one
+    // after the other on one thread, in NCBI's one-thread order, at any `-num_threads`; every
+    // stage of `run_call`, a query chunk's and a block's calls included, takes this pool. A window of 0 or
+    // more keeps the caller's.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+    let x_neg_window_pool;
+    let blastp_parallel_pool = if args.window_size < 0 {
+        x_neg_window_pool = crate::utils::threading::SearchPool::x_serial();
+        &x_neg_window_pool
+    } else {
+        blastp_parallel_pool
+    };
     let result = run_call(
         args,
         query_records,
@@ -9351,7 +9364,10 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+    // An ungapped search, and a negative `-window_size` (whose diagonal offset NCBI moves after
+    // each part of a subject: `negative_window_long_subject`), over a subject longer than NCBI's
+    // part length: LOSAT's refusals.
+    if (args.ungapped || args.window_size < 0) && query_valid.iter().any(|valid| *valid) {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
                 .iter()
@@ -9372,9 +9388,11 @@ fn ungapped_setup_failure(
             }
         };
         if let Some((what, length)) = longest {
-            return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
-                &what, length,
-            )));
+            return Some(UngappedSetupFailure::Refusal(if args.ungapped {
+                too_long_subject_refusal(&what, length)
+            } else {
+                negative_window_long_subject(args, &what, length)
+            }));
         }
     }
     None
@@ -9473,19 +9491,6 @@ fn run_call(
         Some(Arc::new(BlastpTiming::new()))
     } else {
         None
-    };
-    // A negative `-window_size` (a search strategy's; the command line takes none): NCBI's one
-    // diagonal table passes from each subject to the next, so the call searches the subjects one
-    // after the other on one thread, in NCBI's one-thread order, at any `-num_threads`; every
-    // stage below, a query chunk's and a block's calls included, takes this pool. A window of 0 or
-    // more keeps the caller's.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
-    let x_neg_window_pool;
-    let blastp_parallel_pool = if args.window_size < 0 {
-        x_neg_window_pool = crate::utils::threading::SearchPool::x_serial();
-        &x_neg_window_pool
-    } else {
-        blastp_parallel_pool
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
     //
@@ -9609,13 +9614,6 @@ fn run_call(
             UngappedSetupFailure::Engine(text) => setup_error(outputs, true, "", &text),
             UngappedSetupFailure::Refusal(error) => error,
         });
-    }
-    // A negative `-window_size` and a subject that NCBI searches in overlapping parts, each with
-    // its own move of the diagonal offset: LOSAT's refusal, where the ungapped search's is.
-    if args.window_size < 0 && query_valid.iter().any(|valid| *valid) {
-        if let Some(error) = negative_window_long_subject(&args, subject_source) {
-            return Err(error);
-        }
     }
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds
@@ -11014,33 +11012,15 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
 /// whole subject does not do. A window of 0 or more does not read the offset of an earlier part.
 fn negative_window_long_subject(
     args: &ResolvedBlastpArgs,
-    subject_source: BlastpSubjectSource<'_>,
-) -> Option<anyhow::Error> {
-    let longest = match subject_source {
-        BlastpSubjectSource::Fasta(records) => records
-            .iter()
-            .enumerate()
-            .find(|(_, record)| record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN)
-            .map(|(index, record)| {
-                (
-                    format!("subject sequence {}", index + 1),
-                    record.sequence.len(),
-                )
-            }),
-        BlastpSubjectSource::Database(database) => {
-            let longest = database.seqdb().max_length() as usize;
-            (longest > crate::core::subject_split::MAX_DBSEQ_LEN)
-                .then(|| ("a database sequence".to_string(), longest))
-        }
-    };
-    longest.map(|(what, length)| {
-        anyhow::anyhow!(
-            "a -window_size of {} with {what} of {length} residues, a subject which NCBI BLAST+ searches in overlapping parts of {} residues, is not supported by LOSAT's {}",
-            args.window_size,
-            crate::core::subject_split::MAX_DBSEQ_LEN,
-            args.app.name()
-        )
-    })
+    what: &str,
+    length: usize,
+) -> anyhow::Error {
+    anyhow::anyhow!(
+        "a -window_size of {} with {what} of {length} residues, a subject which NCBI BLAST+ searches in overlapping parts of {} residues, is not supported by LOSAT's {}",
+        args.window_size,
+        crate::core::subject_split::MAX_DBSEQ_LEN,
+        args.app.name()
+    )
 }
 
 #[cfg(test)]

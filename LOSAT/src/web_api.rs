@@ -443,6 +443,7 @@ fn parse_tblastx_args(
         one_query_batch: false,
         scope_refusal: None,
         matrix_file: None,
+        command_line: None,
     };
 
     let mut index = 0;

@@ -16,8 +16,9 @@ use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
-use crate::report::sam::{SamDocument, SamId, SamLetters, SamRow, SamSequence};
-use crate::report::seqid::SeqId;
+use crate::report::sam::{
+    database_sam_id, fasta_sam_id, SamDocument, SamId, SamLetters, SamRow, SamSequence,
+};
 
 /// The lengths of the subjects the hit lists name, by index (rank for a database).
 pub(crate) struct SubjectLengths<'a> {
@@ -65,12 +66,7 @@ pub(crate) fn add_blastn_sam(
             let subject = sam_subjects.len() as u32;
             let (id, offset, key) = match subjects {
                 SubjectNames::Records(records) => (
-                    match records[s_idx].believed() {
-                        Some(ids) => SeqId::Db(crate::report::db_subject::forced_accession(
-                            &ids.best, &ids.ids,
-                        )),
-                        None => SeqId::Local(&records[s_idx].local_id),
-                    },
+                    fasta_sam_id(&records[s_idx]),
                     subject_placements.offset(s_idx) as i32,
                     s_idx as u64,
                 ),
@@ -82,10 +78,11 @@ pub(crate) fn add_blastn_sam(
                     parsed,
                     ..
                 } => (
-                    match parsed.get(s_idx).and_then(Option::as_deref) {
-                        Some(subject) => SeqId::Db(subject.sam_id()),
-                        None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
-                    },
+                    database_sam_id(
+                        parsed.get(s_idx).and_then(Option::as_deref),
+                        oids,
+                        ordinals[s_idx],
+                    ),
                     0,
                     u64::from(ordinals[s_idx]),
                 ),
@@ -123,10 +120,8 @@ pub(crate) fn add_blastn_sam(
             }
         }
         let mut query_record = queries.record(q_idx);
-        if let Some(ids) = queries.records[q_idx].believed() {
-            query_record.id = SeqId::Db(crate::report::db_subject::forced_accession(
-                &ids.best, &ids.ids,
-            ));
+        if queries.records[q_idx].believed().is_some() {
+            query_record.id = fasta_sam_id(&queries.records[q_idx]);
         }
         let query = SamSequence {
             record: SamId::Query(query_record),

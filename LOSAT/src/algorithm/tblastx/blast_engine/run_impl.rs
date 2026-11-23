@@ -2521,7 +2521,9 @@ fn write_tblastx_outputs(
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
-            ))
+            )
+            // The posts of the Seq-aligns that SAM's formatter cannot convert (`tblastx::sam`).
+            || matches!(output_format, report::TblastxOutputFormat::Sam(_)))
         .then(|| {
             let first = warning_lines.take();
             let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
@@ -2861,6 +2863,26 @@ fn write_tblastx_outputs(
                         &mut writer,
                         warnings.as_mut(),
                         probe.as_mut(),
+                    )?
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
+                // The records of the queries with alignments, and the document at the end (BLASTN's
+                // application running a TBLASTX search strategy, `tblastx::sam`).
+                report::TblastxOutputFormat::Sam(spec) => {
+                    crate::algorithm::tblastx::sam::write_tblastx_sam(
+                        spec,
+                        run.args.command_line.clone(),
+                        &mut writer,
+                        &hits,
+                        run.queries,
+                        &run.ranges.input.placements,
+                        run.queries_before,
+                        &seqalign_subjects(run),
+                        run.subject_letters,
+                        warnings
+                            .as_mut()
+                            .expect("a SAM report writes its posts to the diagnostics"),
+                        run.args.app().ncbi_name(),
                     )?
                 }
                 // Refused before the search (`TblastxOutputFormat::Unsupported`).
@@ -4464,7 +4486,9 @@ impl BatchReports<'_> {
                         || formats.iter().any(|format| {
                             format.is_structured_xml() || format.tabular_joins_subjects()
                         }),
-                    sam: false,
+                    sam: formats
+                        .iter()
+                        .any(|format| matches!(format, report::TblastxOutputFormat::Sam(_))),
                     taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
                     words: formats.iter().fold(
                         crate::report::tabular::PrintedIds::default(),

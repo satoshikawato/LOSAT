@@ -316,10 +316,13 @@ fn the_sam_check_of_a_cross_program_run_reads_the_running_application() {
                     ),
                     "{app:?} running {engine:?}"
                 );
-            } else if engine == Program::Blastn {
+            } else if engine == Program::Blastn || engine == Program::Tblastx {
+                // BLASTN's application writes the SAM report of a TBLASTX strategy too
+                // (`algorithm::tblastx::sam`).
                 assert!(checked.is_ok(), "{app:?} running {engine:?}");
             } else {
-                // LOSAT's refusal, in `report_format`'s words, of SAM for the translated search.
+                // LOSAT's refusal, in `report_format`'s words, of SAM for the other translated
+                // searches.
                 assert_eq!(
                     checked.unwrap_err().to_string(),
                     format!(

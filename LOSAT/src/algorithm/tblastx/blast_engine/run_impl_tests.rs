@@ -729,21 +729,20 @@ fn the_warnings_of_another_applications_run_carry_its_name() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
-// The SAM check is the running application's: blastx stops with NCBI's error, blastn passes it
-// and LOSAT refuses the SAM report of a translated search (`formatting_handler_check_of_run`).
+// The SAM check is the running application's: blastx stops with NCBI's error, blastn passes it and
+// writes the SAM report of the TBLASTX strategy (`tblastx::sam`).
 #[test]
 fn the_sam_check_of_another_applications_run_is_the_running_applications() {
-    let refused = |running: &str| {
+    let checked = |running: &str| {
         let args = run_as(running, &["-outfmt", "17"]);
         check_ncbi_options(&args, &cli_outfmts(&args).unwrap(), &mut Vec::new())
-            .unwrap_err()
-            .to_string()
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     };
-    assert!(refused("blastx").contains("SAM format is only applicable to blastn"));
-    assert_eq!(
-        refused("blastn"),
-        "output format 17 is not supported by LOSAT's TBLASTX"
-    );
+    assert!(checked("blastx")
+        .unwrap_err()
+        .contains("SAM format is only applicable to blastn"));
+    assert_eq!(checked("blastn"), Ok(()));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65,137 (the table of a window

@@ -22,7 +22,10 @@ fn allocation_power_of_two_and_window_boundaries() {
         assert_eq!(d.entries.len(), length);
         assert_eq!(d.offset, window);
     }
-    assert!(Diagonals::new(1, -1).is_err());
+    // A window below 0 (an imported search strategy's) gives NCBI's table: the power of 2 from 1
+    // not below the query length plus the window, here 1 cell, with the offset at the window.
+    let d = Diagonals::new(1, -1).unwrap();
+    assert_eq!((d.entries.len(), d.offset), (1, -1));
 }
 
 // No NCBI counterpart (buffer reuse, LOSAT_X_BXDIAGKEEP): a used table of another length or
@@ -45,7 +48,9 @@ fn a_remade_table_is_the_new_one() {
         assert_eq!(table.entries, new.entries);
         assert_eq!((table.offset, table.window), (new.offset, new.window));
     }
-    assert!(Diagonals::new(8, 8).unwrap().x_remake(1, -1).is_err());
+    let mut table = Diagonals::new(8, 8).unwrap();
+    table.x_remake(1, -1).unwrap();
+    assert_eq!((table.entries.len(), table.offset), (1, -1));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-174

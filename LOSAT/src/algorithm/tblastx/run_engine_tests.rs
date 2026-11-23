@@ -78,6 +78,7 @@ fn local_args(query: &Path, subject: &Path, out: &Path) -> TblastxArgs {
         one_query_batch: false,
         scope_refusal: None,
         matrix_file: None,
+        command_line: None,
     }
 }
 

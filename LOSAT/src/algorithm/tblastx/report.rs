@@ -1315,7 +1315,11 @@ pub(crate) enum TblastxOutputFormat {
     Xml2(crate::report::blast_xml2::Xml2Kind),
     /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
     Archive,
-    /// A value that TBLASTX does not write (17, and a value that NCBI cannot read), which the
+    /// SAM (outfmt 17, `tblastx/sam.rs`), which only BLASTN's application writes: a TBLASTX search
+    /// strategy that it runs (a TBLASTX run itself fails at its formatting handler, `app::
+    /// formatting_handler_check`). The document is written at the end of the run.
+    Sam(crate::report::sam::SamSpec),
+    /// A value that TBLASTX does not write (a value that NCBI cannot read), which the
     /// command line, the library and LOSAT Web refuse before the search
     /// (`ReportFormat::writes`, `app::report_format`): its writer refuses it, no report is
     /// written for it.
@@ -1368,6 +1372,7 @@ impl TblastxOutputFormat {
                 | Self::Xml
                 | Self::Xml2(_)
                 | Self::Archive
+                | Self::Sam(_)
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
@@ -1427,6 +1432,7 @@ impl TblastxOutputFormat {
                 _ => 6,
             }),
             Self::Seqalign(serial) => Some(serial.outfmt()),
+            Self::Sam(_) => Some(17),
             // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
             // (`TaxdbPrinter`).
             Self::Archive | Self::Xml2(_) | Self::Unsupported => None,
@@ -1445,6 +1451,12 @@ impl TblastxOutputFormat {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
+    // SAM reads its custom specification (`SQ`, `SR`) and ignores a delimiter.
+    if let Ok(choice) = &choice {
+        if choice.number == crate::blastinput::app::output_format::SAM {
+            return TblastxOutputFormat::Sam(crate::report::sam::SamSpec::parse(&choice.spec));
+        }
+    }
     // Only a value with a custom specification, or outfmt 10 or 20, reads the field list;
     // outfmt 18 (the organism report) is written from the same hit list.
     if let Ok(choice) = &choice {

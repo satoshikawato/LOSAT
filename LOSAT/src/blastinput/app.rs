@@ -639,11 +639,11 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
 /// application `app`: NCBI's checks read the running application's flags (`eIsSAM` of `app`), and
 /// the search is the strategy's (`engine`'s: tblastx running a blastn strategy, blastn running a
 /// tblastx one). A format that `app`'s handler accepts and LOSAT's `engine` does not write is
-/// LOSAT's refusal (`report_format`'s words): SAM of a translated search. NCBI's SAM formatter
-/// converts the Std-seg alignments of a translated search into Dense-segs, which fails where the
-/// HSPs of one alignment change a row's strand (one exception for each such alignment and no
-/// report, the case of the frozen strategies); LOSAT writes no SAM report for a translated
-/// search, so the run is refused where NCBI's formatter starts.
+/// LOSAT's refusal (`report_format`'s words): SAM of a translated search, except TBLASTX's, which
+/// BLASTN's application runs from a search strategy (`algorithm::tblastx::sam`). NCBI's SAM
+/// formatter converts the Std-seg alignments of that search into Dense-segs, which fails where the
+/// HSPs of one alignment change a row's strand (one exception post for each such alignment, no
+/// record for it); LOSAT writes the report as NCBI's formatter does.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-753
@@ -653,7 +653,7 @@ pub fn formatting_handler_check_of_run(
     engine: Program,
 ) -> anyhow::Result<()> {
     formatting_handler_check(choice, app)?;
-    if choice.number == SAM && !engine.is_sam() {
+    if choice.number == SAM && !engine.is_sam() && engine != Program::Tblastx {
         anyhow::bail!(
             "output format {} is not supported by LOSAT's {}",
             choice.number,

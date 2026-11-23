@@ -301,6 +301,14 @@ pub struct TblastxArgs {
     /// option.
     #[arg(skip)]
     pub matrix_file: Option<std::path::PathBuf>,
+    // The command line of the run as the SAM `@PG` line shows it: every argument followed by one
+    // space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the library, the
+    // web ABIs). Set by `run` from the process's arguments; only a TBLASTX strategy that BLASTN's
+    // application runs writes SAM (`tblastx::sam`).
+    //
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:877-885
+    #[arg(skip)]
+    pub command_line: Option<Vec<u8>>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.

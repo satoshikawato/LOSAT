@@ -91,7 +91,7 @@ fn batch_sizes(
                 let settings = start.settings();
                 QueryBatchSizes::of_database(args, name, &settings)?
             }
-            None => QueryBatchSizes::new(args, inputs.subject)?,
+            None => QueryBatchSizes::of_subjects(args, inputs.subject)?,
         },
         Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size(10000)?),
         Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size(20000)?),

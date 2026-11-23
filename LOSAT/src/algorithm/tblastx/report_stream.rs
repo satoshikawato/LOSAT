@@ -316,7 +316,7 @@ fn database_check(
         pairwise,
         structured: format.is_structured_xml(),
         joined: pairwise || format.tabular_joins_subjects(),
-        sam: false,
+        sam: matches!(format, report::TblastxOutputFormat::Sam(_)),
         taxonomy: format.writes_taxonomy(),
         words: format.printed_ids(),
         stops_at_failed_lookup: format.is_tabular()

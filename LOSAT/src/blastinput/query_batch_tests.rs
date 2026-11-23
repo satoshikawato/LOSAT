@@ -146,8 +146,8 @@ fn query_scopes_number_the_searched_queries_of_each_batch() {
     use super::{QueryScopeSpan, QueryScopes};
     let records = parsed_records(b">a x\nAC\n>b x\nAC\n>a y\nAC\n>c x\nAC\n");
     let mut scopes = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP");
-    scopes.add_batch(&records[..2], 0).unwrap();
-    scopes.add_batch(&records[2..], 2).unwrap();
+    scopes.add_batch(&records[..2], &[false; 2], 0).unwrap();
+    scopes.add_batch(&records[2..], &[false; 2], 2).unwrap();
     assert!(scopes.of_query(0).has_key(&local_keys("b")));
     assert!(scopes.of_query(1).has_key(&local_keys("b")));
     assert!(!scopes.of_query(2).has_key(&local_keys("b")));
@@ -158,8 +158,11 @@ fn query_scopes_number_the_searched_queries_of_each_batch() {
     assert!(!from.of_query(1).has_key(&local_keys("b")));
     // `-subject` and outfmt 5: one scope, in which the second `a` is refused.
     let mut run = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
-    run.add_batch(&records[..2], 0).unwrap();
-    let error = run.add_batch(&records[2..], 2).unwrap_err().to_string();
+    run.add_batch(&records[..2], &[false; 2], 0).unwrap();
+    let error = run
+        .add_batch(&records[2..], &[false; 2], 2)
+        .unwrap_err()
+        .to_string();
     assert!(
         error.contains("two query records have the Seq-id lcl|a"),
         "{error}"
@@ -169,19 +172,19 @@ fn query_scopes_number_the_searched_queries_of_each_batch() {
     assert!(whole.of_query(0).has_key(&local_keys("c")));
     let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[1..])
         .unwrap()
-        .read_ahead(None);
-    ahead.add_batch(&records[1..], 0).unwrap();
+        .read_ahead(Vec::new());
+    ahead.add_batch(&records[1..], &[false; 3], 0).unwrap();
     // A refusal that the read met comes with the search's add of its batch (the second here).
     let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[..2])
         .unwrap()
-        .read_ahead(Some((1, anyhow::anyhow!("refused"))));
-    ahead.add_batch(&records[..2], 0).unwrap();
-    let refused = ahead.add_batch(&records[2..3], 2).unwrap_err();
+        .read_ahead(vec![(1, anyhow::anyhow!("refused"))]);
+    ahead.add_batch(&records[..2], &[false; 2], 0).unwrap();
+    let refused = ahead.add_batch(&records[2..3], &[false], 2).unwrap_err();
     assert_eq!(refused.to_string(), "refused");
-    ahead.add_batch(&records[3..], 3).unwrap();
+    ahead.add_batch(&records[3..], &[false], 3).unwrap();
     // A batch's scope has no ids of the whole run.
     let mut batch = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP").with_whole_run_of(&records);
-    batch.add_batch(&records[..2], 0).unwrap();
+    batch.add_batch(&records[..2], &[false; 2], 0).unwrap();
     assert!(!batch.of_query(0).has_key(&local_keys("c")));
 }
 
@@ -238,7 +241,7 @@ fn batch_refusal(
     let mut refusal = None;
     for fasta in batches {
         let records = parsed_records(fasta);
-        if let Err(error) = scopes.add_batch(&records, first) {
+        if let Err(error) = scopes.add_batch(&records, &vec![false; records.len()], first) {
             refusal = ScopeRefusal::of(&error).cloned();
             assert!(refusal.is_some(), "{error}");
             break;
@@ -253,7 +256,6 @@ fn setup_records(program: &'static str, batches: &[&[u8]]) -> Option<Vec<bool>> 
     batch_refusal(program, batches)
         .expect("a refusal")
         .setup_records()
-        .map(<[bool]>::to_vec)
 }
 
 #[test]
@@ -371,7 +373,9 @@ fn batch_count_scope_of_a_million_queries() {
         count.count(record.believed(), record.seq().len(), false);
     }
     let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
-    scopes.add_batch(&records, 0).expect("no repeated id");
+    scopes
+        .add_batch(&records, &vec![false; records.len()], 0)
+        .expect("no repeated id");
     // A hashbrown table holds its capacity's entries and a control byte each.
     let bytes = |scope: &super::QueryScope| {
         scope.keys.capacity() * (8 + 1) + scope.first_records.capacity() * (24 + 1)
@@ -391,7 +395,7 @@ fn batch_count_scope_of_a_million_queries() {
 
 #[test]
 fn a_refused_batch_gives_ncbis_set_up_error_or_the_refusal() {
-    use super::{refused_batch_error, ScopeRefusal};
+    use super::{refused_batch_error, BatchSetUp, ScopeRefusal};
     let refusal = || -> anyhow::Error {
         batch_refusal("BLASTP", &[b">q1\nMKV\n>q2\nMKV\n>q1\nMK\n"])
             .unwrap()
@@ -402,25 +406,354 @@ fn a_refused_batch_gives_ncbis_set_up_error_or_the_refusal() {
     };
     let is_refusal = |error: &anyhow::Error| ScopeRefusal::of(error).is_some();
     // With -export_search_strategy the refusal comes before the batch's request: no set-up.
-    let error = refused_batch_error(refusal(), true, |_| panic!("no set-up"));
+    let error = refused_batch_error(refusal(), true, |_| panic!("no set-up")).unwrap_err();
     assert!(is_refusal(&error));
     // NCBI's error of the set-up of the first records, which get it.
     let error = refused_batch_error(refusal(), false, |first| {
         assert_eq!(first, [true, true, false]);
-        Some(native())
-    });
+        BatchSetUp::Fails(native())
+    })
+    .unwrap_err();
     assert!(error.is::<crate::cli::NativeError>(), "{error}");
-    // A set-up that passes, or an error that is not NCBI's: the refusal.
-    assert!(is_refusal(&refused_batch_error(refusal(), false, |_| None)));
-    let error = refused_batch_error(refusal(), false, |_| Some(anyhow::anyhow!("LOSAT's")));
-    assert!(is_refusal(&error));
+    // A set-up that passes, or an error that is not NCBI's: the refusal (no XML failure takes it).
+    let setups: [fn() -> BatchSetUp; 3] = [
+        || BatchSetUp::Searched,
+        || BatchSetUp::Unknown,
+        || BatchSetUp::Fails(anyhow::anyhow!("LOSAT's")),
+    ];
+    for setup in setups {
+        let error = refused_batch_error(refusal(), false, |_| setup()).unwrap_err();
+        assert!(is_refusal(&error));
+    }
     // No record of the batch to set up: the refusal without a set-up.
     let alone: anyhow::Error = batch_refusal("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"])
         .unwrap()
         .into();
-    assert!(is_refusal(&refused_batch_error(alone, false, |_| panic!(
-        "no set-up"
-    ))));
+    assert!(is_refusal(
+        &refused_batch_error(alone, false, |_| panic!("no set-up")).unwrap_err()
+    ));
+}
+
+/// The refusal of the first batch of `batches` (each with its records that a range skips) that
+/// has one, under the run's XML failure `failure` with `span`, as the readers that read on past a
+/// refusal that the failure takes add them: whether the failure takes it (`None`: no refusal), and
+/// the query whose batch fails (`QueryScopes::xml_failing_query`).
+fn xml_refusal(
+    failure: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    span: super::QueryScopeSpan,
+    batches: &[(&[u8], &[bool])],
+) -> (Option<bool>, Option<super::XmlFailingQuery>) {
+    use super::{QueryScopes, ScopeRefusal};
+    let mut scopes = QueryScopes::new(span, "BLASTP").with_xml_matrix_failure(failure);
+    let mut first = 0;
+    let mut taken = None;
+    for &(fasta, skipped) in batches {
+        let records = parsed_records(fasta);
+        if let Err(error) = scopes.add_batch(&records, skipped, first) {
+            let refusal = ScopeRefusal::of(&error).expect("a refusal");
+            taken.get_or_insert(refusal.xml_takes());
+            if !refusal.xml_takes() {
+                break;
+            }
+        }
+        first += skipped.iter().filter(|&&skipped| !skipped).count();
+    }
+    let at = failure.map(|failure| QueryScopes::xml_failing_query(Some(&scopes), failure));
+    (taken, at)
+}
+
+/// Probe 2 of line RG-KB item 7 and its review (NCBI BLAST+ 2.17.0, `-parse_deflines -matrix
+/// blosum62`): the refusal of a repeat gives way to the run's XML failure in every batch that
+/// NCBI formats before the failure or fails in (`HeldIds::reaches`), wherever the repeat stands
+/// in it, a repeat that a range skips too; a batch after the failing one keeps the refusal (never
+/// read by NCBI, whose failure comes first).
+#[test]
+fn the_xml_matrix_failure_takes_a_refusal_in_every_batch_up_to_the_failing_one() {
+    use super::QueryScopeSpan::{Batch, Run};
+    use super::XmlFailingQuery;
+    use crate::report::blast_xml::matrix::XmlMatrixFailure;
+    let first = Some(XmlMatrixFailure::FirstQuery);
+    let held = Some(XmlMatrixFailure::SecondQueryOrEnd);
+    let at = |query| Some(XmlFailingQuery { query });
+    let (one, two, three) = (&[false][..], &[false; 2][..], &[false; 3][..]);
+    let dup: &[u8] = b">q1\nMKV\n>q1\nMKV\n";
+    let dup3: &[u8] = b">q1\nMKV\n>q2\nMKV\n>q1\nMKV\n";
+    let (q1, q2): (&[u8], &[u8]) = (b">q1\nMKV\n", b">q2\nMKV\n");
+    // FirstQuery: a repeat in the batch of the run's first searched query (`-db`: a scope per
+    // batch; outfmt 5: one scope), not in a later batch (never read by NCBI).
+    for span in [Batch, Run] {
+        assert_eq!(xml_refusal(first, span, &[(dup, two)]).0, Some(true));
+        assert_eq!(xml_refusal(first, span, &[(dup3, three)]).0, Some(true));
+    }
+    assert_eq!(
+        xml_refusal(first, Run, &[(q1, one), (q1, one)]).0,
+        Some(false)
+    );
+    // The first searched query is the run's, past the records that a range skips.
+    let skipped_first: &[u8] = b">q0\nMKV\n>q1\nMKV\n>q1\nMKV\n";
+    let skips = &[true, false, false][..];
+    assert_eq!(
+        xml_refusal(first, Run, &[(skipped_first, skips)]).0,
+        Some(true)
+    );
+    // SecondQueryOrEnd (`-subject`: one scope): dup in one batch fails at the end; dup3 at q2.
+    assert_eq!(
+        xml_refusal(held, Run, &[(dup, two)]),
+        (Some(true), at(None))
+    );
+    assert_eq!(
+        xml_refusal(held, Run, &[(dup3, three)]),
+        (Some(true), at(Some(1)))
+    );
+    // `q1 q1 q2`: the results of q1 are accumulated up to q2's batch.
+    let dup_then: &[u8] = b">q1\nMKV\n>q1\nMKV\n>q2\nMKV\n";
+    let accumulated = xml_refusal(held, Run, &[(dup_then, three)]);
+    assert_eq!(accumulated, (Some(true), at(Some(2))));
+    // A repeat after q2 in q2's batch.
+    let after: &[u8] = b">q2\nMKV\n>q1\nMKV\n";
+    let later = xml_refusal(held, Run, &[(q1, one), (after, two)]);
+    assert_eq!(later, (Some(true), at(Some(1))));
+    let repeat_of_second: &[u8] = b">q1\nMKV\n>q2\nMKV\n>q2\nMKV\n";
+    assert_eq!(
+        xml_refusal(held, Run, &[(repeat_of_second, three)]).0,
+        Some(true)
+    );
+    // The first's id again in a later batch before q2 (probe 2's dup b1, the review's `short`,
+    // `equal` and `mixed`): NCBI sets it up in the first's letters and accumulates its results.
+    assert_eq!(
+        xml_refusal(held, Run, &[(q1, one), (q1, one)]),
+        (Some(true), at(None))
+    );
+    let mixed = xml_refusal(held, Run, &[(dup, two), (b">q1\nMKVL\n>q3\nMK\n", two)]);
+    assert_eq!(mixed, (Some(true), at(Some(3))));
+    // Any repeat in a batch after q2's (dup3 b1, `q1 q2 | q1`): never read.
+    let dup3_b1 = xml_refusal(held, Run, &[(q1, one), (q2, one), (q1, one)]);
+    assert_eq!(dup3_b1, (Some(false), at(Some(1))));
+    let pair: &[u8] = b">q1\nMKV\n>q2\nMKV\n";
+    assert_eq!(
+        xml_refusal(held, Run, &[(pair, two), (q1, one)]).0,
+        Some(false)
+    );
+    // A repeat that a range skips is never set up, searched or formatted (review F3).
+    assert_eq!(
+        xml_refusal(held, Run, &[(dup, &[false, true])]),
+        (Some(true), at(None))
+    );
+    assert_eq!(
+        xml_refusal(first, Run, &[(dup, &[false, true])]).0,
+        Some(true)
+    );
+    assert_eq!(xml_refusal(None, Run, &[(dup, two)]), (Some(false), None));
+    // No repeat: the held report fails with the second query of another Seq-id, as without the
+    // scopes.
+    assert_eq!(xml_refusal(held, Run, &[(pair, two)]), (None, at(Some(1))));
+    let held = XmlMatrixFailure::SecondQueryOrEnd;
+    assert_eq!(
+        super::QueryScopes::xml_failing_query(None, held),
+        XmlFailingQuery { query: Some(1) }
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+/// The held report's Seq-id is the best of the record's ids, matched as `CSeq_id::Match` matches
+/// them (review F2 of line RG-KB item 7, probe `subset_empty`): `ref|NP_000001.1|` after
+/// `emb|CAA00001.1|ref|NP_000001.1|` is a repeat in the scope and of another Seq-id (its best id),
+/// so the held report fails at it, not at the next record.
+#[test]
+fn the_held_report_matches_the_queries_best_ids() {
+    use super::QueryScopeSpan::Run;
+    use super::XmlFailingQuery;
+    use crate::report::blast_xml::matrix::XmlMatrixFailure;
+    let held = Some(XmlMatrixFailure::SecondQueryOrEnd);
+    let at = |query| Some(XmlFailingQuery { query });
+    let subset: &[u8] = b">emb|CAA00001.1|ref|NP_000001.1| a\nMKV\n>ref|NP_000001.1| b\nMKV\n";
+    let records = parsed_records(subset);
+    let best: Vec<String> = records
+        .iter()
+        .map(|record| {
+            let mut label = Vec::new();
+            crate::seqid::label::fasta(&record.believed().unwrap().best, &mut label);
+            String::from_utf8(label).unwrap()
+        })
+        .collect();
+    assert_eq!(best, ["emb|CAA00001.1|", "ref|NP_000001.1|"]);
+    let empty_after = [
+        (subset, &[false; 2][..]),
+        (b">q2\n".as_slice(), &[false][..]),
+    ];
+    assert_eq!(
+        xml_refusal(held, Run, &empty_after),
+        (Some(true), at(Some(1)))
+    );
+    // An accession with and without its version match.
+    let versions: &[u8] = b">ref|NP_000001.1| a\nMKV\n>ref|NP_000001| b\nMKV\n>q2\nMKV\n";
+    assert_eq!(
+        xml_refusal(held, Run, &[(versions, &[false; 3])]).1,
+        at(Some(2))
+    );
+}
+
+/// Where the run stops (probe K/k4f, NCBI 2.17.0): the batch of the first searched query, or
+/// of the second when the report is held (`-subject` 13-16: 3 batches of one query wrote
+/// the requests of Query_1 and Query_2), or the end of a run of one query. With queries of one
+/// Seq-id (probe 2 of line RG-KB item 7): the batch of the first query of another Seq-id, or the
+/// end of a run without one.
+#[test]
+fn a_held_report_fails_with_the_second_query_or_at_the_end() {
+    use super::{QueryScopes, XmlFailingQuery};
+    use crate::report::blast_xml::matrix::XmlMatrixFailure;
+    let first = QueryScopes::xml_failing_query(None, XmlMatrixFailure::FirstQuery);
+    let held = QueryScopes::xml_failing_query(None, XmlMatrixFailure::SecondQueryOrEnd);
+    assert!(first.fails_in(0..1) && first.fails_in(0..3) && !first.fails_in(1..2));
+    assert!(!held.fails_in(0..1) && held.fails_in(1..2) && held.fails_in(0..3));
+    assert!(!held.fails_in(2..3) && !held.fails_in(1..1));
+    assert!(held.fails_at_end(1) && !held.fails_at_end(0) && !held.fails_at_end(2));
+    assert!(!first.fails_at_end(1) && !first.fails_at_end(0));
+    assert_eq!((first.query(), held.query()), (Some(0), Some(1)));
+    // `q1, q1, q2`: the third query's batch; `q1, q1`: the end, whatever was searched.
+    let third = XmlFailingQuery { query: Some(2) };
+    assert!(!third.fails_in(0..2) && third.fails_in(2..3) && third.fails_in(0..3));
+    assert!(third.fails_at_end(2) && !third.fails_at_end(3));
+    let end = XmlFailingQuery { query: None };
+    assert!(!end.fails_in(0..3) && end.query().is_none());
+    assert!(end.fails_at_end(1) && end.fails_at_end(3) && !end.fails_at_end(0));
+}
+
+/// A refused batch of repeats alone (review F1 of line RG-KB item 7): where the run's XML failure
+/// takes its refusal, the program sets up the repeats within their earlier records' letters with
+/// their own letters (`SetUpRead::InFirst`: NCBI's contexts of them have those lengths), whose
+/// `Searched` gives way to the failure; where that set-up does not pass, NCBI's result would
+/// depend on the earlier records' letters, and where every repeat has more letters than its
+/// earlier record NCBI's set-up fails (`CSeqVector_CI: cannot locate segment`, probe `long_new`):
+/// the refusal.
+#[test]
+fn a_batch_of_repeats_is_set_up_with_their_contexts_in_their_earlier_records() {
+    use super::{refused_batch_error, BatchSetUp, QueryScopeSpan, QueryScopes, ScopeRefusal};
+    use crate::report::blast_xml::matrix::XmlMatrixFailure;
+    let refusal_of = |failure: Option<XmlMatrixFailure>, batches: &[&[u8]]| -> anyhow::Error {
+        let mut scopes =
+            QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_xml_matrix_failure(failure);
+        let mut first = 0;
+        for fasta in batches {
+            let records = parsed_records(fasta);
+            if let Err(error) = scopes.add_batch(&records, &vec![false; records.len()], first) {
+                return error;
+            }
+            first += records.len();
+        }
+        panic!("no refusal")
+    };
+    let is_refusal = |error: &anyhow::Error| ScopeRefusal::of(error).is_some();
+    let held = Some(XmlMatrixFailure::SecondQueryOrEnd);
+    let native = || crate::blastinput::app::engine_error("The average subject length is too short");
+    // The review's `short` and `equal`: the repeat in a batch of its own.
+    let short: [&[u8]; 2] = [b">q1\nMKVLA\n", b">q1\nMKV\n"];
+    let equal: [&[u8]; 2] = [b">q1\nMKV\n", b">q1\nAKV\n"];
+    for batches in [short, equal] {
+        let searched = |records: &[bool]| {
+            assert_eq!(records, [true]);
+            BatchSetUp::Searched
+        };
+        refused_batch_error(refusal_of(held, &batches), false, searched).unwrap();
+        for fails in [false, true] {
+            let setup = |_: &[bool]| match fails {
+                true => BatchSetUp::Fails(native()),
+                false => BatchSetUp::Unknown,
+            };
+            let error = refused_batch_error(refusal_of(held, &batches), false, setup).unwrap_err();
+            assert!(is_refusal(&error), "{error}");
+        }
+        let no_set_up = |_: &[bool]| -> BatchSetUp { panic!("no set-up") };
+        let error = refused_batch_error(refusal_of(held, &batches), true, no_set_up).unwrap_err();
+        assert!(is_refusal(&error));
+        let error = refused_batch_error(refusal_of(None, &batches), false, no_set_up).unwrap_err();
+        assert!(is_refusal(&error));
+    }
+    // `long_new`: longer than the earlier record and alone in its batch.
+    let long: [&[u8]; 2] = [b">q1\nMK\n", b">q1\nMKV\n"];
+    let error = refused_batch_error(refusal_of(held, &long), false, |_| panic!("no set-up"));
+    assert!(is_refusal(&error.unwrap_err()));
+    // `mixed`: a record of its own beside it, whose set-up decides as in the first batch.
+    let mixed: [&[u8]; 2] = [b">q1\nMK\n", b">q1\nMKV\n>q3\nMK\n"];
+    let own = |records: &[bool]| {
+        assert_eq!(records, [false, true]);
+        BatchSetUp::Fails(native())
+    };
+    let error = refused_batch_error(refusal_of(held, &mixed), false, own).unwrap_err();
+    assert!(error.is::<crate::cli::NativeError>(), "{error}");
+}
+
+/// A refusal that the run's XML failure takes is searched where the batch's set-up passes with a
+/// valid context; elsewhere it stops the run as other refusals do (`refused_batch_error`,
+/// `QueryBatches::resolve_refusals`).
+#[test]
+fn a_refusal_that_the_xml_failure_takes_waits_for_the_set_up_of_its_batch() {
+    use super::ScopeRefusal;
+    use super::{refused_batch_error, BatchSetUp, QueryReading, QueryScopeSpan, QueryScopes};
+    use crate::blastinput::seq_range::QueryInput;
+    use crate::report::blast_xml::matrix::XmlMatrixFailure;
+    let taken = || -> anyhow::Error {
+        let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP")
+            .with_xml_matrix_failure(Some(XmlMatrixFailure::FirstQuery));
+        let records = parsed_records(b">q1\nMKV\n>q2\nMKV\n>q1\nMK\n");
+        scopes.add_batch(&records, &[false; 3], 0).unwrap_err()
+    };
+    let is_refusal = |error: &anyhow::Error| ScopeRefusal::of(error).is_some();
+    let searched = |first: &[bool]| {
+        assert_eq!(first, [true, true, false]);
+        BatchSetUp::Searched
+    };
+    refused_batch_error(taken(), false, searched).unwrap();
+    let error = refused_batch_error(taken(), true, |_| panic!("no set-up")).unwrap_err();
+    assert!(is_refusal(&error));
+    let error = refused_batch_error(taken(), false, |_| BatchSetUp::Unknown).unwrap_err();
+    assert!(is_refusal(&error));
+    let native = || crate::blastinput::app::engine_error("The average subject length is too short");
+    let error = refused_batch_error(taken(), false, |_| BatchSetUp::Fails(native())).unwrap_err();
+    assert!(error.is::<crate::cli::NativeError>(), "{error}");
+    // Two batches of a scope each (`-db`, batches of 6 letters): the first's repeat waits for its
+    // set-up, the second's (not the first searched query's) stops the reading.
+    let records = parsed_records(b">q1\nMKV\n>q1\nMKV\n>q2\nMKV\n>q2\nMKV\n");
+    let input = QueryInput::whole(&records);
+    let read = || {
+        let scopes = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP")
+            .with_xml_matrix_failure(Some(XmlMatrixFailure::FirstQuery));
+        super::read_query_batches(
+            &records,
+            &records,
+            &input,
+            QueryReading::Records,
+            6,
+            true,
+            Some(scopes),
+        )
+    };
+    let mut batches = read();
+    assert_eq!((batches.starts.len(), batches.xml_refusals.len()), (1, 1));
+    assert!(batches.scope_refusal && batches.stop.is_some());
+    let mut set_ups = Vec::new();
+    batches.resolve_refusals(false, |start, _| {
+        set_ups.push(start);
+        BatchSetUp::Searched
+    });
+    assert_eq!(set_ups, [(0, 0), (2, 2)]);
+    assert_eq!(batches.starts, [(0, 0)]);
+    assert!(batches.scope_refusal && is_refusal(&batches.stop.as_ref().unwrap().1));
+    // A first batch whose set-up does not pass: the run stops at it.
+    let mut batches = read();
+    batches.resolve_refusals(false, |_, _| BatchSetUp::Unknown);
+    assert!(batches.starts.is_empty() && batches.xml_refusals.is_empty());
+    assert_eq!((batches.input_done, batches.searched_done), (0, 0));
+    assert!(batches.scope_refusal && is_refusal(&batches.stop.as_ref().unwrap().1));
+    let mut batches = read();
+    batches.resolve_refusals(false, |_, _| BatchSetUp::Fails(native()));
+    assert!(batches.starts.is_empty() && !batches.scope_refusal);
+    assert!(batches
+        .stop
+        .as_ref()
+        .unwrap()
+        .1
+        .is::<crate::cli::NativeError>());
 }
 
 #[test]
@@ -429,10 +762,10 @@ fn a_call_gets_the_refusal_of_its_batch_where_it_adds_the_batch() {
     let refusal = batch_refusal("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"]).unwrap();
     let records = parsed_records(b">q1\nMKV\n");
     let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_refusal(Some(refusal));
-    let error = scopes.add_batch(&records, 0).unwrap_err();
+    let error = scopes.add_batch(&records, &[false], 0).unwrap_err();
     assert!(ScopeRefusal::of(&error).is_some());
     let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_refusal(None);
-    scopes.add_batch(&records, 0).unwrap();
+    scopes.add_batch(&records, &[false], 0).unwrap();
 }
 
 // psiblast_app.cpp:468 and psiblast_aux_priv.cpp:636-649: a batch of one letter takes one

@@ -1405,6 +1405,8 @@ fn write_first_batch_prologs(
     taxdb_found: bool,
     // The program line of outfmt 0 (`TBLASTN`; `PSITBLASTN` with `-in_pssm`).
     program: &str,
+    // The run's `-html` data (`ResolvedTblastnArgs::html`; `None`: the plain report).
+    html: Option<&crate::report::html_ids::HtmlLinks>,
 ) -> Result<()> {
     let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_definition);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -1425,6 +1427,13 @@ fn write_first_batch_prologs(
                 num_subjects as i64,
                 total,
                 database,
+                html.map(|links| {
+                    let posts = crate::report::query_warnings::html_posts_sink(
+                        outputs.html_posts.as_deref_mut(),
+                        &mut *outputs.diagnostics,
+                    );
+                    (links, posts as &mut dyn Write)
+                }),
             )?;
             writer.flush()?;
         } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {
@@ -1685,6 +1694,7 @@ fn search(
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
             super::in_pssm::PROGRAM,
+            resolved.html.as_deref(),
         )?;
         // The request of the one PSSM query, which NCBI wrote before its constructor failed.
         if let (true, Some(strategy)) = (stop.after_request(), args.strategy.as_ref()) {
@@ -1806,6 +1816,7 @@ fn search(
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
             "TBLASTN",
+            resolved.html.as_deref(),
         )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
@@ -2641,6 +2652,8 @@ fn search(
                 .query_range
                 .as_ref()
                 .map(crate::blastinput::seq_range::SequenceRange::length),
+            html: resolved.html.clone(),
+            is_html: args.html,
         };
         // The records of a subject set whose ids `-parse_deflines` read, by subject index.
         let records_parsed = if args.parse_deflines && reported.is_none() {

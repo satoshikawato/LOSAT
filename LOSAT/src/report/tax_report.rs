@@ -628,6 +628,9 @@ pub struct TaxLookups {
     looked_up: bool,
     /// `<@taxBrowserURL@>` (`tax_browser_url`).
     browser_url: Vec<u8>,
+    /// `m_Protocol` (`CAlignFormatUtil::GetProtocol`, `formatter_registry::protocol`), which the
+    /// HTML rows put in (`row_html`); borrowed where `./.ncbirc` is absent.
+    protocol: std::borrow::Cow<'static, [u8]>,
     /// What one read of `./.ncbirc` by the report posts (`read_ncbirc`); the report of each query
     /// reads it twice.
     registry_posts: Vec<u8>,
@@ -662,6 +665,12 @@ impl TaxLookups {
                 super::formatter_registry::registry_posts(read, &lower)
             }),
             browser_url: tax_browser_url(registry),
+            protocol: match registry {
+                None => std::borrow::Cow::Borrowed(super::reference::DEFAULT_PROTOCOL),
+                Some(_) => super::formatter_registry::protocol(registry)
+                    .to_vec()
+                    .into(),
+            },
             lower,
             answers: Default::default(),
             open: Vec::new(),
@@ -730,9 +739,11 @@ impl TaxLookups {
 
 /// `./.ncbirc` as NCBI's organism report reads it (`CTaxFormat::x_InitTaxFormat` and
 /// `CAlignFormatUtil::GetProtocol` read the file of the current directory each time a report is
-/// made: `formatter_registry::read_cwd_ncbirc`): `None` without the file. LOSAT refuses a file
-/// whose read throws (NCBI's report then fails) and one that reads other files; the messages of a
-/// read that does not throw are NCBI's posts of each report (`formatter_registry::registry_posts`).
+/// made: `formatter_registry::read_cwd_ncbirc`): `None` where the file does not open (no file, a
+/// file the process may not read: NCBI's registry of it is empty and posts nothing; a directory
+/// opens, and its read posts that the stream failed). LOSAT refuses a file whose read throws
+/// (NCBI's report then fails) and one that reads other files; the messages of a read that does not
+/// throw are NCBI's posts of each report (`formatter_registry::registry_posts`).
 fn read_ncbirc(program: &str) -> Result<Option<crate::blastinput::ncbi_registry::RegistryRead>> {
     super::formatter_registry::read_cwd_ncbirc().map_err(|what| {
         anyhow::Error::new(TaxReportRefusal(format!(
@@ -760,17 +771,46 @@ fn tax_browser_url(registry: Option<&crate::blastinput::ncbi_registry::RegistryR
 /// The template (`ORG_REPORT_TXT_ORG_HEADER_NO_TAX_CON`, taxFormat.cpp:98) has no
 /// `<@blast_name_link@>`: its replacement changes nothing.
 fn organism_line(names: &TaxNames) -> Text {
+    let line = with_names(
+        b"<@scientific_name@> <@common_name@> [<@blast_name@>]",
+        names,
+    )
+    .flat();
+    add_spaces(&line, u64::from(LINE_LENGTH), Place::Center, true, true)
+}
+
+/// The names of `names` put in `template` (`x_MapTaxInfoTemplate` up to its `AddSpaces`).
+fn with_names(template: &[u8], names: &TaxNames) -> Text {
     let common: Vec<u8> = if names.common_name != names.scientific_name {
         [b"(", names.common_name.as_slice(), b")"].concat()
     } else {
         Vec::new()
     };
-    let line = Text::of(b"<@scientific_name@> <@common_name@> [<@blast_name@>]")
+    Text::of(template)
         .map_bytes("scientific_name", &names.scientific_name)
         .map_bytes("common_name", &common)
         .map_bytes("blast_name", &names.blast_name)
-        .flat();
-    add_spaces(&line, u64::from(LINE_LENGTH), Place::Center, true, true)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:66, 70, 74, 76 (`kMapTagToString`)
+// The HTML report (`-html`, `CTaxFormat::eHtml`) without the taxonomy server: its organism header
+// (DisplayOrgReport, taxFormat.cpp:462-463) leaves its `<a>` open (line RG T4 probes
+// `*.f18*.h`), and its rows hold `/protein/` also for nucleotide subjects.
+const ORG_REPORT_TABLE: &[u8] = b"<table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr><@table_rows@></table><@taxidToSeqsMap@>";
+const ORG_REPORT_ORG_HEADER_NO_TAX_CON: &[u8] = b"<tr><th colspan=\"4\"><a href=\"<@taxBrowserURL@>?id=<@taxid@>\" name=\"<@taxid@>\" title=\"Show taxonomy info for <@scientific_name@> (taxid <@taxid@>)\" target=\"lnktx<@rid@>\"><@scientific_name@> <@common_name@> [<@blast_name@>]</th></tr>";
+const ORG_REPORT_TABLE_ROW: &[u8] = b"<tr><td><a title=\"Show report for <@acc@>\" target=\"lnktx<@rid@>\" href=\"<@protocol@>//www.ncbi.nlm.nih.gov/protein/<@acc@>?report=fwwwtax&amp;log$=taxrep&amp;RID=<@rid@>\"><@acc@></a></td><td><@descr_abbr@></td><td><@score@></td><td><@evalue@></td></tr>";
+const TAXID_TO_SEQ_MAP: &[u8] =
+    b"<input type=\"hidden\" id=\"txForSeq_<@taxid@>\" value=\"<@giList@>\" />";
+
+/// The organism header of `names` before the replacements after the names, in the text report
+/// (`organism_line`) or, `html`, in the HTML one (no centring: `x_MapTaxInfoTemplate` centres
+/// only `eText`).
+fn organism_header(names: &TaxNames, html: bool) -> Text {
+    if html {
+        with_names(ORG_REPORT_ORG_HEADER_NO_TAX_CON, names)
+    } else {
+        organism_line(names)
+    }
 }
 
 /// A row of the table (`SSeqInfo` as the text report shows it).
@@ -849,6 +889,10 @@ pub struct TaxReport {
     queries: Vec<Option<(Vec<Step>, Text)>>,
     /// Whether the batch's first lookup has written its texts (the texts of opening with it).
     wrote_first: std::cell::Cell<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:899
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// report.
+    pub html: bool,
 }
 
 impl TaxReport {
@@ -858,6 +902,7 @@ impl TaxReport {
         queries: &[TaxQuery<'_>],
         subjects: &dyn TaxSubjects,
         mut lookups: TaxLookups,
+        html: bool,
     ) -> Result<Self> {
         let queries = queries
             .iter()
@@ -865,7 +910,7 @@ impl TaxReport {
                 query
                     .hsps
                     .as_ref()
-                    .map(|hsps| organism_report(hsps, subjects, &mut lookups))
+                    .map(|hsps| organism_report(hsps, subjects, &mut lookups, html))
                     .transpose()
             })
             .collect::<Result<_>>()?;
@@ -873,6 +918,7 @@ impl TaxReport {
             lookups,
             queries,
             wrote_first: std::cell::Cell::new(false),
+            html,
         })
     }
 
@@ -896,18 +942,28 @@ impl TaxReport {
         // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `reportCaption`
         // and a line feed into `m_Outfile` (module docs), the `Query=` block's and `orgReportData`
         // into `out` (`organism_report`).
-        add_spaces(
-            b"Tax BLAST report",
-            u64::from(LINE_LENGTH),
-            Place::Center,
-            true,
-            true,
-        )
-        .insert_into(out)?;
-        crate::cli::insert(out, b"\n")?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1462-1463, 879-884
+        if self.html {
+            crate::cli::insert(out, b"<h1>Tax BLAST report</h1>")?;
+            crate::cli::insert(out, b"<pre>")?;
+        } else {
+            add_spaces(
+                b"Tax BLAST report",
+                u64::from(LINE_LENGTH),
+                Place::Center,
+                true,
+                true,
+            )
+            .insert_into(out)?;
+            crate::cli::insert(out, b"\n")?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:885-888
         // outfmt 0's `Query=` block (`kFormatLineLength`, 68).
-        crate::report::pairwise::write_blastp_query_header(out, title, length)?;
+        crate::report::pairwise::write_blastp_query_header(out, title, length, self.html)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:891-893
+        if self.html {
+            crate::cli::insert(out, b"</pre>")?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:893-899
         // The Seq-align-set of a query whose batch NCBI did not search is null: `*new_aln_set`
         // throws (`CCoreException::eNullPtr`, "Attempt to access NULL pointer", exit status 255,
@@ -1001,7 +1057,7 @@ pub fn write_report(
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
 /// batch's first byte; `loads` what the reports load of each subject (`None`: every subject).
 /// `program` names the program in LOSAT's refusals, and `app` the running application, NCBI's
-/// messages' prefix.
+/// messages' prefix; `html`: `-html`.
 #[allow(clippy::too_many_arguments)]
 pub fn report_batch<'a>(
     queries: &[TaxQuery<'_>],
@@ -1012,6 +1068,7 @@ pub fn report_batch<'a>(
     names: Option<&TabularNames>,
     program: &str,
     app: &str,
+    html: bool,
 ) -> Result<TaxReport> {
     let table = SubjectTable::new(queries, parsed, plain, protein, loads, program)
         .with_loads_that_throw(
@@ -1019,7 +1076,7 @@ pub fn report_batch<'a>(
                 .and_then(TabularNames::report_db)
                 .is_some_and(|db| db.loads_throw),
         );
-    TaxReport::new(queries, &table, TaxLookups::new(names, program, app)?)
+    TaxReport::new(queries, &table, TaxLookups::new(names, program, app)?, html)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
@@ -1033,11 +1090,13 @@ pub fn report_batch<'a>(
 /// (`TaxSubjects::throws`, the load of `GetBioseqHandle` where its batch's prefetch is off) is
 /// left out at the load, and is not the previous id either. LOSAT's refusals: a title that it does
 /// not write as NCBI where NCBI makes it (or, `shown_only`, shows it), and an organism line that
-/// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there).
+/// holds `<@bl_taxid@>` (NCBI writes an uninitialised `int` there). `html`: the HTML report
+/// (`org_report_html`), else the text one (`org_report_text`).
 fn organism_report(
     hsps: &[TaxHsp],
     subjects: &dyn TaxSubjects,
     lookups: &mut TaxLookups,
+    html: bool,
 ) -> Result<(Vec<Step>, Text)> {
     let mut widths = Widths::default();
     let mut groups: Vec<Group<'_>> = Vec::new();
@@ -1081,7 +1140,7 @@ fn organism_report(
                         threw = true;
                         break;
                     };
-                    let line = organism_line(names);
+                    let line = organism_header(names, html);
                     if line.contains(b"<@bl_taxid@>") {
                         return Err(TaxReportRefusal(format!(
                             "the taxonomy database names taxid {} with the template token <@bl_taxid@>, which NCBI BLAST+'s organism report (outfmt 18) replaces with an uninitialised number; this is not supported by LOSAT's {}",
@@ -1112,8 +1171,39 @@ fn organism_report(
             previous = Some(hsp.subject);
         }
     }
-    let text = org_report_text(&groups, widths, &lookups.browser_url);
+    let text = if html {
+        org_report_html(&groups, &lookups.browser_url, &lookups.protocol)
+    } else {
+        org_report_text(&groups, widths, &lookups.browser_url)
+    };
     Ok((steps, text))
+}
+
+/// The organism header of `groups[i]` (its `Group::line`) with the replacements after the names
+/// (`x_MapTaxInfoTemplate` after `AddSpaces`, then `DisplayOrgReport`'s); `browser_url` replaces
+/// `<@taxBrowserURL@>`. One form for the text and the HTML report.
+fn org_header(groups: &[Group<'_>], i: usize, browser_url: &[u8]) -> Text {
+    const DISABLED: &[u8] = b"disabled=\"disabled\"";
+    let group = &groups[i];
+    let last = i + 1 == groups.len();
+    let number = |index: usize| groups[index].taxid.to_string().into_bytes();
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1172-1187
+    // `<@bl_taxid@>` is refused where the group is made (`organism_report`); the line holds none.
+    group
+        .line
+        .map_bytes("taxid", group.taxid.to_string().as_bytes())
+        .map_bytes("taxBrowserURL", browser_url)
+        .map_bytes("rid", b"0")
+        .map_bytes("numhits", group.rows.len().to_string().as_bytes())
+        .map_bytes("depth", b"")
+        .map_bytes("next_taxid", &if last { Vec::new() } else { number(i + 1) })
+        .map_bytes("disable_nexttaxid", if last { DISABLED } else { b"" })
+        .map_bytes(
+            "prev_taxid",
+            &if i == 0 { Vec::new() } else { number(i - 1) },
+        )
+        .map_bytes("disable_prevtaxid", if i == 0 { DISABLED } else { b"" })
+        .map_bytes("disable_top", if i == 0 { DISABLED } else { b"" })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:450-517 (`DisplayOrgReport`)
@@ -1121,29 +1211,9 @@ fn organism_report(
 /// The text of the organism report of `groups` with the widths `widths`; `browser_url` replaces
 /// `<@taxBrowserURL@>`.
 fn org_report_text(groups: &[Group<'_>], widths: Widths, browser_url: &[u8]) -> Text {
-    const DISABLED: &[u8] = b"disabled=\"disabled\"";
     let mut data = Text::default();
     for (i, group) in groups.iter().enumerate() {
-        let last = i + 1 == groups.len();
-        let number = |index: usize| groups[index].taxid.to_string().into_bytes();
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1172-1187
-        // `<@bl_taxid@>` is refused where the group is made (`organism_report`); the line holds none.
-        let header = group
-            .line
-            .map_bytes("taxid", group.taxid.to_string().as_bytes())
-            .map_bytes("taxBrowserURL", browser_url)
-            .map_bytes("rid", b"0")
-            .map_bytes("numhits", group.rows.len().to_string().as_bytes())
-            .map_bytes("depth", b"")
-            .map_bytes("next_taxid", &if last { Vec::new() } else { number(i + 1) })
-            .map_bytes("disable_nexttaxid", if last { DISABLED } else { b"" })
-            .map_bytes(
-                "prev_taxid",
-                &if i == 0 { Vec::new() } else { number(i - 1) },
-            )
-            .map_bytes("disable_prevtaxid", if i == 0 { DISABLED } else { b"" })
-            .map_bytes("disable_top", if i == 0 { DISABLED } else { b"" });
-        data.push_text(&header);
+        data.push_text(&org_header(groups, i, browser_url));
         for row in &group.rows {
             data.push_text(&row_text(row, widths));
         }
@@ -1210,6 +1280,55 @@ fn row_text(row: &Row<'_>, widths: Widths) -> Text {
         .map("descr_text", &column(row.title, widths.descr))
         .map("score", &column(&row.bit_score, widths.score))
         .map("evalue", &column(&row.evalue, widths.evalue))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:706-714
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1073-1074 (`x_InitBlastDBTaxInfo`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:510-514
+/// The HTML organism report (`-html`) of `groups`: the table of the organism headers
+/// (`org_header`) and their rows (`row_html`), then one hidden input per taxid with the labels of
+/// its rows (`accList`, joined by ", "). `browser_url` replaces `<@taxBrowserURL@>`, `protocol`
+/// the rows' `<@protocol@>`. No newline anywhere: queries follow each other on one line (line RG
+/// T4 probes `*.f18*.h`; a query without hits gets the table's header row only).
+fn org_report_html(groups: &[Group<'_>], browser_url: &[u8], protocol: &[u8]) -> Text {
+    let mut data = Text::default();
+    let mut inputs = Text::default();
+    for (i, group) in groups.iter().enumerate() {
+        data.push_text(&org_header(groups, i, browser_url));
+        let mut acc_list = Vec::new();
+        for row in &group.rows {
+            data.push_text(&row_html(row, protocol));
+            if !acc_list.is_empty() {
+                acc_list.extend_from_slice(b", ");
+            }
+            acc_list.extend_from_slice(row.label);
+        }
+        inputs.push_text(
+            &Text::of(TAXID_TO_SEQ_MAP)
+                .map_bytes("giList", &acc_list)
+                .map_bytes("taxid", group.taxid.to_string().as_bytes()),
+        );
+    }
+    Text::of(ORG_REPORT_TABLE)
+        .map("table_rows", &data)
+        .map("taxidToSeqsMap", &inputs)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1130-1157 (`x_MapSeqTemplate`)
+/// One HTML row (`ORG_REPORT_TABLE_ROW`): the first 60 bytes of the title, not escaped, then the
+/// replacements in NCBI's order, so that a title's own tags of a later replacement are filled
+/// (`subject five <@score@> s` gives `subject five 131 s`, probe `bp.di.f18.tax.h`). The
+/// replacements of `gi` and `disp_gi` come before any value is put in and the template holds
+/// neither: they change nothing.
+fn row_html(row: &Row<'_>, protocol: &[u8]) -> Text {
+    Text::of(ORG_REPORT_TABLE_ROW)
+        .map_bytes("descr_abbr", &row.title[..row.title.len().min(60)])
+        .map_bytes("rid", b"0")
+        .map_bytes("acc", row.label)
+        .map_bytes("descr", row.title)
+        .map_bytes("score", &row.bit_score)
+        .map_bytes("evalue", &row.evalue)
+        .map_bytes("protocol", protocol)
 }
 
 #[cfg(test)]

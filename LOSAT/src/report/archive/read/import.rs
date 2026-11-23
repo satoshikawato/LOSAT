@@ -1212,6 +1212,8 @@ pub(crate) struct Kept {
     pub(crate) out: Option<std::path::PathBuf>,
     pub(crate) outfmt: String,
     pub(crate) show_gis: bool,
+    /// `-html`, a formatting option of the command line that no strategy records.
+    pub(crate) html: bool,
     pub(crate) num_descriptions: Option<usize>,
     pub(crate) num_alignments: Option<usize>,
     /// `-max_target_seqs` as given (blastx keeps values below 1 for its own error).

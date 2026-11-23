@@ -418,6 +418,7 @@ impl import::StrategyArgs for TblastxArgs {
             out: self.out,
             outfmt: self.outfmt,
             show_gis: self.show_gis,
+            html: self.html,
             num_descriptions: self.num_descriptions,
             num_alignments: self.num_alignments,
             max_target_seqs: self.max_target_seqs.map(|n| n as i64),
@@ -449,6 +450,7 @@ impl import::StrategyArgs for TblastxArgs {
         self.out = kept.out;
         self.outfmt = kept.outfmt;
         self.show_gis = kept.show_gis;
+        self.html = kept.html;
         self.num_descriptions = kept.num_descriptions;
         self.num_alignments = kept.num_alignments;
         self.max_target_seqs = kept

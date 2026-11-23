@@ -601,6 +601,68 @@ pub fn formatting_handler_check_of_run(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+/// LOSAT's refusal of `-html` with the format `number` when it is 1 to 4 (the query-anchored
+/// alignments), until item T4b of line RG writes their HTML: one check for the five programs, made
+/// where each one's formatting handler checks the format (`formatting_handler_check`), with the
+/// program's option `html`. The refusal's form is that of `cli::run_refusal`.
+pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::Result<()> {
+    if html
+        && (output_format::QUERY_ANCHORED_IDENTITIES
+            ..=output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+            .contains(&number)
+    {
+        anyhow::bail!(
+            "-html (with -outfmt 1, 2, 3 or 4) is not supported by LOSAT's {}",
+            program.name()
+        );
+    }
+    Ok(())
+}
+
+/// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html` or when
+/// none of the run's formats `formats` links ids: the `./.ncbirc` of the prolog's references and
+/// of each query's description table and alignments (`FormatterNcbirc::read`) and NCBI's
+/// formatter registry (`InitConfig::read`:
+/// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
+/// its formats (`html_format_check`), so that LOSAT's refusal of the file comes before the first
+/// byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
+/// `-subject`). The running application `app` names the reads' posts and errors, the program
+/// `engine` that runs the search gives the subjects' molecule (they differ when blastn, blastx or
+/// tblastx runs another program's strategy). One function for the five programs; the links go
+/// where the option went (`PairwiseConfig::html`). NCBI calls `InitConfig` only from the id links of the pairwise
+/// report (outfmt 0; 1 to 4 are refused with `-html`, `html_format_check`): the organism report
+/// (outfmt 18) takes the option alone (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
+pub(crate) fn html_links(
+    html: bool,
+    app: Program,
+    engine: Program,
+    database: Option<&str>,
+    formats: &[i32],
+) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
+    if !html || !formats.contains(&output_format::PAIRWISE) {
+        return Ok(None);
+    }
+    let lower = app.name().to_ascii_lowercase();
+    // The prolog's references read `./.ncbirc` before the first id link reads InitConfig's file.
+    let ncbirc = crate::report::formatter_registry::FormatterNcbirc::read(&lower)
+        .map_err(|what| anyhow::anyhow!("{what}'s {}", app.name()))?;
+    let registry = crate::report::formatter_registry::InitConfig::read(&lower)
+        .map_err(|what| anyhow::anyhow!("{what}'s {}", app.name()))?;
+    Ok(Some(std::sync::Arc::new(
+        crate::report::html_ids::HtmlLinks {
+            registry,
+            ncbirc,
+            db_name: database.unwrap_or_default().as_bytes().to_vec(),
+            // `m_IsDbNa`: the subjects of BLASTN, TBLASTN and TBLASTX are nucleotide sequences.
+            nucleotide: matches!(
+                engine,
+                Program::Blastn | Program::Tblastn | Program::Tblastx
+            ),
+        },
+    )))
+}
+
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after
 /// `Query is Empty!`.
 ///

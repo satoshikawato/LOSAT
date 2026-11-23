@@ -326,6 +326,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
         {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "0",
                     refusal: FormatRefusal::FailsCall,
@@ -481,6 +482,7 @@ fn make_blastp_args() -> BlastpArgs {
         db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
+        html: false,
         parse_deflines: false,
         id_scope: None,
         searchsp: None,

@@ -368,11 +368,35 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     database_error_of(&error, program)
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+// `CATCH_ALL` writes an exception that is not a `CSeqDBException` with `what()`, which names the
+// place of each throw: one thrown by the code NCBI's `datatool` generates (`ThrowSite::generated`,
+// the `CObject_id::GetId` of a `BL_ORD_ID` or `PIG` id with a string tag under an id list, line
+// RG D1c-1) names a place LOSAT does not have, and LOSAT refuses it with its text, as segmasker
+// does (`segmasker::work::database_failure`).
+/// The exception of NCBI's that a search program reports as NCBI's does
+/// (`SeqDbError::ncbi_exception` whose places LOSAT knows), the one test of [`database_error_of`]
+/// and `header_read_error`.
+fn reported_exception(error: &SeqDbError) -> Option<&crate::ncbi_exception::NcbiException> {
+    error
+        .ncbi_exception()
+        .filter(|exception| exception.places_known())
+}
+
 /// [`database_error`] of an error that its owner keeps (`seqdb::NameMaskError::Table`).
 pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Error {
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-    if let Some(exception) = error.ncbi_exception() {
+    if let Some(exception) = reported_exception(error) {
         return NativeError::exception(exception).into();
+    }
+    if let Some(exception) = error.ncbi_exception() {
+        return refusal(
+            &format!(
+                "the report of the exception '{}', which names the place in NCBI's source that \
+                 throws it",
+                String::from_utf8_lossy(exception.get_msg())
+            ),
+            program,
+        );
     }
     match error.ncbi_message() {
         Some(text) => NativeError {
@@ -967,10 +991,12 @@ pub(crate) fn keep_source(
 }
 
 /// A reader error of the header of a reported sequence where the hit list of query `query`
-/// reaches it: NCBI's own is a `HeaderReadError` that names the query; LOSAT's refusals are
-/// errors of their own.
+/// reaches it: NCBI's own (a database error, `SeqDbError::ncbi_message`, or another exception
+/// of NCBI's that LOSAT reports as NCBI's, `reported_exception`: the conversion of a `ti` tag
+/// under an id list, line RG D1c-1) is a `HeaderReadError` that names the query, so the batch
+/// fails after the outfmt 0 prolog as NCBI's does; LOSAT's refusals are errors of their own.
 fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::Error {
-    if error.ncbi_message().is_some() {
+    if error.ncbi_message().is_some() || reported_exception(&error).is_some() {
         anyhow::Error::new(HeaderReadError {
             query,
             error: database_error(error, program),

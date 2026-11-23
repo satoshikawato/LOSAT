@@ -511,13 +511,14 @@ pub(super) fn write_blastp_tabular(
 /// `Query=` block of its title (`tab.query_titles`) with the length of its record
 /// (`record_lengths`), and the table of its reported HSPs in the hit lists' order. The report is
 /// made before the batch's first byte (`tax_report::report_batch`), so that LOSAT's refusals come
-/// before it; `tab.names` carries the run's taxonomy database.
+/// before it; `tab.names` carries the run's taxonomy database; `html`: `-html`.
 pub(super) fn write_blastp_tax_report(
     tab: &BlastpTabular<'_>,
     record_lengths: &[usize],
     hit_lists: &[Option<BlastpHitList>],
     writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut QueryWarnings<'_>>,
+    html: bool,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};
     let parsed = match &tab.subjects {
@@ -581,6 +582,7 @@ pub(super) fn write_blastp_tax_report(
         tab.names,
         tab.app.name(),
         tab.app.ncbi_name(),
+        html,
     )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())

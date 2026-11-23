@@ -380,6 +380,29 @@ fn ncbis_later_format_errors_are_its_messages() {
     }
 }
 
+// `-html` with the formats 1 to 4 is LOSAT's refusal (item T4b of line RG); the other formats
+// and a run without `-html` pass.
+#[test]
+fn html_is_refused_with_the_formats_1_to_4_only() {
+    for program in PROGRAMS {
+        for number in 0..END_VALUE {
+            assert!(html_format_check(number, program, false).is_ok());
+            let checked = html_format_check(number, program, true);
+            if (1..=4).contains(&number) {
+                assert_eq!(
+                    checked.unwrap_err().to_string(),
+                    format!(
+                        "-html (with -outfmt 1, 2, 3 or 4) is not supported by LOSAT's {}",
+                        program.name()
+                    )
+                );
+            } else {
+                assert!(checked.is_ok(), "{} outfmt {number}", program.name());
+            }
+        }
+    }
+}
+
 #[test]
 fn seg_values_follow_ncbis_filtering_handler() {
     assert_eq!(parse_seg_option("no").unwrap(), SegSpec::No);
@@ -508,4 +531,22 @@ fn an_unreadable_format_is_deferred_with_a_strategy_file() {
     let parsed = choice.parsed().unwrap().clone();
     assert_eq!(choice.number(), Some(6));
     assert_eq!(choice.at_formatting_handler("99").unwrap(), parsed);
+}
+
+#[test]
+fn only_the_pairwise_report_reads_the_html_links() {
+    // NCBI calls `CAlignFormatUtil::InitConfig` only from the id links of outfmt 0; the
+    // organism report (18) and the formats that ignore -html read no registry file.
+    for formats in [&[18][..], &[6, 18], &[5], &[]] {
+        assert!(
+            html_links(true, Program::Blastp, Program::Blastp, None, formats)
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(
+        html_links(false, Program::Blastn, Program::Blastn, Some("db"), &[0])
+            .unwrap()
+            .is_none()
+    );
 }

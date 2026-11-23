@@ -761,6 +761,9 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[After("WordThreshold", "DbLength", "BigInteger(1000000)")],
         ),
         ("show_gis", &["-show_gis"], &[]),
+        // NCBI's `CFormattingArgs::ExtractAlgorithmOptions` records the hit list size only
+        // (blast_args.cpp:2894-2978): `-html` is the formatter's (`m_IsHTML`), not the request's.
+        ("html", &["-html"], &[]),
         ("parse_deflines", &["-parse_deflines"], &[]),
         (
             "searchsp",

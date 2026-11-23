@@ -749,6 +749,20 @@ where
             translated.push(format!("--{name}").into());
         }
     }
+    // The order of the options is read only where clap renders a program's help (`-help`, `-h`,
+    // `-help-full`, `-xmlhelp`'s stop, all `--help` or `-h` here): only then is `-html` given its
+    // place (`with_html_help_place`), so a run that renders no help does no work for it (line RG
+    // T4a2 review S1).
+    let help_command;
+    let command = if translated
+        .iter()
+        .any(|word| word == "--help" || word == "-h")
+    {
+        help_command = with_html_help_place(command.clone());
+        &help_command
+    } else {
+        &command
+    };
     let mut matches = match command.clone().try_get_matches_from(&translated) {
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
@@ -1436,6 +1450,47 @@ fn with_toolkit_file_args(
     command
 }
 
+/// `command` with `-html` listed in each search program's `-help` right after `-line_length`, as
+/// NCBI BLAST+ 2.17.0's `-help` lists it (`-line_length`, `-html`, `-sorthits`). The field order
+/// of a program's options gives the other places; `-line_length` and `-sorthits` come from the
+/// one `FormattingArgs` that psiblast and rpsblast flatten in too, which have no `-html`, so the
+/// place is given here: the options listed after `-line_length` move down by one. Only clap's
+/// help reads the order, so `parse_command` calls this only for a command line that asks for help.
+fn with_html_help_place(mut command: clap::Command) -> clap::Command {
+    let names: Vec<String> = command
+        .get_subcommands()
+        .filter(|sub| {
+            sub.get_arguments()
+                .any(|arg| arg.get_long() == Some("html"))
+        })
+        .map(|sub| sub.get_name().to_string())
+        .collect();
+    for name in names {
+        command = command.mut_subcommand(name, |mut sub| {
+            let order_of = |sub: &clap::Command, long: &str| {
+                sub.get_arguments()
+                    .find(|arg| arg.get_long() == Some(long))
+                    .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
+            };
+            let (Some((_, line_length)), Some((html, _))) =
+                (order_of(&sub, "line_length"), order_of(&sub, "html"))
+            else {
+                return sub;
+            };
+            let later: Vec<(clap::Id, usize)> = sub
+                .get_arguments()
+                .filter(|arg| arg.get_id() != &html && arg.get_display_order() > line_length)
+                .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
+                .collect();
+            for (id, order) in later {
+                sub = sub.mut_arg(id, |arg| arg.display_order(order + 1));
+            }
+            sub.mut_arg(html, |arg| arg.display_order(line_length + 1))
+        });
+    }
+    command
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
@@ -2102,9 +2157,20 @@ pub(crate) fn create_out_file(
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
 /// that the run already wrote (`post_native_error`) is not written again. A failed write is
 /// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
-/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
+/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
+/// error of a report's writer that carries an exception of NCBI's (`NcbiException::into_io_error`:
+/// the `-html` links' registry, `report::formatter_registry::InitConfig`, which NCBI's formatter
+/// reads while it writes) is that exception's report (`NativeError::of_writer`), whichever program
+/// wrote it.
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    if let Some(e) = error.downcast_ref::<NativeError>() {
+    let of_writer = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
+        .map(NativeError::exception);
+    if let Some(e) = of_writer
+        .as_ref()
+        .or_else(|| error.downcast_ref::<NativeError>())
+    {
         if !posted(&e.message) {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));

@@ -133,7 +133,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-best_hit_score_edge` (series NP O6a).
     ("blastn", "entrez_query", Refused::Read(None)),
     ("blastn", "gilist", Refused::Read(None)),
-    ("blastn", "html", Refused::Read(None)),
     ("blastn", "negative_gilist", Refused::Read(None)),
     ("blastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
@@ -141,7 +140,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // too).
     ("blastp", "entrez_query", Refused::Read(None)),
     ("blastp", "gilist", Refused::Read(None)),
-    ("blastp", "html", Refused::Read(None)),
     ("blastp", "ipglist", Refused::Read(None)),
     ("blastp", "negative_gilist", Refused::Read(None)),
     ("blastp", "negative_ipglist", Refused::Read(None)),
@@ -149,7 +147,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-2, #1500).
-    ("blastx", "html", Refused::Read(None)),
     ("blastx", "gilist", Refused::Read(None)),
     ("blastx", "negative_gilist", Refused::Read(None)),
     ("blastx", "entrez_query", Refused::Read(None)),
@@ -215,14 +212,12 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
     ("tblastn", "gilist", Refused::Read(None)),
-    ("tblastn", "html", Refused::Read(None)),
     ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),
     ("tblastx", "gilist", Refused::Read(None)),
-    ("tblastx", "html", Refused::Read(None)),
     ("tblastx", "negative_gilist", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];

@@ -72,7 +72,7 @@ fn report(
     hsps: &[TaxHsp],
     names: Option<&TabularNames>,
 ) -> (Vec<u8>, Vec<Step>) {
-    let (steps, text) = organism_report(hsps, subjects, &mut lookups(names)).unwrap();
+    let (steps, text) = organism_report(hsps, subjects, &mut lookups(names), false).unwrap();
     let mut out = Vec::new();
     text.insert_into(
         &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut out)).unwrap(),
@@ -305,6 +305,7 @@ fn a_description_width_that_wraps_pads_with_ncbis_runs() {
         &[hsp(0, 7e-63, 180.3)],
         &subjects,
         &mut lookups(names.as_ref()),
+        false,
     )
     .unwrap();
     assert_eq!(steps, [Step::Read(0), Step::LookUp(0)]);
@@ -395,10 +396,15 @@ fn bl_taxid_in_a_name_is_refused() {
     assert_eq!(steps, [Step::Read(0)]);
     assert!(out.ends_with(b"Accession...  Description... Score... E-value... \n"));
     let reached = Subjects(vec![vec![line("s1", "t", 8889)]]);
-    let error = organism_report(&[hsp(0, 1e-5, 50.0)], &reached, &mut lookups(Some(&names)))
-        .err()
-        .unwrap()
-        .to_string();
+    let error = organism_report(
+        &[hsp(0, 1e-5, 50.0)],
+        &reached,
+        &mut lookups(Some(&names)),
+        false,
+    )
+    .err()
+    .unwrap()
+    .to_string();
     assert!(error.contains("<@bl_taxid@>"), "{error}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -477,7 +483,7 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
         length: 250,
         hsps: Some(vec![hsp(0, 3e-171, 461.0), hsp(1, 1e-3, 30.0)]),
     }];
-    let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref())).unwrap();
+    let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref()), false).unwrap();
     let reads = vec![vec![
         crate::report::query_warnings::SubjectRead::of_text(0, b"read A\n"),
         crate::report::query_warnings::SubjectRead::of_text(1, b"read B\n"),
@@ -521,6 +527,7 @@ fn a_refused_title_is_refused_where_ncbi_makes_or_shows_it() {
             &[hsp(0, 1e-5, 50.0)],
             &Subjects(vec![vec![subject]]),
             &mut lookups(names.as_ref()),
+            false,
         )
     };
     // Taxid 777 is not in the database: NCBI drops the row and never shows the title.
@@ -605,7 +612,7 @@ fn a_query_that_ncbi_did_not_search_is_refused_after_its_query_block() {
             hsps: None,
         },
     ];
-    let report = TaxReport::new(&queries, &subjects, lookups(None)).unwrap();
+    let report = TaxReport::new(&queries, &subjects, lookups(None), false).unwrap();
     let mut out = Vec::new();
     for q_idx in 0..2 {
         let mut sink = OutputSink::Writer(&mut out);
@@ -680,10 +687,131 @@ fn the_hsps_of_a_subject_whose_load_throws_are_left_out() {
         hsp(1, 1e-20, 60.0),
     ];
     let names = names(Some("of18"));
-    let (steps, _) = organism_report(&hsps, &subjects, &mut lookups(names.as_ref())).unwrap();
+    let (steps, _) =
+        organism_report(&hsps, &subjects, &mut lookups(names.as_ref()), false).unwrap();
     // 0's HSPs read and look nothing up and leave the previous id (1) as it was, so 1's second
     // HSP is skipped as the previous id's.
     assert_eq!(steps, [Step::Read(1), Step::LookUp(10090)]);
+}
+
+/// The HTML organism report (`-html`) of `subjects`' `hsps` read through `lookups`.
+fn report_html(subjects: &Subjects, hsps: &[TaxHsp], mut lookups: TaxLookups) -> Vec<u8> {
+    let (_, text) = organism_report(hsps, subjects, &mut lookups, true).unwrap();
+    let mut out = Vec::new();
+    text.insert_into(
+        &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut out)).unwrap(),
+    )
+    .unwrap();
+    out
+}
+
+/// The subjects and HSPs of query q1 of NCBI's probe `bp.di.f18.tax.h` (line RG T4,
+/// `T/t4/out/bp.di.f18.tax.h.out`), in report order.
+fn t4_query_one() -> (Subjects, Vec<TaxHsp>) {
+    let subjects = Subjects(vec![
+        vec![line("XP_000101", "subject one two HSPs", 9606)],
+        vec![line(
+            "s3_local_identifier",
+            "subject three with a title that is longer than the description column",
+            9606,
+        )],
+        vec![line(
+            "XP_000111",
+            "subject eleven strong then planted weak HSP",
+            9606,
+        )],
+        vec![line("P99902", "subject two", 10090)],
+        vec![line("tag_s8", "subject eight", 10090)],
+        vec![line("AAB00104", "subject four", 562)],
+        vec![line(
+            "XP_000105",
+            "subject five <@score@> s <@evalue@> e <@acc_hd@> a <@descr_text@> d <@taxid@> t",
+            32630,
+        )],
+        vec![line("BAA00110", "subject ten", 12908)],
+    ]);
+    let hsps = vec![
+        hsp(0, 5e-109, 313.2),
+        hsp(1, 4e-87, 247.3),
+        hsp(2, 1e-71, 211.1),
+        hsp(3, 4e-53, 159.1),
+        hsp(4, 1e-48, 147.5),
+        hsp(5, 3e-45, 138.3),
+        hsp(6, 9e-43, 131.7),
+        hsp(7, 2e-28, 94.04),
+    ];
+    (subjects, hsps)
+}
+
+#[test]
+fn the_html_report_is_ncbis_table_with_open_links_and_hidden_inputs() {
+    // NCBI BLAST+ 2.17.0 `blastp -outfmt 18 -html` (probe `bp.di.f18.tax.h`, query q1): the
+    // header's `<a>` stays open, the description is the title's first 60 bytes with the later
+    // replacements filled in it, the inputs follow `</table>`, and there is no newline.
+    let names = names(Some("of18"));
+    let (subjects, hsps) = t4_query_one();
+    assert_eq!(
+        String::from_utf8(report_html(&subjects, &hsps, lookups(names.as_ref()))).unwrap(),
+        [
+            "<table><caption><h2>Organism Report</h2></caption>",
+            "<tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr>",
+            "<tr><th colspan=\"4\"><a href=\"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=9606\" name=\"9606\" title=\"Show taxonomy info for Homo sapiens (taxid 9606)\" target=\"lnktx0\">Homo sapiens (human) [primates]</th></tr>",
+            "<tr><td><a title=\"Show report for XP_000101\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/XP_000101?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">XP_000101</a></td><td>subject one two HSPs</td><td>313</td><td>5e-109</td></tr>",
+            "<tr><td><a title=\"Show report for s3_local_identifier\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/s3_local_identifier?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">s3_local_identifier</a></td><td>subject three with a title that is longer than the descripti</td><td>247</td><td>4e-87</td></tr>",
+            "<tr><td><a title=\"Show report for XP_000111\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/XP_000111?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">XP_000111</a></td><td>subject eleven strong then planted weak HSP</td><td>211</td><td>1e-71</td></tr>",
+            "<tr><th colspan=\"4\"><a href=\"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=10090\" name=\"10090\" title=\"Show taxonomy info for Mus musculus (taxid 10090)\" target=\"lnktx0\">Mus musculus (house mouse) [rodents]</th></tr>",
+            "<tr><td><a title=\"Show report for P99902\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/P99902?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">P99902</a></td><td>subject two</td><td>159</td><td>4e-53</td></tr>",
+            "<tr><td><a title=\"Show report for tag_s8\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/tag_s8?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">tag_s8</a></td><td>subject eight</td><td>147</td><td>1e-48</td></tr>",
+            "<tr><th colspan=\"4\"><a href=\"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=562\" name=\"562\" title=\"Show taxonomy info for Escherichia coli (taxid 562)\" target=\"lnktx0\">Escherichia coli () [enterobacteria]</th></tr>",
+            "<tr><td><a title=\"Show report for AAB00104\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/AAB00104?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">AAB00104</a></td><td>subject four</td><td>138</td><td>3e-45</td></tr>",
+            "<tr><th colspan=\"4\"><a href=\"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=32630\" name=\"32630\" title=\"Show taxonomy info for synthetic construct (taxid 32630)\" target=\"lnktx0\">synthetic construct () [-]</th></tr>",
+            "<tr><td><a title=\"Show report for XP_000105\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/XP_000105?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">XP_000105</a></td><td>subject five 131 s 9e-43 e <@acc_hd@> a <@descr_t</td><td>131</td><td>9e-43</td></tr>",
+            "<tr><th colspan=\"4\"><a href=\"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12908\" name=\"12908\" title=\"Show taxonomy info for unclassified sequences (taxid 12908)\" target=\"lnktx0\">unclassified sequences () [unclassified]</th></tr>",
+            "<tr><td><a title=\"Show report for BAA00110\" target=\"lnktx0\" href=\"https://www.ncbi.nlm.nih.gov/protein/BAA00110?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">BAA00110</a></td><td>subject ten</td><td>94.0</td><td>2e-28</td></tr></table>",
+            "<input type=\"hidden\" id=\"txForSeq_9606\" value=\"XP_000101, s3_local_identifier, XP_000111\" />",
+            "<input type=\"hidden\" id=\"txForSeq_10090\" value=\"P99902, tag_s8\" />",
+            "<input type=\"hidden\" id=\"txForSeq_562\" value=\"AAB00104\" />",
+            "<input type=\"hidden\" id=\"txForSeq_32630\" value=\"XP_000105\" />",
+            "<input type=\"hidden\" id=\"txForSeq_12908\" value=\"BAA00110\" />",
+        ]
+        .concat()
+    );
+    // Query pq2 of the same probe: no hits, the table's header row only.
+    assert_eq!(
+        report_html(&Subjects(Vec::new()), &[], lookups(names.as_ref())),
+        b"<table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr></table>".to_vec()
+    );
+}
+
+#[test]
+fn the_html_report_takes_the_scheme_and_the_browser_of_ncbirc() {
+    // Probes `bp.di.f18.rc_p_http.h`, `rc_p_empty.h` and `rc_taxbr.h` (each `./.ncbirc` in
+    // `T/t4/rc/<case>`): the first organism header and the first row.
+    use crate::blastinput::ncbi_registry::{read_registry, Layer};
+    let names = names(Some("of18"));
+    let (subjects, hsps) = t4_query_one();
+    let first = |ncbirc: &[u8]| {
+        let read = read_registry(ncbirc, Layer::SystemWide).unwrap();
+        let lookups = TaxLookups::with_registry(names.as_ref(), "BLASTP", Some(&read));
+        let out = report_html(&subjects, &hsps[..1], lookups);
+        let at = find(&out, b"<tr><th colspan", 0).unwrap();
+        String::from_utf8(out[at..find(&out, b"</td><td>subject", at).unwrap()].to_vec()).unwrap()
+    };
+    let expected = |browser: &str, scheme: &str| {
+        format!(
+            "<tr><th colspan=\"4\"><a href=\"{browser}?id=9606\" name=\"9606\" title=\"Show taxonomy info for Homo sapiens (taxid 9606)\" target=\"lnktx0\">Homo sapiens (human) [primates]</th></tr><tr><td><a title=\"Show report for XP_000101\" target=\"lnktx0\" href=\"{scheme}//www.ncbi.nlm.nih.gov/protein/XP_000101?report=fwwwtax&amp;log$=taxrep&amp;RID=0\">XP_000101</a>"
+        )
+    };
+    let ncbi = "//www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi";
+    assert_eq!(
+        first(b"[BLASTFMTUTIL]\nPROTOCOL=http:\n"),
+        expected(&format!("http:{ncbi}"), "http:")
+    );
+    assert_eq!(first(b"[BLASTFMTUTIL]\nPROTOCOL=\n"), expected(ncbi, ""));
+    assert_eq!(
+        first(b"[TAX_BROWSER]\nBLASTFMTUTIL=<@protocol@>//tax.example/browse\n"),
+        expected("https://tax.example/browse", "https:")
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
@@ -713,6 +841,7 @@ fn a_taxonomy_file_that_does_not_open_leaves_every_hsp_out() {
         &[hsp(0, 1e-86, 243.4), hsp(0, 9.6, 11.9)],
         &subjects,
         &mut lookups(Some(&names)),
+        false,
     );
     std::fs::set_permissions(&btd, std::fs::Permissions::from_mode(0o644)).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
@@ -760,9 +889,9 @@ fn loads_that_throw_at_a_positive_taxid_leave_its_subjects_out() {
         SubjectTable::new(&queries, &[], plain, true, None, "BLASTP").with_loads_that_throw(throws)
     };
     let hsps = queries[0].hsps.as_deref().unwrap();
-    let (steps, _) = organism_report(hsps, &table(true), &mut lookups(None)).unwrap();
+    let (steps, _) = organism_report(hsps, &table(true), &mut lookups(None), false).unwrap();
     assert_eq!(steps, [Step::Read(1), Step::LookUp(0)]);
-    let (steps, _) = organism_report(hsps, &table(false), &mut lookups(None)).unwrap();
+    let (steps, _) = organism_report(hsps, &table(false), &mut lookups(None), false).unwrap();
     assert_eq!(
         steps,
         [

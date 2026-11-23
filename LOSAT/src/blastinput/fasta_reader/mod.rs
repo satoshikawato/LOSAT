@@ -329,6 +329,16 @@ impl FastaRecord {
     }
 }
 
+/// The library's `Hit::subject_title` of a subject read from FASTA: its title after the first word
+/// (lossy UTF-8), `None` for a title without a space. The one producer for every program; no
+/// report reads it (the reports take the title bytes by subject index).
+pub(crate) fn hit_subject_title(title: &[u8]) -> Option<String> {
+    title
+        .iter()
+        .position(|&byte| byte == b' ')
+        .map(|space| String::from_utf8_lossy(&title[space + 1..]).into_owned())
+}
+
 /// The names of a record that the reports show, made from its local ID, its title bytes and the
 /// Seq-ids `-parse_deflines` read: the one owner of these rules, for the shared reader's records
 /// (`FastaRecord::names`) and BLASTX's (`algorithm::blastx::input::FastaRecord::names`).

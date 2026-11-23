@@ -1355,10 +1355,8 @@ fn pairwise_hits(
                     positives: Some(report_positives),
                     gaps: Some(payload.gap_letters),
                     subject_length: Some(subject_length),
-                    // The title after its first word, as BLASTN's and TBLASTX's; the reports take the
-                    // subject's title bytes by subject index (`write_tblastn_pairwise_report`).
-                    subject_title: subject.title.iter().position(|&byte| byte == b' ').map(
-                        |space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned(),
+                    subject_title: crate::blastinput::fasta_reader::hit_subject_title(
+                        &subject.title,
                     ),
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:331-342:
                     // eDontAdjustMatrix -> 0; eCompoScaleOldMatrix -> 1;

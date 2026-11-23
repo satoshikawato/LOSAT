@@ -27,6 +27,16 @@
 //! which `DisplaySeqalign` does not catch) is `MixError::NcbiThrows`, with NCBI's exception
 //! (`X_MERGE_START_ITERATOR`, `BUILD_INFINITE_LOOP`).
 //!
+//! A query whose Bioseq is not a protein (line PS, PS15b-2 fix 1): the PSSM query of the molecule
+//! `other` of psiblast, whose Dense-segs are those of a protein query and protein subjects, is a
+//! nucleotide sequence to the mix (`m_IsAA` is `IsProtein`), so its rows have the width 3 and the
+//! subjects' 1 (`super::Hsps::mix_widths`): each match goes to the query's row of its start
+//! modulo 3 (`x_SetSeqFrame`), where it covers three positions for each of its letters. Two
+//! matches of one HSP whose spans meet on such a row put the HSP's subject row twice on a
+//! segment (`X_MERGE_START_ITERATOR`), and segments shared by HSPs on two such rows can follow
+//! each other in two orders (`BUILD_INFINITE_LOOP`): `MixError::NcbiThrows`, which
+//! `super::write_unreadable_section` refuses.
+//!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
 //! (`fNegativeStrand` is not in `m_MergeFlags`: no merge flag has it) and, with `fForceTranslation`, the
@@ -226,7 +236,7 @@ struct Mix {
     rows: Vec<SeqIx>,
     /// `m_Segments` (`Build`).
     segments: Vec<SegIx>,
-    /// The widths of the query's and of the subjects' rows (`super::Hsps`).
+    /// The widths of the query's and of the subjects' rows (`super::Hsps::mix_widths`).
     query_width: u32,
     subject_width: u32,
     /// `m_AlnMixMatches->m_AddFlags`: the flags of the last `Add`, which the merge reads (all the
@@ -1277,6 +1287,9 @@ impl Mix {
             .iter()
             .map(|&row| self.seqs[self.rows[row]].positive_strand)
             .collect();
+        // (A query whose Bioseq is not a protein with nucleotide subjects, TBLASTN's of the
+        // molecule `other`, has no widths in NCBI's Dense-seg, which holds nucleotides only: its
+        // section reads nothing of the merged Dense-seg, `super::write_unreadable_section`.)
         let widths: Vec<u32> = if self.query_width == 3 || self.subject_width == 3 {
             keep.iter()
                 .map(|&row| self.seqs[self.rows[row]].width)
@@ -1307,6 +1320,9 @@ impl Mix {
 /// `fQuerySeqMergeOnly` and `fFillUnalignedRegions`, and `GetDenseg`; `None` when every `Add` threw
 /// (`hasAln` is false: no merge, and `GetDenseg` throws for the group).
 pub(crate) fn merge(hsps: &Hsps, group: &[usize]) -> Result<Option<Denseg>, MixError> {
+    // The rows' widths as `x_Merge` sets them (`Hsps::mix_widths`; the same as the Dense-segs'
+    // but for a query whose Bioseq is not a protein).
+    let (query_width, subject_width) = hsps.mix_widths();
     let mut mix = Mix {
         seqs: Vec::new(),
         order: Vec::new(),
@@ -1317,8 +1333,8 @@ pub(crate) fn merge(hsps: &Hsps, group: &[usize]) -> Result<Option<Denseg>, MixE
         extra_rows: Vec::new(),
         rows: Vec::new(),
         segments: Vec::new(),
-        query_width: hsps.query_width,
-        subject_width: hsps.subject_width,
+        query_width,
+        subject_width,
         add_flags: AddFlags::PreserveRows,
         query_bioseq: hsps.query_bioseq,
         single_refseq: true,

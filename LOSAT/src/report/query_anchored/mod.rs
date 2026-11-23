@@ -102,6 +102,10 @@ pub(crate) struct Hsps {
     /// TBLASTX (`eTranslateNucToNucAlignment`, blast_format.cpp:651): the HSPs go into the groups of
     /// their query frames and are added with `fForceTranslation`.
     translate_nuc_to_nuc: bool,
+    /// The query's Bioseq is not a protein where its rows are a protein's (a PSSM query of the
+    /// molecule `other`, `pairwise::UnreadableQuery`; `set_query_not_protein`): the merge gives
+    /// its rows the widths of `mix_widths`.
+    query_not_protein: bool,
 }
 
 impl Default for Hsps {
@@ -114,6 +118,7 @@ impl Default for Hsps {
             query_width: 1,
             subject_width: 1,
             translate_nuc_to_nuc: false,
+            query_not_protein: false,
         }
     }
 }
@@ -182,6 +187,37 @@ impl Hsps {
     /// Marks subject `subject` as the query's own Bioseq (`query_bioseq`).
     pub(crate) fn set_query_bioseq(&mut self, subject: u32) {
         self.query_bioseq = Some(subject);
+    }
+
+    /// Marks the query's Bioseq as not a protein (`query_not_protein`): a PSSM query of the
+    /// molecule `other` (`pairwise::UnreadableQuery`), whose Dense-seg rows are those of a protein
+    /// query.
+    pub(crate) fn set_query_not_protein(&mut self) {
+        self.query_not_protein = true;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:251-258
+    // NCBI reference (598d8ae6): c++/include/objmgr/bioseq_handle.hpp:861-865
+    // NCBI reference (598d8ae6): c++/include/objects/seq/Seq_inst.hpp:98-102
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:138-145
+    /// The widths of the query's and the subjects' rows in the merge (`m_Width` once `x_Merge` has
+    /// set them, `aln_mix::merge`). A sequence's `m_IsAA` is whether its Bioseq's molecule is
+    /// `aa` (`IsProtein`); where the mix holds both kinds, `x_Merge` gives a protein's rows the
+    /// width 1 and the others' 3, and otherwise the Dense-seg's widths stay (1 where it has none).
+    /// For a query of the program's own kind both are `query_width` and `subject_width`. A query
+    /// whose Bioseq is not a protein (`query_not_protein`) has rows of width 1 in its Dense-segs:
+    /// - with psiblast's protein subjects (rows of width 1) the mix holds both kinds, so the
+    ///   query's rows take the width 3 of a nucleotide sequence (its protein positions are read
+    ///   as nucleotide positions, its lengths as residues, so a row of its own for each position
+    ///   modulo 3, `x_SetSeqFrame`) and the subjects' the width 1;
+    /// - with tblastn's nucleotide subjects (rows of width 3) the mix holds nucleotides only and
+    ///   the Dense-seg's widths stay.
+    fn mix_widths(&self) -> (u32, u32) {
+        if self.query_not_protein && self.query_width == 1 && self.subject_width == 1 {
+            (3, 1)
+        } else {
+            (self.query_width, self.subject_width)
+        }
     }
 
     /// HSP `index`.
@@ -676,18 +712,54 @@ fn internal(what: &str) -> io::Error {
     ))
 }
 
+/// The merged Dense-seg of each frame group of `hsps` with HSPs and a merge, in the groups' order
+/// (`aln_mix::merge`; a group whose `Add`s all threw has none), and `numDistinctFrames`, the count
+/// of the groups with HSPs (also one whose HSPs all threw: none can, a sequence's first match never
+/// meets another strand). NCBI merges every group before the section's first byte; the first error
+/// ends it.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2054-2093
+fn merge_groups(hsps: &Hsps) -> Result<(Vec<(usize, Denseg)>, usize), aln_mix::MixError> {
+    let groups = hsps.groups();
+    let mut merged = Vec::new();
+    for (group, indices) in groups.iter().enumerate() {
+        if indices.is_empty() {
+            continue;
+        }
+        if let Some(denseg) = aln_mix::merge(hsps, indices)? {
+            merged.push((group, denseg));
+        }
+    }
+    let num_distinct_frames = groups.iter().filter(|indices| !indices.is_empty()).count();
+    Ok((merged, num_distinct_frames))
+}
+
+/// The error of a merge that stops in a way that the program's report asked before the query's
+/// first byte, or that NCBI's code reaches only with input that a BLAST search does not make.
+fn unasked_merge_stop(error: aln_mix::MixError) -> io::Error {
+    match error {
+        aln_mix::MixError::Internal(what) => internal(what),
+        // `ncbi_aborts`, which the program's report asks before the query's first byte.
+        aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
+        // `section_frees`, asked as `ncbi_aborts` is.
+        aln_mix::MixError::NcbiFreesSegment => {
+            internal("a section whose merge NCBI BLAST+ frees a segment in")
+        }
+        aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
+    }
+}
+
 /// Writes the section of one query whose HSPs are `hsps` (none: nothing, as `DisplaySeqalign`
 /// returns before its first byte for an empty Seq-align set; `-num_alignments 0`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1918
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2055-2111
 /// Each group's HSPs are added in order (`aln_mix::merge`; an HSP whose `Add` throws is left
-/// out) and merged; `numDistinctFrames` counts the groups with HSPs, also one whose HSPs all
-/// threw (none can: a sequence's first match never meets another strand). A group without a
-/// merged Dense-seg is skipped (`GetDenseg` throws). A merge that throws (`Merge` is outside the
-/// `try`: TBLASTX's query record that is also a subject, `aln_mix::MixError::NcbiThrows`) fails
-/// the section with NCBI's exception before its first byte, as NCBI's leaves `DisplaySeqalign`
-/// there (`NcbiException::into_io_error`).
+/// out) and merged (`merge_groups`). A group without a merged Dense-seg is skipped (`GetDenseg`
+/// throws). A merge that throws (`Merge` is outside the `try`: TBLASTX's query record that is
+/// also a subject, `aln_mix::MixError::NcbiThrows`) fails the section with NCBI's exception before
+/// its first byte, as NCBI's leaves `DisplaySeqalign` there (`NcbiException::into_io_error`; the
+/// program's report ends with it, `cli::NativeError::of_writer`).
 pub(crate) fn write_section<W: Write + ?Sized>(
     writer: &mut W,
     view: View,
@@ -698,29 +770,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     if hsps.is_empty() {
         return Ok(());
     }
-    let groups = hsps.groups();
-    let mut merged = Vec::new();
-    for (group, indices) in groups.iter().enumerate() {
-        if indices.is_empty() {
-            continue;
-        }
-        let denseg = aln_mix::merge(hsps, indices).map_err(|error| match error {
-            aln_mix::MixError::Internal(what) => internal(what),
-            // `ncbi_aborts`, which the program's report asks before the query's first byte.
-            aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
-            // `section_frees`, asked as `ncbi_aborts` is.
-            aln_mix::MixError::NcbiFreesSegment => {
-                internal("a section whose merge NCBI BLAST+ frees a segment in")
-            }
-            // NCBI's exception, before the section's first byte (`Merge` comes before the line feed
-            // written to `out`): the program's report ends with it (`cli::NativeError::of_writer`).
-            aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
-        })?;
-        if let Some(denseg) = denseg {
-            merged.push((group, denseg));
-        }
-    }
-    let num_distinct_frames = groups.iter().filter(|indices| !indices.is_empty()).count();
+    let (merged, num_distinct_frames) = merge_groups(hsps).map_err(unasked_merge_stop)?;
     writer.write_all(b"\n")?;
     let mut buffers = aln_vec::MapBuffers::default();
     for (group, denseg) in &merged {
@@ -754,6 +804,88 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     }
     Ok(())
 }
+
+/// Writes the section of one query whose letters NCBI's display cannot read (`pairwise::
+/// UnreadableQuery`, a PSSM query of the molecule `other`), whose HSPs are `hsps` with the query's
+/// Bioseq marked as not a protein (`Hsps::set_query_not_protein`), in the report of `program`
+/// (its name in LOSAT's words, as `PSIBLAST`). None: nothing, as `write_section`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2054-2112 (cited at
+/// `merge_groups` and `write_section`)
+/// NCBI adds and merges the HSPs as `write_section` does: no `Add` throws (each Seq-id resolves,
+/// and the width check of `CAlnMixSequences::Add` is in debug builds only), so each group with
+/// HSPs is merged, its rows with the widths of a query that is not a protein
+/// (`Hsps::mix_widths`). Where every merge returns, NCBI writes the line feed, then each merged
+/// group's heading `For reading frame` (where more than one group has HSPs) and its display,
+/// whose `x_PrepareRowData` reads the query's letters as the alignment's first step and throws
+/// (`pairwise::UnreadableQuery`), caught by the group's `try`: the section is that line feed.
+/// Where a merge throws (`aln_mix::MixError::NcbiThrows`: `Merge` is outside the `try`), NCBI's
+/// run ends with that exception before the section's first byte (exit status 255). That is an
+/// NCBI failure without a checkable valid result (AGENTS.md rule 3), so LOSAT refuses there
+/// (`UnreadableMergeRefusal`), after the bytes of the report before the section, which are
+/// NCBI's. The merge reads the HSPs' positions and lengths only (no `fCalcScore`), so the
+/// encoding of the PSSM's sequence plays no part.
+pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
+    writer: &mut W,
+    hsps: &Hsps,
+    program: &str,
+) -> io::Result<()> {
+    if hsps.is_empty() {
+        return Ok(());
+    }
+    let (merged, num_distinct_frames) = match merge_groups(hsps) {
+        Ok(merged) => merged,
+        Err(aln_mix::MixError::NcbiThrows(_)) => {
+            return Err(UnreadableMergeRefusal {
+                program: program.to_string(),
+            }
+            .error())
+        }
+        Err(error) => return Err(unasked_merge_stop(error)),
+    };
+    writer.write_all(b"\n")?;
+    if num_distinct_frames > 1 {
+        for (group, _) in &merged {
+            writer.write_all(b"For reading frame ")?;
+            writer.write_all(K_FRAME_CONVERSION[*group].as_bytes())?;
+            writer.write_all(b" of query sequence:\n\n")?;
+        }
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of the query-anchored section (outfmt 1 to 4) of a query that NCBI's display
+/// cannot read, where NCBI's merge of its HSPs throws (`write_unreadable_section`): NCBI BLAST+
+/// 2.17.0 stops there with an uncaught `CAlnException` (exit status 255). It travels as the
+/// `io::Error` of the report's writes (`error`), which the programs pass on as LOSAT's error, not
+/// as NCBI's exception or a failed write (`cli::NativeError::of_writer`, `cli::ReportStream::
+/// finish`), so the run stops with this text and exit status 1.
+#[derive(Debug)]
+pub(crate) struct UnreadableMergeRefusal {
+    /// The program, in LOSAT's words (`PSIBLAST`).
+    program: String,
+}
+
+impl UnreadableMergeRefusal {
+    /// The refusal as the error of the report's writes.
+    fn error(self) -> io::Error {
+        io::Error::new(io::ErrorKind::Unsupported, self)
+    }
+}
+
+impl std::fmt::Display for UnreadableMergeRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "-outfmt 1 to 4 with a PSSM query of the molecule other is not supported by LOSAT's {} \
+             where NCBI BLAST+ 2.17.0 cannot merge the query's alignments (it reads such a query \
+             as a nucleotide sequence there, and stops with a C++ exception)",
+            self.program
+        )
+    }
+}
+
+impl std::error::Error for UnreadableMergeRefusal {}
 
 /// The query's frame of each frame group (`k_FrameConversion` as numbers).
 const K_GROUP_FRAMES: [i8; K_NUM_FRAME] = [1, 2, 3, -1, -2, -3];
@@ -1718,6 +1850,8 @@ fn adjust_insert(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_ps15b2;
 #[cfg(test)]
 mod tests_t3b;
 #[cfg(test)]

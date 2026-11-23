@@ -55,7 +55,9 @@ pub struct PairwiseConfig {
     pub html: Option<super::html_ids::HtmlReport>,
     /// A query whose sequence NCBI's alignment display cannot read (psiblast's and tblastn's PSSM
     /// query of the molecule `other`): the alignments of outfmt 0 are one line each, the
-    /// query-anchored section of outfmt 1 to 4 a line feed. `None` for every other report.
+    /// query-anchored section of outfmt 1 to 4 a line feed where NCBI's merge of its HSPs
+    /// returns, and refused where that merge throws (`query_anchored::write_unreadable_section`).
+    /// `None` for every other report.
     pub unreadable_query: Option<UnreadableQuery>,
 }
 
@@ -4737,13 +4739,6 @@ fn write_anchored_section<W: Write>(
     q_idx: usize,
     hsps_of: impl FnOnce(&dyn super::query_anchored::ReportSequences) -> super::query_anchored::Hsps,
 ) -> io::Result<()> {
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2058-2112
-    // A query whose sequence the display cannot read (`UnreadableQuery`): the merge's add of each
-    // HSP throws and is caught, so no frame has a merge; the line feed before the frames comes,
-    // then each frame's vector throws on its empty merge and is caught too.
-    if config.unreadable_query.is_some() {
-        return writer.write_all(b"\n");
-    }
     let (PairwiseView::QueryAnchored { identity, anchored }, Some(sequences)) =
         (config.view, anchored)
     else {
@@ -4751,6 +4746,19 @@ fn write_anchored_section<W: Write>(
             "LOSAT internal error: a query-anchored report without its sequences",
         ));
     };
+    // A query whose sequence the display cannot read (`UnreadableQuery`): NCBI merges its HSPs
+    // as a nucleotide query's (its Bioseq is not a protein), then each merged frame's display
+    // throws and is caught; where the merge throws, LOSAT refuses
+    // (`query_anchored::write_unreadable_section`).
+    if config.unreadable_query.is_some() {
+        let mut hsps = hsps_of(sequences);
+        hsps.set_query_not_protein();
+        return super::query_anchored::write_unreadable_section(
+            writer,
+            &hsps,
+            &config.program.to_ascii_uppercase(),
+        );
+    }
     super::query_anchored::write_section(
         writer,
         super::query_anchored::View {

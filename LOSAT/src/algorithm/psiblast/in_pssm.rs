@@ -106,14 +106,6 @@ pub(crate) fn check_in_pssm_options(
     {
         return Ok(());
     }
-    // The formats that LOSAT's psiblast writes (`args::writes_outfmt`).
-    if let Some(number) = outfmts
-        .iter()
-        .find(|&&number| !super::args::writes_outfmt(number))
-    {
-        let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
-        bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
-    }
     // The archive's request holds the PSSM that the search holds (`PsiSearch::archive_pssm`):
     // `-in_pssm`'s object, whose members the XML and ASN.1 binary streams do not all write yet
     // (`report::archive::pssm_unwritten`; the later rounds' PSSMs keep its query). Lifted where

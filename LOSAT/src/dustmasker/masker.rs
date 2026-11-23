@@ -16,7 +16,8 @@ pub(super) type Interval = (u32, u32);
 /// 2^32 counts as none.
 ///
 /// The letters are read 16 at a time as a mask of their `N`s (`equal_bytes_16`; the last block
-/// filled up with `N`, which only lengthens the run that ends the sequence). A block that leaves
+/// filled up with copies of the sequence's last letter, which add no run and only lengthen the
+/// one that ends the sequence, which counts whatever its length). A block that leaves
 /// the state as it was (no `N` after a letter that is not `N`, or only `N` inside a run) is passed
 /// with one test of the two words. In the others, the run that comes into the block is closed and
 /// the one that goes on after it is opened, both at the edges of the mask. The runs that start
@@ -30,10 +31,12 @@ fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
     let mut in_run = false;
     let mut open = 0;
     let (blocks, tail) = seq.as_chunks::<16>();
-    let mut last = [b'N'; 16];
-    last[..tail.len()].copy_from_slice(tail);
-    let filled = (!tail.is_empty()).then_some(&last);
-    for (index, block) in blocks.iter().chain(filled).enumerate() {
+    let filled = tail.last().map(|&letter| {
+        let mut last = [letter; 16];
+        last[..tail.len()].copy_from_slice(tail);
+        last
+    });
+    for (index, block) in blocks.iter().chain(filled.as_ref()).enumerate() {
         let (low, high) = equal_bytes_16(block, b'N');
         if !in_run && (low | high) == 0 || in_run && (low & high) == ALL {
             continue;
@@ -112,8 +115,8 @@ impl RunTest {
 
 /// The kept runs of `inner`, a block's mask of `N`s without the runs that cross its edges, the
 /// block starting at `base` (modulo 2^32): the k-th start of a run with the k-th end. A function
-/// of its own because the block loop with it inlined was not faster (callgrind, ad-RG-KC-2
-/// 2026-11-24).
+/// of its own because the block loop with it inlined was not faster (callgrind, line RG
+/// item KC-11e, 2026-11-24).
 #[inline(never)]
 fn inner_runs(runs: &mut Vec<Interval>, inner: u32, base: u32, max_ns: u32) {
     let mut starts = inner & !(inner << 1);

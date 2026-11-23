@@ -5,8 +5,9 @@
 //! and its header writer search every byte of every definition line, so the search tests the
 //! bytes a block at a time.
 //!
-//! No NCBI counterpart: NCBI's code calls the C and C++ libraries for these searches; LOSAT keeps
-//! what they return (the index of the first match), not how they search.
+//! No NCBI counterpart: NCBI's code calls the C and C++ libraries for these searches, or tests
+//! one byte at a time (dustmasker's test of each letter for `N`); LOSAT keeps what they return
+//! (the index of the first match, the bytes that match), not how they search.
 
 /// The bytes that [`find_first`] tests at once.
 const BLOCK: usize = 32;

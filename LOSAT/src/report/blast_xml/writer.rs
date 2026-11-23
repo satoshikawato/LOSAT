@@ -333,7 +333,7 @@ pub trait StructuredXml {
 /// texts (titles, messages, the names of their hits' subjects) that NCBI's writer must be able
 /// to write: all of them, except the last when the run stops after this call (`stops`: no epilog
 /// and no later report call follow it) and the documents hold that report back (`holds_back`:
-/// `StructuredXml::holds_back`, `Xml2Target::holds_back`).
+/// `StructuredXml::holds_back`, `Xml2Run::holds_back`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
 /// A `-subject` report is written when the next query's results arrive, or in the epilog

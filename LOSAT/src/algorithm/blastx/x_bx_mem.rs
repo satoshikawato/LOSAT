@@ -384,8 +384,7 @@ pub(crate) fn flow_subjects_per_task(
 
 /// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): the threads the subject flow of a
 /// batch searched on `pool` takes (its own and the helpers): the pool's, and for a batch of one task
-/// of the capped batch flow (`one_task`) the threads the cap leaves it. Its composition redo's flow
-/// takes as many (`LOSAT_X_BXREDOFLOW`; `search::search_core` reads it once for both).
+/// of the capped batch flow (`one_task`) the threads the cap leaves it.
 pub(crate) fn flow_threads(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,

@@ -856,7 +856,6 @@ impl PreliminarySink for Runtime<'_> {
         &mut self,
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
-        x_threads: usize,
     ) -> Result<()> {
         // Diagnostic (LOSAT_TIMING): the clocks of the intervals of this function
         // (x_timing.rs). No NCBI counterpart.
@@ -991,7 +990,6 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
-                threads: x_threads,
             };
             x_t_finish = if sw_redo {
                 self.kappa_redo_batch::<true>(kappa_batch)?

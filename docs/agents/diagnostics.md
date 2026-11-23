@@ -7123,8 +7123,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXPAR`'s rule: a batch end in a pool of 2+ threads with 2 or more matches, not `-use_sw_tback` in e-value
   mode): the matches ahead are redone as a flow (`utils::xahead`, `runtime/kappa_batch.rs`) instead of in fork-join
   batches of 32 matches per worker. The loop's thread offers the next 32 x workers matches as it walks the stream
-  (the early-termination guess on the heaps as they are then), each worker (one per thread the unit's subject flow
-  takes, `x_bx_mem::flow_threads`, at most one per match: the loop's thread keeps one) takes the next match offered,
+  (the early-termination guess on the heaps as they are then), each worker (one per thread of the pool, as for the
+  batches, at most one per match: the loop's thread keeps one) takes the next match offered,
   and the loop takes a match's result when it reaches it, redoing other offered matches while one is still being
   redone; the helpers leave once every match is taken. Why: each batch waited at its join for its longest redo; with
   one batch end live the threads stood idle there (BLASTX `-use_sw_tback`, 200 queries of q200k against the 40

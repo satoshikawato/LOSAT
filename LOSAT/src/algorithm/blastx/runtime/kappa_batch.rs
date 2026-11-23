@@ -28,8 +28,8 @@ use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 /// unless `=0`), the matches redone ahead as a flow instead of in fork-join batches (see
 /// `kappa_redo_batch`). It acts wherever the batches would run (LOSAT_X_BXPAR's rule: a pool of
 /// two or more threads, two or more matches, no recording observer, not e-value mode of
-/// `-use_sw_tback`), and has no rule of its own; its workers are the unit's threads, those of its
-/// subject flow (`x_bx_mem::flow_threads`).
+/// `-use_sw_tback`), and has no rule of its own; its workers are the batches': one per thread of
+/// the pool.
 #[cfg(feature = "parallel")]
 fn x_redo_flow() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -51,10 +51,6 @@ pub(super) struct KappaBatch<'a> {
     pub(super) queries: &'a mut [HitList],
     pub(super) heaps: &'a mut [CompoHeap],
     pub(super) inactive_heaps: &'a mut [CompoHeap],
-    /// No NCBI counterpart (scheduling only): the threads the unit's flows take
-    /// (`search::PreliminarySink::batch_end`, `x_bx_mem::flow_threads`): the redo's flow
-    /// (`LOSAT_X_BXREDOFLOW`) makes no more workers.
-    pub(super) threads: usize,
 }
 
 impl Runtime<'_> {
@@ -87,10 +83,7 @@ impl Runtime<'_> {
             queries,
             heaps,
             inactive_heaps,
-            threads: x_unit_threads,
         } = args;
-        #[cfg(not(feature = "parallel"))]
-        let _ = x_unit_threads;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
         let x_t = x_timing::lap();
         let mut matches = Vec::new();
@@ -147,15 +140,11 @@ impl Runtime<'_> {
                 && matches.len() > 1
                 && !reads_heaps
         }) {
-            // The flow's workers are the unit's threads, those its subject flow takes
-            // (`x_unit_threads`: under the cap, a batch of one task is left fewer than the
-            // pool's); the batches' the pool's.
-            let x_threads = if x_flow {
-                x_unit_threads
-            } else {
-                rayon::current_num_threads()
-            };
-            (0..x_kappa_workers(x_threads, matches.len()))
+            // The workers of the flow and of the batches: one per thread of the pool (at most one
+            // per match). Not the share the cap leaves a batch of one task for its subject flow
+            // (`x_bx_mem::flow_threads`): a redo that ends a search alone would keep that share
+            // (4 of 32 threads at the end of q200k `-use_sw_tback`, 2.5 times the batches' time).
+            (0..x_kappa_workers(rayon::current_num_threads(), matches.len()))
                 .map(|_| {
                     Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
                         batch,

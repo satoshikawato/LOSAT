@@ -30,9 +30,18 @@ fn run_files_of(
     query: &str,
     subject: &str,
 ) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
+    run_inputs_of(words, &fasta(query), &fasta(subject))
+}
+
+/// `run_files_of` with the FASTA bytes `query` and `subject`.
+fn run_inputs_of(
+    words: &[&str],
+    query: &[u8],
+    subject: &[u8],
+) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, true, &fasta(query)).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, true, &fasta(subject)).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, true, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(
         program,
@@ -406,10 +415,10 @@ fn an_outfmt_that_does_not_parse_fails_where_the_command_line_fails() {
 /// tabular formats' of 500; the argv's outfmt 0 is the second search) with a name that LOSAT
 /// refuses at NCBI's first request: each search has the export of the command line's run of its
 /// formats (decision F1w-5; the other search's receiver keeps nothing), so the other search, which
-/// runs first, stops at its own first request with its outputs holding nothing (without its export
-/// it would write the tabular reports: review 2 of line RG F1w, N-c, mutation M4), and the run
-/// fails with the refusal of the argv's own search, no output holding a byte, as the CLI's run of
-/// the argv (`ROWS[1]`, whose run with a file the first test checks).
+/// runs first, stops at its own first request with its outputs holding nothing, and the run fails
+/// with the refusal of the argv's own search, no output holding a byte, as the CLI's run of the
+/// argv (`ROWS[1]`, whose run with a file the first test checks; without the other search's export
+/// the outcome here is the same, and the next test tells them apart).
 #[test]
 fn a_two_search_run_refuses_a_name_as_the_command_line() {
     let (_, _, query, subject, _) = ROWS[1];
@@ -421,10 +430,39 @@ fn a_two_search_run_refuses_a_name_as_the_command_line() {
     assert_eq!(groups.len(), 2, "two searches");
     assert_eq!(own_search(&groups), 1, "the argv's search is the second");
     let (result, streams) = run_files_of(&words, query, subject);
-    assert_eq!(
-        result.unwrap_err(),
-        "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTP; give a file name"
+    assert_eq!(result.unwrap_err(), BLASTP_STANDARD_OUTPUT);
+    assert!(files(&streams).is_empty());
+    for stream in [0, 6, 7] {
+        assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
+    }
+}
+
+/// LOSAT's refusal of `-export_search_strategy -` in BLASTP.
+const BLASTP_STANDARD_OUTPUT: &str = "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTP; give a file name";
+
+/// The two-search run of `a_two_search_run_refuses_a_name_as_the_command_line` on 700 queries
+/// whose outfmt 7 report is longer than a chunk, which the adapter sends as the search writes it
+/// (`emit::CHUNK`): the run without the option sends that much of stream 7, and the run with `-`
+/// sends no byte of any output, as its other search, which runs first, stops at its first request
+/// (decision F1w-5). Without that search's export it would run to its end and send its chunks
+/// before the argv's own search fails (review 2 of line RG F1w, N-c, mutation M4).
+#[test]
+fn a_two_search_run_that_refuses_a_name_sends_nothing_of_the_other_search() {
+    let title = "t".repeat(1600);
+    let query: Vec<u8> = (0..700)
+        .flat_map(|index| format!(">q{index} {title}\nMKTAYIAKQRQISFVKSHFS\n").into_bytes())
+        .collect();
+    let subject = fasta(ROWS[1].3);
+    let refused = row_argv(&ROWS[1], "-");
+    let (result, streams) = run_inputs_of(&refused[..refused.len() - 2], &query, &subject);
+    result.unwrap();
+    let sent = streams.get(&7).map_or(0, Vec::len);
+    assert!(
+        sent > crate::emit::CHUNK,
+        "stream 7 of the run without the option: {sent} bytes"
     );
+    let (result, streams) = run_inputs_of(&refused, &query, &subject);
+    assert_eq!(result.unwrap_err(), BLASTP_STANDARD_OUTPUT);
     assert!(files(&streams).is_empty());
     for stream in [0, 6, 7] {
         assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");

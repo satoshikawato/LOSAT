@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.83
+- Version: 1.84
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -419,8 +419,9 @@
   1.82 2026-11-22 (approved exception 26, makeprofiledb's word table past `Int4`, psiblast line item
   PS10a: the scaled word score threshold and the neighbouring-word score sums of `-dbtype rps` computed
   in 64 bits; proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
-  rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
-  maintainer's acceptance; and the explicit rejections, rule 3, of `losat makeprofiledb`, Owner-delegated,
+  rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」, and accepted
+  by the maintainer on 2026-11-23 by marking PR #1497 ready for review, as the PR asked; and the explicit
+  rejections, rule 3, of `losat makeprofiledb`, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.81; first
   1.72, then 1.73, 1.74, 1.75, 1.76, 1.77, 1.78, 1.79, 1.80, 1.81 and 1.82 at the merges of dev that brought line NP
   items M5a and M5b's 1.72, then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line
@@ -434,7 +435,14 @@
   it changes no code and no output of LOSAT, the behaviour being on dev already; the no-effect entry
   of `hard_ranges[1]` generalised to `hard_ranges[n]` after the last chunk; decided by the Owner on
   2026-11-23 13:49 JST, question Q-ALIGNEX, words 「推奨通り」, option A (recommended); line NP item
-  M4b-AX; numbered after 1.82)
+  M4b-AX; numbered after 1.82);
+  1.84 2026-11-23 (the rule-3 rejection of a query letter of `losat makeprofiledb` narrowed, psiblast line
+  item PS10c: NCBI's conversion gives every byte of the query a code, 255 for one that is no residue, so a
+  lower-case IUPACaa query is built as NCBI builds it, and only a code past the 28 residues is refused,
+  where NCBI's engine counts it, after the errors of the lengths and the matrix that NCBI gives first;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.83; first 1.79, then
+  1.83 at the merge of dev that brought 1.78 to 1.82 (psiblast line item PS10a, line RG item D5b-5, line NP items
+  O4c and M4c-1, psiblast line item PS12c), then 1.84 at the merge of dev that brought line NP item M4b-AX's 1.83)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2889,8 +2897,17 @@ file would differ, and NCBI's programs still could not open the database).
   - A frequency ratio whose value times 10^9 does not fit a 64-bit integer (row S_frhuge), a word
     score threshold that is not a number after the scaling, a `-scale` whose ceiling does not fit
     `int`: NCBI's conversions of them have no defined result.
-  - A profile with frequency ratios only whose query letter NCBI's sequence conversion leaves
-    uninitialized (a lower-case letter), whose matrix has no frequency ratios, or whose query has no
+  - A profile with frequency ratios only whose query has a residue that is none of the 28 NCBIstdaa
+    codes (version 1.84, PS10c): NCBIeaa other than a capital letter, `*` or `-`, IUPACaa other than a
+    letter of either case (NCBI's `CSeqConvert` tables give them 255), or an NCBIstdaa code of 28 or
+    more. NCBI's engine counts the query's composition in an array of the 28 codes
+    (`blast_stat.c:1962-1971,1984-2007`) and writes outside it; what follows depends on the code
+    (PS10c probes, `PR/ps10c/probe*`: SIGSEGV for every such byte of 42 to 90, ten bytes outside and
+    the codes 28, 29, 64, 128 and 255, malloc's abort on its corrupted heap for 31, a database for
+    32, with or without a later error such as a negative frequency ratio). A query of the wrong
+    length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
+    QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A profile with frequency ratios only whose matrix has no frequency ratios, or whose query has no
     ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
   - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends
     (review rows RF_BLOSUM45_s1, RF_BLOSUM50_s1, RF_BLOSUM80_s1, RF_tiny1).
@@ -3289,9 +3306,10 @@ out of the search are not read.
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 
 Version 1.82, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
-rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
-maintainer's acceptance. Its version is in the list at the top; elsewhere it is cited by its number and
-name, "approved exception 26 (makeprofiledb's word table past `Int4`)". Psiblast line item PS10a.
+rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; accepted by the
+maintainer on 2026-11-23 by marking PR #1497 ready for review, as the PR asked. Its version is in the list at
+the top; elsewhere it is cited by its number and name, "approved exception 26 (makeprofiledb's word table
+past `Int4`)". Psiblast line item PS10a.
 
 25. **A word score threshold that, times the profile's scaling factor, does not fit `Int4`, and
     neighbouring-word score sums past `Int4`.** makeprofiledb indexes the words of every profile of a

@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "agN",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "agN",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T08:18:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49632,
+  "bytes-to-cache": 230,
+  "files": [
+    "agN.pdb",
+    "agN.phr",
+    "agN.pin",
+    "agN.pnd",
+    "agN.pni",
+    "agN.pog",
+    "agN.pos",
+    "agN.pot",
+    "agN.psq",
+    "agN.ptf",
+    "agN.pto"
+  ]
+}

@@ -399,7 +399,18 @@
   there: silent differences, and for outfmt 10 a wrong refusal), and a call of LOSAT's library is
   refused where NCBI's runs of its formats stop at different places after such a sequence (M1:
   a format that ends the run there with one whose run goes on, or two that end at different
-  rows); line DBID item pfoff-4,
+  rows); review 2 of the item: NCBI gives a held sequence for such a Seq-align id from its data
+  loader, by the id's own type, accession and version, for the whole run, and from its scope, by
+  another type of the accession and version or a weak match (an accession without a version and
+  its versions, a name), until the end of the query batch (of the run in outfmt 5), and LOSAT
+  keeps the two apart (H1: a weak match is refused where outfmt 0, 5, 6, 7 and 18 wrote
+  `Unknown`; M1: a sequence of another type loaded in an earlier batch, which this version
+  refused at first, leaves it thrown outside outfmt 5, as NCBI does); such a refusal also takes
+  534 runs of the review's probe whose output LOSAT wrote as NCBI does before, where NCBI's
+  output with the holder equals the one without it (M2); and a call of the library is also
+  refused where a format that reads nothing of the sequence, or one whose run goes on and posts
+  nothing, comes with one whose run ends there, a pairwise report, or outfmt 15 or 16, which post
+  the error on standard error (M3); line DBID item pfoff-4,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.78; first
   1.75, then 1.77 and 1.79 at the merges of dev that brought line RG item D5b-3's 1.74, line NP item
   M5's 1.75 and line RG item X4b-2's 1.76, then line RG items D3c-3a's 1.77 and D5b-5's 1.78)
@@ -1663,25 +1674,45 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   which no later batch is prefetched) or outfmt 5 (since version 1.79, line DBID item pfoff-4: each
   `Hit` of such a sequence is the Seq-align id's FASTA form, `Unknown` and length 0, with HSPs of
   its scores, coordinates 0, the Seq-align's identities and no letters, and the report goes on);
-  in each of these formats it refuses such a sequence where the run loaded before it another
-  sequence of the database that holds an id that NCBI's scope takes for its Seq-align id and
-  whose own lookup does not fail (listed in the LMDB files that have the accession table), in
-  NCBI's order: a report before (a query, a batch, a psiblast round, a call of the library's
-  batches before, of which LOSAT has no record and takes any such sequence), or before it in its
-  report (a row, a `Hit`, a description line before the alignments), with the words of another
-  sequence that holds the Seq-align id (`... which database sequence N also holds (where both
-  are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)`): NCBI's
-  scope or data loader gives that sequence for the id and writes its record, without the lookup
-  (since version 1.79, review 1 of item pfoff-4, H1 and H2: `gi|5001|ref|NP_100001.1|` loaded in
-  the first query's report for `ref|NP_100001.1|` in the second's, also in outfmt 0, 6, 7, 10
-  and 18, where versions 1.47 to 1.76 wrote `Unknown` or refused outfmt 10 for a crash that
-  NCBI does not have; a holder that loads after the throw leaves it thrown, and a report after
-  a table's first row that ends NCBI's run at the null pointer of `sacc` or `saccver` is not
-  reached), and in a call of
-  LOSAT's library whose formats NCBI's runs of each stop at different places after such a
-  sequence (outfmt 0, outfmt 1 to 4, the formats that end the run there, at their rows, and
-  the others; since version 1.79, review 1 of item pfoff-4, M1: outfmt 5 with
-  `6 qseqid slen`), a
+  in each of these formats it refuses such a sequence where the run loaded before it, in NCBI's
+  order and while NCBI keeps it, another sequence of the database whose own lookup does not fail
+  and that NCBI gives for its Seq-align id without the lookup (listed in the LMDB files that have
+  the accession table), from one of two places: NCBI's data loader keeps the ids of every
+  sequence that it loaded for the whole run and gives that sequence for an id of the same type,
+  accession and version (`gi|5001|ref|NP_100001.1|` for `ref|NP_100001.1|`), and NCBI's scope
+  keeps the sequences that it loaded until the end of the query batch (in outfmt 5 until the end
+  of the run) and gives one of them also for an id of another type of the same accession and
+  version (`emb|NP_100001.1|` for `ref|NP_100001.1|`) or for a weak match (the versions of an
+  accession without one, `ref|NP_100001.1|` for `ref|NP_100001|`; an id of the same name,
+  `gb|AAA09999.1|LOCUSN` for `gb||LOCUSN`; in a version 5 database LOSAT cannot list the weak
+  matches of a name or of a `pir` or `prf` id and takes any sequence loaded in that time); before
+  it is a report before (a query, a batch, a psiblast round, a call of the library's batches
+  before, of which LOSAT has no record and takes any such sequence, each call a batch of its
+  own), or a place before it in its report (a row, a `Hit`, a description line before the
+  alignments; of two sequences with equal scores NCBI's reports show the later one in the
+  database first, and NCBI orders the databases of a `-db` list by name), with the words of
+  another sequence that holds the Seq-align id (`... which database sequence N also holds (where
+  both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)`) or
+  of holders that LOSAT cannot list: NCBI writes that sequence's record for it (since version
+  1.79, review 1 of item pfoff-4, H1 and H2: `gi|5001|ref|NP_100001.1|` loaded in the first
+  query's report for `ref|NP_100001.1|` in the second's, also in outfmt 0, 6, 7, 10 and 18,
+  where versions 1.47 to 1.76 wrote `Unknown` or refused outfmt 10 for a crash that NCBI does not
+  have; a holder that loads after the throw leaves it thrown, and a report after a table's first
+  row that ends NCBI's run at the null pointer of `sacc` or `saccver` is not reached; review 2 of
+  item pfoff-4, H1 and M1: the weak matches, which LOSAT wrote as `Unknown` in outfmt 0, 5, 6, 7
+  and 18, and the scope's holders only while NCBI keeps them, so a sequence of another type or a
+  weak match loaded in an earlier batch leaves it thrown outside outfmt 5, as NCBI's run does).
+  Where the holder comes first in its report, NCBI's output can equal what LOSAT wrote before
+  (a table's row of a thrown lookup repeats the previous row's names, here the holder's), and
+  those runs are refused too (review 2 of item pfoff-4, M2: 534 runs of the review's
+  probe that LOSAT wrote as NCBI does before; writing them would need the holder's record, which
+  LOSAT does not write). It refuses a call of
+  LOSAT's library whose formats NCBI's runs of each end apart after such a sequence, with
+  another exit status or another standard error, where the call has one result and one standard
+  error (outfmt 0, outfmt 1 to 4, the formats that end the run there, at their rows, outfmt 15
+  and 16, which post the error on standard error, and the others, those that read nothing of the
+  sequence among them; since version 1.79, review 1 of item pfoff-4, M1: outfmt 5 with
+  `6 qseqid slen`; review 2, M3: outfmt 8 with outfmt 0, outfmt 16 with outfmt 6), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

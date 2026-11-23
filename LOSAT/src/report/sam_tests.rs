@@ -72,9 +72,9 @@ fn document(
 ) -> String {
     let run = RunRecord {
         program: crate::blastinput::app::Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let query = SamSequence {
         record: SamId::Query(QueryRecord {
@@ -252,9 +252,9 @@ fn subject_seq(index: usize, id: &'static str) -> SamSequence<'static> {
 fn run_record() -> RunRecord<'static> {
     RunRecord {
         program: crate::blastinput::app::Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     }
 }
 

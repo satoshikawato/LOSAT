@@ -21,6 +21,7 @@ export {
   PLACE_NOWHERE,
   PLACE_RUN,
   ReactorAbi,
+  TOOL_FILES_STREAM,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
@@ -34,6 +35,7 @@ export {
   type RegistryFileInfo,
   type RegisteredInput,
   type StreamSink,
+  type ToolSink,
 } from './infra/reactor/abi.js';
 export { inspectReactor, type MemoryLimits, type ReactorArtifact, type ReactorKind } from './infra/reactor/artifact.js';
 export { engineBuildName, type EngineAssets, type ReactorAsset } from './infra/reactor/assets.js';

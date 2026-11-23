@@ -1864,8 +1864,9 @@ fn non_utf8_names() -> (OsString, OsString) {
 /// `files`, written to the standard error.
 #[cfg(unix)]
 fn conffile_start_writes(name: &OsStr, files: &MemoryFiles) -> (Vec<u8>, Option<i32>) {
+    // segmasker's application writes the report once (`replays_collected`).
     let start =
-        ApplicationStart::with_files("dustmasker", &[OsStr::new("-conffile"), name], &[], files);
+        ApplicationStart::with_files("segmasker", &[OsStr::new("-conffile"), name], &[], files);
     let mut stderr = Vec::new();
     let status = start
         .write_config_load(&mut DiagTarget::Stderr, &mut stderr)

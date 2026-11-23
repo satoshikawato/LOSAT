@@ -211,7 +211,7 @@ test('a query with a record left out: the command names the file of the records 
   await expectNative(page, 2, 'losat blastn -query q.fa -subject s.fa', [{ name: 'q.fa', bytes: QUERY }, { name: 's.fa', bytes: SUBJECT }]);
 });
 
-test('a subject with a record left out is named and offered as the query is; several files and pasted text are offered too (D22)', async ({ page }) => {
+test('a subject with a record left out is named and offered as the query is; several files and pasted text are offered too (D22)', async ({ page, browserName }) => {
   await program(page, 'blastn');
   await openFiles(page, 'query', [{ name: 'q.fa', text: QUERY }]);
   await openFiles(page, 'subject', [{ name: 's.fa', text: SUBJECT }]);
@@ -256,9 +256,13 @@ test('a subject with a record left out is named and offered as the query is; sev
   await expect(page.getByTestId('results-subject-from')).toHaveText('a.fa (2 records) and b.fa without b2 (1 of 2 records)');
   await expect(page.getByTestId('run-input-subject-from')).toHaveText('From a.fa (2 records) and b.fa without b2 (1 of 2 records)');
   // Pasted text with nothing left out has its From line too: the run's name for the file says nothing of what it is.
-  await expect(page.getByTestId('run-input-query-from')).toHaveText('From pasted text (3 records)');
+  await shownThen(page, 'run-details', 'run-details-combined', browserName, () =>
+    expect(page.getByTestId('run-input-query-from')).toHaveText('From pasted text (3 records)'),
+  );
   // The header's Subjects row says what the subject is made of, as the run picker does, not only the run's name for the file.
-  await expect(page.getByTestId('results-subjects')).toHaveText('a.fa + b.fa, some records left out, 3 records');
+  await shownThen(page, 'results-summary', 'results-header-combined', browserName, () =>
+    expect(page.getByTestId('results-subjects')).toHaveText('a.fa + b.fa, some records left out, 3 records'),
+  );
   await page.getByTestId('results-view-outputs').click();
   expect(await shownCommand(page, 2)).toBe(`${together} -outfmt 6`);
   await expect(page.getByTestId('outputs-query-file')).toContainText(`-query ${second.query} is pasted text (3 records).`);

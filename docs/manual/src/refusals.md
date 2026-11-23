@@ -421,6 +421,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ posts it with a stack trace of its own binary and stops with exit status 255. |
 | `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
 | An archive of the mapper | Refused. NCBI's programs write none. |
+| A value in an archive's results that LOSAT does not yet write in the output format: a NaN or an infinite real number (`-outfmt` `9`, `12`), a UTF8String (`9`, `12`), a NULL value or an OCTET STRING (`12`) | Refused, with the value and the format named. NCBI BLAST+ writes a NaN or an infinity in `-outfmt` `9`, and stops at one in `-outfmt` `12` with an error of its JSON stream. |
 | `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
 
 An empty `-rid`, the archive's other errors (an archive of PHI-BLAST is NCBI's engine error), the errors of `-outfmt` and a failed write of the output come as in NCBI. `BL2SEQ_LEGACY` changes nothing in `-outfmt` `8`, `9` and `12`, in NCBI as in LOSAT.
@@ -450,7 +451,7 @@ An empty `-rid`, the archive's other errors (an archive of PHI-BLAST is NCBI's e
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`).
 - `-html`.
-- `blast_formatter`: the output formats other than `8`, `9` and `12`, and archives in ASN.1 binary or XML.
+- `blast_formatter`: the output formats other than `8`, `9` and `12`, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

@@ -36,15 +36,16 @@ struct Case {
 }
 
 /// The variables of the first words of `words` of the form `NAME=value` (`NAME` in upper case,
-/// such as `BLASTDB`, where the taxonomy database is), taken out of `words`: the shell's
-/// assignments before the command.
+/// digits and `_`, not starting with a digit, such as `BLASTDB`, where the taxonomy database is,
+/// or `BL2SEQ_LEGACY`), taken out of `words`: the shell's assignments before the command.
 pub(crate) fn take_variables(words: &mut Vec<String>) -> Vec<(String, String)> {
     let mut variables = Vec::new();
     while let Some((name, value)) = words.first().and_then(|word| word.split_once('=')) {
         if name.is_empty()
+            || name.as_bytes()[0].is_ascii_digit()
             || !name
                 .bytes()
-                .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
         {
             break;
         }
@@ -440,7 +441,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 3] = [
+const REFUSED_ROWS: [RefusedRow; 5] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -468,6 +469,24 @@ const REFUSED_ROWS: [RefusedRow; 3] = [
         ncbi_status: 0,
         ncbi_err: "",
         losat_err: "output format 6 is not supported",
+    },
+    // A NaN or an infinite real number in the results: NCBI writes it in ASN.1 binary (its one
+    // special octet) and stops at it in JSON with an error of its stream.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_real_9",
+        kind: "Unwritable",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "output format 9 of a BLAST archive with a NaN or an infinite real number",
+    },
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_real_12",
+        kind: "Unwritable",
+        ncbi_status: 1,
+        ncbi_err: "invalid double: not a number",
+        losat_err: "output format 12 of a BLAST archive with a NaN or an infinite real number",
     },
 ];
 
@@ -732,7 +751,8 @@ fn blast_formatter_standard_output_failure_aborts() {
                 outfmt.to_string(),
             ],
             stdin: None,
-            variables: Vec::new(),
+            // The run is out of the fixtures: the archive's database `in/db/s3` from `BLASTDB`.
+            variables: vec![("BLASTDB".to_string(), dir.display().to_string())],
         };
         let binary = Path::new(env!("CARGO_BIN_EXE_losat"));
         let full = fs::OpenOptions::new()
@@ -772,7 +792,29 @@ fn blast_formatter_standard_output_failure_aborts() {
 fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Vec<String> {
     let example = example_binary("library_command_line");
     let mut differ = Vec::new();
-    let (mut refused, mut started) = (0, 0);
+    let mut started = 0;
+    let xmlhelp_refused: Streams = (
+        Vec::new(),
+        format!(
+            "Error: the option -xmlhelp runs on the command line of \
+             LOSAT's {refusal_name} only: the library API and the Web engine do not write \
+             NCBI's XML description of the arguments\n"
+        )
+        .into_bytes(),
+        1,
+    );
+    // `-xmlhelp` alone, also where the table has no row of it (blast_formatter's XML is not
+    // NCBI's bytes: it lists no `-rid`).
+    let xmlhelp = Case {
+        name: "xmlhelp_through_the_library".to_string(),
+        words: vec!["-xmlhelp".to_string()],
+        stdin: None,
+        variables: Vec::new(),
+    };
+    let got = run_binary(&example, program, &xmlhelp);
+    if got != xmlhelp_refused {
+        differ.push((xmlhelp.name.clone(), got, xmlhelp_refused.clone()));
+    }
     for case in cases_here(program) {
         let (out, err, status) = run_binary(&example, program, &case);
         let help = case
@@ -780,13 +822,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
             .iter()
             .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"));
         let expected = if help.is_some_and(|given| given == "-xmlhelp") {
-            refused += 1;
-            let text = format!(
-                "Error: the option -xmlhelp runs on the command line of \
-                 LOSAT's {refusal_name} only: the library API and the Web engine do not write \
-                 NCBI's XML description of the arguments\n"
-            );
-            (Vec::new(), text.into_bytes(), 1)
+            xmlhelp_refused.clone()
         } else {
             if ["-conffile", "-dryrun"].into_iter().any(|word| {
                 case.words
@@ -803,7 +839,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
             differ.push((case.name.clone(), got, expected));
         }
     }
-    assert!(refused > 0 && started > 0, "{program}: {refused} {started}");
+    assert!(started > 0, "{program}: no row of -conffile or -dryrun");
     if !differ.is_empty() {
         eprintln!("{}", describe(&differ));
     }

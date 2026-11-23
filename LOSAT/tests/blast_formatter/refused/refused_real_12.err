@@ -1,0 +1,1 @@
+Error: output format 12 of a BLAST archive with a NaN or an infinite real number in its results is not supported by LOSAT's BLAST_FORMATTER

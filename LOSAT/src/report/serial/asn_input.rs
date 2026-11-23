@@ -125,13 +125,20 @@ pub(crate) const VECTOR_RESERVE_LENGTH_ERROR: &str = "vector::reserve";
 /// What LOSAT's own messages call the document that a reader reads, the reader, the input that a
 /// length can pass the end of, and the part of NCBI's program that allocates what a length asks
 /// for (the lexical layer's refusals, `asn_text_reader::Reader::new`, and [`reserve`]'s): the one
-/// owner of those words for each caller.
+/// owner of those words for each caller; and whether NCBI's program reads the objects of a file
+/// with one object stream (`one_stream`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Names {
     pub(crate) document: &'static str,
     pub(crate) reader: &'static str,
     pub(crate) input: &'static str,
     pub(crate) allocator: &'static str,
+    /// Whether NCBI's program reads all the objects of a file with one object stream, whose line
+    /// count goes on from one object to the next (blast_formatter's archive reader: observed,
+    /// line RG item F3, agent C6, 2026-11-23, a bad byte of an archive's second object posted
+    /// with the line of the file), instead of a new stream for each object
+    /// (`read::ObjectStream`, `Input::new_object`).
+    pub(crate) one_stream: bool,
 }
 
 impl Names {
@@ -141,6 +148,7 @@ impl Names {
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {
@@ -148,6 +156,7 @@ impl Names {
         reader: "mask data reader",
         input: "file",
         allocator: "makeblastdb",
+        one_stream: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
@@ -156,6 +165,7 @@ impl Names {
         reader: "delayed member reader",
         input: "member's bytes",
         allocator: "NCBI's reader",
+        one_stream: false,
     };
     /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`).
     pub(crate) const STRATEGY: Names = Names {
@@ -163,6 +173,7 @@ impl Names {
         reader: "search strategy reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
     };
     /// A BLAST archive of blast_formatter's `-archive` (`report::archive::read`).
     pub(crate) const ARCHIVE: Names = Names {
@@ -170,6 +181,7 @@ impl Names {
         reader: "ASN.1 text reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: true,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]
@@ -178,6 +190,7 @@ impl Names {
         reader: "test reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
     };
 }
 
@@ -339,11 +352,10 @@ pub(crate) trait Input {
     const ENCODING: Encoding;
     /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
     fn position(&self) -> StreamPosition;
-    /// The state of the stream at the next object: in binary a new object stream (its byte count
-    /// and data limits start again); in text the stream goes on (its line count too: NCBI's
-    /// archive reader keeps one object stream for all the objects of the file, and its posts
-    /// name the line of the file; `TextInput::restart_lines` for a program that reads each object
-    /// with a stream of its own).
+    /// The state of a new object stream at the next byte (each object of a file is read by a
+    /// stream of its own in NCBI: its line count, or its byte count and data limits, start
+    /// again), or, in text, of the one stream of a program that reads all the objects of a file
+    /// with it (`Names::one_stream`: the line count goes on).
     fn new_object(&mut self);
     /// `EndOfData()`: whether no object follows (binary: no byte left; text: nothing but white
     /// space and comments, or what `SkipWhiteSpace` stops at): blast_formatter's archive reader
@@ -435,6 +447,8 @@ pub(crate) struct TextInput<S: AsnSource> {
     block_start: bool,
     /// `GetStackDepth()` (`Input::set_stack_depth`).
     depth: usize,
+    /// `Names::one_stream`: the line count goes on at a new object.
+    one_stream: bool,
 }
 
 /// A `ThrowError` of `CObjectIStreamAsn` (objistrasn.cpp) at `line` of `function`.
@@ -478,18 +492,13 @@ const SKIP_BYTE_BLOCK: ThrowSite =
 const EXPECT_CHOICE: ThrowSite = asn_site(203, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::Expect");
 
 impl<S: AsnSource> TextInput<S> {
-    /// The line count of a new `CObjectIStreamAsn` (line 1), for a program that reads each object
-    /// of a file with a stream of its own (makeblastdb's mask data, `writedb::mask_info`).
-    pub(crate) fn restart_lines(&mut self) {
-        self.r.line = 1;
-    }
-
     /// The text input over `src`, which LOSAT's own messages call by `names` (`Reader::new`).
     pub(crate) fn new(src: S, names: Names) -> Self {
         TextInput {
             r: Reader::new(src, names.document, names.reader),
             block_start: false,
             depth: 0,
+            one_stream: names.one_stream,
         }
     }
 
@@ -617,11 +626,13 @@ impl<S: AsnSource> Input for TextInput<S> {
         StreamPosition::Line(self.r.line as u64)
     }
 
-    /// The state of `CObjectIStreamAsn` at the next object: no block started, the line count
-    /// going on (observed: blast_formatter 2.17.0 posts a bad byte of the second object of an
-    /// archive with the line of the file, line RG item F3, agent C6, 2026-11-23). The bytes
+    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started; with
+    /// `one_stream`, the one stream's state: no block started, the line count going on. The bytes
     /// before it are not read again (a stream keeps about one object, not the objects before it).
     fn new_object(&mut self) {
+        if !self.one_stream {
+            self.r.line = 1;
+        }
         self.block_start = false;
         self.r.src.release_before(self.r.pos);
     }

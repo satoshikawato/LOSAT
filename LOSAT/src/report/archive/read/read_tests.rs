@@ -103,12 +103,18 @@ const EDITED: [&str; 6] = [
     "fixtures/rpsbproc/arch/mfirst_delta.asn",
 ];
 
-/// The archives of blast_formatter's rows that are broken on purpose (`blast_formatter/cases.tsv`:
-/// a line of garbage after the archive, a file cut in its second object): the rows of NCBI's read
-/// errors.
-const BROKEN: [&str; 2] = [
+/// The archives of blast_formatter's rows that are broken or edited by hand on purpose
+/// (`blast_formatter/cases.tsv`): a line of garbage after the archive, a file cut in its second
+/// object (the rows of NCBI's read errors), a byte that NCBI posts in a title of the first or the
+/// second object (the line of its post), and the review's requests with both taxid lists (written
+/// by hand, a list on one line).
+const BROKEN: [&str; 6] = [
     "blast_formatter/in/garbage.asn",
     "blast_formatter/in/cut2.asn",
+    "blast_formatter/in/bad1.asn",
+    "blast_formatter/in/bad2.asn",
+    "blast_formatter/in/tax_both.asn",
+    "blast_formatter/in/tx5_both.asn",
 ];
 
 /// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`, `{db_dir}`: an

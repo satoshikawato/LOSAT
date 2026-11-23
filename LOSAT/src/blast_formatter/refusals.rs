@@ -55,6 +55,14 @@ pub(crate) enum Refusal {
     /// the mapper; NCBI's programs write no such archive (PHI-BLAST's archives end with NCBI's
     /// engine error instead, `search_program::blast_type`).
     Program(&'static str),
+    /// A value in an archive's results that LOSAT's encoder of the output format does not write
+    /// (`report::serial::SerialError`), what it is and the format: a NaN or an infinite real
+    /// number in `-outfmt 9` and `12`, which NCBI writes in 9 as its one special octet and stops
+    /// at in 12 with an error of its JSON stream (agent C6 of line RG item F3, 2026-11-23,
+    /// `remaining-gaps-20261112/F/f3/tmp/c6/pd`), and the values the encoders leave unwritten
+    /// (a UTF8String, a NULL value, an OCTET STRING, a member read into a delay buffer). The
+    /// bytes of the Seq-annot that went to the output before it stay written.
+    Unwritable(&'static str, i32),
 }
 
 impl Refusal {
@@ -108,6 +116,11 @@ impl Refusal {
                 "a BLAST archive of {task} is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
+            Refusal::Unwritable(what, format) => format!(
+                "output format {format} of a BLAST archive with {what} in its results is not \
+                 supported by LOSAT's {}",
+                super::PROGRAM
+            ),
         }
     }
 
@@ -132,6 +145,7 @@ impl Refusal {
             Refusal::FatalMessage => "severity Fatal".to_string(),
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
+            Refusal::Unwritable(..) => "an archive's results".to_string(),
         }
     }
 }
@@ -176,6 +190,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::FatalMessage,
         Refusal::Prefetch,
         Refusal::Program("mapr2g"),
+        Refusal::Unwritable("", 12),
     ]);
     refusals
 }

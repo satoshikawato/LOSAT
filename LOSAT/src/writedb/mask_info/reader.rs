@@ -1463,7 +1463,6 @@ impl MaskFileReader {
         match &mut self.source {
             Source::Text(rd) => {
                 rd.inp.new_object();
-                rd.inp.restart_lines();
                 let result = text(rd);
                 self.posts.append(&mut rd.posts);
                 result

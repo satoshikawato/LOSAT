@@ -219,10 +219,12 @@ fn the_run_s_errors_go_to_the_logfile() {
     );
     // LOSAT's refusals stay on the standard error stream.
     let (status, _, err) = run_words(&["-logfile", &log_name, "-rid", "X"], b"");
-    assert_eq!(status, 2);
-    assert!(
-        err.starts_with("error: the NCBI BLAST+ option -rid"),
-        "{err}"
+    assert_eq!(
+        (status, err),
+        (
+            1,
+            format!("Error: {}\n", super::refusals::Refusal::Rid.reason())
+        )
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }

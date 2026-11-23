@@ -783,8 +783,23 @@ fn write_streamed(
             };
             write_document_posting(format, byte, &document, None, buf, &mut skip, diagnostics)
         }
-        Err(error) => Err(SeqAlignError::Serial(error).into()),
+        Err(error) => Err(unwritable(error, format)),
     }
+}
+
+/// The refusal of a value of the Seq-annot that the plain encoder of `format` stopped on, other
+/// than a byte that NCBI writes as `#` (`Refusal::Unwritable`); an error of another kind is the
+/// writer's.
+fn unwritable(error: SerialError, format: SerialFormat) -> anyhow::Error {
+    let what = match error {
+        SerialError::JsonDouble(_) | SerialError::NonFiniteReal => {
+            "a NaN or an infinite real number"
+        }
+        SerialError::OctetString => "an OCTET STRING",
+        SerialError::Unwritten(what) => what,
+        other => return SeqAlignError::Serial(other).into(),
+    };
+    Refusal::Unwritable(what, format.outfmt()).into()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040

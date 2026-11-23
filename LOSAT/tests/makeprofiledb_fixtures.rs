@@ -2,7 +2,8 @@
 //! `tests/fixtures/makeprofiledb/cases.tsv` runs in its own copy of `in/` and gives NCBI's standard
 //! output, standard error (in LOSAT's words, `losat::wording`) and exit status
 //! (`ncbi/<row>.{out,err,rc}`) and, for each file the run wrote, its size and FNV-1a digest
-//! (`ncbi/<row>.files`; the date of a `.pin` or `.pal` file replaced by `<DATE>`, its size `*`),
+//! (`ncbi/<row>.files`; the date of a `.pin` or `.pal` file replaced by `<DATE>`, its size `*`;
+//! on Windows the files read back to Linux's, `as_on_linux`),
 //! frozen from the oracle of row PS10a (2026-11-21; README.md of the directory). NCBI is not run
 //! here. Then `losat rpsblast` on databases that `losat makeprofiledb` built gives NCBI rpsblast's
 //! bytes on NCBI makeprofiledb's databases (`rps/`).
@@ -101,6 +102,74 @@ fn masked(name: &str, bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:438-448
+/// The bytes `bytes` of the file `name` that a run wrote, as LOSAT writes them on Linux, the
+/// platform of NCBI's frozen files. On Windows LOSAT writes what NCBI's code writes there
+/// (`writedb::platform`; not checked against a makeprofiledb.exe): an LMDB file (`.pdb`, `.ptf`)
+/// is as long as its map (500000 bytes, grown where the data needs more), which its meta pages
+/// record, and the LMDB name of a version 5 index file (`.pin`) is the database's name after its
+/// last `\`. The bytes are read back to Linux's after the check that the file is as long as the
+/// map of its newer meta page: the file ends after that meta page's last page, and the map size
+/// of both meta pages is Linux's (700000000 bytes for `.pdb`, 300000000 for `.ptf`); the LMDB name
+/// is the database's name after its last `/`.
+fn as_on_linux(name: &str, bytes: Vec<u8>) -> Vec<u8> {
+    if !cfg!(windows) {
+        return bytes;
+    }
+    if name.ends_with(".pin") {
+        let int4 = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        // Version 5: the version, the molecule type, the volume, the title, then the LMDB name,
+        // each string after its length. A refused run leaves an empty file.
+        if bytes.len() < 16 || int4(0) != 5 {
+            return bytes;
+        }
+        let lmdb_at = 12 + 4 + int4(12);
+        let lmdb_end = lmdb_at + 4 + int4(lmdb_at);
+        let lmdb = &bytes[lmdb_at + 4..lmdb_end];
+        let base = lmdb.rsplit(|&byte| byte == b'/').next().unwrap();
+        let mut out = bytes[..lmdb_at].to_vec();
+        out.extend_from_slice(&(base.len() as u32).to_be_bytes());
+        out.extend_from_slice(base);
+        out.extend_from_slice(&bytes[lmdb_end..]);
+        return out;
+    }
+    let linux_map_size: u64 = if name.ends_with(".pdb") {
+        700_000_000
+    } else if name.ends_with(".ptf") {
+        300_000_000
+    } else {
+        return bytes;
+    };
+    // An `MDB_meta` after the page's header of 16 bytes: the magic number and the version (4
+    // bytes each), the address (8), the map size (8), two `MDB_db` (48 bytes each), the last page
+    // (8), the transaction id (8); LMDB's pages on Windows are of 4096 bytes.
+    const PAGE: usize = 4096;
+    const MAP_SIZE: usize = 16 + 4 + 4 + 8;
+    const LAST_PAGE: usize = MAP_SIZE + 8 + 2 * 48;
+    const TXNID: usize = LAST_PAGE + 8;
+    let field = |page: usize, at: usize| {
+        u64::from_le_bytes(bytes[page * PAGE + at..][..8].try_into().unwrap())
+    };
+    // A file without its two meta pages (a run refused before the environment was made) stays
+    // as it is.
+    if bytes.len() < 2 * PAGE {
+        return bytes;
+    }
+    let newer = usize::from(field(1, TXNID) > field(0, TXNID));
+    assert_eq!(
+        bytes.len() as u64,
+        field(newer, MAP_SIZE),
+        "{name}: an LMDB file on Windows is as long as its map"
+    );
+    let end = (field(newer, LAST_PAGE) as usize + 1) * PAGE;
+    let mut out = bytes[..end].to_vec();
+    for page in 0..2 {
+        out[page * PAGE + MAP_SIZE..][..8].copy_from_slice(&linux_map_size.to_le_bytes());
+    }
+    out
+}
+
 /// A command of `binary` with no LOSAT, NCBI or BLAST variable, run in `dir`.
 fn command(binary: &Path, dir: &Path) -> Command {
     let mut command = Command::new(binary);
@@ -167,7 +236,7 @@ fn run(dir: &Path, words: &[String]) -> Run {
         .unwrap();
     let mut files = String::new();
     for path in files_below(dir) {
-        let bytes = fs::read(dir.join(&path)).unwrap();
+        let bytes = as_on_linux(&path, fs::read(dir.join(&path)).unwrap());
         match masked(&path, &bytes) {
             Some(masked) => files.push_str(&format!("{path}\t*\t{:016x}\n", fnv1a64(&masked))),
             None => files.push_str(&format!(

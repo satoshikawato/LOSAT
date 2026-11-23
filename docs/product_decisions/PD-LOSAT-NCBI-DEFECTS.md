@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.87
+- Version: 1.88
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -448,15 +448,26 @@
   maintainer (Owner's answer 「Q-D1c-R2=A」, 2026-11-22 22:4x JST); numbered after 1.71; first
   1.72, then 1.74, 1.78, 1.81, 1.82, 1.83 and 1.85 at the merges of dev that brought 1.72 and 1.73,
   then 1.74 to 1.77, then 1.78 to 1.80, then 1.81, then 1.82, then 1.83 and 1.84);
-  1.87 2026-11-23 (TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a frame
+  1.86 2026-11-23 (two rule-3 rejections of `losat makeprofiledb`, psiblast line item PS10d: a
+  query in a nucleotide coding whose data is shorter than NCBI's writer reads for its length, and
+  in a profile with frequency ratios only a query whose `Seq-data` is a gap; a query in `iupacna`,
+  `ncbi2na` or `ncbi4na` of enough bytes is built as NCBI builds it, and in a profile with
+  frequency ratios only the query of every other coding gets NCBI's conversion: `Unknown
+  conversion.` for a nucleotide coding, NCBI8aa's bytes as its codes, the unknown exception for
+  NCBIpna and NCBIpaa; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.85; first 1.80, then 1.84 at the merge of psiblast line item PS10c, which brought
+  dev's 1.80 to 1.82 and PS10c's 1.83, then 1.85 at the merge of dev that brought line NP item
+  M4b-AX's 1.83 and PS10c's 1.84, then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85);
+  1.88 2026-11-23 (TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a frame
   of more than 5,000,000 residues, line NP item M4b-T2: the scan of a chunk's later range that
   starts before the chunk, and of the ranges after a first range raised to one word on the
   frame's last letter, ported, rule 4; a TBLASTN gapped search of a chunk that saves an initial
   alignment starting before the chunk, on which NCBI crashes or starts its gapped alignment
   outside the chunk, an explicit rejection, rule 3; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.86, line NP item M4b-3c (open work, #1523); first 1.81, then 1.82 at
+  2026-09-29, restated 2026-10-07; numbered after 1.87, line NP item M4b-3c (open work, #1523); first 1.81, then 1.82 at
   the merge of dev that brought 1.81, then 1.84 after dev's 1.82 (line PS item PS10a) and M4b-AX's 1.83, then 1.86
-  after dev's 1.84 (psiblast line item PS10c), then 1.87 after dev's 1.85 (line RG item D1c-1) and M4b-3c's 1.86)
+  after dev's 1.84 (psiblast line item PS10c), then 1.87 after dev's 1.85 (line RG item D1c-1), then 1.88 after
+  dev's 1.86 (psiblast line item PS10d) and M4b-3c's 1.87)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2655,9 +2666,9 @@ file would differ, and NCBI's programs still could not open the database).
   X-short-tbx-link).
 
 - TBLASTN with `-db_soft_mask`, a gapped search of a chunk that saves an initial alignment starting
-  before the chunk (version 1.87, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
+  before the chunk (version 1.88, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). Masks stored out of order on a frame of more than
-  5,000,000 residues let the scan find words before the chunk (the rule-4 item of version 1.87); the
+  5,000,000 residues let the scan find words before the chunk (the rule-4 item of version 1.88); the
   one-hit extension of such a word (`-window_size 0`), or a two-hit extension whose word lies wholly
   before the chunk, gives an initial alignment that starts there. NCBI's gapped start reads the
   subject at that start taken as `Uint4` (`blast_gapalign.c:3936-3942,3393-3439`), about 4 GiB past
@@ -2956,6 +2967,25 @@ file would differ, and NCBI's programs still could not open the database).
     32, with or without a later error such as a negative frequency ratio). A query of the wrong
     length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
     QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
+    1.86, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
+    `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than
+    `ceil(length / 2)` bytes (four letters or more short of an even length, three of an odd one).
+    NCBI's `x_CookSequence` converts the kept sequence when it is published
+    (`writedb_convert.cpp:444-528,569-610`; at the next query, at the close, or at the close after an
+    error, `writedb_impl.cpp:100-108,158-180,324-331`), and its checks of the size are debug-only: it
+    reads past the data (fixture inputs `l_QR01.lst`-`l_QR05.lst`: `.psq` bytes that differ between
+    two runs, SIGSEGV for empty `ncbi2na`). The data of
+    enough bytes (more than the length needs, unused bits set, iupacna up to three letters short of an
+    even length and two of an odd one, whose read ends at the string's zero or before it) is NCBI's
+    (fixture rows QD01-QD40).
+  - A profile with frequency ratios only whose query's `Seq-data` is a `gap` (version 1.86, PS10d):
+    NCBI's conversion of the query to NCBIstdaa looks its coding up in a table of the `CSeqUtil`
+    codings that ends before the gap's number (`seqport_util.cpp:1947-1959,2032-2035`) and reads
+    past it. The other codings that the conversion meets are NCBI's (fixture rows QD41-QD46:
+    `Unknown conversion.` for NCBI8na, NCBI8aa's bytes as the query's codes, the unknown exception
+    of NCBIpna and NCBIpaa, which the table has no coding for; then the writer's error for the
+    coding it cannot store, posted or reported where NCBI's is).
   - A profile with frequency ratios only whose matrix has no frequency ratios, or whose query has no
     ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
   - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends
@@ -3553,7 +3583,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT
   rejected them before Session S07+++b.
 - TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a subject frame of more than
-  5,000,000 residues (version 1.87, 2026-11-23, line NP item M4b-T2; Owner-delegated, standing
+  5,000,000 residues (version 1.88, 2026-11-23, line NP item M4b-T2; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). NCBI moves a chunk's ranges to the chunk's offsets
   and raises only the first one's left to 0 (`blast_engine.c:286-307`), so a later range of masks
   stored out of order can start before the chunk (NCBI cuts each translated frame into chunks of

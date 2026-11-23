@@ -357,6 +357,55 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A `-conffile` name that is not UTF-8 (no such file) is NCBI's post with the name's bytes, exit
+/// status 255, as in NCBI BLAST+ 2.17.0 (line RG K4i-2c, frozen 2026-11-23: dustmasker,
+/// segmasker, convert2blastmask, blastdbcmd, makembindex and windowmasker with `-conffile
+/// conf\xff`); the start code is the same for the search programs. The name is only an argument:
+/// no file with it is made.
+#[test]
+fn a_conffile_name_that_is_not_utf8_aborts_with_its_bytes() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = scratch("conffile-bytes");
+    let name = std::ffi::OsStr::from_bytes(b"conf\xff");
+    let expected = b"Critical: (106.23) Registry file \"conf\xff\" not found, aborting.\n";
+    let searches: [(&str, [&str; 2]); 3] = [
+        ("dustmasker", ["-in", "arch_tbx_q.fna"]),
+        ("segmasker", ["-in", "arch_bp_q.faa"]),
+        ("blastn", ["-query", "arch_tbx_q.fna"]),
+    ];
+    for (program, input) in searches {
+        for joined in [false, true] {
+            let mut command = Command::new(BIN);
+            command
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", "/nonexistent")
+                .current_dir(&dir)
+                .arg(program)
+                .args(input)
+                .stdin(std::process::Stdio::null());
+            if joined {
+                let mut word = b"-conffile=".to_vec();
+                word.extend_from_slice(name.as_bytes());
+                command.arg(std::ffi::OsStr::from_bytes(&word));
+            } else {
+                command.arg("-conffile").arg(name);
+            }
+            let aborted = command.output().unwrap();
+            assert_eq!(
+                (
+                    aborted.status.code(),
+                    aborted.stderr.as_slice(),
+                    aborted.stdout.len()
+                ),
+                (Some(255), &expected[..], 0),
+                "{program} joined {joined}"
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// NCBI BLAST+ 2.17.0 (probes `conf_missing`, `conf_dir`, `conf_empty`, `conf_log`, `conf_h`,
 /// `conf_ver`, `conf_two_bad`, `makeblastdb.conf_missing`): a `-conffile` that is not a file is
 /// NCBI's critical post where the diagnostics go, then its abort (exit status 255), before `-h`

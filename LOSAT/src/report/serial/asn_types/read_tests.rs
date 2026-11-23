@@ -957,7 +957,7 @@ const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
     (
         named::SEQ_INST,
         "Seq-inst ::= { repr raw, mol aa, length 12",
-        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 239, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStreamAsn::SkipWhiteSpace\") }, message: \"line 1: end of file\\n\", extra: Some(\" at Seq-inst.length\") }])), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 239, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStreamAsn::SkipWhiteSpace\") }, message: \"line 1: end of file\\n\", extra: Some(\" at Seq-inst.length\"), main_text: true }])), [])",
     ),
     (named::SEQ_ID, "Seq-id ::= gi 9223372036854775807", "(Ok(SeqId(Gi(9223372036854775807))), [])"),
     (named::SEQ_ID, "Seq-id ::= gi\r\n9223372036854775808", "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-id\", extra: None, main_text: false }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1500, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoice, Object type= Seq-id\", extra: None, main_text: false }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1498, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoiceVariant, Member name= gi\", extra: None, main_text: false }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") }, message: \"number overflow in line 2\", extra: None, main_text: true }])), [])"),
@@ -970,17 +970,17 @@ const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id -\n5 } } } }",
-        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1042, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::SkipSNumber\") }, message: \"line 1: bad signed integer in line 1\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag.id\") }])), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistrasn.cpp\", line: 1042, kind: \"CSerialException::eFormatError\", function: Some(\"ncbi::CObjectIStreamAsn::SkipSNumber\") }, message: \"line 1: bad signed integer in line 1\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag.id\"), main_text: true }])), [])",
     ),
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id 5",
-        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 606, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStream::HandleEOF\") }, message: \"line 1:  Frame type= eFrameChoiceVariant, Member name= id\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag\") }])), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 606, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStream::HandleEOF\") }, message: \"line 1:  Frame type= eFrameChoiceVariant, Member name= id\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag\"), main_text: true }])), [])",
     ),
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id +",
-        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 606, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStream::HandleEOF\") }, message: \"line 1:  Frame type= eFrameChoiceVariant, Member name= id\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag\") }])), [])",
+        "(Err(Serial([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 606, kind: \"CSerialException::eEOF\", function: Some(\"ncbi::CObjectIStream::HandleEOF\") }, message: \"line 1:  Frame type= eFrameChoiceVariant, Member name= id\", extra: Some(\" at Auth-list.names.std.[].[].name.dbtag.tag\"), main_text: true }])), [])",
     ),
 ];
 

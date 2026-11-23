@@ -363,11 +363,22 @@ const IUPACAA_TO_NCBISTDAA: [u8; 256] = iupacaa_to_ncbistdaa_table();
 /// the data, whatever `Seq-inst.length` says), `None` for another coding.
 pub(crate) fn protein_codes(seq_data: &SeqData) -> Option<Vec<u8>> {
     match seq_data {
-        SeqData::Ncbieaa(v) => Some(convert_1_to_1(v, &NCBIEAA_TO_NCBISTDAA)),
-        SeqData::Iupacaa(v) => Some(convert_1_to_1(v, &IUPACAA_TO_NCBISTDAA)),
+        SeqData::Ncbieaa(v) => Some(ncbieaa_codes(v)),
+        SeqData::Iupacaa(v) => Some(iupacaa_codes(v)),
         SeqData::Ncbistdaa(v) => Some(v.clone()),
         SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other => None,
     }
+}
+
+/// `CSeqConvert` from ncbieaa to ncbistdaa (`CEaaToStdaa`): 255 for a byte that is no residue.
+pub(crate) fn ncbieaa_codes(letters: &[u8]) -> Vec<u8> {
+    convert_1_to_1(letters, &NCBIEAA_TO_NCBISTDAA)
+}
+
+/// `CSeqConvert` from iupacaa to ncbistdaa (`CIupacaaToStdaa`): 255 for a byte that is no
+/// letter.
+pub(crate) fn iupacaa_codes(letters: &[u8]) -> Vec<u8> {
+    convert_1_to_1(letters, &IUPACAA_TO_NCBISTDAA)
 }
 
 fn convert_1_to_1(src: &[u8], table: &[u8; 256]) -> Vec<u8> {

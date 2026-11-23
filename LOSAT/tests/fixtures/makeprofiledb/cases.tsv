@@ -64,3 +64,10 @@ RL03	-in in/l_lneg3.lst -out db
 RL04	-in in/l_lneg1r.lst -out db
 RL06	-in in/l_lneg1f.lst -out db
 RL07	-in in/l_lneg_later.lst -out db
+QC01	-in in/l_q_il.lst -out db
+QC02	-in in/l_q_mp.lst -out db
+QC03	-in in/l_q_ml.lst -out db
+QC04	-in in/l_q_ms30.lst -out db
+QC05	-in in/l_q_xp.lst -out db
+QC06	-in in/l_q_ng.lst -out db
+QC07	-in in/l_q_ngi.lst -out db

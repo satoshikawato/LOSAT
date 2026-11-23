@@ -87,9 +87,9 @@ fn run_losat(args: &[&str]) -> Output {
 fn cli_help_and_version_are_available_without_inputs() {
     for args in [
         vec!["--help"],
-        vec!["blastn", "--help"],
-        vec!["tblastx", "--help"],
-        vec!["blastp", "--help"],
+        vec!["blastn", "-help"],
+        vec!["tblastx", "-help"],
+        vec!["blastp", "-help"],
     ] {
         let output = run_losat(&args);
         assert!(
@@ -1057,7 +1057,7 @@ fn makeblastdb_parse_seqids_hash_index_and_taxid_map() {
         );
     }
     remove(&["phr", "pin", "pjs", "pog", "psd", "psi", "psq"]);
-    // `-taxid_map` requires `-parse_seqids` and excludes `-taxid`: LOSAT's parser, exit 2.
+    // `-taxid_map` requires `-parse_seqids` and excludes `-taxid`: NCBI's argument reader, exit 1.
     for words in [
         vec!["-taxid_map", map_text],
         vec!["-parse_seqids", "-taxid_map", map_text, "-taxid", "1"],
@@ -1073,7 +1073,7 @@ fn makeblastdb_parse_seqids_hash_index_and_taxid_map() {
         ];
         argv.extend(words.iter().copied());
         let output = run_losat(&argv);
-        assert_eq!(output.status.code(), Some(2), "{words:?}: {output:?}");
+        assert_eq!(output.status.code(), Some(1), "{words:?}: {output:?}");
         assert!(!std::path::Path::new(&format!("{base_text}.psq")).exists());
     }
     // A GI-only sequence between sequences with other ids: makeblastdb 2.17.0 aborts on version 5.
@@ -1357,7 +1357,7 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
         assert!(output.stderr.is_empty(), "-use_index {value}");
     }
     let refused = run(&[&subject[..], &["-use_index", "maybe"]].concat());
-    assert_eq!(refused.status.code(), Some(2));
+    assert_eq!(refused.status.code(), Some(1));
     // A task other than megablast ignores it.
     let blastn = [
         "blastn", "-query", "q.fna", "-db", "db/plain", "-outfmt", "6", "-task", "blastn",
@@ -1556,9 +1556,9 @@ fn real_arguments_and_pssm_spaces_read_as_ncbis() {
     }
     for value in ["1x", "1e+", "2,5", "inf", "nan(5)"] {
         let output = run(&[&blastn[..], &["-evalue", value]].concat());
-        assert_eq!(output.status.code(), Some(2), "{value}: {output:?}");
+        assert_eq!(output.status.code(), Some(1), "{value}: {output:?}");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("expected a number"),
+            String::from_utf8_lossy(&output.stderr).contains("Argument cannot be converted"),
             "{value}: {output:?}"
         );
     }
@@ -1571,7 +1571,7 @@ fn real_arguments_and_pssm_spaces_read_as_ncbis() {
     assert_eq!(threshold_hex.stdout, threshold_16.stdout);
     for value in ["1e", "12345678901234567890e"] {
         let output = run(&[&blastp[..], &["-threshold", value]].concat());
-        assert_eq!(output.status.code(), Some(2), "{value}: {output:?}");
+        assert_eq!(output.status.code(), Some(1), "{value}: {output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("Illegal value"),
             "{value}: {output:?}"

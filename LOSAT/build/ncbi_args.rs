@@ -232,12 +232,12 @@ const GENETIC_CODE_32: [(&str, &str); 1] = [("tblastn", "db_gencode")];
 // No NCBI counterpart: line RG DECISIONS K4i-2b-1 (2). The values of a set (`CArgAllow_Strings`,
 // `CArgAllowStringSet`) in the order in which LOSAT's descriptions of a program (`api::describe`,
 // LOSAT Web's) list them, where it is not the XML's: blastn's `-task` and `-template_type` in the
-// order of NCBI's Web page (docs/web/ncbi_ui_mapping.md), `-strand` (`*`: of every program that has
-// it) as LOSAT listed it. NCBI's reader and usage keep the XML's order. The build checks that each
-// row is a permutation of its key's set.
-const DISPLAY_ORDER: [(&str, &str, &[&str]); 3] = [
+// order of NCBI's Web page (docs/web/ncbi_ui_mapping.md), the search programs' `-strand` as LOSAT
+// listed it. NCBI's reader and usage keep the XML's order. The build checks that each row is a
+// permutation of the set of the key of each of its programs.
+const DISPLAY_ORDER: [(&[&str], &str, &[&str]); 3] = [
     (
-        "blastn",
+        &["blastn"],
         "task",
         &[
             "megablast",
@@ -247,9 +247,13 @@ const DISPLAY_ORDER: [(&str, &str, &[&str]); 3] = [
             "rmblastn",
         ],
     ),
-    ("*", "strand", &["both", "plus", "minus"]),
     (
-        "blastn",
+        &["blastn", "blastx", "tblastx"],
+        "strand",
+        &["both", "plus", "minus"],
+    ),
+    (
+        &["blastn"],
         "template_type",
         &["coding", "optimal", "coding_and_optimal"],
     ),
@@ -492,11 +496,13 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
         tables.program(program, &arguments, &dependencies);
         tables.display_orders(program, &arguments);
     }
-    for (program, name, _) in DISPLAY_ORDER {
-        assert!(
-            tables.display_orders_of(program, name),
-            "DISPLAY_ORDER: no XML has {program} -{name}"
-        );
+    for (row_programs, name, _) in DISPLAY_ORDER {
+        for program in row_programs {
+            assert!(
+                tables.display_orders_of(program, name),
+                "DISPLAY_ORDER: no XML has {program} -{name}"
+            );
+        }
     }
     let rows = REFUSED
         .iter()
@@ -514,20 +520,17 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
 }
 
 impl Tables {
-    /// The rows of `DISPLAY_ORDER` of `program` (`*` rows for each program with the key): each a
-    /// permutation of its key's set of strings in `arguments`, written to `DISPLAY_ORDERS`.
+    /// The rows of `DISPLAY_ORDER` of `program`: each a permutation of its key's set of strings in
+    /// `arguments`, written to `DISPLAY_ORDERS`.
     fn display_orders(&mut self, program: &str, arguments: &[Argument]) {
-        for (row_program, name, values) in DISPLAY_ORDER {
-            if row_program != program && row_program != "*" {
+        for (row_programs, name, values) in DISPLAY_ORDER {
+            if !row_programs.contains(&program) {
                 continue;
             }
-            let Some(argument) = arguments.iter().find(|argument| argument.name == name) else {
-                assert!(
-                    row_program == "*",
-                    "DISPLAY_ORDER: {program} has no -{name}"
-                );
-                continue;
-            };
+            let argument = arguments
+                .iter()
+                .find(|argument| argument.name == name)
+                .unwrap_or_else(|| panic!("DISPLAY_ORDER: {program} has no -{name}"));
             let set = match &argument.constraint {
                 Some(Spec::Strings(set) | Spec::StringSet(set)) => set,
                 _ => panic!("DISPLAY_ORDER: {program} -{name} is no set of strings"),
@@ -550,16 +553,12 @@ impl Tables {
         }
     }
 
-    /// Whether a row of `DISPLAY_ORDER` (`program`, `name`) was written for some program.
+    /// Whether the row of `DISPLAY_ORDER` of `program`'s `name` was written.
     fn display_orders_of(&mut self, program: &str, name: &str) -> bool {
-        let name = format!(", {}, ", self.text(name));
-        let program = (program != "*").then(|| format!("({}, ", self.text(program)));
-        self.display_orders.iter().any(|row| {
-            row.contains(&name)
-                && program
-                    .as_ref()
-                    .is_none_or(|program| row.starts_with(program))
-        })
+        let row = format!("({}, {}, ", self.text(program), self.text(name));
+        self.display_orders
+            .iter()
+            .any(|written| written.starts_with(&row))
     }
 }
 

@@ -133,11 +133,12 @@ pub fn ncbi_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
 
 /// The number of a genetic code argument as `CArgAllowGeneticCodeInteger` converts it
 /// (`NStr::StringToInt` of `value`, flags 0: `ncbi_str::string_to_int`), when it is 0 to 255 and
-/// written without a minus sign; `None` for the other values, for which LOSAT's message says
-/// "invalid" (`genetic_code`, TBLASTN's `tblastn_genetic_code`) where it says "unsupported" for
-/// a number of that range outside NCBI's codes. NCBI refuses both alike.
+/// written without a minus sign; `None` for the other values, for which the messages of LOSAT Web's
+/// ABI v1 say "invalid" (its parsers, `web_v1_argv`) where they say "unsupported" for a number of
+/// that range outside NCBI's codes. NCBI refuses both alike.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:998-1007
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
     match crate::ncbi_str::string_to_int(value.as_bytes(), 0) {
         Ok(n) if !value.starts_with('-') => u8::try_from(n).ok(),

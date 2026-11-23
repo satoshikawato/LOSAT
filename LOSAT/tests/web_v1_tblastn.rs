@@ -4,7 +4,9 @@
 //! workflow) and `tblastn::web::run_pair` (`src/algorithm/tblastn/web.rs`) are held to the
 //! command line through them. When the vector was made (2026-11-04), every case but the two
 //! parser errors (LOSAT's own messages) was also byte-identical to NCBI BLAST+ 2.17.0 tblastn, on
-//! standard output and standard error.
+//! standard output and standard error. ABI v1 keeps those two messages (it is frozen); the command
+//! line now reads its arguments with NCBI's reader (line RG item K4i-2b), whose report the test
+//! checks for them in place of the bytes.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -49,16 +51,24 @@ fn the_cli_writes_the_bytes_of_the_web_v1_tblastn_vector() {
             .expect("losat tblastn");
         // The frozen bytes are NCBI-identical (see above); LOSAT writes them in its own words
         // (`losat::wording`, AGENTS.md rule 8).
-        let mut expected = losat::wording::losat_output_bytes(
+        let expected = losat::wording::losat_output_bytes(
             &std::fs::read(dir.join(format!("{name}.{kind}"))).expect(name),
         )
         .into_owned();
         // ABI v1 returns LOSAT's own parser messages without a line end, as when it was frozen;
-        // the command line ends them with one (`cli::command_line_message`).
+        // the command line writes NCBI's reader's report for them (its usage, the line of `=`
+        // and NCBI's posts, exit status 1).
         if kind == "err" && expected.last() != Some(&b'\n') {
-            expected.push(b'\n');
-        }
-        if kind == "out" {
+            let report = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(1), "{name}: {report}");
+            assert!(output.stdout.is_empty(), "{name}: wrote a report");
+            assert!(
+                report.starts_with("USAGE\n")
+                    && report.contains(&format!("\n{}\n\nError: ", "=".repeat(72)))
+                    && report.ends_with('\n'),
+                "{name}: {report}"
+            );
+        } else if kind == "out" {
             assert!(output.status.success(), "{name}: {output:?}");
             assert!(output.stdout == expected, "{name}: report differs");
         } else {

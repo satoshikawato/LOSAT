@@ -741,10 +741,10 @@ fn rpsbproc_refuses_what_it_does_not_give() {
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
 // prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), so does `-version-full` in NCBI's form
-// with LOSAT's values (line RG item E3), `-help` LOSAT's help,
-// `-dryrun=1` is an unknown word as in NCBI (`-dryrun` is not an argument), an
-// unknown word is named as it was given, and a file name that is not UTF-8 is refused before
-// anything is written.
+// with LOSAT's values (line RG item E3), `-help` NCBI's help in LOSAT's words, the argument
+// errors are NCBI's reader's (status 1: `-dryrun=1` gives a value to a flag, `--i` is the unknown
+// `-i`; line RG item K4i-2b), and a file name that is not UTF-8 is refused before anything is
+// written.
 #[test]
 fn rpsbproc_command_line() {
     let run_dir = RunDir::new("cli");
@@ -762,7 +762,9 @@ fn rpsbproc_command_line() {
     );
     let (out, _, status) = rpsbproc(dir, &["-help"], None);
     assert_eq!(status, 0);
-    assert!(String::from_utf8(out).unwrap().contains("--infile"));
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .contains("\n -i, --infile <String>\n"));
     let (out, err, status) = rpsbproc(
         dir,
         &["-i", "arch/one.asn", "-d", "data", "-version-full"],
@@ -781,17 +783,25 @@ fn rpsbproc_command_line() {
     let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-dryrun=1"], None);
     assert!(out.is_empty());
     let err = String::from_utf8(err).unwrap();
-    assert_eq!(status, 2, "{err}");
+    assert_eq!(status, 1, "{err}");
     assert!(
-        err.contains("unknown option or argument '-dryrun=1'"),
+        err.ends_with("\nError:  Invalid argument: -dryrun=1\n"),
         "{err}"
     );
-    let (_, _, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-m", "xx"], None);
-    assert_eq!(status, 2);
+    let (_, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-m", "xx"], None);
+    let err = String::from_utf8(err).unwrap();
+    assert_eq!(status, 1, "{err}");
+    assert!(
+        err.contains("Argument \"m\". Illegal value, expected"),
+        "{err}"
+    );
     let (_, err, status) = rpsbproc(dir, &["--i", "arch/one.asn"], None);
     let err = String::from_utf8(err).unwrap();
-    assert_eq!(status, 2, "{err}");
-    assert!(err.contains("unknown option or argument '--i'"), "{err}");
+    assert_eq!(status, 1, "{err}");
+    assert!(
+        err.ends_with("\nError:  Unknown argument: \"-i\"\n"),
+        "{err}"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;

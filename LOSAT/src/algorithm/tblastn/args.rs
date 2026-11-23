@@ -7,8 +7,6 @@ use std::path::PathBuf;
 
 use crate::blastinput::value_parsers::*;
 
-use crate::utils::genetic_code::GeneticCode;
-
 use super::stage_d_pipeline::LocalStageDScoring;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;

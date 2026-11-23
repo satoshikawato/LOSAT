@@ -21,6 +21,7 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
+use crate::blastinput::value_parsers::ncbi_integer;
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};

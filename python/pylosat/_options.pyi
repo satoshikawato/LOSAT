@@ -36,9 +36,9 @@ class BlastnOptions(TypedDict, total=False):
     """Effective length of the search space"""
     task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short', 'rmblastn']
     """Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn"""
-    template_type: str
+    template_type: Literal['coding', 'optimal', 'coding_and_optimal']
     """Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal"""
-    template_length: int
+    template_length: Literal[16, 18, 21]
     """Discontiguous MegaBLAST template length: 16, 18 or 21"""
     word_size: int
     """Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and
@@ -271,6 +271,7 @@ class BlastxOptions(TypedDict, total=False):
     """Effective length of the search space"""
     task: Literal['blastx', 'blastx-fast']
     evalue: float
+    """Expectation value (E) threshold for saving hits [default: 10]"""
     word_size: int
     """Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]"""
     max_hsps: int
@@ -483,6 +484,7 @@ class TblastxOptions(TypedDict, total=False):
     searchsp: int
     """Effective length of the search space"""
     evalue: float
+    """Expectation value (E) threshold for saving hits [default: 10]"""
     threshold: float
     """Minimum word score such that the word is added to the BLAST lookup table [default: 13, or
     the matrix's suggestion]"""

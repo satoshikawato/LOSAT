@@ -85,7 +85,9 @@ pub struct DbFilterArgs {
     pub no_taxid_expansion: bool,
 }
 
-/// The names of the options of `DbFilterArgs`, for a program's `-subject_loc` exclusions.
+/// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's
+/// ABI v1, which keeps its own parser (`web_v1_argv`; the other readers are NCBI's).
+#[cfg(any(target_arch = "wasm32", test))]
 pub const DB_FILTER_OPTIONS: [&str; 7] = [
     "seqidlist",
     "negative_seqidlist",

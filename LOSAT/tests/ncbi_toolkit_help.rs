@@ -3,8 +3,8 @@
 //! segmasker, and NCBI's rpsbproc 0.5.1 (probes of 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E2.md`,
 //! run with `env -i` in a fresh directory): `-help-full` writes the bytes of `-help` in every place
 //! but makeblastdb's, which lists its hidden `-randomize`, and the reader stops at a help flag.
-//! LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1) and do not list
-//! `-randomize`, so the test holds `-help-full` to LOSAT's `-help` in the same place.
+//! LOSAT's help texts are NCBI's in LOSAT's words (line RG item K4i-2b), makeblastdb's
+//! `-help-full` with `-randomize` too.
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 //! `cli::try_parse_from`) and c++/src/corelib/ncbiapp.cpp:685-697
@@ -70,6 +70,10 @@ fn help_full_writes_the_help_in_every_place() {
         assert_eq!(help.status.code(), Some(0), "{program}");
         assert!(help.stdout.starts_with(b"USAGE"), "{program}");
         assert!(help.stderr.is_empty(), "{program}");
+        let help_full = run_in(&dir, program, &["-help-full"]);
+        let randomize = String::from_utf8_lossy(&help_full.stdout).contains("\n -randomize\n");
+        assert_eq!(randomize, program == "makeblastdb", "{program}");
+        assert_eq!(help_full.stdout == help.stdout, !randomize, "{program}");
         // NCBI BLAST+ 2.17.0 probes `hf`, `hf_h`, `hf_unk`, `hf_missing_val2`, `hf_dry`, `hf_xml`,
         // `hf_twice` (`-help-full` and its `-help` twin: the same bytes).
         for words in [
@@ -84,9 +88,14 @@ fn help_full_writes_the_help_in_every_place() {
             &["-help-full", "-help-full"],
         ] {
             let full = run_in(&dir, program, words);
+            let expected = if words.contains(&"-help-full") {
+                &help_full
+            } else {
+                &help
+            };
             assert_eq!(full.status.code(), Some(0), "{program} {words:?}");
-            assert_eq!(full.stdout, help.stdout, "{program} {words:?}");
-            assert_eq!(full.stderr, help.stderr, "{program} {words:?}");
+            assert_eq!(full.stdout, expected.stdout, "{program} {words:?}");
+            assert_eq!(full.stderr, expected.stderr, "{program} {words:?}");
         }
         // `-h -help-full`, `-h -xmlhelp`: the short help (probes `h_hf`, `h_xml`).
         let short = run_in(&dir, program, &["-h"]);
@@ -111,7 +120,7 @@ fn help_full_writes_the_help_in_every_place() {
         let log = dir.join("log.txt");
         let _ = fs::remove_file(&log);
         let logged = run_in(&dir, program, &["-help-full", "-logfile", "log.txt"]);
-        assert_eq!(logged.stdout, help.stdout, "{program}");
+        assert_eq!(logged.stdout, help_full.stdout, "{program}");
         assert_eq!(fs::read(&log).ok(), Some(Vec::new()), "{program}");
         fs::remove_file(&log).unwrap();
     }
@@ -186,43 +195,45 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.starts_with("<?xml version=\"1.0\"?>\n<ncbi_application"));
             assert!(text.contains(&format!("<name>{program}</name>\n<version>")));
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
-            // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
-            // run of a search (psiblast's `-use_sw_tback`; rpstblastn's `-ungapped`, which needs a
-            // database, is a run refusal of LOSAT's table of refusals with it, `REFUSED` of
-            // `build/ncbi_args.rs`). The arguments left in are read
-            // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
-            // statistics, line RG item X4, tblastn's in every mode, item X4b, blastx's in every
-            // mode, item X4b-2; blastp's `-ungapped` runs, line NP item O4b, and
+            // Each argument left out is refused by name: after NCBI's reader took the command
+            // line (a search's words with `-db x`, line RG item K4i-2b; `-entrez_query` with the
+            // `-remote` it requires), or by the run of a search (psiblast's `-use_sw_tback`, with
+            // `-subject`; rpstblastn's `-ungapped`, which needs a database, is a run refusal of
+            // LOSAT's table of refusals with it, `REFUSED` of `build/ncbi_args.rs`). The arguments
+            // left in are read (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with
+            // composition-based statistics, line RG item X4, tblastn's in every mode, item X4b,
+            // blastx's in every mode, item X4b-2; blastp's `-ungapped` runs, line NP item O4b, and
             // tblastn's, item O4c).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
-                if kept.contains(&name) {
+                if kept.contains(&name) || program == "rpstblastn" && name == "ungapped" {
                     continue;
                 }
                 let word = format!("-{name}");
-                let flag = ncbi_text.contains(&format!("<flag name=\"{name}\""));
-                let words = if flag {
-                    vec![&*word, "-h"]
-                } else {
-                    vec![&*word, "1", "-h"]
-                };
-                let refused = run_in(&dir, program, &words);
-                let mut message = String::from_utf8_lossy(&refused.stderr).into_owned();
-                let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
-                if refused.status.code() == Some(0) && program != "rpstblastn" {
-                    let search = ["-query", "p.fa", "-subject", subject, &word];
-                    let cbs = ["-comp_based_stats", "0"];
-                    let words = [&search[..], if name == "ungapped" { &cbs } else { &[] }].concat();
-                    message =
-                        String::from_utf8_lossy(&run_in(&dir, program, &words).stderr).into_owned();
+                let mut option = vec![&*word];
+                if !ncbi_text.contains(&format!("<flag name=\"{name}\"")) {
+                    option.push("1");
                 }
-                assert!(
+                if name == "entrez_query" {
+                    option.push("-remote");
+                }
+                let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
+                let refusal = |message: &str| {
                     message.contains(&format!("-{name} is not supported by LOSAT's"))
                         || message.contains(&format!("-{name} ("))
                             && message.contains("is not supported by LOSAT's")
-                        || program == "rpstblastn" && name == "ungapped",
-                    "{program} -{name}: {message}"
-                );
+                };
+                let mut message = String::new();
+                for search in [["-db", "x"], ["-subject", subject]] {
+                    let words = [&["-query", "p.fa"][..], &search[..], &option[..]].concat();
+                    let run = run_in(&dir, program, &words);
+                    message = String::from_utf8_lossy(&run.stderr).into_owned();
+                    if refusal(&message) {
+                        assert_eq!(run.status.code(), Some(1), "{program} {words:?}");
+                        break;
+                    }
+                }
+                assert!(refusal(&message), "{program} -{name}: {message}");
             }
         }
         for words in [

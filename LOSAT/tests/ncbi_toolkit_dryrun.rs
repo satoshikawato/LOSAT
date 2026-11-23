@@ -432,8 +432,14 @@ fn argument_errors_are_reported_as_without_dryrun() {
     ];
     for words in [&words[..], &[&words[..], &["-dryrun"]].concat()] {
         let run = run_in(&dir, words, &[]);
-        assert_eq!(run.status.code(), Some(2), "{words:?}: {run:?}");
-        assert!(text(&run.stderr).contains("-no_taxid_expansion"), "{run:?}");
+        assert_eq!(run.status.code(), Some(1), "{words:?}: {run:?}");
+        let posts = text(&run.stderr);
+        assert!(
+            posts.contains("Incompatible with argument:  `")
+                && posts.contains("no_taxid_expansion")
+                && posts.contains("window_masker_taxid"),
+            "{run:?}"
+        );
     }
     // makeblastdb's `-dbtype` is mandatory.
     let dry = run_in(
@@ -448,7 +454,7 @@ fn argument_errors_are_reported_as_without_dryrun() {
         ],
         &[],
     );
-    assert_eq!(dry.status.code(), Some(2), "{dry:?}");
+    assert_eq!(dry.status.code(), Some(1), "{dry:?}");
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -2154,7 +2154,9 @@ mod tests {
                     losat::web_adapter::argv_message(&cli),
                     "{program} {option}"
                 );
-                assert!(parse(&both).unwrap_err().contains("cannot be used with"));
+                assert!(parse(&both)
+                    .unwrap_err()
+                    .contains("Incompatible with argument:  `"));
             }
         }
         assert!(matches!(
@@ -3113,9 +3115,11 @@ mod tests {
         );
         crate::store::release(q_nuc).unwrap();
         crate::store::release(s_nuc).unwrap();
-        // `-db` with `-subject` is the parser's conflict, as on the command line.
+        // `-db` with `-subject` is NCBI's reader's exclusion, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
-        assert!(validate(&both).unwrap_err().contains("cannot be used with"));
+        assert!(validate(&both)
+            .unwrap_err()
+            .contains("Incompatible with argument:  `"));
         assert!(!searches_database(&both));
         // `-dbsize` is an option of the search: accepted with the subject records.
         validate(&[

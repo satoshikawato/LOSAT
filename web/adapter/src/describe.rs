@@ -1,6 +1,7 @@
-//! The *describe* response (docs/web/abi_v2.md §9), generated from the engine's clap
-//! definitions and value parsers, so that the application shows exactly the options,
-//! defaults and allowed values of the command line.
+//! The *describe* response (docs/web/abi_v2.md §9), generated from the engine's definitions
+//! of the command line (its options and their help) and NCBI's argument tables (the defaults
+//! and the allowed values that its reader takes), so that the application shows exactly the
+//! options, defaults and allowed values of the command line.
 
 use std::fmt::Write as _;
 use std::sync::{Mutex, PoisonError};

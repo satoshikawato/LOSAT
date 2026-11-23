@@ -8,7 +8,7 @@ use std::sync::Arc;
 use super::search::TranslatedRpsSearch;
 use crate::algorithm::blastx::BlastxArgs;
 use crate::algorithm::rps_search::engine::RpsSearch;
-use crate::algorithm::rpsblast::args::{check_rps_outfmt, rps_composition_mode, rpsblast_mt_mode};
+use crate::algorithm::rpsblast::args::{check_rps_outfmt, rps_composition_mode};
 use crate::blastinput::report_counts::FormattingArgs;
 use crate::blastinput::value_parsers::*;
 

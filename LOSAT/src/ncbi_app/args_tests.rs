@@ -826,3 +826,63 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     assert_eq!(string_values("tblastx", "task"), None);
     assert_eq!(string_values("blastn", "evalue"), None);
 }
+
+// Line RG DECISIONS K4i-2b-1: the descriptions' sets are the tables' (`choices`), in the display
+// order of `DISPLAY_ORDERS` where it has a row and else in the XML's; a flag and a key of another
+// constraint have none; the defaults are the XML's `<default>`.
+#[test]
+fn display_orders_are_the_tables_sets() {
+    let blastn_tasks = [
+        "megablast",
+        "dc-megablast",
+        "blastn",
+        "blastn-short",
+        "rmblastn",
+    ];
+    assert_eq!(choices("blastn", "task"), Some(strings(&blastn_tasks)));
+    assert_eq!(
+        choices("blastn", "template_type"),
+        Some(strings(&["coding", "optimal", "coding_and_optimal"]))
+    );
+    for program in ["blastn", "blastx", "tblastx"] {
+        assert_eq!(
+            choices(program, "strand"),
+            Some(strings(&["both", "plus", "minus"])),
+            "{program}"
+        );
+    }
+    // Without a row: the XML's order (blastdbcmd's `-strand`, NCBI's integer set of
+    // `-template_length`).
+    assert_eq!(
+        choices("blastdbcmd", "strand"),
+        Some(strings(&["minus", "plus"]))
+    );
+    assert_eq!(
+        choices("blastn", "template_length"),
+        Some(strings(&["16", "18", "21"]))
+    );
+    // Each displayed set is the XML's set.
+    for (program, name, values) in DISPLAY_ORDERS.iter() {
+        let (program, name) = (program.get(), name.get());
+        let mut shown: Vec<&str> = constraint::strings(*values).collect();
+        let mut set: Vec<String> = match find_desc(arguments(program).unwrap(), name)
+            .unwrap()
+            .constraint
+        {
+            Some(Constraint::Strings(set) | Constraint::StringSet(set)) => {
+                constraint::strings(set).map(str::to_string).collect()
+            }
+            other => panic!("{program} -{name}: {other:?}"),
+        };
+        shown.sort_unstable();
+        set.sort_unstable();
+        assert_eq!(shown, set, "{program} -{name}");
+    }
+    assert_eq!(choices("blastn", "ungapped"), None);
+    assert_eq!(choices("blastn", "evalue"), None);
+    assert_eq!(choices("blastn", "no_such_option"), None);
+    assert_eq!(default_value("blastn", "task"), Some("megablast"));
+    assert_eq!(default_value("blastp", "task"), Some("blastp"));
+    assert_eq!(default_value("blastp", "evalue"), None);
+    assert_eq!(default_value("blastn", "ungapped"), None);
+}

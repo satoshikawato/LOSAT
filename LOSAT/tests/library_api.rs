@@ -3483,7 +3483,7 @@ fn makeblastdbs_refused_argv_is_a_tools_error() {
         )
         .unwrap_err();
         let cli = cli_output("makeblastdb", words);
-        assert_eq!(cli.status.code(), Some(2), "{words:?}");
+        assert_eq!(cli.status.code(), Some(1), "{words:?}");
         assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
         assert_eq!(diagnostics, cli.stderr, "{words:?}");
         assert!(cli.stderr.ends_with(b"\n"), "{words:?}");
@@ -3583,18 +3583,26 @@ fn a_losat_refusal_is_its_text_without_error_and_the_newline() {
     );
 }
 
-/// The parser's message is its text (`Error`'s third rule), which the command line writes with a
-/// newline where the text has none: a value that the option refuses (the text ends with a
-/// newline) and an option that the program does not have (it does not).
+/// NCBI's reader's report is the command line's standard error without its last newline
+/// (`Error`'s third rule; line RG item K4i-2b): a value that the option does not convert and an
+/// option that the program does not have, both NCBI's usage and posts with status 1.
 #[test]
-fn the_parsers_message_is_its_text() {
-    for (words, newline_added) in [(&["-evalue", "abc"][..], false), (&["-nosuch"], true)] {
+fn the_readers_report_is_the_command_lines_text() {
+    for words in [&["-evalue", "abc"][..], &["-nosuch"]] {
         let error = validate(Program::Blastp, words).unwrap_err();
         let cli = cli_output("blastp", words);
-        assert_eq!(cli.status.code(), Some(2), "{words:?}");
+        assert_eq!(cli.status.code(), Some(1), "{words:?}");
         assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
-        let added: &[u8] = if newline_added { b"\n" } else { b"" };
-        assert_eq!(cli.stderr, [error.message(), added].concat(), "{words:?}");
+        assert_eq!(cli.stderr, [error.message(), b"\n"].concat(), "{words:?}");
+        assert!(
+            cli.stderr
+                .ends_with(b"\nError:  Unknown argument: \"nosuch\"\n")
+                || cli
+                    .stderr
+                    .ends_with(b"Argument cannot be converted:  `abc'\n"),
+            "{words:?}: {}",
+            String::from_utf8_lossy(&cli.stderr)
+        );
     }
 }
 

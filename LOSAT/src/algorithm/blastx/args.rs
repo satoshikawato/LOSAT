@@ -1,8 +1,6 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
 use crate::blastinput::value_parsers::{
-    best_hit_value, blastx_query_coverage, blastx_real, blastx_threshold, genetic_code,
-    ncbi_boolean, ncbi_input_path, ncbi_int8, ncbi_integer, ncbi_output_path,
-    ncbi_positive_integer, nonnegative_ncbi_integer, protein_word_size, report_count, SegSpec,
+    ncbi_boolean, ncbi_double, ncbi_int8, ncbi_integer, ncbi_integer_as, ncbi_path, SegSpec,
 };
 use crate::stats::protein_options::{
     protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,

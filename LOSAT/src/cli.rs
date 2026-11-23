@@ -1465,6 +1465,9 @@ pub fn post_native_error(error: &anyhow::Error) {
 #[cfg(test)]
 mod manual_refusals_tests;
 
+#[cfg(test)]
+mod syntax_cases_tests;
+
 #[cfg(all(test, unix))]
 #[path = "cli_tests.rs"]
 mod tests;

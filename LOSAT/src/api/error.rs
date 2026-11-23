@@ -30,10 +30,8 @@ use super::id::DebugBytes;
 ///   the text without that `Error: ` and without the newline after it. An error with causes, which
 ///   the command line writes under `Caused by:`, is the error and its causes joined by `: `
 ///   (anyhow's alternate form).
-/// - [`Error::Argv`] from the parser is the parser's text; the command line adds a newline where
-///   the text has none. Its `Usage:` line follows the argv that the call parses, which in the
-///   library has no `-outfmt` (the formats are an argument of the call), so it does not name
-///   `-outfmt <SPEC>` where the command line's does.
+/// - [`Error::Argv`] of NCBI's argument reader (an argument error: NCBI's short usage, the line of
+///   `=` and NCBI's posts) is the command line's standard error without its last newline.
 /// - The other messages, NCBI's too, are the command line's text without its last newlines:
 ///   [`Error::Input`] (the reader's, such as that of an input that does not start with a
 ///   definition line); the error of a tool ([`run_makeblastdb`](super::run_makeblastdb) and the

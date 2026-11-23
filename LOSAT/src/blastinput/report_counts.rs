@@ -6,6 +6,7 @@
 //! and [`ReportCounts::validate`].
 
 use crate::blastinput::app::{options_error, output_format};
+use crate::blastinput::value_parsers::ncbi_integer_as;
 
 /// NCBI's default hit list size.
 ///

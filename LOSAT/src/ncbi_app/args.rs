@@ -20,7 +20,10 @@ use super::Tool;
 #[path = "constraint.rs"]
 mod constraint;
 
-pub(crate) use constraint::{file_name_length, is_genetic_code, string_to_int8, Constraint};
+pub(crate) use constraint::{is_genetic_code, string_to_int8, Constraint};
+// The file name rule of LOSAT Web ABI v1's own output path parser (`web_v1_argv`).
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) use constraint::file_name_length;
 
 /// What an argument holds (`CArgDescriptions::EType` of a key, or a flag).
 ///
@@ -264,11 +267,9 @@ pub fn string_values(program: &str, name: &str) -> Option<Vec<&'static str>> {
 pub fn choices(program: &str, name: &str) -> Option<Vec<String>> {
     let display = DISPLAY_ORDERS
         .iter()
-        .find(|(of, key, _)| (of.is(program) || of.is("*")) && key.is(name));
+        .find(|(of, key, _)| of.is(program) && key.is(name));
     if let Some((_, _, values)) = display {
-        if find_desc(arguments(program)?, name).is_some() {
-            return Some(constraint::strings(*values).map(str::to_string).collect());
-        }
+        return Some(constraint::strings(*values).map(str::to_string).collect());
     }
     match find_desc(arguments(program)?, name)?.constraint? {
         Constraint::Strings(values) | Constraint::StringSet(values) => {

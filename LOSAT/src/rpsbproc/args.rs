@@ -8,6 +8,7 @@
 //! alias name). The parser, its errors and `-help` are LOSAT's (`PD-LOSAT-CLI-NONSEARCH-
 //! DIFFERENCES`); the values are read as NCBI reads them.
 
+use crate::blastinput::value_parsers::ncbi_double;
 use clap::Args;
 use std::ffi::OsString;
 

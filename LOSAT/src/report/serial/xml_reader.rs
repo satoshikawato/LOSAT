@@ -844,8 +844,8 @@ impl<S: AsnSource> XmlReader<S> {
                 break c;
             }
         };
-        let (end, number) = buffer_number(&mut self.src, self.pos - 1, c, max, signed);
-        self.pos = end;
+        let start = self.pos - 1;
+        let number = buffer_number(&mut self.src, &mut self.pos, start, c, max, signed);
         if number == Err(NumberStop::Eof) {
             return fail(EOF_MESSAGE);
         }

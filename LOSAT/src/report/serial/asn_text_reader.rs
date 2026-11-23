@@ -169,33 +169,39 @@ pub(crate) enum NumberStop {
 /// for `-0`) and `GetInt8` after `SkipWs`, from `c`, the first byte that is not C's `isspace`, at
 /// `pos` of `src`: the sign, then the digits checked against `max` (`kMax_I4`, `kMax_UI4`,
 /// `kMax_I8`; one more for a negative number) as NCBI checks them, the digit that overflows taken
-/// before the check. The position after the bytes taken and the number, or why it stops. The one
-/// port of NCBI's numbers of an input buffer, for the ASN.1 text reader (`Reader::get_number`) and
-/// the XML reader (`xml_reader::XmlReader::get_number`), whose streams read them from the same
-/// buffer. The negation of the largest magnitude wraps to the least number (2^31 negated as an
-/// Int4 is the least Int4, likewise in 64 bits).
+/// before the check. The number, or why it stops; `at` (the caller's position) is set to the
+/// byte after the bytes taken at each exit, as the text reader set its own before. The one port
+/// of NCBI's numbers of an input buffer, for the ASN.1 text reader (`Reader::get_number`) and the
+/// XML reader (`xml_reader::XmlReader::get_number`), whose streams read them from the same buffer.
+/// The negation of the largest magnitude wraps to the least number (2^31 negated as an Int4 is
+/// the least Int4, likewise in 64 bits).
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
 // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
 #[inline(always)]
 pub(crate) fn buffer_number<S: AsnSource + ?Sized>(
     src: &mut S,
+    at: &mut usize,
     pos: usize,
     mut c: u8,
     max: u64,
     signed: bool,
-) -> (usize, std::result::Result<i64, NumberStop>) {
+) -> std::result::Result<i64, NumberStop> {
     let mut pos = pos + 1;
     let mut negative = false;
     if (signed && c == b'-') || c == b'+' {
         negative = c == b'-';
         c = match src.byte_at(pos) {
             Some(c) => c,
-            None => return (pos, Err(NumberStop::Eof)),
+            None => {
+                *at = pos;
+                return Err(NumberStop::Eof);
+            }
         };
         pos += 1;
     }
     if !c.is_ascii_digit() {
-        return (pos, Err(NumberStop::Bad));
+        *at = pos;
+        return Err(NumberStop::Bad);
     }
     let mut n = u64::from(c - b'0');
     let before_mul = max / 10;
@@ -215,16 +221,15 @@ pub(crate) fn buffer_number<S: AsnSource + ?Sized>(
     });
     if overflow {
         // The digit that overflows is taken before the check.
-        return (end + 1, Err(NumberStop::Overflow));
+        *at = end + 1;
+        return Err(NumberStop::Overflow);
     }
-    (
-        end,
-        Ok(if negative {
-            (n as i64).wrapping_neg()
-        } else {
-            n as i64
-        }),
-    )
+    *at = end;
+    Ok(if negative {
+        (n as i64).wrapping_neg()
+    } else {
+        n as i64
+    })
 }
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:420-436 (`FillBuffer` at the end of a
 // file: `NCBI_THROW` of a `CEofException` with `eEof` and `m_Error`, the error "end of file")
@@ -1231,9 +1236,7 @@ impl<S: AsnSource> Reader<S> {
         let (pos, c) = self.white_space_at(self.pos)?;
         // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
         let (pos, c) = self.ws_at(pos, c)?;
-        let (end, number) = buffer_number(&mut self.src, pos, c, max, signed);
-        self.pos = end;
-        match number {
+        match buffer_number(&mut self.src, &mut self.pos, pos, c, max, signed) {
             Ok(n) => Ok(n),
             Err(stop) => Err(self.number_stop(stop)),
         }

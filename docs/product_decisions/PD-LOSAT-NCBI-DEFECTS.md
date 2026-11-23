@@ -1115,15 +1115,15 @@ object frames, 97 levels of `mix` and more, which NCBI reads at every start.
     depth, the bioconda build read every nest of up to 6,449 levels and crashed in every run from
     6,474 levels in binary files, and read up to 6,610 levels and crashed from 6,637 in text files,
     crashing in some runs only at the depths between; NCBI's Linux x86-64 release crashes deeper
-    (binary files read up to 6,784 levels, crashes from 6,809; text files 6,873 and 6,900); `mix`,
+    (binary files read up to 6,784 levels, crashes from 6,809; text files 6,872 and 6,899); `mix`,
     `equiv`, the two alternating and the pointer syntax alike. As in
     exception 15 the depth is not the input's: the stack limit, the lengths of the command line and
     of the environment and the stack's random start at each run move it. With no stack limit
     (`ulimit -s unlimited`) NCBI reads every depth tried, to 100,000 levels (205 MB of memory), and
     writes its normal database, or for a file damaged deep inside its report, which names every
     frame of the nest (at 100,000 levels about 25 s and 2 MB; a number too large for `int` in a text
-    file, whose report gives each frame a line of its own, took 245 s at 5,000 levels and did not
-    end within 20 minutes of CPU at 20,000). LOSAT keeps the levels and the frames on the heap
+    file, whose report gives each frame a line of its own, took 245 s at 5,000 levels and 4,933 s
+    and 253 MB at 20,000, for a report of 17 MB). LOSAT keeps the levels and the frames on the heap
     (`writedb::mask_info::reader`, `Rd::read_seq_loc_parts`), so it reads every depth as far as
     memory allows and writes NCBI's output with a stack large enough, its reports in time linear
     in the depth. No mask file that dustmasker, segmasker, windowmasker or convert2blastmask writes

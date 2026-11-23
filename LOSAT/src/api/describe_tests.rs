@@ -178,7 +178,8 @@ fn the_described_options_are_those_that_the_command_line_converts() {
 }
 
 // The help of an option is NCBI's comment of it (the `<description>` of its XML, which `-help`
-// prints), in LOSAT's words (`wording::losat_text`), and the options come in the order of `-help`.
+// prints), in LOSAT's words (`wording::losat_text`), and the options come in the order of the usage
+// line of `-help`.
 #[test]
 fn the_help_is_ncbis_comment_in_the_order_of_the_help() {
     let blastn = describe(Program::Blastn);

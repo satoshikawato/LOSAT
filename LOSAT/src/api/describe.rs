@@ -4,7 +4,8 @@
 //! and prints them from there (`PrintUsage`); LOSAT's argument tables are NCBI's (generated from
 //! each program's `-xmlhelp` XML, `ncbi_app::args`), which the command line's reader reads, and
 //! `describe` takes every part of an option from them (line RG DECISIONS K4i-3-1): the options
-//! and their order (the `-help`'s), their value kinds, defaults and allowed values, and their help
+//! and their order (that of the usage line that `-help` prints first, the order in which NCBI's
+//! program describes them), their value kinds, defaults and allowed values, and their help
 //! (NCBI's comment, in LOSAT's words), so a caller shows exactly what the command line reads and
 //! holds no table of its own (LOSAT Web ABI v2 *describe*, docs/web/abi_v2.md §9, reads the same
 //! rows).
@@ -42,7 +43,9 @@ pub struct Parameter {
     /// The flag with its single dash, as on the command line (`-evalue`).
     pub flag: String,
     /// The help text of the command line: NCBI's comment of the option, which its `-help`
-    /// prints, in LOSAT's words.
+    /// prints, in LOSAT's words. The text keeps the line breaks and the trailing spaces of NCBI's
+    /// comment as `-help` shows them (blastn's `-num_alignments`: two lines), so a caller that
+    /// shows it on one line or wraps it joins or trims them itself.
     pub help: String,
     /// Whether the flag takes a value (`-evalue 1e-5`) or stands alone (`-ungapped`).
     pub takes_value: bool,
@@ -64,8 +67,9 @@ pub struct Parameter {
 pub struct Description {
     /// The described program.
     pub program: Program,
-    /// The options that an argv of the library API may hold, in the order of the command
-    /// line's `-help`: every option of the program but those the API sets itself (`-query`,
+    /// The options that an argv of the library API may hold, in the order of the usage line of
+    /// the command line's `-help` (not of the list of options under it, which `-help` groups by
+    /// their kind): every option of the program but those the API sets itself (`-query`,
     /// `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`; `search::API_OWNED`; psiblast's
     /// `-in_msa`, `search::alignment_owned`) and the search strategy file, which it refuses
     /// (`search::file_options`). psiblast's `-msa_master_idx` and `-ignore_msa_master` are
@@ -100,8 +104,9 @@ fn value_kind(kind: Kind) -> ValueKind {
     }
 }
 
-/// Every option of `program` that LOSAT's descriptions list, in the order of the command line's
-/// help (`ncbi_app::args::described`): `describe`'s, and those the library API sets itself. LOSAT
+/// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
+/// command line's `-help` (`ncbi_app::args::described`): `describe`'s, and those the library API
+/// sets itself. LOSAT
 /// Web's *describe* lists these rows but those that its adapter sets (`web_adapter`).
 pub(crate) fn parameters(program: Program) -> impl Iterator<Item = Parameter> {
     let tool =

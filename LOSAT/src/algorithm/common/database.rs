@@ -1427,13 +1427,23 @@ impl<'a> FetchExcluded<'a> {
     /// is noted, in increasing ordinal (`take_utf8`): of a fetch that reads every subject with
     /// hits, as the ungapped re-evaluation of a nucleotide subject does.
     pub(crate) fn excludes(&self, ordinal: u32) -> Result<bool, SeqDbError> {
+        self.excludes_noting(ordinal, &self.utf8)
+    }
+
+    /// `excludes`, with the read of a UTF8String header noted in `reads` (in increasing ordinal):
+    /// a check that the batches of a search share and that are searched side by side, each with
+    /// its own note (TBLASTN's `stage_d_pipeline::BatchFetches::excludes`).
+    pub(crate) fn excludes_noting(
+        &self,
+        ordinal: u32,
+        reads: &crate::seqdb::Utf8Reads,
+    ) -> Result<bool, SeqDbError> {
         let read = self
             .check
             .read(ordinal)
             .map_err(|error| self.read_error(ordinal, error))?;
         if read.utf8 {
-            self.utf8
-                .note_ordinal(self.check.db, u128::from(ordinal), ordinal);
+            reads.note_ordinal(self.check.db, u128::from(ordinal), ordinal);
         }
         Ok(!read.kept)
     }

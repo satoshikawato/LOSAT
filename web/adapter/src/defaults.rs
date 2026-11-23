@@ -217,22 +217,13 @@ fn words<'a>(program: Program, task: &'a str, extra: &[&'a str]) -> Vec<&'a str>
     words
 }
 
-/// The tasks of a program that the engine resolves, in the order of its parser ("" for a
-/// program without -task).
+/// The tasks of a program that the engine resolves, in the order of NCBI's set of `-task`'s
+/// values in the engine's argument tables ("" for a program without -task).
 fn tasks(program: Program) -> Vec<String> {
-    let root = Cli::command();
-    let Some(task) = root.find_subcommand(program.name()).and_then(|command| {
-        command
-            .get_arguments()
-            .find(|arg| arg.get_long() == Some("task"))
-    }) else {
+    let Some(names) = losat::web_adapter::string_values(program.name(), "task") else {
         return vec![String::new()];
     };
-    let mut names: Vec<String> = task
-        .get_possible_values()
-        .iter()
-        .map(|value| value.get_name().to_string())
-        .collect();
+    let mut names: Vec<String> = names.into_iter().map(str::to_string).collect();
     names.retain(|name| resolved(&words(program, name, &[])).is_ok());
     names
 }

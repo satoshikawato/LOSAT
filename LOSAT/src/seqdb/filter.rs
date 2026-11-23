@@ -1344,6 +1344,15 @@ impl OidMap<'_> {
         })
     }
 
+    /// The ordinal ids whose OIDs are of `from..to` (of the database's OIDs; past the database's
+    /// sequences there are none, which the reader's blocks end).
+    pub(crate) fn ordinals_in(self, from: u32, to: u32) -> std::ops::Range<u32> {
+        match self.0 {
+            Some(filter) => filter.rank(from)..filter.rank(to),
+            None => from..to.max(from),
+        }
+    }
+
     /// Whether an ordinal id has an OID of `from..to` (of the database's OIDs).
     pub(crate) fn any_in(self, from: u32, to: u32) -> bool {
         match self.0 {

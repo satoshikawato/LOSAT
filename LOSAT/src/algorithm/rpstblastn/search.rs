@@ -48,10 +48,6 @@ pub(crate) struct TranslatedRpsSearch {
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
-    /// `-use_sw_tback` and `-comp_based_stats` as given: `-use_sw_tback` with composition-based
-    /// statistics (a later item) is refused per run (`check_options`).
-    pub(crate) use_sw_tback: bool,
-    pub(crate) comp_based_stats: String,
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
@@ -685,12 +681,6 @@ impl TranslatedRpsSearch {
     /// LOSAT's refusals of the options before the first byte of the reports: what NCBI BLAST+
     /// 2.17.0's rpstblastn does in its search with them has no result that can be checked.
     pub(crate) fn check_options(&self) -> Result<()> {
-        let requested_cbs = self.search.requested_cbs;
-        if self.use_sw_tback && requested_cbs > 0 {
-            bail!(
-                "-use_sw_tback with composition-based statistics is not supported by LOSAT's {PROGRAM} yet"
-            );
-        }
         if self.search.sum_stats {
             bail!(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpstblastn links HSPs with the profiles' indexes as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's {PROGRAM}"

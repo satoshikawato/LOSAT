@@ -126,6 +126,7 @@ impl TblastnDatabase {
             engine_db_length: statistics.engine_db_length,
             min_length: statistics.min_length,
             request_count: statistics.request_count,
+            average: statistics.average,
         }
     }
 
@@ -451,9 +452,10 @@ impl TblastnDatabase {
         reported: &'s ReportedSubjects,
         before: LoadedBefore<'s>,
     ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        let gapped = reported.gapped;
         before.subjects(
             |hitlists, span| hitlists.get(span),
-            |_, hitlists| seq_aligns_of(hitlists),
+            move |_, hitlists| seq_aligns_of(hitlists, gapped),
             // TBLASTN's prefetched set is its reported set.
             move |_, hitlists, loads| {
                 Self::prefetch_subjects(reported, hitlists, loads.reported_rows())
@@ -694,7 +696,7 @@ impl<'a> CallReads<'a> {
             let Some(hitlists) = results.get(span.clone()) else {
                 break;
             };
-            if shared::prefetch_off(seq_aligns_of(hitlists)) {
+            if shared::prefetch_off(seq_aligns_of(hitlists, reported.gapped)) {
                 for (query, hitlist) in span.clone().zip(hitlists) {
                     let subjects = hitlist.lists().iter().map(|list| {
                         let rank = list.oid as usize;
@@ -772,8 +774,9 @@ pub(super) fn drop_unaligned(
     database: &TblastnDatabase,
     hitlists: &mut [KappaResultHitList],
 ) -> Option<crate::seqdb::SeqLocation> {
-    // tblastn is gapped (`-ungapped` is refused): the redo or the traceback fetched every
-    // subject with `check_oid_exclusion` (`fetch_excluded`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2650-2664
+    // The redo, the traceback or (`-ungapped`) the ungapped re-evaluation fetched every subject
+    // with `check_oid_exclusion` (`fetch_excluded`).
     let mut aligned = shared::SeqAligned::of(&database.db, true)?;
     for hitlist in hitlists {
         hitlist.with_lists_mut(|lists| aligned.retain(lists, |list| u32::try_from(list.oid).ok()));
@@ -847,6 +850,9 @@ pub(super) struct ReportedSubjects {
     /// rank): the refusals, the names (`blast_xml::prepare`), the taxonomy reads (`read_taxids`)
     /// and the stop's record of the loads (`prefetch_stop_error`) take it.
     pub(super) loads: HitLoads,
+    /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
+    /// HSP, else one for each subject (`seq_aligns_of`).
+    pub(super) gapped: bool,
 }
 
 impl ReportedSubjects {
@@ -918,6 +924,7 @@ pub(super) fn prefetch_stop(
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
+    gapped: bool,
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -938,7 +945,10 @@ pub(super) fn prefetch_stop(
                 .flatten()
                 .flat_map(KappaResultHitList::lists)
         };
-        if shared::prefetch_off(lists().map(scored).sum()) {
+        let seq_aligns = lists()
+            .map(|list| shared::subject_seq_aligns(scored(list), gapped))
+            .sum();
+        if shared::prefetch_off(seq_aligns) {
             return None;
         }
         let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
@@ -964,13 +974,13 @@ pub(super) fn prefetch_stop(
 }
 
 /// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against
-/// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP (TBLASTN's search is gapped;
-/// LOSAT refuses `-ungapped`, whose Seq-aligns are one per subject).
-pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList]) -> usize {
+/// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP of a `gapped` search, one
+/// for each subject of an ungapped one (`-ungapped`, `shared::subject_seq_aligns`).
+pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList], gapped: bool) -> usize {
     hitlists
         .iter()
         .flat_map(KappaResultHitList::lists)
-        .map(|list| list.hsps.hsps.len())
+        .map(|list| shared::subject_seq_aligns(list.hsps.hsps.len(), gapped))
         .sum()
 }
 
@@ -1141,6 +1151,7 @@ pub(super) fn reported_subjects(
     others: &[&str],
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
+    gapped: bool,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
     let shown = parsed_shown(formats);
@@ -1155,7 +1166,7 @@ pub(super) fn reported_subjects(
     // `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them one by
     // one; `shared::BatchPrefetch`, `shared::BatchReads::shown`).
     let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
-        seq_aligns_of(&hitlists[span])
+        seq_aligns_of(&hitlists[span], gapped)
     });
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
         hitlist
@@ -1319,6 +1330,7 @@ pub(super) fn reported_subjects(
         parsed,
         sources,
         loads,
+        gapped,
     })
 }
 

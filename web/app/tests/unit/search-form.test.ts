@@ -36,6 +36,7 @@ import {
   PROTEIN_GAP_COSTS,
   PROTEIN_WORD_SIZES,
   residueUnit,
+  printSummaryParts,
   searchSummary,
   searchSummaryParts,
   sequenceKind,
@@ -769,6 +770,16 @@ describe('fieldRows', () => {
       ['Gap Costs', ['-gapopen', '-gapextend']],
       [undefined, ['-comp_based_stats']],
     ]);
+  });
+});
+
+// Line WQA's D20, 2026-11-23: the line under "Run LOSAT" for a draft whose argv prints the command line's help or version.
+describe('printSummaryParts', () => {
+  it('says what is printed, for which program, and that no search runs', () => {
+    const text = (parts: ReturnType<typeof printSummaryParts>) => parts.map((part) => part.text).join('');
+    expect(text(printSummaryParts(programById('blastn'), 'help'))).toBe("Print the command line's help for BLASTN. No search runs.");
+    expect(text(printSummaryParts(programById('tblastx'), 'version'))).toBe("Print the command line's version for TBLASTX. No search runs.");
+    expect(printSummaryParts(programById('blastp'), 'help').filter((part) => part.strong).map((part) => part.text)).toEqual(['help', 'BLASTP']);
   });
 });
 

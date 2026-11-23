@@ -1,0 +1,188 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/l_p3.lst
+           3 sequences; 108 total letters
+
+
+
+Query= YP_009220529.1 ribonucleotide reductase large subunit [White spot
+syndrome virus]
+
+Length=848
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pe qe cut q_rr1.faa 401-436                                           64.4    2e-18
+pc qc cut q_rr2.faa 101-136                                           15.8    0.46 
+
+
+>pe qe cut q_rr1.faa 401-436
+Length=36
+
+ Score = 64.4 bits (156),  Expect = 2e-18, Method: Composition-based stats.
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+
+Query  401  GKGKEVVKARALFDQINSARIETGTPYVCFKDTINR  436
+            GKGKEVVKARALFDQINSARIETGTPYVCFKDTINR
+Sbjct  1    GKGKEVVKARALFDQINSARIETGTPYVCFKDTINR  36
+
+
+ Score = 13.2 bits (23),  Expect = 5.5, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  342  GNEDLRTRDLFPAI  355
+            G E ++ R LF  I
+Sbjct  3    GKEVVKARALFDQI  16
+
+
+ Score = 12.4 bits (21),  Expect = 9.7, Method: Composition-based stats.
+ Identities = 5/11 (45%), Positives = 5/11 (45%), Gaps = 0/11 (0%)
+
+Query  125  TGKPASVVNDT  135
+            TG P     DT
+Sbjct  23   TGTPYVCFKDT  33
+
+
+>pc qc cut q_rr2.faa 101-136
+Length=36
+
+ Score = 15.8 bits (30),  Expect = 0.46, Method: Composition-based stats.
+ Identities = 7/21 (33%), Positives = 11/21 (52%), Gaps = 0/21 (0%)
+
+Query  619  DWEQLRRDIMKYGVHNSMFVA  639
+            DWE+L +D   + +    F A
+Sbjct  2    DWEKLTQDEKDFILQILAFFA  22
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.392    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0527    0.140     1.90     42.6     43.6 
+
+Effective search space used: 37215
+
+
+Query= YP_009220535.1 ribonucleotide reductase small subunit [White spot
+syndrome virus]
+
+Length=413
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pc qc cut q_rr2.faa 101-136                                           55.9    1e-15
+pe qe cut q_rr1.faa 401-436                                           13.6    1.8  
+
+
+>pc qc cut q_rr2.faa 101-136
+Length=36
+
+ Score = 55.9 bits (134),  Expect = 1e-15, Method: Composition-based stats.
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+
+Query  101  KDWEKLTQDEKDFILQILAFFASSDGIVIENLTTRL  136
+            KDWEKLTQDEKDFILQILAFFASSDGIVIENLTTRL
+Sbjct  1    KDWEKLTQDEKDFILQILAFFASSDGIVIENLTTRL  36
+
+
+ Score = 13.1 bits (23),  Expect = 2.9, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+
+Query  334  FPFMDNISLENKTN  347
+            F   D I +EN T 
+Sbjct  21   FASSDGIVIENLTT  34
+
+
+ Score = 13.1 bits (23),  Expect = 2.9, Method: Composition-based stats.
+ Identities = 4/14 (29%), Positives = 10/14 (71%), Gaps = 0/14 (0%)
+
+Query  207  LAELIVAFAAVEGI  220
+            + +++  FA+ +GI
+Sbjct  14   ILQILAFFASSDGI  27
+
+
+>pe qe cut q_rr1.faa 401-436
+Length=36
+
+ Score = 13.6 bits (24),  Expect = 1.8, Method: Composition-based stats.
+ Identities = 4/5 (80%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+
+Query  376  ETGSP  380
+            ETG+P
+Sbjct  22   ETGTP  26
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.135    0.387    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 21330
+
+
+Query= YP_009220649.1 DNA polymerase [White spot syndrome virus]
+
+Length=2351
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pf qf cut q_pol.faa 1001-1036                                         69.3    1e-19
+pc qc cut q_rr2.faa 101-136                                           14.3    6.7  
+
+
+>pf qf cut q_pol.faa 1001-1036
+Length=36
+
+ Score = 69.3 bits (169),  Expect = 1e-19, Method: Composition-based stats.
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+
+Query  1001  NKEGEIFRLCMDSALTEAVVTANLATPLCIGEGAIC  1036
+             NKEGEIFRLCMDSALTEAVVTANLATPLCIGEGAIC
+Sbjct  1     NKEGEIFRLCMDSALTEAVVTANLATPLCIGEGAIC  36
+
+
+>pc qc cut q_rr2.faa 101-136
+Length=36
+
+ Score = 14.3 bits (26),  Expect = 6.7, Method: Composition-based stats.
+ Identities = 5/14 (36%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+
+Query  958  KDEVDLHFHLLGFL  971
+            +DE D    +L F 
+Sbjct  8    QDEKDFILQILAFF  21
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.132    0.388    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 69750
+
+
+  Database: in/l_p3.lst
+    Posted date:  Nov 21, 2026  5:07 AM
+  Number of letters in database: 108
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

@@ -27,9 +27,10 @@ const RECORD_DELIM: u8 = 10;
 const MAX_STRING_LINE: i32 = 4096;
 const ISAM_NUMERIC_TYPE: i32 = 0;
 const ISAM_STRING_TYPE: i32 = 2;
+const ISAM_NUMERIC_LONG: i32 = 5;
 
-/// `EWriteDBIsamType` of the indices makeblastdb builds from FASTA input (`eTrace` is never
-/// built: makeblastdb does not set `eAddTrace`).
+/// `EWriteDBIsamType`: the indices of makeblastdb, and the trace ids of makeprofiledb's
+/// (`eAddTrace`, part of its `eDefault`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IsamType {
     /// `ePig`: protein identifier groups, which only `makeblastdb -input_type blastdb` gives.
@@ -40,6 +41,8 @@ pub(crate) enum IsamType {
     Acc,
     /// `eHash`: the string index of the sequence hashes.
     Hash,
+    /// `eTrace`: the numeric index of the trace ids (`gnl|ti|<n>`).
+    Trace,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:56-96
@@ -50,6 +53,7 @@ fn isam_extension(itype: IsamType, protein: bool, is_index: bool) -> &'static st
         IsamType::Gi => ["pni", "pnd", "nni", "nnd", "", "", "", ""],
         IsamType::Acc => ["psi", "psd", "nsi", "nsd", "", "", "", ""],
         IsamType::Hash => ["phi", "phd", "nhi", "nhd", "", "", "", ""],
+        IsamType::Trace => ["pti", "ptd", "nti", "ntd", "", "", "", ""],
     };
     names[usize::from(!protein) * 2 + usize::from(!is_index)]
 }
@@ -836,6 +840,8 @@ pub(crate) struct NumericIsam {
     data_file_size: u64,
     /// `m_NumberTable`: (id, OID).
     table: Vec<(i64, i32)>,
+    /// `m_UseInt8`: a trace id of `kMax_Int` or more makes the ids `Int8`s.
+    use_int8: bool,
 }
 
 impl NumericIsam {
@@ -850,6 +856,7 @@ impl NumericIsam {
             files: IsamFiles::new(itype, dbname, protein, index, max_file_size),
             data_file_size: 0,
             table: Vec::new(),
+            use_int8: false,
         }
     }
 
@@ -872,6 +879,27 @@ impl NumericIsam {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:524-552
+    // A tag `str` is converted by `NStr::StringToInt8`; the caller gives only tags that convert
+    // (`trace_id`).
+    /// `AddIds` of the numeric index of the trace ids (`x_AddTraceIds`): each `gnl|ti|<n>` of
+    /// `ids`.
+    pub(crate) fn add_trace_ids(&mut self, oid: u32, ids: &[ParsedSeqId]) {
+        for id in ids.iter().filter_map(trace_id) {
+            self.table.push((id, oid as i32));
+            if self.use_int8 {
+                self.data_file_size += 12;
+            } else if id >= i64::from(i32::MAX) {
+                self.use_int8 = true;
+                self.data_file_size /= 8;
+                self.data_file_size *= 12;
+                self.data_file_size += 12;
+            } else {
+                self.data_file_size += 8;
+            }
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:496-501
     /// `AddPig`: the PIG of OID `oid` (a PIG index).
     pub(crate) fn add_pig(&mut self, oid: u32, pig: i32) {
@@ -880,42 +908,64 @@ impl NumericIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:383-455
-    // `m_UseInt8` is set by trace ids only, which makeblastdb does not index. The rows are
-    // sorted as (Int8 id, OID) pairs and the id is written as an `Int4`: a GI of 2^31 or more
+    // `m_UseInt8` is set by trace ids only (makeprofiledb's). The rows are sorted as (Int8 id,
+    // OID) pairs and, without `m_UseInt8`, the id is written as an `Int4`: a GI of 2^31 or more
     // comes after the smaller ones and is written negative. The header counts the rows
     // before the duplicates are skipped (`x_WriteHeader`: `num_terms` is the table's size).
     /// `Close`: writes both files when the index has rows.
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         if !self.table.is_empty() {
+            let isam_type = if self.use_int8 {
+                ISAM_NUMERIC_LONG
+            } else {
+                ISAM_NUMERIC_TYPE
+            };
             self.files.create_with_header(
-                ISAM_NUMERIC_TYPE,
+                isam_type,
                 self.data_file_size,
                 self.table.len() as i32,
                 256,
                 0,
             )?;
-            self.table.sort_unstable();
+            let mut table = std::mem::take(&mut self.table);
+            table.sort_unstable();
             let mut prev: Option<(i64, i32)> = None;
             let mut row_index: u32 = 0;
-            for &(id, oid) in &self.table {
+            for &(id, oid) in &table {
                 if prev == Some((id, oid)) {
                     continue;
                 }
                 prev = Some((id, oid));
                 if row_index & 255 == 0 {
-                    self.files.index.write_int4(id as i32)?;
+                    self.write_id(true, id)?;
                     self.files.index.write_int4(oid)?;
                 }
-                self.files.data.write_int4(id as i32)?;
+                self.write_id(false, id)?;
                 self.files.data.write_int4(oid)?;
                 row_index += 1;
             }
-            self.files.index.write_int4(-1)?;
+            self.write_id(true, -1)?;
             self.files.index.write_int4(0)?;
         }
         // `x_Free`: `m_NumberTable` is swapped with an empty `vector` of `SIdOid`.
         self.table = Vec::new();
         self.files.close();
+        Ok(())
+    }
+
+    /// An id of the index (`index`) or data file: an `Int8` with `m_UseInt8`, an `Int4`
+    /// otherwise.
+    fn write_id(&mut self, index: bool, id: i64) -> Result<(), WriteDbError> {
+        let file = if index {
+            &mut self.files.index
+        } else {
+            &mut self.files.data
+        };
+        if self.use_int8 {
+            file.write_int8(id)?;
+        } else {
+            file.write_int4(id as i32)?;
+        }
         Ok(())
     }
 
@@ -929,6 +979,23 @@ impl NumericIsam {
 
     pub(crate) fn list_files(&self, files: &mut Vec<String>) {
         self.files.list_files(!self.table.is_empty(), files);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:527-533
+/// The trace id of `id` (`gnl|ti|<n>`): the tag's `id`, or its `str` as `NStr::StringToInt8`
+/// converts it (`None` for a string it does not convert, whose `CStringException` the caller
+/// refuses before the id reaches the index: `makeprofiledb`).
+pub(crate) fn trace_id(id: &ParsedSeqId) -> Option<i64> {
+    let ParsedSeqId::General(tag) = id else {
+        return None;
+    };
+    if tag.db.as_slice() != b"ti" {
+        return None;
+    }
+    match &tag.tag {
+        crate::seqid::model::ObjectId::Id(number) => Some(i64::from(*number)),
+        crate::seqid::model::ObjectId::Str(text) => crate::ncbi_str::string_to_int8(text, 0).ok(),
     }
 }
 

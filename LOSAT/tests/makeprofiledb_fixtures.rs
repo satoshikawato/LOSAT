@@ -295,6 +295,44 @@ fn makeprofiledb_refuses_nucleotide_data_shorter_than_its_length() {
     }
 }
 
+// `in/l_QR06.lst`, `in/l_QR07.lst` (row PS10d): profiles with frequency ratios only whose query
+// NCBI's run does not end in a defined way. QR06 (ncbi8na alone, review O6): NCBI's conversion
+// error, then its writer's error posted as it closes, then the taxonomy writer's exception out
+// of its destructor (`terminate`, exit status 134). QR07 (a gap): NCBI's conversion reads past
+// its table of codings.
+#[test]
+fn makeprofiledb_refuses_a_query_where_ncbi_has_no_result() {
+    for (list, err) in [
+        (
+            "QR06",
+            "Error: LOSAT database creation error: Unable to process sequence for entry \
+             [CDD:237976].\nError: an error (ERROR: Unknown conversion.) after which the \
+             database's writer stops with another (Error: No tax info for any oid; NCBI's \
+             makeprofiledb aborts there) is not supported by LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR07",
+            "Error: a profile of frequency ratios whose query's Seq-data is a gap (NCBI's \
+             sequence conversion reads its coding past the end of its table) is not supported \
+             by LOSAT's MAKEPROFILEDB\n",
+        ),
+    ] {
+        let dir = scratch(list);
+        let words = words(&format!("-in in/l_{list}.lst -out db"));
+        let (out, got, status, _) = run(&dir, &words);
+        assert_eq!(
+            (
+                String::from_utf8_lossy(&out),
+                String::from_utf8_lossy(&got),
+                status
+            ),
+            ("".into(), err.into(), 1),
+            "{list}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
 /// `text` with the date of each `Posted date:` line (outfmt 0's database footer: the build date
 /// that makeprofiledb wrote into the `.pin` file) replaced by `<DATE>`.
 fn posted_date_masked(text: &str) -> String {

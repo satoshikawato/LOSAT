@@ -395,11 +395,14 @@
   lower-case IUPACaa query is built as NCBI builds it, and only a code past the 28 residues is refused,
   where NCBI's engine counts it, after the errors of the lengths and the matrix that NCBI gives first;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.80 2026-11-23 (the rule-3 rejection of `losat makeprofiledb` of a query in a nucleotide coding
-  whose data is shorter than NCBI's writer reads for its length, psiblast line item PS10d: a query
-  in `iupacna`, `ncbi2na` or `ncbi4na` of enough bytes is built as NCBI builds it, with NCBI's
-  `Unknown conversion.` error in a profile with frequency ratios only; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.79)
+  1.80 2026-11-23 (two rule-3 rejections of `losat makeprofiledb`, psiblast line item PS10d: a
+  query in a nucleotide coding whose data is shorter than NCBI's writer reads for its length, and
+  in a profile with frequency ratios only a query whose `Seq-data` is a gap; a query in `iupacna`,
+  `ncbi2na` or `ncbi4na` of enough bytes is built as NCBI builds it, and in a profile with
+  frequency ratios only the query of every other coding gets NCBI's conversion: `Unknown
+  conversion.` for a nucleotide coding, NCBI8aa's bytes as its codes, the unknown exception for
+  NCBIpna and NCBIpaa; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.79)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2726,7 +2729,14 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     two runs, SIGSEGV for empty `ncbi2na`). The data of
     enough bytes (more than the length needs, unused bits set, iupacna up to three letters short of an
     even length and two of an odd one, whose read ends at the string's zero or before it) is NCBI's
-    (fixture rows QD01-QD39).
+    (fixture rows QD01-QD40).
+  - A profile with frequency ratios only whose query's `Seq-data` is a `gap` (version 1.80, PS10d):
+    NCBI's conversion of the query to NCBIstdaa looks its coding up in a table of the `CSeqUtil`
+    codings that ends before the gap's number (`seqport_util.cpp:1947-1959,2032-2035`) and reads
+    past it. The other codings that the conversion meets are NCBI's (fixture rows QD41-QD46:
+    `Unknown conversion.` for NCBI8na, NCBI8aa's bytes as the query's codes, the unknown exception
+    of NCBIpna and NCBIpaa, which the table has no coding for; then the writer's error for the
+    coding it cannot store, posted or reported where NCBI's is).
   - A profile with frequency ratios only whose matrix has no frequency ratios, or whose query has no
     ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
   - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends

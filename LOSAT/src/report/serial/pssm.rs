@@ -57,7 +57,7 @@ pub struct PssmQuery {
     /// The ids, read and written as every Seq-id of NCBI's ASN.1 text (`seqid::asn_text`,
     /// `report::seqid::SeqId::Db`).
     pub ids: Vec<crate::seqid::ParsedSeqId>,
-    /// `descr` (`Seq-descr ::= SET OF Seqdesc`) in the order read; `None` without the member.
+    /// `descr` (a `Seq-descr`, a set of `Seqdesc`) in the order read; `None` without the member.
     pub descr: Option<Vec<Seqdesc>>,
     pub inst: SeqInst,
     /// `annot SET OF Seq-annot`, each a value of the generic reader.
@@ -221,17 +221,17 @@ pub const SEQ_INST_MOL: [(&str, i32); 6] = [
 // `NCBI2na` and `NCBI4na` OCTET STRINGs)
 #[derive(Debug, Clone, PartialEq)]
 pub enum SeqData {
-    /// `iupacna` (`IUPACna ::= StringStore`).
+    /// `iupacna`: IUPACna letters, a StringStore.
     Iupacna(Vec<u8>),
-    /// `iupacaa` (`IUPACaa ::= StringStore`).
+    /// `iupacaa`: IUPACaa letters, a StringStore.
     Iupacaa(Vec<u8>),
-    /// `ncbi2na` (`NCBI2na ::= OCTET STRING`).
+    /// `ncbi2na`: NCBI2na bytes, an OCTET STRING.
     Ncbi2na(Vec<u8>),
-    /// `ncbi4na` (`NCBI4na ::= OCTET STRING`).
+    /// `ncbi4na`: NCBI4na bytes, an OCTET STRING.
     Ncbi4na(Vec<u8>),
-    /// `ncbieaa` (`NCBIeaa ::= StringStore`).
+    /// `ncbieaa`: NCBIeaa letters, a StringStore.
     Ncbieaa(Vec<u8>),
-    /// `ncbistdaa` (`NCBIstdaa ::= OCTET STRING`).
+    /// `ncbistdaa`: NCBIstdaa codes, an OCTET STRING.
     Ncbistdaa(Vec<u8>),
     /// Another variant, the `Seq-data` CHOICE value of the generic reader: NCBI's object manager
     /// does not read it, LOSAT's search refuses it (`in_pssm::psi_search_and_object`).

@@ -99,6 +99,7 @@ impl From<ProfileError> for RunError {
             ProfileError::Rps(error) => error.into(),
             ProfileError::Blast(message) => RunError::Blast(message.into_bytes()),
             ProfileError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
+            ProfileError::Unknown => RunError::Unknown,
         }
     }
 }

@@ -218,8 +218,8 @@ fn cooked(data: SeqData, length: u32) -> (String, String) {
 
 // NCBI makeprofiledb 2.17.0 on profiles whose query is in a nucleotide coding (row PS10d survey
 // `PR/ps10d/probe`, 2026-11-23, two runs equal, valgrind clean): the sequence bytes that it
-// wrote into the protein volume's `.psq` (each sequence ends at the next NUL there) and its
-// standard output, for the cases of the survey's §4 (`SA_*`, `VC_*`, `L*_*`). The query's bases
+// wrote into the protein volume's `.psq` (the bytes between the sequence's offsets in the
+// `.pin`, `probe/dbinfo.txt`) and its standard output, for the cases of the survey's §4 (`SA_*`, `VC_*`, `L*_*`). The query's bases
 // are `ATGGCGTACCTGAAGTTCGACA` (22) and their first 21 or fewer.
 #[test]
 fn nucleotide_codings_give_ncbis_sequence_bytes_and_lines() {

@@ -110,3 +110,10 @@ QD36	-in in/l_QD36.lst -out db
 QD37	-in in/l_QD37.lst -out db
 QD38	-in in/l_QD38.lst -out db
 QD39	-in in/l_QD39.lst -out db
+QD40	-max_smp_vol 2 -in in/l_QD40.lst -out db
+QD41	-in in/l_QD41.lst -out db
+QD42	-in in/l_QD42.lst -out db
+QD43	-in in/l_QD43.lst -out db
+QD44	-in in/l_QD44.lst -out db
+QD45	-in in/l_QD45.lst -out db
+QD46	-in in/l_QD46.lst -out db

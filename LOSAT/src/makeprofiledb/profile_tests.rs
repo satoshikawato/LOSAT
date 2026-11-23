@@ -79,21 +79,24 @@ fn a_code_past_the_residues_is_refused_where_the_engine_counts_it() {
             "{text}"
         );
     }
+    let text = refusal("seq-data ncbi8aa '0A1C'H", "BLOSUM62").unwrap();
+    assert!(text.contains("the NCBI8aa code 28 at position 2"), "{text}");
     assert_eq!(refusal("seq-data ncbieaa \"KD+E\"", "FOO"), None);
     assert_eq!(refusal("seq-data iupacaa \"kd\"", "BLOSUM62"), None);
     assert_eq!(refusal("seq-data ncbistdaa '0A1B'H", "BLOSUM62"), None);
 }
 
-// NCBI makeprofiledb 2.17.0 (row PS10d survey §2, 2026-11-23): the query of a profile with
-// frequency ratios only in a nucleotide coding stops the build with `CSeqConvert`'s exception
-// (`Error: ERROR: Unknown conversion.`, exit status 255) in each coding; empty data is an empty
-// query, whose length NCBI then finds wrong.
+// NCBI makeprofiledb 2.17.0 (row PS10d survey §2 and review O1, O5, 2026-11-23): the query of
+// a profile with frequency ratios only in a nucleotide coding stops the build with
+// `CSeqConvert`'s exception (`Error: ERROR: Unknown conversion.`, exit status 255) in each
+// coding; empty data is an empty query, whose length NCBI then finds wrong.
 #[test]
 fn a_nucleotide_query_is_ncbis_unknown_conversion() {
     for data in [
         "seq-data iupacna \"ACGTACGTACGT\"",
         "seq-data ncbi2na '1B1B1B'H",
         "seq-data ncbi4na '124812481248'H",
+        "seq-data ncbi8na '010204080F00'H",
     ] {
         match query_ncbistdaa(&profile(data)) {
             Err(ProfileError::Exception(exception)) => {
@@ -106,7 +109,37 @@ fn a_nucleotide_query_is_ncbis_unknown_conversion() {
         "seq-data iupacna \"\"",
         "seq-data ncbi2na ''H",
         "seq-data ncbi4na ''H",
+        "seq-data ncbi8na ''H",
+        "seq-data ncbi8aa ''H",
     ] {
         assert_eq!(query_ncbistdaa(&profile(data)).unwrap(), [0u8; 0], "{data}");
+    }
+}
+
+// NCBI makeprofiledb 2.17.0 (row PS10d review O2, O3, 2026-11-23): NCBI8aa's bytes are the
+// query's codes (a code past the residues is then refused where the engine counts it);
+// NCBIpna and NCBIpaa, which `CSeqportUtil` has no coding for, are its unknown exception,
+// whatever their data; a gap, whose number its table does not reach, is refused.
+#[test]
+fn the_other_codings_are_ncbis_conversion() {
+    assert_eq!(
+        query_ncbistdaa(&profile("seq-data ncbi8aa '0A04141B1C'H")).unwrap(),
+        [10, 4, 20, 27, 28]
+    );
+    for data in [
+        "seq-data ncbipna '0000000000'H",
+        "seq-data ncbipna ''H",
+        "seq-data ncbipaa '00000000000000000000000000'H",
+    ] {
+        assert!(
+            matches!(query_ncbistdaa(&profile(data)), Err(ProfileError::Unknown)),
+            "{data}"
+        );
+    }
+    match query_ncbistdaa(&profile("seq-data gap { type unknown }")) {
+        Err(ProfileError::Rps(RpsError::Refused(text))) => {
+            assert!(text.contains("Seq-data is a gap"), "{text}")
+        }
+        other => panic!("{other:?}"),
     }
 }

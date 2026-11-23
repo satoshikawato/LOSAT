@@ -447,8 +447,9 @@ pub(crate) fn flow_subjects_per_task(
 /// of the capped batch flow (`one_task`) the threads the cap leaves it, and for a reader batch
 /// searched whole those it is left (`whole`, `whole_batch_threads`), at most ceil(subjects / f)
 /// with the fill's f: every thread then has f tasks (of one subject where the subjects are few),
-/// and no thread holds a diagonal table of the batch's letters (`next_pow2(letters + window)`
-/// cells of 4 bytes, 8 MiB for 1,000,000 letters) for fewer subjects than that.
+/// and no thread holds a diagonal table of the batch's letters (the power of two at or above the
+/// letters plus the window, in cells of 4 bytes: 8 MiB for 1,000,000 letters) for fewer subjects
+/// than that.
 pub(crate) fn flow_threads(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,

@@ -438,6 +438,7 @@ fn with_batch(
                 search_space: first.search_space,
                 length_adjustment: first.length_adjustment,
                 searched_space: batch_searched_space(call.batches, options),
+                round: None,
             })
         },
     )
@@ -454,12 +455,17 @@ pub(crate) fn write_blastx_archive(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
-        rps: call.batch.options.rpstblastn.is_some(),
         db_title: match &call.names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: call.batch.options.gapped,
+        program_type: call
+            .batch
+            .options
+            .rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn),
     };
     // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
     // of a subject with HSPs of letters in two, and makes alignments without scores of a subject

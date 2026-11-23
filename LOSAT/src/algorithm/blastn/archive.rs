@@ -470,6 +470,7 @@ pub(crate) fn for_each_batch(
                         space: context.context0_space,
                         query_length: context.context0_length,
                     }),
+                    round: None,
                 };
                 each(span, &batch)
             },
@@ -491,9 +492,9 @@ pub(crate) fn write_blastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: call.subjects.db_title(),
         gapped: call.batches.gapped,
+        program_type: None,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
         for index in span.clone() {

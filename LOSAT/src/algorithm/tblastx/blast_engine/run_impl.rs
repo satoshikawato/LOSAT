@@ -5365,6 +5365,7 @@ fn search_query_batch<S: TbxScore>(
                 x_pair_lut_is_stub,
                 x_read_failure: &x_read_failure,
                 subject_besthit: statistics.word_finder_cx.subject_besthit,
+                extensions: statistics.word_finder_cx.extensions,
             },
             x_units_stage,
             &mut x_lap,

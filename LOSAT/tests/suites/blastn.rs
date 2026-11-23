@@ -20,6 +20,8 @@ mod blastn_db_search;
 mod blastn_db_soft_long;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_qs_ahead.rs"]
+mod blastn_dc_qs_ahead;
 #[path = "../blastn_dc_seed_lean.rs"]
 mod blastn_dc_seed_lean;
 #[path = "../blastn_diag_lv.rs"]

@@ -71,7 +71,7 @@ fn calls(
     subject: &[u8],
     range: (i32, i32),
     array_size: usize,
-    form: Option<(bool, bool)>,
+    form: Option<(bool, bool, bool)>,
 ) -> Vec<(Vec<(u32, u32)>, i32)> {
     calls_held(lookup, presence, subject, range, array_size, form, false)
 }
@@ -80,15 +80,15 @@ thread_local! {
     static RESUMED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// `calls`, with one `XScanHeld` for the range when `resume`. `form` = `scan`'s `(avx2, run)`;
-/// `None` = NCBI's scan.
+/// `calls`, with one `XScanHeld` for the range when `resume`. `form` = `scan`'s
+/// `(avx2, run, step)`; `None` = NCBI's scan.
 fn calls_held(
     lookup: &BlastAaLookupTable,
     presence: &XPresence,
     subject: &[u8],
     range: (i32, i32),
     array_size: usize,
-    form: Option<(bool, bool)>,
+    form: Option<(bool, bool, bool)>,
     resume: bool,
 ) -> Vec<(Vec<(u32, u32)>, i32)> {
     let mut held = XScanHeld::new();
@@ -104,7 +104,7 @@ fn calls_held(
     let mut out = Vec::new();
     while scan_range[1] <= scan_range[2] {
         let hits = match form {
-            Some((avx2, run)) => {
+            Some((avx2, run, step)) => {
                 let at = (subject.as_ptr() as usize, subject.len());
                 if !resume {
                     held = XScanHeld::new();
@@ -116,6 +116,7 @@ fn calls_held(
                 scan(
                     avx2,
                     run,
+                    step,
                     lookup,
                     presence,
                     subject,
@@ -159,12 +160,17 @@ fn calls_held(
 fn x_scan_byte_equals_ncbi_scan_on_random_subjects() {
     RESUMED.with(|r| r.set(0));
     let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
-    // (avx2, run): the plain loops, the AVX2 forms, and those with the chain runs
-    // (LOSAT_X_CHAINRUN).
-    let forms: Vec<(bool, bool)> = if avx2_detected() {
-        vec![(false, false), (true, false), (true, true)]
+    // (avx2, run, step): the plain loops, the AVX2 forms, those with the chain runs
+    // (LOSAT_X_CHAINRUN), and those with the list in steps too (LOSAT_X_LISTSTEP).
+    let forms: Vec<(bool, bool, bool)> = if avx2_detected() {
+        vec![
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (true, true, true),
+        ]
     } else {
-        vec![(false, false)]
+        vec![(false, false, false)]
     };
     let mut compared = 0usize;
     let mut stops = 0usize;
@@ -323,21 +329,22 @@ fn indexes_and_presence_equal_the_rolled_index_and_pv() {
     }
     for words in [1, 15, 16, 17, 31, 32, 33, 100, X_BLOCK] {
         let block = &letters[..words + 2];
-        let mut forms = vec![false];
+        // (avx2, step): the plain loop, the AVX2 form, and its list in steps (LOSAT_X_LISTSTEP).
+        let mut forms = vec![(false, false)];
         if avx2_detected() {
-            forms.push(true);
+            forms.extend([(true, false), (true, true)]);
         }
-        for avx2 in forms {
+        for (avx2, step) in forms {
             let mut index = [0u16; X_BLOCK];
             let mut cand = [MaybeUninit::<u16>::uninit(); X_BLOCK];
-            let n = run_candidates(avx2, block, &presence, &mut index, &mut cand);
+            let n = run_candidates(avx2, step, block, &presence, &mut index, &mut cand);
             let mut rolled = ((block[0] as usize) << 5 | block[1] as usize) & X_MASK;
             let mut want = Vec::new();
             for k in 0..words {
                 rolled = ((rolled << 5) | block[k + 2] as usize) & X_MASK;
                 assert_eq!(
                     index[k] as usize, rolled,
-                    "word {k} of {words}, avx2 {avx2}"
+                    "word {k} of {words}, avx2 {avx2} step {step}"
                 );
                 if presence[rolled] == 1 {
                     want.push(k as u16);
@@ -348,14 +355,16 @@ fn indexes_and_presence_equal_the_rolled_index_and_pv() {
                 .iter()
                 .map(|c| unsafe { c.assume_init() })
                 .collect();
-            assert_eq!(got, want, "{words} words, avx2 {avx2}");
+            assert_eq!(got, want, "{words} words, avx2 {avx2} step {step}");
         }
     }
 }
 
-/// `candidates_avx2` when `avx2` (detected by the caller), else `candidates`.
+/// `candidates_avx2` (listing in steps when `step`) when `avx2` (detected by the caller), else
+/// `candidates`.
 fn run_candidates(
     avx2: bool,
+    step: bool,
     letters: &[u8],
     presence: &[u8; X_MASK + 1],
     index: &mut [u16; X_BLOCK],
@@ -364,9 +373,9 @@ fn run_candidates(
     #[cfg(target_arch = "x86_64")]
     if avx2 {
         // SAFETY: AVX2 was detected.
-        return unsafe { candidates_avx2(letters, presence, index, cand) };
+        return unsafe { candidates_avx2(letters, presence, index, cand, step) };
     }
-    assert!(!avx2, "AVX2 off x86-64");
+    assert!(!avx2 && !step, "AVX2 off x86-64");
     candidates(letters, presence, index, cand)
 }
 
@@ -425,9 +434,13 @@ fn the_last_overflow_chain_is_copied_exactly() {
                 want[0].0.len() >= hits,
                 "case {case}: the chain was not copied"
             );
-            let mut forms = vec![(false, false)];
+            let mut forms = vec![(false, false, false)];
             if avx2_detected() {
-                forms.extend([(true, false), (true, true)]);
+                forms.extend([
+                    (true, false, false),
+                    (true, true, false),
+                    (true, true, true),
+                ]);
             }
             for form in forms {
                 for resume in [false, true] {

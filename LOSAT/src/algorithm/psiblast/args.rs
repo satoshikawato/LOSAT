@@ -522,7 +522,6 @@ impl PsiblastArgs {
             return Ok(());
         }
         if let Some(format) = ReportFormat::from_number(choice.number) {
-            // With a pattern, formats 8, 9 and 12 reach NCBI's engine error.
             let runs = matches!(
                 format,
                 ReportFormat::Pairwise
@@ -534,12 +533,27 @@ impl PsiblastArgs {
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::ArchiveFormat
                     | ReportFormat::CommaSeparatedValuesWithHeader
-            ) || (phi
-                && matches!(
-                    format,
-                    ReportFormat::AsnText | ReportFormat::AsnBinary | ReportFormat::JsonSeqalign
-                ));
-            if !runs {
+            );
+            // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), and formats
+            // 8, 9 and 12, which reach NCBI's engine error.
+            let phi_runs = matches!(
+                format,
+                ReportFormat::Pairwise
+                    | ReportFormat::Tabular
+                    | ReportFormat::TabularWithComments
+                    | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::CommaSeparatedValuesWithHeader
+                    | ReportFormat::AsnText
+                    | ReportFormat::AsnBinary
+                    | ReportFormat::JsonSeqalign
+            );
+            if phi && runs && !phi_runs {
+                bail!(
+                    "-phi_pattern with output format {} is not supported by LOSAT's PSIBLAST yet",
+                    choice.number
+                );
+            }
+            if !runs && !(phi && phi_runs) {
                 bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number

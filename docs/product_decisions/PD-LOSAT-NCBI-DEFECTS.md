@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.86
+- Version: 1.87
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -443,15 +443,20 @@
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.83; first 1.79, then
   1.83 at the merge of dev that brought 1.78 to 1.82 (psiblast line item PS10a, line RG item D5b-5, line NP items
   O4c and M4c-1, psiblast line item PS12c), then 1.84 at the merge of dev that brought line NP item M4b-AX's 1.83);
-  1.86 2026-11-23 (TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a frame
+  1.85 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: an
+  explicit rejection of a `SEQIDLIST` token that NCBI warns about, kept under rule 2 by the
+  maintainer (Owner's answer 「Q-D1c-R2=A」, 2026-11-22 22:4x JST); numbered after 1.71; first
+  1.72, then 1.74, 1.78, 1.81, 1.82, 1.83 and 1.85 at the merges of dev that brought 1.72 and 1.73,
+  then 1.74 to 1.77, then 1.78 to 1.80, then 1.81, then 1.82, then 1.83 and 1.84);
+  1.87 2026-11-23 (TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a frame
   of more than 5,000,000 residues, line NP item M4b-T2: the scan of a chunk's later range that
   starts before the chunk, and of the ranges after a first range raised to one word on the
   frame's last letter, ported, rule 4; a TBLASTN gapped search of a chunk that saves an initial
   alignment starting before the chunk, on which NCBI crashes or starts its gapped alignment
   outside the chunk, an explicit rejection, rule 3; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.85, line NP item M4b-3c (open work); first 1.81, then 1.82 at the
-  merge of dev that brought 1.81, then 1.84 after dev's 1.82 (line PS item PS10a) and M4b-AX's 1.83, then 1.86
-  after dev's 1.84 (psiblast line item PS10c) and M4b-3c's 1.85)
+  2026-09-29, restated 2026-10-07; numbered after 1.86, line NP item M4b-3c (open work, #1523); first 1.81, then 1.82 at
+  the merge of dev that brought 1.81, then 1.84 after dev's 1.82 (line PS item PS10a) and M4b-AX's 1.83, then 1.86
+  after dev's 1.84 (psiblast line item PS10c), then 1.87 after dev's 1.85 (line RG item D1c-1) and M4b-3c's 1.86)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2650,9 +2655,9 @@ file would differ, and NCBI's programs still could not open the database).
   X-short-tbx-link).
 
 - TBLASTN with `-db_soft_mask`, a gapped search of a chunk that saves an initial alignment starting
-  before the chunk (version 1.86, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
+  before the chunk (version 1.87, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). Masks stored out of order on a frame of more than
-  5,000,000 residues let the scan find words before the chunk (the rule-4 item of version 1.86); the
+  5,000,000 residues let the scan find words before the chunk (the rule-4 item of version 1.87); the
   one-hit extension of such a word (`-window_size 0`), or a two-hit extension whose word lies wholly
   before the chunk, gives an initial alignment that starts there. NCBI's gapped start reads the
   subject at that start taken as `Uint4` (`blast_gapalign.c:3936-3942,3393-3439`), about 4 GiB past
@@ -2850,6 +2855,16 @@ file would differ, and NCBI's programs still could not open the database).
   allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
+
+- An alias file's `SEQIDLIST` over a version 4 database (version 1.85, 2026-11-22, line RG item
+  D1c-1; rule 2, the rejection kept by the maintainer: Owner's answer 「Q-D1c-R2=A」, 2026-11-22
+  22:4x JST), in a shape whose
+  NCBI result is deterministic but has no known use: a token of the list that NCBI warns about and
+  drops (a token of form feeds and vertical tabs alone: `WARNING:  <token> is not a valid seqid
+  string.` when NCBI reads the list, at its constructor's scan or at the search's first read under
+  `NSEQ` and `LENGTH`). LOSAT refuses (exit 1) where NCBI reads the list. A list that two volumes
+  or more translate, with an id that a second simplification changes, is read in NCBI's order:
+  the ids simplified again for each later volume and not sorted again (rows `db.il.bp.cv.*`).
 
 - `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
   D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's
@@ -3538,7 +3553,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT
   rejected them before Session S07+++b.
 - TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a subject frame of more than
-  5,000,000 residues (version 1.86, 2026-11-23, line NP item M4b-T2; Owner-delegated, standing
+  5,000,000 residues (version 1.87, 2026-11-23, line NP item M4b-T2; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). NCBI moves a chunk's ranges to the chunk's offsets
   and raises only the first one's left to 0 (`blast_engine.c:286-307`), so a later range of masks
   stored out of order can start before the chunk (NCBI cuts each translated frame into chunks of

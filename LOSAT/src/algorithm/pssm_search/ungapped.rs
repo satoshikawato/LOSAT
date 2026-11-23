@@ -193,9 +193,8 @@ pub(crate) fn pssm_extend_two_hit<R: PssmRows>(
     }
 }
 
-/// `pssm_extend_two_hit` of a hit whose first hit (`s_left_off`) lies before its chunk or whose
-/// word (at `s_right_off`) goes past the chunk's last letter, on the letters around the chunk
-/// (`ChunkLetters`, whose type doc gives NCBI's reads there).
+/// `pssm_extend_two_hit` of a hit whose first hit (`s_left_off`) lies before its chunk, on the
+/// letters around the chunk (`ChunkLetters`, whose type doc gives NCBI's reads there).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1157, :995 and :948
 #[cold]

@@ -224,14 +224,13 @@ pub(crate) fn scan_lead(ranges: &[(i32, i32)]) -> usize {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158, :897 and :841
 // NCBI's extensions read the word and start the walks wherever the scan's hit lies, also before
-// the chunk (a later range of masks stored out of order) and past its last letter (a first range
-// raised to one word at its left): their subject is the chunk's, so the left walks stop at the
-// chunk's first letter and the right walks at its last, and the word and the letters between are
-// the frame's.
+// the chunk (a later range of masks stored out of order): their subject is the chunk's, so the left
+// walks stop at the chunk's first letter and the right walks at its last, and the word and the
+// letters between are the frame's.
 /// The letters of a chunk's frame around it, as NCBI's extensions read them for a hit that lies
-/// before the chunk or whose word goes past it: `letters` holds the frame from `lead` letters
-/// before the chunk on (to past its end where the frame goes on), and the chunk has `length`
-/// letters. Offsets are the chunk's, as NCBI's (`Int4`, below 0 before the chunk).
+/// before the chunk: `letters` holds the frame from `lead` letters before the chunk on, at least to
+/// the chunk's end, and the chunk has `length` letters. Offsets are the chunk's, as NCBI's (`Int4`,
+/// below 0 before the chunk).
 #[derive(Clone, Copy)]
 pub(crate) struct ChunkLetters<'a> {
     pub(crate) letters: &'a [u8],

@@ -480,8 +480,7 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
 // right walk up to the subject's length) and :1020-1083 (the one-hit extension), on the letters
 // around a chunk as NCBI's extensions read them there (`ChunkLetters`).
 /// `s_BlastAaExtendTwoHit` with the matrix `matrix` of a hit whose first hit (`s_left_off`) lies
-/// before its chunk or whose word (at `s_right_off`) goes past the chunk's last letter, on the
-/// letters around the chunk (`ChunkLetters`).
+/// before its chunk, on the letters around the chunk (`ChunkLetters`).
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]

@@ -136,8 +136,8 @@ pub(super) struct ChunkCx<'s, S> {
     pub(super) sc: S,
     /// The frame's letters around the chunk that the scan reads (`x_soft_scan_letters`: from
     /// before the chunk for ranges stored out of order, past its end for a first range raised to
-    /// one word), which the extension of a hit there reads (`extend_hit_two_hit_outside`); the
-    /// chunk's letters alone without soft masks.
+    /// one word), which the extension of a hit before the chunk reads
+    /// (`extend_hit_two_hit_outside`); the chunk's letters alone without soft masks.
     pub(super) x_around: ChunkLetters<'s>,
 }
 
@@ -502,13 +502,19 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582 and
         // :1089-1158
         // A first hit before the chunk (its `last_hit + wordsize` below 0: a range of masks stored
-        // out of order starts before the chunk), or a word past the chunk's last letter (a first
-        // range raised to one word at its left), reads the frame's letters around the chunk as
+        // out of order starts before the chunk) reads the frame's letters around the chunk as
         // NCBI's extension does (`extend_hit_two_hit_outside`); a chunk without soft masks has
-        // neither.
+        // none. A word past the chunk's last letter (a first range raised to one word at its left,
+        // aa_ungapped.c:495-500) is never extended: it is the chunk's first word scanned, so it
+        // starts its diagonal (the cells of the chunks and subjects before lie a window or more
+        // behind it), and every later word of the chunk starts at least a word before the chunk's
+        // end, before it on that diagonal.
         let s_left_off = last_hit + wordsize;
+        debug_assert!(
+            subject_offset as i32 + wordsize <= chunk.length as i32,
+            "a word past the chunk's last letter is never a second hit"
+        );
         let (hsp_q_u, hsp_qe_u, hsp_s, hsp_se, score, right_extend, s_last_off) = if s_left_off < 0
-            || subject_offset as i32 + wordsize > chunk.length as i32
         {
             crate::algorithm::tblastx::extension::extend_hit_two_hit_outside(
                 sc,

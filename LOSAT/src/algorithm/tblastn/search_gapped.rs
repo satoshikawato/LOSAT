@@ -169,10 +169,11 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
                 matrix,
             )
         };
-        let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
-            - i64::from(hit.q_seed - u32::try_from(context_offset)?);
-        let s_gapped_start =
-            usize::try_from(s_gapped_start).context("negative gapped subject start")?;
+        let s_gapped_start = x_gapped_subject_start(
+            hit.s_seed,
+            i32::try_from(q_gapped_start)?,
+            i32::try_from(hit.q_seed)? - context_offset,
+        )?;
         let gapped = if ONE_HIT && s_gapped_start >= chunk.length {
             // Only the window of a negative length reaches past the chunk (`q_gapped_start` is
             // then `q_start + 5`: inside the frame's letters, or with a PSSM, for a chunk that ends
@@ -565,6 +566,22 @@ fn x_gapped_start_before_chunk(
         "TBLASTN: {name}, frame {frame}: an initial alignment of the chunk from residue {} starts before the chunk (-db_soft_mask with masks stored out of order on a frame longer than 5,000,000 residues), where NCBI BLAST+ starts its gapped alignment outside the chunk or reads past its buffer (a segmentation fault), which LOSAT does not support",
         chunk_offset + 1
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3942-3945 and
+// c++/src/algo/blast/core/blast_aascan.c:110-113
+/// The subject's gapped start of an initial HSP: its seed (`s_seed`, the chunk's `Uint4` offset,
+/// which holds a seed before the chunk wrapped below 0) moved by the gapped start's distance from
+/// the query's seed, in NCBI's wrapping 32-bit sum, read as `Int4`. A seed at -1 whose HSP starts
+/// in the chunk gives a start in the chunk; a start below 0 is an internal error (an HSP that
+/// starts before the chunk is refused before, `x_gapped_start_before_chunk`).
+pub(super) fn x_gapped_subject_start(
+    s_seed: u32,
+    q_gapped_start: i32,
+    q_seed: i32,
+) -> Result<usize> {
+    let start = s_seed.wrapping_add(q_gapped_start.wrapping_sub(q_seed) as u32) as i32;
+    usize::try_from(start).context("negative gapped subject start")
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058-1101 and
@@ -1178,19 +1195,11 @@ fn x_preliminary_protein_hsps_by_unit<
         };
         let subject_residues = &x_residues[x_lead..];
         let subject_sequence = &subject_residues[..chunk.length];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
-        // c++/src/algo/blast/core/aa_ungapped.c:499-500
-        // The letters around the chunk for the extensions of the hits outside it: those before
-        // it, and a first range raised to one word at its left whose word goes past its last
-        // letter (the two-hit word finder's; on the frame's last chunk the scan finds no hit
-        // there, `search_seed::x_scan_unit_of`).
-        let word_size = profile.word_size;
-        let x_word_past = !ONE_HIT
-            && ranges.first().is_some_and(|&(left, right)| {
-                right - left < word_size as i32 && left as usize + word_size > chunk.length
-            });
-        let x_around = (x_lead > 0 || x_word_past).then(|| ChunkLetters {
-            letters: &x_residues[..(x_lead + chunk.length + word_size - 1).min(x_residues.len())],
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306
+        // The letters around the chunk for the extensions of the hits before it (a word past the
+        // chunk's last letter is never extended: `XTwoHit::pairs_on`).
+        let x_around = (x_lead > 0).then(|| ChunkLetters {
+            letters: &x_residues[..x_lead + chunk.length],
             lead: x_lead,
             length: chunk.length,
         });

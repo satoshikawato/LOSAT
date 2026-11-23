@@ -151,12 +151,11 @@ pub(super) struct XTwoHit<'a> {
     x_around: Option<XAround>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
-// c++/src/algo/blast/core/aa_ungapped.c:499-500 (cited at `ChunkLetters`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 (cited at
+// `ChunkLetters`)
 /// A copy of the letters around a unit's chunk (`ChunkLetters`): made only for a unit whose scan
-/// reads letters before its chunk (masks stored out of order) or a word past its last letter (a
-/// first range raised to one word at its left), so that the finder, which lives longer than a
-/// unit's letters, holds them for that unit.
+/// reads letters before its chunk (masks stored out of order), so that the finder, which lives
+/// longer than a unit's letters, holds them for that unit.
 struct XAround {
     letters: Vec<u8>,
     lead: usize,
@@ -364,8 +363,7 @@ impl<'a> XTwoHit<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
-    // c++/src/algo/blast/core/aa_ungapped.c:499-500
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306
     /// The letters around the next unit's chunk (`ChunkLetters`) for the extensions of its hits
     /// outside the chunk (`x_two_hit_around`, `x_one_hit_around`), or `None` for a unit whose
     /// scan gives no such hit (a copy; `None` frees it).
@@ -380,10 +378,8 @@ impl<'a> XTwoHit<'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1158 (cited
     // at `blastp::extension::extend_two_hit_outside`)
     /// The extension of `pairs_on` for a hit whose first hit (`s_left_off`) lies before its
-    /// unit's chunk or whose word (at `s_right_off`) goes past the chunk's last letter, on the
-    /// letters around the chunk (`x_set_around`): the walks' own (a PSSM's) or the matrix's.
-    /// `None` for a unit without those letters, as the extension in the chunk gives for a word
-    /// past it.
+    /// unit's chunk, on the letters around the chunk (`x_set_around`): the walks' own (a PSSM's)
+    /// or the matrix's. `None` for a unit without those letters (none has such a hit).
     #[cold]
     #[inline(never)]
     fn x_two_hit_around<W: XUngapWalks>(
@@ -626,12 +622,15 @@ impl<'a> XTwoHit<'a> {
                     word_size,
                 )
             };
-            // A first hit before the chunk (masks stored out of order) or a word past its last
-            // letter (a first range raised to one word at its left): the extension on the letters
-            // around the chunk. EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks
-            // (`x_tbn_ungap`); `None` = an extension outside the table's range, which runs the
-            // reference.
-            let result = if s_left_off < 0 || s + word_size_i32 > subject_sequence.len() as i32 {
+            // A first hit before the chunk (masks stored out of order): the extension on the
+            // letters around the chunk. A word past the chunk's last letter of a first range raised
+            // to one word at its left (aa_ungapped.c:495-500) is never extended: it is the unit's
+            // first word scanned, so it starts its diagonal, and every later word of the unit
+            // starts at least a word before the chunk's end
+            // (`tblastx::blast_engine::word_finder::two_hit_one_hit` gives the reasons).
+            // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
+            // extension outside the table's range, which runs the reference.
+            let result = if s_left_off < 0 {
                 self.x_two_hit_around(walks, s_left_off, s, q, self.x_dropoffs[context])
             } else if self.x_ungap_fast {
                 walks

@@ -96,3 +96,23 @@ fn masks_stored_out_of_order_give_a_range_before_its_chunk() {
         ]
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+// The letters around a chunk of 4 letters with 3 before it: offsets below 0 read the letters before
+// the chunk, the left walks' subject starts at the chunk's first letter and the right walks' ends at
+// its last.
+#[test]
+fn chunk_letters_read_before_the_chunk_and_walk_inside_it() {
+    let letters = [10, 11, 12, 20, 21, 22, 23, 30];
+    let chunk = ChunkLetters {
+        letters: &letters,
+        lead: 3,
+        length: 4,
+    };
+    assert_eq!(
+        (-3..5).map(|s| chunk.at(s)).collect::<Vec<_>>(),
+        letters.to_vec()
+    );
+    assert_eq!(chunk.chunk_onward(), &[20, 21, 22, 23, 30]);
+    assert_eq!(chunk.to_chunk_end(), &[10, 11, 12, 20, 21, 22, 23]);
+}

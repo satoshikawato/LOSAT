@@ -849,8 +849,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158, :897 and :841
 /// NCBI's two-hit extension (`s_BlastAaExtendTwoHit`) of a hit whose first hit (`s_left_off`)
-/// lies before its chunk or whose word (at `s_right_off`) goes past the chunk's last letter, with
-/// the scores of `sc`, on the letters around the chunk (`ChunkLetters`, whose type doc gives NCBI's
+/// lies before its chunk, with the scores of `sc`, on the letters around the chunk (`ChunkLetters`, whose type doc gives NCBI's
 /// reads there): the word on the frame's letters, the left walk down to the chunk's first letter
 /// (none where the word's best end is at or before it), the right walk up to the chunk's last
 /// letter. The walks go on into the query batch `qb` past the context's ends as NCBI's do. The

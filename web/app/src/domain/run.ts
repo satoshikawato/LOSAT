@@ -14,9 +14,31 @@ export type RunStatus =
 
 export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', 'cancelled', 'failed']);
 
-export interface InputSnapshot {
-  /** Name passed as -query / -subject (plan §5.3). */
+/**
+ * What a file of the user's gave to an input that is not that file as given (line WQA's D22, 2026-11-23): its name (`pasted text`
+ * for pasted text), the records of it that the input holds, and the first IDs of those it leaves out with their number.
+ */
+export interface InputPart {
   readonly name: string;
+  /** The records of the part that the input holds. */
+  readonly records: number;
+  /** The IDs of the first records that the input leaves out, in the order of the file (at most MOST_LEFT_OUT_IDS). */
+  readonly leftOut: readonly string[];
+  /** The number of records that the input leaves out. */
+  readonly leftOutCount: number;
+}
+
+export interface InputSnapshot {
+  /**
+   * Name passed as -query / -subject (plan §5.3): the user's own file name where the input is that file as given, else the
+   * name of a file that the page offers with the run (`from`), whose bytes are exactly `bytes`.
+   */
+  readonly name: string;
+  /**
+   * What the input is made of when it is not one file of the user's as given: pasted text, several inputs searched together,
+   * or a file with records left out. Absent where `name` is the user's file, whose bytes `bytes` are (line WQA's D22).
+   */
+  readonly from?: readonly InputPart[];
   /** Exact FASTA bytes given to the engine. */
   readonly bytes: Uint8Array;
   /** Lower-case hex SHA-256 of `bytes`. */

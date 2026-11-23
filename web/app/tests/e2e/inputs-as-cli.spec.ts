@@ -17,7 +17,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openFiles, openParameters, openSearch, paste, program, showRecords, storedOutputs, submit, waitStatus, type Role } from './support/search';
+import { inputNames, openFiles, openParameters, openSearch, paste, program, showRecords, storedOutputs, submit, waitStatus, type Role } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 
@@ -55,7 +55,10 @@ async function shownThen(page: Page, role: Role, shot: string, browserName: stri
   }
 }
 
-/** An input of a search: its bytes, under the name that the application gives it in the argv (outfmt 0 shows it). */
+/**
+ * An input of a search: its bytes, under the name that the application gives it in the argv (outfmt 0 shows it): the user's file name,
+ * or for pasted text the name that the run gives (`searchAsTheCli` reads it from the run's details; DECISIONS 44).
+ */
 interface Input {
   readonly name: string;
   readonly bytes: Uint8Array | string;
@@ -90,6 +93,10 @@ async function searchAsTheCli(
   await submit(page);
   await waitStatus(page, 1, 'completed');
   const { outputs, warnings } = await storedOutputs(page, 1);
+  // The names that the run's command gives the inputs (storedOutputs leaves the page at the run's details).
+  const names = inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
+  query = { ...query, name: names.query };
+  subject = { ...subject, name: names.subject };
   if (NATIVE === undefined) {
     test.info().annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
     return;
@@ -136,9 +143,9 @@ test('lines that NCBI\'s line reader joins are read as the CLI reads them', asyn
 });
 
 const PROTEIN = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ';
-/** Pasted inputs: the application names them query.fa and subject.fa in the argv. */
-const SEQ_ID_QUERY = { name: 'query.fa', bytes: `2HHB\n${PROTEIN}\n` };
-const SEQ_ID_SUBJECT = { name: 'subject.fa', bytes: `>s\n${PROTEIN}\n` };
+/** Pasted inputs: the run names them, and the test runs the CLI under those names. */
+const SEQ_ID_QUERY = { name: 'pasted-query', bytes: `2HHB\n${PROTEIN}\n` };
+const SEQ_ID_SUBJECT = { name: 'pasted-subject', bytes: `>s\n${PROTEIN}\n` };
 /** The CLI's refusal of the query's first line `2HHB` with the data loaders on (the engine's reader, `seq_id.rs`). */
 const SEQ_ID_REFUSAL =
   "the first line of the query (\"2HHB\") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's BLASTP (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)";

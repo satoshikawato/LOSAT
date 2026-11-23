@@ -135,7 +135,8 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
     assert!(warnings.is_empty());
     // Each query's read of the file comes after a load of the registry.
     let (first, later) = (Posts::of_lines(b"first\n".to_vec()), posted);
-    let (posts, _) = batch_error(missing.build_error().unwrap(), 3, &first, &later).unwrap();
+    let (posts, _) =
+        batch_error(missing.build_error().unwrap(), 3, &first, &later, "blastn").unwrap();
     assert_eq!(posts.text(), b"first\nposted\nposted\n");
     let one = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open \n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n ");
     assert_eq!(error.exit, 3);

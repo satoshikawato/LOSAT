@@ -4769,8 +4769,6 @@ struct SamTarget<'a> {
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
-    /// NCBI's name of the running application, the prefix of the run's diagnostics (`BlastnArgs::app`).
-    app: &'static str,
     /// The pairwise report's name of the subjects (`ShownSubjects::pairwise_name`).
     pairwise_subject_title: &'a str,
     queries: &'a [FastaRecord],
@@ -5831,7 +5829,7 @@ fn post_process_hits_and_write(
                     format_warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
-                    report.app,
+                    report.app.ncbi_name(),
                 )?;
             } else if output_format == BlastnOutputFormat::Archive {
                 // The BLAST archive (outfmt 11): one document per query batch of the call.
@@ -6015,7 +6013,7 @@ fn write_custom_tabular(
         Some(database) => database.tabular_names(spec, &taxonomy)?,
         None => report
             .subject_taxdb
-            .map(|taxdb| taxdb.report_names(report.app)),
+            .map(|taxdb| taxdb.report_names(report.app.ncbi_name())),
     };
     let subjects = match (report.database_ordinals, report.database_reader) {
         (Some(ordinals), Some(reader)) => TabularSubjects::Database {
@@ -6072,7 +6070,7 @@ fn write_custom_tabular(
             false,
             names.as_ref(),
             "BLASTN",
-            report.app,
+            report.app.ncbi_name(),
             &queries,
             writer,
             warnings,
@@ -9848,7 +9846,6 @@ fn write_reports_untimed(
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
-        app: args.app().ncbi_name(),
         pairwise_subject_title: &subjects.shown.pairwise_name,
         query_reads: &query_reads,
         queries: query_records,

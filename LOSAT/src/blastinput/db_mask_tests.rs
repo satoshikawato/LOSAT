@@ -53,7 +53,7 @@ fn resolve(
     name: &str,
 ) -> (Result<Option<ResolvedMask>>, String) {
     let mut warnings = Vec::new();
-    let resolved = option.resolve(db, name, "BLASTN", &mut |text| {
+    let resolved = option.resolve(db, name, "BLASTN", "blastn", &mut |text| {
         warnings.extend_from_slice(text);
         Ok(())
     });

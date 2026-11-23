@@ -547,17 +547,16 @@ impl PsiblastArgs {
                     | ReportFormat::AsnBinary
                     | ReportFormat::JsonSeqalign
             );
-            if phi && runs && !phi_runs {
-                bail!(
+            match (runs, phi && phi_runs) {
+                (true, false) if phi => bail!(
                     "-phi_pattern with output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
-                );
-            }
-            if !runs && !(phi && phi_runs) {
-                bail!(
+                ),
+                (false, false) => bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
-                );
+                ),
+                _ => {}
             }
         }
         Ok(())

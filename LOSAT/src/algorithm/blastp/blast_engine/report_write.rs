@@ -29,8 +29,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_rows,
-    result_query_masks, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject,
+    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_record_masks,
+    query_rows, result_query_masks, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject,
     BlastpRanges, BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
@@ -982,8 +982,9 @@ pub(super) fn write_pairwise(
     for window in windows {
         // PHI-BLAST: each query's report of its occurrences' rows (`phi_round`); the epilog
         // after the loop. Its results carry the query's masks (each occurrence's
-        // `GetMaskedQueryRegions`, shown in lower case), unlike psiblast's other rounds; psiblast
-        // has no database masks, so of the subjects' masks only `-lcase_masking`'s apply.
+        // `GetMaskedQueryRegions`, shown in lower case: `query_record_masks`), unlike psiblast's
+        // other rounds (`result_query_masks`); psiblast has no database masks, so of the
+        // subjects' masks only `-lcase_masking`'s apply.
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2155-2161
         if let Some(phi) = phi.as_ref() {
             let phi_query_masks = query_record_masks(query_frames, &ranges.query_input.placements);

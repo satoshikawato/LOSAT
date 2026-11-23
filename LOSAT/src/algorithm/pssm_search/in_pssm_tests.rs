@@ -51,13 +51,13 @@ use crate::report::serial::pssm::Seqdesc;
 /// (`read_in_pssm`): "read", NCBI's "Unrecognized format" of a `CSerialException`, the silent
 /// "end" of a `CEofException`.
 fn outcome(bytes: &[u8]) -> &'static str {
-    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
+    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary, read_pssm_xml};
     let read = match guess_format(bytes) {
         PssmFileFormat::TextAsn { start } => read_pssm(&bytes[start..]),
         PssmFileFormat::BinaryAsn { start } => read_pssm_binary(&bytes[start..]),
+        PssmFileFormat::Xml { start } => read_pssm_xml(&bytes[start..]),
         PssmFileFormat::Unsupported => return "Unsupported format",
         PssmFileFormat::Exception(_) => return "exception",
-        PssmFileFormat::Refused { what: XML_PSSM, .. } => return "XML refused",
         PssmFileFormat::Refused { .. } => return "refused",
     };
     match read.result {
@@ -74,7 +74,7 @@ fn outcome(bytes: &[u8]) -> &'static str {
 fn the_format_guess_is_ncbis() {
     use PssmFileFormat as P;
     let binary = |format: &P| matches!(format, P::BinaryAsn { start: 0 });
-    let xml = |format: &P| matches!(format, P::Refused { what: XML_PSSM, .. });
+    let xml = |format: &P| matches!(format, P::Xml { start: 0 });
     assert!(matches!(guess_format(b""), P::Unsupported));
     assert!(matches!(guess_format(b"\x1f\x8b\x08\x00"), P::Unsupported));
     assert!(matches!(guess_format(b">q\nMKV\n"), P::Unsupported));

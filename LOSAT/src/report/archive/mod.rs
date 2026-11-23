@@ -720,7 +720,24 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
             self.as_is &= self.encoding.writes_text(value);
         }
     }
+    /// The archive's stream copies a buffer of its format (its strings are written as they were
+    /// read) and writes a buffer of another format by its values, whose strings are checked.
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        use crate::report::serial::asn_input::Encoding;
+        match self.encoding {
+            ArchiveEncoding::Text => Some(Encoding::Text),
+            ArchiveEncoding::Binary => Some(Encoding::Binary),
+            ArchiveEncoding::Xml => Some(Encoding::Xml),
+            ArchiveEncoding::Nothing => None,
+        }
+    }
     fn delayed(&mut self, _: &[u8]) {}
+    fn unread_delayed(&mut self) {}
+    /// A delayed member whose read posts replaced bytes: written through `Traced`, which posts
+    /// them.
+    fn delayed_posts(&mut self, _: &[crate::report::serial::encoder::ReplacedChar]) {
+        self.as_is = false;
+    }
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
         None
     }

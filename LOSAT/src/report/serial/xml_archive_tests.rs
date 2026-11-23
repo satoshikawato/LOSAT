@@ -672,8 +672,19 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.utf8_str(value);
         self.flush();
     }
-    fn delayed(&mut self, text: &[u8]) {
-        self.inner.delayed(text);
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        self.inner.data_format()
+    }
+    fn delayed(&mut self, bytes: &[u8]) {
+        self.inner.delayed(bytes);
+        self.flush();
+    }
+    fn unread_delayed(&mut self) {
+        self.inner.unread_delayed();
+        self.flush();
+    }
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        self.inner.delayed_posts(posts);
         self.flush();
     }
     fn error(&self) -> Option<SerialError> {

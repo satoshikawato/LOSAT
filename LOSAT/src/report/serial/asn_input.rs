@@ -20,7 +20,10 @@ use super::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, EnumWord, MemberId, NcbiThrow, PointerType, Reader,
     FILL_BUFFER_EOF, FIND_NAME, FIND_VALUE, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
 };
+use super::asn_types::read::Post;
+use super::asn_types::Member;
 use super::encoder::StreamPosition;
+use super::object_frame::{text_frame_site, FrameKind};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::string_to_int;
 use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
@@ -298,6 +301,8 @@ pub enum Encoding {
     Text,
     /// `eSerial_AsnBinary`
     Binary,
+    /// `eSerial_Xml` (NCBI's ASN.1-style XML, `asn_types::read_xml`)
+    Xml,
 }
 
 /// The members of a SEQUENCE or the variants of a CHOICE, as an encoding looks them up: their
@@ -320,13 +325,89 @@ pub(crate) trait EnumItems {
     fn value_of(&self, name: &[u8]) -> Option<i32>;
     /// Whether `value` is one of the named values.
     fn has_value(&self, value: i32) -> bool;
+    /// `GetName()`: the name of the ENUMERATED's type, empty for an anonymous one (the XML
+    /// stream's `ReadEnum` reads the value inside a tag of that name).
+    fn type_name(&self) -> &'static str {
+        ""
+    }
 }
 
-/// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`) that NCBI's
-/// object stack calls (the names are NCBI's functions).
+/// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`,
+/// `CObjectIStreamXml`) that NCBI's object stack calls (the names are NCBI's functions).
+///
+/// The XML stream's object stack has frames of its own and names its tags by them
+/// (`SkipStackTagName`): the consts and the default methods below (`NAMED_TYPES` to
+/// `drain_posts`) are what the object stack asks of an encoding for them. Their defaults are the
+/// text and binary streams', which inline to nothing (no runtime flag: the stack is monomorphised
+/// for each encoding).
 pub(crate) trait Input {
     /// The encoding.
     const ENCODING: Encoding;
+    /// Whether a named type that is neither a SEQUENCE, a CHOICE nor an ENUMERATED (an alias, a
+    /// named SEQUENCE OF such as `Seq-descr`) is read in a frame of its own with a tag of its own
+    /// (`ReadNamedType`: `BeginNamedType`, `EndNamedType`; the text and binary streams read it
+    /// without either, `VIRTUAL_MID_LEVEL_IO`).
+    const NAMED_TYPES: bool = false;
+    /// Whether a SEQUENCE OF or SET OF of the table is read in an array frame (`eFrameArray`; the
+    /// XML stream's `ReadContainer` pushes none for a container without a name, and every list
+    /// type of the table is read as one: a named one through its named frame).
+    const ARRAY_FRAMES: bool = true;
+    /// Whether the stream throws `eMissingValue` (the XML stream's ENUMERATED without its
+    /// attribute), which `ReadWithSetFlagMember` takes for an OPTIONAL or DEFAULT member.
+    const MISSING_VALUES: bool = false;
+    /// Whether the elements of a list of the type `element` are read in an element frame
+    /// (`eFrameArrayElement`; the XML stream's only when the type will have no name,
+    /// `WillHaveName`).
+    #[inline(always)]
+    fn element_frame(_element: u16) -> bool {
+        true
+    }
+    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves a frame of `kind`
+    /// (of a skip function: `skip`), whose line `NCBI_RETHROW_SAME` adds to a `CException` other
+    /// than a `CSerialException` passing through it.
+    #[inline(always)]
+    fn frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32, &'static str) {
+        text_frame_site(kind, skip)
+    }
+    /// A frame of `kind` (of the table's type `ty`: none, `u16::MAX`, for a member frame, the
+    /// element type for an element frame) was pushed; `depth` frames are on the stack.
+    #[inline(always)]
+    fn frame_pushed(&mut self, _kind: FrameKind, _ty: u16, depth: usize) {
+        self.set_stack_depth(depth);
+    }
+    /// The member or variant of the top frame (`SetTopMemberId`).
+    #[inline(always)]
+    fn frame_member(&mut self, _member: &'static Member) {}
+    /// The top frame was left; `depth` frames stay.
+    #[inline(always)]
+    fn frame_popped(&mut self, depth: usize) {
+        self.set_stack_depth(depth);
+    }
+    /// `BeginNamedType` of the type of the named frame on top (`NAMED_TYPES`).
+    #[inline(always)]
+    fn begin_named(&mut self) -> R<()> {
+        Ok(())
+    }
+    /// `EndNamedType`, before the named frame is left.
+    #[inline(always)]
+    fn end_named(&mut self) -> R<()> {
+        Ok(())
+    }
+    /// `EndArrayElement` after each element of a list (the XML stream's closing tag of an
+    /// element read in an element frame).
+    #[inline(always)]
+    fn end_element(&mut self) -> R<()> {
+        Ok(())
+    }
+    /// `SkipNull` (the text and binary streams read what `ReadNull` reads).
+    #[inline(always)]
+    fn skip_null(&mut self) -> R<()> {
+        self.read_null()
+    }
+    /// Moves what the stream posted outside the strings it read (the XML stream posts each byte
+    /// it replaces at once, also in the attributes it skips) to `posts`, in the order posted.
+    #[inline(always)]
+    fn drain_posts(&mut self, _posts: &mut Vec<Post>) {}
     /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
     fn position(&self) -> StreamPosition;
     /// The state of a new object stream at the next byte (each object of a file is read by a

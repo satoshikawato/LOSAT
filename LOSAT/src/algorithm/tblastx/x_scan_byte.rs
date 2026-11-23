@@ -824,11 +824,14 @@ unsafe fn candidates_avx2(
     if X_FX_LIST == 2 {
         return list4p(&index[..words], presence, cand);
     }
+    if X_FX_LIST == 3 {
+        return list8p(&index[..words], presence, cand);
+    }
     list(&index[..words], presence, cand)
 }
 
 /// PROBE (exp/fx-cellbf, line FX s2): the form of [`candidates_avx2`]'s list, fixed at build time
-/// (LOSAT_FXLIST_BUILD, a digit; 2 = [`list4p`], else [`list`]).
+/// (LOSAT_FXLIST_BUILD, a digit; 2 = [`list4p`], 3 = [`list8p`], else [`list`]).
 #[cfg(target_arch = "x86_64")]
 const X_FX_LIST: u8 = match option_env!("LOSAT_FXLIST_BUILD") {
     Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
@@ -846,6 +849,47 @@ fn x_fx_opaque(mut p: *mut u16) -> *mut u16 {
         std::arch::asm!("/* {0} */", inout(reg) p, options(pure, nomem, nostack, preserves_flags));
     }
     p
+}
+
+/// PROBE (exp/fx-cellbf, LOSAT_FXLIST_BUILD=3): [`list4p`] eight words per step (the loop's
+/// counter, test and the index pointer once per eight).
+///
+/// # Safety
+/// As [`list`].
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn list8p(
+    index: &[u16],
+    presence: &[u8; X_MASK + 1],
+    cand: &mut [MaybeUninit<u16>; X_BLOCK],
+) -> usize {
+    let start = cand.as_mut_ptr().cast::<u16>();
+    let mut out = start;
+    let p = presence.as_ptr();
+    let (eights, rest) = index.as_chunks::<8>();
+    let mut k = 0u16;
+    for w in eights {
+        // SAFETY: (caller) every index is at most `X_MASK`; `out` stays inside `cand` (as `list`).
+        unsafe {
+            let b = w.map(|ix| *p.add(ix as usize) as usize);
+            for (j, &bit) in b.iter().enumerate() {
+                out.write(k + j as u16);
+                out = x_fx_opaque(out.add(bit));
+            }
+        }
+        k += 8;
+    }
+    for &ix in rest {
+        // SAFETY: as above.
+        unsafe {
+            let bit = *p.add(ix as usize) as usize;
+            out.write(k);
+            out = out.add(bit);
+        }
+        k += 1;
+    }
+    // SAFETY: `out` was moved on from `start` inside `cand`, never back.
+    unsafe { out.offset_from_unsigned(start) }
 }
 
 /// PROBE (exp/fx-cellbf): [`list`] four words per step with the entry kept as a pointer that moves

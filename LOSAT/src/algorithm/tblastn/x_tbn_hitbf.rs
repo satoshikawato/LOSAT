@@ -173,8 +173,7 @@ unsafe fn x_hit_step<C: XDiagCell>(
 ) -> bool {
     // SAFETY: (caller) a cell of the table.
     let (last_hit, flag) = unsafe { entry.read() }.bf_read();
-    // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
-    // [C] diff = subject_offset - last_hit;
+    // Unbias the stored `last_hit` by `diag_offset` and compute distance from `subject_offset`.
     let s_diag = (s_off as i32).wrapping_add(offset);
     let diff = s_diag.wrapping_sub(last_hit);
     // diff - wordsize, exact in either width (module doc): below k unsigned = a candidate, at
@@ -186,12 +185,11 @@ unsafe fn x_hit_step<C: XDiagCell>(
         let dw = i64::from(diff) - i64::from(word_size);
         ((dw as u64) < u64::from(k), dw >= i64::from(k))
     };
-    // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
+    // Stop on a flagged diagonal or when a hit passes both distance tests.
     if flag | candidate {
         return false;
     }
-    // [C] if (diff >= window) last_hit = subject_offset + diag_offset;
-    // [C] if (diff < wordsize) continue;
+    // Update `last_hit` when distance reaches or exceeds `window`; skip overlapping hits below `wordsize`.
     let next = if too_far { s_diag } else { last_hit };
     // SAFETY: as above.
     unsafe { (*entry).set_last_hit(next) };
@@ -215,7 +213,7 @@ pub(super) fn x_hits_steps<C: XDiagCell>(
     let Some(last) = entries.len().checked_sub(1) else {
         return 0;
     };
-    // [C] diag_coord = (query_offset - subject_offset) & diag_mask; (diag_mask = length - 1)
+    // Diagonal table index: query offset minus subject offset, masked by length minus 1.
     let mask = last as u32;
     // window - wordsize: the length of the candidate range of diff - wordsize.
     let k = window.wrapping_sub(word_size) as u32;

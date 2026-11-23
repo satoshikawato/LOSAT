@@ -1701,7 +1701,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // Smith-Waterman redo (`SwBatchStatus::excluded_at_fetch`) and is neither redone nor kept.
     // The one read of their headers also gives the subjects whose header holds a UTF8String where
     // a VisibleString is expected (`fetched_utf8`, in the stream's order): the first that the
-    // redo fetches posts NCBI's warning (`note_redo_fetched`, after the redo or before the
+    // redo fetches posts NCBI's warning (`RedoFetchNotes::redo`, after the redo or before the
     // batch's failure).
     let (excluded_at_fetch, fetched_utf8) = FetchMarks::of_noting(
         profile.fetch_excluded.map(|fetches| fetches.excluded),
@@ -1710,6 +1710,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
         |(context, _, list)| (*context, list.best_evalue, !list.hsps.is_empty()),
     )
     .map_err(fetch_refusal)?;
+    let redo_notes = RedoFetchNotes::new(profile.fetch_excluded, fetched_utf8, &preliminary_lists);
     // A PSSM query's Smith-Waterman redo (`-in_pssm`, composition-based statistics 0) is refused at
     // its first match, the first list that the fetch keeps (the heaps are empty there, so early
     // termination lets it go on): `match_redo::sw_pssm_refusal`.
@@ -1721,13 +1722,9 @@ fn run_local_search_with_redo<R: MatchRedo>(
         let first_kept = (0..preliminary_lists.len())
             .find(|&index| !excluded_at_fetch.excluded(index))
             .unwrap_or(usize::MAX);
-        if let Some(fetches) = profile.fetch_excluded {
-            note_first_fetched(fetches, &fetched_utf8, first_kept);
-        }
+        redo_notes.first(first_kept);
         return Err(sw_pssm_refusal());
     }
-    // The stream's lists, for the heaps at each of those subjects' turn (`note_redo_fetched`).
-    let redo_stream = redo_stream(&preliminary_lists, &fetched_utf8);
     // With a `-db` stream, the subjects of the lists that the redo fetches, each read
     // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the redo ends).
@@ -2151,22 +2148,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
                         ),
                     };
                     let item =
-                        match match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
-                        {
-                            Ok(item) => item,
-                            Err(error) => {
-                                if let Some(fetches) = profile.fetch_excluded {
-                                    note_redo_fetched(
-                                        fetches,
-                                        &heaps,
-                                        &fetched_utf8,
-                                        &redo_stream,
-                                        first + at,
-                                    );
-                                }
-                                return Err(error);
-                            }
-                        };
+                        match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
+                            .inspect_err(|_| redo_notes.redo(&heaps, first + at))?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -2209,15 +2192,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     .reads_heaps(&redo_params)
                     .then_some(&mut heaps[..]),
             );
-            let item = match match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps) {
-                Ok(item) => item,
-                Err(error) => {
-                    if let Some(fetches) = profile.fetch_excluded {
-                        note_redo_fetched(fetches, &heaps, &fetched_utf8, &redo_stream, index);
-                    }
-                    return Err(error);
-                }
-            };
+            let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
+                .inspect_err(|_| redo_notes.redo(&heaps, index))?;
             keep_item(context, &mut heaps, item);
         }
     }
@@ -2225,17 +2201,13 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // `match_redo::sw_batch_failed`)
     // The status of the last match the Smith-Waterman redo reached fails the batch.
     if R::SMITH_WATERMAN && sw_status.failed() {
-        if let Some(fetches) = profile.fetch_excluded {
-            note_redo_fetched(fetches, &heaps, &fetched_utf8, &redo_stream, usize::MAX);
-        }
+        redo_notes.redo(&heaps, usize::MAX);
         return Err(sw_batch_failed(
             heaps.first().is_some_and(|heap| heap.len() > 0),
         ));
     }
 
-    if let Some(fetches) = profile.fetch_excluded {
-        note_redo_fetched(fetches, &heaps, &fetched_utf8, &redo_stream, usize::MAX);
-    }
+    redo_notes.redo(&heaps, usize::MAX);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
     // Blast_HSPResultsSortByEvalue(results); /* positive local TotLen */
@@ -2264,6 +2236,46 @@ type FetchedRead = (
     crate::algorithm::common::database::FetchedUtf8,
     (usize, f64, bool),
 );
+
+/// The notes of a batch's redo of the fetches that read a header with a UTF8String where a
+/// VisibleString is expected: the subjects of such headers (`fetched`, in the stream's order,
+/// `FetchMarks::of_noting`) and the query and subject of each list of the stream (`stream`,
+/// `redo_stream`); nothing is noted without the batch's fetches.
+struct RedoFetchNotes<'a> {
+    fetches: Option<BatchFetches<'a>>,
+    fetched: Vec<FetchedRead>,
+    stream: Vec<(usize, i32)>,
+}
+
+impl<'a> RedoFetchNotes<'a> {
+    fn new<L>(
+        fetches: Option<BatchFetches<'a>>,
+        fetched: Vec<FetchedRead>,
+        lists: &[(usize, usize, L)],
+    ) -> Self {
+        let stream = redo_stream(lists, &fetched);
+        RedoFetchNotes {
+            fetches,
+            fetched,
+            stream,
+        }
+    }
+
+    /// [`note_redo_fetched`] of the lists up to the stream's place `until`, with the heaps
+    /// `heaps`.
+    fn redo(&self, heaps: &[CompoHeap], until: usize) {
+        if let Some(fetches) = self.fetches {
+            note_redo_fetched(fetches, heaps, &self.fetched, &self.stream, until);
+        }
+    }
+
+    /// [`note_first_fetched`] of the lists up to the stream's place `until`.
+    fn first(&self, until: usize) {
+        if let Some(fetches) = self.fetches {
+            note_first_fetched(fetches, &self.fetched, until);
+        }
+    }
+}
 
 /// The query and subject of each list of the redo's stream `lists`, in its order (markers too),
 /// where a subject of `fetched` has a header with a UTF8String where a VisibleString is expected

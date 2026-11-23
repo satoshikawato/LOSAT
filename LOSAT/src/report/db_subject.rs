@@ -2143,8 +2143,9 @@ pub enum AfterThrow {
     /// (outfmt 18, `CTaxFormat::x_InitTaxInfoMap`'s `catch`) leaves the HSP out and goes on.
     WritesRow,
     /// The pairwise report, outfmt 0: the `catch` of the description line writes it with the
-    /// Seq-align id and `Unknown` (`ParsedSubject::thrown_description`) and the report goes on;
-    /// then `GetDbType` loads the subject of the first alignment shown, without a `catch` for an
+    /// Seq-align id and `Unknown` (`ParsedSubject::thrown_description`) and the report goes on
+    /// (with `-html` the first such line ends the run, `PairwiseReads::html`); then `GetDbType`
+    /// loads the subject of the first alignment shown, without a `catch` for an
     /// id that is not local: where it throws, the run ends after the query's description lines
     /// (`alignment_end`); otherwise the `catch` of each alignment writes NCBI's skipped line in
     /// place of each alignment of a subject that throws (`report::pairwise::DatabaseHeading::
@@ -2207,12 +2208,14 @@ pub struct Shown {
 /// first, then those of the copies of its record shown in it, each once), the hits whose
 /// description lines it shows (indices of `hits`, in the order of the lines:
 /// `x_pairwise_par::described_subjects`), and the number of its first hits whose alignments it
-/// shows (`QueryGroup::aligned`).
+/// shows (`QueryGroup::aligned`), and whether it is the `-html` report (`html`: its description
+/// lines end the run at the first whose subject's load throws, `HitLoads::pairwise_report`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PairwiseReads {
     pub hits: Vec<Vec<usize>>,
     pub described: Vec<usize>,
     pub aligned: usize,
+    pub html: bool,
 }
 
 impl PairwiseReads {
@@ -2610,8 +2613,9 @@ impl HitLoads {
     /// - `SkipsAlignment` and `EndsAtAlignment` (outfmt 0 to 4): a report that reads one by one
     ///   gives its reads as its writer makes them (`ReportKeys::Pairwise`,
     ///   `x_pairwise_par::QueryGroup::read_order`): each description line loads its subject or
-    ///   throws, then the alignments load theirs up to the one that ends the run, if any
-    ///   (`pairwise_report`); one whose batch prefetches gives its entries in any order.
+    ///   throws (with `-html` the first that throws ends the run), then the alignments load
+    ///   theirs up to the one that ends the run, if any (`pairwise_report`); one whose batch
+    ///   prefetches gives its entries in any order.
     ///
     /// A report whose batch prefetches loads every subject (a lookup that throws stops the
     /// prefetch first, `common::database::batch_prefetch_stop`). A subject is loaded where some
@@ -2757,14 +2761,22 @@ impl HitLoads {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     // (`PruneSeqalign` keeps the alignments of the first `m_NumAlignments` hits, cited at
     // `report::x_pairwise_par::QueryGroup::aligned`)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3904-3907
+    // With `-html`, the `catch` of a description line whose load throws makes the line's link,
+    // whose `GetIDUrl` loads the subject again by its Seq-align id, of any kind, outside any
+    // `catch`: the run ends there (`CATCH_ALL`), before the later lines, the alignments and the
+    // later batches with their prefetch (line RG T4b review b F2; the writer's answer is
+    // `pairwise::HtmlRows::end_at_thrown`).
     /// The loads of one pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`, whose run does
     /// `after` after a throw) in a batch whose prefetch is off, whose reads are `reads` (its
     /// writer's own answers, `x_pairwise_par::QueryGroup::read_order`): unless the run ended
-    /// before (`ended`), its description lines load the subjects of the hits that they show, then
-    /// its alignments those of its first `reads.aligned` hits up to the one whose load ends the
-    /// run (`AfterThrow::alignment_end`, which `ended` then records). A subject whose lookup throws
-    /// (`lookup_throws`) loads nothing there, nor do the copies in its hit; every subject that
-    /// neither loads is passed.
+    /// before (`ended`), its description lines load the subjects of the hits that they show, up
+    /// to the first whose load throws where it is the `-html` report (`reads.html`), which ends
+    /// the run; else its alignments then load those of its first `reads.aligned` hits up to the
+    /// one whose load ends the run (`AfterThrow::alignment_end`). `ended` records either end. A
+    /// subject whose lookup throws (`lookup_throws`) loads nothing there, nor do the copies in its
+    /// hit; every subject that neither loads is passed.
     fn pairwise_report<'p>(
         &mut self,
         after: AfterThrow,
@@ -2780,15 +2792,34 @@ impl HitLoads {
         let throws = |hit: usize| first(hit).and_then(ParsedSubject::lookup_throws);
         let mut reached = vec![false; reads.hits.len()];
         if !ended.get() {
-            let end = after.alignment_end(
-                0..reads.aligned,
-                |hit| throws(hit).is_some(),
-                |hit| first(hit).is_some_and(ParsedSubject::alignment_id_is_local),
-            );
-            let aligned = 0..end.map_or(reads.aligned, |end| end + 1);
-            for hit in reads.described.iter().copied().chain(aligned) {
-                reached[hit] = true;
-            }
+            let described_end = if reads.html {
+                reads
+                    .described
+                    .iter()
+                    .position(|&hit| throws(hit).is_some())
+            } else {
+                None
+            };
+            let end = match described_end {
+                Some(end) => {
+                    for &hit in &reads.described[..=end] {
+                        reached[hit] = true;
+                    }
+                    Some(end)
+                }
+                None => {
+                    let end = after.alignment_end(
+                        0..reads.aligned,
+                        |hit| throws(hit).is_some(),
+                        |hit| first(hit).is_some_and(ParsedSubject::alignment_id_is_local),
+                    );
+                    let aligned = 0..end.map_or(reads.aligned, |end| end + 1);
+                    for hit in reads.described.iter().copied().chain(aligned) {
+                        reached[hit] = true;
+                    }
+                    end
+                }
+            };
             ended.set(end.is_some());
         }
         for (hit, keys) in reads.hits.iter().enumerate() {

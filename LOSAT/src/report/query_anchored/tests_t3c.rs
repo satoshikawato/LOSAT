@@ -126,6 +126,7 @@ fn section(
     let view = View {
         identity: matches!(format, 1 | 3),
         anchored: matches!(format, 1 | 2),
+        html: false,
     };
     let mut out = Vec::new();
     write_section(&mut out, view, line_length, &hsps, probe).expect("the section");

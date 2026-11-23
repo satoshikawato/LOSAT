@@ -370,6 +370,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
                         descriptions,
                         alignments,
                     },
+                    html: false,
                 };
                 assert_eq!(
                     pairwise_read_order(&hit_lists, reading, |_| None),

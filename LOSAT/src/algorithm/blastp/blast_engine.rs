@@ -5609,8 +5609,8 @@ fn resolve_for_formats(
         options.outfmt.clear();
         options.num_descriptions = 0;
         options.num_alignments = 0;
-        // The `-html` links belong to the format as well: only the pairwise report reads them
-        // (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
+        // The `-html` links belong to the format as well: only the reports of outfmt 0 to 4 read
+        // them (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
         options.html = None;
         format!("{options:?}")
     };
@@ -5623,8 +5623,8 @@ fn resolve_for_formats(
         if search_options(&resolved) != first_options {
             bail!("the requested output formats resolve to different search options");
         }
-        // The run's `-html` links are those of the format that reads them (outfmt 0, in any
-        // place among the formats).
+        // The run's `-html` links are those of the format that reads them (outfmt 0 to 4, in
+        // any place among the formats).
         first.html = first.html.or(resolved.html);
     }
     first.num_descriptions = shared.num_descriptions;

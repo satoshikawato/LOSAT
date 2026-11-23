@@ -1504,9 +1504,9 @@ fn filter_final_hitlists(
 #[allow(clippy::too_many_arguments)]
 /// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
 /// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
-/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
-/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
-/// texts of its reads (line DBID item pfoff-3); `None` without one.
+/// `-num_descriptions`, `-num_alignments` and `-html`; the formats of a run whose loads they
+/// make share one view's order, `FormatThrow::and`), for the loads of a subject whose lookup
+/// throws and the texts of its reads (line DBID item pfoff-3); `None` without one.
 fn pairwise_reading(
     resolved: &ResolvedTblastnArgs,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
@@ -1522,6 +1522,7 @@ fn pairwise_reading(
             descriptions: resolved.num_descriptions,
             alignments: resolved.num_alignments,
         },
+        resolved.html.is_some(),
     ))
 }
 

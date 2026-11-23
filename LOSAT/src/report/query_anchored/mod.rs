@@ -654,12 +654,19 @@ pub(crate) fn aborted_section(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:617-658
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1694-1770
 /// Formats 1 to 4: `eShowIdentity` (`.` for a letter equal to the query's: 1 and 3) and
-/// `eMasterAnchored` (only the query's columns, with the rows' insertions below them: 1 and 2).
+/// `eMasterAnchored` (only the query's columns, with the rows' insertions below them: 1 and 2);
+/// `html`, `eHtml` (`-html`): the rows' masks in NCBI's spans (`output_seq`). Of the HTML of
+/// NCBI's query-anchored rows, only the spans reach the bytes: the rows' id links and anchors need
+/// `eHyperLinkMasterSeqid`, `eHyperLinkSlaveSeqid`, `eShowCheckBox` or `eSequenceRetrieval`, and
+/// the colours `eColorDifferentBases`, none of which a BLAST program sets (`s_SetFlags`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct View {
     pub(crate) identity: bool,
     pub(crate) anchored: bool,
+    pub(crate) html: bool,
 }
 
 /// An error that NCBI's code reaches only with input that a BLAST search does not make.
@@ -1365,6 +1372,7 @@ fn display_row_data_set(
                 aln_start,
                 actual_line_len,
                 prev_stop[row],
+                view.html,
             );
             if view.anchored {
                 display_inserts(
@@ -1389,7 +1397,8 @@ fn display_row_data_set(
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627
 /// (`k_IdStartMargin`, `k_StartSequenceMargin` and `k_SeqStopMargin` are 2, showalign.cpp:96-98;
-/// the `size_t` sum of `maxStartLen` less `startLen`, plus 2, is at least 1.)
+/// the `size_t` sum of `maxStartLen` less `startLen`, plus 2, is at least 1.) `html`: the view's
+/// `eHtml` (`View::html`), which `x_OutputSeq` reads for the row's masks only.
 #[allow(clippy::too_many_arguments)]
 fn display_sequence_line(
     out: &mut Vec<u8>,
@@ -1400,6 +1409,7 @@ fn display_sequence_line(
     j: i64,
     actual_line_len: usize,
     prev_stop: i32,
+    html: bool,
 ) {
     add_space(out, rows.max_id_len - rows.labels[row].len() + 2);
     let empty = (j > 0 && end == prev_stop) || (j == 0 && start == 1 && end == 1);
@@ -1417,7 +1427,7 @@ fn display_sequence_line(
         j as usize,
         actual_line_len,
         rows.masked[row].map(|(index, frame)| (&rows.masks[index][..], frame)),
-        false,
+        html,
     );
     add_space(out, 2);
     if !empty {
@@ -1437,7 +1447,9 @@ fn display_sequence_line(
 /// sets: blast_format.cpp, survey T4 §1.1.)
 ///
 /// Outfmt 0 rows come without masks (their builders lowercase the letters, `HspMasks::lower_row`);
-/// `-html` (T4a2) keeps the lists in a side table indexed like the hits, only under `-html`.
+/// `-html` (T4a2) keeps the lists in a side table indexed like the hits, only under `-html`. The
+/// query-anchored rows (outfmt 1 to 4) come with their masks (`prepare_rows`), under `-html` with
+/// `html` (`View::html`, item T4b of line RG).
 fn output_seq(
     out: &mut Vec<u8>,
     sequence: &[u8],

@@ -272,12 +272,15 @@ fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()>
 }
 
 /// The ranges of a search as the reports use them: where the searched letters of each
-/// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
-/// reports end with the epilog (a search that stops at a query batch writes none).
+/// query and subject lie in its record (`-query_loc`, `-subject_loc`), whether the
+/// reports end with the epilog (a search that stops at a query batch writes none), and under
+/// `-parse_deflines` the scopes of the queries, whose Seq-ids place the XML failure of a held
+/// report (`query_batch::QueryScopes::xml_failing_query`).
 pub(super) struct ReportRanges<'a> {
     pub queries: &'a crate::blastinput::seq_range::Placements,
     pub subjects: &'a crate::blastinput::seq_range::Placements,
     pub epilog: bool,
+    pub query_scopes: Option<&'a crate::blastinput::query_batch::QueryScopes>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -369,10 +372,10 @@ pub(super) fn render(
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes a report's
-    // data (`xml_matrix_failure`): that of the run's first query, or of its second where the
-    // report is held (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id,
-    // the second as LOSAT refuses two queries of one id before any output), in the batch of that
-    // query, or for a run of one query whose report is held
+    // data (`xml_matrix_failure`): that of the run's first query, or where the report is held
+    // (`XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another Seq-id
+    // (`QueryScopes::xml_failing_query` of the scopes, `ranges.query_scopes`), in the batch of that
+    // query, or for a run whose held report has no such query
     // in `PrintEpilog` (blast_format.cpp:2204-2212, cited at
     // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
     // caller writes that stop). The start alone is written then (probe `tblastn_sub_lcmatrix`),
@@ -386,6 +389,9 @@ pub(super) fn render(
         matches!(shown, ShownSubjects::Database { .. }),
         pssm.is_some(),
     )
+    .map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(ranges.query_scopes, failure)
+    })
     .filter(|_| !query_records.is_empty())
     {
         for format in outputs.formats.iter_mut() {
@@ -395,7 +401,7 @@ pub(super) fn render(
                 writer.flush()?;
             }
         }
-        let failing = (failure.query() < query_records.len()).then(|| failure.query());
+        let failing = failure.query().filter(|&query| query < query_records.len());
         for posts in query_posts
             .iter()
             .take(failing.map_or(query_records.len(), |query| query + 1))
@@ -444,7 +450,7 @@ pub(super) fn render(
             xml_is_xml2,
             xml_only_xml2,
             xml_taxa,
-            pssm.and_then(|psi| psi.bioseq_letters.clone()),
+            pssm,
         )?)
     } else {
         None
@@ -566,7 +572,9 @@ pub(super) fn render(
             seg,
             mask_lowercase,
             ranges,
-            pssm.is_none(),
+            crate::report::record::carries_query_masks(super::in_pssm::program_type(
+                pssm.is_some(),
+            )),
             query_bioseq,
             anchored_formats.then_some(&mut section_masks),
             html_masks.as_mut(),
@@ -677,8 +685,13 @@ pub(super) fn render(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // The statistics of each query for the observer, the values of the XML reports.
     if let Some(observer) = observer.as_deref_mut() {
-        let stats =
-            super::blast_xml::query_stats(parameters, query_validity, scoring, ungapped_karlin);
+        let stats = super::blast_xml::query_stats(
+            parameters,
+            query_validity,
+            scoring,
+            ungapped_karlin,
+            pssm,
+        );
         for (q_idx, stats) in stats.into_iter().enumerate() {
             observer.query_stats(q_idx, stats);
         }
@@ -704,6 +717,7 @@ pub(super) fn render(
         seg,
         mask_lowercase,
         ranges,
+        program_type: super::in_pssm::program_type(pssm.is_some()),
     };
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         // A format that failed alone writes nothing more; the next takes the warnings.
@@ -893,6 +907,8 @@ pub(super) fn render(
                     shown,
                     hitlists,
                     ranges,
+                    // PSI-TBLASTN's own "Blast Type" (`psitblastn`).
+                    super::in_pssm::program_type(pssm.is_some()),
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
@@ -1222,7 +1238,8 @@ fn pairwise_hits(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     ranges: &ReportRanges<'_>,
-    // Whether the alignments show the query's masks (not a PSSM query's).
+    // Whether the alignments show the query's masks (`report::record::carries_query_masks`: not a
+    // PSSM query's).
     query_masks: bool,
     // The PSSM query's Bioseq letters where they are not its record's (`PsiSearch::bioseq_letters`),
     // which the rows show (`QueryLetters`); a run of such a query has no other.
@@ -1355,10 +1372,8 @@ fn pairwise_hits(
                     positives: Some(report_positives),
                     gaps: Some(payload.gap_letters),
                     subject_length: Some(subject_length),
-                    // The title after its first word, as BLASTN's and TBLASTX's; the reports take the
-                    // subject's title bytes by subject index (`write_tblastn_pairwise_report`).
-                    subject_title: subject.title.iter().position(|&byte| byte == b' ').map(
-                        |space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned(),
+                    subject_title: crate::blastinput::fasta_reader::hit_subject_title(
+                        &subject.title,
                     ),
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:331-342:
                     // eDontAdjustMatrix -> 0; eCompoScaleOldMatrix -> 1;

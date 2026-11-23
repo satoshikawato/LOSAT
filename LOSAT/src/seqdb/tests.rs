@@ -1691,7 +1691,8 @@ fn every_filtering_alias_key_is_rejected() {
         let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
         assert!(
             matches!(&error, SeqDbError::MemoryMap(message)
-                if String::from_utf8_lossy(message).ends_with("/1'")),
+                if String::from_utf8_lossy(message)
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR))),
             "{key}: {error}"
         );
     }

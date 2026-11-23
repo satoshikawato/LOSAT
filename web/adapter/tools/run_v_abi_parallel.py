@@ -25,9 +25,12 @@ SIZE_OPTIONS = ("-query", "-subject")
 
 
 def input_size(search: dict) -> int:
+    if search.get("tool"):
+        return 0  # a tool run (windowmasker): small files, part of the program `windowmasker`
     argv, total = search["argv"], 0
     for option in SIZE_OPTIONS:
-        total += (Path(search["cwd"]) / argv[argv.index(option) + 1]).stat().st_size
+        if option in argv:  # a search of -db has no -subject
+            total += (Path(search["cwd"]) / argv[argv.index(option) + 1]).stat().st_size
     return total
 
 

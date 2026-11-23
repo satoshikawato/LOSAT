@@ -22,7 +22,7 @@ fn with_algo<'a>(line: &[&'a str]) -> Vec<&'a str> {
 
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     assert_eq!(usage.len(), 414);
     assert!(usage.starts_with("USAGE\n  convert2blastmask [-h] [-help] [-in input_file_name]"));
     assert_eq!(HELP.len(), 1203);

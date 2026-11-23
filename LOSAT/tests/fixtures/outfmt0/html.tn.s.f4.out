@@ -1,0 +1,112 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_spec.fna).
+           4 sequences; 2,460 total letters
+
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     3e-109
+s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 
+s2 long title words long title words long title words long title ...  <a href=#Subject_2>159</a>     2e-53 
+s4 plain title for the third subject                                  <a href=#Subject_4>138</a>     2e-45 
+
+
+
+Query_1    1     CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1     CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+Subject_3  1                                                       GDESHIVADL  30
+Subject_2  1     CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  180
+
+Query_1    61    PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  181   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+Subject_1  1006                                 YLLKPR                         989
+Subject_3  31    PAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITCANSVMRAVSK  210
+Subject_2  181   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  360
+
+Query_1    121   VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  361   VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL                             459
+Subject_1  904                                  GLSTPFVNLVRHAAQLKVYSRLACDIAHP  990
+Subject_3  211   ASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVPSRLALCYTHG  390
+Subject_3  257                                                    PSKSLLVLTAK  225
+
+Query_1    181   AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  991   AALKGTRSPRLTDYPRCSIHSGRGLFDPESTLGDPSRVQIPLTERACNLRLITVSTDYCT  1170
+Subject_3  391   AASKGLGSSPLPESNRCSTH                                          450
+Subject_3  224   SYAEALLTARITEFAQV                                             174
+Subject_3  345    AIAGAITPRSVLYSR                                              389
+Subject_4  16                             FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCT  120
+Subject_4  182                                                      VTPLGGACA  208
+
+Query_1    241   SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  1171  SKTREPAHSCVLVDVNVILICNSSRGSLCKRSRGTEYSKFTSSGFSSPPSMVTTLVNYQN  1350
+Subject_4  121   SKLREPRHSLNLVRYNGKLICNSARGSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ   297
+Subject_4  209   S                                                             211
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20736
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_spec.fna).
+    Posted date:  Unknown
+  Number of letters in database: 2,460
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

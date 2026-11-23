@@ -253,12 +253,12 @@ fn run_main_entry() -> Result<()> {
         start.settings().map_err(anyhow::Error::msg)?;
         return Ok(());
     }
-    // LOSAT's refusals of what it does not run (`reader::refusal_after_read`), then clap's
-    // conversion of the arguments that NCBI's reader read (`reader::convert`): LOSAT's errors, on
+    // LOSAT's refusals of what it does not run (`reader::refusal_after_read`), then the program's
+    // options of the arguments that NCBI's reader read (`reader::options`): LOSAT's errors, on
     // the terminal's standard error (`Error: ` and the text, exit status 1; line RG DECISIONS 32).
     let command = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(refusal) => Err(refusal),
-        None => crate::cli::reader::convert(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args, false),
     };
     let command = match command {
         Ok(command) => command,

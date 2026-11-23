@@ -250,7 +250,9 @@ impl ProgramParser for Cli {
     }
 }
 
-/// `Cli`'s command with the arguments of `program` only (`cli_command`).
+/// `Cli`'s command with the arguments of `program` only (`cli_command`): LOSAT Web's ABI v1's
+/// (`web_v1_argv`) and the tests'.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn command_of(program: &str) -> clap::Command {
     cli_command::<false>(|name| name == program)
 }

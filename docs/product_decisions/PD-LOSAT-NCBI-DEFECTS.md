@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.86
+- Version: 1.87
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -448,7 +448,17 @@
   maintainer (Owner's answer 「Q-D1c-R2=A」, 2026-11-22 22:4x JST); numbered after 1.71; first
   1.72, then 1.74, 1.78, 1.81, 1.82, 1.83 and 1.85 at the merges of dev that brought 1.72 and 1.73,
   then 1.74 to 1.77, then 1.78 to 1.80, then 1.81, then 1.82, then 1.83 and 1.84);
-  1.86 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
+  1.86 2026-11-23 (two rule-3 rejections of `losat makeprofiledb`, psiblast line item PS10d: a
+  query in a nucleotide coding whose data is shorter than NCBI's writer reads for its length, and
+  in a profile with frequency ratios only a query whose `Seq-data` is a gap; a query in `iupacna`,
+  `ncbi2na` or `ncbi4na` of enough bytes is built as NCBI builds it, and in a profile with
+  frequency ratios only the query of every other coding gets NCBI's conversion: `Unknown
+  conversion.` for a nucleotide coding, NCBI8aa's bytes as its codes, the unknown exception for
+  NCBIpna and NCBIpaa; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.85; first 1.80, then 1.84 at the merge of psiblast line item PS10c, which brought
+  dev's 1.80 to 1.82 and PS10c's 1.83, then 1.85 at the merge of dev that brought line NP item
+  M4b-AX's 1.83 and PS10c's 1.84, then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85);
+  1.87 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
   of line NP's M4b (question Q6 of that day's batch, 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
   Q10=A Q11=A Q12=A Q13=OK」): with `-db_hard_mask`, TBLASTN and TBLASTX search a reading frame whose
   masks leave it an empty first part (a mask within the first 2 bases of a sequence or within the 1
@@ -457,10 +467,11 @@
   removed; how the 1 or 2 masked bases are read (masked in every frame): the Owner's answer
   「推奨通り」 of 2026-11-23 13:49 JST, on the board, to the report of line NP's session ad-M4b-8 that
   asked Q-ALIGNEX and M4b-3c's question Q6 (recommended A and B), which is Q6 = B; line NP item
-  M4b-3c; numbered after 1.85 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c, 1.85 line RG
-  item D1c-1); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to 1.82 (the branch had assumed
-  1.76 for line NP item M4b-3b; dev's 1.76 and 1.77 are line RG's X4b-2 and D3c-3a), then 1.86 at the merge
-  of dev that brought line RG item D1c-1's 1.85; the exception numbered 24 at first, then 27 after dev's 24 to 26)
+  M4b-3c; numbered after 1.86 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c, 1.85 line RG
+  item D1c-1, 1.86 psiblast line item PS10d); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to
+  1.82 (the branch had assumed 1.76 for line NP item M4b-3b; dev's 1.76 and 1.77 are line RG's X4b-2 and
+  D3c-3a), then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85, then 1.87 at the merge of dev
+  that brought PS10d's 1.86; the exception numbered 24 at first, then 27 after dev's 24 to 26)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1285,7 +1296,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     leaves a frame an empty first part (an empty first part of a frame, then a part that NCBI
     searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0 before a
     tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13), refused
-    (rule 3) until version 1.86, is searched under approved exception 27 (a translated mask that
+    (rule 3) until version 1.87, is searched under approved exception 27 (a translated mask that
     leaves a frame an empty first part). Masks out of
     order, overlapping masks, a mask that ends past its sequence, and in BLASTP and BLASTX a range
     longer than 5,000,000 letters stay refused (rule 3). `blastinput::db_mask::HardScan`,
@@ -1333,7 +1344,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     `a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk`
     (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
 
-## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.86)
+## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.87)
 
 The Owner decided on 2026-11-22 at 22:34 JST (words 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
 Q10=A Q11=A Q12=A Q13=OK」; question Q6 of that batch is question Q4 of line NP's M4b,
@@ -3030,6 +3041,25 @@ file would differ, and NCBI's programs still could not open the database).
     32, with or without a later error such as a negative frequency ratio). A query of the wrong
     length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
     QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
+    1.86, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
+    `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than
+    `ceil(length / 2)` bytes (four letters or more short of an even length, three of an odd one).
+    NCBI's `x_CookSequence` converts the kept sequence when it is published
+    (`writedb_convert.cpp:444-528,569-610`; at the next query, at the close, or at the close after an
+    error, `writedb_impl.cpp:100-108,158-180,324-331`), and its checks of the size are debug-only: it
+    reads past the data (fixture inputs `l_QR01.lst`-`l_QR05.lst`: `.psq` bytes that differ between
+    two runs, SIGSEGV for empty `ncbi2na`). The data of
+    enough bytes (more than the length needs, unused bits set, iupacna up to three letters short of an
+    even length and two of an odd one, whose read ends at the string's zero or before it) is NCBI's
+    (fixture rows QD01-QD40).
+  - A profile with frequency ratios only whose query's `Seq-data` is a `gap` (version 1.86, PS10d):
+    NCBI's conversion of the query to NCBIstdaa looks its coding up in a table of the `CSeqUtil`
+    codings that ends before the gap's number (`seqport_util.cpp:1947-1959,2032-2035`) and reads
+    past it. The other codings that the conversion meets are NCBI's (fixture rows QD41-QD46:
+    `Unknown conversion.` for NCBI8na, NCBI8aa's bytes as the query's codes, the unknown exception
+    of NCBIpna and NCBIpaa, which the table has no coding for; then the writer's error for the
+    coding it cannot store, posted or reported where NCBI's is).
   - A profile with frequency ratios only whose matrix has no frequency ratios, or whose query has no
     ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
   - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends

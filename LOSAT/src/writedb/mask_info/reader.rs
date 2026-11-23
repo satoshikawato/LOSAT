@@ -5,8 +5,10 @@
 //! NCBI reads an object with its serial library (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`,
 //! driven by the type information of the generated classes). The two encodings share their
 //! structure: this module is the part of `CObjectIStream` that is common to both
-//! (`ReadClassSequential`, `ReadChoiceSimple`, `ReadContainer`, the object frames); `text.rs`
-//! and `ber.rs` are the two encodings' primitives.
+//! (`ReadClassSequential`, `ReadChoiceSimple`, `ReadContainer`, the object frames); the two
+//! encodings' primitives are `report::serial::asn_input::TextInput` and
+//! `report::serial::asn_ber_reader::BerReader`, which the reader of the type table
+//! (`report::serial::asn_types::read`) shares.
 //!
 //! What NCBI's reader throws for a file it cannot read is what LOSAT reports (`Fail`, then
 //! `MaskFileError::Ncbi`): the exception of the primitive at its place in NCBI's source, with
@@ -26,7 +28,6 @@ use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::ber::BerIn;
 use super::guess::guess_format;
 use super::schema::{
     ChoiceDef, ClassDef, EnumDef, Member, Ty, BLAST_DB_MASK_INFO, BLAST_FILTER_PROGRAM,
@@ -37,15 +38,18 @@ use super::schema::{
     SEQ_LOC_PACKED_INT, SEQ_LOC_PACKED_PNT, SEQ_LOC_PNT, SEQ_LOC_WHOLE, SEQ_POINT, TEXTSEQ_ID,
     T_OBJECT_ID,
 };
-use super::text::{TextIn, TextSource};
 use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart, NullElement};
-use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
-use crate::report::serial::asn_text_reader::{PointerType, StreamSource};
-use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
-use crate::report::serial::object_frame::{
-    frame_info, frame_name, text_frame_site, FrameKind, READ_POINTER_FRAME_END,
+use crate::ncbi_exception::{NcbiException, Severity};
+use crate::report::serial::asn_ber_reader::BerReader;
+use crate::report::serial::asn_input::{
+    throw_error, utf8_tag_message, Fail, Input, Names, StringKind, StringPost, TextInput, R,
 };
-use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
+use crate::report::serial::asn_text_reader::{PointerType, StreamSource};
+use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
+use crate::report::serial::object_frame::{
+    frame_info, frame_name, text_frame_site, FrameKind, EXPECTED_MEMBER, GET_REGISTERED_OBJECT,
+    HANDLE_EOF, READ_POINTER_FRAME_END, SKIP_FILE_HEADER,
+};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -99,173 +103,19 @@ impl fmt::Display for MaskFileError {
 
 impl std::error::Error for MaskFileError {}
 
-/// What a primitive or a frame reports: the class of what NCBI's reader throws. What a variant
-/// holds is in a box of one word (`Fail::serial`, `Fail::exception`, `Fail::unsupported`), so
-/// `Fail` is a tag and a word, and the result of a primitive (`R<u32>`, `R<()>`, `R<bool>`) is
-/// returned in two registers (an unboxed `String` made every result a niche of its capacity, a
-/// 64-bit constant at each `Ok` and `?`, returned through memory); no error is built on the
-/// paths that read a valid file.
-#[derive(Debug)]
-pub(super) enum Fail {
-    /// NCBI's `CEofException` (see the module comment).
-    Eof,
-    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it.
-    Serial(Box<NcbiException>),
-    /// Another `CException` (the `CUtilException` of a number in text, the `CStringException` of
-    /// a member's tag), with a line for each frame it leaves (`NCBI_RETHROW_SAME`).
-    Exception(Box<NcbiException>),
-    /// `std::bad_alloc` of the string that a length announces (`GetChars`' `reserve`).
-    OutOfMemory,
-    /// `std::length_error` of that `reserve`: `what()` is [`STRING_CREATE_LENGTH_ERROR`].
-    LengthError,
-    /// NCBI reads it; LOSAT does not.
-    Unsupported(Box<Refusal>),
-}
-
-/// What [`Fail::Unsupported`] says of what LOSAT does not read.
-#[derive(Debug)]
-pub(super) struct Refusal(String);
-
-pub(super) type R<T> = Result<T, Fail>;
-
-impl Fail {
-    /// [`Fail::Serial`] of `e`.
-    #[cold]
-    pub(super) fn serial(e: NcbiException) -> Fail {
-        Fail::Serial(Box::new(e))
-    }
-
-    /// [`Fail::Exception`] of `e`.
-    #[cold]
-    pub(super) fn exception(e: NcbiException) -> Fail {
-        Fail::Exception(Box::new(e))
-    }
-
-    /// [`Fail::Unsupported`] of `what`.
-    #[cold]
-    pub(super) fn unsupported(what: String) -> Fail {
-        Fail::Unsupported(Box::new(Refusal(what)))
-    }
-}
-
-/// `ThrowError` of NCBI's object stream with a flag and a message, at `site` (`ThrowError1`,
-/// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position
-/// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`. It returns the
-/// [`Fail`], not an `R`: the path that calls it ends there (`return Err(throw_error(..))`), so
-/// the reading path around it keeps nothing for its return.
-#[cold]
-#[inline(never)]
-pub(super) fn throw_error(site: ThrowSite, position: &str, message: impl AsRef<[u8]>) -> Fail {
-    Fail::serial(NcbiException::new(
-        site,
-        [position.as_bytes(), b": ", message.as_ref()].concat(),
-    ))
-}
-
-/// A `ThrowError` of `CObjectIStream` (objistr.cpp) at `line` of `function`.
-const fn istr_site(line: u32, kind: &'static str, function: &'static str) -> ThrowSite {
-    ThrowSite {
-        file: "src/serial/objistr.cpp",
-        line,
-        kind,
-        function: Some(function),
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
-const HANDLE_EOF: ThrowSite = istr_site(
-    606,
-    "CSerialException::eEOF",
-    "ncbi::CObjectIStream::HandleEOF",
-);
-const SKIP_FILE_HEADER: ThrowSite = istr_site(
-    896,
-    "CSerialException::eFormatError",
-    "ncbi::CObjectIStream::SkipFileHeader",
-);
-const EXPECTED_MEMBER: ThrowSite = istr_site(
-    1037,
-    "CSerialException::eFormatError",
-    "ncbi::CObjectIStream::ExpectedMember",
-);
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:873-880
-// (makeblastdb's streams collect no objects: `m_Objects` is null, checked with makeblastdb
-// 2.17.0 on `@0` and `@1`.)
-const GET_REGISTERED_OBJECT: ThrowSite = istr_site(
-    877,
-    "CSerialException::eFormatError",
-    "ncbi::CObjectIStream::GetRegisteredObject",
-);
-
-/// `what()` of the `std::length_error` that libstdc++'s `_M_create` throws for a capacity over
-/// `max_size()` (`rpsbproc::prosite::CxxString`).
-pub(super) const STRING_CREATE_LENGTH_ERROR: &str = "basic_string::_M_create";
-
-/// The bytes of the file that one string of `length` bytes asks NCBI for (`GetChars`:
-/// `str` reserves `count` bytes before the bytes are read, when they are not all in the input
-/// buffer): a length over `max_size()` (2^63 - 1, `rpsbproc::prosite::CxxString`) is
-/// `std::length_error`; an allocation of [`USER_SPACE_BYTES`] or more `std::bad_alloc` on every
-/// host; one of [`HOST_DEPENDENT_BYTES`] or more succeeds or fails by the host's memory, which
-/// LOSAT refuses (DECISIONS 40 of line PS: memory that NCBI builds from a length field of the
-/// input, as `losat rpsbproc` does). Below that the allocation succeeds and the read goes on to the
-/// end of the file.
-// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:496-523
-// (checked with makeblastdb 2.17.0 on lengths 2^62 - 1, 2^62, 2^63 - 2 and 2^63 - 1: "BLAST ran
-// out of memory", status 4; 2^63: "Error: basic_string::_M_create", status 255.)
-pub(super) fn reserve_string(length: u64) -> R<()> {
-    if length > (1 << 63) - 1 {
-        return Err(Fail::LengthError);
-    }
-    let bytes = length + 1;
-    if bytes >= USER_SPACE_BYTES {
-        return Err(Fail::OutOfMemory);
-    }
-    if bytes >= HOST_DEPENDENT_BYTES {
-        return Err(host_dependent_string(length));
-    }
-    Ok(())
-}
-
-/// The refusal of a string of `length` bytes that `reserve_string` leaves to the host.
-#[cold]
-#[inline(never)]
-fn host_dependent_string(length: u64) -> Fail {
-    let bytes = length + 1;
-    Fail::unsupported(format!(
-        "a string whose length ({length} bytes) passes the end of the file: makeblastdb \
-         allocates {bytes} bytes for it, which succeeds or fails by the host's memory"
-    ))
-}
-
-/// What reading a VisibleString posts, in the order NCBI posts it.
-#[derive(Debug)]
-pub(super) enum StringPost {
-    /// The warning of a UTF8String tag for a VisibleString (binary,
-    /// `ExpectStringTag`, objistrasnb.cpp:296-305).
-    Utf8Tag,
-    /// `ReplaceVisibleChar`'s post of a byte read as `#`: where, the byte, and the string (or
-    /// piece of it) that the message quotes.
-    BadChar {
-        position: StreamPosition,
-        byte: u8,
-        string: Vec<u8>,
-    },
-}
-
 /// A message that NCBI's reader posts while it reads a mask file.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MaskPost {
-    /// `ERR_POST_X` (subcode 7) of a byte read as `#`.
+    /// The post 803.7 of a byte read as `#`.
     BadChar(ReplacedChar),
-    /// A warning posted once (`ERR_POST_X_ONCE`, subcode 10) for a UTF8String tag for the
-    /// VisibleString member at the stack trace: once per process.
+    /// The warning 803.10 of a UTF8String tag for the VisibleString member at the stack trace
+    /// (makeblastdb writes the first of its run, `asn_input::Utf8TagOnce`).
     Utf8Tag(String),
 }
 
 impl MaskPost {
     /// The line makeblastdb writes on its standard error (`ReplacedChar::post`,
     /// `ncbi_exception::post_line`).
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310
     pub(crate) fn line(&self) -> Vec<u8> {
         match self {
             MaskPost::BadChar(replaced) => replaced.post(Some("makeblastdb")),
@@ -273,11 +123,7 @@ impl MaskPost {
                 Severity::Warning,
                 Some("803.10"),
                 Some("makeblastdb"),
-                format!(
-                    "CObjectIStreamAsnBinary: UTF8String data for VisibleString member {trace}, \
-                     ASN.1 specification may need an update"
-                )
-                .as_bytes(),
+                utf8_tag_message(trace).as_bytes(),
             ),
         }
     }
@@ -289,54 +135,6 @@ impl MaskPost {
             MaskPost::Utf8Tag(text) => *text = trace,
         }
     }
-}
-
-/// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`).
-pub(super) trait Input {
-    /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
-    fn position(&self) -> String;
-    /// The depth of NCBI's object stack (`GetStackDepth()`), which the text reader's
-    /// `SkipWhiteSpace` asks at the end of the text.
-    #[inline]
-    fn set_stack_depth(&mut self, _depth: usize) {}
-    /// `ReadFileHeader`: the type name that precedes an object in text; binary files have none.
-    fn read_file_header(&mut self) -> R<Option<Vec<u8>>>;
-    fn begin_class(&mut self) -> R<()>;
-    /// `BeginClassMember` of the class type and `pos`: the next member, searched from `pos` on, or
-    /// `None` at the end of the class.
-    fn begin_member(&mut self, def: &'static ClassDef, pos: usize) -> R<Option<usize>>;
-    fn end_member(&mut self) -> R<()>;
-    fn end_class(&mut self) -> R<()>;
-    fn begin_choice(&mut self) -> R<()>;
-    fn begin_variant(&mut self, def: &'static ChoiceDef) -> R<usize>;
-    fn end_variant(&mut self) -> R<()>;
-    fn end_choice(&mut self) -> R<()>;
-    fn begin_container(&mut self, set: bool) -> R<()>;
-    fn begin_element(&mut self) -> R<bool>;
-    fn end_container(&mut self) -> R<()>;
-    fn read_i32(&mut self) -> R<i32>;
-    fn read_i64(&mut self) -> R<i64>;
-    fn read_u32(&mut self) -> R<u32>;
-    fn read_bool(&mut self) -> R<bool>;
-    fn read_null(&mut self) -> R<()>;
-    /// A `VisibleString` with each byte outside `' '..='~'` read as `#` (`eFNP_ReplaceAndWarn`,
-    /// the default of `SERIAL_WRONG_CHARS_READ`), and what NCBI posts while it reads it, in
-    /// `posts` (also when it then fails).
-    fn read_string(&mut self, posts: &mut Vec<StringPost>) -> R<Vec<u8>>;
-    /// `ReadEnum` of the enum's `values`: the value (`CEnumeratedTypeInfo::ReadEnum` adds its line
-    /// to an error).
-    fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
-    /// `ReadPointerType()`, where NCBI reads a `CRef<>` that is empty at that moment
-    /// (`Rd::read_pointer`): a `NULL` is taken, the `@` or `:` that starts the other two forms too.
-    fn read_pointer_type(&mut self) -> R<PointerType>;
-    /// `ReadObjectPointer()`: the object index after `@` (text: `ReadInt8`, `TObjectIndex` being
-    /// 64 bits) or of the object reference tag (binary: `ReadStdSigned`). Its value does not matter:
-    /// `GetRegisteredObject` throws for every index.
-    fn read_object_pointer(&mut self) -> R<()>;
-    /// `ReadOtherPointer()`: the name of the type whose value follows.
-    fn read_other_pointer(&mut self) -> R<Vec<u8>>;
-    /// `ReadOtherPointerEnd()`, after that value.
-    fn read_other_pointer_end(&mut self) -> R<()>;
 }
 
 /// The deepest nesting of object frames that LOSAT follows (NCBI's stack is only limited by memory).
@@ -678,7 +476,7 @@ impl<I: Input> Rd<I> {
     fn expected_member(&self, m: &Member) -> Fail {
         throw_error(
             EXPECTED_MEMBER,
-            &self.inp.position(),
+            self.inp.position(),
             format!("member {} expected", m.name),
         )
     }
@@ -830,7 +628,7 @@ impl<I: Input> Rd<I> {
                 self.inp.read_object_pointer()?;
                 Err(throw_error(
                     GET_REGISTERED_OBJECT,
-                    &self.inp.position(),
+                    self.inp.position(),
                     "invalid object index: NO_COLLECT defined",
                 ))
             }
@@ -878,7 +676,7 @@ impl<I: Input> Rd<I> {
     fn null_element(&self, list: &'static str) -> NullElement {
         NullElement {
             list,
-            position: self.inp.position(),
+            position: self.inp.position().to_string(),
         }
     }
 
@@ -886,7 +684,11 @@ impl<I: Input> Rd<I> {
     /// (`StringPost`, here with the stack trace).
     fn read_str(&mut self) -> R<Vec<u8>> {
         let mut posts = Vec::new();
-        let result = self.inp.read_string(&mut posts);
+        let mut out = Vec::new();
+        let result = self
+            .inp
+            .read_string(StringKind::Visible, &mut out, &mut posts)
+            .map(|()| out);
         if !posts.is_empty() {
             let start = self.posts.len();
             for post in posts {
@@ -1478,7 +1280,7 @@ impl<I: Input> Rd<I> {
             match s.inp.read_file_header()? {
                 Some(name) if !name.is_empty() && name != def.name.as_bytes() => Err(throw_error(
                     SKIP_FILE_HEADER,
-                    &s.inp.position(),
+                    s.inp.position(),
                     [
                         b"incompatible type ".as_slice(),
                         &name,
@@ -1504,7 +1306,8 @@ fn mandatory<T>(value: Option<T>) -> T {
 /// compares it with `seqid::ber::decode_seq_id` (DECISIONS 35).
 #[cfg(test)]
 pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
-    let mut rd = Rd::new(BerIn::new(data));
+    use crate::report::serial::asn_text_reader::SliceSource;
+    let mut rd = Rd::new(BerReader::new(SliceSource::new(data), Names::MASK));
     rd.frame(FrameKind::Named, Some("Seq-id"), |s| s.read_seq_id())
 }
 
@@ -1513,7 +1316,7 @@ pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
 #[cfg(test)]
 pub(super) fn seq_id_from_text(data: &[u8]) -> R<ParsedSeqId> {
     use crate::report::serial::asn_text_reader::SliceSource;
-    let mut rd = Rd::new(TextIn::new(SliceSource::new(data)));
+    let mut rd = Rd::new(TextInput::new(SliceSource::new(data), Names::MASK));
     rd.frame(FrameKind::Named, Some("Seq-id"), |s| s.read_seq_id())
 }
 
@@ -1536,14 +1339,17 @@ fn unknown_encoding(name: &Path) -> MaskFileError {
     )))
 }
 
-/// Where the objects of a mask file come from.
+/// The bytes of a mask file, read in blocks as its objects are read.
+type FileSource = StreamSource<Box<dyn Read>>;
+
+/// Where the objects of a mask file come from: one reader for all objects of the file (only the
+/// bytes of the object being read are kept), each object read by a new state of NCBI's stream
+/// (`Input::new_object`).
 enum Source {
-    /// ASN.1 text, read from the file in blocks by one reader for all objects (`text.rs`): only
-    /// the bytes of the object being read are kept.
-    Text(Box<Rd<TextIn<TextSource>>>),
-    /// ASN.1 binary: the bytes of the file and the offset of the next object (`ber.rs` reads a
-    /// slice).
-    Binary { data: Vec<u8>, offset: usize },
+    /// ASN.1 text.
+    Text(Box<Rd<TextInput<FileSource>>>),
+    /// ASN.1 binary.
+    Binary(Box<Rd<BerReader<FileSource>>>),
 }
 
 /// A mask file read from the disk.
@@ -1562,10 +1368,9 @@ impl fmt::Debug for MaskFileReader {
         debug.field("path", &self.path);
         match &self.source {
             Source::Text(_) => debug.field("format", &MaskFileFormat::TextAsn),
-            Source::Binary { data, offset } => debug
+            Source::Binary(rd) => debug
                 .field("format", &MaskFileFormat::BinaryAsn)
-                .field("bytes", &data.len())
-                .field("offset", offset),
+                .field("offset", &rd.inp.offset()),
         };
         debug.field("state", &self.state).finish()
     }
@@ -1583,9 +1388,9 @@ impl MaskFileReader {
     /// Opens the file and guesses its format from its first bytes; messages call the file
     /// `name` (the name on makeblastdb's command line). The text of the error for a file in
     /// neither format is NCBI's. A file that cannot be opened or read is a failed stream for the
-    /// format guess (`x_TestInput`), which answers `eUnknown`: the same error. A text file is
-    /// then read in blocks as its objects are read; a binary file is read whole (a read error
-    /// there is the same error).
+    /// format guess (`x_TestInput`), which answers `eUnknown`: the same error. The file is then
+    /// read in blocks as its objects are read (a read error ends the file, as the bad bit of
+    /// NCBI's stream does).
     pub(crate) fn open_named(path: &Path, name: &Path) -> Result<Self, MaskFileError> {
         match std::fs::File::open(path) {
             Ok(file) => Self::from_reader(name, Box::new(file)),
@@ -1599,10 +1404,16 @@ impl MaskFileReader {
         Self::from_reader(path, Box::new(std::io::Cursor::new(data)))
     }
 
-    /// The reader of the bytes `input` gives; `path` is only used in messages.
+    /// The reader of the bytes `input` gives, read one byte per fill after the format guess (the
+    /// bytes it keeps end at every byte); `path` is only used in messages.
     #[cfg(test)]
     pub(crate) fn from_read(path: &Path, input: Box<dyn Read>) -> Result<Self, MaskFileError> {
-        Self::from_reader(path, input)
+        let mut reader = Self::from_reader(path, input)?;
+        match &mut reader.source {
+            Source::Text(rd) => rd.inp.r.src.fill_one_byte_at_a_time(),
+            Source::Binary(rd) => rd.inp.src.fill_one_byte_at_a_time(),
+        }
+        Ok(reader)
     }
 
     /// The reader of the file `input`; `path` is only used in messages.
@@ -1610,16 +1421,13 @@ impl MaskFileReader {
         let Some((format, sample)) = guess_format(&mut input) else {
             return Err(unknown_encoding(path));
         };
+        let src = StreamSource::new(input, &sample);
         let source = match format {
-            MaskFileFormat::TextAsn => Source::Text(Box::new(Rd::new(TextIn::new(
-                StreamSource::new(input, &sample),
-            )))),
+            MaskFileFormat::TextAsn => {
+                Source::Text(Box::new(Rd::new(TextInput::new(src, Names::MASK))))
+            }
             MaskFileFormat::BinaryAsn => {
-                let mut data = sample;
-                if input.read_to_end(&mut data).is_err() {
-                    return Err(unknown_encoding(path));
-                }
-                Source::Binary { data, offset: 0 }
+                Source::Binary(Box::new(Rd::new(BerReader::new(src, Names::MASK))))
             }
         };
         Ok(MaskFileReader {
@@ -1630,13 +1438,12 @@ impl MaskFileReader {
         })
     }
 
-    /// The bytes of the file that the reader keeps: the stream's buffer of a text file, the
-    /// whole of a binary one.
+    /// The bytes of the file that the reader keeps (the stream's buffer).
     #[cfg(test)]
     pub(crate) fn buffered(&self) -> usize {
         match &self.source {
             Source::Text(rd) => rd.inp.buffered(),
-            Source::Binary { data, .. } => data.len(),
+            Source::Binary(rd) => rd.inp.src.buffered(),
         }
     }
 
@@ -1644,14 +1451,14 @@ impl MaskFileReader {
     pub(crate) fn format(&self) -> MaskFileFormat {
         match self.source {
             Source::Text(_) => MaskFileFormat::TextAsn,
-            Source::Binary { .. } => MaskFileFormat::BinaryAsn,
+            Source::Binary(_) => MaskFileFormat::BinaryAsn,
         }
     }
 
     fn run<T>(
         &mut self,
-        text: impl FnOnce(&mut Rd<TextIn<TextSource>>) -> R<T>,
-        binary: impl FnOnce(&mut Rd<BerIn<'_>>) -> R<T>,
+        text: impl FnOnce(&mut Rd<TextInput<FileSource>>) -> R<T>,
+        binary: impl FnOnce(&mut Rd<BerReader<FileSource>>) -> R<T>,
     ) -> R<T> {
         match &mut self.source {
             Source::Text(rd) => {
@@ -1660,11 +1467,9 @@ impl MaskFileReader {
                 self.posts.append(&mut rd.posts);
                 result
             }
-            Source::Binary { data, offset } => {
-                let start = (*offset).min(data.len());
-                let mut rd = Rd::new(BerIn::new(&data[start..]));
-                let result = binary(&mut rd);
-                *offset = start + rd.inp.offset();
+            Source::Binary(rd) => {
+                rd.inp.new_object();
+                let result = binary(rd);
                 self.posts.append(&mut rd.posts);
                 result
             }
@@ -1705,9 +1510,7 @@ impl MaskFileReader {
                 MaskFileError::Ncbi(WriteDbError::Exception(*e))
             }
             Fail::OutOfMemory => MaskFileError::Ncbi(WriteDbError::OutOfMemory),
-            Fail::LengthError => {
-                MaskFileError::Ncbi(WriteDbError::Other(STRING_CREATE_LENGTH_ERROR.to_string()))
-            }
+            Fail::Std(what) => MaskFileError::Ncbi(WriteDbError::Other(what.to_string())),
             Fail::Unsupported(what) => MaskFileError::Unsupported(what.0),
             Fail::Eof => MaskFileError::EofInContinuation {
                 path: self.path.clone(),

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.76
+- Version: 1.81
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -370,6 +370,52 @@
   otherwise Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
   1.73, line RG item X4b-1, after 1.74, line RG item D5b-3, and after 1.75, line NP item M5, at
   the merges of dev, and after exception 22)
+  1.77 2026-11-22 (psiblast and tblastn `-in_pssm` of a PSSM in ASN.1 binary, line RG item D3c-3a:
+  the explicit rejections, rule 3, of a binary PSSM's string or byte block whose length passes the
+  end of the file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are
+  missing or whose number is not its Seq-inst's `length`, on which NCBI crashes or writes past its
+  buffer for most lengths and which it answers for one less than the letters, an answer LOSAT does
+  not yet give; and a refusal that is not a
+  rule-3 item, of a PSSM's Karlin-Altschul values that are not finite numbers where LOSAT does not
+  yet compute NCBI's output of them; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.76; first 1.71, then 1.72, 1.74, 1.76 and 1.77 at the merges of dev that brought line DBID item
+  pfoff-3's 1.71, line NP items M5a and M5b's 1.72 and line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74 and
+  line NP item M5's 1.75, then line RG item X4b-2's 1.76);
+  1.78 2026-11-23 (approved exception 24, the Owner's answer of 2026-11-22 「Q5=C」 to line RG's
+  question Q-HARDIDX: `losat blastn -use_index true` with `-db_hard_mask` searches the MegaBLAST
+  index with the masked letters matching nothing and each seed in the hard range that holds it,
+  where NCBI BLAST+ 2.17.0 takes for each hard chunk the index's list of the chunk with the same
+  number; the refusal that LOSAT made from line RG item D5b-2 until this version removed; line
+  RG item D5b-5; first 1.77, then 1.78 at the merge of dev that brought line RG item D3c-3a's 1.77);
+  1.79 2026-11-23 (TBLASTN `-ungapped` runs, line NP item O4c: the explicit rejection of 1.46
+  extended to the ungapped re-evaluation of an alignment on a subject of fewer than 12 bases,
+  which reads the same translation that NCBI never makes, rule 3; the explicit rejection of 1.76,
+  `-ungapped -comp_based_stats 0 -use_sw_tback`, on which NCBI crashes at every query batch it
+  searches, extended from BLASTX to TBLASTN, rule 3; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.78; first 1.72, then 1.78 and 1.79 at the merges of
+  dev that brought 1.72 to 1.77 (line NP items M5a, M5b and M5, line RG items X4b-1, D5b-3, X4b-2
+  and D3c-3a), then line RG item D5b-5's 1.78);
+  1.80 2026-11-21 (RPSTBLASTN `-use_sw_tback`, line PS item PS12c: the explicit rejection of 1.30
+  of a Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to RPSTBLASTN, rule
+  3, within the class of 1.30; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.79; first 1.68, then 1.70, 1.72, 1.74, 1.77, 1.79 and 1.80 at the merges
+  of dev that brought line NP's 1.68 and 1.69, lines RG's 1.70 and DBID's 1.71, line NP's 1.72
+  and line RG's 1.73, then 1.74 to 1.76, then 1.77 and 1.78, then 1.79; with it, under
+  rule 2, a Smith-Waterman alignment that starts with a gap, refused until line PS item PS12d);
+  1.81 2026-11-23 (makeblastdb `-gi_mask`, line NP item M4c-1: exception 25, the alias file of a
+  database of one volume, which names the volume where NCBI's names the database itself, the
+  Owner's decision of 2026-11-20 (Q6=B); the explicit rejection, rule 2, of two masking
+  algorithms that would write one GI-mask data file at the same time, whose bytes depend on how
+  the C++ runtime buffers two streams on one file, the Owner's decision of 2026-11-21 23:07 JST
+  (question Q-GIDUP, 「推奨通り」); the GI-mask writer's other defects reproduced under rule 2, two
+  algorithms of one name whose files are written one after the other included; the form of
+  exception 25 Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.80, line PS item PS12c; first 1.60, then 1.61, 1.63, 1.68, 1.70, 1.72, 1.74, 1.76 and 1.81 at the
+  merges of dev that brought line RG's 1.60, then line RG's 1.61 and line LIB-O's 1.62, then the
+  1.63 to 1.67 of lines RG, PS, NP and LIB-S, then line NP's 1.68 and 1.69, then line RG's 1.70
+  and line DBID's 1.71, then line NP's 1.72 and line RG's 1.73, then line RG's 1.74 and line
+  NP's 1.75, then the 1.76 to 1.80 of lines RG, NP and PS; the exception numbered 18 at first,
+  then 20, 22 and 23)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1202,7 +1248,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     the tail mask (NCBI's own run, LOSAT the same) but 1-60 with the near input's mask of one letter.
     TBLASTN with `-window_size 0` on `th2`'s tail (`db.tmask.tn.hard.th2.13.w0.6`): NCBI's own
     bytes, the same as its run of the near input (with `-ungapped -comp_based_stats 0` too, 4,951
-    bytes, no row repeated; LOSAT refuses TBLASTN `-ungapped` for every database, so no row);
+    bytes, no row repeated; LOSAT's the same since TBLASTN `-ungapped` runs, line NP item O4c,
+    row `db.tmask.tn.hard.th2.13.ung.6`);
     BLASTP with `-window_size 0` on `pe_tail` (`db.pmask.bp.hard.tail.pe_tail.w0.6`): the near
     input's. Unit tests `protein_shapes_of_the_hard_masks` and
     `translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start`
@@ -1265,7 +1312,68 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 `tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
 `rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
 
+## Approved exception 25 (makeblastdb `-gi_mask`, a database of one volume, version 1.81)
+
+Version 1.81, line NP item M4c-1. The Owner answered on 2026-11-20 「Q1=A Q2=B Q3=A Q4=A Q5=A Q6=B Q7=A
+Q8=OK」. Q6 was the question Q-GIMASK 「makeblastdb -gi_mask が 1 volume の DB を作る時、NCBI と同じにしますか」
+(when `makeblastdb -gi_mask` builds a database of one volume, should LOSAT do as NCBI does?), and its option
+B read 「LOSAT だけが 1 volume でも読める DB を書く。NCBI と違う file になり、新しい例外が 1 つ増える。」 (LOSAT
+alone writes a database of one volume that can be read; the files differ from NCBI's, and one more exception
+is added). Not taken: option A, NCBI's files and its exit status 2 under rule 2. The form below (which bytes
+differ, and how) is Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07. Not taken there:
+naming the volume `<name>.00` as a database of several volumes does (the name of every volume file would
+differ from NCBI's), and keeping NCBI's alias file while only LOSAT's reader takes it for the volume (no
+file would differ, and NCBI's programs still could not open the database).
+
+25. **The alias file of a database of one volume built with `-gi_mask`.** With `-gi_mask` NCBI's
+    writer gives every database an alias file (`writedb_impl.cpp:378-380`); its `DBLIST` is the list
+    of the volumes' file names when there are several, and the database's own name `m_Dbname`, an
+    absolute path, when there is one (`CWriteDB_Impl::x_MakeAlias`, `writedb_impl.cpp:403-416`).
+    NCBI's reader takes a `DBLIST` entry with a directory for another alias file or volume to look
+    up; this one names the alias file itself, so every reader of the database stops with `BLAST
+    Database error: Illegal configuration: DB alias files are mutually recursive.`
+    (`CSeqDBAliasNode::x_ExpandAliases`, `seqdbalias.cpp:735-813`). makeblastdb opens the new
+    database for its metadata file (`makeblastdb.cpp:1296-1317`) and ends there with that message
+    and exit status 2, after every other file is written; no NCBI program can open the database.
+    LOSAT writes the database's file name without a directory in that line
+    (the file name of `m_Dbname`, the form of the list of several volumes), which NCBI's reader
+    takes for the volume of the alias file's own name (`seqdbalias.cpp:773-797`): the database
+    opens, and the build goes on as a build of several volumes does, with the metadata file and
+    exit status 0. Every other file, the messages and the log are NCBI's. The metadata file is the
+    one NCBI's own code gives for that database (`CSeqDB::GetDBMetaData`, `seqdb.cpp:1610-1749`;
+    NCBI BLAST+ 2.17.0 `blastdbcmd -metadata` on NCBI's database with that one line changed): it
+    lists the alias file twice, as the alias file and as a file of the volume (the extensions of
+    `SeqDB_GetFileExtensions` begin with the alias file's, `seqdbcommon.cpp:2629`), and counts its
+    bytes twice. An alias file that NCBI's makeblastdb left from such a build is not LOSAT's: the
+    removal of the old database cannot read it (`seqdb.cpp:1542, 1573-1574`), a build with
+    `-gi_mask` writes its own alias file over it, and a build without `-gi_mask` keeps it and ends
+    with the message above, as NCBI's does (rule 2).
+    Evidence: `docs/evidence/gi_mask_single_volume/` (NCBI BLAST+ 2.17.0 opens such databases,
+    version 5 and 4, nucleotide and protein, `-out` in a subdirectory, the default GI-mask name:
+    `blastdbcmd -info`, `%m0`, `-mask_sequence_with 0`, `-metadata`, `blastn -db_soft_mask 0` and
+    `-db_hard_mask 0`, `blastp -db_soft_mask 0`; the masks are those of the mask column but for the
+    sequences without a GI, as for a database of several volumes; from another directory NCBI does
+    not find the GI-mask files, as for a database of several volumes). Fixtures: the rows of one
+    volume of `LOSAT/tests/seqdb/gi_mask` (`make_gi_mask_fixtures.py`, `single_volume_exception`:
+    NCBI's run with that one line changed, taken as the successful run where NCBI ended on the
+    message above), among them `x01_*` (a rebuild over LOSAT's alias file) and `x10_*` (builds
+    beside NCBI's alias file). Tests `LOSAT/tests/makeblastdb_gi_mask.rs`.
+
 ## Reproduced as NCBI (rule 2)
+
+- RPSTBLASTN `-use_sw_tback`: a Smith-Waterman alignment that starts with a gap (version 1.80,
+  2026-11-22, line PS item PS12c, review B1, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07): with forbidden ranges NCBI's redo can give a profile's second alignment that
+  starts with a gap in the profile's row (row `db.rpstbn.rej.swgap`: `nest.faa`, the profile's
+  source twice, nested, back-translated). Its Std-seg's first segment has no location in that row,
+  so `CSeq_align::GetSeqRange` takes no id from it and throws "Row seqids not consistent" on the
+  row (`Seq_align.cpp:171-191`). The output is deterministic: the prefetch warns (every format but
+  8, 9, 11 and 12; outfmt 6 not with `PRE_FETCH_SEQS_LIMIT=0`), outfmt 0 to 4 stop after the query's
+  `Length=` (the description table) with exit status 255, 13 and 14 too, BLAST XML, JSON and XML2
+  stop their document with the exception (exit status 0), and the tables and the Seq-aligns are
+  the alignments as made. rpsblast's Dense-seg has a location in every segment. LOSAT refuses such
+  a profile with the query batch that holds it, as the endless redo of 1.80 (below), until line PS
+  item PS12d writes these reports (rule 2); the X-drop redo's alignments start with a substitution.
 
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
   item X5, DECISIONS X5-1): for a query that has a next query in its query batch, NCBI adjusts the
@@ -1492,6 +1600,27 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   database.", "requested sequence type does not match DB.", a header-less database and, for a date
   that was cut, the exception of CTime (exit status 255, no metadata file). The rule-3 refusals of
   an index file of no bytes and of a header field past the last page are in the list below.
+- makeblastdb `-gi_mask` (version 1.81, 2026-11-23, line NP item M4c-1): the GI-mask writer
+  (`seqdb_writer/writedb_gimask.cpp`, `writedb_impl.cpp:338-342, 405-438, 1453-1456`) is ported
+  with its defects, which give deterministic files, messages and exit statuses, but for the alias
+  file of a database of one volume (approved exception 25). An alias file of that kind that NCBI's
+  makeblastdb left in the directory is kept by a later build into the same `-out` (the removal of
+  the old database cannot read it and ignores the error, `seqdb.cpp:1542, 1573-1574`); a build
+  without `-gi_mask` then ends at its metadata step with `BLAST Database error: Illegal
+  configuration: DB alias files are mutually recursive.`, exit status 2, as NCBI's does. The masks
+  of a sequence without a GI are dropped before their ranges are checked (a range past such a
+  sequence's end is no error), and an algorithm that reached no sequence with a GI writes no files
+  and is left out of `MASKLIST`. A data volume takes its first record
+  whatever its size, and when the first record does not fit `-max_file_sz` the volume `.00` is
+  never created. A `-gi_mask_name` in a directory that does not exist writes nothing there and is
+  still listed in `MASKLIST`. GIs from 2^31 to 2^32 - 1 are written as the low 32 bits
+  (NCBI converts a GI to `int` with `GI_TO`). The size of a record in `CanFit` (`writedb_gimask.hpp:96-99`: twice the
+  number of ranges plus one, times four, which NCBI computes in `int` and which overflows past
+  268,435,455 ranges) is computed without overflow. Two algorithms whose GI-mask files are the
+  same files are written as NCBI writes them where their files are written one after the other
+  (the rule-2 rejection of version 1.81 below covers the others). Fixtures `LOSAT/tests/seqdb/gi_mask`
+  (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
+  `LOSAT/src/writedb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -2107,11 +2236,41 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   the reports of the batches without a valid context before it, which NCBI reports with a warning
   and does not search (rows `db.x4b2.rej.ungapped.ac.b1.*`) (exit 1, "-use_sw_tback with -ungapped,
   on which NCBI BLAST+ 2.17.0's blastx crashes at every query batch it searches, is not supported by
-  LOSAT's BLASTX"; rows `db.x4b2.rej.ungapped.*`). With `-use_sw_tback` LOSAT searches a query batch
+  LOSAT's BLASTX"; rows `db.x4b2.rej.ungapped.*`). TBLASTN `-ungapped` (version 1.79, line NP item
+  O4c) crashes there in the same way, with `-matrix IDENTITY` too, before the redo's frequency ratios
+  that fail a gapped batch (NCBI BLAST+ 2.17.0 from Bioconda, 2026-11-23: hits and none, `-subject` and
+  `-db`, a first batch without a valid context reported before the crash); LOSAT refuses it as BLASTX
+  does (exit 1, "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's tblastn crashes at every
+  query batch it searches, is not supported by LOSAT's TBLASTN"; one producer of the text,
+  `smith_waterman_match::sw_ungapped_error`; rows `db.tn.rej.ungapped.sw.*`, anchor
+  `db.tn.ungapped.ac.b1.nosw.7`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
   of NCBI's reader as one unit (the batch's status, its first query's heap and the contexts that
   index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.
   Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs `LOSAT/tests/fasta/x4b2` and
   the databases `LOSAT/tests/db_search/x4b2` (`make_x4b2.py`).
+
+- RPSTBLASTN `-use_sw_tback` with composition-based statistics (version 1.80, 2026-11-21, line PS
+  item PS12c, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the
+  class of 1.30; P2: no checkable result exists, P3: the round loop of 1.30 and 1.53 decides it,
+  `core::composition_adjustment::smith_waterman::smith_waterman_redo_window`): a profile with two
+  or more preliminary HSPs in a window of a query frame (`s_WindowsFromTranslatedAligns`) when the
+  e-value of a score of 0 passes `-evalue` (the search space of the query's context 0 times the
+  profile's K below it: a large `-evalue`, a small `-searchsp`, or `-strand minus`, whose invalid
+  frame +1 leaves that search space 0, so that every score passes) and the profile's first
+  position, after the window's composition adjustment, scores the window's first letter (after
+  SEG) above 0. NCBI runs the loop of 1.30 (`Blast_RedoOneMatchSmithWaterman`,
+  `redo_alignment.c:1438-1529`) on each window's letters, so it never ends either: NCBI BLAST+
+  2.17.0's rpstblastn did not end within 120 and 300 seconds on the inputs of rows
+  `db.rpstbn.rej.swendless` and `db.rpstbn.rej.swendless.minus`, whose searches without
+  `-use_sw_tback` (`tks_m.fna`, and `nq.fna` on both strands) took 0.1 to 0.2 seconds. LOSAT
+  refuses (exit 1, "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's RPSTBLASTN")
+  with the query batch that holds the profile, after the reports of the batches before it (in outfmt
+  0 after the prolog, which NCBI writes before it searches its first batch; the form of 1.40 and of
+  BLASTP's 1.53; rows `db.rpstbn.rej.swendless.0` and, on a later batch, the probe of PS12c's
+  review S2: the same bytes at 1, 4 and 8 threads). Where that cell scores 0 or less, NCBI's redo fails
+  and drops the profile, which LOSAT reproduces (rule 2; rows `db.rpstbn.sw.*`, among them the
+  `-strand minus` inputs on which NCBI ends, `db.rpstbn.sw.tksm.minus.6`,
+  `db.rpstbn.sw.tksw.minus.6` and `db.rpstbn.sw.s5e.minus.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the
@@ -2228,6 +2387,46 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (`values[1]`, `values[2]`; NCBI 2.17.0 crashes on both, exit status 139) and `TestFormatFasta`'s
   search for `|` past a test buffer of 10 bytes or fewer.
 
+  Since version 1.77 (line RG item D3c-3a, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07) LOSAT also reads a PSSM in ASN.1 binary as NCBI's reader does
+  (`CObjectIStreamAsnBinary`, through the same type table and frames as the text), and refuses
+  (exit 1) two more cases there. A string or a byte block (OCTET STRING or BIT STRING) whose length
+  passes the end of the file and is 1 GiB to 2^47 bytes: NCBI's reader reserves the length before
+  it reads the bytes (a string's in `CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`,
+  when the bytes are not in its buffer; a byte block's, whose length the binary stream knows, in
+  its `vector<char>` reader, `serial/stdtypes.cpp:1538-1548`), which succeeds or fails by the
+  host's memory and overcommit (NCBI's probe host: `Unrecognized format for PSSM`, exit status 1);
+  below 1 GiB LOSAT writes NCBI's end-of-file answer, from 2^47 bytes `BLAST ran out of memory`
+  (exit status 4), the bounds of 1.52, and over 2^63 - 1 bytes NCBI's `std::length_error`
+  (`Error: basic_string::_M_create` or `Error: vector::reserve`, exit status 255); a byte block's
+  reserve that throws is posted first (`Error: (803.4) [psiblast] unended byte block`), as in
+  NCBI (rows `db.ber.ps.block_*`). A query whose letters are missing or whose number is not the
+  `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than its
+  Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
+  for a query of 30 letters NCBI 2.17.0's psiblast ends by a signal with the lengths 31, 60 and
+  255 (SIGSEGV), 0, 1, 2, 10 and 4,294,967,295 (SIGABRT), and writes past its buffer with 28
+  (valgrind: an invalid write) though it exits 0. With 29, one less than the letters, NCBI answers
+  (exit 0, clean under valgrind) in ASN.1 text and binary alike: it searches the 29 letters with
+  the PSSM, and its E-values are those of a query of 29 letters. LOSAT does not yet give that
+  answer (the PSSM of 30 columns over a query of 29 letters belongs to line PS: hand-off
+  `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md` of line RG), so it is refused too. Not a rule-3 item but
+  a refusal: with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps
+  in a delay buffer and reads again only while it writes them, where that read posts a message or
+  fails (NCBI reports it in the middle of the file it writes; not ported). The warning of a
+  UTF8String tag (803.10) is not one of them: NCBI posts it once per process, when it first reads
+  the file, so the second read posts nothing and the names are written. Also not a rule-3 item
+  but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
+  `kappa` or `h` of `NOT-A-NUMBER`, and psiblast's `lambdaUngapped` of `PLUS-INFINITY` ("a PSSM
+  whose gapped Karlin-Altschul parameter lambda is infinite (LOSAT does not yet compute the hits,
+  E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) ..."). NCBI goes on with them
+  (E-values 0.0, bit scores `inf` or -1.0); LOSAT's search wrote NaN or found other hits, and its
+  arithmetic of these values belongs to line PS (hand-off `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`
+  of line RG), which lifts the refusal when it computes NCBI's output. `MINUS-INFINITY` stays in the
+  refusal of a negative gapped value above. Tests:
+  `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
+  `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
+  `db.ber.ps.*` and `db.ber.tbn.*`.
+
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided
   by the Owner on 2026-11-16 (「推奨通り」): Q1 to Q3 refuse their cases, as built, and Q-BM ports BitMagic
@@ -2296,8 +2495,8 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (`:1234-1235`), and every caller reads from that address on next: the traceback's gapped start
   and `ALIGN_EX` (`blast_traceback.c:429-440,509-512`), the identities after the composition-based
   redo (`blast_kappa.c:527-528`, which run only for an alignment left by the redo's E-value purge,
-  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's TBLASTN refuses
-  `-ungapped`; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
+  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; TBLASTN with `-ungapped`,
+  refused there since version 1.79; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
   with SIGSEGV in every such run of ours (ws and the local
   official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject`, `-subject_loc` and `-db`,
   a matrix query at `-comp_based_stats` 0 to 3, `-in_pssm`, `-outfmt` 0, 5 and 6, a second query, a
@@ -2913,6 +3112,83 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     `a_context_past_the_batch_tests_an_empty_heap` (`LOSAT/src/algorithm/blastx/results_boundary_tests.rs`) and
     `a_heap_test_past_the_batch_reads_an_empty_heap` (`LOSAT/tests/blastx_sw_tback.rs`).
 
+## Approved exception 24 (BLASTN `-use_index true` with `-db_hard_mask`, the seeds in their hard ranges, version 1.78)
+
+Version 1.78, line RG item D5b-5. The Owner decided on 2026-11-22 22:3x JST: the answer 「Q5=C」
+(the whole answer 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A Q10=A Q11=A Q12=A Q13=OK」) to
+question Q5 of that day's batch, line RG's question Q-HARDIDX, whose option C read 「種を正しい範囲に置く
+（NCBI が出さない正しい結果、どの thread 数でも同じ）」 (place the seeds in their right ranges: a correct
+result that NCBI does not give, the same at every thread count). Not taken: option A, NCBI's
+one-thread result at every thread count through a pass over the sequences in OID order that
+decides which list each range takes (the line's recommendation before the answer), and option B,
+the refusal (`-use_index true with a MegaBLAST database index (...) and -db_hard_mask`) that LOSAT
+made from item D5b-2 (PR #1472) until this version. Owner-delegated (standing instruction
+2026-09-29, restated 2026-10-07; P2, P3): what the right range of a seed means, below (in the
+index's search a masked letter matches no query letter, and two hits of a diagonal with a masked
+letter between them do not pair). Not taken: NCBI's lists cut at the masked letters after the
+search (the item's first version), under which a masked letter could still qualify a two-hit
+seed (6 of 400 random databases). Also delegated: the masks of sequences that an OID list leaves
+out of the search are not read.
+
+24. **BLASTN `-use_index true` with `-db_hard_mask`.** NCBI's indexed word finder
+    (`MB_IndexedWordFinder`, `na_ungapped.c:1697-1782`) takes the seeds of `GetResults` of the
+    sequence and `subject->chunk` (`blast_dbindex.cpp:869-875`): the list of the index's chunk
+    whose number is the number of the chunk being searched. The index numbers each sequence's
+    chunks over its whole range (5,000,000 letters that overlap by 100), while with
+    `-db_hard_mask` each hard range starts chunks of its own (`s_GetNextSubjectChunk`,
+    `blast_engine.c:221-262`). So NCBI extends the seeds of a masked sequence at the offsets of
+    another range's chunk, and a sequence with more hard ranges than index chunks takes the lists
+    of the sequences after it, which the word finder moves out, so that what each sequence finds
+    depends on which thread reaches it first: in the survey's probe g_f (dustmasker's masks,
+    `-db_hard_mask 11`) NCBI wrote 5 rows at `-num_threads 1`, 7 or 8 rows from run to run at 4
+    threads, where its search without the index wrote 12. LOSAT searches the index with each letter of the
+    `-db_hard_mask` masks matching no query letter (`dbindex::search`): a root whose Nmer holds a
+    masked letter is no root, the extensions (`ExtendLeft`, `ExtendRight`) stop before a masked
+    letter, and the two-hit search takes no earlier hit of a diagonal with a masked letter between
+    it and the seed. (NCBI's search reads the index's letters, masked or not, and its two-hit
+    search can qualify a seed by masked letters.) So each seed lies in one unmasked stretch, and
+    no masked letter decides one. Each seed then goes to the hard range that holds its left end,
+    into the last chunk of the range that starts at or before it (the index's own rule where
+    chunks overlap), in the order of the lists and of each list (`mb_index_seeds::HardSeeds`).
+    The refusals of the search without the masks still apply: a chunk that is a later sequence's
+    in the index, and a seed at or past its chunk's last letter. The word finder, the ungapped
+    and gapped stages and the traceback are those of every hard chunk. A local id of the index
+    (its group of sequences) without masked letters is searched as without `-db_hard_mask`. A
+    sequence without masked letters keeps NCBI's seeds, unless one of its exact runs reaches past
+    its end into masked letters of the next sequence of its local id (NCBI's index search reads on
+    there). The result depends neither on `-num_threads` nor on the masked letters. The masks of a
+    sequence that an OID list leaves out of the search are not read: its letters count as
+    unmasked, and only a run past the end of the sequence before it reads them. The refusals of
+    `HardMaskShape` and approved exception 13 (a mask that runs to the end) apply as they do
+    without the index. Evidence: the rows `plain NAME` of `LOSAT/tests/blastn_mb_index/cases.tsv` (`hm_i*`,
+    `sm_i_hard`; database hm of `gen_d5b5.py`: masks inside, at the start and at the end of
+    sequences and hard ranges of 1 and 2 letters; nmer 8, 9 with stride 3, and 11; word sizes 16
+    and 28; `-dust no`; 1 and 4 threads; an old-style index; database hmr of `gen_d5b5_r.py`, hm with every masked
+    letter replaced at random), whose output is NCBI's one-hit search without the index with the
+    same `-db_hard_mask` (hm: 32 rows, where NCBI's search with the index writes 5). The two-hit
+    search (`-window_size`) of NCBI's index pairs other hits than its scan even without masks, so
+    no NCBI search gives its result: the rows `expect hm_i_win` (`-window_size 20` at 1 and 4
+    threads, and on hmr) give LOSAT's 31 rows, NCBI's 28 rows without the index and 3 of the
+    index's pairs (`the_two_hit_index_search_adds_the_index_s_pairs`: the row of qhm7 in hm4 is in
+    NCBI's own indexed search without the mask, `hm_iu_win`; the other two are runs that a mask
+    ends, paired within the window); and NCBI's own two-hit search with the index of the database
+    of hm's unmasked stretches, each its own sequence (`hm_win_stretches.out`), gives each of
+    LOSAT's rows but for three that NCBI's search without the index and LOSAT's carry across a
+    7-letter mask (the traceback reads the whole sequence with the masked letters as B, where the
+    stretches end). Random comparison `remaining-gaps-20261112/D/d5/probe/d5b5/rand_d5b5.py` (400
+    databases of dustmasker's masks with queries across the masked stretches; NCBI 2.17.0): the
+    308 one-hit searches give NCBI's rows without the index; of the 92 two-hit searches, 61 give
+    them, and 31 are of databases where NCBI's index and scan pair other hits even without the
+    mask. For those 31, NCBI's indexed search of the database of unmasked stretches
+    (`st_oracle.py`, `st_explain.py`) gives LOSAT's rows in 17; in 12 the only differences are
+    alignments carried across a short mask as above, and in the last 2 (indexes that store every
+    19th and every 2nd position, `-legacy false`) the stretch database moves the stored positions,
+    after which NCBI's two-hit rule pairs other hits (traced: a root 7 letters later drops the earlier
+    hit). No run depended on `-num_threads` (1 and 4) or on the masked letters (the same database
+    with every masked letter replaced at random). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
+    `the_masks_are_of_their_own_sequence` (`LOSAT/src/dbindex/search_tests.rs`), and the placement
+    tests of `LOSAT/src/algorithm/blastn/blast_engine/mb_index_seeds_tests.rs`.
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -2920,8 +3196,9 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last three entries are not of these. The last (version 1.60, line RG item D5a)
-and the one before it (version 1.54, line RG item X5) say so themselves. The one before those (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
+would port. The last four entries are not of these. The last (version 1.81, line NP item M4c-1), the one
+before it (version 1.60, line RG item D5a) and the one before that (version 1.54, line RG item X5)
+say so themselves. The one before those (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
 2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
 Version 1.45's rejection of well-formed BitMagic data was removed in version 1.58: line RG item
@@ -2983,6 +3260,32 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   sizes wrap and no longer match its data. That needs a `-volsize` of about 18,000 or more and more
   than 16 Gbp of sequences in one index volume; LOSAT refuses (exit 1) at the sequence that passes
   4 GiB.
+
+- makeblastdb `-gi_mask`, two masking algorithms that would write one GI-mask data file at the
+  same time (version 1.81, 2026-11-23, line NP item M4c-1, the Owner's decision; not of the
+  database class above). Two algorithms whose names
+  lead to the same files (one `-gi_mask_name` twice, two names of one path such as `x` and `./x`,
+  or a name that reaches the same directory through a link; on Windows and macOS also two names
+  that differ only in case) each get a `CWriteDB_GiMask` (`writedb_impl.cpp:1453-1456`) with its
+  own streams on the same paths (`writedb_gimask.cpp:46-57`). NCBI exits 0. Where the files are
+  written one after the other, its bytes follow from the order of the writes, and LOSAT writes
+  them as NCBI does: an algorithm that reaches no sequence with a GI creates no file
+  (`writedb_gimask.cpp:92-96, 290-295`), the offset and index files are each created, written
+  and closed in turn at the close (`:109-119`), and a data volume that one algorithm closed before
+  the other created it is created anew (`:70-80`). Where a data volume of one algorithm would be
+  created while the other's of the same number is open, NCBI writes both algorithms' records
+  through two streams into one file, and its bytes then depend on how the C++ runtime buffers two
+  streams on one file (survey D6, probe `m04_dupname`: the files hold the second algorithm's
+  masks); LOSAT does not reproduce that, and its model of the runtime's file streams
+  (`writedb/ofstream.rs`) is under licence audit (2026-11-21). LOSAT refuses the record that
+  would create that volume (exit 1, "losat makeblastdb: -gi_mask: two masking algorithms would
+  write one GI-mask data file at the same time ..."). The build ends there as an error of NCBI's
+  `SetMaskData` ends it (case `x03gi`): the volume files are removed, and the GI-mask files of
+  the other algorithm and the alias file stay. The Owner answered 「推奨通り」 on 2026-11-21 at
+  23:07 JST to question Q-GIDUP, whose recommended option A was to keep this rejection; option
+  B, to reproduce the C++ runtime's buffering, was not taken. Unit tests in `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04`
+  (refused) and `x11_1`, `x11_2` and `x12` (written in turn) of `LOSAT/tests/seqdb/gi_mask`
+  (`make_gi_mask_fixtures.py`).
 
 ## Ported (rule 4)
 

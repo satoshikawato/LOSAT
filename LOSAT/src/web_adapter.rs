@@ -26,6 +26,11 @@ pub use crate::cli::{
     command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
 };
 
+// The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
+// made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
+// defaults it resolves.
+pub use crate::ncbi_app::args::{genetic_codes, string_values};
+
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start, NCBI's single-dash options included.
 /// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
@@ -80,6 +85,13 @@ pub use crate::algorithm::blastn::coordination::{
 };
 pub use crate::algorithm::blastn::scoring::{check_losat_limits, check_scoring_options};
 pub use crate::algorithm::blastn::BlastnArgs;
+
+/// Gives BLASTN's `-filtering_db` its repeat search with the run's `settings` (the lookup of the
+/// database as of `-db`: the run's working directory and registry), as the command line does
+/// before a search; nothing without the option (`BlastnArgs::resolve_repeat_filter`).
+pub fn resolve_blastn_repeat_filter(args: &mut BlastnArgs, settings: &ApplicationSettings) {
+    args.resolve_repeat_filter(settings);
+}
 pub use crate::algorithm::blastp::blast_engine::check_options as check_blastp_options;
 pub use crate::algorithm::blastx::check_options as check_blastx_options;
 pub use crate::algorithm::blastx::BlastxArgs;

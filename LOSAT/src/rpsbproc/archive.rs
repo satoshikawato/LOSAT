@@ -473,6 +473,12 @@ impl<R: Read> ArchiveStream<R> {
         self.reader.src.buffered()
     }
 
+    /// Reads one byte per fill from now on (`StreamSource::fill_one_byte_at_a_time`).
+    #[cfg(test)]
+    pub(crate) fn fill_one_byte_at_a_time(&mut self) {
+        self.reader.src.fill_one_byte_at_a_time();
+    }
+
     /// The next object: `Ok(None)` when NCBI's reader fails at it (the end of the input), the
     /// object when it reads, or the refusal of what LOSAT does not read in it.
     pub(crate) fn next_archive(&mut self) -> std::result::Result<Option<Archive>, AsnTextError> {

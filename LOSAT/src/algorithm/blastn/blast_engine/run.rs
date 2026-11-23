@@ -10763,9 +10763,10 @@ fn search_query_batch<const UNGAPPED: bool>(
         .map(|(_, algo_id, _)| algo_id);
     let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:302-306
-    // The seeds of the MegaBLAST database index for the batch's query (`mb_index_seeds`), each
-    // index volume searched when the preliminary stage first reaches it; a batch split into
-    // query chunks has none (each chunk searched its own above).
+    // The seeds of the MegaBLAST database index for the batch's query (`mb_index_seeds`), the
+    // index volumes that the preliminary stage reaches searched here, one after another on the
+    // whole pool (`IndexSeeds::search_volumes`); a batch split into query chunks has none (each
+    // chunk searched its own above).
     let index_seeds = match (subjects, args.megablast_index_loaded.as_deref()) {
         (SubjectSource::Database(database), Some(index)) if index_search => {
             Some(mb_index_seeds::IndexSeeds::new(
@@ -10784,6 +10785,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         }
         _ => None,
     };
+    if let Some(index) = &index_seeds {
+        index.search_volumes(parallel_pool);
+    }
     // What the preliminary search of a subject reads of the batch
     // (`prelim_subject::PrelimBatch`), built once: the preliminary stage's cutoffs and
     // spaces (the setup's, or its own where they differ, `prelim_eff_searchsp`). With the

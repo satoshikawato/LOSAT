@@ -50,6 +50,7 @@ fn search_masked(
             two_hits,
         },
         masks,
+        &SearchPool::x_serial(),
     )
     .unwrap()
 }
@@ -319,4 +320,162 @@ fn a_chunk_past_the_sequences_chunks_is_a_later_sequences() {
     assert!(seeds.chunk_of_a_later_sequence(1, 1));
     assert!(!seeds.chunk_of_a_later_sequence(2, 7));
     assert!(!seeds.chunk_of_a_later_sequence(3, 5));
+}
+
+/// `Pass::divides` is `n % d == 0` (NCBI's offset iterator) for the passes it can hold.
+#[test]
+fn a_pass_divides_as_the_remainder() {
+    let mut ns: Vec<u32> = (0..3000).collect();
+    ns.extend([
+        u32::MAX,
+        u32::MAX - 1,
+        1 << 31,
+        (1 << 31) - 1,
+        4_294_967_291,
+        123_456_789,
+    ]);
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    for _ in 0..2000 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        ns.push(state as u32);
+    }
+    let mut ds: Vec<u64> = (1..=600).collect();
+    ds.extend([
+        u64::from(u32::MAX) - 1,
+        u64::from(u32::MAX),
+        u64::from(u32::MAX) + 1,
+        u64::MAX,
+        1 << 16,
+        65_537,
+        2_147_483_648,
+    ]);
+    for &d in &ds {
+        let pass = Pass::new(d);
+        for &n in &ns {
+            assert_eq!(pass.divides(n), u64::from(n) % d == 0, "{n} % {d}");
+        }
+    }
+}
+
+/// `query_byte` packs four letters as NCBI's byte loops do one by one, and names the letters that
+/// are not bases: the first from the left (`extend_right`) and from the right (`extend_left`).
+#[test]
+fn four_query_letters_pack_as_one_byte() {
+    for code in 0u32..1 << 16 {
+        let letters: Vec<u8> = (0..4).map(|k| ((code >> (4 * k)) & 0xF) as u8).collect();
+        let (byte, ambiguous) = query_byte(&letters, 0).unwrap();
+        let first = letters.iter().position(|&letter| letter > 3);
+        let last = letters.iter().rposition(|&letter| letter > 3);
+        assert_eq!(ambiguous != 0, first.is_some(), "{letters:?}");
+        if let (Some(first), Some(last)) = (first, last) {
+            assert_eq!(ambiguous.trailing_zeros() / 8, first as u32, "{letters:?}");
+            assert_eq!(
+                ambiguous.leading_zeros() / 8,
+                3 - last as u32,
+                "{letters:?}"
+            );
+        } else {
+            let scalar = letters
+                .iter()
+                .fold(0u8, |byte, &letter| (byte << 2) + letter);
+            assert_eq!(byte, scalar, "{letters:?}");
+        }
+    }
+    assert_eq!(query_byte(&[0, 1, 2], 0), Err(Corrupt));
+    assert_eq!(query_byte(&[0, 1, 2, 3], -1), Err(Corrupt));
+}
+
+/// The seeds do not depend on when the roots are turned into seeds (NCBI's `LIMIT_ROOTS`) nor on
+/// the threads: a volume of several local ids, lookup segments with gaps, an empty one and an
+/// ambiguity, Nmers in many blocks, the one-hit and the two-hit search, with and without masks.
+#[test]
+fn any_round_limit_and_thread_count_give_the_same_seeds() {
+    let mut options = small_options();
+    options.chunk_size = 10_000;
+    options.chunk_overlap = 100;
+    let seqs: Vec<String> = (0..12)
+        .map(|k| test_letters(9_000 + 700 * k, 31 + k as u64))
+        .collect();
+    let fasta: String = seqs
+        .iter()
+        .enumerate()
+        .map(|(k, s)| format!(">s{k}\n{s}\n"))
+        .collect();
+    let path = test_volume("rounds", &fasta, &options);
+    let volume = IndexVolume::open(&path).unwrap();
+    assert!(volume.lid_map().len() / 4 >= 3);
+    let mut letters = String::new();
+    for k in [1usize, 4, 7, 10] {
+        letters.push_str(&seqs[k][1000..2600]);
+    }
+    let mut query = blastna(&letters);
+    for at in (50..query.len()).step_by(97) {
+        query[at] = (query[at] + 1) % 4;
+    }
+    query[3000] = 14;
+    let segments = vec![
+        (0, 1200),
+        (1200, 1200),
+        (1300, 3500),
+        (3600, query.len() as u32),
+    ];
+    let masks = [(4u32, vec![(1500, 1550), (2000, 2003)])];
+    for masks in [&[][..], &masks[..]] {
+        for two_hits in [0, 40] {
+            let options = SearchOptions {
+                word_size: 16,
+                two_hits,
+            };
+            let serial = SearchPool::x_serial();
+            let of = |pool: &SearchPool<'_>, limit: u64| {
+                search_with_limit(&volume, &query, &segments, options, masks, pool, limit).unwrap()
+            };
+            let reference = of(&serial, LIMIT_ROOTS);
+            let seeds: usize = reference.results.iter().flatten().map(Vec::len).sum();
+            assert!(seeds > 10, "{seeds} seeds");
+            for limit in [1, 2, 3, 7, 64, 1000] {
+                assert_eq!(of(&serial, limit), reference, "limit {limit}");
+            }
+            crate::utils::threading::with_search_pool(4, "blastn", |pool| {
+                for limit in [1, 5, 300, LIMIT_ROOTS] {
+                    assert_eq!(of(pool, limit), reference, "limit {limit}, 4 threads");
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+}
+
+/// `query_bytes16` is four `query_byte`s, and none where a letter is not a base.
+#[test]
+fn sixteen_query_letters_pack_as_four_bytes() {
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    for round in 0..20_000 {
+        let letters: Vec<u8> = (0..16)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                if round % 3 == 0 {
+                    (state % 16) as u8
+                } else {
+                    (state % 4) as u8
+                }
+            })
+            .collect();
+        let four: Vec<(u8, u32)> = (0..4)
+            .map(|k| query_byte(&letters, 4 * k).unwrap())
+            .collect();
+        let expected = four.iter().all(|&(_, ambiguous)| ambiguous == 0).then(|| {
+            four.iter().enumerate().fold(0u32, |word, (k, &(byte, _))| {
+                word | u32::from(byte) << (8 * k)
+            })
+        });
+        assert_eq!(query_bytes16(&letters, 0), expected, "{letters:?}");
+    }
+    assert_eq!(query_bytes16(&[0; 15], 0), None);
+    assert_eq!(query_bytes16(&[0; 16], -1), None);
 }

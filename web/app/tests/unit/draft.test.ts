@@ -1281,8 +1281,51 @@ describe('SearchDraft submit', () => {
     expect(datasetOf(request!, 'subject')).toEqual({
       name: 'combined_subject.fa',
       revisionIds: [sourceOf(draft, 'subject', 0).base!.revisionId, sourceOf(draft, 'subject', 1).base!.revisionId],
+      from: [
+        { name: 'a.fa', records: 1, leftOut: [] },
+        { name: 'b.fa', records: 1, leftOut: [] },
+      ],
     });
+    expect(datasetOf(request!, 'query').from).toEqual([{ name: 'pasted text', records: 1, leftOut: [] }]);
     expect(draft.state.get().message).toBeUndefined();
+  });
+
+  // Line WQA's D22 (2026-11-23): the argv named the user's file whose bytes the run did not search.
+  it('names a file with records left out by the file of its included records, and says which records it leaves out', async () => {
+    const { draft, requests } = setup();
+    draft.addFiles('query', [file('q.fa', '>r1\nACGTACGT\n>r2\nACGTACGT\n>r3\nACGTACGT\n')]);
+    draft.addFiles('subject', [new File([zstdCompressSync('>s1\nACGT\n>s2\nACGT\n')], 's.fa.zst')]);
+    await draft.idle();
+    // Nothing left out: the user's file as given, with nothing made of it.
+    expect(draft.inputName('query')).toBe('q.fa');
+    expect(draft.inputName('subject')).toBe('s.fa.zst');
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1], false);
+    draft.setIncluded('subject', sourceOf(draft, 'subject').key, [0], false);
+    await draft.idle();
+    expect(draft.inputName('query')).toBe('included_q.fa');
+    // The bytes are not compressed: the plain name.
+    expect(draft.inputName('subject')).toBe('included_s.fa');
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'] }] });
+    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_s.fa', from: [{ name: 's.fa', records: 1, leftOut: ['s1'] }] });
+    // Included again: the user's file as given.
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1], true);
+    await draft.idle();
+    expect(draft.inputName('query')).toBe('q.fa');
+  });
+
+  it('names the input of a separate search by its own file: as given, or with its records left out', async () => {
+    const { draft, requests } = setup();
+    draft.addFiles('subject', [file('a.fa', '>a1\nACGT\n>a2\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    draft.setIncluded('subject', sourceOf(draft, 'subject', 0).key, [0], false);
+    draft.setMode('subject', 'separate');
+    await draft.submit();
+    const subjects = requests[0]!.map((r) => datasetOf(r, 'subject'));
+    expect(subjects.map((subject) => subject.name)).toEqual(['included_a.fa', 'b.fa']);
+    expect(subjects.map((subject) => subject.from)).toEqual([[{ name: 'a.fa', records: 1, leftOut: ['a1'] }], undefined]);
   });
 
   it('queues separate searches as every query input against every subject input', async () => {

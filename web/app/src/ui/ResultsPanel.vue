@@ -13,6 +13,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
+import { leftOutTexts } from '../domain/input-parts';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
@@ -71,7 +72,8 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 /**
  * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
  * them (its -outfmt help), the output of the run's own -outfmt with its value (W10, W11), then the
- * files that the run made besides its outputs (the file of -logfile; line RG E1w-3b); the one
+ * files that the run made besides its outputs (the file of -logfile; line RG E1w-3b), and the query and subject that are
+ * files of LOSAT's, which the command names (pasted, combined, or with records left out; line WQA's D22); the one
  * chosen is saved as one file (WA-RS-05). The list opens in the page's flow, under the run's line,
  * so that it fits a phone's width; an output that is not saved says why there, until the next
  * download or another run (WA2-BR-01).
@@ -79,6 +81,7 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 type DownloadItem = { readonly key: string; readonly label: string; readonly testid: string } & (
   | { readonly format: RunOutput }
   | { readonly runFile: number }
+  | { readonly input: 'query' | 'subject' }
   | { readonly printed: true }
 );
 const downloads = computed(() => {
@@ -94,6 +97,11 @@ const downloads = computed(() => {
   if (custom !== undefined) {
     const name = FORMAT_NAMES[formatNumber(custom) ?? 0];
     items.push({ key: 'format-custom', format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
+  }
+  // The file of a query or subject that is not a file of the user's as given, which the run's command names (line WQA's D22).
+  for (const role of ['query', 'subject'] as const) {
+    const input = prints === undefined ? loaded.value?.run.snapshot[role] : undefined;
+    if (input?.from !== undefined) items.push({ key: `input-${role}`, input: role, label: `${input.name} (-${role})`, testid: `results-download-${role}` });
   }
   (loaded.value?.run.record.runFiles ?? []).forEach((file, index) =>
     items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-logfile)`, testid: `results-download-run-file-${index}` }),
@@ -115,6 +123,7 @@ function download(item: DownloadItem): void {
   if (run === undefined) return;
   if ('format' in item) void saver.save(run, item.format);
   else if ('printed' in item) void saver.savePrinted(run);
+  else if ('input' in item) void saver.saveInput(run, item.input);
   else void saver.saveRunFile(run, item.runFile);
 }
 
@@ -283,6 +292,15 @@ async function toAlignments(id: HspId): Promise<void> {
                 · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
               </template>
             </dd>
+            <!-- Records that the run's file leaves out, which its command and its name say no more of (line WQA's D22, 2026-11-23). -->
+            <template v-for="role in ['query', 'subject'] as const" :key="role">
+              <template v-if="leftOutTexts(selected.snapshot[role].from).length > 0">
+                <dt>{{ role === 'query' ? 'Query' : 'Subject' }} left out</dt>
+                <dd :data-testid="`results-${role}-left-out`">
+                  <template v-for="text in leftOutTexts(selected.snapshot[role].from)" :key="text">{{ text }}<br /></template>
+                </dd>
+              </template>
+            </template>
             <template v-if="selected.snapshot.query.records.length === 1">
               <dt>Query ID</dt>
               <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>

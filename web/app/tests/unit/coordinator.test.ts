@@ -332,6 +332,20 @@ describe('Coordinator', () => {
     expect(snapshot.subject.revisionIds).toHaveLength(1);
   });
 
+  // Line WQA's D22 (2026-11-23): an input that is not a file of the user's as given is a file that the run's command names, which
+  // the page offers: pasted text, and what the draft says is made of a file (InputSnapshot.from).
+  it('keeps what a made input is made of, and saves its bytes under its name', async () => {
+    const { coordinator, saved } = setup(new ManualEngine());
+    const pasted = (await coordinator.enqueue(request)).runId!;
+    expect(viewOf(coordinator, pasted)!.snapshot.query.from).toEqual([{ name: 'pasted text', records: 1, leftOut: [] }]);
+    const file = new File(['>chr1\nACGTACGT\n'], 'genome.fa');
+    const given = (await coordinator.enqueue({ ...request, subject: { file } })).runId!;
+    expect(viewOf(coordinator, given)!.snapshot.subject.from).toBeUndefined();
+    await expect(coordinator.exportInput(given, 'subject')).rejects.toThrow('a file of yours as you gave it');
+    await coordinator.exportInput(pasted, 'query');
+    expect(saved).toEqual([{ fileName: 'query.fa', text: '>q\nACGT\n', type: 'text/plain' }]);
+  });
+
   it('reads a chosen file by reference and names the input after it', async () => {
     const { coordinator } = setup(new ManualEngine());
     const file = new File(['>chr1 genome\nACGTACGT\n>chr2\nGG\n'], 'genome.fa');

@@ -56,11 +56,17 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
 }
 
 /**
- * The -query / -subject names of inputs that are not one file (plan §5.3): pasted text, and
- * several inputs searched together.
+ * The -query / -subject names of inputs that are not one file of the user's as given (plan §5.3): pasted text, and
+ * several inputs searched together; a file with records left out has INCLUDED_PREFIX and its name. The page offers each of
+ * these files with the run (InputSnapshot.from).
  */
 export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject.fa' } as const);
 export const COMBINED_NAMES = Object.freeze({ query: 'combined_query.fa', subject: 'combined_subject.fa' } as const);
+/**
+ * The start of the name of a file of the user's with records left out (`included_q.fa` for `q.fa`): the file's own name
+ * would name bytes that the run did not search (line WQA's D22, 2026-11-23).
+ */
+export const INCLUDED_PREFIX = 'included_';
 
 export interface ArgvInput {
   readonly program: ProgramId;

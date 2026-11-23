@@ -2603,7 +2603,14 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
   await page.getByTestId('results-download-all').click();
-  await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
+  // The three formats, and the query and subject that were pasted: files of LOSAT's that the command names (line WQA's D22).
+  await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveText([
+    'Pairwise (outfmt 0)',
+    'Tabular (outfmt 6)',
+    'Tabular with comment lines (outfmt 7)',
+    'query.fa (-query)',
+    'subject.fa (-subject)',
+  ]);
 });
 
 /** The CRC-32 of ZIP (ISO-HDLC). */

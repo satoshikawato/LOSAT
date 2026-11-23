@@ -34,7 +34,7 @@ import {
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
 import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
-import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import { isTerminal, type ConffileSnapshot, type InputPart, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
@@ -49,7 +49,7 @@ import { Store } from './store';
  * indexes itself. A run keeps its input in its snapshot (bytes and records), not its sources.
  */
 export type SequenceInput =
-  | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[] } }
+  | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[]; readonly from?: readonly InputPart[] } }
   | { readonly text: string }
   | { readonly file: File };
 
@@ -350,6 +350,17 @@ export class Coordinator {
     this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
   }
 
+  /**
+   * Saves the file that a run's query or subject is, where it is not a file of the user's as given (InputSnapshot.from:
+   * pasted text, several inputs together, a file with records left out): its bytes, as the run searched them, under the
+   * name that the run's command gives them, so that the command runs on it (line WQA's D22, 2026-11-23).
+   */
+  async exportInput(runId: string, role: 'query' | 'subject'): Promise<void> {
+    const input = this.find(runId)?.snapshot[role];
+    if (input?.from === undefined) throw new Error(`the run's ${role} is a file of yours as you gave it`);
+    this.deps.downloader.save(input.name, input.bytes, 'text/plain');
+  }
+
   /** The input of a run that reads none (one that prints the command line's help or version): no bytes, no records. */
   private async noInput(name: string): Promise<InputSnapshot> {
     const bytes = new Uint8Array(0);
@@ -460,7 +471,9 @@ export class Coordinator {
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
       const { bytes, sha256, records } = await runInput;
-      return Object.freeze({ name, bytes, sha256, revisionIds, records });
+      // Pasted text is a file that LOSAT made (`query.fa`): the page offers it with the run (line WQA's D22, 2026-11-23).
+      const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [] }] : undefined;
+      return Object.freeze({ name, bytes, sha256, revisionIds, records, ...(from === undefined ? {} : { from: Object.freeze(from) }) });
     } catch (error) {
       // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
       if (isUnavailable(error)) throw error;

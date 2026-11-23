@@ -44,7 +44,8 @@ import {
   type FetchGroup,
   type FetchSourceId,
 } from '../domain/accession';
-import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
+import type { InputPart } from '../domain/run';
+import { buildArgv, COMBINED_NAMES, INCLUDED_PREFIX, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
@@ -888,9 +889,7 @@ export class SearchDraft {
 
   /** The name of the role's input in the argv of a combined search (plan §5.3). */
   inputName(role: InputRole): string {
-    const sources = this.role(role).sources.filter((source) => source.status !== 'failed');
-    if (sources.length === 1) return nameOf(sources[0]!, role);
-    return sources.length === 0 ? PASTED_NAMES[role] : COMBINED_NAMES[role];
+    return nameOf(this.role(role).sources.filter((source) => source.status !== 'failed'), role);
   }
 
   /** The runs that "Run LOSAT" would make now. */
@@ -1174,21 +1173,21 @@ export class SearchDraft {
   }
 
   /** The inputs of the role's runs: all sources together, or one per source (Separate). */
-  private inputGroups(role: InputRole): ReadonlyArray<{ readonly name: string; readonly sources: readonly DraftSource[] }> {
+  private inputGroups(role: InputRole): readonly InputGroup[] {
     const draft = this.role(role);
     const usable = draft.sources.filter((source) => source.status === 'ready');
     if (draft.mode === 'separate' && usable.length > 1) {
       // A source whose records are all excluded has nothing to search alone.
       return usable
         .filter((source) => includedOf(source).length > 0 || (source.base?.records.length ?? 0) === 0)
-        .map((source) => ({ name: nameOf(source, role), sources: [source] }));
+        .map((source) => groupOf([source], role));
     }
-    return usable.length === 0 ? [] : [{ name: this.inputName(role), sources: usable }];
+    return usable.length === 0 ? [] : [groupOf(usable, role)];
   }
 
-  private async resolveGroup(group: { readonly name: string; readonly sources: readonly DraftSource[] }) {
+  private async resolveGroup(group: InputGroup) {
     const revisionIds = await Promise.all(group.sources.map((source) => this.revisionFor(source)));
-    return { name: group.name, revisionIds };
+    return { name: group.name, revisionIds, ...(group.from === undefined ? {} : { from: group.from }) };
   }
 
   // --- asynchronous work ------------------------------------------------------------------
@@ -1875,15 +1874,50 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
   return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
+/** The input of a run: the sources it holds, the name its argv gives it, and what it is made of (`InputSnapshot.from`). */
+interface InputGroup {
+  readonly name: string;
+  readonly sources: readonly DraftSource[];
+  readonly from?: readonly InputPart[];
+}
+
+/** Whether the sources are one file of the user's, with every record in: the bytes of the run's input are the file's own. */
+function isFileAsGiven(sources: readonly DraftSource[]): boolean {
+  return sources.length === 1 && sources[0]!.origin === 'file' && sources[0]!.excluded.length === 0;
+}
+
 /**
- * The name that a source has in the run's argv: the user's own file name, as the command line is typed. A file named `.gz`,
- * `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's run takes the bytes of its
- * inputs, not files, and writes the names of its argv where the command line writes the names of its files (the `Input:` line
- * of a subject set in outfmt 0 to 4 and 7, SAM's command line), so the argv names the file the user gave (line WQA's D21, S3-3
- * and the review's F1, 2026-11-23).
+ * The name that an input has in the run's argv, where the command line writes the name of a file: the name of a file whose
+ * bytes are what the run searches. The user's own file name, as the command line is typed, where the input is that file as
+ * given: a file named `.gz`, `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's
+ * run takes the bytes of its inputs, not files, and writes the names of its argv where the command line writes the names of its
+ * files (the `Input:` line of a subject set in outfmt 0 to 4 and 7, SAM's command line), so the argv names the file the user gave
+ * (line WQA's D21, S3-3 and the review's F1, 2026-11-23). The user's file with records left out is not that file: its name would
+ * make the command search other bytes than the run did, so the argv names the file of the included records, `included_` and the
+ * name (the plain one: the bytes are not compressed), as `combined_query.fa` names several inputs together and `query.fa` pasted
+ * text; the page offers these files with the run (line WQA's D22, 2026-11-23).
  */
-function nameOf(source: DraftSource, role: InputRole): string {
-  return source.origin === 'paste' ? PASTED_NAMES[role] : source.file.name;
+function nameOf(sources: readonly DraftSource[], role: InputRole): string {
+  if (isFileAsGiven(sources)) return sources[0]!.file.name;
+  if (sources.length > 1) return COMBINED_NAMES[role];
+  const [source] = sources;
+  return source === undefined || source.origin === 'paste' ? PASTED_NAMES[role] : `${INCLUDED_PREFIX}${source.name}`;
+}
+
+/** What an input made of `sources` is made of, for the run's snapshot; undefined where it is the user's file as given. */
+function fromOf(sources: readonly DraftSource[]): readonly InputPart[] | undefined {
+  if (isFileAsGiven(sources)) return undefined;
+  return sources.map((source) => ({
+    name: source.origin === 'paste' ? 'pasted text' : source.name,
+    records: includedOf(source).length,
+    // A record without a title has no ID to name: its place in the file does.
+    leftOut: source.excluded.map((index) => source.base?.records[index]?.id || `record ${index + 1}`),
+  }));
+}
+
+function groupOf(sources: readonly DraftSource[], role: InputRole): InputGroup {
+  const from = fromOf(sources);
+  return { name: nameOf(sources, role), sources, ...(from === undefined ? {} : { from }) };
 }
 
 function describeSource(source: DraftSource): string {

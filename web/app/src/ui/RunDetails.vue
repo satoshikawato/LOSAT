@@ -10,6 +10,7 @@ import { optionGrammar, type LoadedRun } from '../application/results';
 import { commandWords } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
+import { fromText } from '../domain/input-parts';
 import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
@@ -68,6 +69,8 @@ const inputs = computed(() => [
           <dd :data-testid="`run-input-${role.toLowerCase()}`">
             {{ input.name }}: {{ formatCount(input.records.length) }} {{ input.records.length === 1 ? 'record' : 'records' }},
             {{ formatBytes(input.bytes.length) }}<br />
+            <!-- The file of the command is not the user's as given: what it is made of, and which records it leaves out (line WQA's D22, 2026-11-23). -->
+            <template v-if="input.from"><span :data-testid="`run-input-${role.toLowerCase()}-from`">From {{ fromText(input.from) }}</span><br /></template>
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
           </dd>
         </template>

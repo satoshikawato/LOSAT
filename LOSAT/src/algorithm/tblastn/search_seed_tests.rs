@@ -1516,7 +1516,7 @@ fn x_compressed_unit_pairs(plan: &XScanPlan) -> (Vec<(u32, u32)>, Vec<(u32, u32)
     let mut pairs = Vec::new();
     for (unit, (frame_index, chunk, ranges)) in plan.subject.units.iter().enumerate() {
         let residues = &plan.subject.frames[*frame_index].aa_seq[1 + chunk.offset..];
-        x_scan_unit(plan, unit, residues, &mut pairs, |filled| {
+        x_scan_unit(plan, unit, residues, 0, &mut pairs, |filled| {
             scanned.extend(filled.iter().map(|pair| (pair.q_off, pair.s_off)));
         });
         for (range_index, &(left, right)) in ranges.iter().enumerate() {
@@ -1797,7 +1797,7 @@ fn x_scan_unit_does_not_scan_a_raised_word_past_the_frame() {
     let calls: Vec<Vec<Vec<(u32, u32)>>> = (0..3)
         .map(|unit| {
             let mut calls = Vec::new();
-            x_scan_unit(&plan, unit, residues, &mut pairs, |filled| {
+            x_scan_unit(&plan, unit, residues, 0, &mut pairs, |filled| {
                 calls.push(filled.iter().map(|p| (p.q_off, p.s_off)).collect());
             });
             calls
@@ -1877,9 +1877,9 @@ fn x_scan_unit_of_one_hit_does_not_scan_a_unit_whose_first_range_is_short() {
             words.extend(filled.iter().map(|p| (p.q_off, p.s_off)));
         };
         if one_hit {
-            x_scan_unit_of::<false>(&plan, unit, residues, &mut pairs, &mut on_pairs);
+            x_scan_unit_of::<false>(&plan, unit, residues, 0, &mut pairs, &mut on_pairs);
         } else {
-            x_scan_unit(&plan, unit, residues, &mut pairs, &mut on_pairs);
+            x_scan_unit(&plan, unit, residues, 0, &mut pairs, &mut on_pairs);
         }
         words
     };
@@ -1892,4 +1892,113 @@ fn x_scan_unit_of_one_hit_does_not_scan_a_unit_whose_first_range_is_short() {
     // A first range of a word: both scans are the same.
     assert_eq!(scan(1, true), scan(1, false));
     assert!(scan(1, true).contains(&(0, 0)));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,
+// c++/src/algo/blast/core/blast_aascan.c:76-77, :110 and c++/src/algo/blast/core/masksubj.inl:50-58
+// Masks stored out of order (probe M4b-T2, 2026-11-23): a later range of a chunk starts before
+// the chunk. The unit scan reads the frame's letters from `scan_lead` letters before the chunk
+// and gives each hit at the chunk's offsets (below 0 before it, as NCBI's Uint4); a first range
+// raised to one word on the frame's last letter finds no word there (the frame's NULLB), and the
+// scan goes on with the later ranges.
+#[test]
+fn x_scan_unit_reads_a_range_before_its_chunk_at_the_chunk_s_offsets() {
+    let query = b"MKVLAAGIVGLLLAAGCSSHKEEAKSGGLW";
+    let codon = |letter: u8| -> &'static [u8] {
+        match letter {
+            b'A' => b"GCT",
+            b'C' => b"TGT",
+            b'E' => b"GAA",
+            b'G' => b"GGT",
+            b'H' => b"CAT",
+            b'I' => b"ATT",
+            b'K' => b"AAA",
+            b'L' => b"CTG",
+            b'M' => b"ATG",
+            b'S' => b"TCT",
+            b'V' => b"GTT",
+            b'W' => b"TGG",
+            other => panic!("no codon for {}", other as char),
+        }
+    };
+    // Frame +1 of the subject is the query.
+    let subject: Vec<u8> = query.iter().flat_map(|&l| codon(l).to_vec()).collect();
+    let mut plan = x_scan_plan(
+        &[query.as_slice()],
+        SubjectNt::Letters(&subject).into(),
+        1,
+        None,
+        11,
+        false,
+        ScoringMatrix::Blosum62,
+        3,
+        &std::sync::OnceLock::new(),
+        &XCompressedSide::default(),
+        None,
+        None,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        matches!(plan.lookup, XPlanLookup::Aa(_)),
+        "the standard table"
+    );
+    let frame = plan.subject.frames[0].clone();
+    let length = query.len() as i32;
+    // The frame's 30 letters scanned whole, and a chunk of its last 20 (from letter 10) with the
+    // ranges that masks stored out of order give it.
+    let whole = TranslatedChunk::new(0, query.len());
+    let chunk = TranslatedChunk::new(10, 20);
+    plan.subject = std::sync::Arc::new(XSubjectPlan {
+        frames: vec![frame],
+        units: vec![
+            (0, whole, vec![(0, length)]),
+            (0, chunk, vec![(2, 6), (12, -4), (-10, 20)]),
+            (0, chunk, vec![(19, 19), (19, -6), (-8, 20)]),
+        ],
+    });
+    assert_eq!(
+        plan.subject
+            .units
+            .iter()
+            .map(|(_, _, ranges)| crate::algorithm::common::translated_chunks::scan_lead(ranges))
+            .collect::<Vec<_>>(),
+        vec![0, 10, 8]
+    );
+    let aa_seq = plan.subject.frames[0].aa_seq.clone();
+    let mut pairs = Vec::new();
+    let mut scan = |unit: usize, lead: usize| {
+        let offset = plan.subject.units[unit].1.offset;
+        let mut words = Vec::new();
+        x_scan_unit(
+            &plan,
+            unit,
+            &aa_seq[1 + offset - lead..],
+            lead,
+            &mut pairs,
+            |filled| {
+                words.extend(filled.iter().map(|p| (p.q_off, p.s_off)));
+            },
+        );
+        words
+    };
+    // The whole frame's words, at the frame's offsets.
+    let frame_words = scan(0, 0);
+    // Those at frame offsets `offsets`, at the chunk's offsets (10 less, wrapping as Uint4).
+    let at_chunk = |offsets: std::ops::RangeInclusive<u32>| -> Vec<(u32, u32)> {
+        frame_words
+            .iter()
+            .filter(|(_, s)| offsets.contains(s))
+            .map(|&(q, s)| (q, s.wrapping_sub(10)))
+            .collect()
+    };
+    // (2, 6): the chunk's words at 2 and 3 (frame 12 and 13); (12, -4): none; (-10, 20): from 10
+    // letters before the chunk (frame 0) to the chunk's last word (frame 27).
+    let mut expected = at_chunk(12..=13);
+    expected.extend(at_chunk(0..=27));
+    assert!(expected.iter().any(|&(_, s)| (s as i32) < 0));
+    assert_eq!(scan(1, 10), expected);
+    // (19, 19), raised to the word at the frame's last letter: none (it holds the NULLB after the
+    // frame); (19, -6): none; (-8, 20): frame 2 to 27.
+    assert_eq!(scan(2, 8), at_chunk(2..=27));
 }

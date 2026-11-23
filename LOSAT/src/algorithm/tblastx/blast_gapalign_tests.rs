@@ -315,7 +315,8 @@ fn test_get_ungapped_hsp_list_into_rejects_a_list_with_hits() {
 // The one-hit conversion keeps the ends `start + length` of HSPs of length 0, -1 and -2 (one
 // ending at -2, below the frame's start) and sorts with the `Int4` comparator: of two HSPs of
 // score 9 that start at subject 0, the one ending at 3 comes before the one ending at -2
-// (`subject.end` descending), which the `u32` comparator orders the other way. The HSPs of
+// (`subject.end` descending). The two-hit lists' comparator reads the subject's offset and end as
+// `Int4` too (a chunk's HSP before the chunk, M4b-T2), so it orders them the same way. The HSPs of
 // positive length are `get_ungapped_hsp_list`'s, field for field.
 #[test]
 fn int4_conversion_keeps_ends_at_or_before_the_start_and_sorts_them_as_int4() {
@@ -359,7 +360,8 @@ fn int4_conversion_keeps_ends_at_or_before_the_start_and_sorts_them_as_int4() {
     );
     let mut by_u32 = hits.clone();
     sort_ungapped_hits_by_index_replay(&mut by_u32, score_compare_ungapped_hits_ncbi);
-    assert_eq!(by_u32[1].s_end_int4(), -2);
+    assert_eq!(by_u32[1].s_end_int4(), 3);
+    assert_eq!(by_u32[2].s_end_int4(), -2);
 
     let positive = vec![
         make_init_hsp(101, 104, 0, 3, 9),
@@ -373,4 +375,34 @@ fn int4_conversion_keeps_ends_at_or_before_the_start_and_sorts_them_as_int4() {
         &actual,
         &expected,
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:150-189,1330-1353
+// A chunk's HSPs before the chunk (masks stored out of order, M4b-T2): the one-hit HSP of a word at
+// offset -1 that starts at 0 (its seed at -1) and one from -2, then a two-hit HSP from -1. The
+// conversion keeps the subject's offsets as NCBI's `Int4` and each sort reads them so: of HSPs of
+// one score, the one that starts lower comes first.
+#[test]
+fn hsps_before_their_chunk_convert_and_sort_as_int4() {
+    let contexts = vec![make_context()];
+    let subject_frames = vec![make_subject_frame()];
+    let mut seed_before = make_init_hsp(0, 3, 0, 3, 9);
+    seed_before.s_seed = -1;
+    let one_hit = get_ungapped_hsp_list_int4(
+        vec![seed_before, make_init_hsp(1, 4, -2, 1, 9)],
+        &contexts,
+        &subject_frames,
+    );
+    let offsets: Vec<(i32, i32, i32)> = one_hit
+        .iter()
+        .map(|hit| (hit.s_start_int4(), hit.s_end_int4(), hit.s_seed_int4()))
+        .collect();
+    assert_eq!(offsets, vec![(-2, 1, -2), (0, 3, -1)]);
+    let two_hit = get_ungapped_hsp_list(
+        vec![make_init_hsp(0, 3, 0, 3, 9), make_init_hsp(2, 3, -1, 0, 9)],
+        &contexts,
+        &subject_frames,
+    );
+    let starts: Vec<i32> = two_hit.iter().map(UngappedHit::s_start_int4).collect();
+    assert_eq!(starts, vec![-1, 0]);
 }

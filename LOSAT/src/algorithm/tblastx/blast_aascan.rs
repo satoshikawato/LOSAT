@@ -366,6 +366,20 @@ pub(crate) fn s_blast_aa_scan_subject_one_range(
     totalhits
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:76-77 and :110
+// NCBI's hit keeps its offset from the chunk's first letter (`Uint4`, below 0 before the chunk
+// for a range of masks stored out of order).
+/// The hits of a scan of the frame's letters from `lead` letters before the chunk at the chunk's
+/// offsets: each subject offset less `lead`, wrapping as NCBI's `Uint4`.
+#[cold]
+#[inline(never)]
+pub(crate) fn x_pairs_at_chunk(pairs: &mut [OffsetPair], lead: usize) {
+    let lead = lead as u32;
+    for pair in pairs {
+        pair.s_off = pair.s_off.wrapping_sub(lead);
+    }
+}
+
 #[cfg(test)]
 #[path = "blast_aascan_tests.rs"]
 mod tests;

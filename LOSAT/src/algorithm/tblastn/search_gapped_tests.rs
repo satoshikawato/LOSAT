@@ -5029,3 +5029,17 @@ fn ungapped_chunk_hsps_are_context_local_and_sorted_by_score() {
         ]
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3942-3945
+// The gapped start of a one-hit HSP whose seed lies at the chunk's offset -1 (its word starts one
+// letter before the chunk, masks stored out of order, M4b-T2) and whose HSP starts at 0: the seed's
+// `Uint4` wraps, so the start is the seed moved by the gapped start's distance from the query's seed
+// (16 letters: offset 15), not about 2^32 past the chunk. Before the chunk is an internal error.
+#[test]
+fn a_seed_before_the_chunk_gives_its_gapped_start_with_ncbis_wrap() {
+    let seed = (-1i32) as u32;
+    assert_eq!(x_gapped_subject_start(seed, 30, 14).unwrap(), 15);
+    assert_eq!(x_gapped_subject_start(seed, 15, 14).unwrap(), 0);
+    assert_eq!(x_gapped_subject_start(40, 30, 14).unwrap(), 56);
+    assert!(x_gapped_subject_start(seed, 14, 14).is_err());
+}

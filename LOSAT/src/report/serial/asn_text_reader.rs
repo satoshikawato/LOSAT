@@ -187,9 +187,15 @@ pub(crate) fn buffer_number<S: AsnSource + ?Sized>(
     signed: bool,
 ) -> std::result::Result<i64, NumberStop> {
     let mut pos = pos + 1;
-    let mut negative = false;
-    if (signed && c == b'-') || c == b'+' {
-        negative = c == b'-';
+    // The sign, a constant of each arm (`Some(negative)`): the sign byte is not kept past the
+    // read of the byte after it (one instruction less per number than a test of that byte).
+    let sign = match c {
+        b'-' if signed => Some(true),
+        b'+' => Some(false),
+        _ => None,
+    };
+    let negative = sign == Some(true);
+    if sign.is_some() {
         c = match src.byte_at(pos) {
             Some(c) => c,
             None => {

@@ -823,9 +823,7 @@ fn write_tabular_rows<const RPS: bool>(
                     None => None,
                 };
                 row_index += 1;
-                let span = (hsp.q_end + 1 - hsp.q_start) as i32;
-                let mut row =
-                    tabular_hsp(hsp, qcovhsp.of_hsp(span, span), rows.map(|(rows, _)| rows));
+                let mut row = tabular_hsp(hsp, qcovhsp, rows.map(|(rows, _)| rows));
                 if let Some((_, stored_gaps)) = rows {
                     row.stored_gaps = stored_gaps;
                 }
@@ -900,7 +898,7 @@ fn hsp_rows<'r>(
 }
 
 /// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// its `qcovhsp` (`report::tabular::QueryCoveragePerHsp`), `rows` when a field shows them.
+/// its `qcovhsp` by its subject's rule `coverage`, `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1094
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
@@ -910,7 +908,7 @@ fn hsp_rows<'r>(
 /// sequences: the frames are 1.
 fn tabular_hsp<'r>(
     hsp: &BlastpHsp,
-    qcovhsp: i32,
+    coverage: QueryCoveragePerHsp,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
     TabularHsp {
@@ -930,7 +928,11 @@ fn tabular_hsp<'r>(
         rows,
         end_gaps: true,
         stored_gaps: [&[], &[]],
-        qcovhsp,
+        // The HSP's query letters, in its context and in its Seq-align.
+        qcovhsp: {
+            let span = (hsp.q_end + 1 - hsp.q_start) as i32;
+            coverage.of_hsp(span, span)
+        },
     }
 }
 

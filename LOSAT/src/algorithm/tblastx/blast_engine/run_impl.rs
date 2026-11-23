@@ -1981,11 +1981,11 @@ fn write_pairwise_prologs(
                         },
                         None,
                         args.html_links.as_deref().map(|links| {
-                            let posts = crate::api::local_blast::html_posts_sink(
-                                &mut outputs.html_posts,
+                            let posts = crate::report::query_warnings::html_posts_sink(
+                                outputs.html_posts.as_deref_mut(),
                                 &mut *outputs.diagnostics,
                             );
-                            (links, posts)
+                            (links, posts as &mut dyn std::io::Write)
                         }),
                     )?
                 }
@@ -1998,11 +1998,11 @@ fn write_pairwise_prologs(
                         0,
                         Some(pairwise),
                         args.html_links.as_deref().map(|links| {
-                            let posts = crate::api::local_blast::html_posts_sink(
-                                &mut outputs.html_posts,
+                            let posts = crate::report::query_warnings::html_posts_sink(
+                                outputs.html_posts.as_deref_mut(),
                                 &mut *outputs.diagnostics,
                             );
-                            (links, posts)
+                            (links, posts as &mut dyn std::io::Write)
                         }),
                     )?
                 }

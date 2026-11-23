@@ -724,13 +724,13 @@ fn write_run(
                     .map(|posts| posts as &mut dyn Write),
             )
         } else {
-            (
-                &mut quiet,
-                Some(crate::api::local_blast::html_posts_sink(
-                    html_posts,
-                    &mut **diagnostics,
-                )),
-            )
+            let posts = crate::report::query_warnings::html_posts_sink(
+                html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn Write),
+                &mut **diagnostics,
+            );
+            (&mut quiet, Some(posts))
         };
         report::write_prolog(writer, warnings, posts, options, subjects, &shown)
             .map_err(report_error)?;

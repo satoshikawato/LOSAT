@@ -7550,11 +7550,11 @@ fn write_pairwise_prologs(
                 total_letters,
                 pairwise_database.as_ref(),
                 args.html.as_deref().map(|links| {
-                    let posts = crate::api::local_blast::html_posts_sink(
-                        &mut outputs.html_posts,
+                    let posts = crate::report::query_warnings::html_posts_sink(
+                        outputs.html_posts.as_deref_mut(),
                         &mut *outputs.diagnostics,
                     );
-                    (links, posts)
+                    (links, posts as &mut dyn Write)
                 }),
             )?;
             writer.flush()?;

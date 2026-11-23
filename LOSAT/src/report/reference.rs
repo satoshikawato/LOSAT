@@ -280,8 +280,9 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// `blastn`, ...; compared without case, so the callers may pass the version line's name).
 /// `html`: the `-html` form, each reference with the scheme of its own read of `./.ncbirc`
 /// (`formatter_registry::FormatterNcbirc::protocol`), whose posts go to the run's diagnostics
-/// (the second item) after the report written so far is flushed, as NCBI's `cerr` does; a file
-/// whose read throws ends the references before the first one; `None`: the plain form.
+/// (the second item) after the report written so far where they flush it, as NCBI's `cerr` does
+/// (`query_warnings::write_html_post`); a file whose read throws ends the references before the
+/// first one; `None`: the plain form.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
 /// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. LOSAT has no
@@ -302,12 +303,11 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     let mut write = |out: &mut W, publication: Publication, is_psiblast: bool| -> io::Result<()> {
         match html.as_mut() {
             Some((ncbirc, diagnostics)) => {
-                let posts = ncbirc.posts();
-                if !posts.is_empty() {
-                    out.flush()?;
-                    diagnostics.write_all(posts)?;
-                    diagnostics.flush()?;
-                }
+                super::query_warnings::write_html_post(
+                    &mut *out,
+                    &mut **diagnostics,
+                    ncbirc.posts(),
+                )?;
                 write_reference(out, true, ncbirc.protocol()?, publication, is_psiblast)
             }
             None => write_reference(out, false, DEFAULT_PROTOCOL, publication, is_psiblast),

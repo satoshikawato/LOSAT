@@ -2135,17 +2135,23 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:396-441
 /// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
 /// `html`, the report is `-html`; `own_buffer`, the writer is a buffer that its sink opened for
 /// the prolog alone (`OutputSink::open` of a library call's `Stdout` or `File` sink), flushed so
 /// that its write errors show. A plain report keeps dev's flush points (the writers of blastn,
 /// blastx and tblastx flush there; blastp and tblastn write the prolog with the first report). An
-/// `-html` report does not flush there: NCBI's `cout` keeps the bytes after the prolog's `NcbiEndl`
-/// pair until a post (`cerr` is tied to `cout`) or its buffer writes them, so `GETURL_DEBUG`'s
-/// `REGISTRY:` line, which is not a post (`QueryWarnings::html_stderr_line`), comes before them
-/// where both streams go to one pipe (line RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0
-/// after the version line's 159 bytes in every program, probes `T/t4/fix2/out/c4.*`). A write
-/// failure still shows before the search, at the version line (`write_prolog`).
+/// `-html` report does not flush there: NCBI's `PrintProlog` flushes `cout` with the `NcbiEndl`
+/// pair after the version line and writes the references and the database lines after it without
+/// a flush, so its `cout` keeps those bytes until a post on `cerr` (tied to `cout`:
+/// `query_warnings::write_html_post`) or its buffer writes them, and `GETURL_DEBUG`'s `REGISTRY:`
+/// line, which is not a post (`QueryWarnings::html_stderr_line`), comes before them where both
+/// streams go to one pipe (line RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 after the
+/// version line's 159 bytes in every program, probes `T/t4/fix2/out/c4.*`). A write failure still
+/// shows before the search, at the version line (`write_prolog`). NCBI's later flush points of the
+/// report (the `NcbiEndl` that starts each query's footer, its buffer's size) are the report
+/// stream's of line RG T6a (PR #1508), which takes this rule with it (decision T4a2-14).
 pub(crate) fn flushes_after_prolog(html: bool, own_buffer: bool) -> bool {
     !html || own_buffer
 }

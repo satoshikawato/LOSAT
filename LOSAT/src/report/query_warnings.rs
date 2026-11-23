@@ -839,6 +839,53 @@ fn write_after(report: &mut dyn Write, sink: &mut dyn Write, text: &[u8]) -> io:
     sink.flush()
 }
 
+/// Where the posts of a `-html` report's reads of NCBI's formatter registries go: `posts`, the
+/// sink that a caller sets apart for them (`ReportOutputs::html_posts` of a library call's later
+/// search, the diagnostics of a later format of BLASTX), else `diagnostics`, the run's. The one
+/// owner of that rule, for the reports' writers (`QueryWarnings::html_posts_sink`) and for the
+/// prologs' references that post before a search or with its first batch (blastx's
+/// `report::write_prolog`, tblastn's and tblastx's prolog writers; line RG T4a2 fix round 3,
+/// review e N1).
+pub(crate) fn html_posts_sink<'s, W: Write + ?Sized>(
+    posts: Option<&'s mut W>,
+    diagnostics: &'s mut W,
+) -> &'s mut W {
+    match posts {
+        Some(posts) => posts,
+        None => diagnostics,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:543-544
+/// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report, to
+/// `posts` (`html_posts_sink`); before it, the report written so far (`report`) is flushed where
+/// the post goes to the standard error. NCBI's posts go to `cerr` (its default handler), which
+/// the C++ library ties to `cout`, so the report reaches standard output first; the posts of a
+/// run whose messages follow `-logfile` (tblastx, rpsblast, rpstblastn:
+/// `ncbi_environment::run_messages_follow_log`) go to that file and flush nothing, which LOSAT
+/// knows by the standard error that the file replaced (`ncbi_environment::terminal_stderr`).
+/// NCBI BLAST+ 2.17.0 (line RG T4a2 review e S1, probe `T/t4/review_t4a2_e/out/txlog.rep.*`,
+/// `tblastx -html -logfile` with both streams in one pipe): `GETURL_DEBUG`'s `REGISTRY:` line
+/// after the version line's flush (166 bytes), where a flush at each post put it after the
+/// first description table's head (1,037). A library call's posts go to its diagnostics, never
+/// a process stream: its report is flushed before each, as the command line's without
+/// `-logfile`.
+pub(crate) fn write_html_post<R: Write + ?Sized>(
+    report: &mut R,
+    posts: &mut dyn Write,
+    text: &[u8],
+) -> io::Result<()> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    if crate::blastinput::ncbi_environment::terminal_stderr().is_none() {
+        report.flush()?;
+    }
+    posts.write_all(text)?;
+    posts.flush()
+}
+
 impl Drop for QueryWarnings<'_> {
     /// The texts of the reads that the report did not place (a writer that stopped early, or a
     /// read no writer marks) are written when the warnings end, so that standard error keeps
@@ -889,10 +936,10 @@ impl<'a> QueryWarnings<'a> {
     }
 
     /// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report
-    /// (`ReportPlace::Html`), to the sink of the report's posts (`html_posts_sink`) after the
-    /// report written so far (`report`) is flushed (NCBI posts on `cerr`, tied to `cout`).
+    /// (`ReportPlace::Html`), to the sink of the report's posts (`html_posts_sink`), after the
+    /// report written so far (`report`) where the post flushes it (`write_html_post`).
     pub fn html_post(&mut self, text: &[u8], report: &mut dyn Write) -> io::Result<()> {
-        write_after(report, self.html_posts_sink(), text)
+        write_html_post(report, self.html_posts_sink(), text)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
@@ -979,12 +1026,10 @@ impl<'a> QueryWarnings<'a> {
         self.report
     }
 
-    /// The sink of the `-html` report's own posts (`with_html_posts`, else `sink`).
+    /// The sink of the `-html` report's own posts (`with_html_posts`, else `sink`:
+    /// `query_warnings::html_posts_sink`).
     pub(crate) fn html_posts_sink(&mut self) -> &mut dyn Write {
-        match &mut self.html_posts {
-            Some(posts) => &mut **posts,
-            None => &mut *self.sink,
-        }
+        html_posts_sink(self.html_posts.as_deref_mut(), &mut *self.sink)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452

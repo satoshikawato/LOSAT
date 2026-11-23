@@ -1457,7 +1457,8 @@ fn pairwise_metadata(
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 /// The prolog of a format (`options`), whose warnings go to `diagnostics` and the posts of its
-/// `-html` references to `html_posts` (`None`: `diagnostics`).
+/// `-html` references where `query_warnings::html_posts_sink` sends them: `html_posts`, else
+/// `diagnostics`.
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
@@ -1467,16 +1468,18 @@ pub(crate) fn write_prolog(
     shown: &ShownSubjects<'_>,
 ) -> Result<()> {
     if options.pairwise_view().is_some() {
-        let posts: &mut dyn Write = match html_posts {
-            Some(posts) => posts,
-            None => &mut *diagnostics,
-        };
         crate::report::pairwise::write_blastx_prolog(
             writer,
             options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
-            options.html.as_deref().map(|links| (links, posts)),
+            options.html.as_deref().map(|links| {
+                let posts = crate::report::query_warnings::html_posts_sink(
+                    html_posts.map(|posts| posts as &mut dyn Write),
+                    &mut *diagnostics,
+                );
+                (links, posts)
+            }),
         )?;
     }
     // Outfmt 20's line of the field names, after its formatter's warning

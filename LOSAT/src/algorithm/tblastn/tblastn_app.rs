@@ -1410,11 +1410,11 @@ fn write_first_batch_prologs(
                 total,
                 database,
                 html.map(|links| {
-                    let posts = crate::api::local_blast::html_posts_sink(
-                        &mut outputs.html_posts,
+                    let posts = crate::report::query_warnings::html_posts_sink(
+                        outputs.html_posts.as_deref_mut(),
                         &mut *outputs.diagnostics,
                     );
-                    (links, posts)
+                    (links, posts as &mut dyn Write)
                 }),
             )?;
             writer.flush()?;

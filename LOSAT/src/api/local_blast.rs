@@ -341,21 +341,6 @@ impl FormatOutput<'_> {
     }
 }
 
-/// The sink of the `-html` reports' posts of the outputs whose fields `html_posts` and
-/// `diagnostics` these are (`ReportOutputs::html_posts`, else the diagnostics), for the writers
-/// that post apart from a format's warnings (the prologs' references, before a search or with its
-/// first batch). A function of the two fields, so that a caller that holds the outputs' `formats`
-/// can ask it.
-pub(crate) fn html_posts_sink<'s>(
-    html_posts: &'s mut Option<&mut (dyn Write + Send)>,
-    diagnostics: &'s mut (dyn Write + Send),
-) -> &'s mut dyn Write {
-    match html_posts {
-        Some(posts) => &mut **posts,
-        None => diagnostics,
-    }
-}
-
 /// `ReportOutputs::open_out` of the outputs `formats` (for a caller that holds the diagnostics
 /// stream of the same outputs).
 pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {

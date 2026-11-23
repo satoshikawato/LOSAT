@@ -9442,16 +9442,11 @@ fn write_pairwise_prologs(
             _ => false,
         };
         if writes_prolog {
-            write_format_prolog(
-                format,
-                output_format,
-                intro,
-                shown,
-                crate::api::local_blast::html_posts_sink(
-                    &mut outputs.html_posts,
-                    &mut *outputs.diagnostics,
-                ),
-            )?;
+            let posts = crate::report::query_warnings::html_posts_sink(
+                outputs.html_posts.as_deref_mut(),
+                &mut *outputs.diagnostics,
+            );
+            write_format_prolog(format, output_format, intro, shown, posts)?;
         }
     }
     Ok(())
@@ -9459,7 +9454,7 @@ fn write_pairwise_prologs(
 
 /// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16,
 /// 20); `diagnostics` takes the posts of a `-html` prolog's references
-/// (`local_blast::html_posts_sink`).
+/// (`query_warnings::html_posts_sink`).
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,

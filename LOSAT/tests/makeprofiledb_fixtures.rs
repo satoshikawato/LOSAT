@@ -119,8 +119,8 @@ fn as_on_linux(name: &str, bytes: Vec<u8>) -> Vec<u8> {
     if name.ends_with(".pin") {
         let int4 = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
         // Version 5: the version, the molecule type, the volume, the title, then the LMDB name,
-        // each string after its length.
-        if int4(0) != 5 {
+        // each string after its length. A refused run leaves an empty file.
+        if bytes.len() < 16 || int4(0) != 5 {
             return bytes;
         }
         let lmdb_at = 12 + 4 + int4(12);
@@ -150,6 +150,11 @@ fn as_on_linux(name: &str, bytes: Vec<u8>) -> Vec<u8> {
     let field = |page: usize, at: usize| {
         u64::from_le_bytes(bytes[page * PAGE + at..][..8].try_into().unwrap())
     };
+    // A file without its two meta pages (a run refused before the environment was made) stays
+    // as it is.
+    if bytes.len() < 2 * PAGE {
+        return bytes;
+    }
     let newer = usize::from(field(1, TXNID) > field(0, TXNID));
     assert_eq!(
         (bytes.len() as u64, field(0, MAP_SIZE), field(1, MAP_SIZE)),

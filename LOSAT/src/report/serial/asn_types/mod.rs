@@ -65,6 +65,47 @@ impl Name {
         let start = self.0 as usize;
         &table::NAMES[start..start + usize::from(self.1)]
     }
+
+    /// Whether the name is `id`: the lengths first, then the bytes in place (`same_bytes`; no
+    /// `str` slice is made). Inlined into each lookup, which calls it per candidate.
+    #[inline(always)]
+    pub(crate) fn is(self, id: &[u8]) -> bool {
+        let start = self.0 as usize;
+        usize::from(self.1) == id.len()
+            && same_bytes(&table::NAMES.as_bytes()[start..start + id.len()], id)
+    }
+}
+
+/// Whether `a` and `b` are the same bytes: the lengths first. The names of the modules are short:
+/// up to 16 bytes are compared as two words (or three bytes) that cover them, read in place,
+/// where the C library's compare would cost a call; a longer name is compared as a slice.
+#[inline(always)]
+fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+    let n = a.len();
+    if n != b.len() {
+        return false;
+    }
+    match n {
+        0 => true,
+        1..=3 => a[0] == b[0] && a[n / 2] == b[n / 2] && a[n - 1] == b[n - 1],
+        4..=8 => same_ends::<4>(a, b),
+        9..=16 => same_ends::<8>(a, b),
+        _ => a == b,
+    }
+}
+
+/// Whether the first and the last `W` bytes of `a` and `b`, of the same length of at least `W`,
+/// are equal.
+#[inline(always)]
+fn same_ends<const W: usize>(a: &[u8], b: &[u8]) -> bool {
+    let last = a.len() - W;
+    word::<W>(a, 0) == word::<W>(b, 0) && word::<W>(a, last) == word::<W>(b, last)
+}
+
+/// The `W` bytes of `s` from `at` on.
+#[inline(always)]
+fn word<const W: usize>(s: &[u8], at: usize) -> [u8; W] {
+    s[at..at + W].try_into().unwrap()
 }
 
 /// The members of a SEQUENCE or CHOICE (`table::MEMBERS`) or the values of an ENUMERATED
@@ -98,6 +139,12 @@ pub(crate) struct EnumValue {
 impl EnumValue {
     pub(crate) fn name(&self) -> &'static str {
         self.name.get()
+    }
+
+    /// Whether the value is named `id` (`Name::is`).
+    #[inline(always)]
+    pub(crate) fn is_named(&self, id: &[u8]) -> bool {
+        self.name.is(id)
     }
 }
 

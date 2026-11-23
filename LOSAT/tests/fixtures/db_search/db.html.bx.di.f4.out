@@ -1,0 +1,184 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/ps_ids.faa
+           11 sequences; 1,610 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>subject one two HSPs                                      <a href=#XP_000101.1>313</a>     5e-109
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>247</a>     5e-87 
+<a title="Show report for XP_000111.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000111.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XP_000111.1>211</a>     1e-71 
+<a title="Show report for XP_000109.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000109.1?report=genbank&log$=prottop&blast_rank=4&RID=" >XP_000109.1 </a>subject nine                                              <a href=#XP_000109.1>168</a>     8e-57 
+<a title="Show report for P99902.2" href="https://www.ncbi.nlm.nih.gov/protein/P99902.2?report=genbank&log$=prottop&blast_rank=5&RID=" >P99902.2 </a>subject two                                                  <a href=#P99902.2>159</a>     4e-53 
+testdb:tag_s8 subject eight                                           <a href=#testdb:tag_s8>147</a>     1e-48 
+s7_not_in_taxdb_long_label subject seven taxid not in taxdb           <a href=#s7_not_in_taxdb_long_label>141</a>     2e-46 
+<a title="Show report for 1ABC_A" href="https://www.ncbi.nlm.nih.gov/protein/1ABC_A?report=genbank&log$=prottop&blast_rank=8&RID=" >1ABC_A </a>subject six                                                    <a href=#1ABC_A>139</a>     1e-45 
+<a title="Show report for AAB00104.1" href="https://www.ncbi.nlm.nih.gov/protein/AAB00104.1?report=genbank&log$=prottop&blast_rank=9&RID=" >AAB00104.1 </a>subject four                                               <a href=#AAB00104.1>139</a>     3e-45 
+<a title="Show report for XP_000105.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000105.1?report=genbank&log$=prottop&blast_rank=10&RID=" >XP_000105.1 </a>subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@...  <a href=#123456>131</a>     1e-42 
+<a title="Show report for BAA00110.1" href="https://www.ncbi.nlm.nih.gov/protein/BAA00110.1?report=genbank&log$=prottop&blast_rank=11&RID=" >BAA00110.1 </a>subject ten                                                <a href=#BAA00110.1>94.0</a>    2e-28 
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1                     1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+XP_000101.1                 1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+s3_local_identifier         1                                                      GDESHIVADL  10
+XP_000111.1                 1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+XP_000109.1                 1                                  RPMRGRLTLIDPRHRVPYACGDPSHIVAGR  30
+P99902.2                    1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+tag_s8                      1    CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  60
+XP_000105.1                 1    CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  60
+
+Query_1                     181  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+XP_000101.1                 61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+s3_local_identifier         11   PAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITCANSVMRAVSK  70
+XP_000111.1                 61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR                      100
+XP_000109.1                 31   PARPTVTRSVDATISNDPFFNCRCRRDYSITYMLQPRLCRPNGNVESGTCANLVMVAVVK  90
+P99902.2                    61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+tag_s8                      61   PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR                      100
+1ABC_A                      1                                            PSENVESHTSANLVIRPVVK  20
+XP_000105.1                 61   PARPTLTKSVRHAISPDPFF                                          80
+
+Query_1                     361  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  540
+XP_000101.1                 121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL                             153
+XP_000101.1                 302                                 GLSTPFVNLVRHAAQLKVYSRLACDIAHP  330
+s3_local_identifier         71   ASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVPSRLALCYTHG  130
+XP_000111.1                 232                                TGLSKRFEHQSRHML                 246
+XP_000109.1                 91   VSAYDTTTKT                                                    100
+s7_not_in_taxdb_long_label  1                                  SGLSTPFVDLVRHTMQMKVPSRRAACYTHA  30
+1ABC_A                      21   VRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNLVRPAMQLKVPSRSPACYTHL  80
+
+Query_1                     541  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  720
+XP_000101.1                 331  AALKGTRSPRLTDYPRCSIHSGRGLFDPESTLGDPSRVQIPLTERACNLRLITVSTDYCT  390
+s3_local_identifier         131  AASKGLGSSPLPESNRCSTH                                          150
+XP_000111.1                 191            LADCGDWSFDSGRGLFEPESDL                              212
+s7_not_in_taxdb_long_label  31   AALKGLPLPRLIEIDNCSNFVKRGLREMEGTLGDLSRRQTPLTETRCHSRLVTPGSNACT  90
+1ABC_A                      81   AALLGLPSPNLSEFFRGST                                           99
+AAB00104.1                  6                             FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCT  40
+BAA00110.1                  1                        SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCT  40
+
+Query_1                     721  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  900
+XP_000101.1                 391  SKTREPAHSCVLVDVNVILICNSSRGSLCKRSRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+s7_not_in_taxdb_long_label  91   SQSREPRHS                                                     99
+AAB00104.1                  41   SKLREPRHSLNLVRYNGKLICNSARGSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ   99
+BAA00110.1                  41   SKSCEPVDSPNLVRVNVILI                                          60
+
+For reading frame -1 of query sequence:
+
+Query_1      732  SRL*CTIIRDRCYQTTVAPSLGEWYLHSTGIPKRRFRLE*ATSRMSTTAVIFCKPRRSKT  553
+XP_000101.1  321  SRLACDIAHPAALKGTRSPRLTDY                                      344
+XP_000101.1  141          RDKSYVTLIPPPL-----------RRTYRLALVALNPVSRHYVFC         174
+
+Query_1      552  F*SR*VSITSSEA*WHFQLHGVTYKINKWGTQTTWYKSHIAFVALAHTSIKIVTCFNGEV  373
+AAB00104.1   55                                                          YNGKL  59
+
+Query_1      372  IC  367
+AAB00104.1   60   IC  61
+
+For reading frame -2 of query sequence:
+
+Query_1      806  HRYPLA---ELHI------NITLTRTKLHE--------CRGSLDFDVQ*FVIGVTKRLLH  678
+XP_000111.1  180                                                          QVLH  183
+XP_000111.1  44   HRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQ              91
+
+Query_1      677  LVSVSGICTLLGSPSVDSGSNRPRPE*VLQRLYSVSLGDPRPFK<font color="#000000">aar*v*qaar</font>RDGTFN  498
+XP_000111.1  184  MTLLSCSLADCGDWSFDSGRGLFEPE                                    209
+
+Query_1      497  CMA*RTRLTNGVLKPLGIRVT*LLSRSHTPPSKSLLVLTAKSYADTLTTARITRFAQV  324
+1ABC_A       43                                           KSYVTLIPSGLSTRFVNL  60
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316389
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for AAB00104.1" href="https://www.ncbi.nlm.nih.gov/protein/AAB00104.1?report=genbank&log$=prottop&blast_rank=1&RID=" >AAB00104.1 </a>subject four                                               <a href=#AAB00104.1>18.9</a>    0.025
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>subject one two HSPs                                      <a href=#XP_000101.1>16.9</a>    0.14 
+<a title="Show report for P99902.2" href="https://www.ncbi.nlm.nih.gov/protein/P99902.2?report=genbank&log$=prottop&blast_rank=3&RID=" >P99902.2 </a>subject two                                                  <a href=#P99902.2>15.4</a>    0.58 
+<a title="Show report for XP_000111.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000111.1?report=genbank&log$=prottop&blast_rank=4&RID=" >XP_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XP_000111.1>14.2</a>    1.9  
+<a title="Show report for XP_000109.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000109.1?report=genbank&log$=prottop&blast_rank=5&RID=" >XP_000109.1 </a>subject nine                                              <a href=#XP_000109.1>12.7</a>    7.7  
+
+
+
+For reading frame +2 of query sequence:
+
+Query_2      71   RRFLQKNGRP  100
+XP_000101.1  272  RRAEEEHNRP  281
+
+For reading frame -1 of query sequence:
+
+Query_2      120  LNSDSTLGRPFFCKNRRTELCTSARLALCKPAH*FASR  7
+AAB00104.1   60                      ICNSARGSLCK          70
+XP_000101.1  21            PFPEIFSRVERPMRGRLALIDVRH       44
+XP_000101.1  410                     ICNSSRGSLCK          420
+P99902.2     12   IRSARVTSNPFPFSFQRVEYCMRGRGATINLRH       44
+XP_000111.1  28                   RVERPMRGRLALIDVRH       44
+XP_000109.1  22                                DPSHIVAGR  30
+
+For reading frame -2 of query sequence:
+
+Query_2      53   RHVWL  39
+XP_000101.1  286  QHIWL  290
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39609
+
+
+  Database: in/ps_ids.faa
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 1,610
+  Number of sequences in database:  11
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

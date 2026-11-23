@@ -127,12 +127,10 @@ impl StrategySink for std::io::BufWriter<std::fs::File> {
 }
 
 struct State {
-    sink: Box<dyn StrategySink>,
-    /// The requests made for a sink that cannot be cut (`StrategySink::can_cut`), by the run's
-    /// first query of each one's batch, in order, until the run reaches their batches' starts
-    /// (`release_through`) or ends (`end_run`): such a sink gets only the requests NCBI writes.
-    /// `None` for a regular file, which gets each request where it is made and is cut back.
-    held: Option<std::collections::VecDeque<(usize, Vec<u8>)>>,
+    /// The sink of a regular file (`StrategySink::can_cut`), which gets each request where it is
+    /// made and is cut back (`end_run`); `None` for a sink that cannot be cut, whose requests wait
+    /// in `Shared::held`.
+    sink: Option<Box<dyn StrategySink>>,
     /// The bytes written to `sink`.
     written: u64,
     /// The end in the file of the last request whose batch's start the run reached
@@ -168,6 +166,52 @@ struct Shared {
     /// (`ReportHold`): only for a file that LOSAT refuses.
     hold: Option<ReportHold>,
     state: Mutex<State>,
+    /// A sink that cannot be cut, with its requests held (`None` for a regular file, whose sink is
+    /// `State::sink`). Its own lock, taken after `state`'s where both are, so that the panic hook
+    /// can wait for it (`hook_lock`).
+    held: Option<Mutex<HeldSink>>,
+}
+
+// No NCBI counterpart: NCBI writes each request to its file before the batch's search
+// (blastp_app.cpp:259-262, cited at `StrategyExport::write_with`); LOSAT, which may search later
+// batches before an earlier batch's report ends the run, holds them for a sink it cannot cut back.
+/// A sink that cannot be cut (`StrategySink::can_cut`: a FIFO, a pipe, a terminal) with the
+/// requests made for it, by the run's first query of each one's batch, in order, until the run
+/// reaches their batches' starts (`StrategyExport::release_through`) or ends (`end_run`, or a
+/// panic: `install_panic_hook`): such a sink gets only the requests NCBI writes. Its lock is held
+/// only to add a request made (outside the lock) or to write and drop requests, never while a
+/// request is made.
+struct HeldSink {
+    sink: Box<dyn StrategySink>,
+    requests: std::collections::VecDeque<(usize, Vec<u8>)>,
+}
+
+impl HeldSink {
+    /// Writes the held requests whose batches' first queries pass `through`, in order, then
+    /// flushes the sink.
+    fn write_through(&mut self, through: impl Fn(usize) -> bool) -> std::io::Result<()> {
+        let mut wrote = false;
+        while self.requests.front().is_some_and(|(at, _)| through(*at)) {
+            if let Some((_, bytes)) = self.requests.pop_front() {
+                self.sink.write_all(&bytes)?;
+                wrote = true;
+            }
+        }
+        if wrote {
+            self.sink.flush()?;
+        }
+        Ok(())
+    }
+}
+
+impl Shared {
+    /// `HeldSink::write_through` of a sink that cannot be cut (nothing for a regular file).
+    fn write_held(&self, through: impl Fn(usize) -> bool) -> std::io::Result<()> {
+        match &self.held {
+            Some(held) => hook_lock(held).write_through(through),
+            None => Ok(()),
+        }
+    }
 }
 
 /// What a run with `-export_search_strategy` holds: the request of its options and the file.
@@ -502,13 +546,19 @@ impl StrategyExport {
         options: OptionsHandle,
         refusal: Option<String>,
     ) -> Self {
-        Self(Arc::new(Shared {
+        let can_cut = sink.can_cut();
+        let (sink, held) = if can_cut {
+            (Some(sink), None)
+        } else {
+            let requests = std::collections::VecDeque::new();
+            (None, Some(Mutex::new(HeldSink { sink, requests })))
+        };
+        let export = Self(Arc::new(Shared {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
             hold: refusal.is_some().then(ReportHold::default),
             refusal,
             state: Mutex::new(State {
-                held: (!sink.can_cut()).then(std::collections::VecDeque::new),
                 sink,
                 written: 0,
                 reached: 0,
@@ -519,7 +569,14 @@ impl StrategyExport {
                 pending: Vec::new(),
                 unreached: std::collections::VecDeque::new(),
             }),
-        }))
+            held,
+        }));
+        if !can_cut {
+            let mut open = hook_lock(&HOLDING);
+            open.retain(|shared| shared.strong_count() > 0);
+            open.push(Arc::downgrade(&export.0));
+        }
+        export
     }
 
     /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
@@ -589,7 +646,7 @@ impl StrategyExport {
     /// file back to the requests reached when NCBI's error ends the run. (Holding the requests'
     /// bytes until then instead would keep every request of a BLASTN XML run in memory: 2.6 MB on a
     /// run of 82 MB, review 1 of K4h gap 2; so only a sink that cannot be cut holds them,
-    /// `State::held`.)
+    /// `Shared::held`.)
     /// Returns false, calling nothing, when the request is not to be written (`takes`). The
     /// requests are made in the run's order, each starting where the one before ended, after
     /// the batch before was noted; anything else is LOSAT's internal error.
@@ -620,9 +677,9 @@ impl StrategyExport {
                 // A sink that cannot be cut gets the request where the run reaches its batch.
                 let mut held = Vec::new();
                 let mut counted = Counted {
-                    inner: match state.held {
-                        Some(_) => &mut held as &mut dyn Write,
-                        None => &mut *state.sink as &mut dyn Write,
+                    inner: match state.sink.as_mut() {
+                        Some(sink) => &mut **sink as &mut dyn Write,
+                        None => &mut held as &mut dyn Write,
                     },
                     written: 0,
                 };
@@ -637,15 +694,23 @@ impl StrategyExport {
                         Ok(())
                     },
                 );
-                let flushed = match state.held.as_mut() {
-                    Some(requests) => {
-                        requests.push_back((queries.start, held));
-                        Ok(())
+                let wrote = counted.written;
+                let flushed = match state.sink.as_mut() {
+                    Some(sink) => {
+                        state.written += wrote;
+                        sink.flush()
                     }
-                    None => {
-                        state.written += counted.written;
-                        state.sink.flush()
-                    }
+                    // A sink that cannot be cut is `Shared::held` (`with_refusal` makes one of
+                    // the two from the sink).
+                    None => match &shared.held {
+                        Some(waiting) => {
+                            hook_lock(waiting).requests.push_back((queries.start, held));
+                            Ok(())
+                        }
+                        None => Err(std::io::Error::other(
+                            "LOSAT internal error: the search strategy export has no sink",
+                        )),
+                    },
                 };
                 state.unreached.push_back((queries.start, state.written));
                 state.next_query = queries.end;
@@ -655,7 +720,8 @@ impl StrategyExport {
                 // bytes its stream flushed, so the request is reached.
                 if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
                     flushed?;
-                    state.release_through(queries.start)?;
+                    state.reach_through(queries.start);
+                    shared.write_held(|at| at <= queries.start)?;
                     return written;
                 }
                 written?;
@@ -675,7 +741,10 @@ impl StrategyExport {
     /// requests of the batches through it are NCBI's whatever ends the run (`end_run`); a sink
     /// that cannot be cut gets them here.
     pub(crate) fn release_through(&self, first: usize) -> std::io::Result<()> {
-        self.with_state(|state| state.release_through(first))
+        self.with_state(|state| {
+            state.reach_through(first);
+            self.0.write_held(|at| at <= first)
+        })
     }
 
     /// Whether `other` is this export (`Posts`'s request marks compare by it).
@@ -768,6 +837,96 @@ impl StrategyExport {
     }
 }
 
+// No NCBI counterpart: NCBI's process does not panic; a panic is LOSAT's own failure.
+/// The exports whose sinks cannot be cut (`Shared::held`: their requests wait in memory until the
+/// run reaches their batches), for the panic hook (`install_panic_hook`).
+static HOLDING: Mutex<Vec<std::sync::Weak<Shared>>> = Mutex::new(Vec::new());
+
+thread_local! {
+    /// The locks that the panic hook takes (`hook_lock`) that this thread holds.
+    static HOOK_LOCKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A lock that the panic hook takes too (`HOLDING`, `Shared::held`), counted for its thread: a
+/// thread that panics while it holds one does not wait for it in the hook, which would never end
+/// (`write_held_at_panic`). Each is held only for steps that make no request: `HOLDING` to add
+/// an export, `Shared::held` to add a request made or to write requests to the sink, which takes
+/// as long as the sink takes them (a FIFO whose reader stops reading holds it).
+struct HookLock<'a, T>(std::sync::MutexGuard<'a, T>);
+
+/// `HookLock` of `mutex`, which waits for it.
+fn hook_lock<T>(mutex: &Mutex<T>) -> HookLock<'_, T> {
+    let guard = mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    HOOK_LOCKS.set(HOOK_LOCKS.get() + 1);
+    HookLock(guard)
+}
+
+impl<T> std::ops::Deref for HookLock<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for HookLock<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T> Drop for HookLock<'_, T> {
+    fn drop(&mut self) {
+        HOOK_LOCKS.set(HOOK_LOCKS.get() - 1);
+    }
+}
+
+// No NCBI counterpart (see `HOLDING`).
+/// Makes a panic of the command line end each strategy file as LOSAT's refusals end it
+/// (`end_run`): the requests held for a sink that cannot be cut (a FIFO, a pipe) are written, so
+/// it gets every request made, as a regular file has them (each request is written and flushed to
+/// such a file when it is made). The release profile ends the process at a panic (`panic =
+/// "abort"`), so no `end_run` and no destructor runs after it, only the panic hook. A build that
+/// unwinds may catch a panic and go on (the first phase of `blastx`'s batches, which raises it
+/// again where the unit is written): there the hook could write requests of a run that then ends
+/// with NCBI's error, so it is installed only where a panic ends the process. The hook writes the
+/// panic's message first (the hook before it, Rust's own by default), then the requests; it waits
+/// for a thread that is adding or writing requests (`hook_lock`), so a FIFO whose reader stops
+/// reading stops it as it stops the run's own writes. The command line's entry
+/// (`cli::main_entry`) calls it once, before the program runs.
+pub fn install_panic_hook() {
+    if !cfg!(panic = "abort") {
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        write_held_at_panic();
+    }));
+}
+
+/// The panic hook's part (`install_panic_hook`): the exports of `HOLDING` (`write_held_of`),
+/// unless the panicking thread holds one of the hook's locks (a panic inside such a step: the
+/// requests of every export are left as they are).
+fn write_held_at_panic() {
+    if HOOK_LOCKS.get() > 0 {
+        return;
+    }
+    let open = hook_lock(&HOLDING);
+    write_held_of(&open);
+}
+
+/// Writes every held request of each live export of `open`, after the steps of other threads on
+/// its sink (`hook_lock`); a request still being made (`StrategyExport::write_with`) is not held
+/// yet.
+fn write_held_of(open: &[std::sync::Weak<Shared>]) {
+    for shared in open.iter().filter_map(std::sync::Weak::upgrade) {
+        let _ = shared.write_held(|_| true);
+    }
+}
+
 // No NCBI counterpart: NCBI posts while it writes the request, so no post can wait there.
 /// The end of a run of a program with `-export_search_strategy` (`strategy`; `None` without
 /// it). The requests written (`StrategyExport::write_with`) whose batches' starts the run did not
@@ -799,14 +958,16 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
     let ended = strategy.with_state(|state| -> std::io::Result<()> {
         state.unreached.clear();
         if !native {
-            return state.write_held(|_| true);
+            return strategy.0.write_held(|_| true);
         }
-        if let Some(held) = state.held.as_mut() {
-            held.clear();
+        if let Some(held) = &strategy.0.held {
+            hook_lock(held).requests.clear();
         }
-        if state.written > state.reached {
-            state.sink.truncate(state.reached)?;
-            state.written = state.reached;
+        if let Some(sink) = state.sink.as_mut() {
+            if state.written > state.reached {
+                sink.truncate(state.reached)?;
+                state.written = state.reached;
+            }
         }
         Ok(())
     });
@@ -861,31 +1022,9 @@ fn replaced_posts(
 }
 
 impl State {
-    // No NCBI counterpart: NCBI writes each request to its file before the batch's search
-    // (blastp_app.cpp:259-262, cited at `StrategyExport::write_with`); LOSAT, which may search
-    // later batches before an earlier batch's report ends the run, holds them for a sink it
-    // cannot cut back.
-    /// Writes to a sink that cannot be cut its held requests whose batches' first queries pass
-    /// `through` (`State::held`), in order, then flushes it.
-    fn write_held(&mut self, through: impl Fn(usize) -> bool) -> std::io::Result<()> {
-        let Some(held) = self.held.as_mut() else {
-            return Ok(());
-        };
-        let mut wrote = false;
-        while held.front().is_some_and(|(at, _)| through(*at)) {
-            if let Some((_, bytes)) = held.pop_front() {
-                self.sink.write_all(&bytes)?;
-                wrote = true;
-            }
-        }
-        if wrote {
-            self.sink.flush()?;
-        }
-        Ok(())
-    }
-
-    /// `StrategyExport::release_through`.
-    fn release_through(&mut self, first: usize) -> std::io::Result<()> {
+    /// The run reaches the batches whose first queries are at most `first`
+    /// (`StrategyExport::release_through`).
+    fn reach_through(&mut self, first: usize) {
         while let Some(&(at, end)) = self.unreached.front() {
             if at > first {
                 break;
@@ -893,7 +1032,6 @@ impl State {
             self.reached = end;
             self.unreached.pop_front();
         }
-        self.write_held(|at| at <= first)
     }
 
     /// `StrategyExport::takes`.

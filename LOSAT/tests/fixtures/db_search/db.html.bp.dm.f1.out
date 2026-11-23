@@ -1,0 +1,139 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: in/pmix_ids.faa
+           10 sequences; 1,360 total letters
+
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for A12345" href="https://www.ncbi.nlm.nih.gov/protein/A12345?report=genbank&log$=prottop&blast_rank=1&RID=" >pir||A12345 </a>pir subject                                               <a href=#A12345>313</a>     4e-109
+<a title="Show report for US5000000_1" href="https://www.ncbi.nlm.nih.gov/protein/US5000000_1?report=genbank&log$=prottop&blast_rank=2&RID=" >US5000000_1 </a>patent subject                                            <a href=#US5000000_1>247</a>     3e-87 
+<a title="Show report for XP_000901.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000901.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000901.1 </a>nine titles 1 &lt;&amp;&gt;                                         <a href=#XP_000901.1>168</a>     6e-57 
+<a title="Show report for 1234567A" href="https://www.ncbi.nlm.nih.gov/protein/1234567A?report=genbank&log$=prottop&blast_rank=4&RID=" >prf||1234567A </a>prf subject                                             <a href=#1234567A>159</a>     3e-53 
+<a title="Show report for Q99999.1" href="https://www.ncbi.nlm.nih.gov/protein/Q99999.1?report=genbank&log$=prottop&blast_rank=5&RID=" >Q99999.1 </a>two deflines first                                           <a href=#Q99999.1>147</a>     9e-49 
+<a title="Show report for 12345" href="https://www.ncbi.nlm.nih.gov/Traces/trace.cgi?cmd=retrieve&dopt=fasta&val=12345&RID=">TI:12345 </a>trace subject                                                <a href=#TI:12345>141</a>     1e-46 
+<a title="Show report for AAA00001.1" href="https://www.ncbi.nlm.nih.gov/protein/AAA00001.1?report=genbank&log$=prottop&blast_rank=7&RID=" >AAA00001.1 </a>gi and gb &lt;&amp;&gt; &quot;q&quot;                                          <a href=#1000>139</a>     1e-45 
+<a title="Show report for DAA00001.1" href="https://www.ncbi.nlm.nih.gov/protein/DAA00001.1?report=genbank&log$=prottop&blast_rank=8&RID=" >DAA00001.1 </a>tpg subject                                                <a href=#DAA00001.1>138</a>     2e-45 
+gi|999 gi only subject                                                <a href=#999>131</a>     7e-43 
+loc_x local &amp; id                                                      <a href=#loc_x>94.0</a>    1e-28 
+
+
+
+Query_1      1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+A12345       1    ............................................................  60
+US5000000_1  1                                                      ........DL  10
+US5000000_1  136                  .G.S.L..                                      143
+XP_000901.1  1                                  .......T...P..........P.......  30
+1234567A     1    ..T...V...GIR.A.V......FS.Q...YC....G.T.NL............LAA...  60
+Q99999.1     1    ....N....D.V......L..YC..R......P.....E.TQL.......Q..F..F..G  60
+999          1    ................GDI..E...A....D.A..V....T.....Y...PV........  60
+
+Query_1      61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+A12345       61   ............................................................  120
+US5000000_1  11   ..A........V........P......S...................I....S.....S.  70
+XP_000901.1  31   .....V....DA...N....N.........T.......C..NG............V....  90
+1234567A     61   .....S..V.....C.KY..L.....VVW......S....ADR.....Y.VT..SLL.L.  120
+Q99999.1     61   .......L..L.......V...TWDN............R.                      100
+AAA00001.1   1                                            .......H.S....I.P...  20
+999          61   .......K....A.......                                          80
+
+Query_1      121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+A12345       121  ..............................PP.                             153
+A12345       302                                 .............A....Y....CDIA.P  330
+US5000000_1  71   A...............K.......Q....H......RR.........Q......L....G  130
+XP_000901.1  91   .....TTT..                                                    100
+12345        1                                  ........D....T..M.....R......A  30
+AAA00001.1   21   .R.AC...C....S..D..I...............R......P.........SP......  80
+
+Query_1      181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+A12345       331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+US5000000_1  131  ..S.....SP.P.S......                                          150
+12345        31   ......PL...I.IDN..NFVK...R.M.G....L..R.T.......H......GS.A..  90
+AAA00001.1   81   ...L..P..N.S.FF.G..                                           99
+DAA00001.1   6                             ....G...L.GTQ.G..H.......E....NQ...  40
+loc_x        1                        ..I.FL..........G..P.........A......S...  40
+
+Query_1      241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+A12345       391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+12345        91   .Q.......                                                     99
+DAA00001.1   41   ..L......L....Y.GK........S....R.....R.......ER...R.S.DA...   99
+loc_x        41   ...C..VD.P..........                                          60
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 264000
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 33210
+
+
+  Database: in/pmix_ids.faa
+    Posted date:  Nov 17, 2026  10:57 PM
+  Number of letters in database: 1,360
+  Number of sequences in database:  10
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

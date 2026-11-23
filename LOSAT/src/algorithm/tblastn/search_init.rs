@@ -562,9 +562,11 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `pairs` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the walks
-    /// `walks`.
+    /// `walks`. Always inlined: `x_pairs_bf_on` calls it for one pair at a time, and a call of its
+    /// own set up the finder's fields for every such pair (78 instructions in a `tblastn` run of
+    /// 2.26 million such calls).
     #[allow(clippy::too_many_arguments)]
-    #[inline]
+    #[inline(always)]
     fn pairs_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
         &self,
         walks: W,

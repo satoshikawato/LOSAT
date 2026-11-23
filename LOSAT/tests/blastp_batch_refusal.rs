@@ -365,7 +365,8 @@ fn a_split_batch_without_a_valid_chunk_meets_the_tracebacks_setup() {
             next.stdout
         );
         assert!(
-            next.stderr.starts_with("LOSAT database error: Error: File (")
+            next.stderr
+                .starts_with("LOSAT database error: Error: File (")
                 && next.stderr.ends_with("arch_sprot_nopsq.psq) not found.\n"),
             "n{threads}: {}",
             next.stderr

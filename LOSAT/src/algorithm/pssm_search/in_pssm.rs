@@ -21,7 +21,7 @@ use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
 use crate::ncbi_exception::{NcbiException, Severity};
-use crate::report::serial::asn_types::{ReadError, Value};
+use crate::report::serial::asn_types::ReadError;
 use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::ParsedSeqId;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
@@ -387,7 +387,10 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
                 push(&mut residues, position, letter);
             }
         }
-        Some(SeqData::Other(_)) | None => {}
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => {}
     }
     residues
 }
@@ -577,11 +580,12 @@ pub(crate) fn psi_search_and_object_of(
             defline_reads_annot,
         ));
     };
-    if let Some(SeqData::Other(Value::Choice(variant, _))) = &query.inst.seq_data {
-        let name = crate::report::serial::asn_types::members(
-            crate::report::serial::asn_types::table::named::SEQ_DATA,
-        )[usize::from(*variant)]
-        .name();
+    if let Some(
+        data
+        @ (SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_)),
+    ) = &query.inst.seq_data
+    {
+        let (name, _, _) = data.variant();
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
         )));

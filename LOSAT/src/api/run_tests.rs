@@ -1,5 +1,6 @@
 use super::*;
 use crate::api::{validate, Program};
+use crate::blastinput::ncbi_environment::DiagTarget;
 
 // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
@@ -34,20 +35,20 @@ fn groups_follow_the_hit_list_sizes() {
     let inputs = Inputs::new(&[], &[]);
     let plain = validate(Program::Blastp, &[])
         .unwrap()
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap();
     assert_eq!(search_groups(&plain, &[6, 0, 7]), vec![vec![0, 1, 2]]);
     // -num_alignments changes the pairwise formats' hit list size only: two searches, the
     // tabular formats first.
     let split = validate(Program::Blastp, &["-num_alignments", "1"])
         .unwrap()
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap();
     assert_eq!(search_groups(&split, &[0, 6, 7]), vec![vec![1, 2], vec![0]]);
     // -max_target_seqs sets every format's size.
     let same = validate(Program::Blastp, &["-max_target_seqs", "5"])
         .unwrap()
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap();
     assert_eq!(search_groups(&same, &[0, 6]), vec![vec![0, 1]]);
 }
@@ -58,8 +59,12 @@ fn groups_follow_the_hit_list_sizes() {
 #[test]
 fn groups_follow_the_cuts_of_the_hit_lists() {
     let inputs = Inputs::new(&[], &[]);
-    let command =
-        |program, options: &[&str]| validate(program, options).unwrap().command(inputs).unwrap();
+    let command = |program, options: &[&str]| {
+        validate(program, options)
+            .unwrap()
+            .command(inputs, &DiagTarget::Stderr)
+            .unwrap()
+    };
     let psiblast = command(Program::Psiblast, &[]);
     assert_eq!(search_groups(&psiblast, &[6, 11]), vec![vec![0], vec![1]]);
     assert_eq!(search_groups(&psiblast, &[11, 6]), vec![vec![0], vec![1]]);
@@ -290,5 +295,53 @@ fn the_html_links_reach_outfmt_0_in_any_place() {
             String::from_utf8_lossy(&alone.reports[0].bytes),
             "{program}"
         );
+    }
+}
+
+// Line RG item T4b: formats 0 to 4 read `-html`'s links (`blastinput::app::formats_link_ids`), so
+// in a call of several formats each format's report is its report alone, the query-anchored ones
+// (outfmt 1 to 4) and the organism report (outfmt 18) among them, in each of the five programs
+// (review a S3; LOSAT Web calls the library with several formats). Their posts with a registry
+// file that posts (`FMTCFG`), against the command line's: `tests/library_html_posts.rs`
+// (`later_formats_post_as_their_runs_alone`, in a child process that gets the environment; review
+// b N3).
+#[test]
+fn each_html_report_of_a_call_of_several_formats_is_its_report_alone() {
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let (query, subject) = self_pair(program);
+        let search = validate(program, &["-html"]).unwrap();
+        let alone = |format: &str| {
+            run_collect(&search, Inputs::new(&query, &subject), &[format])
+                .unwrap()
+                .reports
+                .remove(0)
+                .bytes
+        };
+        assert!(
+            alone("1").starts_with(b"<HTML>"),
+            "{program}: {}",
+            String::from_utf8_lossy(&alone("1"))
+        );
+        for formats in [
+            &["6", "1"][..],
+            &["0", "1"],
+            &["1", "18"],
+            &["3", "0", "4", "2"],
+        ] {
+            let together = run_collect(&search, Inputs::new(&query, &subject), formats).unwrap();
+            for (at, &format) in formats.iter().enumerate() {
+                assert_eq!(
+                    String::from_utf8_lossy(&together.reports[at].bytes),
+                    String::from_utf8_lossy(&alone(format)),
+                    "{program} {formats:?}: outfmt {format}"
+                );
+            }
+        }
     }
 }

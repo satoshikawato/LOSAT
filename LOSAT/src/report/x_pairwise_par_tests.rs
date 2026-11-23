@@ -539,6 +539,7 @@ fn the_model_of_the_reads_is_the_writers_group() {
                                 descriptions,
                                 alignments,
                             },
+                            html: false,
                         };
                         let model = QueryGroup::read_order(
                             rows.iter().map(|row| (row.hit.s_idx, row)),

@@ -439,7 +439,8 @@ mod tests {
         Program::Blastx,
     ];
 
-    /// The help text and the clap default of a program's option.
+    /// The help text and the default of NCBI's argument reader (`describe`'s) of a program's
+    /// option.
     fn help(program: Program, flag: &str) -> (String, Option<String>) {
         let root = Cli::command();
         let arg = root
@@ -450,14 +451,10 @@ mod tests {
                     .find(|arg| arg.get_long() == flag.strip_prefix('-'))
             })
             .unwrap_or_else(|| panic!("{} has no {flag}", program.name()));
-        let defaults: Vec<String> = arg
-            .get_default_values()
-            .iter()
-            .map(|value| value.to_string_lossy().into_owned())
-            .collect();
+        let name = flag.strip_prefix('-').unwrap_or(flag);
         (
             arg.get_help().map(ToString::to_string).unwrap_or_default(),
-            (!defaults.is_empty()).then(|| defaults.join(" ")),
+            losat::web_adapter::default_value(program.name(), name).map(str::to_string),
         )
     }
 
@@ -471,8 +468,8 @@ mod tests {
         })
     }
 
-    // The CLI states each default that the engine resolves for a task, as the clap default or
-    // in the help: the help and the resolution agree (before, programs.ts held a copy of the
+    // The CLI states each default that the engine resolves for a task, as NCBI's reader's default
+    // or in the help: the help and the resolution agree (before, programs.ts held a copy of the
     // help, checked the same way).
     #[test]
     fn every_task_default_is_a_value_that_the_help_names() {
@@ -481,9 +478,9 @@ mod tests {
             let defaults = defaults(program).unwrap();
             for (task, values) in &defaults.tasks {
                 for (flag, value) in values {
-                    let (text, clap_default) = help(program, flag);
-                    let stated = match &clap_default {
-                        Some(clap_default) => clap_default == value,
+                    let (text, default) = help(program, flag);
+                    let stated = match &default {
+                        Some(default) => default == value,
                         None => text.to_lowercase().contains("default") && names(&text, value),
                     };
                     if !stated {

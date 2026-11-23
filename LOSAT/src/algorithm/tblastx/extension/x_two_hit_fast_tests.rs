@@ -540,8 +540,10 @@ fn bound_cells(rng: &mut Rng) -> &'static [[i32; MATRIX_LETTERS]; MATRIX_LETTERS
 /// `check_walks` of the made-up matrix with words of `W` letters.
 fn bound_walks_equal_the_reference<const W: usize>(rng: &mut Rng) {
     let cells = bound_cells(rng);
-    let mut t = Box::new(MatrixWalkTable([0; MATRIX_TABLE_LEN]));
+    let mut t = Box::new(MatrixWalkTable([0; MATRIX_TABLE_LEN], [0; KEY_TABLE_LEN]));
     assert!(fill_matrix_table(&mut t.0, |a, b| cells[a as usize][b as usize]));
+    let t0 = t.0;
+    fill_keys::<5>(&mut t.1, &t0);
     let sc = BoundScore::<W>(cells);
     let mut check = |q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32| {
         check_walks::<W, _>(sc, &t, q, s, sl, sr, qr, d);
@@ -678,18 +680,25 @@ fn sentinel_walks_stop_at_both_ends_as_the_bound_does() {
 }
 
 // No NCBI counterpart. Two-letter alphabets (ties for the best, drops equal to the X-drop)
-// and a code 0 inside a sequence (it stops a walk as BLAST_SCORE_MIN does), codes 28..=255.
+// and a code 0 inside a sequence (it stops a walk as BLAST_SCORE_MIN does), codes 28..=31 (the
+// keys' bytes past the letters); a buffer with a byte of 32 or more does not take the path.
 #[test]
 fn sentinel_walks_equal_the_reference_at_ties_inner_sentinels_and_odd_codes() {
     let mut rng = Rng(0x9E6C_63D0_676A_9A99);
+    for (a, b) in [(5u8, 40u8), (27, 255), (31, 32)] {
+        let frame = [0u8, a, b, a, b, 0];
+        assert!(!sent_frame(true, &frame), "{a} {b}");
+        assert!(!sent_contexts(std::iter::once(&frame[..])), "{a} {b}");
+        assert!(sent_frame(true, &[0u8, a, a, a, 0]) == (a < 32), "{a}");
+    }
     for (a, b) in [
         (1u8, 2u8),
         (1, 20),
         (4, 5),
         (11, 12),
         (19, 25),
-        (5, 40),
-        (27, 255),
+        (27, 31),
+        (28, 30),
     ] {
         for _ in 0..300 {
             let len = WORD + rng.below(200) as usize;
@@ -747,8 +756,9 @@ fn sentinel_walks_refuse_what_the_table_cannot_do() {
     }
 }
 
-// No NCBI counterpart. A chunk takes the sentinel walks only when the batch does, the chunk
-// is the whole frame and the buffer has its two sentinels; otherwise the walks of `two_hit`.
+// No NCBI counterpart. A chunk takes the sentinel walks only when its frame may (`sent_frame`),
+// the chunk is the whole frame and the buffer has its two sentinels; otherwise the walks of
+// `two_hit`.
 #[test]
 fn only_a_whole_frame_with_its_sentinels_takes_the_sentinel_walks() {
     let frame = [0u8, 4, 5, 6, 7, 0];

@@ -1,5 +1,5 @@
 // Line WQA's D14 (2026-11-20): the words with which the command line prints its help (`-h`, `-help`,
-// `-help-full`, `--help`, `-xmlhelp`) or its version (`-version` and its full forms), typed in "Additional
+// `-help-full`, `-xmlhelp`) or its version (`-version` and its full forms), typed in "Additional
 // options" or as a value that the command line reads as one, run as the native CLI runs them: the run
 // needs no input, prints the command line's text and searches nothing. The results say so, the Outputs
 // show the text under "Help" or "Version" and save it. With LOSAT_WEB_NATIVE, the saved text is the

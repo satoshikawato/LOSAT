@@ -594,7 +594,8 @@ pub(super) fn compare_preliminary_lists_for_kappa(
 // else { if (index > hsp_cnt) hsp_array[hsp_cnt] = hsp_array[index]; hsp_cnt++; }
 #[allow(dead_code)]
 pub(super) fn reap_by_evalue(list: &mut LinkedHspList, prelim_evalue: f64) {
-    list.hsps.retain(|hsp| !(hsp.evalue > prelim_evalue));
+    list.hsps
+        .retain(|hsp| hsp.evalue <= prelim_evalue || hsp.evalue.is_nan());
 }
 
 #[cfg(test)]

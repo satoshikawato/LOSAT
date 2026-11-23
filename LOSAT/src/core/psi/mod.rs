@@ -86,8 +86,14 @@ impl PsiScoreBlk {
     /// scaling computes again before anything reads it (`_PSIUpdateLambdaK` at every factor of
     /// `_PSIScaleMatrix`), so it is not kept.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60
+    /// The ancillary data keeps a block only where its Lambda is 0 or more (a NaN and a negative
+    /// one give none, as a PSSM file's can), and the engine then keeps its own block.
     pub(crate) fn set_ungapped_statistical_params(&mut self, psi_gapped: KarlinBlk) {
-        self.gap_psi = psi_gapped;
+        if psi_gapped.lambda >= 0.0 {
+            self.gap_psi = psi_gapped;
+        }
     }
 }
 

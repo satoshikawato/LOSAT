@@ -678,12 +678,12 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
+        redone.retain(|hsp| hsp.e_value <= self.expect_value || hsp.e_value.is_nan());
         let first = redone.first()?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
         // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
         // block gives them) pass the reaping above but leave it at `INT4_MAX`.
-        if !(best_evalue <= self.expect_value) {
+        if best_evalue > self.expect_value {
             return None;
         }
         let best_score = first.align.score;
@@ -932,12 +932,12 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
+        redone.retain(|hsp| hsp.e_value <= self.expect_value || hsp.e_value.is_nan());
         let first = redone.first()?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
         // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
         // block gives them) pass the reaping above but leave it at `INT4_MAX`.
-        if !(best_evalue <= self.expect_value) {
+        if best_evalue > self.expect_value {
             return None;
         }
         let best_score = first.align.score;

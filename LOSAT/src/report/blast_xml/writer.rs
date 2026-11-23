@@ -164,7 +164,9 @@ impl DocumentPosts {
     /// epilog marked it (`caught_at`: before the document's end); `Some(post)` back where nothing
     /// marked it, for the caller to write after the report (`query_warnings::HitPosts::caught`).
     pub fn place_caught(&mut self, post: Vec<u8>) -> Option<Vec<u8>> {
-        let at = self.caught_at.take()?;
+        let Some(at) = self.caught_at.take() else {
+            return Some(post);
+        };
         self.posts.push(DocumentPost { at, text: post });
         self.posts.sort_by_key(|post| post.at);
         None

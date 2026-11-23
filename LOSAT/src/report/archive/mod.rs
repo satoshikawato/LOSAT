@@ -297,6 +297,8 @@ struct SearchSets {
     before_batches: Vec<options::Param>,
     /// Set by each batch's set-up, before its search space.
     each_batch: Vec<options::Param>,
+    /// Set by the application after each batch, after its search space.
+    after_batch: Vec<options::Param>,
 }
 
 /// What the searches of the batches that one writer of a run's requests (the archive, the search
@@ -351,20 +353,24 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:532
     /// The parameters that the run sets in the handle after the command line's options and
     /// besides the batches' `EffectiveSearchSpace`: `before_batches` once, before the first batch
-    /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios), and
+    /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios),
     /// `each_batch` at each batch's set-up (the RPS database's length and `.aux` costs,
-    /// `rps_search::volumes::search_sets`). Set once per run, where the database is opened; a
-    /// second setting is LOSAT's internal error.
+    /// `rps_search::volumes::search_sets`), and `after_batch` after each batch (psiblast's reset of
+    /// the composition-based statistics after PHI-BLAST's batch, `phi_hooks::note_handle_sets`).
+    /// Set once per run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_search_sets(
         &self,
         before_batches: Vec<options::Param>,
         each_batch: Vec<options::Param>,
+        after_batch: Vec<options::Param>,
     ) -> anyhow::Result<()> {
         let set = self.0.search.set(SearchSets {
             before_batches,
             each_batch,
+            after_batch,
         });
         anyhow::ensure!(
             set.is_ok(),
@@ -428,7 +434,7 @@ impl OptionsHandle {
     /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
     /// context 0 (the option is the search's own value, or what `RequestLength` makes of it),
     /// `None` for a batch NCBI does not search, which leaves the option as the batch before left
-    /// it.
+    /// it; then what the application sets after the batch (`after_batch`).
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
@@ -445,6 +451,11 @@ impl OptionsHandle {
                 "EffectiveSearchSpace",
                 options::ParamValue::BigInteger(length.space(context0)),
             );
+        }
+        if let Some(search) = self.0.search.get() {
+            for param in &search.after_batch {
+                carry.0.set(param.name, param.value.clone());
+            }
         }
     }
 

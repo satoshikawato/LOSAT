@@ -252,10 +252,7 @@ impl RoundSections<'_> {
             if query.batch_skipped {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !query.valid {
-                writeln!(writer)?;
-                writeln!(writer)?;
-                writeln!(writer)?;
-                writeln!(writer, "Effective search space used: 0")?;
+                Self::invalid_foot(writer)?;
             } else {
                 write_blastp_query_footer_spacing(
                     writer,
@@ -475,12 +472,6 @@ impl RoundSections<'_> {
     /// The footer of a query with hits (`BlastpSections::foot`).
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // A query that NCBI did not search (PHI-BLAST without its table's Karlin block,
-        // `phi_hooks::phi_footers`): the -1 blocks.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
-        if query.batch_skipped {
-            return write_tblastn_unsearched_query_footer_spacing(writer, false);
-        }
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
@@ -490,6 +481,16 @@ impl RoundSections<'_> {
             query.effective_search_space,
             false,
         )
+    }
+
+    /// The footer of a query whose context is not valid (no letters): no Karlin block and a search
+    /// space of 0.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+    fn invalid_foot<W: Write>(writer: &mut W) -> io::Result<()> {
+        writeln!(writer)?;
+        writeln!(writer)?;
+        writeln!(writer)?;
+        writeln!(writer, "Effective search space used: 0")
     }
 }
 

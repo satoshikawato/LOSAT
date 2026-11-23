@@ -47,3 +47,15 @@ fn an_occurrence_without_alignments_keeps_the_table_header() {
     write_empty_table(&mut out, 0).unwrap();
     assert_eq!(out, b"\n");
 }
+
+// A first query without letters (its batch's next query is searched, PS8a fix round 1): no Karlin
+// block and a search space of 0 (NCBI BLAST+ 2.17.0 `PS/tmp/rev8a/ncbi3/er.first.0`).
+#[test]
+fn the_footer_of_a_query_without_letters_has_no_karlin_block() {
+    let mut out = Vec::new();
+    RoundSections::invalid_foot(&mut out).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "\n\n\nEffective search space used: 0\n"
+    );
+}

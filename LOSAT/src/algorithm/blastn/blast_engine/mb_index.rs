@@ -63,6 +63,7 @@ pub(super) fn note_index_use(
             value: crate::report::archive::options::ParamValue::Boolean(true),
         }],
         Vec::new(),
+        Vec::new(),
     )
 }
 

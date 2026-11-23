@@ -503,7 +503,8 @@ impl PsiblastArgs {
     /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
     /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
     /// `-outfmt`. `phi`: the run has `-phi_pattern`, whose formats 8, 9 and 12 end with NCBI's
-    /// engine error (`blast_engine/phi_hooks.rs`).
+    /// engine error (`blast_engine/phi_hooks.rs`); its refusal of formats 5 and 11 comes after
+    /// NCBI's errors of the pattern's search (`phi_hooks::phi_limits`).
     pub fn check_outfmt(
         outfmt: &str,
         out: Option<&std::path::Path>,
@@ -535,7 +536,7 @@ impl PsiblastArgs {
                     | ReportFormat::CommaSeparatedValuesWithHeader
             );
             // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), and formats
-            // 8, 9 and 12, which reach NCBI's engine error.
+            // 8, 9 and 12, which reach NCBI's engine error; 5 and 11 are `phi_limits`'.
             let phi_runs = matches!(
                 format,
                 ReportFormat::Pairwise
@@ -547,16 +548,11 @@ impl PsiblastArgs {
                     | ReportFormat::AsnBinary
                     | ReportFormat::JsonSeqalign
             );
-            match (runs, phi && phi_runs) {
-                (true, false) if phi => bail!(
-                    "-phi_pattern with output format {} is not supported by LOSAT's PSIBLAST yet",
-                    choice.number
-                ),
-                (false, false) => bail!(
+            if !(runs || phi && phi_runs) {
+                bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
-                ),
-                _ => {}
+                );
             }
         }
         Ok(())

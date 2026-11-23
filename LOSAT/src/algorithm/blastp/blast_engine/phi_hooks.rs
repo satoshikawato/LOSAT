@@ -36,30 +36,38 @@ use crate::algorithm::tblastx::lookup::{
     build_lookup_segments_for_context, prepare_matrix_lookup_query_for_word_size, QueryContext,
 };
 use crate::algorithm::tblastx::translation::QueryFrame;
+use crate::blastinput::seq_range;
 
 thread_local! {
     static PHI_SCRATCH: RefCell<PssmGapScratch> = RefCell::new(PssmGapScratch::new());
 }
 
-/// The queries' contexts of a PHI-BLAST search (their validity and the letters that the search
-/// reads, as blastp's query preparation makes them) and a word table without words: the pattern
-/// scan finds the seeds (`phi_prelim`), and the table is what the call's other readers of the
-/// scan's shape take.
+/// The queries' contexts of a PHI-BLAST search (the letters that the search reads, as blastp's
+/// query preparation makes them) and a word table without words: the pattern scan finds the seeds
+/// (`phi_prelim`), and the table is what the call's other readers of the scan's shape take. Every
+/// context is valid: PHI-BLAST's score block is the pattern table's (`s_PHIScoreBlkFill`), so
+/// NCBI computes no context's Karlin-Altschul parameters from its letters, and a query that blastp
+/// cannot score (all `X`) is searched; a context without letters is not valid
+/// (`call_setup::call_lookup`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:121-130
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:504-506
 #[cold]
 #[inline(never)]
 pub(super) fn phi_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
-    let (_, _, contexts) = prepare_matrix_lookup_query_for_word_size(
+    let (_, _, mut contexts) = prepare_matrix_lookup_query_for_word_size(
         query_frames,
         args.word_size,
         false,
         args.scoring.matrix,
         None,
     );
+    for context in &mut contexts {
+        context.is_valid = true;
+    }
     let table = build_pssm_lookup_in(&QueryPssm { rows: Vec::new() }, 3, 0, &[]);
     (BlastpRuntimeLookup::Aa(table), contexts)
 }
@@ -83,24 +91,141 @@ pub(super) fn phi_karlin(args: &ResolvedBlastpArgs) -> Result<stats::PhiKarlin, 
 
 /// The searches of the call's queries and what the preliminary stage gathers for the traceback.
 pub(super) struct PhiCall<'p> {
-    /// Each query's search, by query.
-    pub(super) searches: Vec<PhiSearch<'p>>,
+    /// Each query's search, by query: `None` for a query without letters (its batch is searched
+    /// as its query with letters, `PhiBatch`), and for every query where NCBI's table has no
+    /// Karlin block (`no_statistics`). A query whose letters give blastp no Karlin block (all `X`)
+    /// is searched: PHI-BLAST's score block is the table's (`s_PHIScoreBlkFill`).
+    pub(super) searches: Vec<Option<PhiSearch<'p>>>,
+    /// The call's query batches, each the result set of one report (`PhiBatch`).
+    pub(super) batches: Vec<PhiBatch>,
+    /// By query, the letters that the reports read for a query whose results NCBI reports under
+    /// its batch's first query without letters (`PhiBatch::shows_gaps`): a gap character at each
+    /// of its positions; `None` for the others (`ShownQueries::of`).
+    pub(super) shown_gaps: Vec<Option<Box<[u8]>>>,
     /// The pattern hits of the scanned subjects (NCBI's `Int8` `lookup_hits`; the traceback reads
     /// them as an `Int4`, `num_patterns_db`).
     lookup_hits: AtomicI64,
     /// LOSAT's refusal of a subject's scan (`phi_search::scan`), the first one met.
     refusal: Mutex<Option<String>>,
     /// NCBI's message where its table has no Karlin block for the matrix and gap costs
-    /// (`phi_karlin`): no query is searched (`searches` is empty), and each query's report is
-    /// the message, no hits and the footer of -1 values (`s_PHIScoreBlkFill` leaves the score
-    /// block without Karlin blocks; NCBI's setup goes on, so the pattern's and the occurrences'
-    /// errors still stop the run).
+    /// (`phi_karlin`): no query is searched (every `searches` entry is `None`), and each batch's
+    /// report is the message, no hits and the footer of -1 values (`s_PHIScoreBlkFill` leaves the
+    /// score block without Karlin blocks; NCBI's setup goes on, so the pattern's and the
+    /// occurrences' errors still stop the run).
     pub(super) no_statistics: Option<String>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1652-1712
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:263-281
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:303-360
+/// A query batch of PHI-BLAST's call: the queries without letters that psiblast's reader puts
+/// before the next query with letters, and that query (`read_psiblast_query_batches` with
+/// CLocalBlast's rule). NCBI searches the batch as one query (a context without letters shares
+/// the offset of the next, so the occurrences are the lettered query's own), puts every HSP in
+/// context 0, and makes each occurrence's result with the batch's first query: its Seq-id, its
+/// length and Bioseq for the rows (`PhiBlastResults2SeqAlign_OMF`), the statistics of its context
+/// for the footer (`BuildBlastAncillaryData`), and result `i` carries the messages of the batch's
+/// query `i` (`BlastBuildSearchResultSet`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PhiBatch {
+    /// The batch's queries; the first heads its report.
+    pub(super) queries: std::ops::Range<usize>,
+    /// The batch's query with letters (its last), whose search and hit lists the report shows.
+    pub(super) searched: usize,
+}
+
+impl PhiBatch {
+    /// The query that heads the batch's report.
+    pub(super) fn first(&self) -> usize {
+        self.queries.start
+    }
+
+    /// Whether the report shows the rows of `searched` with the letters of a first query without
+    /// letters: a gap character at each position (`PhiCall::shown_gaps`).
+    pub(super) fn shows_gaps(&self) -> bool {
+        self.searched != self.queries.start
+    }
+}
+
+/// The batches of the call's queries `query_batches` (call-local), each with its query with
+/// letters (`PhiBatch`): the last query of the batch that has letters, or its last query.
+fn phi_batches(
+    query_batches: &[seq_range::RangedBatch],
+    query_frames: &[Vec<QueryFrame>],
+) -> Vec<PhiBatch> {
+    query_batches
+        .iter()
+        .filter(|batch| !batch.searched.is_empty())
+        .map(|batch| PhiBatch {
+            queries: batch.searched.clone(),
+            searched: batch
+                .searched
+                .clone()
+                .rev()
+                .find(|&query| query_frames[query][0].aa_len > 0)
+                .unwrap_or(batch.searched.end - 1),
+        })
+        .collect()
+}
+
+impl PhiCall<'_> {
+    /// The batch whose report query `q_idx` heads, `None` for a query that heads none.
+    pub(super) fn batch_at(&self, q_idx: usize) -> Option<&PhiBatch> {
+        let at = self
+            .batches
+            .binary_search_by_key(&q_idx, PhiBatch::first)
+            .ok()?;
+        Some(&self.batches[at])
+    }
+
+    /// The batch's search, `None` where nothing is searched (`no_statistics`).
+    pub(super) fn search_of(&self, batch: &PhiBatch) -> Option<&PhiSearch<'_>> {
+        self.searches.get(batch.searched).and_then(Option::as_ref)
+    }
+
+    /// The query of each result of the batch, whose Seq-id and title the result's report shows:
+    /// the batch's first for each occurrence of its search (`PhiBlastResults2SeqAlign_OMF`), or,
+    /// where nothing is searched (`no_statistics`), each query of the batch for a result of its own
+    /// without a Seq-align set (NCBI BLAST+ 2.17.0 `PS/tmp/fix8a/ncbi5/er.first.p250.7`).
+    pub(super) fn result_queries(&self, batch: &PhiBatch) -> Vec<usize> {
+        match self.search_of(batch) {
+            Some(search) => vec![batch.first(); search.occurrences.len()],
+            None => batch.queries.clone().collect(),
+        }
+    }
+
+    /// The footer of the batch's report (`x_PrintOneQueryFooter` of its first query's context).
+    pub(super) fn footer(
+        &self,
+        batch: &PhiBatch,
+    ) -> crate::report::pairwise::psiblast_round::phi_round::PhiFooter {
+        use crate::report::pairwise::psiblast_round::phi_round::PhiFooter;
+        if self.no_statistics.is_some() {
+            PhiFooter::NoStatistics
+        } else if batch.shows_gaps() {
+            PhiFooter::NoLetters
+        } else {
+            PhiFooter::Searched
+        }
+    }
+
+    /// The messages that the batch's report writes before it (`PrintPhiResult` writes each
+    /// result's warnings): result `i` carries the messages of the batch's query `i`, written as
+    /// `per_query` holds them (`query_warnings::phi_result_warning`).
+    pub(super) fn result_warnings(&self, batch: &PhiBatch, per_query: &[Vec<u8>]) -> Vec<u8> {
+        let results = self.result_queries(batch).len();
+        per_query[batch.queries.clone()]
+            .iter()
+            .take(results)
+            .flatten()
+            .copied()
+            .collect()
+    }
 }
 
 /// How the call's PHI-BLAST setup ends.
 pub(super) enum PhiStart<'p> {
-    /// Every query is searched.
+    /// Every query is set up.
     Search(PhiCall<'p>),
     /// NCBI's error of a query's setup: the pattern's compilation (`query` 0, the first query that
     /// NCBI sets up) or the query's occurrences; NCBI's engine stops with it after the reports of
@@ -108,12 +233,37 @@ pub(super) enum PhiStart<'p> {
     EngineError { query: usize, text: String },
 }
 
+/// What LOSAT's limits of PHI-BLAST read besides the options (`phi_limits`): the call's formats
+/// and its subjects.
+pub(super) struct PhiLimits<'a> {
+    formats: &'a [super::BlastpReport],
+    subject_source: super::BlastpSubjectSource<'a>,
+}
+
+impl<'a> PhiLimits<'a> {
+    /// The limits' inputs: the call's formats and subjects.
+    pub(super) fn new(
+        formats: &'a [super::BlastpReport],
+        subject_source: super::BlastpSubjectSource<'a>,
+    ) -> Self {
+        Self {
+            formats,
+            subject_source,
+        }
+    }
+}
+
 /// psiblast `-phi_pattern`: the run's PHI-BLAST call (`phi_start` with the table's Karlin block,
 /// `phi_karlin`), `None` without a pattern; NCBI's engine error of a query's setup is
-/// `setup_error(query, text)` (`phi_setup_error` of `run_call`).
+/// `setup_error(query, text)` (`phi_setup_error` of `run_call`). LOSAT's limits (`phi_limits`)
+/// come after NCBI's errors of the first batch's setup (the pattern's, its query's occurrences)
+/// and after the table's lookup, where NCBI would search what LOSAT does not: before an error of a
+/// later batch, whose batches before NCBI searches and reports.
 pub(super) fn phi_call<'p>(
     args: &'p ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    query_batches: &[seq_range::RangedBatch],
+    limits: PhiLimits<'_>,
     db_length: i64,
     db_num_seqs: i64,
     setup_error: impl FnOnce(usize, &str) -> anyhow::Error,
@@ -121,17 +271,100 @@ pub(super) fn phi_call<'p>(
     if args.phi.is_none() {
         return Ok(None);
     }
-    match phi_start(args, query_frames, phi_karlin(args), db_length, db_num_seqs)? {
+    let karlin = phi_karlin(args);
+    let searched = karlin.is_ok();
+    let batches = phi_batches(query_batches, query_frames);
+    let start = phi_start(args, query_frames, batches, karlin, db_length, db_num_seqs)?;
+    let first_batch_fails = match &start {
+        PhiStart::EngineError { query, .. } => query_batches
+            .iter()
+            .find(|batch| !batch.searched.is_empty())
+            .is_none_or(|first| first.searched.contains(query)),
+        PhiStart::Search(_) => false,
+    };
+    if !first_batch_fails {
+        if let Some(refusal) = phi_limits(args, &limits, searched) {
+            return Err(refusal);
+        }
+    }
+    match start {
         PhiStart::Search(call) => Ok(Some(call)),
         PhiStart::EngineError { query, text } => Err(setup_error(query, &text)),
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
+/// LOSAT's limits of PHI-BLAST (item PS8a; their order after NCBI's errors is `phi_call`'s):
+/// outfmt 5 and 11 of the round (a later item, PS8b), whatever is searched. Then only where the
+/// round is searched (`searched`: NCBI's table has a Karlin block for the matrix and gap costs;
+/// without it round 1 is the run's last whatever `-num_iterations` and `-sum_stats` say, probes
+/// `k.pam.it3.0`, `k.pam.ss3.0`): the rounds after it (PS8b), `-sum_stats true` (NCBI links the
+/// preliminary HSPs with the pattern's Karlin block and reaps them by the linked e-values; probe
+/// `op.sumstats.6`) and a subject longer than `MAX_DBSEQ_LEN` (NCBI's parts), both item PS8a-2.
+/// Outfmt 8, 9 and 12 are no exception: NCBI's engine error of their Seq-annot comes only where an
+/// alignment is found (`report_write::write_phi_report`; `-sum_stats true` with outfmt 8 ends with
+/// exit status 0 and no output, probe `PS/tmp/fix8a/ncbi5/k.ss.8`).
+fn phi_limits(
+    args: &ResolvedBlastpArgs,
+    limits: &PhiLimits<'_>,
+    searched: bool,
+) -> Option<anyhow::Error> {
+    let program = args.app.name();
+    use super::BlastpReport;
+    if let Some(number) = limits.formats.iter().find_map(|format| match format {
+        BlastpReport::Xml => Some(5),
+        BlastpReport::Archive => Some(11),
+        _ => None,
+    }) {
+        return Some(anyhow::anyhow!(
+            "-phi_pattern with output format {number} is not supported by LOSAT's {program} yet"
+        ));
+    }
+    if !searched {
+        return None;
+    }
+    if let Some(rounds) = args.psi_rounds.as_deref() {
+        return Some(anyhow::anyhow!(
+            "-phi_pattern with -num_iterations {} is not supported by LOSAT's {program} yet",
+            rounds.num_iterations
+        ));
+    }
+    if args.sum_stats {
+        return Some(anyhow::anyhow!(
+            "-phi_pattern with -sum_stats true is not supported by LOSAT's {program} yet"
+        ));
+    }
+    let (what, length) = limits.subject_source.longest_split()?;
+    Some(super::too_long_phi_subject_refusal(&what, length))
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:507-532
+/// What psiblast sets in the options handle that the search strategy's requests hold
+/// (`report::archive::OptionsHandle::set_search_sets`): after each batch it resets the
+/// composition-based statistics to their value before the batches, which PHI-BLAST's options never
+/// set (psiblast's arguments do not set them for `phiblastp`), so the reset appends
+/// `CompositionBasedStats 0` after the batch's `EffectiveSearchSpace`: the requests of the batches
+/// after the first hold both (NCBI BLAST+ 2.17.0 `st.multi`).
+#[cold]
+#[inline(never)]
+pub(super) fn note_handle_sets(handle: &crate::report::archive::OptionsHandle) -> Result<()> {
+    use crate::report::archive::options::{Param, ParamValue};
+    handle.set_search_sets(
+        Vec::new(),
+        Vec::new(),
+        vec![Param {
+            name: "CompositionBasedStats",
+            value: ParamValue::Integer(0),
+        }],
+    )
+}
+
 /// The setup of each query of the call: NCBI's errors of the pattern (`PhiError::Ncbi`) and of
-/// the query's occurrences (`PhiSetupError`), LOSAT's refusals of the query's scan, or the
-/// searches. `db_length` and `db_num_seqs` are the database's (`-dbsize` replaces the length).
-/// The Karlin block of NCBI's table, or its message where there is none, is the caller's
-/// (`phi_karlin`); without it the queries' occurrences are found for their errors alone.
+/// the occurrences of each batch's query with letters (`PhiSetupError`), LOSAT's refusals of the
+/// query's scan, or the searches. A query without letters is not set up (its batch's query with
+/// letters is, `PhiBatch`). `db_length` and `db_num_seqs` are the database's (`-dbsize` replaces
+/// the length). The Karlin block of NCBI's table, or its message where there is none, is the
+/// caller's (`phi_karlin`); without it the queries' occurrences are found for their errors alone.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1065-1118
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170-185
@@ -140,6 +373,7 @@ pub(super) fn phi_call<'p>(
 pub(super) fn phi_start<'p>(
     args: &'p ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    batches: Vec<PhiBatch>,
     karlin: Result<stats::PhiKarlin, String>,
     db_length: i64,
     db_num_seqs: i64,
@@ -164,6 +398,11 @@ pub(super) fn phi_start<'p>(
     let mut searches = Vec::with_capacity(query_frames.len());
     for (query, frames) in query_frames.iter().enumerate() {
         let frame = &frames[0];
+        // A query without letters: its batch is its query with letters' search.
+        if frame.aa_len == 0 {
+            searches.push(None);
+            continue;
+        }
         let letters = &frame.aa_seq[1..=frame.aa_len];
         let segments: Vec<(usize, usize)> =
             build_lookup_segments_for_context(0, frame.aa_len, &frame.seg_masks)
@@ -190,7 +429,7 @@ pub(super) fn phi_start<'p>(
             Err(_) => engine::occurrences(pattern, letters, &segments).map(|_| None),
         };
         match set_up {
-            Ok(search) => searches.extend(search),
+            Ok(search) => searches.push(search),
             Err(PhiSetupError::Refusal(message)) => anyhow::bail!("{message}"),
             Err(error) => {
                 return Ok(PhiStart::EngineError {
@@ -200,8 +439,15 @@ pub(super) fn phi_start<'p>(
             }
         }
     }
+    let mut shown_gaps = vec![None; query_frames.len()];
+    for batch in batches.iter().filter(|batch| batch.shows_gaps()) {
+        shown_gaps[batch.searched] =
+            Some(vec![b'-'; query_frames[batch.searched][0].aa_len].into_boxed_slice());
+    }
     Ok(PhiStart::Search(PhiCall {
         searches,
+        batches,
+        shown_gaps,
         lookup_hits: AtomicI64::new(0),
         refusal: Mutex::new(None),
         no_statistics: karlin.err(),
@@ -254,7 +500,7 @@ pub(super) fn phi_prelim(
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<()> {
     // Without NCBI's Karlin block nothing is searched (`PhiCall::no_statistics`).
-    if phi.searches.is_empty() {
+    if phi.searches.iter().all(Option::is_none) {
         return Ok(());
     }
     let process_subject = |_: &mut BlastpSubjectScratch,
@@ -264,9 +510,10 @@ pub(super) fn phi_prelim(
         let letters = &subject.aa_seq[1..];
         let mut counted = false;
         for (q_idx, search) in phi.searches.iter().enumerate() {
-            if !contexts[q_idx].is_valid {
+            // A query without letters: its batch's query with letters is searched (`PhiBatch`).
+            let Some(search) = search else {
                 continue;
-            }
+            };
             let found = PHI_SCRATCH
                 .with(|scratch| search.prelim(letters, subject.aa_len, &mut scratch.borrow_mut()));
             let (hsps, hits) = match found {
@@ -375,7 +622,9 @@ pub(super) fn phi_traceback(
         let Some(hit_list) = hit_list.take() else {
             continue;
         };
-        let search = &phi.searches[q_idx];
+        let search = phi.searches[q_idx]
+            .as_ref()
+            .expect("the hit list of a searched query");
         let ctx = &contexts[q_idx];
         let query_nomask = super::query_nomask_sequence(ctx);
         let count = hit_list.hsplist_count;
@@ -494,12 +743,36 @@ pub(super) fn occurrence_list(
     Some(part)
 }
 
-/// The footers of PHI-BLAST's outfmt 0 report: each query's ungapped and gapped Karlin blocks are
-/// the pattern's (`s_PHIScoreBlkFill`: Lambda, K and H of the table, in both), its search space
-/// the pattern's (`stats::search_space`), and the Gumbel columns, where the report prints them
-/// (no `-searchsp`), zeros (PHI-BLAST's Gumbel block is not filled). Without the table's Karlin
-/// block (`PhiCall::no_statistics`) each footer is that of a query not searched: -1 in both
-/// blocks, no Gumbel columns, a search space of 0, also with `-searchsp`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:752-761
+/// The batch's context 0 as the search strategy's `EffectiveSearchSpace` option reads it
+/// (`CallRequests::set_searched`) for the batch whose first query is `first`: the pattern's search
+/// space of its search (`PhiSearch::search_space`, the footers' value, `phi_footers`) and the first
+/// query's length (0 for a context that is not valid, as `context0_searched` gives it); `None`
+/// where nothing is searched (`no_statistics`).
+pub(super) fn request_searched(
+    phi: &PhiCall<'_>,
+    contexts: &[QueryContext],
+    query_valid: &[bool],
+    first: usize,
+) -> Option<crate::report::archive::SearchedContext0> {
+    let search = phi.search_of(phi.batch_at(first)?)?;
+    Some(crate::report::archive::SearchedContext0 {
+        space: search.search_space,
+        query_length: if query_valid[first] {
+            contexts[first].aa_len as i64
+        } else {
+            0
+        },
+    })
+}
+
+/// The footers of PHI-BLAST's outfmt 0 report: each searched query's ungapped and gapped Karlin
+/// blocks are the pattern's (`s_PHIScoreBlkFill`: Lambda, K and H of the table, in both), its
+/// search space the pattern's (`PhiSearch::search_space`, which the search strategy's requests
+/// carry too, `CallRequests::set_searched`), and the Gumbel columns, where the report prints them
+/// (no `-searchsp`), zeros (PHI-BLAST's Gumbel block is not filled). Which footer a batch's report
+/// writes is `PhiCall::footer`'s (without the table's Karlin block, the -1 blocks of a query that
+/// is not searched; a first query without letters has no Karlin block).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:504-506
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
@@ -508,12 +781,6 @@ pub(super) fn phi_footers(
     queries: &mut [crate::report::BlastpPairwiseQuery],
     report: &mut crate::report::BlastpPairwiseReport,
 ) {
-    if phi.no_statistics.is_some() {
-        for query in queries.iter_mut() {
-            query.batch_skipped = true;
-        }
-        return;
-    }
     let karlin =
         |search: &PhiSearch<'_>, base: crate::stats::KarlinParams| crate::stats::KarlinParams {
             lambda: search.karlin.lambda,
@@ -522,10 +789,12 @@ pub(super) fn phi_footers(
             ..base
         };
     for (query, search) in queries.iter_mut().zip(&phi.searches) {
-        query.ungapped_karlin = karlin(search, query.ungapped_karlin);
-        query.effective_search_space = search.search_space;
+        if let Some(search) = search {
+            query.ungapped_karlin = karlin(search, query.ungapped_karlin);
+            query.effective_search_space = search.search_space;
+        }
     }
-    if let Some(search) = phi.searches.first() {
+    if let Some(search) = phi.searches.iter().flatten().next() {
         report.gapped_karlin = karlin(search, report.gapped_karlin);
     }
     report.gumbel = report.gumbel.map(|gumbel| crate::stats::BlastGumbelBlk {
@@ -537,3 +806,7 @@ pub(super) fn phi_footers(
         ..gumbel
     });
 }
+
+#[cfg(test)]
+#[path = "phi_hooks_tests.rs"]
+mod tests;

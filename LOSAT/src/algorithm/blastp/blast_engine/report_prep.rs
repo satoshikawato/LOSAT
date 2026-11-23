@@ -1211,6 +1211,9 @@ pub(super) struct ReportSetup<'a> {
     /// formatter's cut (`rps_hooks::RpsSearched::unlisted`), which outfmt 7's count and the
     /// prefetch's limit still count; empty otherwise.
     pub(super) unlisted: &'a [usize],
+    /// psiblast `-phi_pattern`: the call's PHI-BLAST searches, whose reports show some queries'
+    /// letters as their batch's first query's (`ShownQueries::of`).
+    pub(super) phi: Option<&'a super::phi_hooks::PhiCall<'a>>,
 }
 
 /// The residues that the reports read of a database's listed subjects, read from the database
@@ -1267,7 +1270,7 @@ pub(super) fn read_shown_residues(
         };
         // The query test of `recount_shown_identities`.
         let query_recounted: Vec<bool> = if residues == database::XShownResidues::WithO {
-            let queries = ShownQueries::of(query_records, args);
+            let queries = ShownQueries::of(query_records, args, setup.phi);
             (0..query_records.len())
                 .map(|q_idx| queries.letters(q_idx).is_some_and(ShownLetters::recounted))
                 .collect()
@@ -1642,7 +1645,7 @@ pub(super) fn report_values(
     let mut engine_counts = EngineCounts::default();
     recount_shown_identities(
         hit_lists,
-        ShownQueries::of(query_records, args),
+        ShownQueries::of(query_records, args, setup.phi),
         shown_subjects,
         args.scoring.matrix,
         // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the

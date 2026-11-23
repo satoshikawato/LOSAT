@@ -1966,28 +1966,12 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         program,
     )?;
     // psiblast `-phi_pattern` (item PS8a): LOSAT's refusals of a pattern whose compilation
-    // NCBI's code does not define (`phi_search::pattern::PhiError::Refusal`), and of the rounds
-    // after a PHI-BLAST round (a later item, PS8b). Where NCBI's table has no Karlin block for the
-    // matrix and gap costs, nothing is searched and round 1 is the run's last, whatever
-    // `-num_iterations` and `-sum_stats` say (`phi_hooks::phi_karlin`; probes `k.pam.it3.0`,
-    // `k.pam.ss3.0`).
-    if let Some(phi) = args.phi.as_deref() {
-        if let Err(crate::algorithm::phi_search::pattern::PhiError::Refusal(message)) = phi {
-            bail!("{message}");
-        }
-        let searched = phi_hooks::phi_karlin(args).is_ok();
-        if let Some(rounds) = args.psi_rounds.as_deref().filter(|_| searched) {
-            bail!(
-                "-phi_pattern with -num_iterations {} is not supported by LOSAT's {program} yet",
-                rounds.num_iterations
-            );
-        }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
-        // NCBI links PHI-BLAST's preliminary HSPs with the pattern's Karlin block and reaps them by
-        // the linked e-values (probe `op.sumstats.6`), which LOSAT does not port yet.
-        if args.sum_stats && searched {
-            bail!("-phi_pattern with -sum_stats true is not supported by LOSAT's {program} yet");
-        }
+    // NCBI's code does not define (`phi_search::pattern::PhiError::Refusal`). The limits of the
+    // search come after NCBI's errors of its setup (`phi_hooks::phi_limits`).
+    if let Some(Err(crate::algorithm::phi_search::pattern::PhiError::Refusal(message))) =
+        args.phi.as_deref()
+    {
+        bail!("{message}");
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
@@ -3191,37 +3175,68 @@ fn row_start(hit: &Hit, side: RowSide) -> usize {
 }
 
 // No NCBI counterpart: how LOSAT's reports reach the queries' letters.
-/// The queries whose letters the reports read, by query index: their records, and the letters of
-/// a PSSM query's Bioseq where they are not its record's (`bioseq`, `PsiSearch::bioseq_letters`;
-/// a run of such a query has no other query).
+/// The queries whose letters the reports read, by query index: their records, the letters of a
+/// PSSM query's Bioseq where they are not its record's (`bioseq`, `PsiSearch::bioseq_letters`; a
+/// run of such a query has no other query), and PHI-BLAST's letters of a query whose results NCBI
+/// shows with the Bioseq of its batch's first query, which has none (`phi_shown`,
+/// `phi_hooks::PhiCall::shown_gaps`; empty without a pattern).
 #[derive(Clone, Copy)]
 struct ShownQueries<'a> {
     records: &'a [FastaRecord],
     bioseq: Option<&'a [u8]>,
+    phi_shown: &'a [Option<Box<[u8]>>],
 }
 
 impl<'a> ShownQueries<'a> {
-    /// The queries `records` of the run `args`.
-    fn of(records: &'a [FastaRecord], args: &'a ResolvedBlastpArgs) -> Self {
+    /// The queries `records` of the run `args` and of its PHI-BLAST call `phi`.
+    fn of(
+        records: &'a [FastaRecord],
+        args: &'a ResolvedBlastpArgs,
+        phi: Option<&'a phi_hooks::PhiCall<'_>>,
+    ) -> Self {
         let bioseq = args
             .psi_search
             .as_deref()
             .and_then(|psi| psi.bioseq_letters.as_deref());
-        Self { records, bioseq }
+        let phi_shown = phi.map_or(&[][..], |phi| &phi.shown_gaps[..]);
+        Self {
+            records,
+            bioseq,
+            phi_shown,
+        }
     }
 
-    /// The record letters of the query `q_idx` (none past the queries).
+    /// PHI-BLAST's letters of the query `q_idx` (`phi_shown`).
+    fn phi_letters(self, q_idx: usize) -> Option<&'a [u8]> {
+        self.phi_shown.get(q_idx)?.as_deref()
+    }
+
+    /// The record letters of the query `q_idx` (none past the queries), PHI-BLAST's where it has
+    /// them (`phi_letters`).
     fn record(self, q_idx: usize) -> &'a [u8] {
+        if let Some(letters) = self.phi_letters(q_idx) {
+            return letters;
+        }
         self.records
             .get(q_idx)
             .map_or(&[][..], |record| record.seq())
     }
 
-    /// The letters of the query `q_idx` as the reports read them (`ShownLetters::query`).
+    /// The letters of the query `q_idx` as the reports read them (`ShownLetters::query`), shown as
+    /// a Bioseq's where PHI-BLAST has them (`phi_letters`).
     fn letters(self, q_idx: usize) -> Option<ShownLetters<'a>> {
+        if let Some(letters) = self.phi_letters(q_idx) {
+            return Some(ShownLetters::Bioseq(letters));
+        }
         self.records
             .get(q_idx)
             .map(|record| ShownLetters::query(record.seq(), self.bioseq))
+    }
+
+    /// `letters`, past the queries `ShownLetters::query` of no letters.
+    fn shown(self, q_idx: usize) -> ShownLetters<'a> {
+        self.letters(q_idx)
+            .unwrap_or(ShownLetters::query(&[], self.bioseq))
     }
 }
 
@@ -3544,7 +3559,7 @@ fn build_pairwise_hits(
             (None, None)
         };
         let query_record = queries.record(q_idx);
-        let query_letters = ShownLetters::query(query_record, queries.bioseq);
+        let query_letters = queries.shown(q_idx);
         let query_seq = restore_displayed_o(query_seq, query_letters, &hit, RowSide::Query);
         let subject_seq = restore_displayed_o(
             subject_seq,
@@ -4380,6 +4395,11 @@ pub fn run(
             ))
         })
         .transpose()?;
+    // psiblast `-phi_pattern`: what psiblast sets in the options handle after each batch
+    // (`phi_hooks::note_handle_sets`).
+    if args.phi.is_some() {
+        phi_hooks::note_handle_sets(&options)?;
+    }
     // LOSAT's thread capability is checked before any input or output, as for BLASTN.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -5484,6 +5504,32 @@ impl<'a> BlastpSubjectSource<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+    /// A subject longer than `MAX_DBSEQ_LEN`, which NCBI searches in overlapping parts: the first
+    /// such record of a subject set, or a database's longest sequence, described as the refusals
+    /// name it (`too_long_subject_refusal`, `too_long_phi_subject_refusal`) with its length.
+    fn longest_split(self) -> Option<(String, usize)> {
+        match self {
+            Self::Fasta(records) => records
+                .iter()
+                .enumerate()
+                .find(|(_, record)| {
+                    record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN
+                })
+                .map(|(index, record)| {
+                    (
+                        format!("subject sequence {}", index + 1),
+                        record.sequence.len(),
+                    )
+                }),
+            Self::Database(database) => {
+                let longest = database.seqdb().max_length() as usize;
+                (longest > crate::core::subject_split::MAX_DBSEQ_LEN)
+                    .then(|| ("a database sequence".to_string(), longest))
+            }
+        }
+    }
+
     /// The number of sequences and of letters that the `Database:` lines of the reports
     /// show: the real totals, also with `-dbsize`, as NCBI's `Int8` (`PairwiseDatabase`).
     fn shown_totals(self) -> (i64, i64) {
@@ -6228,6 +6274,8 @@ fn search(
                 &query_input,
                 reading,
                 query_scopes,
+                // PHI-BLAST's one round (`phi_hooks::PhiBatch`).
+                args.phi.is_some() && args.psi_rounds.is_none(),
             ),
         ),
     };
@@ -6269,8 +6317,10 @@ fn search(
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
-    // one search per round per query (`psi_round`).
-    if let Some(plan) = args.psi_rounds.clone() {
+    // one search per round per query (`psi_round`). PHI-BLAST's round 1 is this call's search:
+    // LOSAT refuses the rounds after it where NCBI's table has a Karlin block, and without one it
+    // is the run's last (`phi_hooks::phi_limits`).
+    if let Some(plan) = args.psi_rounds.clone().filter(|_| args.phi.is_none()) {
         return psi_round::search_rounds(
             &args,
             &plan,
@@ -7964,9 +8014,10 @@ fn preliminary_search_error(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:515-560
 /// psiblast `-phi_pattern` (item PS8a): NCBI's engine error of query `query`'s PHI-BLAST setup
-/// (`phi_hooks::PhiStart::EngineError`). psiblast searches one query per batch: the first searched
-/// batch's error follows the prolog (`preliminary_search_error`); a later query's follows the
-/// reports of the queries before it, without the epilog (`reports_then_engine_error`).
+/// (`phi_hooks::PhiStart::EngineError`). psiblast searches one query with letters per batch, and
+/// PHI-BLAST searches every batch (`phi_hooks::phi_lookup`): the first batch's error follows the
+/// prolog (`preliminary_search_error`); a later batch's follows the reports of the batches before
+/// it, without the epilog (`reports_then_engine_error`).
 #[allow(clippy::too_many_arguments)]
 fn phi_setup_error(
     args: &ResolvedBlastpArgs,
@@ -7988,7 +8039,7 @@ fn phi_setup_error(
         .expect("every query is in a batch");
     let first_searched = query_batches
         .iter()
-        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
+        .find(|batch| !batch.searched.is_empty());
     if first_searched.is_none_or(|first| first.searched.start == batch.searched.start) {
         return preliminary_search_error(
             args,
@@ -8155,16 +8206,23 @@ fn rps_request_spaces(
 /// The searched space of each batch of `call` (`CallRequests::set_searched`): its context 0
 /// (`context0_searched`) where NCBI searches the batch (not `query_batch_skipped`), with
 /// rpsblast's the space its last search unit leaves in the options handle
-/// (`rps_hooks::request_space`).
+/// (`rps_hooks::request_space`), and PHI-BLAST's the pattern's (`phi_hooks::request_searched`).
 fn set_call_searched(
     call: &CallRequests<'_>,
     args: &ResolvedBlastpArgs,
-    rps_units: Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+    (rps_units, phi): (
+        Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+        Option<&phi_hooks::PhiCall<'_>>,
+    ),
     contexts: &[QueryContext],
     gapped_params: &KarlinParams,
     (query_valid, query_batch_skipped): (&[bool], &[bool]),
     (exact_search_spaces, search_spaces): (&[Option<i64>], &[SearchSpace]),
 ) -> Result<()> {
+    if let Some(phi) = phi {
+        call.set_searched(|first| phi_hooks::request_searched(phi, contexts, query_valid, first));
+        return Ok(());
+    }
     let rps_request_spaces = rps_request_spaces(
         call.batch_firsts(),
         rps_units,
@@ -9548,34 +9606,13 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    // PHI-BLAST's search of such a subject (`-phi_pattern`) is refused too: NCBI's parts keep
-    // the occurrences and the alignments that each part holds (an alignment past a part's end
-    // stops there unless the next part holds its occurrence), which LOSAT does not port yet.
-    if (args.ungapped || args.phi.is_some()) && query_valid.iter().any(|valid| *valid) {
-        let longest = match subject_source {
-            BlastpSubjectSource::Fasta(records) => records
-                .iter()
-                .enumerate()
-                .find(|(_, record)| {
-                    record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN
-                })
-                .map(|(index, record)| {
-                    (
-                        format!("subject sequence {}", index + 1),
-                        record.sequence.len(),
-                    )
-                }),
-            BlastpSubjectSource::Database(database) => {
-                let longest = database.seqdb().max_length() as usize;
-                (longest > crate::core::subject_split::MAX_DBSEQ_LEN)
-                    .then(|| ("a database sequence".to_string(), longest))
-            }
-        };
-        if let Some((what, length)) = longest {
-            return Some(UngappedSetupFailure::Refusal(match args.phi {
-                Some(_) => too_long_phi_subject_refusal(&what, length),
-                None => too_long_subject_refusal(&what, length),
-            }));
+    // PHI-BLAST refuses such a subject too, after NCBI's errors of its setup
+    // (`phi_hooks::phi_limits`).
+    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+        if let Some((what, length)) = subject_source.longest_split() {
+            return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
+                &what, length,
+            )));
         }
     }
     None
@@ -9851,6 +9888,8 @@ fn run_call(
     let phi_call = phi_hooks::phi_call(
         &args,
         query_frames,
+        &query_batches,
+        phi_hooks::PhiLimits::new(&requested_formats, subject_source),
         eff_db_length,
         i64::from(num_subjects),
         |query, text| {
@@ -10111,7 +10150,7 @@ fn run_call(
         set_call_searched(
             call,
             &args,
-            rps_units,
+            (rps_units, phi_call.as_ref()),
             &contexts,
             &gapped_params,
             (&query_valid, &query_batch_skipped),
@@ -10465,6 +10504,7 @@ fn run_call(
         subject_label,
         total_db_len,
         unlisted: &rps_unlisted,
+        phi: phi_call.as_ref(),
     };
     report_prep::read_shown_residues(
         &setup,
@@ -10559,7 +10599,7 @@ fn run_call(
                 subjects,
                 args.scoring.matrix,
                 true,
-                ShownQueries::of(query_records, &args),
+                ShownQueries::of(query_records, &args, phi_call.as_ref()),
                 shown_subjects,
                 x_rows_pool,
             )?;
@@ -10671,15 +10711,11 @@ fn run_call(
     let phi_result_warnings = phi_call
         .as_ref()
         .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
-    let phi_reports =
-        phi_call
-            .as_ref()
-            .zip(phi_result_warnings.as_deref())
-            .map(|(call, result_warnings)| report_write::PhiPairwise {
-                call,
-                rows_of_lists: &rows_of_lists,
-                result_warnings,
-            });
+    let phi_reports = report_write::PhiPairwise::of(
+        phi_call.as_ref(),
+        &rows_of_lists,
+        phi_result_warnings.as_deref(),
+    );
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -11242,8 +11278,10 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-250
 /// The refusal of PHI-BLAST's search (`-phi_pattern`) of a subject longer than `MAX_DBSEQ_LEN`
-/// (`ungapped_setup_failure`). NCBI's output is the same at 1 and 8 threads (probe
-/// `PS/ncbi8/long`, 11-23); the parts and their merge are a later item's port.
+/// (`phi_hooks::phi_limits`): NCBI's parts keep the occurrences and the alignments that each part
+/// holds (an alignment past a part's end stops there unless the next part holds its occurrence),
+/// which LOSAT does not port yet. NCBI's output is the same at 1 and 8 threads (probe
+/// `PS/ncbi8/long`, 11-23); the parts and their merge are item PS8a-2's port.
 fn too_long_phi_subject_refusal(what: &str, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "{what} has {length} residues; -phi_pattern with a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's PSIBLAST yet",

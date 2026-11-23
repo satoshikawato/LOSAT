@@ -131,6 +131,7 @@ pub(super) fn note_handle_sets(
     handle.set_search_sets(
         before_batches,
         crate::algorithm::rps_search::volumes::search_sets(db_length, costs),
+        Vec::new(),
     )
 }
 

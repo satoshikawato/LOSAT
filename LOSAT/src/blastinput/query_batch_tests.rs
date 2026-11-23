@@ -453,7 +453,14 @@ fn a_psiblast_batch_holds_one_query() {
     };
     let read = |records: &[FastaRecord]| {
         let input = QueryInput::whole(records);
-        super::read_psiblast_query_batches(records, records, &input, QueryReading::Records, None)
+        super::read_psiblast_query_batches(
+            records,
+            records,
+            &input,
+            QueryReading::Records,
+            None,
+            false,
+        )
     };
     let whole = records(&[4, 7, 3]);
     let batches = read(&whole);
@@ -496,6 +503,50 @@ fn a_psiblast_batch_holds_one_query() {
     );
     assert!(blastp.stop.is_none());
     assert_eq!(blastp.starts, vec![(0, 0), (1, 1)]);
+}
+
+// psiblast `-phi_pattern` with one round (CLocalBlast): a record without letters joins the next
+// query's batch, and a last record without letters stops the run with blastp's error (NCBI 2.17.0
+// `PS/tmp/rev8a/ncbi3/er.first.0`, rc 0, and `er.last.0`, `Sequence contains no data`, rc 3).
+#[test]
+fn a_phi_batch_holds_the_queries_without_letters_before_the_next() {
+    use super::QueryReading;
+    use crate::blastinput::fasta_reader::FastaRecord;
+    use crate::blastinput::seq_range::QueryInput;
+    let records = |lengths: &[usize]| -> Vec<FastaRecord> {
+        lengths
+            .iter()
+            .enumerate()
+            .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
+            .collect()
+    };
+    let read = |records: &[FastaRecord]| {
+        let input = QueryInput::whole(records);
+        super::read_psiblast_query_batches(
+            records,
+            records,
+            &input,
+            QueryReading::Records,
+            None,
+            true,
+        )
+    };
+    let joined = records(&[4, 0, 0, 3]);
+    let batches = read(&joined);
+    assert!(batches.stop.is_none());
+    assert_eq!(batches.starts, vec![(0, 0), (1, 1)]);
+    let last = records(&[4, 0]);
+    let batches = read(&last);
+    assert_eq!(batches.starts, vec![(0, 0)]);
+    let error = batches.stop.expect("a last query without letters").1;
+    let native = error
+        .downcast_ref::<crate::cli::NativeError>()
+        .expect("an NCBI error");
+    assert_eq!(native.exit, 3);
+    assert_eq!(
+        native.message,
+        b"LOSAT engine error: Warning: Sequence contains no data \n"
+    );
 }
 
 #[test]

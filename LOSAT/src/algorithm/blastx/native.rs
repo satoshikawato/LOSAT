@@ -671,7 +671,7 @@ fn run_inner(
         // archive and of the search strategy hold (`OptionsHandle::pass`): the search for the
         // database knows its volumes' costs and its units' database length.
         if let Some(handle) = handle {
-            handle.set_search_sets(Vec::new(), search.handle_sets())?;
+            handle.set_search_sets(Vec::new(), search.handle_sets(), Vec::new())?;
         }
         options.rpstblastn = Some(search);
     }

@@ -13,8 +13,9 @@
 use super::super::{
     blastp_family_program, cpp_default_double, write_blast_database_header,
     write_blastp_database_header_spacing, write_blastp_query_header, write_description_table,
-    write_no_hits_found, write_prolog, write_spaces, BlastpPairwiseQuery, BlastpPairwiseReport,
-    PairwiseConfig, PairwiseDatabase, PairwiseHit, RowDecoration,
+    write_no_hits_found, write_prolog, write_spaces, write_tblastn_unsearched_query_footer_spacing,
+    BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
+    RowDecoration,
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -30,6 +31,23 @@ pub(crate) struct PhiQueryInfo<'a> {
     pub(crate) text: &'a [u8],
     pub(crate) probability: f64,
     pub(crate) occurrences: Vec<(u32, u32)>,
+}
+
+/// The footer of a PHI-BLAST report (`x_PrintOneQueryFooter` of its query's context).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhiFooter {
+    /// The query is searched: the pattern's Karlin blocks and search space, which the caller has
+    /// put in the query's footer values (`phi_hooks::phi_footers`).
+    Searched,
+    /// The report's query has no letters (its batch's query with letters is searched): no Karlin
+    /// block, a search space of 0.
+    NoLetters,
+    /// NCBI's table has no Karlin block for the matrix and gap costs: -1 in both blocks, no Gumbel
+    /// columns and a search space of 0, also with `-searchsp`, as for a query that is not
+    /// searched.
+    NoStatistics,
 }
 
 /// The `pattern` row of an occurrence's alignments: `*` over the alignment columns of the query's
@@ -87,17 +105,20 @@ pub(crate) fn write_phi_prolog(
 }
 
 /// The outfmt 0 report of query `q_idx` of PHI-BLAST's round: `occurrence_hits[i]` are the rows of
-/// the HSPs of occurrence `i` (its result set), in its result's order, after the query's messages
-/// `result_warning` (`query_warnings::phi_result_warning`). No prolog, no epilog. `info` is `None`
-/// where NCBI's table had no Karlin block and nothing was searched: no pattern block, no hits.
+/// the HSPs of occurrence `i` (its result set), in its result's order, after the warnings of the
+/// queries `batch` (the batch's reading, from `q_idx` on) and the messages `result_warning` of the
+/// results (`query_warnings::phi_result_warning`), and the footer `footer`. No prolog, no epilog.
+/// `info` is `None` where NCBI's table had no Karlin block and nothing was searched: no pattern
+/// block, no hits.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2047
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2068-2199
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_phi_round_report(
     occurrence_hits: &[Vec<PairwiseHit>],
-    q_idx: usize,
+    batch: std::ops::Range<usize>,
     result_warning: &[u8],
     info: Option<&PhiQueryInfo<'_>>,
+    footer: PhiFooter,
     writer: &mut dyn Write,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
@@ -113,8 +134,11 @@ pub(crate) fn write_phi_round_report(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
+    let q_idx = batch.start;
     if let Some(warnings) = warnings.as_deref_mut() {
-        warnings.before_query(q_idx, writer)?;
+        for query in batch {
+            warnings.before_query(query, writer)?;
+        }
     }
     writer.write_all(result_warning)?;
     let sections = RoundSections {
@@ -166,7 +190,7 @@ pub(crate) fn write_phi_round_report(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2108-2115
     if groups.first().is_none_or(Option::is_none) {
         write_no_hits_found(writer)?;
-        return sections.foot(writer, q_idx).and_then(|()| writer.flush());
+        return write_phi_footer(writer, &sections, q_idx, footer).and_then(|()| writer.flush());
     }
     // NCBI loads each subject that the query's batch did not prefetch at its description line,
     // or one the tables do not show at its alignment's heading (`QueryWarnings::subject_read`).
@@ -227,8 +251,23 @@ pub(crate) fn write_phi_round_report(
         }
         writeln!(writer)?;
     }
-    sections.foot(writer, q_idx)?;
+    write_phi_footer(writer, &sections, q_idx, footer)?;
     writer.flush()
+}
+
+/// The footer `footer` of query `q_idx`'s report (`PhiFooter`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+fn write_phi_footer<W: Write>(
+    writer: &mut W,
+    sections: &RoundSections<'_>,
+    q_idx: usize,
+    footer: PhiFooter,
+) -> io::Result<()> {
+    match footer {
+        PhiFooter::Searched => sections.foot(writer, q_idx),
+        PhiFooter::NoLetters => RoundSections::invalid_foot(writer),
+        PhiFooter::NoStatistics => write_tblastn_unsearched_query_footer_spacing(writer, false),
+    }
 }
 
 /// `PrintPhiInfo`: the number of occurrences, the pattern, their 1-based positions and the

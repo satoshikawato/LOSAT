@@ -203,7 +203,8 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .is_ok());
     }
     // With `-phi_pattern` (item PS8a): PHI-BLAST's reports run, formats 8, 9 and 12 go on to
-    // NCBI's engine error, and BLAST XML and the archive are refused with the pattern.
+    // NCBI's engine error, and BLAST XML and the archive go on to the search's setup, whose NCBI
+    // errors come before their refusal (`phi_hooks::phi_limits`).
     let with_pattern = |format: &str| {
         parse(&["-phi_pattern", "p.pat", "-outfmt", format])
             .unwrap()
@@ -211,16 +212,19 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .map(|_| ())
             .map_err(|error| error.to_string())
     };
-    for format in ["0", "6", "7", "10", "20 qseqid sseqid", "8", "9", "12"] {
+    for format in [
+        "0",
+        "6",
+        "7",
+        "10",
+        "20 qseqid sseqid",
+        "8",
+        "9",
+        "12",
+        "5",
+        "11",
+    ] {
         assert_eq!(with_pattern(format), Ok(()), "outfmt {format}");
-    }
-    for format in ["5", "11"] {
-        assert_eq!(
-            with_pattern(format),
-            Err(format!(
-                "-phi_pattern with output format {format} is not supported by LOSAT's PSIBLAST yet"
-            ))
-        );
     }
     assert_eq!(
         with_pattern("3"),

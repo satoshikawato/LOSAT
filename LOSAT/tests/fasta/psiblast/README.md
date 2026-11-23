@@ -91,3 +91,14 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   so round 2 has no Karlin-Altschul parameters (NCBI 2.17.0 psiblast crashes there, exit 139).
 - `q4c_tk_pol.faa` (line RG, series Q, Q4c): `tk.faa` then `pol.faa`; with `CHUNK_SIZE=1000` NCBI splits only the second
   query (rows `db.ps.it.split.two.*`).
+- `ps8_*.faa` (line PS, PS8a fix round 1; the `db.phi.*` rows of `psiblast.phi.tsv`, with the patterns
+  `tests/fixtures/phi/c2c.pat` `C-x(2)-C`, `x3.pat` `x(3)` and `brknum.pat` `[C1]-x-C`, a digit in a bracket):
+  `ps8_q3.faa`: YP_009220477.1, YP_009220540.1 and YP_009220504.1 of `tests/fasta/WSSV.faa` (a search strategy of
+  three PHI queries); `ps8_e1_q3.faa`: an empty record `e1`, then `ps8_q3.faa` (psiblast's batch of one query takes
+  the empty record with the next protein); `ps8_emptylast.faa`: YP_009220477.1, then an empty last record
+  (`Sequence contains no data`, exit 3); `ps8_x10_p30.faa` and `ps8_p30_x10.faa`: 10 `X` and the first 30 letters of
+  `ps8_c2c.faa`, in both orders (an X-only query is searched); `ps8_s_dneq.faa`: a 63-letter subject rich in D, N,
+  E and Q; `ps8_c2c.faa`: YP_009220489.1 of `tests/fasta/WSSV.faa`; `ps8_s_lc.faa`: its letters with the first 60 in
+  lower case (`-lcase_masking` masks a subject's lower case); `ps8_sid_q.faa` and `ps8_sid_s.faa`: a query and a
+  subject set whose first record has the query's Seq-id `gb|ABC12345.1|` (under `-parse_deflines` NCBI shows them as
+  one sequence; LOSAT's rule refuses it).

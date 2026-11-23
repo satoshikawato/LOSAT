@@ -254,9 +254,12 @@ fn the_handle_sets_fold_in_ncbis_order() {
                     value: ParamValue::Str("BLOSUM62".to_string()),
                 },
             ],
+            Vec::new(),
         )
         .unwrap();
-    assert!(handle.set_search_sets(Vec::new(), Vec::new()).is_err());
+    assert!(handle
+        .set_search_sets(Vec::new(), Vec::new(), Vec::new())
+        .is_err());
     let mut carry = HandleCarry::default();
     let names = |carry: &HandleCarry| -> Vec<&'static str> {
         handle
@@ -289,6 +292,56 @@ fn the_handle_sets_fold_in_ncbis_order() {
         ]
     );
     assert_eq!(search_space(&handle.request_sets(&carry)), Some(96_628));
+}
+
+// psiblast `-phi_pattern` (PS8a fix round 1): psiblast resets the composition-based statistics
+// after each batch, which PHI-BLAST's options never set: the reset comes after the batch's search
+// space and stays there (NCBI BLAST+ 2.17.0 `st.multi`: requests 2 and 3 hold
+// `EffectiveSearchSpace`, then `CompositionBasedStats 0`; `st.multi.p250`, a batch NCBI does not
+// search, only the latter).
+#[test]
+fn the_after_batch_sets_follow_the_search_space() {
+    use options::{Param, ParamValue};
+    let handle = OptionsHandle::default();
+    handle
+        .set_search_sets(
+            Vec::new(),
+            Vec::new(),
+            vec![Param {
+                name: "CompositionBasedStats",
+                value: ParamValue::Integer(0),
+            }],
+        )
+        .unwrap();
+    let names = |carry: &HandleCarry| -> Vec<&'static str> {
+        handle
+            .request_sets(carry)
+            .iter()
+            .map(|param| param.name)
+            .collect()
+    };
+    let mut carry = HandleCarry::default();
+    assert!(names(&carry).is_empty());
+    let searched = |space| {
+        Some(writer::SearchedContext0 {
+            space,
+            query_length: 104,
+        })
+    };
+    handle.pass(&mut carry, searched(338_444));
+    assert_eq!(
+        names(&carry),
+        ["EffectiveSearchSpace", "CompositionBasedStats"]
+    );
+    handle.pass(&mut carry, searched(338_000));
+    assert_eq!(
+        names(&carry),
+        ["EffectiveSearchSpace", "CompositionBasedStats"]
+    );
+    assert_eq!(search_space(&handle.request_sets(&carry)), Some(338_000));
+    let mut unsearched = HandleCarry::default();
+    handle.pass(&mut unsearched, None);
+    assert_eq!(names(&unsearched), ["CompositionBasedStats"]);
 }
 
 #[test]

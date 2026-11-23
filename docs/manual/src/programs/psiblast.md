@@ -53,6 +53,8 @@ losat psiblast -query QUERY.faa -db DB -phi_pattern PATTERN.txt
 
 Each place where the pattern occurs in the query is searched on its own, and its E-values come from NCBI's statistics for patterns. With `-outfmt 0`, the report lists these places and the pattern's probability, then, for each place, a table of hits and the alignments, with a `pattern` line that marks the pattern's letters with `*`. Formats 6, 7, 10 and 20 write the rows of each place in turn, and `-outfmt 7` writes a header for each place. A query that does not contain the pattern stops the run with NCBI's message and exit status 3, as in NCBI BLAST+.
 
+A query record without letters is searched with the next query, as in NCBI BLAST+: the report is headed by the empty record, with its message, and its alignments show `-` for the query's letters. A query of `X` alone is searched too. A last record without letters stops the run with NCBI's message `Sequence contains no data` and exit status 3.
+
 A pattern search runs one round (`-num_iterations 1`, the default). With a matrix and gap costs for which NCBI BLAST+ has no pattern statistics (`-matrix PAM250`, or `-gapopen 10 -gapextend 2` with BLOSUM62), LOSAT writes NCBI's message for each query and reports no hits, as NCBI BLAST+ does.
 
 ## Common options
@@ -105,7 +107,7 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 Not yet supported:
 
 - `-outfmt` 1 to 4, 12 to 16 and 18. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
-- With `-phi_pattern`: more than one round, `-outfmt` other than 0, 6, 7, 10 and 20 (8, 9 and 12 get NCBI's own error), `-sum_stats true` and a subject longer than 5,000,000 residues. The library and pylosat do not take `phi_pattern`.
+- With `-phi_pattern`: more than one round, `-outfmt` other than 0, 6, 7, 10 and 20 (8, 9 and 12 get NCBI's own error where an alignment is found), `-sum_stats true` and a subject longer than 5,000,000 residues. NCBI's own errors come before these refusals. The library and pylosat do not take `phi_pattern`.
 
 Also refused:
 
@@ -115,7 +117,7 @@ Also refused:
 - With `-in_msa`, where NCBI BLAST+ crashes: a query sequence of X or O alone, and `-matrix IDENTITY`.
 - With `-in_msa`, where NCBI BLAST+ crashes or reads memory that the file does not give: a PHYLIP header with 0 sequences, an empty command (a lone `;`) in a NEXUS file, a FASTA alignment whose rows have different lengths where the shorter row is read past its end, a `secondary-accession` range that runs backwards or has a number of more than 18 digits. See [Refusals](../refusals.md).
 - A `-subject` file whose sequences all have no letters.
-- A `-phi_pattern` pattern that NCBI BLAST+ cannot read without going past its memory: more than 330 positions, an unterminated `(`, `[`, `{` or `x(`, `x(n,m)` without two numbers, a count outside 32-bit integers, a byte that is not ASCII (outside `[]`), and, in a pattern that needs more than two machine words, two variable wildcards in a row or more than 100 words. Also a sequence with more than 10,000 hits of such a long pattern. See [Refusals](../refusals.md).
+- A `-phi_pattern` pattern that NCBI BLAST+ cannot read without going past its memory: more than 330 positions, an unterminated `(`, `{` or `x(`, `x(n,m)` without two numbers, a count outside 32-bit integers, a byte that is not ASCII (outside `[]`), and, in a pattern that needs more than two machine words, two variable wildcards in a row or more than 100 words. Also a sequence with more than 10,000 hits of such a long pattern, and an alignment with more hits of it than NCBI's arrays hold. See [Refusals](../refusals.md).
 
 `psiblast` has no `-task` and no `-ungapped`. For the full list, see [What LOSAT refuses](../refusals.md).
 

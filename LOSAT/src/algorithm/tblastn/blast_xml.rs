@@ -75,6 +75,9 @@ pub(super) struct XmlValues {
     /// A list kept no sequence of the database: the messages of the queries of the searched
     /// batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
+    /// `-in_pssm` (PSI-TBLASTN): `BlastOutput_program` and `_version` name `psitblastn`
+    /// (`Blast_ProgramNameFromType` of the PSSM search's program type).
+    pub pssm: bool,
 }
 
 /// The document's texts, made (and refused) before the first byte of any format is written:
@@ -123,30 +126,48 @@ pub(super) struct PreparedXml {
     query_bioseq: Option<std::sync::Arc<[u8]>>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
-/// The `Statistics` of every query, with the gapped Karlin block of the scoring; the unsearched
-/// values for a query without a valid context.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89,101-103
+/// The `Statistics` of every query, with the gapped Karlin block of the scoring (a PSSM query's
+/// `kbp_gap_psi`, `PsiSearch::gapped_karlin`, as its pairwise report; an ungapped search: the
+/// query's own ungapped block, `ungapped_karlin`); the unsearched values for a query without a
+/// valid context.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:241-248
+/// The XML's Karlin-Altschul values are those of the query's gapped block, or of its ungapped
+/// block when it has no gapped one. An ungapped search makes no gapped block, so its statistics
+/// are the ungapped block's (XML2's are read the same way, data4xml2format.cpp:258-273).
 pub(super) fn query_stats(
     parameters: &LocalSubjectParameters,
     query_validity: &[bool],
     scoring: LocalStageDScoring,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
 ) -> Vec<XmlStats> {
-    let gapped = lookup_protein_params(&ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
+    let gapped = scoring.gapped.then(|| {
+        let matrix = lookup_protein_params(&ProteinScoringSpec {
+            matrix: scoring.matrix,
+            gap_open: scoring.gap_open,
+            gap_extend: scoring.gap_extend,
+        });
+        match pssm {
+            Some(psi) => psi.gapped_karlin(&matrix),
+            None => matrix,
+        }
     });
     query_validity
         .iter()
         .enumerate()
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
-            Some(length) if valid => XmlStats {
-                hsp_len: length.length_adjustment as i32,
-                eff_space: length.eff_searchsp,
-                kappa: gapped.k,
-                lambda: gapped.lambda,
-                entropy: gapped.h,
-            },
+            Some(length) if valid => {
+                let karlin = gapped.unwrap_or(ungapped_karlin[q_idx]);
+                XmlStats {
+                    hsp_len: length.length_adjustment as i32,
+                    eff_space: length.eff_searchsp,
+                    kappa: karlin.k,
+                    lambda: karlin.lambda,
+                    entropy: karlin.h,
+                }
+            }
             _ => XmlStats::NONE,
         })
         .collect()
@@ -161,6 +182,7 @@ pub(super) fn prepare(
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     parameters: &LocalSubjectParameters,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
     query_validity: &[bool],
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
@@ -170,7 +192,7 @@ pub(super) fn prepare(
     xml2: bool,
     only_xml2: bool,
     taxa: XmlTaxa,
-    query_bioseq: Option<std::sync::Arc<[u8]>>,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
 ) -> Result<PreparedXml> {
     ensure!(
         query_validity.len() == query_records.len()
@@ -180,7 +202,7 @@ pub(super) fn prepare(
     // A matrix name that the formatting table does not know stops a run with queries before its
     // reports (`stage_e_report::xml_matrix_failure`, `render`): here only a run without a query.
     let positives = FormattingMatrix::new(matrix_name);
-    let stats = query_stats(parameters, query_validity, scoring);
+    let stats = query_stats(parameters, query_validity, scoring, ungapped_karlin, pssm);
     let has_hits = |hitlist: &KappaResultHitList| {
         hitlist
             .lists()
@@ -328,7 +350,7 @@ pub(super) fn prepare(
         all_masks: xml2,
         xml2: xml2_run,
         taxa_notes: taxa.notes,
-        query_bioseq,
+        query_bioseq: pssm.and_then(|psi| psi.bioseq_letters.clone()),
     })
 }
 
@@ -360,6 +382,29 @@ fn query_masks(
     }
 }
 
+/// The masks of a query's outfmt 0 rows and query-anchored sections, half-open in the searched
+/// letters: NCBI's list of the query (`query_masks` of its SEG and lower-case intervals,
+/// `tblastn_report_mask_intervals`, without an offset), in which a SEG run and a lower-case run
+/// that touch stay two masks (two `<font>` spans under `-html`, `x_OutputSeq`) and a mask of the
+/// whole searched interval is not listed (the formatter gets `TMaskedQueryRegions`).
+pub(super) fn row_masks(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+) -> Vec<(usize, usize)> {
+    let mut masks = Vec::new();
+    query_masks(
+        &tblastn_report_mask_intervals(query, seg, mask_lowercase),
+        query.len(),
+        0,
+        &mut masks,
+    );
+    masks
+        .iter()
+        .map(|mask| (mask.from as usize, mask.to as usize + 1))
+        .collect()
+}
+
 impl PreparedXml {
     /// What the XML2 and JSON documents need of the run beyond outfmt 5's (`Xml2Writer::new`).
     pub(super) fn xml2_run(&self) -> Xml2Run {
@@ -384,9 +429,14 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:682-684
+        // The program's name, and its upper case with the version (outfmt 7's program line).
+        let program_type = super::in_pssm::program_type(self.values.pssm);
+        let program = program_type.map_or("tblastn", crate::report::record::ProgramType::name);
+        let version = super::tabular::program_version(self.values.pssm);
         let run = self.positives.as_ref().map(|positives| XmlRun {
-            program: "tblastn",
-            version: concat!("TBLASTN ", crate::wording::report_version!()),
+            program,
+            version,
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
             matrix: Some(&self.matrix_name),
@@ -454,7 +504,9 @@ impl PreparedXml {
             // A query of a batch NCBI did not search has no masks (its result is made
             // without the search, probe `BATCH_SIZE=10` with `-lcase_masking`); XML2 and JSON
             // list the masks of every other query, also one without hits.
+            // A PSSM query's results have no masks (`report::record::carries_query_masks`).
             if self.searched[q_idx]
+                && crate::report::record::carries_query_masks(program_type)
                 && (self.all_masks
                     || hitlist
                         .lists()

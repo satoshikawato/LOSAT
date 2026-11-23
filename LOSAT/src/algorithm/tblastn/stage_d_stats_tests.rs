@@ -41,6 +41,7 @@ fn computed_code1_control_parameters_match_stage_c_inputs() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: (subject_length / 3) as i32,
@@ -100,6 +101,7 @@ fn each_karlin_block_is_read_where_ncbi_reads_it() {
         scale_factor: 1.0,
         gumbel: None,
         eff_searchsp_override: None,
+        ungapped: None,
     };
     let call = LocalParameterCall::Initial {
         min_subject_length: 1000,
@@ -171,8 +173,8 @@ fn each_karlin_block_is_read_where_ncbi_reads_it() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1788-1802;
 // c++/src/algo/blast/core/blast_hits.c:1811-1926:
-// Blast_HSPListGetEvalues receives translated subject_length/3 and
-// divides each Spouge E-value by BLAST_GapDecayDivisor(rate, 1).
+// `Blast_HSPListGetEvalues` receives the translated subject length (divided by 3) and
+// divides each Spouge E-value by the single-HSP divisor from `BLAST_GapDecayDivisor`.
 #[test]
 fn preliminary_individual_evalues_match_ncbi_double_bits() {
     let trace = include_str!(concat!(
@@ -266,6 +268,7 @@ fn computed_code1_default_link_parameters_match_stage_d_call() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: (subject_length / 3) as i32,
@@ -372,4 +375,22 @@ fn effective_lengths_read_a_database_of_2_to_the_32_letters_or_more() {
             "{total}"
         );
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
+// The score of an e-value E in a search space N is ceil(ln(K * N / E) / Lambda).
+// The ungapped search's word cutoff: e-value 1 divided by the gap decay divisor (1 - 0.5) in
+// the space of the shorter of subject and query times the subject (BLOSUM62's ungapped block,
+// Lambda 0.3176, K 0.134): ceil(ln(0.134 * 30000 / 0.5) / 0.3176) = 29, with a query longer
+// than the subject
+// ceil(ln(0.134 * 90000 / 0.5) / 0.3176) = 32, and without the divisor (a decay outside
+// (0, 1)) ceil(ln(0.134 * 30000) / 0.3176) = 27.
+#[test]
+fn ungapped_word_cutoff_takes_the_shorter_length_and_the_decay() {
+    let kbp = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    assert_eq!(ungapped_word_cutoff(100, 300, 0.5, &kbp), 29);
+    assert_eq!(ungapped_word_cutoff(1000, 300, 0.5, &kbp), 32);
+    assert_eq!(ungapped_word_cutoff(100, 300, 0.0, &kbp), 27);
+    // A space below one letter's score keeps NCBI's cutoff of 1.
+    assert_eq!(ungapped_word_cutoff(1, 1, 0.5, &kbp), 1);
 }

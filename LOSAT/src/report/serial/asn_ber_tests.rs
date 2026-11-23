@@ -96,12 +96,37 @@ fn visible_strings_have_short_and_long_lengths() {
         bytes(|enc| enc.visible_str(&string)),
         [&[0x1a, 0x83, 0x01, 0x11, 0x70][..], &string].concat()
     );
-    // Above 0xffffff NCBI writes all 8 bytes (the `sizeof` of `size_t`) of the length.
+    // Above 0xffffff NCBI drops the leading zero bytes of the bytes of a `size_t`
+    // (`WriteLongLength`): four bytes here.
     let string = vec![b'w'; 0x100_0000];
-    assert_eq!(
-        bytes(|enc| enc.visible_str(&string))[..10],
-        [0x1a, 0x88, 0, 0, 0, 0, 0x01, 0, 0, 0]
-    );
+    let written = bytes(|enc| enc.visible_str(&string));
+    assert_eq!(written[..6], [0x1a, 0x84, 0x01, 0, 0, 0]);
+    assert_eq!(written.len(), 6 + string.len());
+}
+
+/// `WriteLongLength`: the fewest bytes that hold the length, at each boundary of 1 to 5 bytes
+/// (NCBI BLAST+ 2.17.0 writes `84 01 00 00 25` for a 0x1000025-letter query's seq-data in a
+/// binary archive, probe K/kb/i8 of line RG).
+#[test]
+fn long_lengths_take_the_fewest_bytes() {
+    use crate::report::serial::asn_ber::write_length;
+    let of = |length: usize| {
+        let mut out = Vec::new();
+        write_length(&mut out, length);
+        out
+    };
+    assert_eq!(of(0x7f), [0x7f]);
+    assert_eq!(of(0x80), [0x81, 0x80]);
+    assert_eq!(of(0xff), [0x81, 0xff]);
+    assert_eq!(of(0x100), [0x82, 0x01, 0x00]);
+    assert_eq!(of(0xffff), [0x82, 0xff, 0xff]);
+    assert_eq!(of(0x1_0000), [0x83, 0x01, 0x00, 0x00]);
+    assert_eq!(of(0xff_ffff), [0x83, 0xff, 0xff, 0xff]);
+    assert_eq!(of(0x100_0000), [0x84, 0x01, 0x00, 0x00, 0x00]);
+    assert_eq!(of(0x100_0025), [0x84, 0x01, 0x00, 0x00, 0x25]);
+    assert_eq!(of(0xffff_ffff), [0x84, 0xff, 0xff, 0xff, 0xff]);
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(of(0x1_0000_0000), [0x85, 0x01, 0x00, 0x00, 0x00, 0x00]);
 }
 
 /// A byte outside 0x20..0x7E is `#` and an error, as in the ASN.1 text encoder (through

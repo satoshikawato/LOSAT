@@ -1,0 +1,128 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= nest_p
+
+Length=1140
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1     MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+
+Query_1  181   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIMQLILSHHLTMAGRVELVTGPMFAG  360
+101      1                                        MQLILSHHLTMAGRVELVTGPMFAG  25
+101      1                                        MQLILSHHLTMAGRVELVTGPMFAG  25
+102      29                              LDVKDFI                             35
+103      129                   ASLEYMLQVLP----IMLIDRPYIGAHIT-AGKCRTLE        161
+
+Query_1  361   KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  540
+101      26    KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  85
+101      26    KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  85
+103      129                                                      ASLEYMLQV  137
+
+Query_1  541   LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  720
+101      86    LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  145
+101      86    LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  145
+102      29     LDVKDFI                                                      35
+103      138   LP----IMLID                                                   144
+
+Query_1  721   KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDDEGQFFTDLVLVNRL  900
+101      146   KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD                 190
+101      146   KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD                 190
+101      97                                                  EGQFFTDLVLVNRL  110
+103      149                                     GAHITAGKCR                  158
+
+Query_1  901   ADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGND  1080
+101      111   ADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGND  170
+
+Query_1  1081  NDNNVICVGGAEMYAAACRD  1140
+101      171   NDNNVICVGGAEMYAAACRD  190
+103      149            GAHITAGKCR   158
+
+For reading frame +2 of query sequence:
+
+Query_1  950  INKCSARSINYY  985
+103      30   IDECNQIVLSEY  41
+
+For reading frame +3 of query sequence:
+
+Query_1  60   PYVCGK  77
+102      126  PYVCFK  131
+
+For reading frame -1 of query sequence:
+
+Query_1  891  DQY*ISEKLALVIPARSRIHLGPSHTDHIIIVIVPEPHRKRGLFRIDLTNHAF*S*FYDA  712
+102      95   EKYEAEGKGKEVVKARALFD                                          114
+103      124                    MHIAPASLEYMLQVL                             138
+
+Query_1  711  VSIG*EFMDR*EHLLVRGTVQGGNHDSFSLVRKTIHKDEISEKLPLVN*NNVYYLGQDRD  532
+102      3                NVSVKKVSQGGD                                      14
+
+Query_1  531  *LFDARDCCATFYYFSRMCHNGARTTAVSGL*RVFYEKAMFVPAVFLLINIFEVRRFACE  352
+101      126                                     SDQQMFSPIHKLL              138
+102      53                                             PAIW-VSDLFMERVKAGK  69
+
+Query_1  351  HWTRDEFNPPCHR*VMAQDQLHY*DNIHHLGENGYKLLYRAYSGTTLYDLTGVRHYCSCS  172
+102      70   NWS                                                           72
+
+Query_1  171  TPIPCFK  151
+102      125  TPYVCFK  131
+
+For reading frame -2 of query sequence:
+
+Query_1  401  PFSC**IFLRYVDLPANIGPVTSSTLPAIVK*WLKINCIIKITSTTSGRTDISSFIELTV  222
+102      126  PYVCFKDTINRKSNQENVGIIKSSNL                                    151
+
+Query_1  221  VQPSMTSPACVTIVPVPHPYLVSRLCLTNKQCLLPPFSC*YIFLRYVDFPANIGPVTNST  42
+102      126                                     PYVCFKDTINRKSNQENVGIIKSSN  150
+
+Query_1  41   L  39
+102      151  L  151
+
+For reading frame -3 of query sequence:
+
+Query_1  1126  QRTFPPLRRK*RCYRYHCQTLL*TVLPWYQSYISCTLKPTSLWSSCMVIVYGSG*TFVDL  947
+101      128   QQMFSPIHK                                                     136
+
+Query_1  946   RCHQAPLLRSAFPYPRAY*PVLDQ*KTGPRHPGTQPHTSRPLPHRSHYYRYRSRTAP*KG  767
+
+Query_1  766   PLSYRSYKSCILKLVLRCC*YRVRVYGSVRTSAGQRYRPGRQSRFFFPCPQDDSQGRDQ*  587
+
+Query_1  586   KTAPRQLK*RLLPRARPRLTL*CSRLLCNLLLLLPHVSQWCPYHSRIGSLESV  428
+101      132                                     SPIHKLLPYTNSIVKLASK  150
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0500    0.140     1.90     42.6     43.6 
+
+Effective search space used: 161472
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

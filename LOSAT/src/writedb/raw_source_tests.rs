@@ -202,12 +202,14 @@ fn a_copied_database_is_the_database_written_from_its_fasta() {
     );
 }
 
-/// The probes' head of the log of `dir`'s database `db` titled `X`.
+/// The probes' head of the log of `dir`'s database `db` titled `X` (the name as `-out` gives it,
+/// `TempDir::base`: the separator of the platform before `db`).
 fn log_head(dir: &str) -> String {
     format!(
-        "\n\nBuilding a new DB, current time: 11/21/2026 09:00:00\nNew DB name:   {dir}/db\n\
+        "\n\nBuilding a new DB, current time: 11/21/2026 09:00:00\nNew DB name:   {}\n\
          New DB title:  X\nSequence type: Nucleotide\nKeep MBits: T\n\
-         Maximum file size: 3000000000B\n"
+         Maximum file size: 3000000000B\n",
+        Path::new(dir).join("db").display()
     )
 }
 
@@ -215,10 +217,12 @@ fn log_head(dir: &str) -> String {
 /// directories start with the current one (LOSAT's text of it).
 fn not_found(name: &str) -> String {
     let cwd = std::env::current_dir().unwrap();
+    // NCBI splits the search path at `;` on Windows, at `:` elsewhere.
+    let splitter = if cfg!(windows) { ';' } else { ':' };
     let ncbi = format!(
         "BLAST Database error: No alias or index file found for nucleotide database [{name}] in \
-         search path [{}::]. Please verify the spelling of the BLAST database and its molecule \
-         type.\n",
+         search path [{}{splitter}{splitter}]. Please verify the spelling of the BLAST database \
+         and its molecule type.\n",
         cwd.display()
     );
     String::from_utf8(crate::wording::losat_bytes(ncbi.as_bytes()).into_owned()).unwrap()
@@ -356,9 +360,9 @@ fn oid_list_files_ncbi_cannot_read_are_refused() {
 
 /// An alias file whose `OID_MASK_TYPE` leaves a sequence without a definition line (line RG
 /// D1b-2): NCBI's makeblastdb stops with a null pointer exception (exit status 255, probe mkbd of
-/// D1b-2, for `ompx`, `tall` and `omnx`), LOSAT refuses the input at that sequence, before any file is written. An
-/// alias whose sequences each keep a line is copied with the lines it keeps (case `B_al_om` of
-/// `blastdb_input_runs_as_makeblastdb`).
+/// D1b-2, for `ompx`, `tall`, `omnx`, `omp4x` and `ntall`), LOSAT refuses the input at that sequence, before any file is written. An
+/// alias whose sequences each keep a line is copied with the lines it keeps (cases `B_al_om`, `B_al_omn`, `B_al_t0`, `B_al_t2`,
+/// `B_al_j2` and `B_al_j5` of `blastdb_input_runs_as_makeblastdb`).
 #[test]
 #[cfg_attr(
     target_os = "wasi",
@@ -371,6 +375,8 @@ fn a_sequence_the_mask_type_leaves_without_a_line_is_refused() {
         ("ompx", "prot", 2),
         ("tall", "prot", 1),
         ("omnx", "nucl", 2),
+        ("omp4x", "prot", 2),
+        ("ntall", "nucl", 1),
     ] {
         let input = format!("tests/db_search/oidmask/{name}");
         let (status, log, err) = makeblastdb(&[
@@ -434,10 +440,13 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
         if let (Some(algorithm_id), 2) = (algorithm_id, i) {
-            db.set_mask_data(&[MaskedRanges {
-                algorithm_id,
-                offsets: vec![(1, 4)],
-            }])
+            db.set_mask_data(
+                &[MaskedRanges {
+                    algorithm_id,
+                    offsets: vec![(1, 4)],
+                }],
+                &[],
+            )
             .unwrap();
         }
         if i != 2 {
@@ -550,4 +559,47 @@ fn the_memory_of_algorithm_lookups_is_ncbi_s() {
     let mut memory = super::VolAlgoMemory::default();
     assert!(!memory.reads_a_kept_id(2, 0, true));
     assert!(!memory.reads_a_kept_id(2, 0, true));
+}
+
+/// The input `tests/db_search/t5/nhd_utf8` has a title stored as a UTF8String for a
+/// VisibleString (line RG item T5d). makeblastdb 2.17.0 writes its warning 803.10 once in the
+/// run: at the scan of the input's headers, or before it, when a mask file met such a string
+/// first (probes of T5d merge 18, 2026-11-23, Linux x86-64; the copies are written in both).
+#[test]
+fn a_utf8_string_of_the_input_s_headers_is_warned_once_in_the_run() {
+    let tmp = TempDir::new("raw-utf8");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let input = root.join("tests/db_search/t5/nhd_utf8");
+    let input = input.to_string_lossy();
+    let warning = |member: &str| {
+        format!(
+            "Warning: (803.10) [makeblastdb] CObjectIStreamAsnBinary: UTF8String data for \
+             VisibleString member {member}, ASN.1 specification may need an update\n"
+        )
+    };
+    let words = ["-input_type", "blastdb", "-dbtype", "nucl", "-in", &input];
+    let copied = tmp.base("copied");
+    let mut run = words.to_vec();
+    run.extend(["-out", &copied]);
+    let (status, _, err) = makeblastdb(&run);
+    assert_eq!((status, err), (0, warning("Blast-def-line-set.E.title")));
+    assert!(files_of(&tmp.0).contains(&"copied.nhr".to_string()));
+
+    let mask = root.join("tests/seqdb/mask_parse/b_utf8_options.asnb");
+    let mask = mask.to_string_lossy();
+    let masked = tmp.base("masked");
+    let mut run = words.to_vec();
+    run.extend(["-mask_data", &mask, "-out", &masked]);
+    let (status, _, err) = makeblastdb(&run);
+    assert_eq!(
+        (status, err),
+        (
+            0,
+            warning("Blast-db-mask-info.algo-options")
+                + "Error: [makeblastdb] No sequences matched any of the masks provided.\n\
+                   Please ensure that the -parse_seqids option is used in the\n\
+                   filtering program as well as makeblastdb.\n"
+        )
+    );
+    assert!(files_of(&tmp.0).contains(&"masked.nhr".to_string()));
 }

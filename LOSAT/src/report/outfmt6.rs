@@ -143,7 +143,7 @@ fn write_scientific_ncbi<W: Write + ?Sized>(
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
 pub fn format_evalue_ncbi(e_value: f64) -> String {
     if e_value == 0.0 || e_value < 1.0e-180 {
-        // NCBI: snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
+        // Formats as "0.0" matching NCBI's threshold below 1e-180.
         "0.0".to_string()
     } else if e_value < 1.0e-99 {
         // NCBI: "%2.0le" -> e.g., "1e-100"

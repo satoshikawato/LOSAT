@@ -20,7 +20,8 @@ pub use x_link_window::print_summary as x_link_window_print_summary;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:126-143;
 // c++/src/algo/blast/core/link_hsps.c:1765-1810:
-// hsp->num = 1; Blast_HSPListGetEvalues(...); s_BlastUnevenGapLinkHSPs(...);
+// Initializes each HSP's linked count to 1, computes individual E-values via
+// `Blast_HSPListGetEvalues`, and links uneven-gap sets via `s_BlastUnevenGapLinkHSPs`.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct LinkedHsp {
     pub context: usize,
@@ -40,7 +41,7 @@ pub(super) struct LinkedHspList {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1090-1100,1469-1492:
-// BlastLinkedHSPSet* prev; BlastLinkedHSPSet* next;
+// Doubly-linked chain node links (`prev` and `next` of `BlastLinkedHSPSet`).
 #[derive(Clone, Copy)]
 struct WorkHsp {
     value: LinkedHsp,
@@ -60,7 +61,7 @@ pub(super) fn score_compare(a: &GappedHsp, b: &GappedHsp) -> Ordering {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1567-1594:
-//     current_index = index; current_end = link->hsp->query.end;
+// Tracks the running prefix index and maximum query end across each context.
 fn query_end_prefix_index(work: &[WorkHsp], offset_order: &[usize]) -> Vec<usize> {
     let mut index = vec![0; offset_order.len()];
     let mut current = 0;
@@ -322,6 +323,72 @@ pub(super) fn link_preliminary_hsps_on(
     Ok(x_link_list(hsps))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1779-1782
+/// The linking of an ungapped search with a `longest_intron` of 0 (`-max_intron_length` 4 or
+/// less): `s_BlastEvenGapLinkHSPs` (`core::link_hsps::even_gap_link_hsps`) of the HSPs of `input`
+/// on their subject frames, with the ungapped Karlin blocks `kbp` (`sbp->kbp`), the contexts'
+/// lengths and the subject's length in nucleotides (`EvenGapLinkParams::subject_translated`), then
+/// sorted by score with the best e-value (link_hsps.c:1801-1810).
+pub(super) fn link_even_gap_translated(
+    input: &[(usize, GappedHsp)],
+    query_lengths: &[i32],
+    lengths: &[LocalContextLength],
+    subject_nt_length: i32,
+    kbp: &[KarlinParams],
+    params: &crate::core::link_hsps::EvenGapLinkParams,
+) -> Result<LinkedHspList> {
+    use crate::core::link_hsps::{even_gap_link_hsps, LinkContext, LinkHsp};
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1774-1777
+    // An empty list returns at once (as in `link_preliminary_hsps_on`).
+    if input.is_empty() {
+        return Ok(LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
+    }
+    let contexts: Vec<LinkContext> = (0..query_lengths.len())
+        .map(|context| {
+            Ok(LinkContext {
+                lambda: kbp[context].lambda,
+                log_k: kbp[context].k.glibc_ln(),
+                query_length: query_lengths[context],
+                length_adjustment: i32::try_from(lengths[context].length_adjustment)?,
+                eff_searchsp: lengths[context].eff_searchsp,
+            })
+        })
+        .collect::<Result<_>>()?;
+    let hsps: Vec<LinkHsp> = input
+        .iter()
+        .map(|&(context, hsp)| LinkHsp {
+            context,
+            subject_frame: hsp.frame,
+            query_offset: hsp.q_start,
+            query_end: hsp.q_end,
+            subject_offset: hsp.s_start,
+            subject_end: hsp.s_end,
+            score: hsp.score,
+        })
+        .collect();
+    let mut linked = Vec::with_capacity(input.len());
+    even_gap_link_hsps(
+        &hsps,
+        &|context| contexts[context],
+        subject_nt_length,
+        params,
+        &mut |l| {
+            let (context, hsp) = input[l.index];
+            linked.push(LinkedHsp {
+                context,
+                hsp,
+                num: l.num,
+                evalue: l.evalue,
+                source_index: l.index,
+            })
+        },
+    );
+    Ok(x_link_list(linked))
+}
+
 /// The HSPs of `input` linked (`s_BlastUnevenGapLinkHSPs`), with their sum e-values and chain
 /// sizes, in the order of `input` (`source_index` = the position in `input`).
 fn x_link_values(
@@ -523,9 +590,8 @@ pub(super) fn compare_preliminary_lists_for_kappa(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676 and
 // c++/src/algo/blast/core/blast_hits.c:1976-2010:
-// cutoff = hit_params->prelim_evalue;   /* preliminary pass */
-// cutoff = hit_options->expect_value;   /* post-Kappa pass */
-// else { if (index > hsp_cnt) hsp_array[hsp_cnt] = hsp_array[index]; hsp_cnt++; }
+// Reaps HSPs exceeding `prelim_evalue` in the preliminary pass or `expect_value`
+// in the post-Kappa pass, compacting surviving entries in place.
 #[allow(dead_code)]
 pub(super) fn reap_by_evalue(list: &mut LinkedHspList, prelim_evalue: f64) {
     list.hsps.retain(|hsp| hsp.evalue <= prelim_evalue);

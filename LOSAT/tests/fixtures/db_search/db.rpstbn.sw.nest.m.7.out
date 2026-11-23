@@ -1,0 +1,27 @@
+# RPSTBLASTN 2.17.0+
+# Query: nest_m
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 21 hits found
+nest_m	CDD:101	100.000	190	0	0	855	286	1	190	1.92e-111	312
+nest_m	CDD:101	66.667	285	0	1	1140	286	1	190	2.17e-95	271
+nest_m	CDD:101	100.000	94	0	0	282	1	97	190	4.17e-51	158
+nest_m	CDD:101	38.462	13	8	0	715	753	126	138	4.5	15.1
+nest_m	CDD:101	26.316	19	14	0	657	713	132	150	7.9	14.3
+nest_m	CDD:101	33.333	9	6	0	15	41	128	136	8.6	14.3
+nest_m	CDD:102	26.923	26	19	0	740	817	126	151	0.47	18.2
+nest_m	CDD:102	23.077	26	20	0	1025	1102	126	151	0.66	17.8
+nest_m	CDD:102	71.429	7	2	0	970	990	125	131	2.3	16.2
+nest_m	CDD:102	83.333	6	1	0	1081	1064	126	131	4.7	15.1
+nest_m	CDD:102	33.333	12	8	0	466	501	3	14	6.2	14.7
+nest_m	CDD:102	28.571	21	14	1	736	798	53	72	6.5	14.7
+nest_m	CDD:102	42.857	7	4	0	882	862	29	35	9.3	14.3
+nest_m	CDD:102	42.857	7	4	0	597	577	29	35	9.3	14.3
+nest_m	CDD:102	25.000	20	15	0	250	309	95	114	10.0	14.3
+nest_m	CDD:103	26.316	38	23	2	912	799	129	161	2.0	16.3
+nest_m	CDD:103	25.000	12	9	0	191	156	30	41	4.7	15.1
+nest_m	CDD:103	35.000	20	9	1	627	568	129	144	6.1	14.7
+nest_m	CDD:103	20.000	15	12	0	304	348	124	138	7.6	14.3
+nest_m	CDD:103	50.000	10	5	0	318	289	149	158	7.9	14.3
+nest_m	CDD:103	50.000	10	5	0	33	4	149	158	7.9	14.3
+# BLAST processed 1 queries

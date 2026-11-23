@@ -15,13 +15,13 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `2` | Query-anchored, no identities | all but `psiblast` |
 | `3` | Flat query-anchored, showing identities | all but `psiblast` |
 | `4` | Flat query-anchored, no identities | all but `psiblast` |
-| `5` | BLAST XML | all but `psiblast` |
+| `5` | BLAST XML | all eight |
 | `6` | Tabular | all eight |
 | `7` | Tabular with comment lines | all eight |
-| `8` | Seqalign, ASN.1 text | all but `psiblast` |
-| `9` | Seqalign, ASN.1 binary | all but `psiblast` |
+| `8` | Seqalign, ASN.1 text | all eight |
+| `9` | Seqalign, ASN.1 binary | all eight |
 | `10` | Comma-separated values | all eight |
-| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all but `psiblast` |
+| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all eight |
 | `12` | Seqalign, JSON | all but `psiblast` |
 | `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` |
 | `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` |
@@ -33,16 +33,18 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 
 "All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`. Some programs write fewer formats than the table shows:
 
-- `psiblast` writes `0`, `6`, `7`, `10` and `20`; with `-in_pssm` or `-in_msa`, `0`, `6` and `7`.
-- `tblastn` with `-in_pssm` writes `0` to `4`, `6`, `7` and `10`.
+- `psiblast` writes `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and it writes one Seq-annot or archive per round.
+- `tblastn` with `-in_pssm` writes `0` to `10` and `20`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `makeprofiledb` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 
 `0` is the classic BLAST report: a header, a table of one-line descriptions, then the alignments. `1` to `4` are NCBI's query-anchored views: the alignments of all subjects are stacked under the query. `1` and `3` print a dot where a subject letter matches the query; `2` and `4` print the letters. `3` and `4` are NCBI's flat variants.
 
 `-num_descriptions`, `-num_alignments`, `-line_length`, `-sorthits` and `-sorthsps` shape these formats. For formats above `4` they are ignored with a warning, as in NCBI.
+
+With `-html`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` write format `0` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Formats `1` to `4` with `-html` are not supported yet.
 
 ## Tabular and custom fields (6, 7, 10, 20)
 
@@ -118,7 +120,7 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 
 ## Organism report (18)
 
-`-outfmt 18` is NCBI's "Tax BLAST report". It groups the subjects of each query by the tax id of each definition line, under the names of NCBI's `taxdb.bti` and `taxdb.btd`. A `-subject` record has tax id 0. Without a taxonomy database the report has its headers only. As in NCBI, a subject whose tax id the database does not know is left out of the report but still widens its columns.
+`-outfmt 18` is NCBI's "Tax BLAST report". It groups the subjects of each query by the tax id of each definition line, under the names of NCBI's `taxdb.bti` and `taxdb.btd`. A `-subject` record has tax id 0. Without a taxonomy database the report has its headers only. With `-html` it is written as NCBI's HTML. As in NCBI, a subject whose tax id the database does not know is left out of the report but still widens its columns.
 
 ## Differences from NCBI BLAST+
 

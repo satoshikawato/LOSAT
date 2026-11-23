@@ -24,9 +24,12 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask` and `-gi_mask_name`
-//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
-//! files of the metadata file (`metadata::metadata_user_path`).
+//! `-parse_seqids`. With `-gi_mask` (and `-gi_mask_name`) the masks go instead to the GI-indexed
+//! files of each algorithm (`gi_mask`), and the database gets an alias file that names them.
+//! `losat makeblastdb` refuses no option of makeblastdb 2.17.0 by name today (no row of
+//! `ncbi_app::args::refusal`); `-oid_masks` writes the OID mask files (`oid_list`);
+//! `-metadata_output_prefix` names the files of the metadata file
+//! (`metadata::metadata_user_path`).
 //!
 //! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each
 //! sequence in the form of the sequence file with its definition lines (and their PIG), the
@@ -38,12 +41,14 @@ pub mod bioseq;
 pub mod build_db;
 pub(crate) mod column;
 pub mod convert;
+pub(crate) mod cout;
 pub mod data_size;
 pub mod deflines;
 pub(crate) mod dir_entry;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
+pub(crate) mod gi_mask;
 pub mod header;
 pub(crate) mod id_set;
 pub(crate) mod isam;
@@ -84,6 +89,19 @@ pub enum WriteDbError {
     /// `Creation` whose text holds bytes that are not UTF-8 (a Seq-id label of the
     /// duplicate check), which makeblastdb prints as they are.
     CreationBytes(Vec<u8>),
+    /// LOSAT's refusal of a version 5 database with parsed Seq-ids in which the sequence of OID
+    /// `oid` (first id `name`, its FASTA label) has GIs only and lies between sequences with
+    /// other ids: NCBI's writer aborts at its close (`writer::gi_only_between_keys_error`).
+    /// makeblastdb reports it as a creation error.
+    GiOnlyBetweenKeys { oid: u32, name: Vec<u8> },
+    /// NCBI's `std::invalid_argument` with its `what()`: `BuildLMDBFileName` of an empty
+    /// database name (`writer::build_lmdb_file_name`).
+    InvalidArgument(&'static str),
+    /// LOSAT's refusal of given definition lines whose first line has no Seq-id in a database
+    /// without parsed Seq-ids: NCBI's writer puts the `gnl|BL_ORD_ID` id past the end of the
+    /// empty list (undefined behaviour). makeprofiledb gives such lines (a query without ids);
+    /// makeblastdb's lines always have an id.
+    OrdinalIdWithoutIds,
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
@@ -149,6 +167,16 @@ impl WriteDbError {
         match self {
             WriteDbError::Creation(message) => losat(DATABASE_CREATION_ERROR, message.as_bytes()),
             WriteDbError::CreationBytes(message) => losat(DATABASE_CREATION_ERROR, message),
+            WriteDbError::GiOnlyBetweenKeys { oid, name } => losat(
+                DATABASE_CREATION_ERROR,
+                &writer::gi_only_between_keys_message(*oid, name),
+            ),
+            WriteDbError::InvalidArgument(what) => text("Error: ", what.as_bytes()),
+            WriteDbError::OrdinalIdWithoutIds => text(
+                "losat makeblastdb: ",
+                b"a first definition line without a Seq-id, whose gnl|BL_ORD_ID id NCBI's writer \
+                  puts past the end of the empty list",
+            ),
             WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
             WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends

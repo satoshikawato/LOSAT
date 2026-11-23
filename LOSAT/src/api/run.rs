@@ -546,30 +546,50 @@ fn hit_list_size(command: &Commands, number: i32) -> usize {
     .hitlist_size
 }
 
-/// The searches of a run: the requested output formats grouped by hit list size, each group a
-/// list of positions in `numbers`, the tabular formats first. One group is one search
+/// How the formatter of the output format `number` cuts the hit lists of `command`'s search
+/// (`BlastpApp::list_cut`: psiblast's and rpsblast's lists; the other programs' are not cut).
+fn list_cut(command: &Commands, number: i32) -> crate::algorithm::blastp::args::ListCut {
+    use crate::algorithm::blastp::args::{BlastpApp, ListCut};
+    match command {
+        Commands::Psiblast(_) => BlastpApp::Psiblast.list_cut(number),
+        Commands::Rpsblast(_) => BlastpApp::Rpsblast.list_cut(number),
+        _ => ListCut::Uncut,
+    }
+}
+
+/// The searches of a run: the requested output formats grouped by hit list size and by the cut
+/// of the hit lists, each group a list of positions in `numbers`. One group is one search
 /// (`run_local` call), and every format of it is written from that search, as the command line
 /// writes it alone: the command line's search depends on the hit list size, which
 /// `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make differ
-/// between the pairwise formats (0 to 4) and the tabular ones. Without those options the sizes
-/// are equal and the one group is every format in the requested order. The tabular group goes
-/// first because the warnings that the formats share belong to the first search's diagnostics,
-/// and the command line writes the tabular formats' (`ReportCounts::warnings`).
+/// between the pairwise formats (0 to 4) and the tabular ones, and on how the format's
+/// formatter cuts the hit lists (`list_cut`): psiblast's XML cuts each round's results before
+/// its PSSM (so its rounds can differ from the other formats'), and psiblast's and rpsblast's
+/// archive keeps the uncut lists. Without the count options the sizes are equal, and formats of
+/// one cut are one group in the requested order (the first group's first format is the first
+/// requested one). With them the tabular groups go first because the warnings that the formats
+/// share belong to the first search's diagnostics, and the command line writes the tabular
+/// formats' (`ReportCounts::warnings`).
 ///
-/// LOSAT Web ABI v2 groups its searches the same way (`web/adapter/src/run.rs`).
+/// LOSAT Web ABI v2 groups its searches by hit list size the same way (`web/adapter/src/run.rs`;
+/// it runs neither psiblast nor rpsblast).
 pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usize>> {
     let [_, descriptions, alignments] = count_options(command);
-    if descriptions.is_none() && alignments.is_none() {
-        return vec![(0..numbers.len()).collect()];
-    }
+    let sizes_differ = descriptions.is_some() || alignments.is_some();
     let mut ordered: Vec<usize> = (0..numbers.len()).collect();
-    ordered.sort_by_key(|&position| numbers[position] <= 4);
-    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    if sizes_differ {
+        ordered.sort_by_key(|&position| numbers[position] <= 4);
+    }
+    let mut groups: Vec<(_, Vec<usize>)> = Vec::new();
     for position in ordered {
-        let size = hit_list_size(command, numbers[position]);
-        match groups.iter_mut().find(|(group, _)| *group == size) {
+        let number = numbers[position];
+        let key = (
+            sizes_differ.then(|| hit_list_size(command, number)),
+            list_cut(command, number),
+        );
+        match groups.iter_mut().find(|(group, _)| *group == key) {
             Some((_, group)) => group.push(position),
-            None => groups.push((size, vec![position])),
+            None => groups.push((key, vec![position])),
         }
     }
     groups.into_iter().map(|(_, group)| group).collect()
@@ -624,16 +644,29 @@ fn taxdb_setting(
 // names and the organism report (outfmt 18) and the file of a `-matrix` that NCBI's tables do not
 // have (TBLASTX, ungapped BLASTX). The settings are the call's application start's
 // (`start::CallStart::settings`).
+/// How a `run_local` call's run ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RunEnd {
+    /// After its last query.
+    Searched,
+    /// Where NCBI's `CATCH_ALL` ends the run with exit status 0 and no word (a `CEofException`:
+    /// a header record's, `common::database::database_error_of`, or the `-in_pssm` reader's,
+    /// `pssm_search::in_pssm`): the reports written before it are the run's, and no query is
+    /// searched after it (`batches::Batches`).
+    WithoutPost,
+}
+
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`
 /// (`run_local_entry`), whose end is the command line's run's: a run that NCBI ends with exit
-/// status 0 and no word ends the call without an error, and an NCBI error after NCBI's main-thread
-/// diagnostic stream failed is the text that the command line writes for it.
+/// status 0 and no word ends the call without an error (`RunEnd::WithoutPost`), and an NCBI error
+/// after NCBI's main-thread diagnostic stream failed is the text that the command line writes for
+/// it.
 pub(super) fn run_local(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RunEnd> {
     // The call's code runs on this thread with the call's own diagnostic stream (one batch of
     // `run_batches` after another's of another call, too), and its searches' workers with it
     // (`utils::threading::with_search_pool`).
@@ -642,18 +675,20 @@ pub(super) fn run_local(
     // The `-out` file of `run_to_file` ends as the command line's run ends its `-out` stream
     // (`ReportOutputs::finish_out`), before the run's error is written as `CATCH_ALL` writes it.
     let Err(error) = outputs.finish_out(result) else {
-        return Ok(());
+        return Ok(RunEnd::Searched);
     };
     let Some(native) = error.downcast_ref::<crate::cli::NativeError>() else {
         return Err(error);
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: the `-in_pssm` reader's
-    // `CEofException`, the object manager's failed write after its diagnostic stream failed): NCBI's
-    // run returns 0 without a word, so the call succeeds with what it wrote (tblastn's error
-    // archive of the saved messages, `report::archive::silent_end_lines`, or nothing).
+    // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: a `CEofException` of the `-in_pssm`
+    // reader's, `pssm_search::in_pssm`, or of a header record's,
+    // `common::database::database_error_of`; the object manager's failed write after its
+    // diagnostic stream failed): NCBI's run returns 0 without a word, so the call succeeds with
+    // what it wrote (tblastn's error archive of the saved messages,
+    // `report::archive::silent_end_lines`, or nothing).
     if crate::cli::is_silent_end(&error) {
-        return Ok(());
+        return Ok(RunEnd::WithoutPost);
     }
     // After NCBI's object manager failed the stream (`ncbi_exception::main_diag_failbit`, this
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
@@ -721,6 +756,14 @@ fn run_local_entry(
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
+            // The file of an ungapped search's `-matrix` that NCBI's tables do not have, first,
+            // as the command line's `run_io` looks it up (`TblastnArgs::find_matrix_file`).
+            if args.unknown_matrix_name()
+                == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
+            {
+                let settings = start.settings();
+                args.find_matrix_file(&settings.matrix_search)?;
+            }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn);
             run_local_tblastn(args, query, end, subject, outputs)
         }
@@ -818,10 +861,10 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
     Ok(())
 }
 
-/// The searches of a call: `formats` grouped by hit list size (`search_groups`), and the threads
-/// of the pool they share. A `-outfmt` value that the command line rejects, and a call without
-/// formats (the engines refuse one), fail here, before any search; the command line's error of
-/// a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
+/// The searches of a call: `formats` grouped by hit list size and cut (`search_groups`), and the
+/// threads of the pool they share. A `-outfmt` value that the command line rejects, and a call
+/// without formats (the engines refuse one), fail here, before any search; the command line's
+/// error of a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
 fn searches(
     search: &Search,
     inputs: Inputs<'_>,
@@ -854,7 +897,7 @@ fn searches(
     if groups.len() > 1 {
         if let Some(option) = pssm_file_option(command) {
             return Err(Error::Argv(format!(
-                "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
+                "{option} is not accepted by the library API with formats that take two searches (two hit list sizes, or psiblast's outfmt 5 or 11 with other formats): the PSSM files are one search's; search those formats in calls of their own"
             ).into()));
         }
     }
@@ -862,7 +905,7 @@ fn searches(
 }
 
 // No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
-// files; the library's call of formats of two hit list sizes searches twice (`search_groups`).
+// files; the library's call of formats that take two searches searches twice (`search_groups`).
 /// The PSSM file option (`-out_pssm`, else `-out_ascii_pssm`) of a psiblast search that can write
 /// one (`PsiblastPssmOptions::writes_files`).
 fn pssm_file_option(command: &Commands) -> Option<&'static str> {
@@ -912,19 +955,23 @@ pub fn run(
         for (ordinal, group) in groups.iter().enumerate() {
             let command = start.command();
             // The warnings of the first search include the reader's and the queries' warnings
-            // that the next searches repeat; the command line writes them once.
+            // that the next searches repeat; the command line writes them once. A later search's
+            // `-html` posts are its reports' own (`later_html_posts`).
             let mut repeated = Vec::new();
-            let mut sink = if ordinal == 0 {
-                log.sink(&mut *diagnostics, true)
-            } else {
-                log.sink(&mut repeated, false)
-            };
+            let mut later_posts = Vec::new();
             // The formats of the other searches, of which the call's refusals are decided
             // (`ReportOutputs::other_outfmts`).
             let others = other_formats(&formats, group);
             let result = {
+                let mut sink = if ordinal == 0 {
+                    log.sink(&mut *diagnostics, true)
+                } else {
+                    log.sink(&mut repeated, false)
+                };
                 let mut outputs = ReportOutputs {
                     other_outfmts: &others,
+                    html_posts: (ordinal > 0)
+                        .then_some(&mut later_posts as &mut (dyn Write + Send)),
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
@@ -942,10 +989,29 @@ pub fn run(
                 };
                 run_local(command, inputs, &mut outputs, &mut start)
             };
-            result.map_err(|error| sink.failed(&error))?;
+            let posted = later_html_posts(&mut log, &mut *diagnostics, &later_posts);
+            result.map_err(|error| log.failed(&error))?;
+            posted?;
         }
         Ok(())
     })
+}
+
+/// `posts`, the `-html` posts of the reports of a call's later search (`ReportOutputs::html_posts`),
+/// written to the call's diagnostics (`diagnostics`) as the first search's messages are
+/// (`RunLog::sink`), after the search and before its error: each report posts what a run of its
+/// format alone posts, also where its search is not the call's first (line RG T4a2 fix round 2,
+/// review c C3 = review d D5: formats 6 and 0 with `-num_alignments 5 -html`).
+fn later_html_posts(
+    log: &mut RunLog,
+    diagnostics: &mut (dyn Write + Send),
+    posts: &[u8],
+) -> Result<(), Error> {
+    if posts.is_empty() {
+        return Ok(());
+    }
+    let written = log.sink(diagnostics, true).write_all(posts);
+    written.map_err(|error| log.failed(&error.into()))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
@@ -995,6 +1061,7 @@ pub fn run_to_file(
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -1007,7 +1074,7 @@ pub fn run_to_file(
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        result.map_err(|error| sink.failed(&error))
+        result.map(drop).map_err(|error| sink.failed(&error))
     })
 }
 
@@ -1036,13 +1103,15 @@ struct Searched {
     ordinals: Option<Vec<usize>>,
 }
 
-/// One search of `run_collect`: the formats at `positions` of `formats`.
+/// One search of `run_collect`: the formats at `positions` of `formats`; `html_posts` receives the
+/// `-html` posts of a later search's reports (`ReportOutputs::html_posts`, `later_html_posts`).
 fn collect_one(
     inputs: Inputs<'_>,
     formats: &[&str],
     positions: &[usize],
     start: &mut CallStart,
     mut sink: RunSink<'_>,
+    html_posts: Option<&mut Vec<u8>>,
 ) -> Result<Searched, Error> {
     let command = start.command();
     let query_range = query_range_of(&command);
@@ -1067,6 +1136,7 @@ fn collect_one(
                 .collect(),
             diagnostics: &mut sink,
             later_warnings: None,
+            html_posts: html_posts.map(|posts| posts as &mut (dyn Write + Send)),
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
@@ -1213,13 +1283,17 @@ pub(super) fn records(
 /// the statistics of each query and the diagnostics.
 ///
 /// Each report is what the command line writes to `-out` for that `-outfmt` alone: the formats
-/// are grouped by hit list size (`search_groups`), one search per group, so a run with
-/// `-num_descriptions` or `-num_alignments` may search twice. The HSP records and the statistics
-/// are those of the first search (the tabular formats'), with their rows and sections in the
-/// reports of that search; the reports of another search give them no span. The diagnostics
-/// are the first search's: the command line's standard error for its first format (the first
-/// tabular format when the formats split, the first requested format otherwise), which holds
-/// the warnings the command line writes once for the run.
+/// are grouped by hit list size and by the cut of the hit lists (`search_groups`), one search per
+/// group, so a run with `-num_descriptions` or `-num_alignments`, and psiblast's outfmt 5 or 11
+/// (rpsblast's 11) with other formats, may search twice. The HSP records and the statistics
+/// are those of the first search (the tabular formats' when the hit list sizes split them, else
+/// the first requested format's), with their rows and sections in the reports of that search;
+/// the reports of another search give them no span. The diagnostics are the first search's: the
+/// command line's standard error for its first format (the first tabular format when the hit list
+/// sizes split the formats, the first requested format otherwise), which holds the warnings the
+/// command line writes once for the run; then the posts of the `-html` reports of the later
+/// searches (their reads of NCBI's formatter registries), which only their search writes. Each
+/// `-html` report posts what the command line's run of its format alone posts.
 ///
 /// Any failure fails the call with the command line's message, for the format whose search
 /// failed. A `-outfmt` value that the command line rejects, and a call without formats, fail
@@ -1265,12 +1339,19 @@ pub fn run_collect(
             // that the next searches repeat; the command line writes them once (the next
             // searches' do not go to the `-logfile` file either; a failure does, as in `run`).
             let mut repeated = Vec::new();
-            let sink = if ordinal == 0 {
-                log.sink(&mut diagnostics, true)
-            } else {
-                log.sink(&mut repeated, false)
+            let mut later_posts = Vec::new();
+            let collected = {
+                let sink = if ordinal == 0 {
+                    log.sink(&mut diagnostics, true)
+                } else {
+                    log.sink(&mut repeated, false)
+                };
+                // A later search's `-html` posts are its reports' own (`later_html_posts`).
+                let posts = (ordinal > 0).then_some(&mut later_posts);
+                collect_one(inputs, formats, group, &mut start, sink, posts)
             };
-            searched.push(collect_one(inputs, formats, group, &mut start, sink)?);
+            later_html_posts(&mut log, &mut diagnostics, &later_posts)?;
+            searched.push(collected?);
         }
         Ok(())
     })?;

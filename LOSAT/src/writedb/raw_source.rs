@@ -12,10 +12,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::build_db::BuildDatabase;
+use super::fasta_source::Warn;
 use super::mask_data::registry::FILTER_PROGRAM_OTHER;
 use super::mask_data::MaskedRanges;
 use super::WriteDbError;
 use crate::ncbi_str::string_to_int;
+use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::seqdb::column::MASK_DATA_TITLE;
 use crate::seqdb::mask::BlockMaskError;
 use crate::seqdb::{
@@ -106,11 +108,21 @@ fn refuse_deflines(db: &SeqDb, ordinal: u32, set: &DeflineSet) -> Result<(), Wri
 // where the two forms meet.
 /// The scan of makeblastdb's leaf taxids over the input `db`, in the order of its sequences. Its
 /// errors are those of the first read of each header; LOSAT's refusals of a set of definition
-/// lines come here, before anything is written.
-pub(crate) fn scan_leaf_tax_ids(db: &SeqDb) -> Result<LeafTaxIds, RawCopyError> {
+/// lines come here, before anything is written. The first read of the run that meets a
+/// UTF8String for a VisibleString (also before a failure) posts NCBI's warning 803.10 to `warn`
+/// (without its line feed), once in the run (`utf8_once`, shared with the mask files).
+pub(crate) fn scan_leaf_tax_ids(
+    db: &SeqDb,
+    warn: Warn<'_>,
+    utf8_once: &mut Utf8TagOnce,
+) -> Result<LeafTaxIds, RawCopyError> {
     let mut leafs = LeafTaxIds::new();
     for ordinal in 0..db.num_seqs() {
-        let set = db.defline_set(ordinal)?;
+        let read = db.defline_set(ordinal);
+        if read.as_ref().map_or(true, |set| set.utf8) {
+            post_utf8_string(db, ordinal, warn, utf8_once);
+        }
+        let set = read?;
         refuse_deflines(db, ordinal, &set)?;
         for defline in &set.deflines {
             let Some(links) = defline.links.as_ref().filter(|links| !links.is_empty()) else {
@@ -122,6 +134,20 @@ pub(crate) fn scan_leaf_tax_ids(db: &SeqDb) -> Result<LeafTaxIds, RawCopyError> 
         }
     }
     Ok(leafs)
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310
+/// makeblastdb's post of NCBI's warning 803.10 for the header of `ordinal`, when its read meets a
+/// UTF8String for a VisibleString (before any failure) and the run has not posted it.
+#[cold]
+fn post_utf8_string(db: &SeqDb, ordinal: u32, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
+    let Some(path) = db.utf8_string_path(ordinal) else {
+        return;
+    };
+    if utf8_once.first() {
+        let line = crate::seqid::ber::utf8_string_warning(Some("makeblastdb"), &path);
+        warn(line.strip_suffix(b"\n").unwrap_or(&line));
+    }
 }
 
 /// One sequence of the input (`GetNext`'s outputs).

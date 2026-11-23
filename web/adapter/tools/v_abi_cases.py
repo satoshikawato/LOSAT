@@ -45,8 +45,17 @@ the runs whose outcome and standard error are those of the argv's own `-outfmt` 
 whose files the engine opens in the run's working directory (abi_v2.md §3; line WQA D12a, 2026-11-20), with
 a query read with the data loaders on and off (`-conffile` of `DATA_LOADERS=none`), and the
 inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id first lines, and
-`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
+`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2), and BLASTN
+`-filtering_db` (line RG item D4): with `-db` (`REPEAT_ROWS`, `REPEAT_FAILURE_ROWS`) and with `-subject`
+(`repeat_subject`, `"run_directory": true`: the subject is registered as for every search, and the run goes to
+the instance whose `/work` holds the repeat database).
 `--group fasta_input` writes that group of the full suite alone.
+
+Both suites add the tool runs of `losat_web2_tool` and `losat_web2_validate` for `windowmasker` (`tool`; line NP
+WW3a, 2026-11-22): a search with `"tool"` is one run of the command line `losat windowmasker <argv>` (`"tool": "run"`)
+or one check of its argv (`"tool": "validate"`), in a directory that holds the files of `"files"` (published path -> source
+file). v_abi.js runs it on an instance whose `/work` is a folder of those files, and the native CLI in another folder of
+the same files, and compares exit status, standard output, standard error and every file the run wrote.
 
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
 """
@@ -271,6 +280,17 @@ def direct_tblastx() -> dict:
 # BLASTP database: -seqidlist (a binary list) and -taxids (line WQA D12a, 2026-11-20).
 DATABASE_ROWS = ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblastn.default.6", "db.tblastx.default.6",
                  "db.sl.bp.bsl.6", "db.tf.bp.nosql.6"]
+# BLASTN `-filtering_db` with `-db` (line RG item D4, D4-web): a second database in the run's directory, whose
+# files the engine opens by `-filtering_db`'s name. Rows of db.rpt.* in LOSAT/tests/db_search_manifest/blastn.rpt.tsv
+# without an environment: four tasks and both strands in outfmt 6, outfmt 0, the archive (11) with the lower case
+# joined to the repeats, a -query_loc edge, and the XML of the filter (5).
+REPEAT_ROWS = ["db.rpt.mb.6", "db.rpt.bn.6", "db.rpt.short.6", "db.rpt.dc.6", "db.rpt.plus.6", "db.rpt.minus.6", "db.rpt.mb.0",
+               "db.rpt.edge_lo.0", "db.rpt.lc.11", "db.rpt.edge_lo.11", "db.rpt.mb.5"]
+# The repeat search's errors through the adapter (D4-web; review N4): a repeat database whose header counts are
+# wrong and a query without letters, whose NCBI messages name no path (exit 3; the native CLI's run is compared).
+REPEAT_FAILURE_ROWS = ["db.rpt.badcount.6", "db.rpt.noletters.6"]
+# The -subject run of a repeat database (D4-web): rpt.* rows of LOSAT/tests/fixtures/blastn_regression/manifest.tsv.
+REPEAT_SUBJECT_ROWS = ["rpt.megablast", "rpt.blastn_fmt0", "rpt.lc", "rpt.fmt11"]
 
 
 def database() -> list[dict]:
@@ -288,6 +308,24 @@ def database() -> list[dict]:
                          "argv": [row["program"], "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
                          "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {"6": row["stdout_sha256"]},
                          "database": True})
+    for row_id in REPEAT_ROWS:
+        row = rows[row_id]
+        assert row["kind"] == "ncbi" and row["rc"] == "0" and row["program"] == "blastn", row_id
+        argv = ["blastn", "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])]
+        search = {"program": "blastn", "argv": argv, "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {},
+                  "database": True}
+        if custom_outfmt(row["outfmt"]):
+            search["outfmt"] = row["outfmt"]
+            search["frozen"]["custom"] = row["stdout_sha256"]
+        else:
+            search["frozen"][row["outfmt"]] = row["stdout_sha256"]
+        searches.append(search)
+    for row_id in REPEAT_FAILURE_ROWS:
+        row = rows[row_id]
+        assert row["kind"] == "ncbi" and row["rc"] == "3" and row["program"] == "blastn", row_id
+        searches.append({"program": "blastn", "argv": ["blastn", "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
+                         "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {}, "expect": "failure", "database": True})
+    searches += repeat_subject()
     # With -parse_deflines the run registers its query with `register_inputs` (its subject handle 0, the
     # response's subject null), and the records' `s_idx` are the database's OIDs (abi_v2.md §4, §8); the
     # native CLI's run of the argv is the reference (review of D12a, low 3).
@@ -315,6 +353,31 @@ def database() -> list[dict]:
     searches.append({"program": "blastp", "argv": ["blastp", "-db", d1["db"], "-query", str(directory / "blastp_db.q.fa")],
                      "cwd": str(REPO / "LOSAT"), "cases": ["db.d1.reader_error"], "frozen": {}, "expect": "failure",
                      "database": True})
+    return searches
+
+
+def repeat_subject() -> list[dict]:
+    """`-subject` searches with `-filtering_db` (line RG item D4, D4-web): the subject is registered as for every
+    subject run, and the repeat database is a set of files in the run's working directory (LOSAT/, as for `-db`):
+    `"run_directory"` has the harness run it on the instance whose `/work` is that directory. The rows are
+    NCBI-frozen (`rpt.*` of the blastn regression manifest)."""
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
+    rows = {row["case_id"]: row for row in regression.read_manifest()}
+    searches = []
+    for case_id in REPEAT_SUBJECT_ROWS:
+        row = rows[case_id]
+        assert row["exit"] == "0" and not row["env"], case_id
+        outfmt, argv = split(["blastn", *shlex.split(row["argv"])])
+        outfmt = outfmt or "0"
+        search = {"program": "blastn", "argv": argv, "cwd": str(REPO / "LOSAT"), "cases": [case_id], "frozen": {},
+                  "run_directory": True}
+        if custom_outfmt(outfmt):
+            search["outfmt"] = outfmt
+            search["frozen"]["custom"] = row["stdout_sha256"]
+        else:
+            search["frozen"][outfmt] = row["stdout_sha256"]
+        searches.append(search)
     return searches
 
 
@@ -782,6 +845,229 @@ def quick() -> list[dict]:
     return searches
 
 
+# The files that a tool run sees in its directory, published path -> source file under LOSAT/tests (`tool`):
+# the windowmasker fixtures of line NP M5 and the counts of winmask/, small ones, and a set of the same names for every row,
+# as every file of a folder is there for the command line.
+TOOL_FILES = {
+    "fa/dm2L_3k.fa": "winmask/fasta/dm2L_3k.fa", "fa/dm2L_60k.fa": "winmask/fasta/dm2L_60k.fa",
+    "fa/dm_edge.fa": "winmask/fasta/dm_edge.fa", "fa/multi.fa": "windowmasker/in/multi.fa",
+    "fa/cd.fa": "windowmasker/in/cd.fa", "fa/gap.fa": "windowmasker/in/gap.fa", "fa/short.fa": "windowmasker/in/short.fa",
+    "fa/letters.fa": "windowmasker/in/letters.fa",
+    "counts/dm2L_u9.binary": "winmask/counts/dm2L_u9.binary", "counts/mg1655_u9.obinary": "winmask/counts/mg1655_u9.obinary",
+    "counts/mg1655_u9.ascii": "winmask/counts/mg1655_u9.ascii", "counts/mg1655_u9.oascii": "winmask/counts/mg1655_u9.oascii",
+    "counts/dm_u2.obinary": "winmask/counts/dm_u2.obinary",
+    "counts/u4.ascii": "windowmasker/counts/u4.ascii", "counts/u4.binary": "windowmasker/counts/u4.binary",
+    "counts/u4.oascii": "windowmasker/counts/u4.oascii", "counts/u4.obinary": "windowmasker/counts/u4.obinary",
+    "counts/garbage.counts": "windowmasker/in/garbage.counts", "counts/empty.counts": "windowmasker/in/empty.counts",
+    "ids/a.txt": "windowmasker/in/ids_a.txt", "ids/b.txt": "windowmasker/in/ids_b.txt", "ids/db.txt": "windowmasker/in/ids_db.txt",
+    **{f"db/{name}.{extension}": f"windowmasker/db/{name}.{extension}"
+       for name, extensions in (("wm", "ndb nhr nin njs not nsq ntf nto"), ("wm_ps", "ndb nhr nin njs nog nos not nsq ntf nto"))
+       for extension in extensions.split()},
+}
+# The bytes of a tool run's FASTA input of more than 1 MiB (the file it writes arrives in two frames at least).
+TOOL_BIG_LETTERS = 1_500_000
+
+
+def tool() -> list[dict]:
+    """The tool runs of `windowmasker` (`"tool": "run"`) and the checks of its argv (`"tool": "validate"`), compared
+    with the command line's run of the same words in a folder of the same files (line NP WW3a, 2026-11-22,
+    D-WW3-6, D-WW3-7, D-WW3-8): the modes `-mk_counts` (each `-sformat`, to the standard output and to a file),
+    `-convert` and `-ustat` (each `-outfmt`), their options, the help and version words, and the errors that the
+    command line has before and after it opens a file. `"expect"` is `"failure"` for a run whose exit status is
+    not 0 (a check of v_abi.js against the native run), `"late_failure"` for an argv that `validate` accepts though
+    the command line's run fails after it opens a file (the checks stop there, D-WW3-10), and `"refusal"` for LOSAT's
+    refusal of an output name that LOSAT Web does not write (the command line would write it; exit status 1, no
+    file); `"frames"` is the least number of frames of bytes that the largest file of the run arrives in. Rows are written with the words of the command line (the mode's own
+    options, the files by their published names)."""
+    tests = REPO / "LOSAT/tests"
+    directory = REPO / "LOSAT/target/v_abi_tool"
+    directory.mkdir(parents=True, exist_ok=True)
+    files = {name: str(tests / source) for name, source in TOOL_FILES.items()}
+    # A list of FASTA files (`-fa_list T`), written for the published names; and a FASTA file of 1.5 million letters
+    # (a fixed generator: the same bytes in every run), which a masked output of more than 1 MiB follows.
+    (directory / "falist.txt").write_text("fa/dm2L_3k.fa\n\nfa/multi.fa\n")
+    files["falist.txt"] = str(directory / "falist.txt")
+    # A registry file of the run's directory (`-conffile wm.ini`), which the run and its validation read.
+    (directory / "wm.ini").write_text("[WINDOW_MASKER]\n")
+    files["wm.ini"] = str(directory / "wm.ini")
+    state, lines = 12345, [">big generated record\n"]
+    letters = []
+    for _ in range(TOOL_BIG_LETTERS):
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        letters.append("ACGT"[(state >> 16) & 3])
+    text = "".join(letters)
+    lines += [text[at:at + 60] + "\n" for at in range(0, len(text), 60)]
+    (directory / "big.fa").write_text("".join(lines))
+    big = {**files, "big.fa": str(directory / "big.fa")}
+    rows: list[dict] = []
+
+    def add(case_id: str, words: str, failure: bool | str = False, kind: str = "run", frames: int | None = None,
+            published: dict | None = None) -> None:
+        row = {"program": "windowmasker", "tool": kind, "argv": shlex.split(words), "cwd": str(tests),
+               "files": published or files, "cases": [f"tool.{case_id}"], "frozen": {}}
+        if failure:
+            row["expect"] = failure if isinstance(failure, str) else "failure"
+        if frames is not None:
+            row["frames"] = frames
+        rows.append(row)
+
+    mask = "-ustat counts/dm2L_u9.binary"
+    # -mk_counts: each -sformat to the standard output (the default, `-out -` and without it) and to a file.
+    add("mk.default.stdout", "-mk_counts -in fa/dm2L_60k.fa -unit 5")
+    for sformat in ("ascii", "binary", "oascii", "obinary"):
+        base = f"-mk_counts -in fa/dm2L_60k.fa -unit 5 -sformat {sformat}"
+        add(f"mk.{sformat}.stdout", base)
+        add(f"mk.{sformat}.out_dash", f"{base} -out -")
+        add(f"mk.{sformat}.file", f"{base} -out out.counts")
+    add("mk.t_low_pct.file", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -t_low_pct 80 -t_extend_pct 95 -t_thres_pct 97 "
+        "-t_high_pct 99.9 -sformat binary -out out.counts")
+    add("mk.t_low_pct.stdout", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -t_low_pct 80 -sformat obinary")
+    add("mk.checkdup", "-mk_counts -in fa/dm2L_60k.fa,fa/cd.fa -checkdup T -unit 3 -sformat binary")
+    add("mk.checkdup.file", "-mk_counts -in fa/dm2L_60k.fa,fa/cd.fa -checkdup T -unit 3 -sformat obinary -out out.counts")
+    add("mk.fa_list", "-mk_counts -in falist.txt -fa_list T -unit 5 -sformat binary")
+    add("mk.fa_list.missing", "-mk_counts -in nonexistent.txt -fa_list T", failure=True)
+    add("mk.comma", "-mk_counts -in fa/dm2L_3k.fa,fa/multi.fa -unit 5 -sformat binary")
+    add("mk.blastdb", "-mk_counts -infmt blastdb -in db/wm -sformat binary")
+    add("mk.blastdb.file", "-mk_counts -infmt blastdb -in db/wm,db/wm_ps -unit 5 -sformat obinary -out out.counts")
+    add("mk.blastdb.missing", "-mk_counts -infmt blastdb -in db/none -unit 5", failure=True)
+    add("mk.ids", "-mk_counts -in fa/multi.fa -ids ids/a.txt -unit 5 -sformat binary")
+    add("mk.exclude_ids", "-mk_counts -in fa/multi.fa -exclude_ids ids/a.txt -unit 5 -sformat binary")
+    add("mk.parse_seqids", "-mk_counts -in fa/dm2L_3k.fa -parse_seqids -sformat binary")
+    add("mk.meta", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -meta something -sformat ascii")
+    add("mk.genome_size", "-mk_counts -in fa/dm2L_3k.fa -genome_size 1000 -unit 3 -sformat binary")
+    add("mk.logfile", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary -logfile run.log")
+    add("mk.logfile.file", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out out.counts -logfile run.log")
+    # -convert: each target format, from each source format, to the standard output and to a file.
+    for source in ("ascii", "binary", "oascii", "obinary"):
+        for target in ("ascii", "binary", "oascii", "obinary"):
+            if source == "ascii" or target == "ascii" or source[0] == target[0]:
+                add(f"convert.{source}.{target}", f"-convert -in counts/u4.{source} -sformat {target}")
+    for target in ("ascii", "binary", "oascii", "obinary"):
+        add(f"convert.ascii.{target}.file", f"-convert -in counts/u4.ascii -sformat {target} -out out.counts")
+    add("convert.default", "-convert -in counts/u4.obinary")
+    add("convert.meta", "-convert -in counts/u4.obinary -sformat ascii -meta 'replaced note'")
+    add("convert.logfile", "-convert -in counts/u4.obinary -sformat oascii -out out.counts -logfile run.log")
+    add("convert.mg1655", "-convert -in counts/mg1655_u9.obinary -sformat ascii -out out.counts")
+    # -ustat: every -outfmt on the standard output and in a file, and with -parse_seqids.
+    outfmts = ("interval", "fasta", "seqloc_asn1_bin", "seqloc_asn1_text", "seqloc_xml", "maskinfo_asn1_bin",
+               "maskinfo_asn1_text", "maskinfo_xml")
+    for outfmt in outfmts:
+        add(f"ustat.{outfmt}.stdout", f"{mask} -in fa/multi.fa -outfmt {outfmt}")
+        add(f"ustat.{outfmt}.file", f"{mask} -in fa/multi.fa -outfmt {outfmt} -out out.res")
+        add(f"ustat.{outfmt}.parse_seqids", f"{mask} -in fa/multi.fa -outfmt {outfmt} -parse_seqids")
+    add("ustat.default", f"{mask} -in fa/dm2L_60k.fa")
+    add("ustat.default.file", f"{mask} -in fa/dm2L_60k.fa -out out.res")
+    add("ustat.dust", f"{mask} -in fa/dm2L_60k.fa -dust T")
+    add("ustat.dust.fasta.file", f"{mask} -in fa/dm2L_60k.fa -dust T -dust_level 10 -outfmt fasta -out out.fa")
+    add("ustat.ids", f"{mask} -in fa/multi.fa -ids ids/a.txt")
+    add("ustat.exclude_ids", f"{mask} -in fa/multi.fa -exclude_ids ids/b.txt -outfmt fasta")
+    add("ustat.ids_and_exclude_ids", f"{mask} -in fa/dm2L_3k.fa -ids ids/a.txt -exclude_ids ids/b.txt", failure=True)
+    add("ustat.text_match", f"{mask} -in fa/multi.fa -ids ids/a.txt -text_match F", failure=True)
+    add("ustat.seqids", f"{mask} -infmt seqids -in ids/a.txt", failure=True)
+    add("ustat.parse_seqids", f"{mask} -in fa/multi.fa -parse_seqids -exclude_ids ids/a.txt")
+    add("ustat.blastdb", f"{mask} -infmt blastdb -in db/wm -outfmt fasta")
+    add("ustat.blastdb.file", f"{mask} -infmt blastdb -in db/wm_ps -parse_seqids -outfmt maskinfo_asn1_text -out out.res")
+    add("ustat.blastdb.missing", f"{mask} -infmt blastdb -in db/none", failure=True)
+    add("ustat.comma", f"{mask} -in fa/dm2L_3k.fa,fa/multi.fa", failure=True)
+    add("ustat.thresholds", f"{mask} -in fa/dm2L_60k.fa -t_extend 60 -t_thres 90 -t_high 300 -t_low 50 -window 13")
+    add("ustat.t_low_pct.file", f"{mask} -in fa/dm2L_60k.fa -t_low_pct 90 -t_extend_pct 99 -out out.res")
+    add("ustat.window5", f"{mask} -in fa/dm2L_3k.fa -window 5 -outfmt maskinfo_xml", failure=True)
+    add("ustat.meta", f"{mask} -in fa/dm2L_3k.fa -meta something")
+    add("ustat.obinary", "-ustat counts/mg1655_u9.obinary -in fa/dm_edge.fa -outfmt fasta")
+    add("ustat.ascii", "-ustat counts/mg1655_u9.ascii -in fa/dm_edge.fa -out out.res")
+    add("ustat.oascii", "-ustat counts/mg1655_u9.oascii -in fa/dm_edge.fa -outfmt maskinfo_xml -out out.res")
+    add("ustat.u2", "-ustat counts/dm_u2.obinary -in fa/dm2L_3k.fa")
+    add("ustat.gap", f"{mask} -in fa/gap.fa -dust T -outfmt fasta")
+    add("ustat.logfile", f"{mask} -in fa/dm2L_3k.fa -logfile run.log")
+    add("ustat.logfile.file", f"{mask} -in fa/dm2L_3k.fa -outfmt fasta -out out.fa -logfile run.log")
+    add("ustat.stdin", f"{mask} -in -")
+    # The output file of more than 1 MiB arrives in more than one frame.
+    add("ustat.big.file", "-ustat counts/mg1655_u9.obinary -in big.fa -outfmt fasta -out out.fa", frames=2, published=big)
+    add("ustat.big.stdout", "-ustat counts/mg1655_u9.obinary -in big.fa -outfmt fasta", published=big)
+    add("mk.big.file", "-mk_counts -in big.fa -unit 9 -sformat obinary -out out.counts", published=big)
+    # Errors, before and after the run opens a file.
+    add("error.no_mode", "-in fa/dm2L_3k.fa", failure=True)
+    add("error.no_arguments", "", failure=True)
+    add("error.unknown_option", f"{mask} -nosuchopt", failure=True)
+    add("error.extra_positional", f"{mask} extra", failure=True)
+    add("error.duplicate_option", f"{mask} -window 20 -window 30", failure=True)
+    add("error.window_abc", f"{mask} -in fa/dm2L_3k.fa -window abc", failure=True)
+    add("error.sformat_with_ustat", f"{mask} -sformat ascii", failure=True)
+    add("error.mk_and_convert", "-mk_counts -convert", failure=True)
+    add("error.mk_and_ustat", f"-mk_counts {mask}", failure=True)
+    add("error.outfmt_bad", f"{mask} -in fa/dm2L_3k.fa -outfmt nosuch", failure=True)
+    add("error.in_missing", f"{mask} -in nonexistent.fa", failure=True)
+    add("error.in_missing.mk", "-mk_counts -in nonexistent.fa -unit 5", failure=True)
+    add("error.counts_missing", "-ustat nonexistent.counts -in fa/dm2L_3k.fa", failure=True)
+    add("error.counts_garbage", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa", failure=True)
+    add("error.counts_empty", "-ustat counts/empty.counts -in fa/dm2L_3k.fa", failure=True)
+    add("error.counts_garbage.logfile", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile run.log", failure=True)
+    add("error.convert_garbage", "-convert -in counts/garbage.counts -sformat ascii", failure=True)
+    add("error.out_missing_directory", f"{mask} -in fa/dm2L_3k.fa -out nodir/x.txt", failure=True)
+    add("mk.out_missing_directory", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -out nodir/c.counts")
+    add("error.out_directory", f"{mask} -in fa/dm2L_3k.fa -out fa", failure=True)
+    add("error.unit_0", "-mk_counts -in fa/dm2L_3k.fa -unit 0", failure=True)
+    add("ustat.ids_missing", f"{mask} -in fa/multi.fa -ids nonexistent.txt")
+    add("error.mk.ids_and_exclude_ids", "-mk_counts -in fa/multi.fa -ids ids/a.txt -exclude_ids ids/b.txt -unit 5",
+        failure=True)
+    add("error.mk.seqids", "-mk_counts -infmt seqids -in ids/a.txt -unit 5", failure=True)
+    add("error.convert.stdin", "-convert -in - -sformat ascii", failure=True)
+    add("error.convert.stdin.out_dash", "-convert -in - -out -", failure=True)
+    add("error.conffile_missing", "-conffile none.ini -mk_counts -in fa/dm2L_3k.fa -unit 5", failure=True)
+    # A folder named as an input opens, and its read fails (EISDIR), as on Linux.
+    add("error.in_directory", f"{mask} -in fa", failure=True)
+    add("error.in_directory.mk", "-mk_counts -in fa -unit 5", failure=True)
+    add("error.counts_directory", "-ustat fa -in fa/dm2L_3k.fa", failure=True)
+    # One file that the run opens twice (`-out X -logfile X`, two spellings of one path): one file, as the system
+    # shares it (D-WW3-9).
+    add("mk.shared.logfile", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out out.counts -logfile out.counts")
+    add("mk.shared.dot", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts")
+    add("mk.shared.ascii", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -sformat ascii -out out.counts -logfile out.counts")
+    add("convert.shared.logfile", "-convert -in counts/u4.obinary -sformat oascii -out out.counts -logfile out.counts")
+    add("ustat.shared.logfile", f"{mask} -in fa/dm2L_3k.fa -outfmt fasta -out out.fa -logfile out.fa")
+    add("error.counts_garbage.shared", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -out out.res -logfile out.res",
+        failure=True)
+    # The registry file of -conffile, and the output names of the system's devices.
+    add("mk.conffile", "-conffile wm.ini -mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary")
+    add("ustat.dev_stdout", f"{mask} -in fa/dm2L_3k.fa -out /dev/stdout")
+    add("mk.dev_stdout", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary -out /dev/stdout")
+    add("ustat.dev_null", f"{mask} -in fa/dm2L_3k.fa -out /dev/null")
+    add("refusal.out_existing", f"{mask} -in fa/dm2L_3k.fa -out fa/short.fa", failure="refusal")
+    add("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", failure="refusal")
+    # The help and the version words.
+    for word in ("-h", "-help", "-xmlhelp", "-version", "-version-full", "-version-full-xml", "-version-full-json"):
+        add(f"print{word}", word)
+    add("print.help_with_options", f"{mask} -h")
+    # losat_web2_validate of a tool's argv: valid -> 0 and nothing emitted; invalid -> -1 and the command line's
+    # standard error (then the file of -logfile) without the last line end.
+    for case_id, words, failure in (
+            ("ustat", f"{mask} -in fa/dm2L_3k.fa", False),
+            ("ustat.options", f"{mask} -in fa/multi.fa -outfmt maskinfo_xml -dust T -ids ids/a.txt -out out.res", False),
+            ("mk_counts", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat obinary -out out.counts", False),
+            ("convert", "-convert -in counts/u4.ascii -sformat obinary", False),
+            ("logfile", f"{mask} -in fa/dm2L_3k.fa -logfile run.log", False),
+            ("help", "-h", False), ("xmlhelp", "-xmlhelp", False), ("version", "-version", False),
+            ("no_mode", "-in fa/dm2L_3k.fa", True), ("no_arguments", "", True),
+            ("unknown_option", f"{mask} -nosuchopt", True), ("extra_positional", f"{mask} extra", True),
+            ("duplicate_option", f"{mask} -window 20 -window 30", True), ("window_abc", f"{mask} -window abc", True),
+            ("unit_17", "-mk_counts -unit 17", True), ("mk_and_ustat", f"-mk_counts {mask}", True),
+            ("no_mode.logfile", "-in fa/dm2L_3k.fa -logfile run.log", True),
+            ("unknown_option.logfile", f"{mask} -nosuchopt -logfile run.log", True),
+            # The registry file of the run's directory, which validation reads (D-WW3-10).
+            ("conffile", "-conffile wm.ini -mk_counts -in fa/dm2L_3k.fa -out out.counts", False),
+            ("conffile_missing", "-conffile none.ini -mk_counts -in fa/dm2L_3k.fa -out out.counts", True),
+            # The command line's refusals before it opens a file, and one after (D-WW3-10).
+            ("mk.ids_and_exclude_ids", "-mk_counts -in fa/multi.fa -ids ids/a.txt -exclude_ids ids/b.txt", True),
+            ("mk.seqids", "-mk_counts -infmt seqids -in ids/a.txt", True),
+            ("convert.stdin", "-convert -in - -sformat ascii", True),
+            ("convert.stdin.out_dash", "-convert -in - -out -", True),
+            ("ustat.ids_and_exclude_ids", f"{mask} -in fa/dm2L_3k.fa -ids ids/a.txt -exclude_ids ids/b.txt",
+             "late_failure"),
+            ("shared", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts", False)):
+        add(f"validate.{case_id}", words, failure, kind="validate")
+    return rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", choices=["quick", "full"], default="quick")
@@ -804,6 +1090,7 @@ def main() -> int:
         searches += database()
         searches += scan_d13()
         searches += failed_outputs()
+        searches += tool()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

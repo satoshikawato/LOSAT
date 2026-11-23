@@ -174,6 +174,7 @@ fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: (subject_nt.len() / 3) as i32,
@@ -206,6 +207,7 @@ fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
         gap_xdrop: 38,
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stage_c_hsps =
@@ -427,6 +429,7 @@ fn code32_local_api_subject_translation_redo_and_scores_match_ncbi() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: 120,
@@ -464,6 +467,7 @@ fn code32_local_api_subject_translation_redo_and_scores_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stage_c_hsps =
@@ -799,6 +803,7 @@ fn multi_query_preliminary_hsps_redo_to_ncbi_alignment_order() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: 2_125,
@@ -833,6 +838,7 @@ fn multi_query_preliminary_hsps_redo_to_ncbi_alignment_order() {
         gap_xdrop: 38,
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-625;
@@ -1519,6 +1525,7 @@ fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: 120,
@@ -1548,6 +1555,7 @@ fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
         gap_xdrop: 38,
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
@@ -1853,7 +1861,6 @@ fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
             num_ident: i32::try_from(stats.0).unwrap(),
             num_positives: stats.1,
             report_num_ident: stats.0,
-            report_num_positives: stats.1,
             report_mismatches: i64::try_from(stats.3).unwrap(),
             align_length: stats.2,
             mismatches: stats.3,
@@ -2045,5 +2052,50 @@ fn test_tblastn_fence_signed_caller_matches_pinned_ncbi() {
             observed,
         )
         .unwrap();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:983-1021
+// The reports compare the rows' letters: a codon of D/N (RAT) or E/Q (SAR) is X in the search
+// and B or Z in the rows, an all-N codon X in both. Query X against the B is identical in the
+// search and in no report; query E against the Z is positive in the reports (BLOSUM62 E/Z 4)
+// and not in the search (E/X -1). Both strands.
+#[test]
+fn report_counts_compare_an_ambiguous_codon_as_the_rows_show_it() {
+    use crate::utils::matrix::aa_char_to_ncbistdaa;
+    let code = GeneticCode::try_from_id(1).unwrap();
+    let query: Vec<u8> = b"MXEXM"
+        .iter()
+        .map(|&aa| aa_char_to_ncbistdaa(aa))
+        .collect();
+    for (subject, frame) in [
+        (&b"ATGRATSARNNNATG"[..], 1i8),
+        (&b"CATNNNYTSATYCAT"[..], -1i8),
+    ] {
+        let converted = ConvertedKappaHsp {
+            context: 0,
+            hsp: GappedHsp {
+                frame,
+                score: 10,
+                q_start: 0,
+                q_end: 5,
+                q_gapped_start: 0,
+                s_start: 0,
+                s_end: 5,
+                s_gapped_start: 0,
+            },
+            edit_script: vec![GapEditOp::Sub(5)],
+            matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+        };
+        let mut target = TargetTranslation::new(subject, &code);
+        let ((ident, positives, length, mismatches, _, _), shown) =
+            report_converted_stats(&converted, &query, &mut target, ScoringMatrix::Blosum62)
+                .unwrap();
+        assert_eq!(
+            (ident, positives, length, mismatches),
+            (4, 4, 5, 1),
+            "frame {frame}"
+        );
+        assert_eq!(shown, (3, 2), "frame {frame}");
     }
 }

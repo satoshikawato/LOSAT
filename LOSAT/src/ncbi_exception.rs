@@ -77,7 +77,8 @@ impl ThrowSite {
 }
 
 /// An exception of NCBI's C++ Toolkit (`CException`): where it was thrown, its message, the
-/// extra text of its class, and the exception it was thrown for (`NCBI_RETHROW`).
+/// extra text of its class, the exception it was thrown for (`NCBI_RETHROW`, or the copy that
+/// `AddBacklog` keeps), and whether its text is the main one of the chain (`m_MainText`).
 ///
 /// The message is bytes, as NCBI's `std::string`: a name or a word of the input that is not UTF-8
 /// (a member name of a text ASN.1 file, a file name) keeps its bytes in the report.
@@ -88,8 +89,11 @@ impl ThrowSite {
 pub struct NcbiException {
     site: ThrowSite,
     message: Vec<u8>,
-    extra: Option<String>,
+    /// A boxed `str`, so that the exception (and `seqdb::SeqDbError`, which holds one) stays as
+    /// small as before `main_text`.
+    extra: Option<Box<str>>,
     predecessor: Option<Box<NcbiException>>,
+    main_text: bool,
 }
 
 impl NcbiException {
@@ -100,6 +104,7 @@ impl NcbiException {
             message: message.into(),
             extra: None,
             predecessor: None,
+            main_text: true,
         }
     }
 
@@ -110,7 +115,7 @@ impl NcbiException {
     /// adds the position.
     pub fn with_pos(site: ThrowSite, message: impl Into<Vec<u8>>, pos: usize) -> Self {
         let mut exception = Self::new(site, message);
-        exception.extra = Some(format!("m_Pos = {pos}"));
+        exception.extra = Some(format!("m_Pos = {pos}").into_boxed_str());
         exception
     }
 
@@ -124,11 +129,15 @@ impl NcbiException {
 
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
-    /// `NCBI_RETHROW_SAME(self, message)` in `function` at `line` of `file`: the same exception
-    /// (its class, code and extra text, such as a `CStringException`'s position) with the new
-    /// place and message, the old one its predecessor: NCBI's serial object stack adds one for
-    /// each frame it leaves (`END_OBJECT_FRAME`: the writer's `report::serial::xml`, the reader's
-    /// `report::serial::asn_types::read`).
+    // `x_Init` sets the place and the message; the error code stays (the class's constructor
+    // sets it), and so does the extra text of the class (a `CSerialException`'s frame stack,
+    // which the frames of the stack that the exception leaves after this call extend,
+    // `seqid::ber`).
+    /// `NCBI_RETHROW_SAME(self, message)` at `site` (`AddBacklog`): the same exception (its class,
+    /// error code and extra text; `site.kind` is not used) with the place of `site` and `message`,
+    /// its predecessor its copy before the call, which keeps the main text of the chain. The one
+    /// owner of the macro: the object frames of NCBI's object streams (`seqid::ber`'s reads,
+    /// `report::serial::xml`'s `END_OBJECT_FRAME`).
     pub fn rethrow_same(
         self,
         file: &'static str,
@@ -145,6 +154,7 @@ impl NcbiException {
             },
             message: message.into(),
             extra: self.extra.clone(),
+            main_text: false,
             predecessor: Some(Box::new(self)),
         }
     }
@@ -153,6 +163,16 @@ impl NcbiException {
     #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
         self.site
+    }
+
+    /// Whether the exception's class (the `C<class>` of `GetErrCodeString`'s `C<class>::e<code>`)
+    /// is `class`: the class that a `catch` of NCBI's matches first (`CEofException`, which
+    /// `NCBI_RETHROW_SAME` keeps).
+    pub fn is_class(&self, class: &str) -> bool {
+        self.site
+            .kind
+            .strip_prefix(class)
+            .is_some_and(|rest| rest.starts_with("::"))
     }
 
     /// `GetType()::GetErrCodeString()` of the exception: `CSeqDBException::eInvalid`, which
@@ -184,7 +204,7 @@ impl NcbiException {
             }
             None => format!(" at {frame_info}"),
         };
-        self.extra = Some(stack);
+        self.extra = Some(stack.into_boxed_str());
     }
 
     /// `GetMsg()`: the message, without the place or the extra text.
@@ -302,14 +322,18 @@ impl NcbiException {
     // `[DEBUG] MessageFile`, ncbiapp.cpp:1654-1667); each message ends with a line feed. The
     // severity is the exceptions' `Error` (`sm_DefEnabled` is true and `sm_DefHandler` null
     // unless an application changes them, ncbiexpt.cpp:603-605). The main text is the newest
-    // exception's: `rethrow` makes an exception whose predecessor loses it (the constructor's
-    // setting `prev_exception->m_MainText` to false, ncbiexpt.cpp:188-189).
+    // exception of the chain, from the newest, that has it (`HasMainText`), else the oldest: an
+    // exception that `rethrow` makes has it (the constructor sets `m_MainText` to true,
+    // ncbiexpt.cpp:179), one that `rethrow_same` makes has not, so the main text is then its
+    // predecessor's (the exception of NCBI's object stream under a member's
+    // `error while reading <member>`).
     /// `NCBI_REPORT_EXCEPTION_X` with `err_subcode`, `title` and the exception `e`, in a source
     /// file whose `NCBI_USE_ERRCODE_X` is `err_code`, as an application with NCBI's default
     /// diagnostic flags posts it: `Error: (<class>::<code>) <message>` for each exception of the
     /// chain, oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
-    /// <message>` of the newest, each line ending with a line feed; in LOSAT's words
-    /// (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
+    /// <message>` of the exception with the main text, each line ending with a line feed; in
+    /// LOSAT's words (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception
+    /// 12).
     pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> Vec<u8> {
         crate::wording::losat_bytes(&self.ncbi_report_default_ex(err_code, err_subcode, title))
             .into_owned()
@@ -324,13 +348,25 @@ impl NcbiException {
         out.extend(err_post_x_bytes(
             err_code,
             err_subcode,
-            &self.titled_text(title),
+            &self.main_link().titled_text(title),
         ));
         out
     }
 
-    /// `<title> (<class>::<code>) <message>` of the newest exception, the line that ends NCBI's
-    /// report of an exception with a title.
+    /// The exception of the chain whose text the reports' last line shows (`HasMainText`, cited
+    /// at `report_default_ex`): the newest that has the main text, else the oldest.
+    fn main_link(&self) -> &NcbiException {
+        let chain = self.chain();
+        chain
+            .iter()
+            .copied()
+            .find(|e| e.main_text)
+            .or(chain.last().copied())
+            .expect("a chain has its own exception")
+    }
+
+    /// `<title> (<class>::<code>) <message>` of this exception, the line that ends NCBI's report
+    /// of an exception with a title (the reports call it on [`Self::main_link`]).
     fn titled_text(&self, title: &str) -> Vec<u8> {
         [
             format!("{title} ({}) ", self.site.kind).as_bytes(),
@@ -344,8 +380,9 @@ impl NcbiException {
     /// `NCBI_CATCH` with `title`, of this exception in an application whose diagnostic prefix is
     /// `prefix` (`ReportDefaultEx` without an error code, cited at `report_default_ex`): `Error:
     /// (<class>::<code>) [<prefix>] <message>` for each exception of the chain, oldest first, then
-    /// `Error: [<prefix>] <title> (<class>::<code>) <message>` of the newest (NCBI BLAST+ 2.17.0,
-    /// line RG D3-1 `om/` cases t08, t10, t76: the Seq-table checks of the object manager).
+    /// `Error: [<prefix>] <title> (<class>::<code>) <message>` of the exception with the main text
+    /// (`main_link`; NCBI BLAST+ 2.17.0, line RG D3-1 `om/` cases t08, t10, t76: the Seq-table
+    /// checks of the object manager).
     pub(crate) fn report_default(&self, prefix: &str, title: &str) -> Vec<u8> {
         let mut out = Vec::new();
         for e in self.chain().iter().rev() {
@@ -354,7 +391,7 @@ impl NcbiException {
         out.extend(error_post_line(
             None,
             Some(prefix),
-            &self.titled_text(title),
+            &self.main_link().titled_text(title),
         ));
         out
     }
@@ -383,13 +420,15 @@ impl Clone for NcbiException {
                 message: link.message.clone(),
                 extra: link.extra.clone(),
                 predecessor: copy,
+                main_text: link.main_text,
             }));
         }
         *copy.expect("the chain holds the exception itself")
     }
 }
 
-/// Two chains are equal when each link is (its place, message and extra text).
+/// Two chains are equal when each link is (its place, message, extra text and whether its text is
+/// the main one).
 impl PartialEq for NcbiException {
     fn eq(&self, other: &Self) -> bool {
         let (mut a, mut b) = (Some(self), Some(other));
@@ -397,7 +436,11 @@ impl PartialEq for NcbiException {
             match (a, b) {
                 (None, None) => return true,
                 (Some(x), Some(y)) => {
-                    if x.site != y.site || x.message != y.message || x.extra != y.extra {
+                    if x.site != y.site
+                        || x.message != y.message
+                        || x.extra != y.extra
+                        || x.main_text != y.main_text
+                    {
                         return false;
                     }
                     a = x.predecessor.as_deref();
@@ -411,7 +454,8 @@ impl PartialEq for NcbiException {
 
 impl Eq for NcbiException {}
 
-/// The links of the chain, newest first, each with its place, message and extra text.
+/// The links of the chain, newest first, each with its place, message, extra text and whether its
+/// text is the main one.
 impl std::fmt::Debug for NcbiException {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         struct Link<'a>(&'a NcbiException);
@@ -421,6 +465,7 @@ impl std::fmt::Debug for NcbiException {
                     .field("site", &self.0.site)
                     .field("message", &String::from_utf8_lossy(&self.0.message))
                     .field("extra", &self.0.extra)
+                    .field("main_text", &self.0.main_text)
                     .finish()
             }
         }

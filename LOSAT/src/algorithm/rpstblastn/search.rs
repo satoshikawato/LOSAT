@@ -48,10 +48,6 @@ pub(crate) struct TranslatedRpsSearch {
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
-    /// `-use_sw_tback` and `-comp_based_stats` as given: `-use_sw_tback` with composition-based
-    /// statistics (a later item) is refused per run (`check_options`).
-    pub(crate) use_sw_tback: bool,
-    pub(crate) comp_based_stats: String,
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
@@ -661,7 +657,7 @@ impl TranslatedRpsSearch {
                 units.searches_volumes_bare(),
             )
             .and_then(|unlisted| {
-                state.unlisted = unlisted.unwrap_or_default();
+                state.unlisted = unlisted;
                 if self.strategy {
                     state.request_space(units, options, &gapped)
                 } else {
@@ -685,12 +681,6 @@ impl TranslatedRpsSearch {
     /// LOSAT's refusals of the options before the first byte of the reports: what NCBI BLAST+
     /// 2.17.0's rpstblastn does in its search with them has no result that can be checked.
     pub(crate) fn check_options(&self) -> Result<()> {
-        let requested_cbs = self.search.requested_cbs;
-        if self.use_sw_tback && requested_cbs > 0 {
-            bail!(
-                "-use_sw_tback with composition-based statistics is not supported by LOSAT's {PROGRAM} yet"
-            );
-        }
         if self.search.sum_stats {
             bail!(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpstblastn links HSPs with the profiles' indexes as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's {PROGRAM}"
@@ -770,8 +760,8 @@ struct WindowBatch {
     /// computed with.
     lengths: Option<(i64, i32)>,
     /// The HSPs of each query's profiles that left its merged list past the formatter's cut
-    /// (`report_ordinal_ids`; `BatchResults::unlisted`).
-    unlisted: Vec<usize>,
+    /// (`report_ordinal_ids`; `BatchResults::unlisted` and `unlisted_subject_row_throws`).
+    unlisted: Option<crate::algorithm::rps_search::volumes::Unlisted>,
     /// The queries' footer K with composition-based statistics (`footer_gapped_k`).
     gapped_k: Option<Vec<f64>>,
 }
@@ -786,7 +776,7 @@ impl WindowBatch {
             hit_lists: vec![None; queries],
             request_space: None,
             lengths: None,
-            unlisted: Vec::new(),
+            unlisted: None,
             gapped_k: None,
         }
     }
@@ -844,8 +834,16 @@ impl WindowBatch {
             prepared: self.prepared.x_for_results(),
             parameters,
             search_skipped: false,
+            fetched_utf8: None,
             request_space: self.request_space,
-            unlisted: self.unlisted,
+            unlisted_subject_row_throws: self
+                .unlisted
+                .as_ref()
+                .is_some_and(|unlisted| unlisted.subject_row_throws),
+            unlisted: self
+                .unlisted
+                .map(|unlisted| unlisted.hsps)
+                .unwrap_or_default(),
             shown: Vec::new(),
             gapped_k: self.gapped_k,
         }
@@ -927,8 +925,10 @@ fn unsearched_batch(
         prepared: prepared.x_for_results(),
         parameters,
         search_skipped: true,
+        fetched_utf8: None,
         request_space: None,
         unlisted: Vec::new(),
+        unlisted_subject_row_throws: false,
         shown: Vec::new(),
         gapped_k: None,
     }

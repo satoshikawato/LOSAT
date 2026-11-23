@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pdo5_same",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pdo5_same",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T22:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49542,
+  "bytes-to-cache": 226,
+  "files": [
+    "pdo5_same.pdb",
+    "pdo5_same.phr",
+    "pdo5_same.pin",
+    "pdo5_same.pog",
+    "pdo5_same.pos",
+    "pdo5_same.pot",
+    "pdo5_same.psq",
+    "pdo5_same.ptf",
+    "pdo5_same.pto"
+  ]
+}

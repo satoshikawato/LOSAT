@@ -21,6 +21,8 @@ mod blastdbcmd_discovery;
 mod blastdbcmd_info;
 #[path = "../blastdbcmd_masks.rs"]
 mod blastdbcmd_masks;
+#[path = "../blastdbcmd_metadata_failures.rs"]
+mod blastdbcmd_metadata_failures;
 #[path = "../blastdbcmd_retrieve.rs"]
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
@@ -57,12 +59,16 @@ mod function_size_limit;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_html_posts.rs"]
+mod library_html_posts;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]
 mod llvm_profile;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
+#[path = "../makeblastdb_gi_mask.rs"]
+mod makeblastdb_gi_mask;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]
@@ -73,6 +79,8 @@ mod makeblastdb_past_32_bits;
 mod makeblastdb_rename_lock;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
+#[path = "../makeprofiledb_fixtures.rs"]
+mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]

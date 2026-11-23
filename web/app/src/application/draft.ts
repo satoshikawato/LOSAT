@@ -24,6 +24,7 @@ import {
   type FastaParserKind,
   type FastaReader,
   type InputRole,
+  type PrintedKind,
   type ProgramId,
   type RegistryFile,
   type SequenceKind,
@@ -44,8 +45,10 @@ import {
   type FetchGroup,
   type FetchSourceId,
 } from '../domain/accession';
-import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
-import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
+import { MOST_LEFT_OUT_IDS } from '../domain/input-parts';
+import type { InputPart } from '../domain/run';
+import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
+import { endsInput, includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
 import { inputLead, type InputLead } from '../domain/input-format';
@@ -886,15 +889,24 @@ export class SearchDraft {
     return words;
   }
 
-  /** The name of the role's input in the argv of a combined search (plan §5.3). */
+  /**
+   * The name of the role's input in the argv that the form validates (plan §5.3): the user's file name for the user's file as
+   * given (D21); for a file that LOSAT makes (pasted text, several files, a file with records left out) a placeholder, because
+   * the run names it after its number and time, which the run has only when "Run LOSAT" starts it (Coordinator.enqueueAll;
+   * line WQA's D22, DECISIONS 44).
+   */
   inputName(role: InputRole): string {
     const sources = this.role(role).sources.filter((source) => source.status !== 'failed');
-    if (sources.length === 1) return nameOf(sources[0]!, role);
-    return sources.length === 0 ? PASTED_NAMES[role] : COMBINED_NAMES[role];
+    return isFileAsGiven(sources) ? readSources(sources)[0]!.file.name : PASTED_NAMES[role];
   }
 
-  /** The runs that "Run LOSAT" would make now. */
+  /**
+   * The runs that "Run LOSAT" would make now: the runs that `submit` starts (one `inputGroups` for both). A draft whose argv
+   * prints the command line's help or version starts the one run that prints it, whatever the inputs (line WQA's D20, S3-2,
+   * 2026-11-23).
+   */
   runCount(): number {
+    if (this.printsKind() !== null) return 1;
     return ROLES.map((role) => this.inputGroups(role).length).reduce((a, b) => a * Math.max(1, b), 1);
   }
 
@@ -946,7 +958,10 @@ export class SearchDraft {
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
     // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
-    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20).
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20): it is read once the
+    // validation of the draft's argv has answered (not `idle`, which waits for a fetch too), so that a word typed just before
+    // Run, or taken out, decides as the engine's answer for the argv says (line WQA's D20 round 4, 2026-11-23).
+    await this.validationSettled();
     for (const role of ROLES) {
       const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -975,7 +990,7 @@ export class SearchDraft {
     // Their sources stay until the runs have their inputs, also when the form lets them go meanwhile.
     this.refs.set(
       'submit',
-      [...groups.query, ...groups.subject].flatMap((group) => group.sources.map((source) => source.sourceId!)),
+      [...groups.query, ...groups.subject].flatMap((sources) => sources.map((source) => source.sourceId!)),
     );
     const parameters = this.parameters();
     // The file of -window_masker_db, when the argv has it (a file chosen and then unchecked is not in the form).
@@ -994,8 +1009,8 @@ export class SearchDraft {
     const state = this.state.get();
     const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
     const resolved = {
-      query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
-      subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
+      query: await Promise.all(groups.query.map((sources) => this.resolveGroup(sources))),
+      subject: await Promise.all(groups.subject.map((sources) => this.resolveGroup(sources))),
     };
     const requests: SearchRequest[] = [];
     for (const query of resolved.query) {
@@ -1023,8 +1038,19 @@ export class SearchDraft {
    * line reads none for it.
    */
   private printsText(): boolean {
+    return this.printsKind() !== null;
+  }
+
+  /**
+   * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, as the
+   * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
+   * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
+   * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
+   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23).
+   */
+  printsKind(): PrintedKind | null {
     const { start, validation } = this.state.get();
-    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+    return validation.state === 'ok' ? (start?.prints ?? null) : null;
   }
 
   /**
@@ -1174,21 +1200,27 @@ export class SearchDraft {
   }
 
   /** The inputs of the role's runs: all sources together, or one per source (Separate). */
-  private inputGroups(role: InputRole): ReadonlyArray<{ readonly name: string; readonly sources: readonly DraftSource[] }> {
+  private inputGroups(role: InputRole): ReadonlyArray<readonly DraftSource[]> {
     const draft = this.role(role);
     const usable = draft.sources.filter((source) => source.status === 'ready');
     if (draft.mode === 'separate' && usable.length > 1) {
       // A source whose records are all excluded has nothing to search alone.
       return usable
         .filter((source) => includedOf(source).length > 0 || (source.base?.records.length ?? 0) === 0)
-        .map((source) => ({ name: nameOf(source, role), sources: [source] }));
+        .map((source) => [source]);
     }
-    return usable.length === 0 ? [] : [{ name: this.inputName(role), sources: usable }];
+    return usable.length === 0 ? [] : [usable];
   }
 
-  private async resolveGroup(group: { readonly name: string; readonly sources: readonly DraftSource[] }) {
-    const revisionIds = await Promise.all(group.sources.map((source) => this.revisionFor(source)));
-    return { name: group.name, revisionIds };
+  /**
+   * An input of a run, from its sources: the user's file name where it is the user's file as given, otherwise (it is a file that
+   * LOSAT makes) what it is made of, and the revisions. The name of a made input is the run's, given by the coordinator. What it
+   * is made of is made here, when the run is resolved, not when the runs are counted (runCount): it reads the record tables.
+   */
+  private async resolveGroup(sources: readonly DraftSource[]) {
+    const revisionIds = await Promise.all(sources.map((source) => this.revisionFor(source)));
+    const from = fromOf(sources);
+    return from === undefined ? { name: readSources(sources)[0]!.file.name, revisionIds } : { revisionIds, from };
   }
 
   // --- asynchronous work ------------------------------------------------------------------
@@ -1510,7 +1542,7 @@ export class SearchDraft {
     if (role !== 'query' || draft.mode !== 'combined' || cannotFollow(draft.sources, source)) return [];
     const at = draft.sources.findIndex((s) => s.key === source.key);
     const before = draft.sources.slice(0, Math.max(0, at)).filter((s) => s.status === 'ready');
-    return before.some((s) => s.base?.readerError !== undefined) ? [] : before;
+    return before.some((s) => endsInput(s.base)) ? [] : before;
   }
 
   /**
@@ -1656,7 +1688,7 @@ export class SearchDraft {
     for (const role of ROLES) {
       const groups = this.inputGroups(role);
       if (groups.length === 0) return;
-      inputBytes += Math.max(...groups.map((group) => group.sources.reduce((sum, source) => sum + source.size, 0)));
+      inputBytes += Math.max(...groups.map((sources) => sources.reduce((sum, source) => sum + source.size, 0)));
     }
     this.deps.engine.prepare({ requestedThreads: threads, inputBytes, ...(this.validArgv === undefined ? {} : { argv: this.validArgv }) });
   }
@@ -1807,15 +1839,24 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
  * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
  */
 function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
-  const read: DraftSource[] = [];
-  for (const source of sources) {
-    if (source.status !== 'ready') continue;
-    const stops = source.base?.readerError !== undefined;
-    if (includedOf(source).length === 0 && !stops) continue;
-    read.push(source);
-    if (stops) break;
-  }
-  return read;
+  return readSources(sources.filter((source) => source.status === 'ready')).filter(
+    (source) => includedOf(source).length > 0 || endsInput(source.base),
+  );
+}
+
+/**
+ * The sources that a run's input reads, in order: up to and with the first whose reading ends with the reader's error, which
+ * ends the input, the engine reading no record after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one
+ * place in the draft that cuts a list of sources there: the readiness of a source after it (combinedSources), the name of the
+ * input (inputName) and the words that say what it is made of (fromOf, line WQA's D22) take their sources from it, so that the name
+ * and the words name what the bytes hold. `sourcesBefore` and `queryEndBefore` ask the same question of one source, with
+ * `endsInput`, the one test of it (domain/dataset.ts). `DataService.runInputBytes` is the data layer's own reading of the same
+ * revisions: it needs the error's offset to keep the bytes after the records, and it is outside the draft (a layer, and held by
+ * D17), so it tests the same field there.
+ */
+function readSources(sources: readonly DraftSource[]): readonly DraftSource[] {
+  const stop = sources.findIndex((source) => endsInput(source.base));
+  return stop < 0 ? sources : sources.slice(0, stop + 1);
 }
 
 /** Whether what a run reads of a source starts without a defline (review M2, 2026-11-20). */
@@ -1848,7 +1889,7 @@ export function cannotFollowText(source: DraftSource): string {
 export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {
   for (const before of sources) {
     if (before.key === source.key) return undefined;
-    if (before.status === 'ready' && before.base?.readerError !== undefined && !cannotFollow(sources, before)) return before;
+    if (before.status === 'ready' && endsInput(before.base) && !cannotFollow(sources, before)) return before;
   }
   return undefined;
 }
@@ -1875,8 +1916,47 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
   return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
-function nameOf(source: DraftSource, role: InputRole): string {
-  return source.origin === 'paste' ? PASTED_NAMES[role] : source.name;
+/** Whether the sources are one file of the user's, with every record in: the bytes of the run's input are the file's own. */
+function isFileAsGiven(sources: readonly DraftSource[]): boolean {
+  // Of the sources that the run reads: a Combined input whose first file ends with the reader's error is that file.
+  const read = readSources(sources);
+  return read.length === 1 && read[0]!.origin === 'file' && read[0]!.excluded.length === 0;
+}
+
+/**
+ * What an input made of `sources` is made of, for the run's snapshot; undefined where it is the user's file as given. Only the
+ * sources that the run reads (readSources), and of the records left out the first few IDs and their number: a file with a
+ * million records and ten kept has a million left out, which the page names three of.
+ */
+function fromOf(sources: readonly DraftSource[]): readonly InputPart[] | undefined {
+  if (isFileAsGiven(sources)) return undefined;
+  return readSources(sources).map((source) => ({
+    // The user's file by its own name (a compressed file by the name that the user gave), pasted text as such.
+    name: source.origin === 'paste' ? 'pasted text' : source.file.name,
+    records: includedOf(source).length,
+    leftOut: leftOutIdsOf(source),
+    leftOutCount: source.excluded.length,
+  }));
+}
+
+/**
+ * The IDs of the first records that a source leaves out, as the page names them: a record without a title by its place in the
+ * file (`record 3`), a record whose ID another record has too by its place (`r1 (#2)`, the number of the card's list).
+ */
+function leftOutIdsOf(source: DraftSource): readonly string[] {
+  const table = source.base?.records ?? [];
+  const named = source.excluded.slice(0, MOST_LEFT_OUT_IDS);
+  // How many records have the ID of each, in one pass over the table.
+  const counts = new Map<string, number>(named.map((index) => [table[index]?.id ?? '', 0]));
+  for (const record of table) {
+    const count = counts.get(record.id);
+    if (count !== undefined) counts.set(record.id, count + 1);
+  }
+  return named.map((index) => {
+    const id = table[index]?.id ?? '';
+    if (id === '') return `record ${index + 1}`;
+    return (counts.get(id) ?? 0) > 1 ? `${id} (#${index + 1})` : id;
+  });
 }
 
 function describeSource(source: DraftSource): string {

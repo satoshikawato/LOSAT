@@ -3,9 +3,9 @@
 
 NCBI references (598d8ae6):
 - c++/src/algo/blast/core/blast_hits.c:1379-1381
-  qsort(..., ScoreCompareHSPs);
+  Sorts the HSP array with `qsort` using `ScoreCompareHSPs`.
 - c++/src/algo/blast/core/link_hsps.c:483-486
-  qsort(..., s_RevCompareHSPsTbx);
+  Sorts the TBLASTX HSP list with `qsort` using `s_RevCompareHSPsTbx`.
 
 The tests freeze LOSAT's ownership boundary around those external calls; they
 do not reproduce or alter NCBI sorting behavior.

@@ -14,7 +14,8 @@
 //! item PS12b): NCBI's `one_query` is the query's translation buffer, the redo's subject is
 //! translated (`subject_is_translated`: windows in the frames, `RedoMatch::redo_windows` with a
 //! `FrameSubject`), its subject length for the e-values is `s_GetSubjectLength`'s and every list
-//! writes `kbp_gap[0]`'s K, the one the query's batch may print.
+//! writes `kbp_gap[0]`'s K, the one the query's batch may print. With `-use_sw_tback` both
+//! programs' redo is the Smith-Waterman redo of the same windows (item PS12c for rpstblastn).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1238-1260
 
@@ -30,6 +31,7 @@ use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
 use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, RedoSubject, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
+use crate::common::GapEditOp;
 use crate::core::composition_adjustment::compo_scale::{PosMatrixInfo, RedoInstance};
 use crate::core::psi::PsiScoreBlk;
 use crate::seqdb::rps::RpsVolumeFiles;
@@ -61,8 +63,10 @@ pub(crate) struct RpsRedoParams<'a> {
     pub(crate) gap_extend: i32,
     pub(crate) x_drop_final_bits: f64,
     /// `-use_sw_tback`: NCBI's Smith-Waterman redo of each profile
-    /// (`RedoMatch::redo_match_smith_waterman`). The redo runs with composition-based statistics
-    /// 1 to 3 only; without them NCBI's RPS traceback does not read the flag
+    /// (`RedoSubject::redo_smith_waterman`: `RedoMatch::redo_match_smith_waterman` of rpsblast's
+    /// query, `RedoMatch::redo_windows_smith_waterman` of rpstblastn's frames). The redo runs
+    /// with composition-based statistics 1 to 3 only; without them NCBI's RPS traceback does not
+    /// read the flag
     /// (`s_RPSComputeTraceback` takes no Smith-Waterman path and `kSmithWaterman` asks for the
     /// other mode).
     ///
@@ -215,14 +219,14 @@ impl RpsTraceback<'_> {
                 // rpsblast and rpstblastn refuse `-sum_stats true`.
                 link: None,
             };
-            // rpstblastn refuses `-use_sw_tback` with composition-based statistics (series PR,
-            // item PS12c).
-            debug_assert!(!(S::Instance::SUBJECT_IS_TRANSLATED && redo.smith_waterman));
-            let redone = if redo.smith_waterman && !S::Instance::SUBJECT_IS_TRANSLATED {
+            // The Smith-Waterman redo of a protein query (rpsblast) or of a translated query's
+            // frames (rpstblastn, series PR, item PS12c).
+            let redone = if redo.smith_waterman {
                 let heap = sw_heap.get_or_insert_with(|| {
                     BlastCompoHeap::new(self.hitlist_size, PSI_INCLUSION_ETHRESH)
                 });
-                redo_match.redo_match_smith_waterman(
+                kind.redo_smith_waterman(
+                    &redo_match,
                     &mut run,
                     &mut scratch.sw,
                     heap,
@@ -242,9 +246,15 @@ impl RpsTraceback<'_> {
                 );
             }
             let redone = redone.map_err(|SwEndless| {
-                anyhow::anyhow!(
-                    "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's {program}"
-                )
+                if S::Instance::SUBJECT_IS_TRANSLATED {
+                    anyhow::anyhow!(
+                        "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs in a window of a query frame and its first position scores the window's first letter above 0) is not supported by LOSAT's {program}"
+                    )
+                } else {
+                    anyhow::anyhow!(
+                        "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's {program}"
+                    )
+                }
             })?;
             scratch.pssm.rows = matrix.rows;
             scratch.gap = gap;
@@ -262,6 +272,21 @@ impl RpsTraceback<'_> {
             if hsp_list.hsps.is_empty() {
                 continue;
             }
+            // An alignment of the Smith-Waterman redo of a translated query that starts with a
+            // gap in the query's row (series PR, item PS12d): no search was found that gives one
+            // (`PR/ps12d/scripts/qgap_grid.sh`: every such start was in the profile's row, whose
+            // reports LOSAT writes as NCBI's, `serial::seqalign::std_seg_row_range`), so nothing
+            // shows what NCBI's reports write for it, and LOSAT refuses the profile.
+            if S::Instance::SUBJECT_IS_TRANSLATED
+                && redo.smith_waterman
+                && hsp_list.hsps.iter().any(|hsp| {
+                    starts_with_row_gap(hsp, crate::report::serial::seqalign::AlignRow::Query)
+                })
+            {
+                anyhow::bail!(
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) gives an alignment that starts with a gap in the query's row, for which no NCBI BLAST+ 2.17.0 report was found to follow, is not supported by LOSAT's {program}"
+                );
+            }
             hit_list
                 .get_or_insert_with(|| BlastpHitList::new(self.hitlist_size))
                 .update(hsp_list);
@@ -271,4 +296,15 @@ impl RpsTraceback<'_> {
         }
         Ok(RpsTraced { hit_list, k_mark })
     }
+}
+
+/// Whether the alignment `hsp` (switched back: its query is the search's query) starts with a gap
+/// in the row `row` (`serial::seqalign::gapped_row_range`).
+pub(crate) fn starts_with_row_gap(
+    hsp: &crate::algorithm::blastp::hsp::BlastpHsp,
+    row: crate::report::serial::seqalign::AlignRow,
+) -> bool {
+    hsp.gap_info.as_deref().is_some_and(|ops: &[GapEditOp]| {
+        crate::report::serial::seqalign::gapped_row_range(ops, row).is_some()
+    })
 }

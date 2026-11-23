@@ -785,6 +785,7 @@ fn computed_default_parameters_preserve_ncbi_preliminary_link_input() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: (subject.len() / 3) as i32,
@@ -814,6 +815,7 @@ fn computed_default_parameters_preserve_ncbi_preliminary_link_input() {
         gap_xdrop: 38,
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let preliminary = preliminary_hsps_of_letters(&refs, subject, 1, profile).unwrap();
@@ -909,6 +911,7 @@ fn computed_positive_uneven_gap_inputs_match_ncbi_link_before() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: (subject.len() / 3) as i32,
@@ -936,6 +939,7 @@ fn computed_positive_uneven_gap_inputs_match_ncbi_link_before() {
         gap_xdrop: 38,
         gapped_cutoff: &gapped_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let preliminary = preliminary_hsps_of_letters(&[query], subject, 1, profile).unwrap();
@@ -1025,6 +1029,7 @@ fn multi_query_gapped_hsps_match_ncbi_context_scores_offsets_and_order() {
         gap_xdrop: 38,
         gapped_cutoff: &gapped_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
@@ -1104,6 +1109,7 @@ fn multi_query_preliminary_append_snapshots_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &gapped_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
@@ -1226,6 +1232,7 @@ fn real_chunk_endpoint_deletion_and_append_cap_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[0, 0, i32::MAX],
         hsp_num_max: 3,
+        gapped: true,
         subject_besthit: false,
     };
     let changes = std::rc::Rc::new(std::cell::Cell::new(0usize));
@@ -1328,6 +1335,7 @@ fn multi_query_traceback_lists_match_ncbi_post_fence_hsps() {
         gap_xdrop: 38,
         gapped_cutoff: &gapped_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
@@ -1411,6 +1419,7 @@ fn real_path_hsp_test_deletion_order_matches_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &gapped_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
@@ -1563,8 +1572,8 @@ fn protein_start_offset_window_boundaries_follow_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-445:
-// retval = BlastGetOffsetsForGappedAlignment(query, subject, sbp, hsp, ...);
-// if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+// Recomputes starting offsets via `BlastGetOffsetsForGappedAlignment`; when that fails,
+// frees the HSP (`Blast_HSPFree`) and continues to the next entry.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3259-3321: positive 11-residue window scores
 // choose a start; two nonpositive endpoint windows return FALSE.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:446-448: on TRUE, write q_start and s_start
@@ -1596,6 +1605,7 @@ fn compare_real_path_start_offset_with_ncbi(positive: bool) {
         gap_xdrop: 38,
         gapped_cutoff: &gapped_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
@@ -1724,7 +1734,7 @@ fn compare_real_path_start_offset_with_ncbi(positive: bool) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-445:
-// if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+// When start-offset lookup fails, frees the HSP (`Blast_HSPFree`) and skips it.
 #[test]
 fn real_path_start_offset_failure_deletion_matches_ncbi() {
     compare_real_path_start_offset_with_ncbi(false);
@@ -1885,8 +1895,8 @@ fn preliminary_append_cap_and_tie_match_ncbi_api() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953,4071-4091:
-// max_offset = BlastGetStartForGappedAlignment(...);
-// status = s_BlastProtGappedAlignment(...);
+// Finds the gapped start via `BlastGetStartForGappedAlignment` and runs
+// `s_BlastProtGappedAlignment`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:811-811
 fn compare_fixture(fixture_name: &str, oracle_name: &str, lowercase: bool) {
     let root = format!(
@@ -1916,6 +1926,7 @@ fn compare_fixture(fixture_name: &str, oracle_name: &str, lowercase: bool) {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
             subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
@@ -1963,10 +1974,10 @@ fn ambiguity_gapped_scores_offsets_and_order_match_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552:
-// status = aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
+// Runs `GetGappedScore` on the initial hit list to build the gapped HSP list.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-// max_offset = BlastGetStartForGappedAlignment(...);
-// status = s_BlastProtGappedAlignment(...);
+// Finds the gapped start via `BlastGetStartForGappedAlignment` and runs
+// `s_BlastProtGappedAlignment`.
 #[test]
 fn code32_api_gapped_scores_offsets_and_order_match_ncbi() {
     let fixture = concat!(
@@ -1994,6 +2005,7 @@ fn code32_api_gapped_scores_offsets_and_order_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[1],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&[query], subject, 32, profile).unwrap();
@@ -2034,7 +2046,7 @@ fn code32_api_gapped_scores_offsets_and_order_match_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1677:
-// if (fence_hit) { /* refetch whole subject */ }
+// Refetches the whole subject when traceback hits a fence sentinel.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-589:
 #[test]
 fn full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets() {
@@ -2065,6 +2077,7 @@ fn full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets() {
             gap_xdrop: 38,
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
+            gapped: true,
             subject_besthit: false,
         };
         let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
@@ -2209,6 +2222,7 @@ fn full_translation_traceback_reads_a_packed_subject_as_its_letters() {
                     gap_xdrop: 38,
                     gapped_cutoff: &[0],
                     hsp_num_max: i32::MAX as usize,
+                    gapped: true,
                     subject_besthit: false,
                 };
                 let stages = preliminary_stages(&[query], &letters, db_gencode, profile).unwrap();
@@ -2429,6 +2443,7 @@ fn whole_windows_trace_as_the_whole_translation() {
                         gap_xdrop: 38,
                         gapped_cutoff: &[0],
                         hsp_num_max: i32::MAX as usize,
+                        gapped: true,
                         subject_besthit: false,
                     };
                     let stages =
@@ -2496,7 +2511,7 @@ fn whole_windows_trace_as_the_whole_translation() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1684:
-// if (fence_hit) { /* refetch whole subject and retry the HSP list */ }
+// Refetches the whole subject and retries the HSP list when traceback hits a fence sentinel.
 #[test]
 fn long_multi_hsp_partial_windows_and_retry_match_ncbi() {
     let root = concat!(
@@ -2561,6 +2576,7 @@ fn long_multi_hsp_partial_windows_and_retry_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
@@ -2658,6 +2674,7 @@ fn nonzero_base_partial_traceback_without_fence_matches_ncbi() {
         gap_xdrop: 12,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
@@ -2759,6 +2776,7 @@ fn six_frame_merged_traceback_endpoint_deletion_matches_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
@@ -2897,6 +2915,7 @@ fn alternate_matrix_word2_gapped_and_append_match_ncbi() {
         gap_xdrop: 53,
         gapped_cutoff: &[0, 0, i32::MAX],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
@@ -3053,6 +3072,7 @@ fn alternate_matrix_traceback_positive_containment_matches_ncbi() {
         gap_xdrop: 53,
         gapped_cutoff: &[0, 0, i32::MAX],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let integrated = preliminary_hsps_of_letters(&refs, subject, 1, profile).unwrap();
@@ -3207,6 +3227,7 @@ fn long_subject_chunk_local_gapped_hsps_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[28],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&[query], &subject, 1, profile).unwrap();
@@ -3463,6 +3484,7 @@ fn long_multi_query_chunk_hsps_and_append_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &expected_cutoffs,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) = preliminary_hsps_traced(&refs, &subject, 1, profile, None).unwrap();
@@ -3745,6 +3767,7 @@ fn no_range_middle_chunk_gapped_and_merged_hsp_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[30],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -3842,6 +3865,7 @@ fn hard_seg_query_bytes_and_integrated_hsp_match_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -3989,6 +4013,7 @@ fn internal_seg_crossing_traceback_uses_masked_score_and_unmasked_identity() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -4105,6 +4130,7 @@ fn internal_soft_seg_crossing_matches_ncbi_query_hsp_and_traceback() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -4257,6 +4283,7 @@ fn lowercase_query_mask_matches_ncbi_candidates_hsps_and_traceback() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -4415,6 +4442,7 @@ fn lowercase_query_soft_mask_matches_ncbi_lookup_and_traceback() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -4567,6 +4595,7 @@ fn overlapping_seg_and_lowercase_query_mask_matches_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -4711,6 +4740,7 @@ fn overlapping_seg_lowercase_soft_mask_matches_ncbi() {
         gap_xdrop: 38,
         gapped_cutoff: &[0],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let (integrated, events) =
@@ -4860,6 +4890,7 @@ fn skipped_middle_chunk_preserves_both_hsps_and_all_append_rows() {
         gap_xdrop: 38,
         gapped_cutoff: &[30],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let stages = preliminary_stages(&[query], &subject, 1, profile).unwrap();
@@ -4949,4 +4980,66 @@ fn skipped_middle_chunk_preserves_both_hsps_and_all_append_rows() {
         .collect();
     assert_eq!(actual_append, expected_append);
     assert_eq!(snapshots.iter().map(Vec::len).collect::<Vec<_>>(), [2; 6]);
+}
+
+// The HSPs of an ungapped unit (`BLAST_GetUngappedHSPList`, cited at `ungapped_chunk_hsps`):
+// each initial HSP in the context of its word's query offset (a word at a context's first
+// offset is that context's), the query offsets made the context's, the word's offsets as the
+// gapped start, the subject offsets the chunk's, and the list sorted by score.
+#[test]
+fn ungapped_chunk_hsps_are_context_local_and_sorted_by_score() {
+    // Two queries of 10 and 13 letters: contexts at 0 and 11 of the concatenated query.
+    let contexts = [0, 11];
+    let hit = |q_seed: u32, q_start: i32, s_seed: u32, s_start: i32, length, score| InitHsp {
+        frame: 2,
+        chunk_offset: 0,
+        q_seed,
+        s_seed,
+        q_start,
+        s_start,
+        length,
+        score,
+    };
+    let hsps = ungapped_chunk_hsps(
+        &contexts,
+        2,
+        &[
+            hit(15, 13, 102, 100, 6, 30),
+            hit(3, 1, 42, 40, 5, 50),
+            hit(11, 11, 7, 7, 3, 30),
+        ],
+    );
+    let hsp = |score, q_start, q_end, q_gapped_start, s_start, s_end, s_gapped_start| GappedHsp {
+        frame: 2,
+        score,
+        q_start,
+        q_end,
+        q_gapped_start,
+        s_start,
+        s_end,
+        s_gapped_start,
+    };
+    assert_eq!(
+        hsps,
+        [
+            (0, hsp(50, 1, 6, 3, 40, 45, 42)),
+            // Equal scores: the smaller subject offset first (`ScoreCompareHSPs`).
+            (1, hsp(30, 0, 3, 0, 7, 10, 7)),
+            (1, hsp(30, 2, 8, 4, 100, 106, 102)),
+        ]
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3942-3945
+// The gapped start of a one-hit HSP whose seed lies at the chunk's offset -1 (its word starts one
+// letter before the chunk, masks stored out of order, M4b-T2) and whose HSP starts at 0: the seed's
+// `Uint4` wraps, so the start is the seed moved by the gapped start's distance from the query's seed
+// (16 letters: offset 15), not about 2^32 past the chunk. Before the chunk is an internal error.
+#[test]
+fn a_seed_before_the_chunk_gives_its_gapped_start_with_ncbis_wrap() {
+    let seed = (-1i32) as u32;
+    assert_eq!(x_gapped_subject_start(seed, 30, 14).unwrap(), 15);
+    assert_eq!(x_gapped_subject_start(seed, 15, 14).unwrap(), 0);
+    assert_eq!(x_gapped_subject_start(40, 30, 14).unwrap(), 56);
+    assert!(x_gapped_subject_start(seed, 14, 14).is_err());
 }

@@ -16,7 +16,7 @@ use crate::blastinput::value_parsers::*;
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` is refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// `-phi_pattern` is refused by the parser (its rows of `ncbi_app::args::refusal`).
 // The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -189,7 +189,7 @@ pub struct PsiblastArgs {
     pub subject_loc: Option<String>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 6, 7, 10 and 20", "6, 7, 10 and 20", "; with -in_pssm or -in_msa: 0, 6 and 7"))]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0, 5 to 11 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     #[arg(
@@ -253,7 +253,7 @@ pub struct PsiblastArgs {
     // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
     // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
     // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by the parser
-    // (`cli.rs` `is_unported_psiblast_arg`).
+    // (its rows of `ncbi_app::args::refusal`).
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",
@@ -264,7 +264,7 @@ pub struct PsiblastArgs {
     pub in_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
     // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
-    // refused by name (`cli.rs` `is_unported_psiblast_arg`) before any exclusion is looked at. The
+    // refused by name (its rows of `ncbi_app::args::refusal`) before any exclusion is looked at. The
     // exclusions and requirements are errors of the argument parser, which LOSAT's parser reports
     // with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is read with
     // the options (`algorithm::psiblast::in_msa`).
@@ -339,10 +339,9 @@ impl PsiblastArgs {
             || ((self.in_pssm.is_some() || self.in_msa.is_some())
                 && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
         .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
-        let request_inputs = self
-            .export_search_strategy
-            .is_some()
-            .then(|| Box::new(self.option_inputs()));
+        // The options of the search strategy's request and of the archive's (outfmt 11), which
+        // record psiblast's own (`service "psi"`, the PSSM engine's options).
+        let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
             subject: self.subject,
@@ -353,6 +352,8 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::named_refusal`).
+            html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,
@@ -365,7 +366,7 @@ impl PsiblastArgs {
             threshold: self.threshold,
             word_size: self.word_size,
             num_threads: self.num_threads,
-            // psiblast has no `-mt_mode` (`cli.rs` `is_unported_psiblast_arg`).
+            // psiblast has no `-mt_mode` (its rows of `ncbi_app::args::refusal`).
             mt_mode: None,
             out: self.out,
             max_target_seqs: self.max_target_seqs,
@@ -504,13 +505,17 @@ impl PsiblastArgs {
             if !matches!(
                 format,
                 ReportFormat::Pairwise
+                    | ReportFormat::Xml
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
+                    | ReportFormat::AsnText
+                    | ReportFormat::AsnBinary
                     | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::ArchiveFormat
                     | ReportFormat::CommaSeparatedValuesWithHeader
             ) {
                 bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST",
+                    "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
                 );
             }

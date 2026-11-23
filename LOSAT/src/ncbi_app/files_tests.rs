@@ -226,19 +226,29 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
         open_input_file("in", missing, &mut cin)
             .err()
             .unwrap()
-            .message(),
+            .message_text(),
         "Argument \"in\". File is not accessible:  `no/such/dir/x.fa'"
     );
     let mut stdout = Vec::new();
     assert!(matches!(
-        open_output_file("out", "-", &mut stdout),
+        open_output_file(
+            "out",
+            std::ffi::OsStr::new("-"),
+            &mut stdout,
+            &OpenFiles::disk()
+        ),
         Ok(OutputFile::Stdout(_))
     ));
     assert_eq!(
-        open_output_file("out", "/no/such/dir/x.out", &mut stdout)
-            .err()
-            .unwrap()
-            .message(),
+        open_output_file(
+            "out",
+            std::ffi::OsStr::new("/no/such/dir/x.out"),
+            &mut stdout,
+            &OpenFiles::disk()
+        )
+        .err()
+        .unwrap()
+        .message_text(),
         "Argument \"out\". File is not accessible:  `/no/such/dir/x.out'"
     );
 }

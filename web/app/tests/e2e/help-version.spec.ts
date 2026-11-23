@@ -64,6 +64,8 @@ test("help and version words print the command line's text without inputs, and s
     // No query and no subject: the command line reads none for these words.
     await submit(page);
     await waitStatus(page, run, 'completed');
+    // The run picker names the mode alone: the run read no file (line WQA's D21, the review of D20's F2, 2026-11-23).
+    await expect(page.getByTestId(`run-${run}-option`)).toHaveText(new RegExp(`^Run ${run} · [A-Z]+$`));
     await chooseRun(page, run);
     await expect(page.getByTestId('results-notice')).toHaveAttribute('data-kind', `printed-${c.kind}`);
     await expect(page.getByTestId('results-notice')).toHaveText(notice);

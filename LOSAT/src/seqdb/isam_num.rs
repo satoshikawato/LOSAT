@@ -89,8 +89,69 @@ impl NumericIsam {
         )
     }
 
-    /// The ISAM of `index` and `data`, an index of the numbers `what` names.
+    /// The ISAM of `index` and `data`, an index of the numbers `what` names: `None` where the
+    /// data file has another length than the index says (`NumericIsam::open_files`).
     fn from_files(index: DbFile, data: DbFile, what: &str) -> Result<Option<Self>, SeqDbError> {
+        Ok(match Self::open_files(index, data, what)? {
+            Opened::Ready(isam) => Some(isam),
+            Opened::Uninitialized => None,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:161-175
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-224
+    // The lookups open the volume's ISAM only for a volume with OIDs: the GIs' as the single
+    // lookups do (a failure to open is caught), the TIs' where both files are regular files
+    // (`IndexExists`), whose constructor's errors are not caught.
+    /// The volume's ISAM of `kind` for the lookups of an id list (`x_OpenGiFile`,
+    /// `x_OpenTiFile`), and the trace-id ISAM of a single lookup: `None` where NCBI has none
+    /// ("... list specified but no ISAM file found").
+    pub(crate) fn open_for_list(
+        base: &Path,
+        seqtype: SeqType,
+        kind: ListIsam,
+        num_oids: u32,
+    ) -> Result<Option<Opened>, SeqDbError> {
+        if num_oids == 0 {
+            return Ok(None);
+        }
+        match kind {
+            ListIsam::Gi => {
+                let (Ok(index), Ok(data)) = (
+                    DbFile::open(&with_extension(base, seqtype, "ni")),
+                    DbFile::open(&with_extension(base, seqtype, "nd")),
+                ) else {
+                    return Ok(None);
+                };
+                Self::open_files(index, data, "GI").map(Some)
+            }
+            ListIsam::Ti => {
+                let index_path = with_extension(base, seqtype, "ti");
+                let data_path = with_extension(base, seqtype, "td");
+                match super::isam::open_if_exists(&index_path, &data_path)? {
+                    Some((index, data)) => Self::open_files(index, data, "TI").map(Some),
+                    None => Ok(None),
+                }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1102-1170
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1461-1520
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1492-1517
+    // The constructor runs `x_FindIndexBounds` whatever `x_InitSearch` returned, with the counts
+    // of the index header that `x_InitSearch` read before it compared the data file's length: it
+    // reads the first row of the data file and the row before `m_NumTerms`, through the mapping
+    // of the whole file without a bound (`GetFileDataPtr`). Inside the last memory page of the
+    // mapping it reads the zeros after the end of the file (`file::mapped_length`); past that
+    // page it reads memory that is not the file's, which LOSAT refuses. So the bounds are read in
+    // both states, and a data file of another length than the index says leaves the ISAM
+    // uninitialised only where they are in the mapping.
+    /// The ISAM of `index` and `data`, an index of the numbers `what` names
+    /// (`CSeqDBIsam::CSeqDBIsam`): uninitialized where the data file has another length than the
+    /// index says (`x_InitSearch` fails). LOSAT's refusal where NCBI's reads of the first and
+    /// last rows pass the memory page after the data file.
+    fn open_files(index: DbFile, data: DbFile, what: &str) -> Result<Opened, SeqDbError> {
         let bad = |message: String| SeqDbError::Unsupported {
             path: index.path().to_path_buf(),
             message,
@@ -121,9 +182,6 @@ impl NumericIsam {
                  {page_size} terms"
             )));
         }
-        if i64::from(word(2)) != data.len() as i64 {
-            return Ok(None);
-        }
         let mut isam = NumericIsam {
             index,
             data,
@@ -134,12 +192,43 @@ impl NumericIsam {
             first_key: 0,
             last_key: 0,
         };
-        isam.first_key = isam.row(&isam.data, 0)?.0;
-        let (start, count) = isam.page(num_samples - 1);
-        isam.last_key = isam
-            .row(&isam.data, row_offset(isam.term_size(), start, count - 1))?
-            .0;
-        Ok(Some(isam))
+        // The last page's start cancels out: its last element is the row before `m_NumTerms`,
+        // also where the samples' pages would end before it or start after it.
+        let last = row_offset(isam.term_size(), 0, i64::from(num_terms) - 1);
+        let data_len = isam.data.len();
+        let mapped = super::file::mapped_length(data_len);
+        if last.saturating_add(isam.term_size()) > mapped {
+            return Err(SeqDbError::NcbiCrashes {
+                path: isam.data.path().to_path_buf(),
+                message: format!(
+                    "NCBI reads row {} of the {what} data file (its last of {num_terms} terms), \
+                     past the memory page after its {data_len} bytes",
+                    num_terms - 1
+                ),
+            });
+        }
+        isam.first_key = isam.bound_key(0)?;
+        isam.last_key = isam.bound_key(last)?;
+        if i64::from(word(2)) != data_len as i64 {
+            return Ok(Opened::Uninitialized);
+        }
+        Ok(Opened::Ready(isam))
+    }
+
+    /// The key of the row at `offset` of the data file as NCBI's mapping holds it: the bytes past
+    /// the end of the file are zeros (`open_files` checked the memory page).
+    fn bound_key(&self, offset: u64) -> Result<i64, SeqDbError> {
+        let len = self.data.len();
+        if offset.saturating_add(self.term_size()) <= len {
+            return Ok(self.row(&self.data, offset)?.0);
+        }
+        let mut bytes = if offset < len {
+            self.data.read_range(offset, len)?
+        } else {
+            Vec::new()
+        };
+        bytes.resize(self.term_size() as usize, 0);
+        Ok(self.key_of(&bytes))
     }
 
     /// `m_TermSize`.
@@ -156,13 +245,22 @@ impl NumericIsam {
     fn row(&self, file: &DbFile, offset: u64) -> Result<(i64, i32), SeqDbError> {
         let end = offset.saturating_add(self.term_size());
         let bytes = file.read_range(offset, end)?;
+        let oid = if self.long_id {
+            &bytes[8..]
+        } else {
+            &bytes[4..]
+        };
+        Ok((self.key_of(&bytes), be_i32(oid)))
+    }
+
+    /// The key at the start of the row `bytes` (`x_GetNumericKey`).
+    fn key_of(&self, bytes: &[u8]) -> i64 {
         if self.long_id {
             let mut key = [0u8; 8];
             key.copy_from_slice(&bytes[..8]);
-            Ok((i64::from_be_bytes(key), be_i32(&bytes[8..])))
+            i64::from_be_bytes(key)
         } else {
-            let key = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            Ok((i64::from(key), be_i32(&bytes[4..])))
+            i64::from(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
         }
     }
 
@@ -217,6 +315,155 @@ impl NumericIsam {
             }
         }
         Ok(None)
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:498-516
+    /// `x_LoadIndex`: the key of every sample.
+    fn sample_keys(&self) -> Result<Vec<i64>, SeqDbError> {
+        let term_size = self.term_size();
+        (0..self.num_samples as u64)
+            .map(|sample| {
+                self.row(&self.index, KEY_SAMPLE_OFFSET + term_size * sample)
+                    .map(|(key, _)| key)
+            })
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:548-623
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:51-115
+    // The list and the keys are walked together: the list (sorted) is advanced past the ids below
+    // a key and past the ids translated already, and every id equal to a key takes that row's
+    // OID. So an id that an earlier volume translated keeps its OID, and of rows with the same
+    // key the walk reaches the first.
+    /// `IdsToOids` of a numeric list over the volume's OIDs (`x_TranslateGiList`):
+    /// sets `oid` of every entry of `ids` (sorted by key) without one whose key is a key of the
+    /// volume, to the OID of its row plus `vol_start`.
+    pub(crate) fn ids_to_oids(&self, vol_start: u32, ids: &mut [NumOid]) -> Result<(), SeqDbError> {
+        let gilist_size = ids.len();
+        if gilist_size == 0 {
+            return Ok(());
+        }
+        debug_assert!(ids.windows(2).all(|w| w[0].key <= w[1].key), "ids sorted");
+        let sample_keys = self.sample_keys()?;
+        let num_samples = self.num_samples as usize;
+        let term_size = self.term_size();
+        let mut gilist_index = 0;
+        let mut sample_index: i64 = 0;
+        while gilist_index < gilist_size && (sample_index as usize) < num_samples {
+            advance_list(ids, &mut gilist_index, sample_keys[sample_index as usize]);
+            if gilist_index >= gilist_size {
+                break;
+            }
+            advance_keys(
+                &sample_keys,
+                &mut sample_index,
+                num_samples,
+                ids[gilist_index].key,
+            );
+            if sample_index < 0 {
+                return Err(SeqDbError::Format {
+                    path: self.index.path().to_path_buf(),
+                    message: "numeric ISAM sample keys are not in order".to_string(),
+                });
+            }
+            let (start, count) = self.page(sample_index as i32);
+            let num_keys = count as usize;
+            let mut keys = Vec::with_capacity(num_keys);
+            let mut vals = Vec::with_capacity(num_keys);
+            for at in 0..count {
+                let (key, oid) = self.row(&self.data, row_offset(term_size, start, at))?;
+                keys.push(key);
+                vals.push(oid);
+            }
+            let mut index: i64 = 0;
+            while gilist_index < gilist_size && (index as usize) < num_keys {
+                advance_keys(&keys, &mut index, num_keys, ids[gilist_index].key);
+                if index < 0 {
+                    return Err(SeqDbError::Format {
+                        path: self.data.path().to_path_buf(),
+                        message: "numeric ISAM keys are not in order".to_string(),
+                    });
+                }
+                let at = index as usize;
+                set_translation(ids, &mut gilist_index, keys[at], vals[at], vol_start);
+                index += 1;
+                if index as usize >= num_keys {
+                    break;
+                }
+                let at = index as usize;
+                advance_list(ids, &mut gilist_index, keys[at]);
+                set_translation(ids, &mut gilist_index, keys[at], vals[at], vol_start);
+            }
+            sample_index += 1;
+        }
+        Ok(())
+    }
+}
+
+/// A numeric ISAM opened for an id list's lookups or a single TI's ([`NumericIsam::open_for_list`]).
+#[derive(Debug)]
+pub(crate) enum Opened {
+    Ready(NumericIsam),
+    /// `m_Initialized` false: the list's lookups throw "Unable to use ISAM index in batch mode",
+    /// a single lookup finds nothing.
+    Uninitialized,
+}
+
+/// The numeric ISAMs that an id list's lookups read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ListIsam {
+    /// `.pni`/`.pnd`, `.nni`/`.nnd`.
+    Gi,
+    /// `.pti`/`.ptd`, `.nti`/`.ntd`.
+    Ti,
+}
+
+/// One entry of a numeric id list (`CSeqDBGiList::SGiOid`, `STiOid`): the id and its OID, set by
+/// [`NumericIsam::ids_to_oids`] (NCBI: -1 while unknown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NumOid {
+    pub key: i64,
+    pub oid: Option<u32>,
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:51-75
+/// `s_AdvanceGiList`: moves `gi_index` past the ids below `key`, then past those translated.
+fn advance_list(gis: &[NumOid], gi_index: &mut usize, key: i64) {
+    let gis_size = gis.len();
+    while *gi_index < gis_size && gis[*gi_index].key < key {
+        *gi_index += 1;
+        let mut jump = 2;
+        while *gi_index + jump < gis_size && gis[*gi_index + jump].key < key {
+            *gi_index += jump;
+            jump *= 2;
+        }
+    }
+    while *gi_index < gis_size && gis[*gi_index].oid.is_some() {
+        *gi_index += 1;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:77-99
+/// `s_AdvanceKeyList`: moves `index` to the last key that is `<= target`; -1 when none is.
+fn advance_keys(keys: &[i64], index: &mut i64, num_keys: usize, target: i64) {
+    let num_keys = num_keys as i64;
+    while *index < num_keys && keys[*index as usize] <= target {
+        *index += 1;
+        let mut jump = 2;
+        while *index + jump < num_keys && keys[(*index + jump) as usize] <= target {
+            *index += jump;
+            jump *= 2;
+        }
+    }
+    *index -= 1;
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:101-115
+/// `s_SetTranslation`: the OID of every entry from `gi_index` on whose key is `key`.
+fn set_translation(gis: &mut [NumOid], gi_index: &mut usize, key: i64, value: i32, vol_start: u32) {
+    while *gi_index < gis.len() && gis[*gi_index].key == key {
+        gis[*gi_index].oid = Some((value as u32).wrapping_add(vol_start));
+        *gi_index += 1;
     }
 }
 

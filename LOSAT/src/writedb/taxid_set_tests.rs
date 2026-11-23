@@ -91,6 +91,7 @@ fn map_lines_follow_ncbi_s_split() {
             defline(vec![refseq("NP_000003", 1)]),
             defline(vec![refseq("NP_000004", 2)]),
         ],
+        utf8: false,
     };
     set.fix_tax_id(&mut deflines);
     let taxids: Vec<Option<i32>> = deflines.deflines.iter().map(|d| d.taxid).collect();
@@ -120,6 +121,7 @@ fn deflines_take_the_taxid_of_their_first_matching_id() {
             defline(vec![ParsedSeqId::Local(ObjectId::Str(b"seq.5".to_vec()))]),
             defline(vec![ParsedSeqId::Gi(777)]),
         ],
+        utf8: false,
     };
     set.fix_tax_id(&mut deflines);
     let taxids: Vec<Option<i32>> = deflines.deflines.iter().map(|d| d.taxid).collect();
@@ -129,6 +131,7 @@ fn deflines_take_the_taxid_of_their_first_matching_id() {
     let mut none = map("unknown_id 5555\n").unwrap();
     let mut deflines = DeflineSet {
         deflines: vec![defline(vec![refseq("NP_9", 1)])],
+        utf8: false,
     };
     none.fix_tax_id(&mut deflines);
     assert_eq!(deflines.deflines[0].taxid, Some(0));

@@ -204,6 +204,61 @@ fn soft_chunk_scan_ranges(
     Ok(calls)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
+// c++/src/algo/blast/core/blast_aascan.c:76-77
+// NCBI moves each range of a chunk to the chunk's offsets and raises only the first range's left
+// to 0, so with masks stored out of order (a range's left below the one before it) a later range
+// can start before its chunk. NCBI's scan then reads the frame's letters there, at negative
+// offsets of the chunk, which its hits keep (as Uint4).
+/// The letters before its chunk that the scan of a chunk's `ranges` reads: how far the lowest
+/// left lies below the chunk's start (0 for ranges in order). The scans read the frame from that
+/// many letters before the chunk, on the ranges moved by as many, and give their hits back at the
+/// chunk's offsets (`tblastx::blast_engine::word_finder`, `tblastn::search_seed::x_scan_unit_of`).
+pub(crate) fn scan_lead(ranges: &[(i32, i32)]) -> usize {
+    ranges
+        .iter()
+        .map(|&(left, _)| left)
+        .min()
+        .map_or(0, |left| left.min(0).unsigned_abs() as usize)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158, :897 and :841
+// NCBI's extensions read the word and start the walks wherever the scan's hit lies, also before
+// the chunk (a later range of masks stored out of order): their subject is the chunk's, so the left
+// walks stop at the chunk's first letter and the right walks at its last, and the word and the
+// letters between are the frame's.
+/// The letters of a chunk's frame around it, as NCBI's extensions read them for a hit that lies
+/// before the chunk: `letters` holds the frame from `lead` letters before the chunk on, at least to
+/// the chunk's end, and the chunk has `length` letters. Offsets are the chunk's, as NCBI's (`Int4`,
+/// below 0 before the chunk).
+#[derive(Clone, Copy)]
+pub(crate) struct ChunkLetters<'a> {
+    pub(crate) letters: &'a [u8],
+    pub(crate) lead: usize,
+    pub(crate) length: usize,
+}
+
+impl<'a> ChunkLetters<'a> {
+    /// The frame's letter at offset `s` of the chunk.
+    #[inline]
+    pub(crate) fn at(self, s: i32) -> u8 {
+        self.letters[(self.lead as i32 + s) as usize]
+    }
+
+    /// The letters from the chunk's first one on: the subject of the left walks, which stop there.
+    #[inline]
+    pub(crate) fn chunk_onward(self) -> &'a [u8] {
+        &self.letters[self.lead..]
+    }
+
+    /// The letters up to the chunk's last one: the subject of the right walks from `lead`
+    /// letters before the chunk, which stop at its end.
+    #[inline]
+    pub(crate) fn to_chunk_end(self) -> &'a [u8] {
+        &self.letters[..self.lead + self.length]
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321, 398-405 and
 // c++/src/algo/blast/core/blast_engine.c:757-762, 814-830, 476-486, 221-311
 // A database sequence of a search with `-db_soft_mask` or `-db_hard_mask` comes with the complement
@@ -221,6 +276,20 @@ fn soft_chunk_scan_ranges(
 // defect, PD-LOSAT-NCBI-DEFECTS exception 21: the Owner's answers Q1 = B and Q2 = B of M4b,
 // 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
 // the same row once for each word it reads in the mask, or a crash).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:145-215, 264-276
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500, 525-545
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// Where the masks leave a frame an empty first part (a mask within the sequence's first two bases
+// for the plus frames, or within the one or two bases after its last whole codon for the minus
+// frames, with no other mask in the frame but at its other end; or an empty mask at 0), the empty
+// part's chunk takes the hard branch, which allocates the subject's list of ranges, and the chunk
+// from 0 after it takes the "no chunking" branch, which points that list at the backup's full
+// range: NCBI searches the frame whole (or, shorter than the frame, as above), then frees that
+// pointer when it restores the subject and crashes, in every run. The empty chunk adds nothing (its
+// one word, if any, is a window or more behind every later hit on its diagonal), so LOSAT searches
+// the frame's chunks as they come, the masked bases masked as for every other mask (an approved
+// NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 27: the Owner's answers Q4 = B of M4b, 2026-11-22,
+// and Q6 = B, 2026-11-23).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
 /// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
 /// `core::subject_split::complement_masks`), each with its scan ranges, in a search with

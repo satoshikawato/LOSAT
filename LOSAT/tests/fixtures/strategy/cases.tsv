@@ -169,6 +169,7 @@ blastp.sub.xmlenv	blastp	ARCHIVE_FORMAT=xml	-query tests/fasta/outfmt11/arch_bp_
 blastp.db.list.expand	blastp	BLASTDB=tests/db_search/taxfilter	-query tests/db_search/taxfilter/q.faa -db tests/db_search/taxfilter/tfp -taxids 9606 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastp.sub.matrix	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -matrix BLOSUM45 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastp.sub.ungapped	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -ungapped -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+blastp.db.ungapped.sw.inv	blastp	-	-query tests/fasta/o4b2/inv.faa -db tests/db_search/x16_taxid -ungapped -comp_based_stats 0 -use_sw_tback -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastp.sub.badfmt	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 99 -export_search_strategy {ss}	ncbi	255	-	-
 blastp.sub.noout	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -out tests/no_such_dir/o.txt -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
 blastp.sub.isdir	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy tests	ncbi	1	-	-

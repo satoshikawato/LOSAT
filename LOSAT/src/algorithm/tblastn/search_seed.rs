@@ -842,17 +842,20 @@ pub(super) fn x_scan_plan(
 /// Scan one unit and hand every filled offset
 /// array to `on_pairs` in scan order, as NCBI c++/src/algo/blast/core/
 /// aa_ungapped.c:492-516 consumes it (a loop of `i` from 0 while it is below `hits`).
-/// `subject` holds the unit's frame from the chunk's first residue on (the frame's `aa_seq`
-/// from `1 + chunk.offset`, or the residues the unit translated, `x_unit_residues`).
+/// `subject` holds the unit's frame from `lead` residues before the chunk's first one on (the
+/// frame's `aa_seq` from `1 + chunk.offset - lead`, or the residues the unit translated,
+/// `x_unit_residues`), `lead` being `common::translated_chunks::scan_lead` of the unit's ranges
+/// (0 for ranges in order); the pairs are at the chunk's offsets.
 #[inline(always)]
 pub(super) fn x_scan_unit(
     plan: &XScanPlan,
     unit: usize,
     subject: &[u8],
+    lead: usize,
     pairs: &mut Vec<BlastOffsetPair>,
     on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
-    x_scan_unit_of::<true>(plan, unit, subject, pairs, on_pairs)
+    x_scan_unit_of::<true>(plan, unit, subject, lead, pairs, on_pairs)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-502 and 760-764
@@ -864,9 +867,27 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     plan: &XScanPlan,
     unit: usize,
     subject: &[u8],
+    lead: usize,
     pairs: &mut Vec<BlastOffsetPair>,
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
+    // c++/src/algo/blast/core/blast_aascan.c:76-77, :110
+    // A later range of masks stored out of order can start before the chunk: NCBI scans the
+    // frame's letters there and keeps the hits at the chunk's offsets (below 0, as Uint4). The
+    // scan reads `subject` from `lead` residues before the chunk on the ranges moved by `lead`,
+    // and the pairs are moved back (`x_pairs_at_chunk`) before `on_pairs` takes them.
+    debug_assert_eq!(
+        lead,
+        crate::algorithm::common::translated_chunks::scan_lead(&plan.subject.units[unit].2)
+    );
+    let lead_i32 = lead as i32;
+    let mut on_pairs = |pairs: &mut [BlastOffsetPair]| {
+        if lead > 0 {
+            crate::algorithm::tblastx::blast_aascan::x_pairs_at_chunk(pairs, lead);
+        }
+        on_pairs(&*pairs)
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1018-1019
     // The scan variant of the unit is chosen once per table, as NCBI picks one scansub: the
     // compressed table's (`x_scan_compressed_call`, range by range as below), or one of the
@@ -881,6 +902,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
             let pair_capacity = plan.pair_capacity as i32;
             let word_length = x_compressed_word_length(table);
             for (range_index, &(left, right)) in ranges.iter().enumerate() {
+                let (left, right) = (left + lead_i32, right + lead_i32);
                 let mut end = right - word_length;
                 if range_index == 0 && end < left {
                     if !CLAMP {
@@ -898,7 +920,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
                         pair_capacity,
                         &mut scan_range,
                     );
-                    on_pairs(&pairs[..hits as usize]);
+                    on_pairs(&mut pairs[..hits as usize]);
                 }
             }
             return;
@@ -935,6 +957,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
     // The scan calls of the unit, for LOSAT_X_STATS.
     let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
+        let (left, right) = (left + lead_i32, right + lead_i32);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501
         let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
@@ -955,7 +978,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
             // the six frames. NULLB is NCBIstdaa '-', whose scores are BLAST_SCORE_MIN, so no
             // neighbor word holds it, and no query word does (NCBI's FASTA reader drops hyphens;
             // TBLASTN takes no PSSM): NCBI's scan finds no hit, and the word is not scanned here
-            // (TBLASTX does the same, tblastx/blast_engine/run_impl.rs).
+            // (TBLASTX does the same, tblastx/blast_engine/word_finder.rs).
             if left as usize + lookup.word_length as usize > subject.len() {
                 continue;
             }
@@ -994,7 +1017,7 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
                     &mut scan_range,
                 )
             };
-            on_pairs(&pairs[..hits as usize]);
+            on_pairs(&mut pairs[..hits as usize]);
             x_calls += 1;
         }
     }

@@ -200,6 +200,8 @@ impl RpstblastnArgs {
             // hit cutoff (`rps_search::engine`), per volume with `-dbsize` on several volumes.
             dbsize: self.dbsize,
             show_gis: self.show_gis,
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::named_refusal`).
+            html: false,
             parse_deflines: self.parse_deflines,
             searchsp: self.searchsp,
             // `-xdrop_ungap` reaches NCBI's options check in BLASTX's resolve ("x_dropoff must be

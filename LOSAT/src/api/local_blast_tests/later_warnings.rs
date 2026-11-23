@@ -88,6 +88,7 @@ impl Search {
         let mut first = Some(first);
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())

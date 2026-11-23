@@ -191,6 +191,8 @@ impl RpsblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::named_refusal`).
+            html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,

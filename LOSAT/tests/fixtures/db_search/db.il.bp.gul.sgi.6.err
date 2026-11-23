@@ -1,0 +1,16 @@
+Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+Warning: [blastp] Empty seqid list
+Warning: [blastp] Query_1 q0: Filtering resulted in an empty database. 
+Warning: [blastp] Query_2 q1: Filtering resulted in an empty database. 
+Warning: [blastp] Query_3 q2: Filtering resulted in an empty database. 
+Warning: [blastp] Query_4 q3: Filtering resulted in an empty database. 
+Warning: [blastp] Query_5 q4: Filtering resulted in an empty database. 
+Warning: [blastp] Query_6 q5: Filtering resulted in an empty database. 
+Warning: [blastp] Query_7 q6: Filtering resulted in an empty database. 
+Warning: [blastp] Query_8 q7: Filtering resulted in an empty database. 
+Warning: [blastp] Query_9 q8: Filtering resulted in an empty database. 
+Warning: [blastp] Query_10 q9: Filtering resulted in an empty database. 
+Warning: [blastp] Query_11 q10: Filtering resulted in an empty database. 
+Warning: [blastp] Query_12 q11: Filtering resulted in an empty database. 
+Warning: [blastp] Query_13 q12: Filtering resulted in an empty database. 
+Warning: [blastp] Query_14 q13: Filtering resulted in an empty database. 

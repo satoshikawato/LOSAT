@@ -382,6 +382,29 @@ fn query_masks(
     }
 }
 
+/// The masks of a query's outfmt 0 rows and query-anchored sections, half-open in the searched
+/// letters: NCBI's list of the query (`query_masks` of its SEG and lower-case intervals,
+/// `tblastn_report_mask_intervals`, without an offset), in which a SEG run and a lower-case run
+/// that touch stay two masks (two `<font>` spans under `-html`, `x_OutputSeq`) and a mask of the
+/// whole searched interval is not listed (the formatter gets `TMaskedQueryRegions`).
+pub(super) fn row_masks(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+) -> Vec<(usize, usize)> {
+    let mut masks = Vec::new();
+    query_masks(
+        &tblastn_report_mask_intervals(query, seg, mask_lowercase),
+        query.len(),
+        0,
+        &mut masks,
+    );
+    masks
+        .iter()
+        .map(|mask| (mask.from as usize, mask.to as usize + 1))
+        .collect()
+}
+
 impl PreparedXml {
     /// What the XML2 and JSON documents need of the run beyond outfmt 5's (`Xml2Writer::new`).
     pub(super) fn xml2_run(&self) -> Xml2Run {

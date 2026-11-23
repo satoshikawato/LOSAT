@@ -104,3 +104,133 @@ fn missing_files_are_silent_and_a_bad_header_is_refused() {
     ));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+fn list(keys: &[i64]) -> Vec<NumOid> {
+    keys.iter().map(|&key| NumOid { key, oid: None }).collect()
+}
+
+fn opened(base: &Path) -> NumericIsam {
+    match NumericIsam::open_for_list(base, SeqType::Protein, ListIsam::Gi, 1).unwrap() {
+        Some(Opened::Ready(isam)) => isam,
+        other => panic!("not ready: {other:?}"),
+    }
+}
+
+#[test]
+fn a_list_is_translated_against_every_page_of_the_volume() {
+    for long_id in [false, true] {
+        let dir = temp_dir(if long_id { "batch_long" } else { "batch_short" });
+        let rows: Vec<(i64, i32)> = (1..=23).map(|i| (i * 7, i as i32)).collect();
+        let base = write_isam(&dir, &rows, long_id, 4);
+        let isam = opened(&base);
+        let mut ids = list(&[1, 7, 8, 28, 28, 70, 161, 162]);
+        isam.ids_to_oids(100, &mut ids).unwrap();
+        let oids: Vec<Option<u32>> = ids.iter().map(|id| id.oid).collect();
+        assert_eq!(
+            oids,
+            vec![
+                None,
+                Some(101),
+                None,
+                Some(104),
+                Some(104),
+                Some(110),
+                Some(123),
+                None
+            ]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[test]
+fn an_id_translated_by_an_earlier_volume_keeps_its_oid() {
+    let dir = temp_dir("batch_kept");
+    let base = write_isam(&dir, &[(5, 0), (9, 1), (12, 2)], false, 2);
+    let isam = opened(&base);
+    let mut ids = list(&[5, 9, 12]);
+    ids[1].oid = Some(3);
+    isam.ids_to_oids(10, &mut ids).unwrap();
+    let oids: Vec<Option<u32>> = ids.iter().map(|id| id.oid).collect();
+    assert_eq!(oids, vec![Some(10), Some(3), Some(12)]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// NCBI's constructor reads the first and last rows of the data file whatever `x_InitSearch`
+/// returned (`x_FindIndexBounds`): inside the last memory page of the mapping it reads the zeros
+/// after the file, past it memory that is not the file's, which LOSAT refuses in both states.
+#[test]
+fn the_bounds_are_read_in_the_mapping_of_the_data_file() {
+    let dir = temp_dir("bounds");
+    let base = write_isam(&dir, &[(5, 0), (9, 1)], false, 256);
+    let ni = with_extension(&base, SeqType::Protein, "ni");
+    let index = std::fs::read(&ni).unwrap();
+    let with_terms = |terms: i32, data_len: i32| {
+        let mut index = index.clone();
+        index[8..12].copy_from_slice(&data_len.to_be_bytes());
+        index[12..16].copy_from_slice(&terms.to_be_bytes());
+        std::fs::write(&ni, index).unwrap();
+    };
+    let open = || NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 2);
+    // 512 rows of 8 bytes end at the end of the first page: zeros past the 16 bytes of the file.
+    with_terms(512, 16);
+    let Some(Opened::Ready(isam)) = open().unwrap() else {
+        panic!("not ready");
+    };
+    assert_eq!((isam.first_key, isam.last_key), (5, 0));
+    with_terms(512, 4096);
+    assert!(matches!(open().unwrap(), Some(Opened::Uninitialized)));
+    // One more row ends past the page: refused whether or not the lengths agree.
+    for data_len in [16, 4104] {
+        with_terms(513, data_len);
+        let error = open().unwrap_err();
+        assert!(error.ncbi_crashes(), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("NCBI reads row 512 of the GI data file (its last of 513 terms), past the memory page after its 16 bytes"),
+            "{error}"
+        );
+    }
+    // A header with more samples than the rows fill: the last page would start past the last
+    // row, and the last key is still the row before `m_NumTerms` (review 2 of line RG D1c-1, R3).
+    let base3 = write_isam(&dir, &[(5, 0), (9, 1), (12, 2)], false, 2);
+    let mut more_samples = std::fs::read(&ni).unwrap();
+    more_samples[16..20].copy_from_slice(&3i32.to_be_bytes());
+    std::fs::write(&ni, more_samples).unwrap();
+    let Some(Opened::Ready(isam)) =
+        NumericIsam::open_for_list(&base3, SeqType::Protein, ListIsam::Gi, 3).unwrap()
+    else {
+        panic!("not ready");
+    };
+    assert_eq!((isam.first_key, isam.last_key), (5, 12));
+    // An empty data file has no mapping (NCBI's null pointer): its first row is refused too.
+    std::fs::write(with_extension(&base, SeqType::Protein, "nd"), []).unwrap();
+    with_terms(1, 0);
+    assert!(open().unwrap_err().ncbi_crashes());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_list_isam_needs_oids_and_an_index_of_the_data_length() {
+    let dir = temp_dir("batch_open");
+    let base = write_isam(&dir, &[(5, 0), (9, 1)], false, 256);
+    assert!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 0)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Ti, 2)
+            .unwrap()
+            .is_none()
+    );
+    let nd = with_extension(&base, SeqType::Protein, "nd");
+    let data = std::fs::read(&nd).unwrap();
+    std::fs::write(&nd, &data[..8]).unwrap();
+    assert!(matches!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 2).unwrap(),
+        Some(Opened::Uninitialized)
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

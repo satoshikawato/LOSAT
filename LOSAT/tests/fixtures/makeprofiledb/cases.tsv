@@ -1,0 +1,119 @@
+# name<TAB>arguments (bash words; run in a directory holding in/). NCBI BLAST+ 2.17.0 makeprofiledb (bioconda build), frozen 2026-11-21 by the PS10 survey oracle (rows R*: 2026-11-22; row PS10a; clock frozen at 2026-11-21 05:07:00 UTC, TZ=UTC); written by freeze_fixtures.py (README.md).
+O00	-in in/l_p3.lst -out db
+O00c	-in in/l_c3.lst -out db
+O00c4	-blastdb_version 4 -in in/l_c3.lst -out db
+O00p4	-blastdb_version 4 -in in/l_p3.lst -out db
+O08b	-max_smp_vol 2 -in in/l_p3.lst -out db
+O08c	-max_smp_vol 3 -in in/l_p3.lst -out db
+O08a	-max_smp_vol 1 -in in/l_p3.lst -out db
+O08k	-max_smp_vol 2 -in in/l_missing.lst -out db
+S_f2	-in in/l_f2.lst -out db
+S_f2v4	-blastdb_version 4 -in in/l_f2.lst -out db
+S_pf	-in in/l_pf.lst -out db
+S_fp	-in in/l_fp.lst -out db
+V06	-max_smp_vol -1 -in in/l_p3.lst -out db
+V08f	-scale 0 -in in/l_f2.lst -out db
+V09f	-scale 1.5 -in in/l_f2.lst -out db
+V10g	-scale 1 -in in/l_f2.lst -out db
+V14	-index false -in in/l_p3.lst -out db
+V14b	-index false -blastdb_version 4 -in in/l_p3.lst -out db
+V17	-gapopen 10 -gapextend 2 -in in/l_p3.lst -out db
+V17c	-gapopen 10 -gapextend 2 -in in/l_c3.lst -out db
+V18	-matrix BLOSUM80 -in in/l_c3.lst -out db
+V20	-threshold 0 -in in/l_p3.lst -out db
+V21	-threshold -5 -in in/l_p3.lst -out db
+V22c	-threshold 9.825 -force -in in/l_c3.lst -out db
+V24	-threshold 11 -in in/l_c3.lst -out db
+V29	-title '' -in in/l_p3.lst -out db
+V31	-obsr_threshold 3 -exclude_invalid false -in in/l_p3.lst -out db
+L01	-in in/l_space.lst -out db
+L06	-in in/l_empty.lst -out db
+L07	-in in/l_missing.lst -out db
+L09	-in in/l_dup.lst -out db
+H04	-dryrun -in in/l_p3.lst -out db
+H07	-logfile mp.log -in in/l_p3.lst -out db
+H07b	-logfile mp.log -in in/l_missing.lst -out db
+H10	-in in/nonexistent.lst -out db
+H16	-out db
+O01	-in in/l_p3.lst -out newdir/sub/db
+O03	-title 'My title' -in in/l_p3.lst -out db
+O13	-in in/l_p3.lst -out outdir/
+O08n	-max_smp_vol 2 -in in/l_dup.lst -out db
+I05s	-in in/l_taxnoorg.lst -out db
+S_notpssm	-in in/l_e_notpssm.lst -out db
+S_empty	-in in/l_e_empty.lst -out db
+S_trunc	-in in/l_e_trunc.lst -out db
+S_unknownfield	-in in/l_e_unknownfield.lst -out db
+RZ03	-out '' -in in/l_zone.lst
+RZ04	-out '' -in in/l_zmiss.lst
+RZ09	-out '' -blastdb_version 4 -in in/l_zlater.lst
+RZ10	-out '' -max_smp_vol 1 -in in/l_zsmall.lst
+RZ11	-out '' -blastdb_version 4 -in in/l_zsmall.lst
+RZ12	-out '' -max_smp_vol 2 -in in/l_zsmall.lst
+RB02	-in in/l_bh2.lst -out db
+RB03v4	-blastdb_version 4 -in in/l_bh0.lst -out db
+RB05	-in in/l_bhorg.lst -out db
+RB06x	-index false -in in/l_bhnoid.lst -out db
+RB07	-in in/l_bh1.lst -out db
+RB07x	-index false -in in/l_bh1.lst -out db
+RI01	-in in/l_noid_d.lst -out db
+RI02	-blastdb_version 4 -in in/l_noid_n.lst -out db
+RL01	-in in/l_l2p31.lst -out db
+RL02	-in in/l_lneg1.lst -out db
+RL03	-in in/l_lneg3.lst -out db
+RL04	-in in/l_lneg1r.lst -out db
+RL06	-in in/l_lneg1f.lst -out db
+RL07	-in in/l_lneg_later.lst -out db
+QC01	-in in/l_q_il.lst -out db
+QC02	-in in/l_q_mp.lst -out db
+QC03	-in in/l_q_ml.lst -out db
+QC04	-in in/l_q_ms30.lst -out db
+QC05	-in in/l_q_xp.lst -out db
+QC06	-in in/l_q_ng.lst -out db
+QC07	-in in/l_q_ngi.lst -out db
+QD01	-in in/l_QD01.lst -out db
+QD02	-in in/l_QD02.lst -out db
+QD03	-in in/l_QD03.lst -out db
+QD04	-in in/l_QD04.lst -out db
+QD05	-in in/l_QD05.lst -out db
+QD06	-in in/l_QD06.lst -out db
+QD07	-in in/l_QD07.lst -out db
+QD08	-in in/l_QD08.lst -out db
+QD09	-in in/l_QD09.lst -out db
+QD10	-in in/l_QD10.lst -out db
+QD11	-in in/l_QD11.lst -out db
+QD12	-in in/l_QD12.lst -out db
+QD13	-in in/l_QD13.lst -out db
+QD14	-in in/l_QD14.lst -out db
+QD15	-in in/l_QD15.lst -out db
+QD16	-in in/l_QD16.lst -out db
+QD17	-in in/l_QD17.lst -out db
+QD18	-in in/l_QD18.lst -out db
+QD19	-in in/l_QD19.lst -out db
+QD20	-in in/l_QD20.lst -out db
+QD21	-in in/l_QD21.lst -out db
+QD22	-in in/l_QD22.lst -out db
+QD23	-in in/l_QD23.lst -out db
+QD24	-in in/l_QD24.lst -out db
+QD25	-max_smp_vol 2 -in in/l_QD25.lst -out db
+QD26	-max_smp_vol 2 -in in/l_QD26.lst -out db
+QD27	-max_smp_vol 2 -in in/l_QD27.lst -out db
+QD28	-in in/l_QD28.lst -out db
+QD29	-logfile mp.log -in in/l_QD29.lst -out db
+QD30	-in in/l_QD30.lst -out db
+QD31	-in in/l_QD31.lst -out db
+QD32	-in in/l_QD32.lst -out db
+QD33	-in in/l_QD33.lst -out db
+QD34	-in in/l_QD34.lst -out db
+QD35	-in in/l_QD35.lst -out db
+QD36	-in in/l_QD36.lst -out db
+QD37	-in in/l_QD37.lst -out db
+QD38	-in in/l_QD38.lst -out db
+QD39	-in in/l_QD39.lst -out db
+QD40	-max_smp_vol 2 -in in/l_QD40.lst -out db
+QD41	-in in/l_QD41.lst -out db
+QD42	-in in/l_QD42.lst -out db
+QD43	-in in/l_QD43.lst -out db
+QD44	-in in/l_QD44.lst -out db
+QD45	-in in/l_QD45.lst -out db
+QD46	-in in/l_QD46.lst -out db

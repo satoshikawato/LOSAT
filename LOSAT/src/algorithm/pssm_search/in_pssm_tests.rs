@@ -543,7 +543,7 @@ fn a_pssm_whose_scores_can_add_up_to_2_30_is_refused() {
             SeqData::Iupacaa(letters) | SeqData::Ncbieaa(letters) | SeqData::Ncbistdaa(letters) => {
                 *letters = vec![letters[0]; columns];
             }
-            SeqData::Other(_) => unreachable!("the test's PSSM is NCBIstdaa"),
+            _ => unreachable!("the test's PSSM is NCBIstdaa"),
         }
         psi_search_of(pssm)
     };

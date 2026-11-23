@@ -31,7 +31,8 @@
 //!   [`check_versions`]; the string case of `CSeqDBVol::x_StringToOids`:
 //!   [`StringIsam::string_id_to_oids`].
 //! - `IdsToOids` of a `CSeqDBGiList` (`x_TranslateGiList<string>`): [`StringIsam::ids_to_oids`];
-//!   `CSeqDBGiList::InsureOrder` for the string list: [`insure_order`].
+//!   `CSeqDBGiList::InsureOrder` for the string list, with the list's order flag: [`insure_order`];
+//!   `SiToOid`: `filter::find_si`.
 //! - `IdsToOids` of a `CSeqDBNegativeList` (`x_SearchNegativeMultiSeq`):
 //!   [`StringIsam::negative_scan`]; `CSeqDBNegativeList` and `CSeqDBBitVector`: [`NegativeOids`].
 //! - `SeqDB_SimplifyAccession`, `SeqDB_SimplifySeqid`, `PreprocessIdsForISAMSiLookup`:
@@ -100,23 +101,30 @@
 //! - A damaged file: NCBI reads past its mapping (undefined behaviour); every such read is an
 //!   `Err(SeqDbError::Format)` here, and so are an index that holds no sample, a page size or
 //!   count that does not fit the sample count, offsets outside the files, and an index
-//!   shorter than its offset tables. `s_AdvanceKeyList` can step to `-1` on an unsorted data
-//!   file (NCBI indexes `keys[-1]`): `Err` here.
+//!   shorter than its offset tables.
+//! - `s_AdvanceKeyList` steps to `-1` where the walk of a list meets a key below the first
+//!   sample key or below the first key of the page it loads: a list out of order (NCBI walks a
+//!   list in the order its flag leaves it, [`insure_order`]) or a data file out of order. NCBI
+//!   then reads the entry before the start of its vector of offsets or keys (undefined
+//!   behaviour): LOSAT's refusal ([`walk_before_start`]).
 //! - A volume whose files fail `x_InitSearch` (wrong version, type or data length) is opened as
 //!   NCBI does, uninitialised: lookups find nothing, and the batch calls fail with NCBI's
 //!   "Error: Unable to use ISAM index in batch mode.". NCBI's `x_FindIndexBounds` still reads the
 //!   index of such a volume; its result is never used and is not computed.
 //! - The warnings that `CSeq_id` posts while parsing a user's id (`ERR_POST` to the diagnostics
 //!   stream) are dropped.
-//! - Exceptions of `SeqDB_SimplifyAccession` that are not a `CSeqIdException` (a `ti` tag that is
-//!   not a number, a string tag of `BL_ORD_ID` or `PIG`) are [`SimplifyError::Exception`] with
-//!   the message NCBI's exception holds.
+//! - Exceptions of `SeqDB_SimplifyAccession` and `SeqDB_SimplifySeqid` that are not a
+//!   `CSeqIdException` (a `ti` tag that is not a number, a string tag of `BL_ORD_ID` or `PIG`)
+//!   are [`SimplifyError::Exception`] with NCBI's exception (`ncbi_str::string_to_int8`'s, or
+//!   `CObject_id::GetId()`'s `CInvalidChoiceSelection`, thrown in code that NCBI's `datatool`
+//!   generates: `ThrowSite::generated`).
 //! - The functions assume the C locale (`tolower`, `toupper`, `isdigit`, `atoi`).
 
 use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::SeqDbError;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::{string_to_int, string_to_int8, string_to_uint, ALLOW_TRAILING_SYMBOLS};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning, SEQID_NOT_SET};
 use crate::seqid::label;
@@ -1020,25 +1028,33 @@ impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2540-2550
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1388-1419
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:548-623
+    // The list is walked in the order it has after `InsureOrder` (`insure_order`): sorted where
+    // its order flag was not set yet, else as it is. A list whose ids changed after the flag was
+    // set (the alias files' `SEQIDLIST`, simplified again for each volume, `alias::ListSet`) can
+    // be out of order: the walk then skips the ids below a key it has passed, as NCBI's does,
+    // and where it meets an id below the key it starts from it is refused (`walk_before_start`).
     /// `IdsToOids` with `vol_start`, `vol_end` and a `CSeqDBGiList` for the string list
     /// (`x_TranslateGiList<string>`): sets `oid` of every entry of `ids` whose `si` (lower-cased,
     /// simplified: [`simplify_accession_for_isam`]) is a key of the volume, to the OID of the
-    /// line plus `vol_start`. An entry that has an `oid` already is left as it is.
-    pub fn ids_to_oids(&self, vol_start: u32, ids: &mut [SiOid]) -> Result<(), SeqDbError> {
+    /// line plus `vol_start`. An entry that has an `oid` already is left as it is. `sorted` is
+    /// the list's order flag (`m_CurrentOrder` at `eGi`), which [`insure_order`] sets.
+    pub fn ids_to_oids(
+        &self,
+        vol_start: u32,
+        ids: &mut [SiOid],
+        sorted: &mut bool,
+    ) -> Result<(), SeqDbError> {
         let gilist_size = ids.len();
         if gilist_size == 0 {
             return Ok(());
         }
-        insure_order(ids);
+        insure_order(ids, sorted);
         if !self.initialized {
             return Err(batch_mode_error());
         }
         let (page_offs, sample_keys) = self.load_index(true)?;
         let num_samples = self.num_samples as usize;
-        let order_error = || SeqDbError::Format {
-            path: self.data.path().to_path_buf(),
-            message: "string ISAM keys are not in order".to_string(),
-        };
+        let order_error = || walk_before_start(self.data.path());
         let mut gilist_index = 0;
         let mut sample_index: i64 = 0;
         while gilist_index < gilist_size && (sample_index as usize) < num_samples {
@@ -1209,9 +1225,22 @@ impl ScanChunk {
     }
 }
 
+/// LOSAT's refusal where the walk of a list over the string ISAM of `path` steps before the
+/// first sample key or the first key of a page (`s_AdvanceKeyList` at -1): NCBI reads the entry
+/// before the start of its vector there.
+fn walk_before_start(path: &Path) -> SeqDbError {
+    SeqDbError::Unsupported {
+        path: path.to_path_buf(),
+        message: "NCBI's walk of an id list over the string ISAM meets an id below the key it \
+                  starts from (a list out of order, or keys out of order) and reads before the \
+                  start of its keys"
+            .to_string(),
+    }
+}
+
 /// NCBI's `CSeqDBException` of kind `eArgErr` with the message
 /// `"Error: Unable to use ISAM index in batch mode."`.
-fn batch_mode_error() -> SeqDbError {
+pub(super) fn batch_mode_error() -> SeqDbError {
     SeqDbError::NotFound(
         "Error: Unable to use ISAM index in batch mode."
             .to_string()
@@ -1240,13 +1269,21 @@ impl SiOid {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:574-586
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:589-606
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:616-651
-/// `CSeqDBGiList::InsureOrder` with `eGi` for the string list: sorts by `si` (`std::string` order:
-/// unsigned bytes, then length) unless it is sorted already.
-pub fn insure_order(ids: &mut [SiOid]) {
+// The flag is NCBI's `m_CurrentOrder`: once it is `eGi`, `InsureOrder` leaves the list as it is,
+// whatever changed it since. NCBI's `std::sort` is not stable, which no result here shows: the
+// entries it sorts have no OID yet, and equal ids are then equal entries.
+/// `CSeqDBGiList::InsureOrder` with `eGi` for the string list: where the flag `sorted` is not set,
+/// sorts by `si` (`std::string` order: unsigned bytes, then length) unless it is sorted already,
+/// and sets the flag.
+pub fn insure_order(ids: &mut [SiOid], sorted: &mut bool) {
+    if *sorted {
+        return;
+    }
     let already = ids.windows(2).all(|w| w[1].si >= w[0].si);
     if !already {
         ids.sort_by(|a, b| a.si.cmp(&b.si));
     }
+    *sorted = true;
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:50-75
@@ -1490,30 +1527,34 @@ pub struct SimplifiedAccession {
 pub enum SimplifyError {
     /// A `CSeqIdException` that `CSeq_id` throws for `element` or for the `db:tag` id.
     SeqId(SeqIdError),
-    /// Another exception, with its message: a string tag read as a number, an integer read from
-    /// a string tag.
-    Exception(Vec<u8>),
+    /// Another exception of NCBI's: a string tag read as a number, an integer read from a string
+    /// tag.
+    Exception(NcbiException),
 }
 
 impl std::fmt::Display for SimplifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SimplifyError::SeqId(error) => f.write_str(&String::from_utf8_lossy(&error.what())),
-            SimplifyError::Exception(message) => f.write_str(&String::from_utf8_lossy(message)),
+            SimplifyError::Exception(exception) => {
+                f.write_str(&String::from_utf8_lossy(exception.get_msg()))
+            }
         }
     }
 }
 
 impl std::error::Error for SimplifyError {}
 
+// NCBI reference (598d8ae6): c++/src/serial/exception.cpp:122-150
 /// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
-/// BDC).
+/// BDC), thrown by the code that NCBI's `datatool` generates for the CHOICE.
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
-        ObjectId::Str(_) => Err(SimplifyError::Exception(
-            b"CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str".to_vec(),
-        )),
+        ObjectId::Str(_) => Err(SimplifyError::Exception(NcbiException::new(
+            ThrowSite::generated("CInvalidChoiceSelection::eFail"),
+            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str",
+        ))),
     }
 }
 
@@ -1562,8 +1603,9 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
             if dbt.db == b"ti" {
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
-                    ObjectId::Str(text) => string_to_int8(text, 0)
-                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_vec()))?,
+                    ObjectId::Str(text) => {
+                        string_to_int8(text, 0).map_err(SimplifyError::Exception)?
+                    }
                     ObjectId::Id(n) => i64::from(*n),
                 };
                 out.id_type = SeqDbIdType::Ti;

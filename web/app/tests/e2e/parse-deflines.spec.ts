@@ -13,7 +13,7 @@ import { expect } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openParameters, openSearch, paste, pickRun, program, showOutput, storedOutputs, submit, waitStatus } from './support/search';
+import { chooseRun, inputNames, openParameters, openSearch, paste, pickRun, program, showOutput, storedOutputs, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine reads no ids of the deflines: the engine build runs these tests');
@@ -50,13 +50,19 @@ const CASES = [
   },
 ] as const;
 
-/** The native CLI's run of `words` (program first) on the inputs as query.fa and subject.fa, in `-outfmt format`, one thread. */
-function nativeRun(words: readonly string[], query: string, subject: string, format: 0 | 6 | 7): { status: number | null; stdout: Buffer; stderr: Buffer } {
+/** The native CLI's run of `words` (program first) on the inputs under the names that the run's command gives them, in `-outfmt format`, one thread. */
+function nativeRun(
+  words: readonly string[],
+  query: string,
+  subject: string,
+  format: 0 | 6 | 7,
+  names: { readonly query: string; readonly subject: string } = { query: 'query.fa', subject: 'subject.fa' },
+): { status: number | null; stdout: Buffer; stderr: Buffer } {
   mkdirSync(test.info().outputPath(), { recursive: true });
   const directory = mkdtempSync(join(test.info().outputPath(), 'native-'));
-  writeFileSync(join(directory, 'query.fa'), query);
-  writeFileSync(join(directory, 'subject.fa'), subject);
-  const args = [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-outfmt', String(format), '-num_threads', '1'];
+  writeFileSync(join(directory, names.query), query);
+  writeFileSync(join(directory, names.subject), subject);
+  const args = [words[0]!, '-query', names.query, '-subject', names.subject, ...words.slice(1), '-outfmt', String(format), '-num_threads', '1'];
   const result = spawnSync(NATIVE!, args, { cwd: directory, maxBuffer: 1 << 28 });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -80,8 +86,10 @@ test('-parse_deflines runs: the outputs are the CLI\'s and the results name the 
     const { outputs, warnings } = await storedOutputs(page, run);
     expect(outputs[6].toString('utf8').split('\t').slice(0, 2), `${id}: the first row's IDs`).toEqual(ids);
     if (NATIVE === undefined) continue;
+    // The command names the pasted inputs by the run's own names (outfmt 0 and 7 show the subject's).
+    const names = inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
     for (const format of [0, 6, 7] as const) {
-      const cli = nativeRun([id, '-parse_deflines'], query, subject, format);
+      const cli = nativeRun([id, '-parse_deflines'], query, subject, format, names);
       expect(cli.status, `${id} -outfmt ${format}: ${cli.stderr}`).toBe(0);
       expect(outputs[format].equals(cli.stdout), `${id} -outfmt ${format}`).toBe(true);
       expect(warnings, `${id} -outfmt ${format}: the warnings`).toBe(cli.stderr.toString('utf8'));
@@ -164,11 +172,12 @@ test('a record that is both a query and a subject and has masks: outfmt 0 alone 
     testInfo.annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
     return;
   }
-  const zero = nativeRun(words, record, record, 0);
+  const names = inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
+  const zero = nativeRun(words, record, record, 0, names);
   expect(zero.status).toBe(1);
   expect(zero.stderr.toString('utf8')).toBe(`Error: ${message}\n`);
   for (const format of [6, 7] as const) {
-    const cli = nativeRun(words, record, record, format);
+    const cli = nativeRun(words, record, record, format, names);
     expect(cli.status, `-outfmt ${format}: ${cli.stderr}`).toBe(0);
     expect(outputs[format].equals(cli.stdout), `-outfmt ${format}`).toBe(true);
     if (format === 6) expect(warnings, 'the warnings: outfmt 6\'s, then the error of outfmt 0').toBe(`${cli.stderr.toString('utf8')}Error: ${message}\n`);

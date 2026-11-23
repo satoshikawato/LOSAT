@@ -50,7 +50,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{ensure, Context, Result};
 
 use super::args::ResolvedOptions;
-use super::empty_rows::{row_is_empty, rows_empty, std_seg_lengths_not_accurate, SubjectLoc};
+use super::empty_rows::{
+    row_range_exception, rows_empty, rows_range, std_seg_lengths_not_accurate, SubjectLoc,
+};
 use super::input::FastaRecord;
 use super::report::{
     display_query_residue, has_seqalign, query_endpoints, reported, ShownSubjects,
@@ -1406,7 +1408,11 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     Ok(()) => None,
                     Err(error) => match error.downcast::<CaughtException>() {
                         Ok(CaughtException(exception)) => {
-                            Some(caught_post(&document.caught_message(&exception)))
+                            Some(crate::ncbi_exception::error_post_line(
+                                None,
+                                Some(options.program().lower),
+                                &document.caught_message(&exception),
+                            ))
                         }
                         Err(error) => return Err(error),
                     },
@@ -1493,18 +1499,20 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
-                                // mapped Std-seg throws, else the empty query row's start (`-db`,
-                                // and the rows that `-subject`'s mapper leaves,
-                                // `SubjectLoc::of_list`). NCBI catches it in
-                                // `s_BlastXMLAddIteration` (`CaughtException`).
-                                if rows_empty(hsp) {
-                                    return Err(CaughtException(
-                                        match loc.of_list(list, options.gapped) {
-                                            SubjectLoc::Interval => std_seg_lengths_not_accurate(),
-                                            SubjectLoc::Whole => row_is_empty(),
-                                        },
-                                    )
-                                    .into());
+                                // mapped Std-seg throws; else the start of a row whose range the
+                                // XML cannot take, the query's first (`empty_rows::rows_range`:
+                                // empty rows with `-db` and the rows that `-subject`'s mapper
+                                // leaves, `SubjectLoc::of_list`; RPSTBLASTN's row that starts with
+                                // a gap). NCBI catches it in `s_BlastXMLAddIteration`
+                                // (`CaughtException`).
+                                let thrown = match loc.of_list(list, options.gapped) {
+                                    SubjectLoc::Interval => {
+                                        rows_empty(hsp).then(std_seg_lengths_not_accurate)
+                                    }
+                                    SubjectLoc::Whole => rows_range(hsp).map(row_range_exception),
+                                };
+                                if let Some(exception) = thrown {
+                                    return Err(CaughtException(exception).into());
                                 }
                                 // The Seq-align's endpoints, lower first: the minus frame's
                                 // outfmt 6 order is not the XML's.
@@ -1556,9 +1564,11 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let caught = match written {
                 Ok(()) => None,
                 Err(error) => match error.downcast::<CaughtException>() {
-                    Ok(CaughtException(exception)) => {
-                        Some(caught_post(&document.caught_message(&exception)))
-                    }
+                    Ok(CaughtException(exception)) => Some(crate::ncbi_exception::error_post_line(
+                        None,
+                        Some(options.program().lower),
+                        &document.caught_message(&exception),
+                    )),
                     Err(error) => return Err(error),
                 },
             };
@@ -1589,10 +1599,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 
 /// The end of the document (`PrintEpilog`): its trailer when `queries` queries were formatted,
 /// else the epilog's end of line alone. For the XML2 and JSON documents `xml2` is the run's
-/// writer: it writes the report held back by a `-subject` run and the document's end.
+/// writer: it writes the report held back by a `-subject` run and the document's end; `program`
+/// names the run's program in its message (`ncbi_exception::error_post_line`).
 pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
+    program: &str,
     queries: usize,
     xml2: Option<&mut RunXml2>,
 ) -> Result<()> {
@@ -1603,9 +1615,11 @@ pub(super) fn write_xml_epilog(
                 // The held report of a `-subject` run that fails (`CaughtException`): its
                 // message, then the end of the document.
                 match error.downcast::<CaughtException>() {
-                    Ok(CaughtException(exception)) => {
-                        Ok(caught_post(&xml2.caught_message(&exception)))
-                    }
+                    Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
+                        None,
+                        Some(program),
+                        &xml2.caught_message(&exception),
+                    )),
                     Err(error) => Err(error),
                 }
             });
@@ -1641,13 +1655,6 @@ fn write_with_posts(
     let mut hits = crate::report::query_warnings::HitPosts::default();
     hits.document(posts);
     crate::report::query_warnings::write_posts_to(buf, &hits, 0, writer, diagnostics, None)
-}
-
-/// NCBI's post (`ERR_POST` at the error level with `message`) of a structured report's caught exception
-/// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
-/// the message (which ends with the `what()` text's end of line) and the post's end of line.
-fn caught_post(message: &[u8]) -> Vec<u8> {
-    [b"Error: [blastx] ".as_slice(), message, b"\n"].concat()
 }
 
 #[cfg(test)]

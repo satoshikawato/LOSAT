@@ -56,11 +56,11 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
 }
 
 /**
- * The -query / -subject names of inputs that are not one file (plan §5.3): pasted text, and
- * several inputs searched together.
+ * The names that stand for a pasted text in the source list and in the argv that the form validates. The argv of a run names a
+ * file that LOSAT makes (pasted text, several files, a file with records left out) by the run's own name (`inputFileName`:
+ * `losat-run3-blastn-20261123T101530Z.query.fa`; line WQA's D22, DECISIONS 44), which the run has only when it is queued.
  */
 export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject.fa' } as const);
-export const COMBINED_NAMES = Object.freeze({ query: 'combined_query.fa', subject: 'combined_subject.fa' } as const);
 
 export interface ArgvInput {
   readonly program: ProgramId;
@@ -74,8 +74,8 @@ export interface ArgvInput {
 
 /**
  * The argv of a run as the user's command: a run that printed the command line's help or version (`RunSnapshot.prints`) read
- * no input, so its command names none (`blastn -version`), where the engine's argv has the placeholders `-query query.fa
- * -subject subject.fa` that `buildArgv` writes. Where the run is shown as a command, it takes the argv from here (line WQA's
+ * no input, so its command names none (`blastn -version`), where the engine's argv has the names that `buildArgv` writes
+ * (the run's own names of its two inputs, `Coordinator.enqueueAll`). Where the run is shown as a command, it takes the argv from here (line WQA's
  * D20, 2026-11-23).
  */
 export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {

@@ -399,8 +399,8 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 「Add to queue」を押したとき、`validate(argv)` が通った場合にだけ RunSnapshot を確定する。エラーは CLI と同じ文で出す（S01 で実装）。
 - この argv を、実行、CLI コマンドの表示、NCBI との比較用コマンド、セッションで共通に使う。`-query`・`-subject`・`-out`・`-num_threads` はアプリが管理し、利用者はパラメーターとして入力できない（S01 で実装。Additional options の `-num_threads` は「-num_threads is set in the form: Threads」）。`-outfmt` はフォームに欄が無く、Additional options に CLI のとおりに書ける（DW-47、DW-51）：run は値によらず outfmt 0・6・7 を書き、ほかの形式（5、8〜16、20、BLASTN の 17）と、6 / 7 で番号の後に語がある値（列、`delim=`）はその出力を足す。値はエンジンが CLI のとおりに読み、CLI が拒む値は CLI の文で拒む。13・14 は CLI の `-out` が要らず、出力は master と side file の ZIP（DW-52）。
 - 表示する CLI コマンドは、出力ごとに作り、必ず `-outfmt` を付ける。いくつかの program は CLI の既定の形式を受け付けないためである（S01 で実装）。outfmt 0・6・7 のコマンドは argv の `-outfmt` を除いて `-outfmt N` を付け、足した出力のコマンドは argv のまま（利用者の `-outfmt` が 1 回）にする（DW-47）。
-- `-query` / `-subject` の名前の規則：ファイルが 1 つならそのファイル名。貼り付けなら `query.fa` / `subject.fa`。複数ファイルをつないだ場合は `combined_query.fa` / `combined_subject.fa`（S12）。つなぐとき、末尾に改行の無いファイルには改行を 1 つ補う。
-- レコードを除外した実行やファイルをつないだ実行では、「この実行に使った入力 FASTA」（エンジンに渡したバイトそのもの）を書き出せるようにする。CLI での再現には、このファイルを使う。
+- `-query` / `-subject` の名前の規則：利用者のファイルが 1 つで、レコードを除外していなければ、そのファイル名（D21）。それ以外（貼り付け、複数ファイルをつないだもの、レコードを除外したファイル）は、アプリが作るファイルで、その実行の接頭辞（出力と同じ `losat-run<N>-<program>[-<task>]-<UTC 時刻>`）と役割で名付ける：`<接頭辞>.query.fa` / `<接頭辞>.subject.fa`（line WQA の D22、DECISIONS 44）。接頭辞は実行の番号と時刻を含むので、別の実行のファイルと名前が重ならず、どのブラウザーでもそのまま保存される。つなぐとき、末尾に改行の無いファイルには改行を 1 つ補う。
+- 利用者のファイルそのものではない入力（貼り付け、つないだもの、レコードを除外したもの）は、「この実行に使った入力 FASTA」（エンジンに渡したバイトそのもの）を、argv の名前のまま、Download All と Outputs から書き出せる（失敗した実行も）。CLI での再現には、このファイルを使う。何でできているか（どのファイルのどのレコードを除いたか）は、Run details の From と Outputs の行が言う。
 - 領域は、その役割のレコードが 1 つのときだけ指定でき、`-query_loc` / `-subject_loc` として argv に入る（DW-9）。
 
 ### 5.4 入力と索引

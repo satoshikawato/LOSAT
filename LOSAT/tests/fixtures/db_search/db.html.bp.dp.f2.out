@@ -1,0 +1,143 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: in/ps_plain.faa
+           11 sequences; 1,610 total letters
+
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject one two HSPs                                               <a href=#BL_ORD_ID:0>313</a>     5e-109
+s3 subject three with a title that is longer than the description...  <a href=#BL_ORD_ID:2>247</a>     4e-87 
+s11 subject eleven strong then planted weak HSP                       <a href=#BL_ORD_ID:10>211</a>     1e-71 
+s9 subject nine                                                       <a href=#BL_ORD_ID:8>168</a>     7e-57 
+s2 subject two                                                        <a href=#BL_ORD_ID:1>159</a>     4e-53 
+s8 subject eight                                                      <a href=#BL_ORD_ID:7>147</a>     1e-48 
+s7 subject seven taxid not in taxdb                                   <a href=#BL_ORD_ID:6>141</a>     2e-46 
+s6 subject six                                                        <a href=#BL_ORD_ID:5>139</a>     1e-45 
+s4 subject four                                                       <a href=#BL_ORD_ID:3>138</a>     3e-45 
+s5 subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@descr_tex...  <a href=#BL_ORD_ID:4>131</a>     9e-43 
+s10 subject ten                                                       <a href=#BL_ORD_ID:9>94.0</a>    2e-28 
+
+
+
+Query_1  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+0        1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+2        1                                                      GDESHIVADL  10
+10       1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+8        1                                  RPMRGRLTLIDPRHRVPYACGDPSHIVAGR  30
+1        1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+7        1    CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  60
+4        1    CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  60
+
+Query_1  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+0        61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+2        11   PAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITCANSVMRAVSK  70
+10       61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR                      100
+8        31   PARPTVTRSVDATISNDPFFNCRCRRDYSITYMLQPRLCRPNGNVESGTCANLVMVAVVK  90
+1        61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+7        61   PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR                      100
+5        1                                            PSENVESHTSANLVIRPVVK  20
+4        61   PARPTLTKSVRHAISPDPFF                                          80
+
+Query_1  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+0        121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL                             153
+0        302                                 GLSTPFVNLVRHAAQLKVYSRLACDIAHP  330
+2        71   ASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVPSRLALCYTHG  130
+10       232                                TGLSKRFEHQSRHML                 246
+8        91   VSAYDTTTKT                                                    100
+6        1                                  SGLSTPFVDLVRHTMQMKVPSRRAACYTHA  30
+5        21   VRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNLVRPAMQLKVPSRSPACYTHL  80
+
+Query_1  181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+0        331  AALKGTRSPRLTDYPRCSIHSGRGLFDPESTLGDPSRVQIPLTERACNLRLITVSTDYCT  390
+2        131  AASKGLGSSPLPESNRCSTH                                          150
+10       191            LADCGDWSFDSGRGLFEPESDL                              212
+6        31   AALKGLPLPRLIEIDNCSNFVKRGLREMEGTLGDLSRRQTPLTETRCHSRLVTPGSNACT  90
+5        81   AALLGLPSPNLSEFFRGST                                           99
+3        6                             FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCT  40
+9        1                        SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCT  40
+
+Query_1  241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+0        391  SKTREPAHSCVLVDVNVILICNSSRGSLCKRSRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+6        91   SQSREPRHS                                                     99
+3        41   SKLREPRHSLNLVRYNGKLICNSARGSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ   99
+9        41   SKSCEPVDSPNLVRVNVILI                                          60
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316389
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39609
+
+
+  Database: in/ps_plain.faa
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 1,610
+  Number of sequences in database:  11
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

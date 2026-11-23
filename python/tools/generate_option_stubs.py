@@ -33,6 +33,9 @@ def option_type(parameter: pylosat.Parameter) -> str:
     if parameter.value_kind in ("flag", "boolean"):
         return "bool"
     if parameter.choices:
+        # An integer's choices are its values (NCBI's set of `-template_length`), as `Search` takes them.
+        if parameter.value_kind == "integer":
+            return "Literal[" + ", ".join(str(int(choice)) for choice in parameter.choices) + "]"
         return "Literal[" + ", ".join(repr(choice) for choice in parameter.choices) + "]"
     return TYPES[parameter.value_kind]
 

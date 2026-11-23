@@ -107,10 +107,22 @@
 //!   it is never below `best - 255` (a step costs 128 at most, and the walk stops once `best - score`
 //!   reaches `x_drop <= 127`); the path takes frames of at most `MAX_SENT_LEN` (`i32::MAX / 64`)
 //!   bytes, above any whole frame (a longer one is searched in chunks of `MAX_DBSEQ_LEN`).
+//! * Keys. The walks are the key walks of blastp and BLASTX (algorithm/common/x_key_walk.rs, item
+//!   SC2e: score and step in one `i64`, so that one comparison keeps the best and its length), and
+//!   the word loop runs on the same keys: a step adds `(t << 32) - 1` for the score `t` of the two
+//!   bytes, read at `q << 5 | s` (`KeyTable`: BLOSUM62's from the cells of `build_table`, another
+//!   matrix's beside its `MatrixWalkTable`). The keys hold the byte tables' scores of the bytes
+//!   below `MATRIX_LETTERS`: the letters (NCBISTDAA 0..=27) and the sentinel 0, the only bytes a
+//!   frame or a context holds (`translation.rs`), as `MatrixWalkTable` takes them; a context or a
+//!   frame takes the path only if every byte of its buffer is below it (`letters` in
+//!   `sent_contexts` and `sent_frame`, once for each batch and each frame's chunk), so every step
+//!   reads a key of the table. A walk takes
+//!   fewer than `MAX_SENT_LEN` steps, inside the keys' step part (`2^32 - 1`), and the scores stay
+//!   as in the item above.
 //! * Other matrices and word lengths (`TbxScore::sent_two_hit`, `two_hit_sent_in::<W>`): the same
-//!   walks on the matrix's byte table after the word loop over `W` letters, for a table whose cells
-//!   of code 0 all hold -128 (`MatrixWalkTable::x_sentinels_stop`); the arguments above hold with
-//!   its scores, at most `MAX_MATRIX_SCORE`.
+//!   walks on the keys of the matrix's byte table after the word loop over `W` letters, for a table
+//!   whose cells of code 0 all hold -128 (`MatrixWalkTable::x_sentinels_stop`); the arguments above
+//!   hold with its scores, at most `MAX_MATRIX_SCORE`.
 //!
 //! No NCBI counterpart for the split itself and the switch: they choose between LOSAT code paths
 //! with the same result.
@@ -118,6 +130,7 @@
 use super::get_score;
 #[cfg(test)]
 use super::two_hit::extend_hit_two_hit_reference;
+use crate::algorithm::common::x_key_walk::{best_of, walk, KeyTable, KEY_TABLE_LEN};
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::BLAST_SCORE_MIN;
 use std::cell::UnsafeCell;
@@ -148,6 +161,7 @@ const _: () = assert!((MAX_MATRIX_WORD as i32 - 1) * MAX_MATRIX_SCORE <= 128);
 /// The bytes another matrix's table holds the scores of (`MatrixWalkTable`): the frames' letters
 /// (NCBISTDAA 0..=27) are below it.
 const MATRIX_LETTERS: usize = 32;
+const _: () = assert!(MATRIX_LETTERS * MATRIX_LETTERS == KEY_TABLE_LEN);
 /// `q << 5 | s` for every two bytes (`MatrixWalkTable`).
 const MATRIX_TABLE_LEN: usize = 256 * MATRIX_LETTERS;
 #[expect(
@@ -179,6 +193,9 @@ struct State {
     /// The table of the walks (`FIXED_TABLE`); `None` (the reference runs) if a score does not fit it.
     #[cfg(target_arch = "wasm32")]
     table: Option<&'static Table>,
+    /// LOSAT_X_TBXUNGAPSENT: the keys of `table`'s letters for the sentinel walks (`fill_keys`);
+    /// `None` when the path is off.
+    keys: Option<Box<KeyTable>>,
 }
 
 /// `tab[i]`. wasm32 reads `FIXED_TABLE` (where `tab` points) at its static address.
@@ -219,9 +236,24 @@ impl WalkTable for Table {
 /// The byte table of a matrix other than BLOSUM62 (`two_hit_in`): the score of `q` against `s` at
 /// `q << 5 | s` for the bytes below `MATRIX_LETTERS`. A byte of 32 or more, which no frame holds,
 /// reads a cell that is not its score. Page-aligned: the cells of the letters (the first 1 KiB),
-/// the only ones written (`fill_matrix_table`), take one page of memory.
+/// the only ones written (`fill_matrix_table`), take one page of memory. Beside it, the keys of
+/// the sentinel walks (LOSAT_X_TBXUNGAPSENT, `fill_keys`; 8 KiB).
 #[repr(align(4096))]
-pub(crate) struct MatrixWalkTable([i8; MATRIX_TABLE_LEN]);
+pub(crate) struct MatrixWalkTable([i8; MATRIX_TABLE_LEN], KeyTable);
+
+/// LOSAT_X_TBXUNGAPSENT: writes into `k` the keys of the sentinel walks (algorithm/common/
+/// x_key_walk.rs, item SC2e) for the letters of a byte table `t` read at `q << SHIFT | s`
+/// (BLOSUM62's `Table`: 8; a `MatrixWalkTable`: 5): `(t << 32) - 1` at `q << 5 | s` for the score
+/// `t` of every two bytes below `MATRIX_LETTERS`, the only bytes of a buffer that takes the walks
+/// (`letters`).
+// No NCBI counterpart: the scores the reference walks add, in the form of the key walks.
+fn fill_keys<const SHIFT: u32>(k: &mut KeyTable, t: &[i8]) {
+    for q in 0..MATRIX_LETTERS {
+        for s in 0..MATRIX_LETTERS {
+            k[q << 5 | s] = ((t[q << SHIFT | s] as i64) << 32) - 1;
+        }
+    }
+}
 
 impl MatrixWalkTable {
     /// Code 0 against anything reads -128, so that the sentinel walks stop at a sentinel.
@@ -330,7 +362,8 @@ static MATRIX_SLOTS: [MatrixTableSlot; ScoringMatrix::ALL.len()] = [const {
     }
 }; ScoringMatrix::ALL.len()];
 static MATRIX_TABLES: MatrixTables = MatrixTables(
-    [const { UnsafeCell::new(MatrixWalkTable([0; MATRIX_TABLE_LEN])) }; ScoringMatrix::ALL.len()],
+    [const { UnsafeCell::new(MatrixWalkTable([0; MATRIX_TABLE_LEN], [0; KEY_TABLE_LEN])) };
+        ScoringMatrix::ALL.len()],
 );
 
 /// The byte table of `matrix`, a matrix other than BLOSUM62 whose scores are `score(q, s)`: a
@@ -349,6 +382,7 @@ pub(crate) fn matrix_walk_table(
         // (MatrixTables).
         let t = unsafe { &mut *table.get() };
         let fits = fill_matrix_table(&mut t.0, score);
+        fill_keys::<5>(&mut t.1, &t.0);
         // `once` orders this store before the loads that follow its completion.
         slot.fits.store(fits, Ordering::Relaxed);
     });
@@ -374,7 +408,12 @@ fn state() -> &'static State {
         let sent = table.is_some()
             && cfg!(not(target_arch = "wasm32"))
             && crate::utils::xswitch::on("LOSAT_X_TBXUNGAPSENT");
-        State { sent, table }
+        let keys = table.as_ref().filter(|_| sent).map(|t| {
+            let mut k = Box::new([0i64; KEY_TABLE_LEN]);
+            fill_keys::<8>(&mut k, &t[..]);
+            k
+        });
+        State { sent, table, keys }
     })
 }
 
@@ -753,28 +792,39 @@ const MAX_SENT_LEN: usize = (i32::MAX / 64) as usize;
 const _: () = assert!(MAX_MATRIX_SCORE as i64 * (MAX_SENT_LEN as i64 + 3) < i32::MAX as i64);
 
 /// LOSAT_X_TBXUNGAPSENT: whether a batch whose query contexts have the buffers `contexts` may take
-/// the sentinel walks: the switch is on and every buffer is `[0, residues.., 0]`.
+/// the sentinel walks: the switch is on and every buffer is `[0, residues.., 0]` with every byte
+/// below `MATRIX_LETTERS` (the bytes of the walks' keys, `KeyTable`).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) -> bool {
     if !state().sent {
         return false;
     }
-    let ok = contexts.all(|b| b.len() >= 2 && b[0] == 0 && b[b.len() - 1] == 0);
+    let ok = contexts.all(|b| b.len() >= 2 && b[0] == 0 && b[b.len() - 1] == 0 && letters(b));
     if !ok {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXUNGAPSENT", false);
     }
     ok
 }
 
+/// LOSAT_X_TBXUNGAPSENT: whether a subject frame whose buffer is `frame` may take the sentinel
+/// walks: the batch does (`batch`, from [`sent_contexts`]) and every byte of `frame` is below
+/// `MATRIX_LETTERS` (the bytes of the walks' keys, `KeyTable`). It reads the whole buffer, so the
+/// callers find it once for each chunk (`XPairPar::x_unit`, the reference frame loop), not for
+/// each extension or unit; [`sent_subject`] adds the chunk's checks.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+pub(crate) fn sent_frame(batch: bool, frame: &[u8]) -> bool {
+    batch && letters(frame)
+}
+
 /// LOSAT_X_TBXUNGAPSENT: whether the extensions of the chunk `offset..offset + len` of
 /// `frame[1..frame.len() - 1]` (`frame`: a subject frame's buffer, `[0, residues.., 0]`) take the
-/// sentinel walks: the batch does (`batch`, from [`sent_contexts`]), the chunk is the whole frame
+/// sentinel walks: the frame may (`frame_ok`, from [`sent_frame`]), the chunk is the whole frame
 /// and the buffer has its sentinels and at most `MAX_SENT_LEN` bytes. Otherwise they take
 /// [`two_hit`].
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 #[inline]
-pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize) -> bool {
-    if !batch {
+pub(crate) fn sent_subject(frame_ok: bool, frame: &[u8], offset: usize, len: usize) -> bool {
+    if !frame_ok {
         return false;
     }
     let whole = offset == 0
@@ -786,64 +836,13 @@ pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize)
     whole
 }
 
-/// LOSAT_X_TBXUNGAPSENT: one walk of `s_BlastAaExtendRight` (`RIGHT`, from `start`) or
-/// `s_BlastAaExtendLeft` (from 0) from `qp`, `sp` (the first step's positions; the left walk
-/// goes down), two steps a loop, until the X-drop test (or, right, `score <= 0`) holds: (best,
-/// length, steps before the stop).
-///
-/// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0) with
-/// every position up to it readable; `tab` is a table read at `q << SHIFT | s` for any two bytes
-/// (`build_table`, 8, or a `MatrixWalkTable`, 5), code 0 against anything -128, every other score at
-/// most `MAX_MATRIX_SCORE`; `1 <= x_drop <= 127`; and the score cannot wrap before the nearer sentinel
-/// (`start` plus `MAX_MATRIX_SCORE` for every step up to it stays below `i32::MAX`: `two_hit_sent_on`
-/// takes frames of at most `MAX_SENT_LEN` bytes).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866 and 886-921 (module comment).
-#[inline(always)]
-unsafe fn walk_sent<const RIGHT: bool, const SHIFT: u32>(
-    tab: *const i8,
-    qp: *const u8,
-    sp: *const u8,
-    x_drop: i32,
-    start: i32,
-) -> (i32, usize, usize) {
-    let mut score = start;
-    let mut best = start;
-    // the offset of the best step; the start value means "no best yet" (length 0)
-    let none: isize = if RIGHT { -1 } else { 1 };
-    let mut best_off = none;
-    let mut off: isize = 0;
-    let dir: isize = if RIGHT { 1 } else { -1 };
-    macro_rules! step {
-        ($l:lifetime) => {{
-            let qc = *qp.offset(off) as usize;
-            let sc = *sp.offset(off) as usize;
-            // SAFETY: q << SHIFT | s is inside the table for any two bytes.
-            score += *tab.add(qc << SHIFT | sc) as i32;
-            if score > best {
-                best = score;
-                best_off = off;
-            }
-            let stop = if RIGHT {
-                score <= 0 || best - score >= x_drop
-            } else {
-                best - score >= x_drop
-            };
-            if stop {
-                break $l;
-            }
-            off += dir;
-        }};
-    }
-    'w: loop {
-        step!('w);
-        step!('w);
-    }
-    let len = if best_off == none {
-        0
-    } else {
-        best_off.unsigned_abs() + 1
-    };
-    (best, len, off.unsigned_abs())
+/// Whether every byte of `buf` is below `MATRIX_LETTERS`: the frames' letters (NCBISTDAA 0..=27)
+/// and the sentinel 0 are, so the check refuses no frame of a search; it keeps the walks' keys
+/// exact for every buffer that takes them (module comment, LOSAT_X_TBXUNGAPSENT).
+// No NCBI counterpart: a condition of a LOSAT code path.
+#[inline]
+fn letters(buf: &[u8]) -> bool {
+    buf.iter().fold(0u8, |a, &c| a | c) < MATRIX_LETTERS as u8
 }
 
 /// LOSAT_X_TBXUNGAPSENT: `two_hit(&q_full[1..q_full.len() - 1], &s_full[1..s_full.len() - 1],
@@ -861,13 +860,6 @@ unsafe fn walk_sent<const RIGHT: bool, const SHIFT: u32>(
 /// `MAX_SENT_LEN` bytes).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
-#[cfg_attr(
-    target_arch = "wasm32",
-    expect(
-        clippy::needless_option_as_deref,
-        reason = "wasm32's `State::table` is an `Option<&Table>` (the native one holds a `Box`)"
-    )
-)]
 pub(super) unsafe fn two_hit_sent(
     q_full: &[u8],
     s_full: &[u8],
@@ -879,8 +871,8 @@ pub(super) unsafe fn two_hit_sent(
     debug_assert!(q_full.len() >= 2 && q_full[0] == 0 && q_full[q_full.len() - 1] == 0);
     debug_assert!(s_full.len() >= 2 && s_full[0] == 0 && s_full[s_full.len() - 1] == 0);
     debug_assert!(s_full.len() <= MAX_SENT_LEN);
-    two_hit_sent_on::<8, WORD>(
-        || Some(state().table.as_deref()?.as_ptr()),
+    two_hit_sent_on::<WORD>(
+        || Some(state().keys.as_deref()?.as_ptr()),
         q_full,
         s_full,
         s_left_off,
@@ -907,8 +899,8 @@ pub(crate) unsafe fn two_hit_sent_in<const W: usize>(
     q_right_off: usize,
     x_drop: i32,
 ) -> Option<TwoHit> {
-    two_hit_sent_on::<5, W>(
-        || Some(t.0.as_ptr()),
+    two_hit_sent_on::<W>(
+        || Some(t.1.as_ptr()),
         q_full,
         s_full,
         s_left_off,
@@ -918,16 +910,16 @@ pub(crate) unsafe fn two_hit_sent_in<const W: usize>(
     )
 }
 
-/// `two_hit_sent` on the table that `table` gives (read after the calls the path does not cover
-/// have returned), read at `q << SHIFT | s` (`walk_sent`), with words of `W` letters (`WORD` for
-/// BLOSUM62's table).
+/// `two_hit_sent` on the keys that `keys` gives (read after the calls the path does not cover
+/// have returned; `KeyTable`, read at `q << 5 | s`), with words of `W` letters (`WORD` for
+/// BLOSUM62's keys) and the key walks (`x_key_walk::walk`).
 ///
-/// SAFETY: those of `two_hit_sent` and `walk_sent`.
+/// SAFETY: those of `two_hit_sent` and `x_key_walk::walk` (module comment, LOSAT_X_TBXUNGAPSENT).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
 // its `word_size`).
 #[inline(always)]
-unsafe fn two_hit_sent_on<const SHIFT: u32, const W: usize>(
-    table: impl FnOnce() -> Option<*const i8>,
+unsafe fn two_hit_sent_on<const W: usize>(
+    keys: impl FnOnce() -> Option<*const i64>,
     q_full: &[u8],
     s_full: &[u8],
     s_left_off: usize,
@@ -942,7 +934,7 @@ unsafe fn two_hit_sent_on<const SHIFT: u32, const W: usize>(
     if !(1..=MAX_X_DROP).contains(&x_drop) || q_right_off + W > q_len || s_right_off + W > s_len {
         return None;
     }
-    let tab = table()?;
+    let tab = keys()?;
     // offset 0 of the reference's sequences; one sentinel before each
     let qb = q_full.as_ptr().add(1);
     let sb = s_full.as_ptr().add(1);
@@ -950,29 +942,28 @@ unsafe fn two_hit_sent_on<const SHIFT: u32, const W: usize>(
     // The best end of the word at R (two_hit.rs, the `k_size` loop; inside both sequences).
     let qw = qb.add(q_right_off);
     let sw = sb.add(s_right_off);
-    let mut score = 0i32;
-    let mut seed_score = 0i32;
-    let mut right_d = 0usize;
+    let mut key = 0i64;
+    let mut seed = 0i64;
     for i in 0..W {
-        score += *tab.add((*qw.add(i) as usize) << SHIFT | *sw.add(i) as usize) as i32;
-        if score > seed_score {
-            seed_score = score;
-            right_d = i + 1;
+        key += *tab.add((*qw.add(i) as usize) << 5 | *sw.add(i) as usize);
+        if key > seed {
+            seed = key;
         }
     }
+    let right_d = best_of(seed).1 as usize;
     let q_r = q_right_off + right_d;
     let s_r = s_right_off + right_d;
 
     // left: from (q_r - 1, s_r - 1) down to the first sentinel (index -1 of the shorter side)
     let (left_score, left_disp, _) =
-        walk_sent::<false, SHIFT>(tab, qb.add(q_r).sub(1), sb.add(s_r).sub(1), x_drop, 0);
+        walk::<false, u8>(tab, qb.add(q_r).sub(1), sb.add(s_r).sub(1), x_drop, 0);
+    let left_disp = left_disp as usize;
 
     let reached_first_hit = left_disp >= s_r.saturating_sub(s_left_off);
     let (right_score, right_disp, s_last_off) = if reached_first_hit {
         // right: from (q_r, s_r) up to the first sentinel (index q_len / s_len)
-        let (best, len, end) =
-            walk_sent::<true, SHIFT>(tab, qb.add(q_r), sb.add(s_r), x_drop, left_score);
-        (best, len, s_r + end)
+        let (best, len, end) = walk::<true, u8>(tab, qb.add(q_r), sb.add(s_r), x_drop, left_score);
+        (best, len as usize, s_r + end)
     } else {
         (0, 0, s_r)
     };

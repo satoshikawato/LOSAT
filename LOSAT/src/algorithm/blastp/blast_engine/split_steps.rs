@@ -19,6 +19,7 @@ use crate::algorithm::blastp::protein_query_split::{
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::blastinput::app::TRACEBACK_FAILED;
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::query_batch::BatchSetUp;
 use crate::blastinput::seq_range;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
@@ -528,20 +529,24 @@ impl std::error::Error for ChunkStop {}
 /// database without sequences, `Database memory map file error`; the average subject length
 /// without the Gumbel block, `-searchsp`, `OLD_FSC` or an ungapped search), or where the search's
 /// first read of the database then fails (a sequence file that cannot be opened, `Database memory
-/// map file error`; line WQA D10 round 6, review 4 M2); `None` where it passes, where no context is
-/// valid and where the failure is LOSAT's refusal (a count of 0), so that the batch's refusal
-/// comes. A batch that NCBI splits (`splits_batches`) meets them in its chunks' steps (NCBI 2.17.0
-/// probes `d1`, `d2` of line RG item X-bpgap), where a chunk's stop keeps the refusal: a chunk is
-/// valid where a part of a record first in its scope has a valid context (the parts of a repeated
-/// id, which NCBI reads in its earlier record's letters, are left out), and a batch whose chunks
-/// have none ends at the traceback's own setup (`Traceback failed`).
+/// map file error`; line WQA D10 round 6, review 4 M2), or LOSAT's (a count of 0), which keeps the
+/// batch's refusal (`query_batch::refused_batch_error`); `Searched` where it passes with a valid
+/// context, so that the refusal comes unless the run's XML failure for its matrix name takes it;
+/// `Unknown` where no context is valid. A batch that NCBI splits (`splits_batches`) meets them in
+/// its chunks' steps (NCBI 2.17.0 probes `d1`, `d2` of line RG item X-bpgap), where a chunk's stop
+/// keeps the refusal (`Unknown`): a chunk is valid where a part of a record first in its scope has
+/// a valid context (the parts of a repeated id, which NCBI reads in its earlier record's letters,
+/// are left out), and a batch whose chunks have none ends at the traceback's own setup (`Traceback
+/// failed`).
 pub(super) fn refused_batch_setup_error(
     args: &ResolvedBlastpArgs,
     database: Option<&BlastpDatabase>,
     subject_records: &[FastaRecord],
     records: &[(&FastaRecord, Option<(&[u8], usize)>)],
-) -> Option<anyhow::Error> {
-    let sizes = protein_query_split_sizes(10000).ok()?;
+) -> BatchSetUp {
+    let Ok(sizes) = protein_query_split_sizes(10000) else {
+        return BatchSetUp::Unknown;
+    };
     let lengths: Vec<usize> = records
         .iter()
         .map(|(record, _)| record.seq().len())
@@ -567,23 +572,27 @@ pub(super) fn refused_batch_setup_error(
         .iter()
         .any(|context| context.is_valid && context.aa_len > 0)
     {
-        return None;
+        return BatchSetUp::Unknown;
     }
     let failures = SetupFailures::of(args, database, &encoded, &contexts);
     let Some(chunks) = chunks else {
-        let error = setup_failure(failures.of_whole_batch()?);
-        return error.is::<crate::cli::NativeError>().then_some(error);
+        return failures
+            .of_whole_batch()
+            .map_or(BatchSetUp::Searched, |failure| {
+                BatchSetUp::Fails(setup_failure(failure))
+            });
     };
     let stop = |refusal: anyhow::Error| refusal.context(ChunkStop);
-    let mut steps = SplitBatchSteps::new(
+    let Ok(mut steps) = SplitBatchSteps::new(
         args.app.name(),
         &chunks,
         sizes,
         failures.read_fails,
         failures.checks(),
         &stop,
-    )
-    .ok()?;
+    ) else {
+        return BatchSetUp::Unknown;
+    };
     let reaches = split_batch_reaches_read(&mut steps, &chunks, |chunk| {
         let parts: Vec<FastaRecord> = chunk
             .queries
@@ -595,17 +604,20 @@ pub(super) fn refused_batch_setup_error(
             .collect();
         Ok(!parts.is_empty() && chunk_valid(args, &parts))
     });
-    // NCBI's errors; LOSAT's other refusals there (a count of 0) leave the batch's refusal.
-    let error = match reaches {
-        Err(error) if error.is::<ChunkStop>() => return None,
-        Err(error) => setup_failure(error),
-        Ok(true) => setup_failure(failures.of_whole_batch()?),
+    match reaches {
+        Err(error) if error.is::<ChunkStop>() => BatchSetUp::Unknown,
+        Err(error) => BatchSetUp::Fails(setup_failure(error)),
+        Ok(true) => failures
+            .of_whole_batch()
+            .map_or(BatchSetUp::Searched, |failure| {
+                BatchSetUp::Fails(setup_failure(failure))
+            }),
         Ok(false) => match steps.unmet_checks() {
             Some(UnmetChecks::TracebackFailed) => {
-                crate::blastinput::app::engine_error(TRACEBACK_FAILED)
+                BatchSetUp::Fails(crate::blastinput::app::engine_error(TRACEBACK_FAILED))
             }
-            _ => return None,
+            Some(UnmetChecks::Refusal(refusal)) => BatchSetUp::Fails(refusal),
+            None => BatchSetUp::Unknown,
         },
-    };
-    error.is::<crate::cli::NativeError>().then_some(error)
+    }
 }

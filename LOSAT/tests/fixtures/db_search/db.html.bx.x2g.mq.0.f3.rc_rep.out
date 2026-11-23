@@ -1,0 +1,109 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2g ms subjects
+           2 sequences; 24 total letters
+
+
+
+<b>Query=</b> f1069_q
+
+Length=59
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+f1069_s                                                               <a href=#BL_ORD_ID:1>11.1</a>    0.068  2
+f0616_s                                                               <a href=#BL_ORD_ID:0>11.6</a>    0.33   2
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1   PLRSGLVDPTWWQERE  48
+1        5         .M.S        8
+1        7   .S.               9
+1        3            S.       4
+1        12         ..         13
+1        9                 .Q  10
+1        9               RQ    10
+1        4              .      4
+1        11          .         11
+0        2    M.               3
+0        11               .    11
+
+For reading frame +2 of query sequence:
+
+Query_1  20  LIQLGGKRGRVP  55
+1        9            .Q.  11
+1        6             M.  7
+1        9         RQ      10
+1        13             .  13
+0        5   MME           7
+
+For reading frame +3 of query sequence:
+
+Query_1  36  AREGGYPS  59
+1        8   S.Q       10
+1        7         ..  8
+1        11        .   11
+
+For reading frame -1 of query sequence:
+
+Query_1  56  RVPSLSCHQVGSTNPDR  6
+1        8              .RQ..   12
+1        6    M..               8
+1        9   .Q.                11
+1        7                 .S.  9
+1        12               D.    13
+1        10          .          10
+0        9         ..E          11
+
+For reading frame -2 of query sequence:
+
+Query_1  52  YPPSLATKLDQLTLTAM  2
+1        6       MPSR           9
+1        7     ..               8
+1        2            .         2
+1        12           .         12
+1        7    .                 7
+1        11    .                11
+0            .                  
+0        5                   .  5
+0        6                M     6
+
+For reading frame -3 of query sequence:
+
+Query_1  48  LPLLPPSWI  22
+1        6   M.SRQ.     11
+1        3         ..V  5
+1        5     VM.      7
+1        7        ..    8
+1        11   .         11
+1        13   .         13
+
+
+Lambda      K        H
+   0.316    0.138    0.499 
+
+
+Effective search space used: 196
+
+
+<b>Query=</b> f0616_q
+
+Length=56

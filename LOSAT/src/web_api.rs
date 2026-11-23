@@ -179,7 +179,8 @@ fn take_search_space_arg(
     searchsp: &mut Option<i64>,
     dbsize: &mut Option<i64>,
 ) -> Result<bool, String> {
-    use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+    use crate::blastinput::value_parsers::ncbi_int8;
+    use crate::web_v1_argv::nonnegative_ncbi_int8;
     let flag = args[*index];
     let (name, joined) = match flag.split_once('=') {
         Some((name, value)) => (name, Some(value)),
@@ -337,14 +338,14 @@ fn parse_blastn_args(
         } else if flag == "-evalue" {
             // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
             args.evalue = Some(
-                crate::blastinput::value_parsers::blastn_evalue(next_arg(
+                crate::blastinput::value_parsers::ncbi_double(next_arg(
                     extra_args, &mut index, flag,
                 )?)
                 .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = Some(
-                crate::blastinput::value_parsers::blastn_evalue(value)
+                crate::blastinput::value_parsers::ncbi_double(value)
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else {

@@ -125,16 +125,18 @@ fn first_database_read<'d>(
     )
 }
 
-/// NCBI's error of the set-up of the records of a refused batch that are first in their scope
-/// (`first`, by input record from `input_done`; the batch's searched queries start at
-/// `searched_done`), where NCBI's set-up of the batch fails for the subjects
+/// NCBI's set-up of the records of a refused batch that are first in their scope (`first`, by
+/// input record from `input_done`; the batch's searched queries start at `searched_done`): its
+/// error where NCBI's set-up of the batch fails for the subjects
 /// (`stage_d_pipeline::set_up_batch`, then the first read of the database where the batch's search
 /// gets to it, as the search of a batch fails in `search`), in the one form of every program
-/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20); `None` where it
-/// succeeds, so that the refusal comes. The batch that NCBI splits holds the repeated ids too, by
-/// the lengths of their own records (line RG item X-short-bat, review 4 M1). NCBI's errors of the
-/// batches before come first: their searches fail before the stop is acted on. `queries`: the
-/// input records, the searched ones and how they map (`QueryInput`).
+/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20); `Searched` where it
+/// passes with a valid context, so that the refusal comes unless the run's XML failure takes it;
+/// `Unknown` without a valid context or where LOSAT's error is not NCBI's. The batch that NCBI
+/// splits holds the repeated ids too, by the lengths of their own records (line RG item
+/// X-short-bat, review 4 M1). NCBI's errors of the batches before come first: their searches fail
+/// before the stop is acted on. `queries`: the input records, the searched ones and how they map
+/// (`QueryInput`).
 fn refused_batch_setup_error(
     first: &[bool],
     (input_done, searched_done): (usize, usize),
@@ -152,7 +154,8 @@ fn refused_batch_setup_error(
         crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode,
         super::stage_d_pipeline::LocalStageDScoring,
     ),
-) -> Option<anyhow::Error> {
+) -> crate::blastinput::query_batch::BatchSetUp {
+    use crate::blastinput::query_batch::BatchSetUp;
     let (input_records, searched_queries, query_input) = queries;
     // NCBI's batch (`stage_d_pipeline::BatchRecord`): each searched query by its own length, with
     // the index of its letters among those set up where it is first in its scope.
@@ -225,11 +228,11 @@ fn refused_batch_setup_error(
         scoring,
     );
     match setup {
-        Err(error) => batch_failure(error).ok(),
-        Ok(false) => None,
-        Ok(true) => match read? {
-            Ok(_) => None,
-            Err((error, _)) => database_read_failure(error).ok(),
+        Err(error) => batch_failure(error).ok().into(),
+        Ok(false) => BatchSetUp::Unknown,
+        Ok(true) => match read {
+            None | Some(Ok(_)) => BatchSetUp::Searched,
+            Some(Err((error, _))) => database_read_failure(error).ok().into(),
         },
     }
 }
@@ -1541,9 +1544,9 @@ fn filter_final_hitlists(
 #[allow(clippy::too_many_arguments)]
 /// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
 /// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
-/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
-/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
-/// texts of its reads (line DBID item pfoff-3); `None` without one.
+/// `-num_descriptions`, `-num_alignments` and `-html`; the formats of a run whose loads they
+/// make share one view's order, `FormatThrow::and`), for the loads of a subject whose lookup
+/// throws and the texts of its reads (line DBID item pfoff-3); `None` without one.
 fn pairwise_reading(
     resolved: &ResolvedTblastnArgs,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
@@ -1559,6 +1562,7 @@ fn pairwise_reading(
             descriptions: resolved.num_descriptions,
             alignments: resolved.num_alignments,
         },
+        resolved.html.is_some(),
     ))
 }
 
@@ -1753,30 +1757,32 @@ fn search(
                 ),
             "TBLASTN",
         )
-        .map(|scopes| scopes.with_refusal(args.scope_refusal.clone())),
+        .map(|scopes| {
+            scopes
+                .with_refusal(args.scope_refusal.clone())
+                .with_xml_matrix_failure(super::stage_e_report::xml_matrix_failure(
+                    &outputs.formats,
+                    &resolved.matrix_name,
+                    database.is_some(),
+                    pssm.is_some(),
+                ))
+        }),
     );
-    if let Some((warnings, refusal)) = batches.stop.take_if(|_| batches.scope_refusal) {
-        let done = (batches.input_done, batches.searched_done);
-        let error = crate::blastinput::query_batch::refused_batch_error(
-            refusal,
-            args.strategy.is_some(),
-            |first| {
-                refused_batch_setup_error(
-                    first,
-                    done,
-                    (input_records, &searched_queries, &query_input),
-                    &resolved,
-                    subject_set,
-                    engine_positives,
-                    database,
-                    subject_letters,
-                    (compo_adjust_mode, scoring),
-                )
-            },
-        );
-        batches.scope_refusal = !error.is::<crate::cli::NativeError>();
-        batches.stop = Some((warnings, error));
-    }
+    // Where the run's XML failure for its matrix name takes a refusal (`ScopeRefusal::xml_takes`),
+    // a batch whose set-up passes is searched (`QueryBatches::resolve_refusals`).
+    batches.resolve_refusals(args.strategy.is_some(), |start, first| {
+        refused_batch_setup_error(
+            first,
+            start,
+            (input_records, &searched_queries, &query_input),
+            &resolved,
+            subject_set,
+            engine_positives,
+            database,
+            subject_letters,
+            (compo_adjust_mode, scoring),
+        )
+    });
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
     // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
     // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.
@@ -1892,9 +1898,9 @@ fn search(
         // found by the name as typed)
         // NCBI fails when it formats a batch in BLAST XML with a matrix name its XML data does not
         // know (`stage_e_report::xml_matrix_failure`, the decision of `stage_e_report::render`):
-        // the batch of the run's first searched query, or of its second where the report is held
-        // (`-subject`, `-in_pssm`; `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of
-        // another Seq-id, the second as LOSAT refuses two queries of one id before any output);
+        // the batch of the run's first searched query, or where the report is held (`-subject`,
+        // `-in_pssm`; `XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another
+        // Seq-id (`QueryScopes::xml_failing_query` of the batches' scopes);
         // the search strategy's file holds the requests up to that
         // batch's, whatever the number of batches after it (probe 7 of RG-F1, probe K4f of line
         // RG). A held report that fails at the run's end, or a run that stops before, writes every
@@ -2775,6 +2781,7 @@ fn search(
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
                 // A run that stops at a query batch writes no epilog.
                 epilog: batches.stop.is_none() && failed.is_none(),
+                query_scopes: batches.query_scopes.as_ref(),
             },
             super::blast_xml::XmlValues {
                 expect: resolved.evalue,

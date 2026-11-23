@@ -1,0 +1,176 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_spec.fna).
+           4 sequences; 2,460 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>832</a>     0.0   
+s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>521</a>     2e-151
+s2 long title words long title words long title words long title ...  <a href=#Subject_2>202</a>     3e-55 
+
+
+
+Query_1    1     TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+Subject_1  1     TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+Subject_2  1     TGCTTCACTTATCAAGGCGTTGGCTTTATTGATACG-A-TCAGCTCGTGTCACATCGAAC  60
+                                               \                             
+                                               |                             
+                                              GG
+
+Query_1    61    CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+Subject_1  61    CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+Subject_2  61    CCATTCCCATAG-TTTTCAG-AGAGTAGAAATTGC-ATGAGGGGGCGAGGCGCAACCATA  120
+                          \                    \                             
+                          |                    |                             
+                         TT                    T
+
+Query_1    121   GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+Subject_1  121   GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+Subject_3  1                                   GGTGACGAGTCTCACATCGTGGCAGATCTA  30
+Subject_2  121   AATTTACGCCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCTTGCCGCTGCAGGACGT  180
+
+Query_1    181   CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+Subject_1  181   CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+Subject_3  31    CCTGCCGCCCCGACTTTGACTCGGAGCGTACGCGTTACCATTTCACCTGATCCTTTCTTT  90
+Subject_2  181   CCTGCCCGTCCGACTTCGACTCGGGTGGTACGCCACACCATTTGTCCCAAGTATTTCTTT  240
+
+Query_1    241   GTATGTAGGTGTAGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  300
+Subject_1  241   GTATGTAGGTGTAGAAGAGACTATTCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  300
+Subject_3  91    CCATGTAGGTGTAGAAGAGACTCATCTATCCAATACATGCTTCAGCCGAGACTACTTCGC  150
+Subject_2  241   CTGTGTCGATGTAGAAGAGAGTGTGG-ATCCAATACATGCTTCAGAGTAGACTACTTCGC  300
+                                    \                                        
+                                    |                                        
+                                    T
+
+Query_1    301   CCGTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTATGCGAGCGGTTGTTAAA  360
+Subject_1  301   CCGTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTATGCGAGCGGTTGTTAAA  360
+Subject_3  151   CCGTCCGAAAATGTGGAATCCATCACTTGTGCGAACCT-GTTATGCGAGCGGTTAGCAAA  210
+                                                     \                       
+                                                     |                       
+                                                     T
+Subject_2  301   GCGACAG-AAATGTGGAATCCGGGTATTGTGTGACCCTAGTTA                   343
+                   \                                                         
+                   |                                                         
+                   T
+
+Query_1    361   GTATCTGCATATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGGAGGTGTGTGCGAG  420
+Subject_1  361   GTATCTGCATATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGGAGGTGTGTGCGAG  420
+Subject_3  211   GCTTCTGCATATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGGAAAGGTGTGCGAG  270
+
+Query_1    421   CGCGACAAAAGCTATGTGACTCTTATACCAAGTGGTTTGAGTACCCCATTTGTTAATCTT  480
+Subject_1  421   CGCGACAAAAGCTATGTGACTCTTATACCA                                450
+Subject_1  900                                 AGTGGTCTGAGTACCCCATTTGTTAATCTT  930
+                                                  \                          
+                                                  |                          
+                                                  G
+Subject_3  271   CGCGACAAAAGCCAAGTGACTCTTATACACAGTGGTTTGAGTACCCCAAGGAGGAATCTT  330
+
+Query_1    481   GTACGTCACGCCATGCAATTGAAAGTGCCATCACGCCTCGCTGCTTGTTATACTCACCTA  540
+Subject_1  931   GTACGTCACGCCGCCCAATTGAAAGT-CTATCACGCCTCGCTGC--GACATTCCCACCCC  990
+                                                \          \         \       
+                                                |          |         |       
+                                                T          T         G
+Subject_3  331   GTACGTCACGCCATGCAATTGCAGGTGCCATCACGCCTCGCT-CTTGTTATACTCACGGG  390
+                                                              \              
+                                                              |              
+                                                              G
+
+Query_1    541   GCGGCTTTAAAAGGTCTTGGATCTCCGAGGCTTACAGAATATAACCGCTGTAGTACTCAT  600
+Subject_1  991   GCGGCTTTAAAAGGTCCCGG-TCTCCGAGGCTTACAGACTATCCGCGCTGTAGTATCCAT  1050
+                                \                                            
+                                |                                            
+                                A
+Subject_3  391   GCGGCTTCGAAAGGTCTTGGAACTCCCA--CTTCCAGAAAGTAACCGCTGTAGTACTCAT  450
+                                       \  \                                  
+                                       |  |                                  
+                                       G  A
+
+Query_1    601   TCTGGACGTGGCCTATTCGAGCCTGAATCTACGCTTGGGGATCCCAGTAGAGTGCAAATA  660
+Subject_1  1051  TCTGGACGTGGCCTATTCGACCCTGAATCTACGCTTGGGGACCCCAGTAGAGTGCAAATA  1110
+
+Query_1    661   CCACTCACCGAGACTAGGTGCAACAGTCGTTTGGTAACACCGATCACGAATTATTGTACA  720
+Subject_1  1111  CCACTCACCGAGAG-AGCTGCAACCTGCGTCT--TATCACAGTTCACGGACTATTGTACA  1170
+                                   \                        \\               
+                                   |                        ||               
+                                   C                        C|
+                                                             |               
+                                                             C
+
+Query_1    721   TCAAAGTCTAGAGAGCCACGACACTCGTGTAACTTAGTTCGGGTTAACGTTATATTGATA  780
+Subject_1  1171  TCAAAGACCAGAGAGCCAGCTCACTCGTGTGTCTTAGTTGACGTTAACGTTATATTGATA  1230
+
+Query_1    781   TGTAACTCCGCTAGGGGGTACCTGTGCAAGCGCTCGCGAGGGACAGAGTACCATAAATTC  840
+Subject_1  1231  TGTAACTCCGC-AGGGGGTCGCTGTGCAAGCGCTCGCGAGGGACAGAGTACAGTAAATTC  1290
+                          \                                                  
+                          |                                                  
+                          A
+
+Query_1    841   ACATCCTCAGAATTTTCCAGCCCCCCATGGATGAACCTCACTCTTGTAAATTATCAGAAT  900
+Subject_1  1291  ACATCCTCAGGGTTTTCCAGCCCCCCATCCATGGTGACAACTTTAGTAAATTATCAGAAT  1350
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 2129944
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 263344
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_spec.fna).
+    Posted date:  Unknown
+  Number of letters in database: 2,460
+  Number of sequences in database:  4
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

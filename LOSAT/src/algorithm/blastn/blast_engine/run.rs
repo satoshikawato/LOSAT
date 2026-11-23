@@ -7478,7 +7478,7 @@ fn search(
     // one word finder call to the next, so NCBI's result with several threads depends on which
     // thread takes which subject; the search gives NCBI's one-thread result at any thread
     // count (Owner-delegated): one thread, the subjects in NCBI's order on one table.
-    let requested = if super::super::coordination::determine_window_size(args) < 0 {
+    let requested = if super::super::coordination::determine_window_size(&args) < 0 {
         1
     } else {
         args.num_threads

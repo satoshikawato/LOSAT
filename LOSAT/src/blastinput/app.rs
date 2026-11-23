@@ -37,6 +37,47 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     .into()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1824-1844
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1927-1947
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1398
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/hspfilter_besthit.h:80-91
+/// The HSP filtering check of NCBI's hit saving options (`BlastHSPFilteringOptionsValidate`,
+/// after the hit list size, e-value and intron checks): the best hit filter's values, set by
+/// `best_hit_overhang` or `best_hit_score_edge` (the other one at its default, 0.1), must lie
+/// strictly between 0 and 0.5, and the best hit filter cannot run with culling (a
+/// `culling_limit` above 0: a smaller one sets no culling) in the preliminary stage, where both
+/// run. The command line's parser keeps every value inside (`-best_hit_*` above 0 and below
+/// 0.5, and either option excludes `-culling_limit`), so only an imported search strategy meets
+/// NCBI's error.
+pub fn check_hsp_filtering(
+    culling_limit: Option<i32>,
+    best_hit_overhang: Option<f64>,
+    best_hit_score_edge: Option<f64>,
+) -> anyhow::Result<()> {
+    match hsp_filtering_error(culling_limit, best_hit_overhang, best_hit_score_edge) {
+        Some(message) => Err(options_error(message)),
+        None => Ok(()),
+    }
+}
+
+/// The message of [`check_hsp_filtering`]'s error, for a program that raises NCBI's option
+/// errors itself (BLASTX's `SemanticOptionsError`).
+pub(crate) fn hsp_filtering_error(
+    culling_limit: Option<i32>,
+    best_hit_overhang: Option<f64>,
+    best_hit_score_edge: Option<f64>,
+) -> Option<&'static str> {
+    if best_hit_overhang.is_none() && best_hit_score_edge.is_none() {
+        return None;
+    }
+    let outside = |value: Option<f64>| value.is_some_and(|value| value <= 0.0 || value >= 0.5);
+    (outside(best_hit_overhang)
+        || outside(best_hit_score_edge)
+        || culling_limit.is_some_and(|limit| limit > 0))
+    .then_some("HSP Filtering options invalid")
+}
+
 /// An error that NCBI raises as a `CBlastException` that is neither an option nor a
 /// memory error (exit 3).
 ///

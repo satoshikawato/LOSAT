@@ -1011,6 +1011,9 @@ impl BlastpArgs {
             x_dropoff: self
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
+            culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
         })?;
         // NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166 (cited at
         // `blastx::args::blastx_matrix`)

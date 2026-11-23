@@ -659,6 +659,9 @@ impl TblastnArgs {
             psiblast: false,
             psi_tblastn: psi,
             x_dropoff: self.xdrop_ungap,
+            culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
         })?;
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),

@@ -1259,6 +1259,13 @@ fn check_ncbi_options(
             "Uneven gap linking of HSPs is allowed for blastx, tblastn, and psitblastn only",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the HSP
+    // filtering options, the last check of the hit saving options)
+    crate::blastinput::app::check_hsp_filtering(
+        args.culling_limit,
+        args.best_hit_overhang,
+        args.best_hit_score_edge,
+    )?;
     Ok((query_range, counts, html))
 }
 

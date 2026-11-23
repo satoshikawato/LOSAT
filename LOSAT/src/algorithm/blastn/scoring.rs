@@ -104,6 +104,14 @@ fn check_scoring_options_with(
         && args.min_raw_gapped_score.unwrap_or(0) <= 0
     {
         "expect value or cutoff score must be greater than zero".to_string()
+    } else if let Some(message) = crate::blastinput::app::hsp_filtering_error(
+        args.culling_limit,
+        args.best_hit_overhang,
+        args.best_hit_score_edge,
+    ) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the HSP
+        // filtering options, the last check of the hit saving options)
+        message.to_string()
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
     } else {

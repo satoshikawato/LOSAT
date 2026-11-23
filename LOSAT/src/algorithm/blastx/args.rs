@@ -817,6 +817,15 @@ impl BlastxArgs {
             )
             .into());
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the HSP
+        // filtering options, after the e-value and the intron length, which BLASTX may give)
+        if let Some(message) = crate::blastinput::app::hsp_filtering_error(
+            self.culling_limit,
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        ) {
+            return Err(SemanticOptionsError::from(message).into());
+        }
         // LOSAT's limit, for values that NCBI's checks above accept: an e-value that is not
         // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
         // no number). Every word size of NCBI's, 2 to 7, runs (item SC9 of line NP).

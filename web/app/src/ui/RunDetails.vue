@@ -7,9 +7,10 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords } from '../domain/argv';
+import { commandWords, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
+import { fromText, worthSaying } from '../domain/input-parts';
 import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
@@ -22,6 +23,12 @@ import VerificationBadge from './VerificationBadge.vue';
 const props = defineProps<{ run: RunView; loaded: LoadedRun }>();
 const snapshot = computed(() => props.run.snapshot);
 const record = computed(() => props.run.record);
+/**
+ * Whether the run searched: a run that printed the command line's help or version (`RunSnapshot.prints`, line WQA's D14)
+ * compared no options, wrote no output and used no engine memory for a search, so Run details says nothing of those
+ * (line WQA's D20, S3-1, 2026-11-23).
+ */
+const searched = computed(() => props.run.snapshot.prints === undefined);
 const takesValue = computed(() => optionGrammar(props.loaded.description).takesValue);
 /** The -outfmt value of the output of the run's own -outfmt, if it has one. */
 const custom = computed(() => customOutfmt(snapshot.value.argv));
@@ -49,11 +56,14 @@ const inputs = computed(() => [
 
 <template>
   <div class="run-details" data-testid="run-details">
-    <h3>Support status</h3>
-    <VerificationBadge :badge="loaded.badge" />
+    <template v-if="loaded.badge">
+      <h3>Support status</h3>
+      <VerificationBadge :badge="loaded.badge" />
+    </template>
 
     <div class="details-grid">
-      <h3>Search (fixed when the run was submitted)</h3>
+      <!-- A printed run is a command, not a search (line WQA's D20, 2026-11-23). -->
+      <h3>{{ searched ? 'Search' : 'Command' }} (fixed when the run was submitted)</h3>
       <dl class="details-list" data-testid="run-snapshot">
         <dt>Run</dt>
         <dd>
@@ -62,12 +72,14 @@ const inputs = computed(() => [
         <dt>Mode</dt>
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
-        <dd><code data-testid="run-argv"><CommandText :words="snapshot.argv" :takes-value="takesValue" /></code></dd>
-        <template v-for="{ role, input } in inputs" :key="role">
+        <dd><code data-testid="run-argv"><CommandText :words="userArgv(snapshot)" :takes-value="takesValue" /></code></dd>
+        <template v-for="{ role, input } in searched ? inputs : []" :key="role">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${role.toLowerCase()}`">
             {{ input.name }}: {{ formatCount(input.records.length) }} {{ input.records.length === 1 ? 'record' : 'records' }},
             {{ formatBytes(input.bytes.length) }}<br />
+            <!-- The file of the command is not the user's as given: what it is made of, and which records it leaves out (line WQA's D22, 2026-11-23). -->
+            <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${role.toLowerCase()}-from`">From {{ fromText(input.from) }}</span><br /></template>
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
           </dd>
         </template>
@@ -106,7 +118,7 @@ const inputs = computed(() => [
         </template>
         <dt>Build</dt>
         <dd data-detail="build">{{ record.engineBuild }}</dd>
-        <template v-if="record.subjectRetained !== undefined">
+        <template v-if="searched && record.subjectRetained !== undefined">
           <dt>Subject</dt>
           <dd>{{ record.subjectRetained ? 'kept from the previous search' : 'read for this search' }}</dd>
         </template>
@@ -128,7 +140,7 @@ const inputs = computed(() => [
           <dt>Runtime</dt>
           <dd>generation {{ record.runtimeGeneration }}</dd>
         </template>
-        <template v-if="record.memory">
+        <template v-if="searched && record.memory">
           <dt>Engine memory</dt>
           <dd>{{ formatBytes(record.memory.linearBytesAfter) }} after the search</dd>
         </template>
@@ -139,15 +151,17 @@ const inputs = computed(() => [
       </dl>
     </div>
 
-    <h3>Command line</h3>
-    <ul class="commands">
-      <li v-for="format in loaded.description.formats" :key="format">
-        outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
-      </li>
-      <li v-if="custom !== undefined">
-        outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
-      </li>
-    </ul>
+    <template v-if="searched">
+      <h3>Command line</h3>
+      <ul class="commands">
+        <li v-for="format in loaded.description.formats" :key="format">
+          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
+        </li>
+        <li v-if="custom !== undefined">
+          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
+        </li>
+      </ul>
+    </template>
 
     <h3>Warnings</h3>
     <pre v-if="loaded.diagnostics !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>

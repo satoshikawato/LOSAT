@@ -436,10 +436,13 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
         if let (Some(algorithm_id), 2) = (algorithm_id, i) {
-            db.set_mask_data(&[MaskedRanges {
-                algorithm_id,
-                offsets: vec![(1, 4)],
-            }])
+            db.set_mask_data(
+                &[MaskedRanges {
+                    algorithm_id,
+                    offsets: vec![(1, 4)],
+                }],
+                &[],
+            )
             .unwrap();
         }
         if i != 2 {
@@ -552,4 +555,47 @@ fn the_memory_of_algorithm_lookups_is_ncbi_s() {
     let mut memory = super::VolAlgoMemory::default();
     assert!(!memory.reads_a_kept_id(2, 0, true));
     assert!(!memory.reads_a_kept_id(2, 0, true));
+}
+
+/// The input `tests/db_search/t5/nhd_utf8` has a title stored as a UTF8String for a
+/// VisibleString (line RG item T5d). makeblastdb 2.17.0 writes its warning 803.10 once in the
+/// run: at the scan of the input's headers, or before it, when a mask file met such a string
+/// first (probes of T5d merge 18, 2026-11-23, Linux x86-64; the copies are written in both).
+#[test]
+fn a_utf8_string_of_the_input_s_headers_is_warned_once_in_the_run() {
+    let tmp = TempDir::new("raw-utf8");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let input = root.join("tests/db_search/t5/nhd_utf8");
+    let input = input.to_string_lossy();
+    let warning = |member: &str| {
+        format!(
+            "Warning: (803.10) [makeblastdb] CObjectIStreamAsnBinary: UTF8String data for \
+             VisibleString member {member}, ASN.1 specification may need an update\n"
+        )
+    };
+    let words = ["-input_type", "blastdb", "-dbtype", "nucl", "-in", &input];
+    let copied = tmp.base("copied");
+    let mut run = words.to_vec();
+    run.extend(["-out", &copied]);
+    let (status, _, err) = makeblastdb(&run);
+    assert_eq!((status, err), (0, warning("Blast-def-line-set.E.title")));
+    assert!(files_of(&tmp.0).contains(&"copied.nhr".to_string()));
+
+    let mask = root.join("tests/seqdb/mask_parse/b_utf8_options.asnb");
+    let mask = mask.to_string_lossy();
+    let masked = tmp.base("masked");
+    let mut run = words.to_vec();
+    run.extend(["-mask_data", &mask, "-out", &masked]);
+    let (status, _, err) = makeblastdb(&run);
+    assert_eq!(
+        (status, err),
+        (
+            0,
+            warning("Blast-db-mask-info.algo-options")
+                + "Error: [makeblastdb] No sequences matched any of the masks provided.\n\
+                   Please ensure that the -parse_seqids option is used in the\n\
+                   filtering program as well as makeblastdb.\n"
+        )
+    );
+    assert!(files_of(&tmp.0).contains(&"masked.nhr".to_string()));
 }

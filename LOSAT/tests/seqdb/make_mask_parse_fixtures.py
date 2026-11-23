@@ -25,7 +25,7 @@ Files written into `<out>/mask_parse/`:
   b_*.asnb                 damaged binary files (made from dust.asnb)
   n_<kind>_<depth>.asnt/.asnb  masks whose Seq-locs nest <depth> levels (docs/evidence/mask_nest_depth/
                            gen_mask_nests.py); makeblastdb reads them with no stack limit, the output it
-                           writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 25)
+                           writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 28)
   expected.tsv             what makeblastdb does with each file
   expected_stdout.tsv      `<file> <log>`: makeblastdb's log (standard output) of each RUN, escaped as
                            below, with the build time as <T>, the database path as <OUT> and the

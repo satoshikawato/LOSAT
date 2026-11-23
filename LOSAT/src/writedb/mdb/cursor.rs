@@ -1932,7 +1932,7 @@ impl Env {
                 split_indx = newindx;
                 nkeys = 0;
             } else {
-                // split_indx = (nkeys+1) / 2
+                // Initial split index is half of `nkeys`, rounded up.
                 let mut si = nkeys.div_ceil(2);
                 if is_leaf2(self.page(rp)) {
                     break 'done self.unreachable("split of a LEAF2 page without MDB_APPEND");

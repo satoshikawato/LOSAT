@@ -1,4 +1,4 @@
-# A mask file whose Seq-locs nest deeper than NCBI's stack holds (PD-LOSAT-NCBI-DEFECTS exception 25)
+# A mask file whose Seq-locs nest deeper than NCBI's stack holds (PD-LOSAT-NCBI-DEFECTS exception 28)
 
 Line NP item M (b), 2026-11-23. NCBI BLAST+ 2.17.0 (the bioconda build and the official Linux x86-64 release) and
 LOSAT, `makeblastdb -mask_data`.

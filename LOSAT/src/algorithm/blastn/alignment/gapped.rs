@@ -1416,7 +1416,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     Vec<GapEditOp>,
 ) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-733 ALIGN_EX function
-    // This is the traceback-capturing version (score_only = FALSE case)
+    // This is the traceback-capturing version (with `score_only` disabled).
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:423-426
     let gap_open_extend = gap_open + gap_extend;
@@ -1599,8 +1599,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             let script_row = SCRIPT_EXTEND_GAP_A;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:592-598
-            // if (score < score_gap_col) { script = SCRIPT_GAP_IN_B; score = score_gap_col; }
-            // if (score < score_gap_row) { script = SCRIPT_GAP_IN_A; score = score_gap_row; }
+            // Take a gap in sequence B when the column gap score is strictly higher than the substitution score, then a gap in sequence A when the row gap score is strictly higher than the score so far.
             if score_val < score_gap_col {
                 script = SCRIPT_GAP_IN_B;
                 score_val = score_gap_col;
@@ -1746,7 +1745,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     let mut edit_ops: Vec<GapEditOp> = Vec::new();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:689-726
-    //     default: ...
+    // Trace back the edit-script state machine (handling the substitution/gap/default branches).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:689-726 (traceback uses edit_script rows/offsets)
     while a_index > 0 || b_index > 0 {
         // Get next script from edit_script[a_index]

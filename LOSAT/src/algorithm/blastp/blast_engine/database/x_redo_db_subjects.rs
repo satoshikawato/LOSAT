@@ -39,7 +39,8 @@ impl ListedSubjects {
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
-        let fetch_excluded = super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
+        let (fetch_excluded, fetched_utf8) =
+            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
         let x_lengths = ordinals
             .iter()
@@ -56,6 +57,8 @@ impl ListedSubjects {
             ordinals,
             encoded: Vec::new(),
             x_lengths,
+            fetched_utf8,
+            earlier_utf8: Default::default(),
             fetch_excluded,
         })
     }

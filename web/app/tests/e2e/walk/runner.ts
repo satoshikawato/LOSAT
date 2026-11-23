@@ -38,6 +38,8 @@ export interface WalkFile {
   readonly browser: string;
   readonly steps: readonly RecordedStep[];
   readonly failure?: WalkFailure;
+  /** A recorded walk's least number of files with records left out that the page must offer and the CLI run on (line WQA's D22). */
+  readonly minOfferedLeftOut?: number;
 }
 
 /**
@@ -133,7 +135,7 @@ export function shrinkLimits(defaults: ShrinkLimits): ShrinkLimits {
 export async function walkTest(
   { page, browser, browserName }: { page: Page; browser: Browser; browserName: string },
   testInfo: TestInfo,
-  { seed, walk, steps, shrink }: { seed: number; walk: number; steps: ReadonlyArray<PlannedStep | RecordedStep>; shrink: ShrinkLimits },
+  { seed, walk, steps, shrink, minOfferedLeftOut }: { seed: number; walk: number; steps: ReadonlyArray<PlannedStep | RecordedStep>; shrink: ShrinkLimits; minOfferedLeftOut?: number },
 ): Promise<void> {
   const fixtures = makeFixtures(seed);
   const outDir = testInfo.outputPath('native');
@@ -144,6 +146,10 @@ export async function walkTest(
   if (result.failure === undefined && result.counts !== undefined && BUILD_HAS_ENGINE) {
     if (result.counts.completed === 0) throw new Error(`walk ${walk} (seed ${seed}) completed no run in ${result.steps.length} steps`);
     if (NATIVE !== undefined && result.counts.compared === 0) throw new Error(`walk ${walk} (seed ${seed}) compared no output with the native CLI`);
+    // A recorded walk's steps are draws: a fixture added to the walk's files moves them, and the walk may then reach no file with records left out.
+    if (NATIVE !== undefined && minOfferedLeftOut !== undefined && result.counts.offeredLeftOut < minOfferedLeftOut) {
+      throw new Error(`walk ${walk} (seed ${seed}) ran the CLI on ${result.counts.offeredLeftOut} files with records left out, fewer than the ${minOfferedLeftOut} that it was recorded for`);
+    }
   }
   const file: WalkFile = { seed, walk, browser: browserName, steps: result.steps, ...(result.failure ? { failure: result.failure } : {}) };
   // In the test's output directory as well, where a passing walk's steps can be read.
@@ -151,8 +157,8 @@ export async function walkTest(
   await testInfo.attach('walk-steps.json', { body: JSON.stringify(file, null, 1), contentType: 'application/json' });
   for (const note of result.notes) testInfo.annotations.push({ type: 'walk note', description: note });
   if (result.counts !== undefined) {
-    const { compared, completed, failed, cancelled, refused, unmatched } = result.counts;
-    const line = `runs: ${completed} completed, ${failed} failed, ${cancelled} cancelled, ${refused} presses refused; outputs equal to the native CLI's: ${compared}; completed runs not compared (inputs of one name): ${unmatched}`;
+    const { compared, completed, failed, cancelled, refused, unmatched, offered, offeredLeftOut } = result.counts;
+    const line = `runs: ${completed} completed, ${failed} failed, ${cancelled} cancelled, ${refused} presses refused; outputs equal to the native CLI's: ${compared}; completed runs not compared (inputs of one name): ${unmatched}; files of LOSAT's that the page offered and the CLI ran on (records left out, several files, pasted text): ${offered}, with records left out: ${offeredLeftOut}`;
     testInfo.annotations.push({ type: 'walk runs', description: line });
     if (TRACE) console.log(line);
   }

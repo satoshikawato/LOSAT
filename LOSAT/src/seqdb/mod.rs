@@ -42,6 +42,7 @@ pub mod date;
 pub mod file;
 pub mod filter;
 pub mod header;
+pub(crate) mod id_list;
 pub mod index;
 pub mod isam;
 pub mod isam_num;
@@ -296,6 +297,63 @@ impl std::fmt::Display for SeqDbError {
 pub const NCBI_CRASHES_ON_IT: &str = "(NCBI crashes on it)";
 
 impl SeqDbError {
+    /// A copy of the error, met again later (`oid_list::OidListError::Reader`): the system's
+    /// error of an I/O failure is copied as its code, else as its kind and text.
+    pub(super) fn duplicate(&self) -> SeqDbError {
+        let io = |source: &std::io::Error| match source.raw_os_error() {
+            Some(code) => std::io::Error::from_raw_os_error(code),
+            None => std::io::Error::new(source.kind(), source.to_string()),
+        };
+        match self {
+            SeqDbError::NotFound(message) => SeqDbError::NotFound(message.clone()),
+            SeqDbError::MemoryMap(message) => SeqDbError::MemoryMap(message.clone()),
+            SeqDbError::Open { path, source } => SeqDbError::Open {
+                path: path.clone(),
+                source: io(source),
+            },
+            SeqDbError::Io { path, source } => SeqDbError::Io {
+                path: path.clone(),
+                source: io(source),
+            },
+            SeqDbError::Map { path, len, source } => SeqDbError::Map {
+                path: path.clone(),
+                len: *len,
+                source: io(source),
+            },
+            SeqDbError::Read { path, source } => SeqDbError::Read {
+                path: path.clone(),
+                source: io(source),
+            },
+            SeqDbError::Format { path, message } => SeqDbError::Format {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::Integrity { path, message } => SeqDbError::Integrity {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::Unsupported { path, message } => SeqDbError::Unsupported {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::NcbiCrashes { path, message } => SeqDbError::NcbiCrashes {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
+            SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
+            SeqDbError::TaxdbThrows {
+                path,
+                reason,
+                exception,
+            } => SeqDbError::TaxdbThrows {
+                path: path.clone(),
+                reason: reason.clone(),
+                exception: exception.clone(),
+            },
+        }
+    }
+
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
     /// than the `gnl|BL_ORD_ID|n` of the sequence's own number in its volume (a database built
     /// with `-parse_seqids`; `SeqDb::read_header`).
@@ -895,6 +953,14 @@ impl DbStatistics {
 /// (`SeqDb::min_length`).
 pub(crate) const BLAST_SEQSRC_MINLENGTH: i32 = 10;
 
+/// An alias tree after NCBI's `ComputeMasks` and the paths of its volumes in the order of
+/// `SeqDb::volumes` (`SeqDb::listed_tree`).
+#[derive(Debug)]
+struct ListedTree {
+    root: alias::AliasNode,
+    names: Vec<String>,
+}
+
 /// An open database: one volume, or the volumes of an alias file.
 #[derive(Debug)]
 pub struct SeqDb {
@@ -958,6 +1024,14 @@ pub struct SeqDb {
     /// errors of a list (`SeqDb::restrict`), else before the walks of the alias files' counts
     /// (`SeqDb::check_alias_values`).
     oid_list_fails_scan: bool,
+    /// The alias tree, kept where it names id lists that NCBI's OID list translates
+    /// (`alias::reads_id_lists`): a positive list translates them again (`SeqDb::restrict`).
+    listed_tree: Option<Box<ListedTree>>,
+    /// The failure of the alias files' OID list without a list, kept where a positive list then
+    /// translated the alias files' id lists without failing and NCBI's constructor scans the
+    /// totals without a list (`oid_list_fails_scan`): the reports' database, opened again without
+    /// the list, meets it (`SeqDb::read_name_records`).
+    unlisted_oid_list_error: Option<oid_list::OidListError>,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -978,6 +1052,19 @@ pub struct SeqDb {
     lookup_isams: OnceLock<lookup::VolumeIsams>,
     /// The filtering algorithms of the mask columns, built on first use (`mask.rs`).
     mask_algorithms: OnceLock<MaskAlgorithms>,
+    /// Whether the run posted NCBI's warning of a UTF8String read for a VisibleString
+    /// (`SeqDb::take_utf8_post`).
+    utf8_posted: AtomicBool,
+    /// Whether a reader met a reported sequence whose Seq-align id the lookup gives first to
+    /// another sequence with such a header (`SeqDb::note_scope_utf8`).
+    scope_utf8: AtomicBool,
+    /// Whether the model of the run's loads has reached the batch whose own reads post that
+    /// warning (`SeqDb::end_scope_utf8_loads`).
+    scope_utf8_ended: AtomicBool,
+    /// Whether a load of that model posts the warning (`SeqDb::claim_utf8_post`).
+    utf8_claimed: AtomicBool,
+    /// Whether the loads modelled now are not NCBI's (`SeqDb::without_scope_utf8_loads`).
+    scope_utf8_held: AtomicBool,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1117,10 +1204,16 @@ impl SeqDb {
             [one] if one == name => {
                 // The reports' database is this one opened again without the list: after a
                 // list, its walks of the counts meet their errors here (`check_alias_values`),
-                // unless its alias files make it scan the totals too.
-                if self.list_applied && !self.alias_scanned {
-                    use alias::WalkKey;
-                    self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
+                // unless its alias files make it scan the totals too, where the build of its OID
+                // list without the list fails first.
+                if self.list_applied {
+                    if let Some(failure) = &self.unlisted_oid_list_error {
+                        return Err(failure.to_error());
+                    }
+                    if !self.alias_scanned {
+                        use alias::WalkKey;
+                        self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
+                    }
                 }
                 vec![self.name_record(one, masks)]
             }
@@ -1298,6 +1391,7 @@ impl SeqDb {
             seqtype,
             alias::LocalCopy::CurrentDir,
             &SearchPath::current_dir()?,
+            alias::MaskList::Refuse,
         )?;
         Self::open_tree(tree, name, seqtype)
     }
@@ -1319,7 +1413,13 @@ impl SeqDb {
         seqtype: SeqType,
         search: &SearchPath,
     ) -> Result<LocatedDatabase, SeqDbError> {
-        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
+        let tree = alias::resolve_one_name(
+            name,
+            seqtype,
+            alias::LocalCopy::CurrentDir,
+            search,
+            alias::MaskList::Pass,
+        )?;
         let mut headers = Vec::with_capacity(tree.volumes.len());
         for volume_name in &tree.volumes {
             let index_path = volume::with_extension(Path::new(volume_name), seqtype, "in");
@@ -1474,6 +1574,8 @@ impl SeqDb {
             alias_range: (0, num_oids as u32),
             oid_list_error: None,
             oid_list_fails_scan: false,
+            listed_tree: None,
+            unlisted_oid_list_error: None,
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -1483,6 +1585,11 @@ impl SeqDb {
             lookup_files: OnceLock::new(),
             lookup_isams: OnceLock::new(),
             mask_algorithms: OnceLock::new(),
+            utf8_posted: AtomicBool::new(false),
+            scope_utf8: AtomicBool::new(false),
+            scope_utf8_ended: AtomicBool::new(false),
+            utf8_claimed: AtomicBool::new(false),
+            scope_utf8_held: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -1492,8 +1599,7 @@ impl SeqDb {
                 Err(error) => return Err(error),
             }
         }
-        let mut root = tree.root;
-        db.read_alias_tree(&mut root, &tree.volumes)?;
+        db.read_alias_tree(tree.root, tree.volumes)?;
         Ok(db)
     }
 
@@ -1517,10 +1623,24 @@ impl SeqDb {
     /// the volumes `names` (the volume paths in the order of `self.volumes`).
     fn read_alias_tree(
         &mut self,
-        root: &mut alias::AliasNode,
-        names: &[String],
+        mut root: alias::AliasNode,
+        names: Vec<String>,
     ) -> Result<(), SeqDbError> {
-        alias::compute_masks(root).map_err(SeqDbError::Ncbi)?;
+        alias::compute_masks(&mut root)?;
+        if self.is_version5() {
+            alias::refuse_v5_lists(&root)?;
+        }
+        let tree = ListedTree { root, names };
+        let read = self.read_listed_tree(&tree);
+        if alias::reads_id_lists(&tree.root) {
+            self.listed_tree = Some(Box::new(tree));
+        }
+        read
+    }
+
+    /// [`SeqDb::read_alias_tree`] of the alias tree `tree`, after NCBI's `ComputeMasks`.
+    fn read_listed_tree(&mut self, tree: &ListedTree) -> Result<(), SeqDbError> {
+        let (root, names) = (&tree.root, tree.names.as_slice());
         let at = |path: &str| {
             names
                 .iter()
@@ -1533,18 +1653,7 @@ impl SeqDb {
         });
         let num_oids = self.num_oids();
         let scan = alias::needs_totals_scan(root);
-        let volumes: Vec<(&str, u32, u32)> = names
-            .iter()
-            .enumerate()
-            .map(|(at, name)| {
-                (
-                    name.as_str(),
-                    self.volume_starts[at],
-                    self.volume_starts[at + 1],
-                )
-            })
-            .collect();
-        let oids = match alias::alias_oids(root, &volumes, num_oids) {
+        let oids = match self.tree_oids(tree, alias::UserList::None) {
             Ok(oids) => oids,
             Err(failure) => {
                 self.oid_list_error = Some(failure);
@@ -1553,12 +1662,11 @@ impl SeqDb {
                     words: None,
                     all_bits_special_set: false,
                     mask_types: Vec::new(),
+                    lists: Vec::new(),
                 }
             }
         };
-        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
-            volume.set_oid_mask_type(mask_type);
-        }
+        let oids = self.set_tree_oids(oids);
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);
@@ -1577,7 +1685,6 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.all_bits_special_set = oids.all_bits_special_set;
         self.alias_totals = totals;
         if self.oid_list_fails_scan {
             return Ok(());
@@ -1594,6 +1701,83 @@ impl SeqDb {
             self.set_included_length(None);
         }
         self.update_first_oid_length()
+    }
+
+    /// NCBI's OID list of the alias tree `tree` ([`alias::alias_oids`]) under the search's
+    /// positive list `user`.
+    fn tree_oids(
+        &self,
+        tree: &ListedTree,
+        user: alias::UserList,
+    ) -> Result<alias::AliasOids, oid_list::OidListError> {
+        let volumes: Vec<alias::TreeVolume<'_>> = tree
+            .names
+            .iter()
+            .enumerate()
+            .map(|(at, name)| alias::TreeVolume {
+                name: name.as_str(),
+                start: self.volume_starts[at],
+                end: self.volume_starts[at + 1],
+            })
+            .collect();
+        alias::alias_oids(
+            &tree.root,
+            &volumes,
+            self.num_oids(),
+            self.seqtype,
+            self.is_version5(),
+            user,
+        )
+    }
+
+    /// Gives the volumes their `OID_MASK_TYPE` and the id lists of `oids`, and the database the
+    /// shape of NCBI's bit set; returns `oids` without them.
+    fn set_tree_oids(&mut self, mut oids: alias::AliasOids) -> alias::AliasOids {
+        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
+            volume.set_oid_mask_type(mask_type);
+        }
+        for (at, lists) in std::mem::take(&mut oids.lists).into_iter().enumerate() {
+            if !lists.is_empty() {
+                let start = self.volume_starts[at];
+                self.volumes[at].set_alias_lists(lists, start);
+            }
+        }
+        self.all_bits_special_set = oids.all_bits_special_set;
+        oids
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
+    // NCBI's `CSeqDB` opened with a positive list translates the alias files' id lists under it
+    // (`alias::UserList`), when its constructor builds the OID list to scan the totals, after the
+    // list's own resolution: the alias files' OID list is made again under the list. Its failure
+    // is the constructor's (`build_oid_list`); the failure without the list stays the reports'
+    // where their database scans the totals (`unlisted_oid_list_error`).
+    /// Makes the alias files' OID list again under the search's positive list `user` of a
+    /// database whose alias tree names id lists (`listed_tree`): the alias files' bits and
+    /// iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set, or the
+    /// failure (`oid_list_error`). Nothing changes for any other database.
+    fn translate_alias_lists(&mut self, user: alias::UserList) {
+        let Some(tree) = self.listed_tree.take() else {
+            return;
+        };
+        let unlisted = self.oid_list_error.take();
+        self.unlisted_oid_list_error = unlisted.filter(|_| self.oid_list_fails_scan);
+        match self.tree_oids(&tree, user) {
+            Ok(oids) => {
+                let oids = self.set_tree_oids(oids);
+                if let Some(words) = oids.words {
+                    let num_oids = self.num_oids();
+                    let range =
+                        alias::top_iteration_range(&tree.root, num_oids).unwrap_or((0, num_oids));
+                    self.alias_range = range;
+                    self.filter = Some(Box::new(
+                        filter::OidFilter::new(words, num_oids).with_range(range),
+                    ));
+                }
+            }
+            Err(failure) => self.oid_list_error = Some(failure),
+        }
+        self.listed_tree = Some(tree);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-938 (at
@@ -1627,7 +1811,9 @@ impl SeqDb {
     /// file cannot be opened, mapped or read (missing, an `open` that fails, a first byte that
     /// the system does not give: [`SeqDbError::Map`], or a later read: [`SeqDbError::Read`]) is
     /// not checked: NCBI opens and maps a header file at its first read, and its error, or its
-    /// SIGBUS, comes there (after the outfmt 0 prolog; line WQA D18).
+    /// SIGBUS, comes there (after the outfmt 0 prolog; line WQA D18). NCBI reads no header when
+    /// it opens a database: a header that its read fails on (`SeqDbError::Ncbi`) fails where a
+    /// report reads it, so the volume is classified by its next header (`first_deflines`).
     pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {
@@ -1648,13 +1834,22 @@ impl SeqDb {
         Ok(parsed)
     }
 
-    /// `deflines` of the first sequence of volume `at` (non-empty), whether a list includes it
-    /// or not, and with every definition line: the check reads the header as stored, before a
-    /// taxid list's `DeflineRule` (`Volume::stored_deflines`), which would refuse a first sequence
-    /// that the list leaves out. Its messages name the sequence's OID.
+    /// `deflines` of the first sequence of volume `at` (non-empty) whose header NCBI's read does
+    /// not fail on, whether a list includes it or not, and with every definition line: the check
+    /// reads the header as stored, before a taxid list's `DeflineRule`
+    /// (`Volume::stored_deflines`), which would refuse a first sequence that the list leaves out.
+    /// Its messages name the sequence's OID. No definition line when NCBI's read fails on every
+    /// header of the volume (each report of them fails).
     fn first_deflines(&self, at: usize) -> Result<Vec<OrdinalDefline>, SeqDbError> {
-        let oid = self.volume_starts[at];
-        self.ordinal_deflines(at, oid, self.volumes[at].stored_deflines(0))
+        let volume = &self.volumes[at];
+        for vol_oid in 0..volume.num_oids() {
+            let oid = self.volume_starts[at] + vol_oid;
+            match self.ordinal_deflines(at, oid, volume.stored_deflines(vol_oid)) {
+                Err(SeqDbError::Ncbi(_)) => {}
+                other => return other,
+            }
+        }
+        Ok(Vec::new())
     }
 
     /// Whether the database is of format version 5 (its volumes' index files name an LMDB
@@ -2378,6 +2573,140 @@ impl SeqDb {
         self.defline_set_at(self.find_volume(ordinal)?)
     }
 
+    /// The member that NCBI's warning of a UTF8String read where a VisibleString is expected
+    /// names (`seqid::ber::utf8_string_path`) for the header of `ordinal`: where NCBI's read of
+    /// the record meets one before any failure. `None` also where the record cannot be read.
+    /// The record is read again: for a read that noted such a string (`OrdinalDefline::utf8`,
+    /// `DeflineSet::utf8`) or failed.
+    #[cold]
+    pub fn utf8_string_path(&self, ordinal: u32) -> Option<String> {
+        self.utf8_string_path_at(self.find_volume(ordinal).ok()?)
+    }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:617-622
+    /// Whether NCBI's warning of a UTF8String read for a VisibleString is to be posted now:
+    /// true once, at the first call (`ERR_POST_X_ONCE` posts once per process; a search opens
+    /// its database once, so once per run of a program).
+    pub fn take_utf8_post(&self) -> bool {
+        !self.utf8_claimed.load(std::sync::atomic::Ordering::Relaxed)
+            && !self
+                .utf8_posted
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether the run has posted that warning (`take_utf8_post`), or a load of the model of its
+    /// loads posts it (`claim_utf8_post`), so that no read need name its member again.
+    pub fn utf8_posted(&self) -> bool {
+        self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
+            || self.utf8_claimed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// `take_utf8_post` for a load of the model of the run's loads (`scope_utf8_loads`), which
+    /// writes the warning with the load's text where the program writes it: true once, and none
+    /// of the run's other posts is taken after (`take_utf8_post`). A search of the batches again
+    /// from the start forgets it (`restart_utf8_loads`).
+    pub fn claim_utf8_post(&self) -> bool {
+        !self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
+            && !self
+                .utf8_claimed
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The batches are searched and their loads modelled again from the start, nothing of the
+    /// first model written (BLASTP's search of the batches before a failed one): no load posts
+    /// the warning yet (`claim_utf8_post`, `end_scope_utf8_loads`).
+    pub fn restart_utf8_loads(&self) {
+        self.utf8_claimed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.scope_utf8_ended
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to
+    /// another sequence whose header holds a UTF8String where a VisibleString is expected
+    /// (`algorithm::common::database::HeaderReader`'s scope read, `ParsedSubject::scope_utf8`).
+    pub fn note_scope_utf8(&self) {
+        self.scope_utf8
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The model of the run's loads reaches a batch whose own reads (its fetches, Seq-aligns and
+    /// the reads of its reported sequences, `algorithm::common::database::Utf8Read`) post NCBI's
+    /// warning of a UTF8String header, before any load of the batch: no load posts it after
+    /// (`scope_utf8_loads`), whether the run has written it yet or not (a program that models
+    /// every batch before it writes a report).
+    pub fn end_scope_utf8_loads(&self) {
+        self.scope_utf8_ended
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a load whose Seq-align id's lookup reads such a header may post NCBI's warning: a
+    /// reader met such a subject (`scope_utf8_seen`), the run has not posted it
+    /// (`take_utf8_post`), no batch before the load posts it with its own reads
+    /// (`end_scope_utf8_loads`), and NCBI makes the loads modelled now
+    /// (`without_scope_utf8_loads`).
+    pub fn scope_utf8_loads(&self) -> bool {
+        self.scope_utf8_seen()
+            && !self.utf8_posted()
+            && !self
+                .scope_utf8_ended
+                .load(std::sync::atomic::Ordering::Relaxed)
+            && !self
+                .scope_utf8_held
+                .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// `model` (a model of loads, `algorithm::common::database::batch_prefetch`) where NCBI does
+    /// not make the loads whose Seq-align id's lookup reads such a header: none of them posts the
+    /// warning (`scope_utf8_loads`), which a later load or read may still post.
+    #[cold]
+    #[inline(never)]
+    pub fn without_scope_utf8_loads<T>(&self, model: impl FnOnce() -> T) -> T {
+        let held = self
+            .scope_utf8_held
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        let modelled = model();
+        self.scope_utf8_held
+            .store(held, std::sync::atomic::Ordering::Relaxed);
+        modelled
+    }
+
+    /// The sequence at `at` (by its ordinal id).
+    pub(crate) fn sequence_at(&self, at: SeqLocation) -> DbSequence {
+        self.sequence(self.ordinal_of(self.location_oid(&at)))
+    }
+
+    /// Whether a reader noted such a sequence (`note_scope_utf8`): only then do the batches'
+    /// prefetches look for it among their subjects (`prefetch_messages`).
+    pub fn scope_utf8_seen(&self) -> bool {
+        self.scope_utf8.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The member of NCBI's warning of a read of the header at `at` that took a UTF8String for a
+    /// VisibleString (`Utf8Reads`), where the run posts it now (`take_utf8_post`, once per
+    /// process): `None` once posted, or where the record holds no such string before a failure.
+    #[cold]
+    #[inline(never)]
+    pub fn take_utf8_post_at(&self, at: SeqLocation) -> Option<String> {
+        if self.utf8_posted() {
+            return None;
+        }
+        let path = self.utf8_string_path_at(at)?;
+        self.take_utf8_post().then_some(path)
+    }
+
+    /// [`SeqDb::utf8_string_path`] of the sequence at `at`.
+    #[cold]
+    pub fn utf8_string_path_at(&self, at: SeqLocation) -> Option<String> {
+        let record = self.volumes[at.volume].header_bytes(at.vol_oid).ok()?;
+        crate::seqid::ber::utf8_string_path(&record)
+    }
+
+    /// The place of the sequence `ordinal` (`None` outside the database).
+    pub fn location_of(&self, ordinal: u32) -> Option<SeqLocation> {
+        self.find_volume(ordinal).ok()
+    }
+
     /// [`SeqDb::defline_set`] of the sequence at `at`.
     pub fn defline_set_at(&self, at: SeqLocation) -> Result<DeflineSet, SeqDbError> {
         let set = self.volumes[at.volume].defline_set(at.vol_oid)?;
@@ -2387,12 +2716,14 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1995-1999
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:907-922
     /// Whether NCBI's header read of the sequence at `at` filters the set it read
-    /// (`x_GetFilteredHeader`): the database is restricted by a list (`x_HaveIdFilter`, a list
-    /// attached even where it kept nothing) or the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the
-    /// third case, is refused (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header
-    /// of no bytes, no set, makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
+    /// (`x_GetFilteredHeader`): the database is restricted by a list or the alias files attached
+    /// an id list to the volume (`x_HaveIdFilter`, a list attached even where it kept nothing), or
+    /// the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the third case, is refused
+    /// (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header of no bytes, no set,
+    /// makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
     pub fn filters_header_sets(&self, at: SeqLocation) -> bool {
-        self.is_restricted() || self.volumes[at.volume].has_oid_mask_type()
+        let volume = &self.volumes[at.volume];
+        self.is_restricted() || volume.has_alias_lists() || volume.has_oid_mask_type()
     }
 
     /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has
@@ -2491,6 +2822,7 @@ impl SeqDb {
                     bl_ord_id: bl_ord_id as u32,
                     replaced_title_bytes: defline.replaced_title_bytes,
                     taxid: defline.taxid,
+                    utf8: defline.utf8,
                 })
             })
             .collect()
@@ -2831,6 +3163,92 @@ impl OrdinalTagError {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309 (cited at
+// `algorithm::common::database::Utf8Read`)
+/// The first, in NCBI's order, of a reader's reads of header records that hold a UTF8String
+/// where a VisibleString is expected (`DeflineSet::utf8`, `OrdinalDefline::utf8`). NCBI's reader
+/// posts its warning at the first such read of the process (`ERR_POST_X_ONCE`,
+/// [`SeqDb::take_utf8_post`]), naming the member the record holds
+/// ([`SeqDb::utf8_string_path`]), wherever the read is: this is the one note of every LOSAT read
+/// that stands for one of NCBI's reads of a header. Its readers: a search's reads of its
+/// reported sequences and of the other sequences its scope reads
+/// (`algorithm::common::database::HeaderReader`), the fetches with `check_oid_exclusion` and the
+/// Seq-aligns under a seqid list (`LineCheck`), the lookups of an accession whose version NCBI
+/// checks against the candidates' Seq-ids (`IdLookup`, `x_CheckVersions`), and blastdbcmd's
+/// reads (`Source`). A reader gives each read its place in NCBI's order (`order`, the least
+/// first; of equal places the one noted first), so that reads on several threads note the same
+/// first; a record is noted only where its read found the string (cold).
+#[derive(Debug, Default)]
+pub struct Utf8Reads {
+    first: std::sync::Mutex<Option<Utf8Note>>,
+    /// Whether `first` may hold a read (a reader asks this before it locks).
+    noted: AtomicBool,
+}
+
+/// A read that `Utf8Reads` noted: its place in the reader's order and the sequence read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Utf8Note {
+    pub order: u128,
+    pub at: SeqLocation,
+}
+
+impl Utf8Reads {
+    /// Notes the read of the sequence at `at` at `order`, where it comes before the reads noted
+    /// so far.
+    #[cold]
+    #[inline(never)]
+    pub fn note(&self, order: u128, at: SeqLocation) {
+        let mut first = self
+            .first
+            .lock()
+            .expect("the UTF8String note is not poisoned");
+        if first.is_none_or(|first| order < first.order) {
+            *first = Some(Utf8Note { order, at });
+        }
+        self.noted.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// [`Utf8Reads::note`] of the sequence `ordinal` of `db` (none outside the database).
+    #[cold]
+    #[inline(never)]
+    pub fn note_ordinal(&self, db: &SeqDb, order: u128, ordinal: u32) {
+        if let Ok(at) = db.find_volume(ordinal) {
+            self.note(order, at);
+        }
+    }
+
+    /// The first read noted.
+    pub fn first(&self) -> Option<Utf8Note> {
+        if !self.noted.load(std::sync::atomic::Ordering::Acquire) {
+            return None;
+        }
+        *self
+            .first
+            .lock()
+            .expect("the UTF8String note is not poisoned")
+    }
+
+    /// `first`, which the reader then forgets (each batch of a search takes its own).
+    pub fn take(&self) -> Option<Utf8Note> {
+        if !self.noted.load(std::sync::atomic::Ordering::Acquire) {
+            return None;
+        }
+        self.take_noted()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn take_noted(&self) -> Option<Utf8Note> {
+        let mut first = self
+            .first
+            .lock()
+            .expect("the UTF8String note is not poisoned");
+        self.noted
+            .store(false, std::sync::atomic::Ordering::Release);
+        first.take()
+    }
+}
+
 /// A definition line with its database-wide `BL_ORD_ID`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrdinalDefline {
@@ -2844,4 +3262,7 @@ pub struct OrdinalDefline {
     /// `Defline::taxid` (0 for none), read with the title by [`SeqDb::deflines`],
     /// [`SeqDb::visit_deflines`] and [`SeqDb::read_header`].
     pub taxid: i32,
+    /// `Defline::utf8`: the record holds a UTF8String where a VisibleString is expected
+    /// ([`SeqDb::utf8_string_path`] names the member of NCBI's warning).
+    pub utf8: bool,
 }

@@ -41,9 +41,9 @@
 //!
 //! The options `-mask_id` and `-mask_desc` depend on others in the argument parser
 //! (makeblastdb.cpp:276-288): `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`.
-//! `-gi_mask_name` (which needs `-gi_mask`) replaces the file name in the registration
-//! (makeblastdb.cpp:960-971); LOSAT writes no GI masks yet and refuses `-gi_mask` and
-//! `-gi_mask_name` in the CLI, so that branch is not here.
+//! `-gi_mask_name` (which needs `-gi_mask` and `-mask_data`) replaces the file name in the
+//! registration (makeblastdb.cpp:970-971): with `-gi_mask` that name names the algorithm's
+//! GI-mask files (`writedb::gi_mask`), which `BuildDatabase::use_gi_masks` turned on before.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -67,6 +67,8 @@ pub(crate) struct MaskDataOptions<'a> {
     pub(crate) mask_id: Option<&'a str>,
     /// `-mask_desc`.
     pub(crate) mask_desc: Option<&'a str>,
+    /// `-gi_mask_name`.
+    pub(crate) gi_mask_name: Option<&'a str>,
     /// The directory in which a relative mask file name is looked up (`None`: the current
     /// directory, as makeblastdb does). The names in the log, the messages and the registry stay
     /// as given. A hook for tests, which cannot change the directory of the process.
@@ -224,7 +226,16 @@ pub(crate) fn process_mask_data(
         desc_list = vec![""; id_list.len()];
     }
 
-    let mut utf8_once = Utf8TagOnce::default();
+    let mut gi_mask_names: Vec<&str> = Vec::new();
+    if let Some(gi_names) = options.gi_mask_name {
+        gi_mask_names = split_commas(truncate_spaces_str(gi_names));
+        if file_list.len() != gi_mask_names.len() {
+            return Err(options_error(
+                "the size of gi_mask_name does not match that of mask_data.",
+            ));
+        }
+    }
+
     for (i, &file) in file_list.iter().enumerate() {
         let path: PathBuf = match options.root {
             Some(root) => root.join(file),
@@ -244,7 +255,7 @@ pub(crate) fn process_mask_data(
         let mut algo_id: Option<i32> = None;
         loop {
             let next = reader.next_info();
-            write_posts(&mut reader, warn, &mut utf8_once);
+            write_posts(&mut reader, warn, db.utf8_once());
             let Some(first_obj) = next? else {
                 break;
             };
@@ -260,10 +271,11 @@ pub(crate) fn process_mask_data(
                             opts,
                         )?
                     } else {
+                        let name = gi_mask_names.get(i).copied().unwrap_or(file);
                         db.register_masking_algorithm(
                             first_obj.algo_program,
                             opts,
-                            file.as_bytes(),
+                            name.as_bytes(),
                         )?
                     };
                     algo_id = Some(id);
@@ -297,7 +309,7 @@ pub(crate) fn process_mask_data(
                 }
 
                 let next = reader.next_list();
-                write_posts(&mut reader, warn, &mut utf8_once);
+                write_posts(&mut reader, warn, db.utf8_once());
                 masks = next?;
             }
         }
@@ -307,8 +319,8 @@ pub(crate) fn process_mask_data(
 
 /// Writes on standard error what NCBI's serial reader posted while `reader` read its last object
 /// (also when it then failed), in the order posted: before makeblastdb does anything with the
-/// object or the error. The warning of a UTF8String tag is posted once per run (`utf8_once`),
-/// whichever file it is in.
+/// object or the error. The warning of a UTF8String tag is posted once per run (`utf8_once`, the
+/// run's: `BuildDatabase::utf8_once`), whichever file it is in.
 fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
     for post in reader.take_posts() {
         if matches!(post, MaskPost::Utf8Tag(_)) && !utf8_once.first() {

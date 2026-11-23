@@ -28,7 +28,7 @@ pub const USAGE: &str = include_str!("usage.txt");
 // The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`), composition-based
 // statistics 0 to 3 included (the default 1, item PS12b), with `-use_sw_tback` NCBI's
 // Smith-Waterman redo of the frames (item PS12c); `-html`, the remote options and
-// `-import_search_strategy` are refused by the parser (`cli.rs` `is_unported_rpstblastn_arg`).
+// `-import_search_strategy` are refused by the parser (their rows of `ncbi_app::args::refusal`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpstblastnArgs {
@@ -200,6 +200,8 @@ impl RpstblastnArgs {
             // hit cutoff (`rps_search::engine`), per volume with `-dbsize` on several volumes.
             dbsize: self.dbsize,
             show_gis: self.show_gis,
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::named_refusal`).
+            html: false,
             parse_deflines: self.parse_deflines,
             searchsp: self.searchsp,
             // `-xdrop_ungap` reaches NCBI's options check in BLASTX's resolve ("x_dropoff must be

@@ -21,7 +21,7 @@ use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
 use crate::ncbi_exception::{NcbiException, Severity};
-use crate::report::serial::asn_types::{ReadError, Value};
+use crate::report::serial::asn_types::ReadError;
 use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::ParsedSeqId;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
@@ -237,7 +237,7 @@ pub(crate) fn read_in_pssm(
             Severity::Warning => crate::report::diag_log::WARNING,
             Severity::Error => crate::report::diag_log::ERROR,
         };
-        posts.post(severity, post.line(&program));
+        posts.post(severity, post.line(Some(&program)));
     }
     posts.write(diagnostics, reader.archive)?;
     let pssm = match read.result {
@@ -387,7 +387,10 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
                 push(&mut residues, position, letter);
             }
         }
-        Some(SeqData::Other(_)) | None => {}
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => {}
     }
     residues
 }
@@ -577,11 +580,12 @@ pub(crate) fn psi_search_and_object_of(
             defline_reads_annot,
         ));
     };
-    if let Some(SeqData::Other(Value::Choice(variant, _))) = &query.inst.seq_data {
-        let name = crate::report::serial::asn_types::members(
-            crate::report::serial::asn_types::table::named::SEQ_DATA,
-        )[usize::from(*variant)]
-        .name();
+    if let Some(
+        data
+        @ (SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_)),
+    ) = &query.inst.seq_data
+    {
+        let (name, _, _) = data.variant();
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
         )));
@@ -1263,6 +1267,105 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
         },
         background: data.background,
     })
+}
+
+/// The score block of `CPssmEngine::x_InitializeScoreBlock` for the matrix named `matrix_name`
+/// (`GetMatrixName()`), the gap costs and the query (NCBIstdaa), psiblast's `-in_msa` and
+/// makeprofiledb's PSSMs of frequency ratios only: the inner `Err` is the message of NCBI's
+/// `CBlastException` for a matrix it does not know and for gap costs that the matrix's table does
+/// not hold; the block holds the gapped block
+/// `kbp_gap_psi` copies. `None` for IDENTITY, whose table has no frequency ratios (the engine
+/// stops there).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-520
+/// The ungapped calculation writes its message for a query whose parameters it cannot compute
+/// and its status is then replaced by the gapped calculation's:
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2790
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3557-3562
+/// The engine throws the first message that was written, so with gap costs that the matrix does
+/// not have the error is the ungapped calculation's for such a query and the gap costs' for any
+/// other (whose allowed values follow as further messages); with gap costs that the matrix has,
+/// the status is 0 and the engine goes on without the query's block (`ungapped_karlin_valid`).
+/// NCBI BLAST+ 2.17.0, PS6 corpus `b.gap.bad`, `o.ok.matrix`; review probes `k.X20.badgap`,
+/// `z.x20.go0.ge5`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:566-570
+#[allow(clippy::type_complexity)]
+pub(crate) fn engine_score_block(
+    matrix_name: &str,
+    gap_open: i32,
+    gap_extend: i32,
+    query: &[u8],
+) -> Result<std::result::Result<(ScoringMatrix, Option<PsiScoreBlk>), String>> {
+    let Ok(matrix) = matrix_name.parse::<ScoringMatrix>() else {
+        return Ok(Err("Unknown error code -1".to_string()));
+    };
+    let spec = crate::config::ProteinScoringSpec {
+        matrix,
+        gap_open,
+        gap_extend,
+    };
+    if !crate::stats::tables::protein_scoring_supported(&spec) {
+        if query_ungapped_block(matrix, query).is_none() {
+            return Ok(Err(
+                crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
+            ));
+        }
+        return Ok(Err(format!(
+            "Gap existence and extension values of {} and {} not supported for {}",
+            spec.gap_open,
+            spec.gap_extend,
+            matrix_name.to_ascii_uppercase()
+        )));
+    }
+    let params = crate::stats::tables::lookup_protein_params(&spec);
+    let gapped = KarlinBlk {
+        lambda: params.lambda,
+        k: params.k,
+        h: params.h,
+    };
+    let sbp = if matrix == ScoringMatrix::Identity {
+        None
+    } else {
+        Some(score_block(matrix, gapped)?)
+    };
+    Ok(Ok((matrix, sbp)))
+}
+
+/// The query's ungapped Karlin-Altschul block in the engine's score block of `matrix`
+/// (`kbp_psi[0]`, `Blast_ScoreBlkKbpUngappedCalc` of the query's composition), `None` where it
+/// cannot be computed: NCBI's score block leaves the query's context invalid there (a query of
+/// `X` alone, or of letters that no positive score pairs with the standard composition), and the
+/// engine then reads a null block.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2786
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:514-520 (the ungapped
+/// calculation's status is replaced by the gapped one's, so the failure goes unreported and the
+/// run goes on with `kbp_psi[0]` null; `s_PSISavePssm` and the scaling read it: NCBI BLAST+ 2.17.0
+/// ends with SIGSEGV, PS6 corpus `r.ch.q.allX`, `x.in.allx.60`, `x.in.allO`)
+pub(crate) fn query_ungapped_block(matrix: ScoringMatrix, query: &[u8]) -> Option<KarlinBlk> {
+    let (_, loscore, hiscore) = score_table(matrix);
+    let mut sentinelled = Vec::with_capacity(query.len() + 2);
+    sentinelled.push(0);
+    sentinelled.extend_from_slice(query);
+    sentinelled.push(0);
+    let composition = crate::stats::karlin_calc::compute_aa_composition(&sentinelled, query.len());
+    let standard = crate::stats::karlin_calc::compute_std_aa_composition();
+    let profile = crate::stats::karlin_calc::compute_score_freq_profile_for_matrix(
+        &composition,
+        &standard,
+        loscore,
+        hiscore,
+        matrix,
+    );
+    crate::stats::karlin_calc::compute_karlin_params_ungapped(&profile)
+        .ok()
+        .map(|params| KarlinBlk {
+            lambda: params.lambda,
+            k: params.k,
+            h: params.h,
+        })
 }
 
 #[cfg(test)]

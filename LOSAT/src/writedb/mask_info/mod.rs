@@ -41,7 +41,7 @@
 //! overflows it, which crashes makeblastdb; with a stack large enough it reads every depth. The
 //! reader keeps the frames of such a nest on the heap (`reader.rs`, `Rd::read_seq_loc_parts`) and
 //! reads every depth as far as memory allows, writing what makeblastdb writes with a stack large
-//! enough (PD-LOSAT-NCBI-DEFECTS exception 25).
+//! enough (PD-LOSAT-NCBI-DEFECTS exception 28).
 //!
 //! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): a string
 //! whose length passes the end of the file by an amount that makeblastdb may or may not be able to

@@ -29,7 +29,7 @@ fn not_a_file(path: &str) -> Vec<u8> {
 /// LOSAT's refusal where NCBI crashes.
 /// It is kept with the database where NCBI meets it later (`SeqDb::oid_list_error`), so it is
 /// `Clone` and makes its `SeqDbError` on demand (`OidListError::to_error`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(super) enum OidListError {
     /// The path is not a regular file (missing, a directory, the directory of an empty value):
     /// NCBI's `eMemoryMappingFailure` (`not_a_file`).
@@ -60,9 +60,18 @@ pub(super) enum OidListError {
         code: Option<i32>,
         text: String,
     },
+    /// The error of an id list of the alias files (`alias::ListSet`): its file's
+    /// `CSeqDBException` text, the error of a volume's ISAM that translates it, LOSAT's refusal
+    /// (copied each time it is met, `SeqDbError::duplicate`).
+    Reader(std::sync::Arc<SeqDbError>),
 }
 
 impl OidListError {
+    /// `error` of an id list of the alias files, kept ([`OidListError::Reader`]).
+    pub(super) fn reader(error: SeqDbError) -> Self {
+        OidListError::Reader(std::sync::Arc::new(error))
+    }
+
     /// The reader error of this failure: NCBI's text where NCBI has one (`SeqDbError::MemoryMap`,
     /// `SeqDbError::Open`), else LOSAT's (`SeqDbError::Integrity` for NCBI's failed assertion,
     /// `SeqDbError::NcbiCrashes` where NCBI crashes).
@@ -94,6 +103,7 @@ impl OidListError {
                      OIDLIST, past the memory page after its {len} bytes"
                 ),
             },
+            OidListError::Reader(kept) => kept.duplicate(),
             OidListError::Read {
                 path,
                 open,

@@ -74,30 +74,13 @@ pub struct Description {
     pub subject_gencodes: Vec<u32>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1021-1024
-// NCBI's argument takes any integer and the genetic-code table decides later; LOSAT's parser
-// decides at once, so the accepted values are those the parser takes.
-/// Genetic codes are small integers; every accepted one is below this bound.
-const GENETIC_CODE_PROBE: u32 = 64;
-
-/// The genetic codes that the parser of `program` accepts for `flag`.
-fn accepted_gencodes(program: Program, flag: &str) -> Vec<u32> {
-    (0..GENETIC_CODE_PROBE)
-        .filter(|code| {
-            let code = code.to_string();
-            let argv = [
-                "losat",
-                program.name(),
-                "-query",
-                "q",
-                "-subject",
-                "s",
-                flag,
-                &code,
-            ];
-            crate::cli::try_parse_from::<Cli, _, _>(argv).is_ok()
-        })
-        .collect()
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:998-1012 (cited at
+// `ncbi_app::constraint`)
+// NCBI's key of a genetic code allows the codes of `CArgAllowGeneticCodeInteger`.
+/// The genetic codes that `program`'s key `name` allows: its constraint in the argument tables
+/// (`ncbi_app::args::genetic_codes`, NCBI's codes and LOSAT's 32 of tblastn's `-db_gencode`).
+fn accepted_gencodes(program: Program, name: &str) -> Vec<u32> {
+    crate::ncbi_app::args::genetic_codes(program.name(), name).unwrap_or_default()
 }
 
 /// The kind of the value of `arg`, from the type its parser makes.
@@ -172,12 +155,12 @@ pub fn describe(program: Program) -> Description {
         program,
         parameters,
         query_gencodes: if has("query_gencode") {
-            accepted_gencodes(program, "-query_gencode")
+            accepted_gencodes(program, "query_gencode")
         } else {
             Vec::new()
         },
         subject_gencodes: if has("db_gencode") {
-            accepted_gencodes(program, "-db_gencode")
+            accepted_gencodes(program, "db_gencode")
         } else {
             Vec::new()
         },

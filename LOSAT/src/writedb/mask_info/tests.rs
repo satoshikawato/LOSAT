@@ -1173,7 +1173,7 @@ fn text_edits_never_panic() {
         let _ = read_bytes("remove", &edited);
     }
     // a nest of 2,000 levels that the file's end cuts: makeblastdb's report of the end of the file
-    // at every level (the reader keeps the levels on the heap, PD-LOSAT-NCBI-DEFECTS exception 25)
+    // at every level (the reader keeps the levels on the heap, PD-LOSAT-NCBI-DEFECTS exception 28)
     let mut deep = String::from("Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, algo-options \"\", masks { masks { ");
     for _ in 0..2000 {
         deep.push_str("mix { ");

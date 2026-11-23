@@ -137,6 +137,32 @@ pub(crate) fn throw_error(
     ))
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:712-756
+// (`eNullValue` and `eMissingValue` are not thrown by the readers of these types: `ExpectedMember`
+// throws `eFormatError` with the default `eSerialVerifyData_Yes`.)
+const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
+    "src/serial/member.cpp",
+    752,
+    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
+);
+
+/// What reading a SEQUENCE member makes of `fail`: `ReadWithSetFlagMember` rethrows a
+/// `CSerialException` of a member with a set flag (`set_flag`) with `error while reading <name>`
+/// (`NCBI_RETHROW_SAME`). The one owner of that rethrow, for the typed reader (`asn_types::read`)
+/// and the mask files' reader (`writedb::mask_info`).
+#[cold]
+#[inline(never)]
+pub(crate) fn read_with_set_flag_member(fail: Fail, set_flag: bool, name: &str) -> Fail {
+    match fail {
+        Fail::Serial(e) if set_flag => {
+            let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
+            let message = format!("error while reading {name}");
+            Fail::serial(e.exception().rethrow_same(file, line, function, message))
+        }
+        other => other,
+    }
+}
+
 /// The `CSerialException` (`eInvalidData`) of `CEnumeratedTypeValues::FindValue` (a name) or
 /// `FindName` (a number) at `site` for `value`, which names no value of the type (the binary
 /// stream's `ReadEnum` too).

@@ -88,6 +88,11 @@
   where a report writes a name whose bytes come from past the mapping, and wrote the others as NCBI
   writes them where it completes, which lines DBID and RG item T5 refused at every lookup
   (approved exception 14 of PD-LOSAT-NCBI-DEFECTS, which the Owner decided on 2026-11-15); on
+  2026-11-16 line RG item T5d wrote NCBI's exception where NCBI's read of a header record fails,
+  which LOSAT refused, and on 2026-11-17 its fix 1 read the header records with a UTF8String or a
+  tag in the long form as NCBI reads them, which it had refused, its fix 2 wrote NCBI's warning of
+  such a record also where NCBI's fetches or its version check of an accession read it, and its
+  fix 3 where NCBI's scope reads it for another sequence that holds a reported sequence's id; on
   2026-11-17 line DBID item v4late looked a Seq-align id up in a version 4 search's ISAM files in
   the volumes' order up to the first one that holds it, never a later one, as NCBI's lookup
   returns there, where LOSAT stopped with NCBI's `Error: Could not open input file` at a later
@@ -116,7 +121,7 @@
   UTC (tables of them; daylight time without a rule followed glibc's `posixrules`), which wait for
   the maintainer's decision on its pull request; on 2026-11-23 line NP item M (b) read the
   Seq-locs of a mask file nested to any depth, which LOSAT refused past 400 levels, as makeblastdb
-  reads them with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 25, pending: question
+  reads them with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 28, pending: question
   Q-MDEPTH, ad-M4a-15 2026-11-22); the rest of this history under the
   maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07))
@@ -393,7 +398,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | Rejected | Why |
 | --- | --- |
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` of the sequence's number n in its volume | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
-| Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT`, `MASKLIST` | filters (P4); `FIRST_OID`, `LAST_OID` read since line RG D1a, `OID_MASK_TYPE` since D1b-2 (2026-11-21; its bit 0 hides the definition lines with a predicted RefSeq id, a sequence left with none is searched and not reported, as NCBI's (an RPS profile of a database of several volumes refused where reported, NCBI's report not finding it); a sequence id that NCBI's accession guide warns about under it refused, NCBI repeating the warning at each read), `OIDLIST` since D1b-1 (2026-11-21; an empty file or one of its header alone refused, LOSAT's words where NCBI crashes or names a line of its source), `VDBLIST` ignored as NCBI's reader ignores it |
+| Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT`, `MASKLIST` | filters (P4); `GILIST`, `TILIST` and a version 4 database's `SEQIDLIST` read since line RG D1c-1 (2026-11-22; the listed OIDs searched and the definition lines that no list names hidden, as NCBI's; a TI list finds no OID, as NCBI BLAST+ 2.17.0's; NCBI's exception where a `ti` general id's tag is no number; a `SEQIDLIST` token NCBI warns about, an id NCBI's simplification throws on or changes a second time over two volumes refused), a version 4 database's `TAXIDLIST` read nowhere as NCBI's, a version 5 database's `SEQIDLIST` and `TAXIDLIST`, `MEMB_BIT` and `MASKLIST` still refused; `FIRST_OID`, `LAST_OID` read since line RG D1a, `OID_MASK_TYPE` since D1b-2 (2026-11-21; its bit 0 hides the definition lines with a predicted RefSeq id, a sequence left with none is searched and not reported, as NCBI's (an RPS profile of a database of several volumes refused where reported, NCBI's report not finding it); a sequence id that NCBI's accession guide warns about under it refused, NCBI repeating the warning at each read), `OIDLIST` since D1b-1 (2026-11-21; an empty file or one of its header alone refused, LOSAT's words where NCBI crashes or names a line of its source), `VDBLIST` ignored as NCBI's reader ignores it; `MASKLIST` names the GI-indexed masks that `makeblastdb -gi_mask` writes since line NP item M4c-1 (2026-11-20), whose reader is item M4c-2: makeblastdb's own reads of an alias file (the removal of the old database, the metadata after the build) pass it as NCBI's do, and the search programs and `blastdbcmd` refuse it |
 | Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks, negative and wrapped counts since D1a-3 (2026-11-14); the values listed above as refused |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
@@ -473,7 +478,7 @@ exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) n
 
 | Not written or rejected | Why |
 | --- | --- |
-| `-gi_mask`, `-gi_mask_name` | not implemented; each is an explicit error that names the option (they write GI-indexed mask files, a later item of line NP) |
+| `-gi_mask` with two algorithms whose GI-mask files are the same files (one `-gi_mask_name` twice, or two names of one path) | written since line NP item M4c-1 (2026-11-21) as makeblastdb 2.17.0 writes them, but for the alias file of a single-volume build, which names the volume by its file name where NCBI's names the database itself (`PD-LOSAT-NCBI-DEFECTS` approved exception 25, 1.81), and where both algorithms would write one data file at the same time: an explicit rejection of a deterministic result (`PD-LOSAT-NCBI-DEFECTS` 1.81, rule 2), whose bytes depend on how the C++ runtime buffers two streams on one file; files written one after the other (an algorithm that reaches no GI writes none) are NCBI's |
 | `[BLAST] MAX_SEQID_LENGTH` (registry or `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`) with `-parse_seqids`, when makeblastdb uses the value (the first layer that has the entry gives a number `NStr::StringToUInt` converts, not 0; an empty, unconvertible or 0 value is ignored by makeblastdb and accepted by LOSAT); `[BLAST] LONG_SEQID` | they change which FASTA ids makeblastdb parses; LOSAT keeps NCBI's defaults and refuses to run |
 | `-input_type` other than `fasta` and `blastdb` | FASTA and existing databases (`blastdb`, line RG item D3c) only (a FASTA input plain, or named `.gz`, `.bz2`, `.zst`: inflated while it is read, in any case of the suffix, as makeblastdb decides it; `-in -` reads the standard input as it comes). Every gzip member, bzip2 stream and zstd frame of a concatenated file is read, where makeblastdb reads every gzip member but only the first bzip2 stream or zstd frame and drops the rest silently (`PD-LOSAT-NCBI-DEFECTS`, the makeblastdb exception). A `.gz` file is read as makeblastdb's decompressor (`CZipDecompressor`) reads it (`GzipMembers` in `LOSAT/src/blastinput/compressed.rs`, which inflates with zlib-rs, a Rust port of zlib's inflate, where makeblastdb calls the host's zlib: the official Linux build links `libz.so.1`, and a host whose `libz.so.1` is zlib-ng's zlib-compatible build could in principle differ on damaged data): neither a member's trailer (CRC-32 and length) nor its header CRC is checked, a trailer cut short reads as the whole member, a member's header must end within the next 4 KiB, bytes after the last member are read only where makeblastdb reads them (fewer than 4 KiB that inflate to no byte, such as up to four zero bytes or a line feed), and a file that does not start with a gzip header is read as a zlib stream, up to that stream's end. A file that is not what its name says, or is cut short (for `.gz`: where makeblastdb's decompressor fails too), stops the build with `losat makeblastdb: -in: 'x.gz' is named .gz but is not gzip data (...)` (exit status 1, the files removed as for another failed input); makeblastdb warns about the decompressor's error, says the file does not appear to be FASTA, and ends with `BLAST failed to write output` (exit status 6) |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |
@@ -806,7 +811,58 @@ search code with a different subject source.
   title that gives no word), `# Database:` of outfmt 7 with the `-db` value as given.
 - Errors: NCBI's texts and exit statuses for a database that is not found or cannot be
   read, at the point where NCBI reports them (a header file is first read when the reports
-  of a query batch are made).
+  of a query batch are made). A header record that NCBI's object stream fails on (a damaged
+  record, or one that another writer encoded so: a taxid of another type or outside `int`, a
+  tag or a length NCBI's reader does not take, a record cut short) gives NCBI's
+  `CSerialException`, made where NCBI throws it (position, message, code, the frames of NCBI's
+  object stack and the backlog `error while reading <member>` of each member with a set flag),
+  as each program reports it: the search programs `Error: <what()>` with exit status 255, after
+  the outfmt 0 prolog and the reports of the batches before the batch whose reports read the
+  record (a record cut inside its first tag or length, the opening bytes of its set of
+  definition lines, throws NCBI's `CEofException`, which `CATCH_ALL` takes as a `CIOException`
+  and does not post: the run ends there with exit status 0, fix 1 of item T5d; a record cut
+  after them, before its first definition line, gives the exception of NCBI's `HandleEOF` with
+  exit status 255 as any other cut record, fix 2); blastdbcmd `Error: [blastdbcmd] <GetMsg()>` with exit status 1 after the records
+  before; segmasker `<what()>` (exit 1); dustmasker NCBI's report of each exception and its
+  `Application's execution failed` line (exit 3). A record that no report reads fails nothing
+  (NCBI reads no header when it opens a database). Line RG item T5d. Two encodings that
+  makeblastdb does not write are read as NCBI reads them (fix 1 of item T5d): a UTF8String where
+  a VisibleString is expected, as the VisibleString (`SERIAL_READ_ANY_VISIBLESTRING_TAG`), with
+  NCBI's warning `Warning: (803.10) [<program>] CObjectIStreamAsnBinary: UTF8String data for
+  VisibleString member <member>, ASN.1 specification may need an update` once per run
+  (`ERR_POST_X_ONCE`) where NCBI first reads such a record, whichever read it is: in the search
+  programs where a batch's search or Seq-aligns read it (after the batch's reader messages,
+  before its prefetch and its reports; a message of the BLAST archive). Under a negative seqid
+  list with ids NCBI's traceback and composition-based redo read the header of each subject they
+  fetch (the redo only those its early termination test leaves), also of one that no report shows
+  (fix 2 of item T5d); a seqid list's Seq-aligns read every final hit, also one that gets no
+  Seq-align; the version check of an accession reads its candidates. NCBI's scope reads the
+  header of the sequence that the lookup of a reported sequence's Seq-align id gives first, where
+  that is another one (the data loader's `x_GetOid`, fix 3 of item T5d): in every format that
+  reads the subject's Bioseq and where the batch's prefetch loads it (also a table of fields that
+  read nothing of it, and outfmt 8 with `PRE_FETCH_SEQS_LIMIT=2147483647`), not in the archive nor
+  the Seq-annots without the prefetch; another holder after the subject is not read. A sequence
+  that differs from the subject only by such a string is the subject to every report. The
+  warning comes at the load of that id (fix 4 of item T5d): in the batch's prefetch after the
+  taxonomy database's texts of the loads before it in NCBI's order of the Seq-id handles (by packed
+  number), before a failed lookup's `Error pre-fetching sequence data` and a stopping prefetch's
+  `BLAST Database error`; where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off, inside the
+  report at its first read of the subject (outfmt 0's description line, a tabular row, a BLAST XML,
+  XML2 or JSON `Hit`; psiblast's PSSM after the round's report where the report reads nothing of
+  it), and in the prefetch of a batch that the limit leaves on with a format that reads nothing of
+  the subject. Refused there: two such loads whose warnings name different members (two of one
+  member write the same bytes in either order, fix 5), or that load and one that asks the taxonomy
+  database where the batch writes a text of it, whose order NCBI takes from the addresses of its
+  Seq-id infos (one packed number, or neither packed: NCBI 2.17.0 wrote the warning before the texts of
+  opening in one run and after them in the next, blastx probe `gt.bad_magic`, fix 4) or that LOSAT
+  does not know (a batch of more than 200 Seq-align ids, as line DBID loadord's stops). A
+  prefetch whose loads end at a lookup that throws on its id (`Error pre-fetching sequence data`)
+  before that load does not make it, so it writes no warning (fix 5 of item T5d): the warning comes
+  at the run's next load of the id (a later batch's prefetch) or not at all; a report that reads the
+  subjects reads the one whose lookup throws too, which LOSAT refuses. In blastdbcmd before the
+  record's text, and before `Entry not found` where the version check of `-entry` or
+  `-entry_batch` read it; segmasker and dustmasker write none. A tag in the long form is read
+  with no message (`PeekLongTag`), or fails as NCBI's read does.
 - `-db` with `-subject` or `-subject_loc` is a usage error (LOSAT's parser text and exit
   status 2; NCBI prints its usage and exits 1). LOSAT Web rejects `-db` until stage DB-7.
 

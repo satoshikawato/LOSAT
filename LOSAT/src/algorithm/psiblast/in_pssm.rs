@@ -135,7 +135,8 @@ pub(crate) fn check_in_pssm_options(
                     super::in_pssm_files::matrix_name_refusal("in the archive of -outfmt 11")
                 );
             }
-            if let Some(what) = crate::report::archive::pssm_unwritten(handle.encoding(), pssm) {
+            if let Some(gap) = crate::report::archive::pssm_unwritten(handle.encoding(), pssm) {
+                let what = gap.what();
                 let stream = match handle.encoding() {
                     crate::report::archive::ArchiveEncoding::Xml => "XML (ARCHIVE_FORMAT=xml)",
                     crate::report::archive::ArchiveEncoding::Text => {

@@ -109,7 +109,7 @@ fn an_optional_ref_member_reads_null_and_its_own_type() {
 // t_params_other_wrong, t_params_other_pssm, t_params_other_unknown, t_params_other_empty,
 // b_params_other_wrong.
 #[test]
-fn an_object_index_is_ncbis_error_and_another_type_is_refused() {
+fn an_object_index_and_another_class_are_ncbis_errors() {
     for text in [
         "PDB-seq-id ::= { mol \"1ABC\", rel @1 }",
         "PDB-seq-id ::= { mol \"1ABC\", rel @0 }",
@@ -132,6 +132,36 @@ fn an_object_index_is_ncbis_error_and_another_type_is_refused() {
     ] {
         serial(read(named::PDB_SEQ_ID, text));
     }
+    // A value of another class: NCBI's `CSerialException` whether or not its process knows the
+    // class (psiblast and tblastn report it with their own message, `Names::own_serial_message`).
+    for (text, expected) in [
+        (
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id 1 }",
+            "incompatible member type",
+        ),
+        (
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Pssm { numRows 1, numColumns 1 } }",
+            "incompatible member type",
+        ),
+        (
+            "PDB-seq-id ::= { mol \"1ABC\", rel :No-such-type id 1 }",
+            "class not found: No-such-type",
+        ),
+        // The first `CSerialException` inside the value.
+        (
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id foo 1 }",
+            "unexpected member",
+        ),
+    ] {
+        let e = serial(read(named::PDB_SEQ_ID, text));
+        assert!(e.contains(expected), "{text}: {e}");
+    }
+    let other = other_pointer("Object-id", &[0xa0, 0x80, 0x02, 0x01, 0x05, 0, 0]);
+    let e = serial(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&other))));
+    assert!(e.contains("incompatible member type"), "{e}");
+    // A read that posts (a class's `PostRead`) posts only where NCBI knows the class, and so does
+    // an error of another kind inside the value (the `CUtilException` of a number in text, which
+    // the PSSM reader does not catch): refused.
     let refused = |result: Result<Value, ReadError>| match result {
         Err(ReadError::Unsupported(what)) => what,
         other => panic!("not refused: {other:?}"),
@@ -139,14 +169,19 @@ fn an_object_index_is_ncbis_error_and_another_type_is_refused() {
     assert_eq!(
         refused(read(
             named::PDB_SEQ_ID,
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id 1 }"
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id x }"
         )),
-        "':Object-id', a value of the type Object-id where a Date belongs (line 1): whether \
-         NCBI's reader reads it depends on the types its process has met before"
+        "':Object-id', a value of the type Object-id where a Date belongs (line 1): \
+         whether NCBI's reader reads it depends on the types its process has met before"
     );
-    let other = other_pointer("Object-id", &[0xa0, 0x80, 0x02, 0x01, 0x05, 0, 0]);
-    assert!(refused(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&other))))
-        .starts_with("':Object-id', a value of the type Object-id where a Date belongs (byte "));
+    assert_eq!(
+        refused(read(
+            named::PDB_SEQ_ID,
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Variation-ref { population-data { }, data unknown NULL } }"
+        )),
+        "':Variation-ref', a value of the type Variation-ref where a Date belongs (line 1): \
+         whether NCBI's reader reads it depends on the types its process has met before"
+    );
     // `:[]`: the name's `std::string` of the largest count of bytes.
     assert_eq!(
         read(
@@ -190,23 +225,25 @@ fn a_member_with_a_set_flag_adds_its_line_and_a_ref_member_does_not() {
 }
 
 // Probe D3c-3b t_descr_elem_null, t_descr_elem_null2, descr_only_null, descr_empty,
-// t_descr_elem_other, t_id_elem_null, t_id_elem_other, t_id_elem_at, b_id_elem_other.
+// t_descr_elem_other, t_id_elem_null, t_id_elem_other, t_id_elem_at, b_id_elem_other; probe6 and
+// probe7 (NCBI reads every such element; the program that uses the list dereferences it or not).
 #[test]
 fn an_element_of_a_list_of_refs_takes_the_pointer_forms() {
-    let refused = |root: u16, text: &str| match read(root, text) {
-        Err(ReadError::Unsupported(what)) => what,
-        other => panic!("{text}: not refused: {other:?}"),
+    let elements = |mut value: Value| match &mut value {
+        Value::List(items) => std::mem::take(items),
+        other => panic!("not a list: {other:?}"),
     };
-    for text in [
-        "Seq-descr ::= { NULL }",
-        "Seq-descr ::= { title \"a\", NULL }",
-        "Seq-descr ::= { NULL, NULL, title \"a\" }",
+    for (text, nulls) in [
+        ("Seq-descr ::= { NULL }", vec![true]),
+        ("Seq-descr ::= { title \"a\", NULL }", vec![false, true]),
+        (
+            "Seq-descr ::= { NULL, NULL, title \"a\" }",
+            vec![true, true, false],
+        ),
     ] {
-        let what = refused(named::SEQ_DESCR, text);
-        assert!(
-            what.starts_with("an element of Seq-descr stated as NULL (line 1): an empty reference"),
-            "{text}: {what}"
-        );
+        let items = elements(ok(named::SEQ_DESCR, text));
+        let held: Vec<bool> = items.iter().map(|item| *item == Value::Null).collect();
+        assert_eq!(held, nulls, "{text}");
     }
     // The empty list is NCBI's error (`CSeq_descr::PostRead`); one of a `NULL` is not empty.
     serial(read(named::SEQ_DESCR, "Seq-descr ::= { }"));
@@ -218,13 +255,14 @@ fn an_element_of_a_list_of_refs_takes_the_pointer_forms() {
         ok(named::SEQ_DESCR, "Seq-descr ::= { :Seqdesc title \"a\" }"),
         ok(named::SEQ_DESCR, "Seq-descr ::= { title \"a\" }")
     );
-    let what = refused(
+    let bioseq = ok(
         named::BIOSEQ,
         "Bioseq ::= { id { local id 1, NULL }, inst { repr raw, mol aa } }",
     );
+    let id = bioseq.member(member_index(named::BIOSEQ, "id")).cloned();
     assert!(
-        what.starts_with("an element of Bioseq.id stated as NULL (line 1)"),
-        "{what}"
+        matches!(&id, Some(Value::List(ids)) if ids.len() == 2 && ids[1] == Value::Null),
+        "{id:?}"
     );
     assert_eq!(
         ok(

@@ -3547,14 +3547,9 @@ fn build_pairwise_hits(
             positives: Some(positives),
             gaps: Some(gaps),
             subject_length: Some(subjects[s_idx].aa_len),
-            // The title after its first word, as the other programs give it; the reports take the
-            // subject's title bytes by subject index (`write_blastp_pairwise_report`).
-            subject_title: shown_subjects.title(s_idx).and_then(|title| {
-                title
-                    .iter()
-                    .position(|&byte| byte == b' ')
-                    .map(|space| String::from_utf8_lossy(&title[space + 1..]).into_owned())
-            }),
+            subject_title: shown_subjects
+                .title(s_idx)
+                .and_then(crate::blastinput::fasta_reader::hit_subject_title),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
@@ -6884,7 +6879,16 @@ fn search(
         // without letters) has its search strategy request: NCBI made its query factory before
         // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+            // NCBI's stream that throws while it writes the request (an empty descriptor of a
+            // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
+            // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
+            if let Err(error) = write_alone(span) {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {

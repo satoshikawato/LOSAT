@@ -1413,10 +1413,10 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
 /// words after the program's name).
 pub(super) fn parse_makedb_words(words: &[String]) -> MakedbArgs {
-    use crate::cli::{Cli, Commands};
+    use crate::cli::Commands;
     let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
     argv.extend(words.iter().cloned());
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(cli) => match cli.command {
             Commands::Makedb(args) => args,
             _ => unreachable!("a makeblastdb command line"),
@@ -2257,11 +2257,12 @@ fn s3a_gate() {
 /// The driver of the S3b and S3c gates of the makedb-v5 line
 /// (`makedb-v5-20261029/scripts/s3b_gate.py`, `s3c_gate.py --lib`): as `s3a_gate`, for the
 /// manifest named by `LOSAT_S3B_GATE_MANIFEST`. The words go through LOSAT's command line
-/// parser (a parser error is written as `main` writes it, with its exit code).
+/// reader (an argument error or a refusal is written as the command line writes it, with its
+/// exit status).
 #[test]
 #[ignore = "driver of an external gate (LOSAT_S3B_GATE_MANIFEST)"]
 fn s3b_gate() {
-    use crate::cli::{Cli, Commands};
+    use crate::cli::Commands;
     let manifest = std::env::var("LOSAT_S3B_GATE_MANIFEST").expect("LOSAT_S3B_GATE_MANIFEST");
     for line in std::fs::read_to_string(manifest).unwrap().lines() {
         let mut fields = line.split('\t');
@@ -2276,7 +2277,7 @@ fn s3b_gate() {
             let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
             argv.extend(parse_json_words(run));
             let (mut out, mut err) = (Vec::new(), Vec::new());
-            let status = match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+            let status = match crate::cli::try_parse_from(argv) {
                 Ok(cli) => {
                     let Commands::Makedb(args) = cli.command else {
                         unreachable!("a makeblastdb command line");
@@ -2291,14 +2292,17 @@ fn s3b_gate() {
                         &mut err,
                     )
                 }
-                Err(error) => {
-                    let message = crate::cli::render_message(&error);
-                    if error.use_stderr() {
-                        err.extend_from_slice(message.as_bytes());
-                    } else {
-                        out.extend_from_slice(message.as_bytes());
-                    }
-                    error.exit_code()
+                Err(crate::cli::ArgvError::Printed(text)) => {
+                    out.extend_from_slice(text.as_bytes());
+                    0
+                }
+                Err(crate::cli::ArgvError::Report(text)) => {
+                    err.extend_from_slice(&text);
+                    1
+                }
+                Err(crate::cli::ArgvError::Refused(text)) => {
+                    err.extend_from_slice(format!("Error: {text}\n").as_bytes());
+                    1
                 }
             };
             std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();

@@ -6,8 +6,8 @@
 //! for a part it does not build: `value`).
 //!
 //! A typed reader recurses as the type nests; the types it is given nest a bounded number of
-//! levels but for a `Seq-loc` of `mix` and `equiv`, whose depth the stream's limit bounds
-//! (`ObjectStream::limit_depth`). It reads (never skips) types that have neither a delayed member
+//! levels but for a `Seq-loc` of `mix` and `equiv`, whose depth the typed read's limit bounds
+//! (`read::TYPED_MAX_DEPTH`). It reads (never skips) types that have neither a delayed member
 //! nor a hook of NCBI's classes (`super::hooks`). Each call names its type, so the XML stream's
 //! frames and tags of a named type (`TypedReader::begin_names`), of a list and of its elements
 //! (`Input::ARRAY_FRAMES`, `Input::element_frame`, `Input::end_element`) are those of the generic

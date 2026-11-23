@@ -1,0 +1,13 @@
+USAGE
+  rpsbproc [-h] [-help] [-xmlhelp] [-i ] [-o ] [-e ] [-m ] [-t ] [-d ] [-f]
+    [-q] [-logfile File_Name] [-conffile File_Name] [-version] [-version-full]
+    [-version-full-xml] [-version-full-json] [-dryrun]
+
+DESCRIPTION
+   Process output from offline rpsblast to annotate sequence with conserved
+   domain information
+
+Use '-help' to print detailed descriptions of command line arguments
+Error in command-line arguments. See error logs for more details.
+========================================================================
+

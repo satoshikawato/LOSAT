@@ -650,6 +650,14 @@ impl StrategyExport {
                 state.unreached.push_back((queries.start, state.written));
                 state.next_query = queries.end;
                 made_one = true;
+                // NCBI's stream threw while it wrote this request (an element stated as `NULL` in a
+                // PSSM query, `encoder::NullElement`): NCBI's error ends the run there, after the
+                // bytes its stream flushed, so the request is reached.
+                if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
+                    flushed?;
+                    state.release_through(queries.start)?;
+                    return written;
+                }
                 written?;
                 flushed?;
                 Ok(())
@@ -667,16 +675,7 @@ impl StrategyExport {
     /// requests of the batches through it are NCBI's whatever ends the run (`end_run`); a sink
     /// that cannot be cut gets them here.
     pub(crate) fn release_through(&self, first: usize) -> std::io::Result<()> {
-        self.with_state(|state| {
-            while let Some(&(at, end)) = state.unreached.front() {
-                if at > first {
-                    break;
-                }
-                state.reached = end;
-                state.unreached.pop_front();
-            }
-            state.write_held(|at| at <= first)
-        })
+        self.with_state(|state| state.release_through(first))
     }
 
     /// Whether `other` is this export (`Posts`'s request marks compare by it).
@@ -883,6 +882,18 @@ impl State {
             self.sink.flush()?;
         }
         Ok(())
+    }
+
+    /// `StrategyExport::release_through`.
+    fn release_through(&mut self, first: usize) -> std::io::Result<()> {
+        while let Some(&(at, end)) = self.unreached.front() {
+            if at > first {
+                break;
+            }
+            self.reached = end;
+            self.unreached.pop_front();
+        }
+        self.write_held(|at| at <= first)
     }
 
     /// `StrategyExport::takes`.

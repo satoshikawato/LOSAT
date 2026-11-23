@@ -726,6 +726,7 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
+    fn null_element(&mut self) {}
     /// NCBI's XML stream checks a UTF8String's bytes as a VisibleString's
     /// (`XmlEncoder::utf8_str`); ASN.1 text writes them as they are.
     fn utf8_str(&mut self, value: &[u8]) {
@@ -784,10 +785,36 @@ pub(crate) fn seq_id_written_as_is(
 /// stream's own format is copied (`Encoder::delayed`); the other values are written as NCBI
 /// writes them (line RG-F3, PR 2: the XML stream's anonymous SEQUENCE and CHOICE, NULL and
 /// UTF8String, the binary stream's UTF8String and its NaN and infinite REALs; line PS item
-/// PS15b-1's probe XA, 2026-11-23).
+/// PS15b-1's probe XA, 2026-11-23). In every stream a list element stated as `NULL`
+/// (`Encoder::null_element`), where NCBI's stream throws in the middle of the archive, is not
+/// written yet.
 struct PssmGaps {
     encoding: ArchiveEncoding,
-    gap: Option<&'static str>,
+    gap: Option<PssmGap>,
+}
+
+/// What an archive's stream does not write yet of a PSSM file's members (`pssm_unwritten`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PssmGap {
+    /// A list element stated as `NULL` (`Encoder::null_element`): NCBI's stream throws there in
+    /// the middle of the archive. The search strategy's writer writes it
+    /// (`writer::write_strategy_request`).
+    NullElement,
+    /// A member read into a delay buffer of another format that NCBI's `CDelayBuffer::Update`
+    /// reads again with an error (`Encoder::unread_delayed`), which no writer of LOSAT writes.
+    ReadAgain,
+}
+
+impl PssmGap {
+    /// The gap in the words of LOSAT's refusal.
+    pub(crate) fn what(self) -> &'static str {
+        match self {
+            PssmGap::NullElement => "a list element stated as NULL",
+            PssmGap::ReadAgain => {
+                "a member read into a delay buffer of another format that NCBI reads again with an error"
+            }
+        }
+    }
 }
 
 impl crate::report::serial::encoder::Encoder for PssmGaps {
@@ -814,13 +841,19 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
+    /// A list element stated as `NULL`: NCBI's stream throws there in the middle of the archive
+    /// (`encoder::NullElement`), which LOSAT's archive does not write yet (its search strategy
+    /// does, `writer::write_strategy_request`).
+    fn null_element(&mut self) {
+        if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
+            self.gap = Some(PssmGap::NullElement);
+        }
+    }
     fn utf8_str(&mut self, _: &[u8]) {}
     fn delayed(&mut self, _: &[u8]) {}
     fn unread_delayed(&mut self) {
         if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
-            self.gap = Some(
-                "a member read into a delay buffer of another format that NCBI reads again with an error",
-            );
+            self.gap = Some(PssmGap::ReadAgain);
         }
     }
     /// Written through `Traced` (`pssm_written_as_is`).
@@ -837,7 +870,7 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
 pub(crate) fn pssm_unwritten(
     encoding: ArchiveEncoding,
     pssm: &crate::report::serial::pssm::PssmWithParameters,
-) -> Option<&'static str> {
+) -> Option<PssmGap> {
     let mut check = PssmGaps {
         encoding,
         gap: None,

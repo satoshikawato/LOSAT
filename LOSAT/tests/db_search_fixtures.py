@@ -650,12 +650,20 @@ def first_difference(expected: bytes, actual: bytes) -> str:
     return f"lengths differ: expected {len(expected)} bytes, got {len(actual)}"
 
 
-def expected_text(row: dict[str, str]) -> str:
-    """The text a `losat-rejection` row's stderr must contain."""
-    _, marker, rest = row["covers"].partition("expect: ")
-    if not marker:
+def expected_text(row: dict[str, str], library: bool = False) -> str:
+    """The text a `losat-rejection` row's stderr must contain: the covers cell's `expect: ` text, or in the
+    library's run its `library-expect: ` text where the cell has one. The library checks an argv before it
+    knows the inputs (`api::validate`), so a row whose command line's refusal comes from an input's word
+    (NCBI's exclusion of `-phi_pattern` by `-in_msa`, line RG item K4i-2b) has the library's message of
+    the argv alone, which is the command line's message of that argv with a query of records."""
+    texts = {match[1]: match[2] for match in reversed(list(EXPECT_TEXT.finditer(row["covers"])))}
+    if "" not in texts:
         raise SystemExit(f"{row['row_id']}: the covers cell has no 'expect: ' text")
-    return rest.split(" | ")[0]
+    return texts["library-"] if library and "library-" in texts else texts[""]
+
+
+# The first `expect: ` and `library-expect: ` texts of a covers cell, each to a ` | ` or the end of the cell.
+EXPECT_TEXT = re.compile(r"(?<![\w-])(library-|)expect: (.*?)(?= \| |$)")
 
 
 def near_row(row: dict[str, str]) -> tuple[str, int | None] | None:
@@ -1313,7 +1321,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.
         if library and run.returncode != 0 and run.stdout == b"" \
-                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row).encode() not in run.stderr:
+                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row, library).encode() not in run.stderr:
             return "library-input-error", ""
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
@@ -1331,8 +1339,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                 problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
-        if expected_text(row).encode() not in run.stderr:
-            problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
+        expected = expected_text(row, library)
+        if expected.encode() not in run.stderr:
+            problems.append(f"stderr lacks {expected!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
         if pssm and (pssms.files or pssms.stray):
             problems.append(f"a refused run wrote {[name for name, _ in pssms.files] + pssms.stray}")
         return ("differs", "; ".join(problems)) if problems else ("rejection", "")

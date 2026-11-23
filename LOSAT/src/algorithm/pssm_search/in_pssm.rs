@@ -639,15 +639,24 @@ pub(crate) fn psi_search_and_object_of(
     // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
     // frequency ratios only, whose engine sets the query up first too.
     let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
-    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+    // Then the set-up takes the query's title (`GetTitle`, before its letters), which reads every
+    // descriptor's variant: an empty descriptor is the query's error
+    // (`report::query_warnings::null_descriptor_error`; NCBI BLAST+ 2.17.0, psiblast and tblastn,
+    // on every report path and with a PSSM of frequency ratios only, probe D3c-3b `probe4`).
+    let query_error = if validation_error.is_some() {
+        None
+    } else if nucleotide_query {
         Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else if query.has_empty() {
+        Some(crate::report::query_warnings::null_descriptor_error())
     } else {
         invalid_residues
     };
     let (mut scores_error, setup_error) = if ratios_only {
-        (invalid_residues, None)
+        (query_error, None)
     } else {
-        (None, invalid_residues)
+        (None, query_error)
     };
     let reads_values =
         validation_error.is_none() && scores_error.is_none() && setup_error.is_none();
@@ -978,7 +987,11 @@ pub(crate) fn psi_search_and_object_of(
     // (`algorithm::psiblast::in_pssm_files`).
     if let Some(request) = &request {
         let text = crate::report::archive::ArchiveEncoding::Text;
-        if crate::report::archive::pssm_unwritten(text, &request.pssm).is_some() {
+        // (A list element stated as NULL is written: the strategy's writer throws where NCBI's
+        // stream does, `report::archive::PssmGap::NullElement`.)
+        if crate::report::archive::pssm_unwritten(text, &request.pssm)
+            == Some(crate::report::archive::PssmGap::ReadAgain)
+        {
             return Err(reader.refuse(
                 "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception)",
             ));

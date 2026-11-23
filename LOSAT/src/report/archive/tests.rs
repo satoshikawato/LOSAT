@@ -543,9 +543,7 @@ fn fixture_pssm(path: &str) -> crate::report::serial::pssm::PssmWithParameters {
 
 #[test]
 fn the_archive_streams_gaps_of_a_pssm_files_members() {
-    const READ_AGAIN: Option<&str> = Some(
-        "a member read into a delay buffer of another format that NCBI reads again with an error",
-    );
+    const READ_AGAIN: Option<PssmGap> = Some(PssmGap::ReadAgain);
     // (file, the gap of the XML, ASN.1 binary and ASN.1 text archives)
     for (path, xml, binary, text) in [
         // A title only.
@@ -580,6 +578,28 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
             None,
             "{path}"
         );
+    }
+    // An element stated as NULL (a Seq-descr element, a feature's dbxref element: the reader's
+    // empty references, line RG item D3c-3b): NCBI's three streams throw at it in the middle of
+    // the archive (`NULL element while writing container`), which LOSAT's archive does not write.
+    // (The XML stream writes the feature's anonymous SEQUENCE before its dbxref, line RG-F3 PR 2.)
+    const NULL_ELEMENT: Option<PssmGap> = Some(PssmGap::NullElement);
+    for path in [
+        "pssm/d3b_descr_elem_null.asn.gz",
+        "pssm/d3b_f_dbxref_null.asn.gz",
+    ] {
+        let pssm = fixture_pssm(path);
+        for encoding in [
+            ArchiveEncoding::Xml,
+            ArchiveEncoding::Binary,
+            ArchiveEncoding::Text,
+        ] {
+            assert_eq!(
+                pssm_unwritten(encoding, &pssm),
+                NULL_ELEMENT,
+                "{path} {encoding:?}"
+            );
+        }
     }
 }
 

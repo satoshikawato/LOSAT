@@ -9,8 +9,9 @@
 - psiblast `-in_pssm` with `-out_pssm` writes the author names of a PSSM in ASN.1 binary or XML
   (`Auth-list` `names`, which NCBI reads again only when it writes them in ASN.1 text) whose read
   replaces a byte outside the visible ASCII range: NCBI's message (803.7) of that read, then `#` in
-  the file, as NCBI does. LOSAT refused them. Still refused: author names whose read fails (a number
-  too large for its type), where NCBI writes part of the file and stops with an exception.
+  the file, as NCBI does. LOSAT refused them. Still refused, also with `-export_search_strategy`: author names whose read
+  fails (a number too large for its type), where NCBI writes part of the file and stops with an
+  exception.
 - psiblast `-outfmt 11` writes the XML and ASN.1 binary archives (`ARCHIVE_FORMAT=xml`, `bin`) of the
   PSSM files that LOSAT refused there: unnamed SEQUENCE and CHOICE values (a User-object descriptor,
   annotations), NULL, UTF8String (in XML with NCBI's message for a control byte), NaN and infinite

@@ -135,6 +135,10 @@ pub(crate) struct Names {
     pub(crate) reader: &'static str,
     pub(crate) input: &'static str,
     pub(crate) allocator: &'static str,
+    /// Whether the program reports every `CSerialException` of the read with a message of its own
+    /// (psiblast's and tblastn's "Unrecognized format for PSSM", `CPsiBlastArgs`), so that what
+    /// the exception says does not show (`read::TypedReader::other_type`).
+    pub(crate) own_serial_message: bool,
 }
 
 impl Names {
@@ -144,6 +148,7 @@ impl Names {
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
+        own_serial_message: true,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {
@@ -151,6 +156,7 @@ impl Names {
         reader: "mask data reader",
         input: "file",
         allocator: "makeblastdb",
+        own_serial_message: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
@@ -159,6 +165,7 @@ impl Names {
         reader: "delayed member reader",
         input: "member's bytes",
         allocator: "NCBI's reader",
+        own_serial_message: false,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]
@@ -167,6 +174,7 @@ impl Names {
         reader: "test reader",
         input: "input",
         allocator: "NCBI's reader",
+        own_serial_message: true,
     };
 }
 

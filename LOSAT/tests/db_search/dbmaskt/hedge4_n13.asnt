@@ -1,0 +1,17 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "near te 13: e2 [1200, 1202) removed, stored as N",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 7,
+          to 9,
+          id local id 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

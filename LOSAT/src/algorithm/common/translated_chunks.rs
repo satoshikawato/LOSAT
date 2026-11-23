@@ -276,6 +276,20 @@ impl<'a> ChunkLetters<'a> {
 // defect, PD-LOSAT-NCBI-DEFECTS exception 21: the Owner's answers Q1 = B and Q2 = B of M4b,
 // 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
 // the same row once for each word it reads in the mask, or a crash).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:145-215, 264-276
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500, 525-545
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// Where the masks leave a frame an empty first part (a mask within the sequence's first two bases
+// for the plus frames, or within the one or two bases after its last whole codon for the minus
+// frames, with no other mask in the frame but at its other end; or an empty mask at 0), the empty
+// part's chunk takes the hard branch, which allocates the subject's list of ranges, and the chunk
+// from 0 after it takes the "no chunking" branch, which points that list at the backup's full
+// range: NCBI searches the frame whole (or, shorter than the frame, as above), then frees that
+// pointer when it restores the subject and crashes, in every run. The empty chunk adds nothing (its
+// one word, if any, is a window or more behind every later hit on its diagonal), so LOSAT searches
+// the frame's chunks as they come, the masked bases masked as for every other mask (an approved
+// NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 27: the Owner's answers Q4 = B of M4b, 2026-11-22,
+// and Q6 = B, 2026-11-23).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
 /// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
 /// `core::subject_split::complement_masks`), each with its scan ranges, in a search with

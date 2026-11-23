@@ -19,10 +19,14 @@ use crate::cli::{Cli, Commands};
 /// `Error: ` and the error's `Debug` text to standard error and exits with status 1). It takes
 /// nothing from its caller, so no caller can pass it a value it does not expect; it acts on the
 /// whole process (it can end it, it sets `cli::post_errors_in_run` for the rest of the process,
-/// and on WASI it changes the working directory), so a program that searches from its own code
-/// calls `api` instead.
+/// where a panic ends the process it installs the panic hook of
+/// `report::archive::strategy::install_panic_hook`, and on WASI it changes the working
+/// directory), so a program that searches from its own code calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    // Where a panic (LOSAT's own failure) ends the process, it ends the strategy files as LOSAT's
+    // refusals end them.
+    crate::report::archive::strategy::install_panic_hook();
     let result = run_main_entry();
     // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
     // the standard error went to the `-logfile` target (tblastx, rpsblast and rpstblastn,

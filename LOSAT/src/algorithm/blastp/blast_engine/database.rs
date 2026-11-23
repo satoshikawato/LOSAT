@@ -2323,7 +2323,7 @@ impl ListedTitles<'_> {
                         &database.db,
                         &database.taxdb,
                         self.parsed_subject(rank as usize),
-                        blob,
+                        (blob, ordinal),
                         &lookups,
                         self.program,
                     )?
@@ -2333,7 +2333,7 @@ impl ListedTitles<'_> {
                     &database.db,
                     &database.taxdb,
                     self.parsed_subject(rank as usize),
-                    ordinal,
+                    (ordinal, ordinal),
                     &[],
                     self.program,
                 )?,

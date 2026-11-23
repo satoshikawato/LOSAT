@@ -945,11 +945,22 @@ pub(super) fn convert_freq_ratios_to_pssm(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2509-2593
 /// Returns `kbp_psi[0]` after the scaling: the block of its last `_PSIUpdateLambdaK`.
+///
+/// `stale` is `kbp_psi[0]` before the scaling where the caller models it (makeprofiledb's engine
+/// on frequency ratios, `pssm_from_freq_ratios_engine`): at a factor whose PSSM gives
+/// `_PSIComputeScoreProbabilities` no score frequencies (`factor_one_score_range_is_valid`),
+/// `_PSIUpdateLambdaK` leaves the block as it was and the search reads its Lambda again. A PSSM
+/// that never leaves that range makes NCBI's bracket search grow its factor without end; LOSAT
+/// stops with [`PsiError::ScalingUndefined`] where a score of the rescaled PSSM leaves `int`
+/// (`rescale`). `None` (psiblast) takes such a PSSM as one without Lambda (-1,
+/// [`PsiError::PositiveAvgScore`]): a round's scores never reach it (cited above
+/// `compute_score_probabilities`), and psiblast's `-in_pssm` refuses that error.
 pub(super) fn scale_matrix(
     query: &[u8],
     std_probs: &[f64; BLASTAA_SIZE],
     internal: &mut InternalPssm,
     sbp: &PsiScoreBlk,
+    stale: Option<KarlinBlk>,
 ) -> Result<KarlinBlk, PsiError> {
     let ideal_lambda = sbp.ideal_lambda;
     let mut first_time = true;
@@ -957,10 +968,18 @@ pub(super) fn scale_matrix(
     let mut factor_low = 1.0;
     let mut factor_high = 1.0;
     let mut too_high = true;
-    let mut kbp_psi;
+    let mut kbp_psi = stale.unwrap_or(KarlinBlk {
+        lambda: -1.0,
+        k: -1.0,
+        h: -1.0,
+    });
+    let update = |internal: &InternalPssm, kbp_psi: &mut KarlinBlk| match stale {
+        Some(_) if !factor_one_score_range_is_valid(&internal.pssm, query) => {}
+        _ => *kbp_psi = update_lambda_k(&internal.pssm, query, std_probs),
+    };
     loop {
-        rescale(internal, factor);
-        kbp_psi = update_lambda_k(&internal.pssm, query, std_probs);
+        rescale(internal, factor, stale.is_some())?;
+        update(internal, &mut kbp_psi);
         let new_lambda = kbp_psi.lambda;
         if new_lambda > ideal_lambda {
             if first_time {
@@ -996,8 +1015,8 @@ pub(super) fn scale_matrix(
     }
     for _ in 0..K_POSIT_SCALING_NUM_ITERATIONS {
         factor = (factor_high + factor_low) / 2.0;
-        rescale(internal, factor);
-        kbp_psi = update_lambda_k(&internal.pssm, query, std_probs);
+        rescale(internal, factor, stale.is_some())?;
+        update(internal, &mut kbp_psi);
         let new_lambda = kbp_psi.lambda;
         if new_lambda > ideal_lambda {
             factor_low = factor;
@@ -1008,17 +1027,30 @@ pub(super) fn scale_matrix(
     Ok(kbp_psi)
 }
 
-/// The rescaling of `_PSIScaleMatrix`'s loops (cited above `scale_matrix`).
-fn rescale(internal: &mut InternalPssm, factor: f64) {
+/// The rescaling of `_PSIScaleMatrix`'s loops (cited above `scale_matrix`). With `checked`
+/// (makeprofiledb's engine, whose factor can grow without end) a score past `int` stops the
+/// scaling: `BLAST_Nint`'s conversion of it to `long` and NCBI's narrowing to `int` leave C's
+/// defined behaviour there.
+fn rescale(internal: &mut InternalPssm, factor: f64, checked: bool) -> Result<(), PsiError> {
     for (pssm, scaled) in internal.pssm.iter_mut().zip(&internal.scaled_pssm) {
         for (score, &scaled) in pssm.iter_mut().zip(scaled) {
             *score = if scaled != BLAST_SCORE_MIN {
-                blast_nint(factor * scaled as f64 / K_PSI_SCALE_FACTOR as f64) as i32
+                let value = factor * scaled as f64 / K_PSI_SCALE_FACTOR as f64;
+                if checked && !int_holds(value) {
+                    return Err(PsiError::ScalingUndefined);
+                }
+                blast_nint(value) as i32
             } else {
                 BLAST_SCORE_MIN
             };
         }
     }
+    Ok(())
+}
+
+/// Whether `value` rounds (`BLAST_Nint`) or truncates (`(int)`) to an `int`.
+fn int_holds(value: f64) -> bool {
+    value > i32::MIN as f64 - 0.5 && value < i32::MAX as f64 + 0.5
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2732-2753
@@ -1087,8 +1119,223 @@ pub(super) fn pssm_from_freq_ratios(
     let mut internal = InternalPssm::new(query.len());
     internal.freq_ratios.copy_from_slice(freq_ratios);
     convert_freq_ratios_to_pssm(&mut internal, query, sbp, &std_probs);
-    let ungapped = scale_matrix(query, &std_probs, &mut internal, sbp)?;
+    let ungapped = scale_matrix(query, &std_probs, &mut internal, sbp, None)?;
     Ok((internal.into_scores(), ungapped))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:343-381
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:399-414
+/// `PSICreatePssmFromFrequencyRatios` as `CPssmEngine` runs it for `CPsiBlastInputFreqRatios`
+/// (makeprofiledb's PSSMs of frequency ratios only): the scores of `freq_ratios` (28 per
+/// position) scaled by `_PSIScaleMatrix` when `impala_scaling_factor` is
+/// `kPSSM_NoImpalaScaling` (1.0), by `_IMPALAScaleMatrix` otherwise, and `kbp_psi[0]` after the
+/// scaling. `kbp_psi` is `kbp_psi[0]` of the engine's score block before it (the query's ungapped
+/// block, which `_PSIUpdateLambdaK` keeps where it computes none).
+pub(super) fn pssm_from_freq_ratios_engine(
+    query: &[u8],
+    freq_ratios: &[[f64; BLASTAA_SIZE]],
+    sbp: &PsiScoreBlk,
+    kbp_psi: KarlinBlk,
+    impala_scaling_factor: f64,
+) -> Result<(Vec<[i32; BLASTAA_SIZE]>, KarlinBlk), PsiError> {
+    let std_probs = crate::stats::karlin_calc::compute_std_aa_composition();
+    let mut internal = InternalPssm::new(query.len());
+    internal.freq_ratios.copy_from_slice(freq_ratios);
+    convert_freq_ratios_to_pssm(&mut internal, query, sbp, &std_probs);
+    let ungapped = if impala_scaling_factor == 1.0 {
+        scale_matrix(query, &std_probs, &mut internal, sbp, Some(kbp_psi))?
+    } else {
+        impala_scale_matrix(
+            query,
+            &std_probs,
+            &mut internal,
+            sbp,
+            kbp_psi,
+            impala_scaling_factor,
+        )?
+    };
+    Ok((internal.into_scores(), ungapped))
+}
+
+/// `PRO_TRUE_ALPHABET_SIZE` letters of `trueCharPositions`, the NCBIstdaa codes `fillSfp` reads.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_posit.c:39-40
+const TRUE_CHAR_POSITIONS: [usize; 20] = [
+    1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
+];
+
+/// `kScoreMatrixScoreRange`: the span of scores `fillSfp` takes.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_posit.h:49
+const K_SCORE_MATRIX_SCORE_RANGE: i32 = 10000;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_posit.c:168-214
+/// `fillSfp` of the PSSM `matrix` (its positions all count, X too): the score probabilities from
+/// the smallest score that is not `BLAST_SCORE_MIN` to the largest, with their average; `Ok(None)`
+/// where the scores span `kScoreMatrixScoreRange` or more (NCBI's NULL). A PSSM whose scores of
+/// the 20 letters are all `BLAST_SCORE_MIN` or `BLAST_SCORE_MAX` and more leaves NCBI's smallest
+/// score at `BLAST_SCORE_MAX` and points its probabilities outside its array:
+/// [`PsiError::ScalingUndefined`].
+fn fill_sfp(
+    matrix: &[[i32; BLASTAA_SIZE]],
+    std_probs: &[f64; BLASTAA_SIZE],
+) -> Result<Option<(Vec<f64>, i32, i32)>, PsiError> {
+    let (mut min_score, mut max_score) = (BLAST_SCORE_MAX, BLAST_SCORE_MIN);
+    for row in matrix {
+        for &k in &TRUE_CHAR_POSITIONS {
+            if row[k] != BLAST_SCORE_MIN && row[k] < min_score {
+                min_score = row[k];
+            }
+            if row[k] > max_score {
+                max_score = row[k];
+            }
+        }
+    }
+    if min_score == BLAST_SCORE_MAX {
+        return Err(PsiError::ScalingUndefined);
+    }
+    if max_score as i64 - min_score as i64 >= K_SCORE_MATRIX_SCORE_RANGE as i64 {
+        return Ok(None);
+    }
+    let mut sprob = vec![0.0; (max_score - min_score + 1) as usize];
+    let one_pos_frac = 1.0 / matrix.len() as f64;
+    for row in matrix {
+        for &k in &TRUE_CHAR_POSITIONS {
+            if row[k] >= min_score {
+                sprob[(row[k] - min_score) as usize] += one_pos_frac * std_probs[k];
+            }
+        }
+    }
+    Ok(Some((sprob, min_score, max_score)))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2597-2623
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_posit.c:228-366
+/// `_IMPALAScaleMatrix` (`impalaScaleMatrix` with its binary search): the scaled PSSM of
+/// `internal.scaled_pssm` scaled by `scaling_factor` replaces both of `internal`'s PSSMs, and the
+/// result is `kbp_psi[0]` after its `_PSIUpdateLambdaK` (`kbp_psi`, the block before it, where
+/// that call computes none). `fillSfp`'s NULL is NCBI's status 1
+/// ([`PsiError::ImpalaScoreRange`]). The bracket search has no error of its own: a Lambda of -1
+/// (`Blast_KarlinLambdaNR`'s failure) counts as too small, so the factor can shrink without end;
+/// a score that the truncation `(int)` cannot hold stops it ([`PsiError::ScalingUndefined`]).
+fn impala_scale_matrix(
+    query: &[u8],
+    std_probs: &[f64; BLASTAA_SIZE],
+    internal: &mut InternalPssm,
+    sbp: &PsiScoreBlk,
+    kbp_psi: KarlinBlk,
+    scaling_factor: f64,
+) -> Result<KarlinBlk, PsiError> {
+    let lambda = sbp.ideal_lambda / scaling_factor;
+    let div_factor = K_PSI_SCALE_FACTOR as f64 / scaling_factor;
+    let lambda_guess = kbp_psi.lambda / scaling_factor;
+    let mut factor = 1.0;
+    let (mut factor_low, mut factor_high) = (1.0, 1.0);
+    let mut too_high = true;
+    let mut first_time = true;
+    // `posMatrix`: a matrix of its own (`Kappa_posSearchItemsNew`), `posPrivateMatrix` the
+    // scaled PSSM itself.
+    let mut matrix = vec![[0i32; BLASTAA_SIZE]; query.len()];
+    let truncate = |matrix: &mut [[i32; BLASTAA_SIZE]],
+                    private: &[[i32; BLASTAA_SIZE]],
+                    factor: f64|
+     -> Result<(), PsiError> {
+        for (row, private) in matrix.iter_mut().zip(private) {
+            for (score, &private) in row.iter_mut().zip(private) {
+                *score = if private == BLAST_SCORE_MIN {
+                    BLAST_SCORE_MIN
+                } else {
+                    let value = (factor * private as f64) / div_factor;
+                    if !(value > i32::MIN as f64 - 1.0 && value < i32::MAX as f64 + 1.0) {
+                        return Err(PsiError::ScalingUndefined);
+                    }
+                    value as i32
+                };
+            }
+        }
+        Ok(())
+    };
+    let new_lambda_at = |matrix: &[[i32; BLASTAA_SIZE]]| -> Result<f64, PsiError> {
+        let Some((sprob, min_score, max_score)) = fill_sfp(matrix, std_probs)? else {
+            return Err(PsiError::ImpalaScoreRange);
+        };
+        Ok(crate::stats::karlin_calc::calc_lambda_of_score_probs(
+            sprob,
+            min_score,
+            max_score,
+            lambda_guess,
+        ))
+    };
+    loop {
+        truncate(&mut matrix, &internal.scaled_pssm, factor)?;
+        let new_lambda = new_lambda_at(&matrix)?;
+        if new_lambda > lambda {
+            if first_time {
+                factor_high = 1.0 + K_POSIT_SCALING_PERCENT;
+                factor = factor_high;
+                factor_low = 1.0;
+                too_high = true;
+                first_time = false;
+            } else {
+                if !too_high {
+                    break;
+                }
+                factor_high += factor_high - 1.0;
+                factor = factor_high;
+            }
+        } else if first_time {
+            factor_high = 1.0;
+            factor_low = 1.0 - K_POSIT_SCALING_PERCENT;
+            factor = factor_low;
+            too_high = false;
+            first_time = false;
+        } else {
+            if too_high {
+                break;
+            }
+            factor_low += factor_low - 1.0;
+            factor = factor_low;
+        }
+    }
+    for _ in 0..K_POSIT_SCALING_NUM_ITERATIONS {
+        factor = 0.5 * (factor_high + factor_low);
+        truncate(&mut matrix, &internal.scaled_pssm, factor)?;
+        let new_lambda = new_lambda_at(&matrix)?;
+        if new_lambda > lambda {
+            factor_low = factor;
+        } else {
+            factor_high = factor;
+        }
+    }
+    for (row, private) in matrix.iter_mut().zip(&internal.scaled_pssm) {
+        for (score, &private) in row.iter_mut().zip(private) {
+            if private != BLAST_SCORE_MIN {
+                let value = private as f64 * factor / K_PSI_SCALE_FACTOR as f64;
+                if !int_holds(value) {
+                    return Err(PsiError::ScalingUndefined);
+                }
+                *score = blast_nint(value) as i32;
+            }
+        }
+    }
+    let kbp_psi = if factor_one_score_range_is_valid(&matrix, query) {
+        update_lambda_k(&matrix, query, std_probs)
+    } else {
+        kbp_psi
+    };
+    let scalefactor = scaling_factor / K_PSI_SCALE_FACTOR as f64;
+    for row in internal.scaled_pssm.iter_mut() {
+        for score in row.iter_mut() {
+            if *score != BLAST_SCORE_MIN {
+                let value = *score as f64 * factor * scalefactor;
+                if !int_holds(value) {
+                    return Err(PsiError::ScalingUndefined);
+                }
+                *score = blast_nint(value) as i32;
+            }
+        }
+    }
+    // `_PSICopyMatrix_int` of `scaled_pssm` into `pssm`: the scaled PSSM is the result.
+    internal.pssm.clone_from(&internal.scaled_pssm);
+    Ok(kbp_psi)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:715-743

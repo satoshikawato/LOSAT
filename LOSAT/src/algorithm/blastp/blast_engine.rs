@@ -87,8 +87,9 @@ mod x_subject_runs;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
-// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo; the
-// steps after any traceback on the final hit lists.
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo,
+// `run_call`'s choice of non-redo traceback (`NonRedoTraceback`), and the steps after any
+// traceback on the final hit lists.
 mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
@@ -9968,70 +9969,27 @@ fn run_call(
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
-    // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
-    // preliminary list here, so the composition-based redo below finds none; its hit lists
-    // replace the redo's after it.
-    let ordinary_hit_lists = if args.rps_search.is_some() {
-        // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
-        Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
-    } else if ordinary_traceback && args.psi_search.is_some() {
-        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
-        // the position-based redo of modes 1 to 3, `FetchNotes::pssm_redo`).
-        Some(pssm_hooks::pssm_traceback(
-            &args,
-            &contexts,
-            total_query_span,
-            subjects,
-            &gapped_params,
-            gapped_gumbel.as_ref(),
-            &exact_search_spaces,
-            &search_spaces,
-            (cutoff_subject_length, prelim_evalue),
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            blastp_parallel_pool,
-            &|heaps: &[_]| fetch_notes.pssm_redo(heaps),
-            sorts_results,
-        )?)
-    } else if args.ungapped {
-        // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
-        // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
-        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
-        let finish = traceback::UngappedFinish {
-            contexts: &contexts,
-            subjects,
-            matrix: args.scoring.matrix,
-            hitlist_size: args.traceback_hitlist_size(),
-            sorts_results,
-        };
-        Some(finish.run(&mut preliminary_hit_lists, &mut x_compact_hit_lists)?)
-    } else if ordinary_traceback {
-        let ordinary = traceback::OrdinaryTraceback {
-            contexts: &contexts,
-            total_query_span,
-            subjects,
-            matrix: args.scoring.matrix,
-            gap_open: args.scoring.gap_open,
-            gap_extend: args.scoring.gap_extend,
-            x_drop_final: x_drop_gapped_final,
-            karlin: &gapped_params,
-            gumbel: gapped_gumbel.as_ref(),
-            search_spaces: &search_spaces,
-            expect_value: args.evalue,
-            hitlist_size: args.traceback_hitlist_size(),
-            sorts_results,
-            link: args
-                .sum_stats
-                .then(crate::core::link_hsps::EvenGapLinkParams::traceback),
-        };
-        Some(ordinary.run(
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            blastp_parallel_pool,
-        )?)
-    } else {
-        None
-    };
+    // Non-redo traceback (`traceback::NonRedoTraceback`: rpsblast, psiblast `-in_pssm`,
+    // `-ungapped`, `-comp_based_stats 0`); when `Some`, its hit lists replace the redo's after it.
+    let ordinary_hit_lists = traceback::NonRedoTraceback {
+        args: &args,
+        ordinary_traceback,
+        contexts: &contexts,
+        total_query_span,
+        subjects,
+        gapped_params: &gapped_params,
+        gapped_gumbel: gapped_gumbel.as_ref(),
+        exact_search_spaces: &exact_search_spaces,
+        search_spaces: &search_spaces,
+        prelim_cutoffs: (cutoff_subject_length, prelim_evalue),
+        x_drop_final: x_drop_gapped_final,
+        sorts_results,
+        query_batches: &query_batches,
+        query_batch_skipped: &query_batch_skipped,
+        fetch_notes: &fetch_notes,
+        pool: blastp_parallel_pool,
+    }
+    .final_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists)?;
     // The parameters of each query's redo (`redo_run::RedoParamsBuilder`), which the redo's paths
     // below read.
     let redo_params = redo_run::RedoParamsBuilder {

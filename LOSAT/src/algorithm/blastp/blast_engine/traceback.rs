@@ -11,7 +11,8 @@
 //! threads' capped results can keep more lists for `-culling_limit` and `-qcov_hsp_perc` with
 //! several threads; LOSAT's output is that of NCBI's `-num_threads 1`).
 //!
-//! The steps after any traceback on each query's final hit list (`finish_hit_lists`) are here too.
+//! `run_call`'s choice of non-redo traceback (`NonRedoTraceback`) and the steps after any
+//! traceback on each query's final hit list (`finish_hit_lists`) are here too.
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
@@ -26,7 +27,7 @@ use super::super::hsp::{
 };
 use super::super::x_prelim_compact::XPrelimHsp;
 use super::super::x_redo_subjects::XRedoSubjects;
-use super::{besthit, culling};
+use super::{besthit, culling, pssm_hooks, redo_run};
 // The preliminary stage's helpers that this module calls are inlined everywhere or have other
 // callers; it does not call `preliminary_hit_from_local_match_hsp`,
 // `purge_preliminary_hits_with_common_endpoints` or `kappa::recompute_num_identities`, whose one
@@ -461,6 +462,111 @@ impl UngappedFinish<'_> {
             hsp_list.hsps.push(final_hsp);
         }
         Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
+    }
+}
+
+/// The final hit lists of a call whose traceback is not the composition-based redo (`redo_run`):
+/// rpsblast's, psiblast `-in_pssm`'s, `-ungapped`'s and `-comp_based_stats 0`'s; `None` for a call
+/// that `run_call`'s redo finishes.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1478-1499
+/// `BLAST_ComputeTraceback_MT` chooses RPS-BLAST's traceback, the composition-based redo, or the
+/// ordinary traceback (which skips alignment for `-ungapped` at line 1526); here `final_lists`
+/// runs every non-redo branch and returns `None` when `run_call`'s redo runs instead.
+pub(super) struct NonRedoTraceback<'a> {
+    pub(super) args: &'a ResolvedBlastpArgs,
+    pub(super) ordinary_traceback: bool,
+    pub(super) contexts: &'a [QueryContext],
+    pub(super) total_query_span: i32,
+    pub(super) subjects: XRedoSubjects<'a>,
+    pub(super) gapped_params: &'a KarlinParams,
+    pub(super) gapped_gumbel: Option<&'a BlastGumbelBlk>,
+    pub(super) exact_search_spaces: &'a [Option<i64>],
+    pub(super) search_spaces: &'a [crate::stats::search_space::SearchSpace],
+    pub(super) prelim_cutoffs: (i32, f64),
+    pub(super) x_drop_final: i32,
+    pub(super) sorts_results: bool,
+    pub(super) query_batches: &'a [crate::blastinput::seq_range::RangedBatch],
+    pub(super) query_batch_skipped: &'a [bool],
+    pub(super) fetch_notes: &'a super::database::FetchNotes<'a>,
+    pub(super) pool: &'a crate::utils::threading::SearchPool<'a>,
+}
+
+impl NonRedoTraceback<'_> {
+    /// Runs the call's non-redo traceback (rpsblast's final lists, psiblast `-in_pssm`'s
+    /// traceback, `-ungapped`'s finish, or `-comp_based_stats 0`'s ordinary traceback), taking
+    /// every preliminary list so `run_call`'s redo finds none; returns `None` when `run_call`'s
+    /// redo runs instead.
+    pub(super) fn final_lists(
+        &self,
+        preliminary_hit_lists: &mut [Option<BlastpHitList>],
+        compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    ) -> Result<Option<Vec<Option<BlastpHitList>>>> {
+        // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
+        // preliminary list here, so `run_call`'s redo finds none; its hit lists replace the
+        // redo's after it.
+        Ok(if self.args.rps_search.is_some() {
+            // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
+            Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
+        } else if self.ordinary_traceback && self.args.psi_search.is_some() {
+            // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
+            // the position-based redo of modes 1 to 3, `FetchNotes::pssm_redo`).
+            Some(pssm_hooks::pssm_traceback(
+                self.args,
+                self.contexts,
+                self.total_query_span,
+                self.subjects,
+                self.gapped_params,
+                self.gapped_gumbel,
+                self.exact_search_spaces,
+                self.search_spaces,
+                self.prelim_cutoffs,
+                preliminary_hit_lists,
+                compact_hit_lists,
+                self.pool,
+                &|heaps: &[_]| self.fetch_notes.pssm_redo(heaps),
+                self.sorts_results,
+            )?)
+        } else if self.args.ungapped {
+            // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
+            // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
+            redo_run::sw_ungapped_check(
+                self.args.use_sw_tback,
+                self.query_batches,
+                self.query_batch_skipped,
+            )?;
+            let finish = UngappedFinish {
+                contexts: self.contexts,
+                subjects: self.subjects,
+                matrix: self.args.scoring.matrix,
+                hitlist_size: self.args.traceback_hitlist_size(),
+                sorts_results: self.sorts_results,
+            };
+            Some(finish.run(preliminary_hit_lists, compact_hit_lists)?)
+        } else if self.ordinary_traceback {
+            let ordinary = OrdinaryTraceback {
+                contexts: self.contexts,
+                total_query_span: self.total_query_span,
+                subjects: self.subjects,
+                matrix: self.args.scoring.matrix,
+                gap_open: self.args.scoring.gap_open,
+                gap_extend: self.args.scoring.gap_extend,
+                x_drop_final: self.x_drop_final,
+                karlin: self.gapped_params,
+                gumbel: self.gapped_gumbel,
+                search_spaces: self.search_spaces,
+                expect_value: self.args.evalue,
+                hitlist_size: self.args.traceback_hitlist_size(),
+                sorts_results: self.sorts_results,
+                link: self
+                    .args
+                    .sum_stats
+                    .then(crate::core::link_hsps::EvenGapLinkParams::traceback),
+            };
+            Some(ordinary.run(preliminary_hit_lists, compact_hit_lists, self.pool)?)
+        } else {
+            None
+        })
     }
 }
 

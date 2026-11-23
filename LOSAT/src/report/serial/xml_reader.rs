@@ -649,7 +649,8 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// `m_NsPrefixToName[prefix] = name` (and the map the other way, which reading does not use).
+    /// Records `name` as the namespace of `prefix` in `m_NsPrefixToName`, replacing an earlier
+    /// declaration of the prefix (NCBI also keeps the map the other way, which reading does not use).
     fn declare(&mut self, prefix: Vec<u8>, name: Vec<u8>) {
         match self
             .namespaces

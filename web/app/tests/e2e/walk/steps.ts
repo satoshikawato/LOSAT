@@ -998,6 +998,18 @@ const runOnce: StepBody = async (walker) => {
   return `runs ${ended.join(', ')}`;
 };
 
+/**
+ * A file that a run made for an input is named by that run (line WQA's D22: `losat-run3-blastn-megablast-20261123T101530Z.query.fa`), and
+ * the engine writes the name where the command line writes a file name (outfmt 0 and 7 `Input:`, SAM's `CL:`): two runs of one form
+ * differ there and nowhere else. The names are compared by the walk's own checks of each run (`filesOf`); here each becomes its role.
+ * A name has no space, so outfmt 0, which wraps its lines at spaces, never splits one.
+ */
+const MADE_NAME = /losat-run\d+-[a-z0-9-]+-\d{8}T\d{6}Z\.(query|subject)\.fa/g;
+
+function withoutMadeNames(bytes: Buffer): Buffer {
+  return Buffer.from(bytes.toString('latin1').replace(MADE_NAME, '<made $1>'), 'latin1');
+}
+
 const twice: StepBody = async (walker) => {
   const { page } = walker;
   await showTab(page, 'search');
@@ -1014,7 +1026,7 @@ const twice: StepBody = async (walker) => {
     const b = await verifyRun(walker, second.runs[i]!, before, i);
     if (a !== undefined && b !== undefined) {
       for (const [format, bytes] of a) {
-        if (!bytes.equals(b.get(format) ?? Buffer.alloc(0))) {
+        if (!withoutMadeNames(bytes).equals(withoutMadeNames(b.get(format) ?? Buffer.alloc(0)))) {
           throw new StepFailure(`twice-bytes:${format}`, `runs ${run} and ${second.runs[i]} of the same form differ in outfmt ${format}`);
         }
       }

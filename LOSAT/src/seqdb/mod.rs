@@ -1062,6 +1062,10 @@ pub struct SeqDb {
     lookup_isams: OnceLock<lookup::VolumeIsams>,
     /// The filtering algorithms of the mask columns, built on first use (`mask.rs`).
     mask_algorithms: OnceLock<MaskAlgorithms>,
+    /// LOSAT's refusal of the alias file's `MASKLIST` (a name that is not UTF-8,
+    /// `alias::gi_mask_list`): the error of every request for the masks
+    /// ([`SeqDb::mask_algorithms`]); `None` otherwise.
+    gi_mask_refusal: Option<SeqDbError>,
     /// Whether the run posted NCBI's warning of a UTF8String read for a VisibleString
     /// (`SeqDb::take_utf8_post`).
     utf8_posted: AtomicBool,
@@ -1202,9 +1206,13 @@ impl SeqDb {
         // (`m_UseGiMask` from the alias file's mask list): a database whose alias file names GI
         // masks has them as its filtering algorithms, and its mask columns are not read. The mask
         // files are looked for along the search path; nothing is read here.
-        if let Some(names) = gi_masks {
-            let masks = gi_mask::GiMasks::new(names, path.clone(), seqtype, db.volumes.len());
-            db.mask_algorithms = OnceLock::from(MaskAlgorithms::gi(std::sync::Arc::new(masks)));
+        match gi_masks {
+            Some(Ok(names)) => {
+                let masks = gi_mask::GiMasks::new(names, path.clone(), seqtype, db.volumes.len());
+                db.mask_algorithms = OnceLock::from(MaskAlgorithms::gi(std::sync::Arc::new(masks)));
+            }
+            Some(Err(refusal)) => db.gi_mask_refusal = Some(refusal),
+            None => {}
         }
         Ok(db)
     }
@@ -1598,6 +1606,7 @@ impl SeqDb {
             lookup_files: OnceLock::new(),
             lookup_isams: OnceLock::new(),
             mask_algorithms: OnceLock::new(),
+            gi_mask_refusal: None,
             utf8_posted: AtomicBool::new(false),
             scope_utf8: AtomicBool::new(false),
             scope_utf8_ended: AtomicBool::new(false),

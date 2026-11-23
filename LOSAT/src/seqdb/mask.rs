@@ -608,10 +608,14 @@ fn read_ranges_into(
 impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
-    /// database without mask data.
+    /// database without mask data. With GI masks, their table, or LOSAT's refusal of a
+    /// `MASKLIST` name (`alias::gi_mask_list`).
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);
+        }
+        if let Some(refusal) = &self.gi_mask_refusal {
+            return Err(refusal.duplicate());
         }
         let table = MaskAlgorithms::build(&self.volumes)?;
         Ok(self.mask_algorithms.get_or_init(|| table))

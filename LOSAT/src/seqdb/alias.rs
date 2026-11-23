@@ -124,8 +124,9 @@ pub(super) struct AliasTree {
     /// Volume paths without extension, sorted as NCBI opens them.
     pub volumes: Vec<String>,
     /// The names of the GI-indexed masks that NCBI's reader uses for the database
-    /// (`gi_mask_list`); `None` where it uses the mask columns of the volumes.
-    pub gi_masks: Option<Vec<String>>,
+    /// (`gi_mask_list`), or LOSAT's refusal of a name, met where the masks are asked for; `None`
+    /// where it uses the mask columns of the volumes.
+    pub gi_masks: Option<Result<Vec<String>, SeqDbError>>,
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
@@ -619,26 +620,28 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 /// database given as `names` names (`CSeqDBAliasFile::GetMaskList` when `HasGiMask`): one name,
 /// whose alias file (the root's one subnode) has `MASKLIST`, whose value is split as a list of
 /// database names is. `None` otherwise. A name that is not UTF-8 is LOSAT's refusal (the names
-/// are paths).
-fn gi_mask_list(root: &AliasNode, names: usize) -> Result<Option<Vec<String>>, SeqDbError> {
+/// are paths and the text of the names table), which the reader keeps for where the masks are
+/// asked for (`SeqDb::mask_algorithms`): NCBI reads the names only there, so a search or a
+/// retrieval without masks reads the database (review N8 of line NP item M4c-2, 2026-11-24).
+fn gi_mask_list(root: &AliasNode, names: usize) -> Option<Result<Vec<String>, SeqDbError>> {
     let [subnode] = root.subnodes.as_slice() else {
-        return Ok(None);
+        return None;
     };
     if names != 1 {
-        return Ok(None);
+        return None;
     }
-    let Some(value) = subnode.value("MASKLIST") else {
-        return Ok(None);
-    };
+    let value = subnode.value("MASKLIST")?;
     let mut list = Vec::new();
     for name in split_quoted(value, false) {
-        let name = std::str::from_utf8(name).map_err(|_| SeqDbError::Unsupported {
-            path: subnode.this_name.clone().unwrap_or_default().into(),
-            message: "a MASKLIST name is not valid UTF-8".to_string(),
-        })?;
+        let Ok(name) = std::str::from_utf8(name) else {
+            return Some(Err(SeqDbError::Unsupported {
+                path: subnode.this_name.clone().unwrap_or_default().into(),
+                message: "a MASKLIST name is not valid UTF-8".to_string(),
+            }));
+        };
         list.push(name.to_string());
     }
-    Ok(Some(list))
+    Some(Ok(list))
 }
 
 struct Resolver<'a> {
@@ -1036,7 +1039,7 @@ pub(super) fn resolve_in(
         };
         resolver.expand(&mut root, db_dir, "-", &[entry.to_string()], skip_local)?;
     }
-    let gi_masks = gi_mask_list(&root, resolved_names.len())?;
+    let gi_masks = gi_mask_list(&root, resolved_names.len());
     Ok(AliasTree {
         gi_masks,
         ..volumes_in_order(root)

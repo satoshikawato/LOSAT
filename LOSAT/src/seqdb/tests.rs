@@ -1727,6 +1727,30 @@ fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
     }
 }
 
+/// A `MASKLIST` name that is not UTF-8 is LOSAT's refusal where the masks are asked for, not at
+/// the opening: the database's sequences read (review N8 of line NP item M4c-2).
+#[test]
+fn a_masklist_name_not_utf8_is_refused_where_the_masks_are_read() {
+    let dir = temp_dir("masklist-utf8");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("gm.pal"),
+        b"TITLE t\nDBLIST prot_v4\nMASKLIST a \xff\n".as_slice(),
+    )
+    .unwrap();
+    let name = dir.join("gm").to_str().unwrap().to_string();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert_eq!(db.num_seqs(), 10);
+    for _ in 0..2 {
+        let error = db.mask_algorithms().unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::Unsupported { message, .. }
+                if message == "a MASKLIST name is not valid UTF-8"),
+            "{error}"
+        );
+    }
+}
+
 #[test]
 fn every_filtering_alias_key_is_rejected() {
     let dir = temp_dir("keys");

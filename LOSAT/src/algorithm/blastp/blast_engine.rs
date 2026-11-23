@@ -6759,7 +6759,16 @@ fn search(
         // without letters) has its search strategy request: NCBI made its query factory before
         // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+            // NCBI's stream that throws while it writes the request (an empty descriptor of a
+            // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
+            // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
+            if let Err(error) = write_alone(span) {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {

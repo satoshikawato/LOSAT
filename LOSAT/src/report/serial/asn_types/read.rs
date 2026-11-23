@@ -3,10 +3,12 @@
 //! type of `table`, over the primitives of either encoding (`report::serial::asn_input::Input`):
 //! ASN.1 text (`read_document`, `CObjectIStreamAsn`) and ASN.1 binary (`read_ber_document`,
 //! `CObjectIStreamAsnBinary`), one object or objects one after another from one stream
-//! (`ObjectStream`). The one object stack of LOSAT's ASN.1 readers: the generic `Value` of any
+//! (`ObjectStream`). The object stack of the table-driven readers: the generic `Value` of any
 //! type (here, read without recursion to any depth), and the typed readers of the callers that
 //! build their own model as they read (`super::typed`: makeblastdb's mask files, the Seq-id model
-//! of `super::seq_id`) run on the same frames, members, pointers and errors.
+//! of `super::seq_id`) run on the same frames, members, pointers and errors. (rpsbproc's reader of
+//! the BLAST archive, `report::serial::asn_text_reader` with `seqid::asn_text` for its Seq-ids,
+//! and the database deflines' Seq-ids, `seqid::ber::decode_seq_id`, are readers of their own.)
 //!
 //! It reads as NCBI's reader reads:
 //! - the members of a SEQUENCE in module order (named or by their tag `[3]` in text, by their
@@ -18,8 +20,11 @@
 //! - NCBI's pointer forms where NCBI reads a `CRef<>` that is empty: an OPTIONAL member held by
 //!   `CRef<>` (`REF`), each element of a list of `CRef<>`s, and every such member in a skip:
 //!   `NULL` leaves it unset, `@n` is NCBI's error (no object is collected), `:Type value` naming
-//!   the declared type is the value, in a frame of its own; a value of another type is refused
-//!   (what NCBI does with it depends on the types its process has met before);
+//!   the declared type is the value, in a frame of its own; a value of another class is NCBI's
+//!   `CSerialException` where the program reports any with its own message (psiblast and
+//!   tblastn), and refused where what NCBI does with it depends on the types its process has met
+//!   before (`TypedReader::other_type`); an element of a list stated as `NULL` is held as the
+//!   empty reference NCBI's list holds (`Value::Null`);
 //! - INTEGER by the C++ storage of its member (`ReadInt4`, `ReadUint4`, `ReadInt8`, `ReadInt2`);
 //!   ENUMERATED by name (text) or by a number that has a name, INTEGER with named values by name or
 //!   any number;
@@ -51,8 +56,9 @@ use crate::report::serial::asn_input::{
 use crate::report::serial::asn_text_reader::{AsnSource, PointerType, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 use crate::report::serial::object_frame::{
-    frame_info, frame_name, text_frame_site, FrameKind, EXPECTED_MEMBER, GET_REGISTERED_OBJECT,
-    HANDLE_EOF, READ_INT2, READ_POINTER_FRAME_END, SKIP_FILE_HEADER, SKIP_POINTER_FRAME_END,
+    frame_info, frame_name, text_frame_site, FrameKind, CLASS_NOT_FOUND, EXPECTED_MEMBER,
+    GET_REGISTERED_OBJECT, HANDLE_EOF, READ_INT2, READ_POINTER_FRAME_END,
+    READ_POINTER_INCOMPATIBLE, SKIP_FILE_HEADER, SKIP_POINTER_FRAME_END,
 };
 
 /// The text of the byte block's post ([`Post::UnendedByteBlock`]).
@@ -289,12 +295,17 @@ pub(super) fn read_ber_value(bytes: &[u8], ty: u16) -> Read<Value> {
     // The read that kept the bytes met their UTF8String tags (and posted for the first).
     reader.utf8_once = Utf8TagOnce::POSTED;
     let value = reader.read_value(ty, false);
-    let value = match (value, reader.null_element.take()) {
-        (Ok(_), Some(null)) => Err(Fail::unsupported(null)),
-        (value, _) => value,
-    };
     (value.map_err(ReadError::from), reader.posts)
 }
+
+// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:122-145
+/// The deepest nesting of object frames that a typed read follows (`ObjectStream::read_typed`):
+/// a typed reader recurses on LOSAT's stack as the type nests (`super::typed`; a `Seq-loc` of
+/// `mix` and `equiv` to any depth), so a frame past it is LOSAT's refusal
+/// (`TypedReader::too_deep`). NCBI's object stream has no such limit (its frames are bounded by
+/// memory: `PushFrameLong` doubles the stack), and the generic `Value` read, which keeps its
+/// values on the heap, has none.
+const TYPED_MAX_DEPTH: usize = 400;
 
 /// Objects one after another from one input (`ObjectStream::read_object`), each read by a new
 /// state of NCBI's stream at the byte after the last one the object before it took (NCBI gives the
@@ -324,18 +335,11 @@ impl<S: AsnSource> ObjectStream<BerReader<S>> {
 }
 
 impl<I: Input> ObjectStream<I> {
-    /// The next object, as the root type `root`, with the messages posted while it was read. A
-    /// value that holds an element of a list stated as `NULL` is refused once the object has been
-    /// read (`Value` holds no empty `CRef<>`; NCBI's program dereferences it where it uses the
-    /// list, `TypedReader::null_element`).
+    /// The next object, as the root type `root`, with the messages posted while it was read.
     pub(crate) fn read_object(&mut self, root: u16) -> Read<Value> {
         let reader = &mut self.reader;
         reader.start_object();
         let value = reader.document(root, |r| r.read_value(root, false));
-        let value = match (value, reader.null_element.take()) {
-            (Ok(_), Some(null)) => Err(Fail::unsupported(null)),
-            (value, _) => value,
-        };
         (
             value.map_err(ReadError::from),
             std::mem::take(&mut reader.posts),
@@ -351,14 +355,10 @@ impl<I: Input> ObjectStream<I> {
     ) -> Read<T> {
         let reader = &mut self.reader;
         reader.start_object();
+        reader.max_depth = TYPED_MAX_DEPTH;
         let value = reader.document(root, read).map_err(ReadError::from);
+        reader.max_depth = usize::MAX;
         (value, std::mem::take(&mut reader.posts))
-    }
-
-    /// The deepest nesting of frames that the reader follows from now on (NCBI's own stack is
-    /// limited by memory only): a frame past it is refused (`TypedReader::too_deep`).
-    pub(crate) fn limit_depth(&mut self, frames: usize) {
-        self.reader.max_depth = frames;
     }
 
     /// `EndOfData()`: whether no object follows (`Input::end_of_data`), which a reader of objects
@@ -395,11 +395,10 @@ pub(crate) struct TypedReader<I: Input> {
     utf8_once: Utf8TagOnce,
     /// What LOSAT's messages call the document, the reader and NCBI's part that allocates.
     names: Names,
-    /// The refusal of the first element of a list of `CRef<>`s stated as `NULL` in a `Value`
-    /// (`ObjectStream::read_object`).
-    null_element: Option<String>,
-    /// The deepest nesting of frames the reader follows (`ObjectStream::limit_depth`).
+    /// The deepest nesting of frames the reader follows (`TYPED_MAX_DEPTH` in a typed read).
     max_depth: usize,
+    /// Whether a value of another class than the declared one is being read (`other_type`).
+    reading_other: bool,
 }
 
 /// A value being read that waits for a value inside it (`TypedReader::read_value`).
@@ -485,8 +484,8 @@ impl<I: Input> TypedReader<I> {
             open: Vec::new(),
             utf8_once: Utf8TagOnce::default(),
             names,
-            null_element: None,
             max_depth: usize::MAX,
+            reading_other: false,
         }
     }
 
@@ -496,7 +495,6 @@ impl<I: Input> TypedReader<I> {
         self.inp.new_object();
         self.frames.clear();
         self.open.clear();
-        self.null_element = None;
     }
 
     /// The refusal of a frame past `max_depth`.
@@ -739,8 +737,8 @@ impl<I: Input> TypedReader<I> {
     /// `ReadPointer` (`SkipPointer` in a skip) of an empty `CRef<>` to a value of the type
     /// `declared`: `NULL` is none; `@n` is NCBI's error (makeblastdb's and psiblast's streams
     /// collect no object); `:Type` naming `declared` is the value in a named frame of that type,
-    /// pushed here (`end_pointer` leaves it); a value of another type is refused, as what NCBI
-    /// does with it depends on what its process has read before.
+    /// pushed here (`end_pointer` leaves it); a value of another type is NCBI's error where what
+    /// its process has read before does not show, and refused elsewhere (`other_type`).
     #[inline(always)]
     pub(super) fn begin_pointer(&mut self, declared: u16, skip: bool) -> R<Pointee> {
         match self.inp.read_pointer_type()? {
@@ -770,7 +768,7 @@ impl<I: Input> TypedReader<I> {
                 let name = self.inp.read_other_pointer()?;
                 let declared_name = super::type_info(declared).name();
                 if name != declared_name.as_bytes() {
-                    return Err(self.other_type(&name, declared_name));
+                    return Err(self.other_type(&name, declared_name, skip));
                 }
                 self.push(FrameKind::Named, declared, skip)?;
                 if let Some(top) = self.frames.last_mut() {
@@ -781,10 +779,71 @@ impl<I: Input> TypedReader<I> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1173-1219
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1341-1361
+    /// `:name`, a value of the class `name`, where a `declared` belongs. NCBI's `MapType` finds
+    /// the class when its process has built its type information, and throws "class not found"
+    /// otherwise; found, the value is read as that class, and the read throws "incompatible member
+    /// type" after it, or its first error inside it. Each is a `CSerialException`, which
+    /// psiblast's and tblastn's PSSM reader report with a message of their own
+    /// (`Names::own_serial_message`; NCBI 2.17.0 rc 1 for `:Object-id`, `:Pssm`, `:No-such-type`
+    /// where params belongs and `:Bioseq` where the query belongs, text and binary, probe
+    /// D3c-3b): there the value is read as the table's class of that name, if any, and the read
+    /// ends with the error. A class outside the table is one that the PSSM's read never builds,
+    /// and nothing before the read builds it: "class not found" (NCBI 2.17.0 with a number that is
+    /// not one inside `:Blast4-cutoff`, `:Seq-submit`, `:Hit`; probe D3c-3b probe9). What NCBI
+    /// does only when it knows the class (a message posted while the value is read, an error of
+    /// another kind inside it: `:Object-id id x` is its exception report, exit status 255, in
+    /// probe9), a value of another class inside it, a skip (`SkipPointer` skips a class it knows
+    /// and stops at another) and the other streams (makeblastdb prints the exception's own text)
+    /// are LOSAT's refusal.
+    #[cold]
+    #[inline(never)]
+    fn other_type(&mut self, name: &[u8], declared: &str, skip: bool) -> Fail {
+        if skip || !self.names.own_serial_message || self.reading_other {
+            return self.other_type_refusal(name, declared);
+        }
+        let Some(class) = super::class_named(name) else {
+            return Fail::serial(NcbiException::new(
+                CLASS_NOT_FOUND,
+                format!("class not found: {}", String::from_utf8_lossy(name)),
+            ));
+        };
+        let posts = self.posts.len();
+        self.reading_other = true;
+        let read = self.read_other(class);
+        self.reading_other = false;
+        match read {
+            _ if self.posts.len() > posts => {
+                // NCBI's posts there depend on its registry: the refusal is LOSAT's alone.
+                self.posts.truncate(posts);
+                self.other_type_refusal(name, declared)
+            }
+            Ok(()) => throw_error(
+                READ_POINTER_INCOMPATIBLE,
+                self.inp.position(),
+                "incompatible member type",
+            ),
+            Err(fail @ Fail::Serial(_)) => fail,
+            Err(_) => self.other_type_refusal(name, declared),
+        }
+    }
+
+    /// The value of the class `class` after `:name` (`other_type`): read in a named frame of the
+    /// class, as `ReadPointer` reads it, to `ReadOtherPointerEnd`.
+    fn read_other(&mut self, class: u16) -> R<()> {
+        self.push(FrameKind::Named, class, false)?;
+        if let Some(top) = self.frames.last_mut() {
+            top.pointer = true;
+        }
+        let value = self.read_value(class, false);
+        self.end_pointer(value).map(drop)
+    }
+
     /// The refusal of `:name` (a value of the type `name`) where a `declared` belongs.
     #[cold]
     #[inline(never)]
-    fn other_type(&self, name: &[u8], declared: &str) -> Fail {
+    fn other_type_refusal(&self, name: &[u8], declared: &str) -> Fail {
         let name = String::from_utf8_lossy(name);
         Fail::unsupported(format!(
             "':{name}', a value of the type {name} where a {declared} belongs ({}): whether \
@@ -801,26 +860,6 @@ impl<I: Input> TypedReader<I> {
         let value = self.pop(result)?;
         self.inp.read_other_pointer_end()?;
         Ok(value)
-    }
-
-    /// An element of a list of `CRef<>`s stated as `NULL` (an empty reference, `Value::Null` in
-    /// the list): the first is refused when the object has been read (`ObjectStream::read_object`,
-    /// `read_ber_value`), as NCBI's program dereferences it where it uses the list (psiblast and
-    /// tblastn 2.17.0 stop with a report of their memory addresses for an id of the query, psiblast
-    /// with "Attempt to access NULL pointer." deep in its engine for a descriptor, probe D3c-3b).
-    #[cold]
-    #[inline(never)]
-    fn null_element(&mut self) {
-        if self.null_element.is_some() {
-            return;
-        }
-        let trace = self.stack_trace();
-        let list = trace.strip_suffix(".E").unwrap_or(&trace);
-        self.null_element = Some(format!(
-            "an element of {list} stated as NULL ({}): an empty reference, which NCBI's \
-             program dereferences where it uses the list",
-            self.inp.position()
-        ));
     }
 
     /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the hooks
@@ -1081,9 +1120,10 @@ impl<I: Input> TypedReader<I> {
     }
 
     /// The next element of a SEQUENCE OF or SET OF of values (of `CRef<>`s, `refs`: each with the
-    /// pointer forms; a `NULL` one is noted, `null_element`, and held as `Value::Null`, an element
-    /// of the list for the hooks: `Seq-descr { NULL }` is not empty); after the last, the element
-    /// frame left, the container's end, the array frame left.
+    /// pointer forms; a `NULL` one is held as `Value::Null`, the empty `CRef<>` that NCBI's list
+    /// holds: `Seq-descr { NULL }` is not empty, and the program that uses the list dereferences
+    /// it or not, `Value::Null`); after the last, the element frame left, the container's end, the
+    /// array frame left.
     fn next_element(
         &mut self,
         element: u16,
@@ -1099,7 +1139,6 @@ impl<I: Input> TypedReader<I> {
             };
             if pointee == Pointee::Null {
                 if !skip {
-                    self.null_element();
                     values.push(Value::Null);
                 }
                 continue;

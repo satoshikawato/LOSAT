@@ -27,6 +27,8 @@ enum Step<'a> {
     EndMember,
     EndSequence,
     Element,
+    /// An element of a list of `CRef<>`s that holds no object (`Encoder::null_element`).
+    NullElement,
     EndList,
     EndVariant,
     EndNamed,
@@ -58,6 +60,7 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
             Step::EndMember => enc.end_member(),
             Step::EndSequence => enc.end_sequence(),
             Step::Element => enc.element(),
+            Step::NullElement => enc.null_element(),
             Step::EndList => enc.end_list(),
             Step::EndVariant => enc.end_variant(),
             Step::EndNamed => enc.end_named(),
@@ -178,13 +181,13 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
             if named {
                 enc.begin_named(info.name());
             }
-            if let Kind::List { element, set, .. } = kind {
+            if let Kind::List { element, set, refs } = kind {
                 enc.begin_list(*set);
                 if named {
                     todo.push(Step::EndNamed);
                 }
                 todo.push(Step::EndList);
-                write_elements(enc, *element, value, todo);
+                write_elements(enc, *element, *refs, value, todo);
                 return;
             }
             write_leaf(enc, kind, value);
@@ -195,17 +198,24 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     }
 }
 
-/// The elements of a SEQUENCE OF or SET OF value of `element`s: the numbers of a list of INTEGER
-/// or REAL at once, the other values left to `todo`.
+/// The elements of a SEQUENCE OF or SET OF value of `element`s (of `CRef<>`s, `refs`): the
+/// numbers of a list of INTEGER or REAL at once, the other values left to `todo`. An element of
+/// `CRef<>`s that the reader kept empty (`Value::Null`) is NCBI's throw
+/// (`Encoder::null_element`).
 fn write_elements<'a, E: Encoder>(
     enc: &mut E,
     element: u16,
+    refs: bool,
     value: &'a Value,
     todo: &mut Vec<Step<'a>>,
 ) {
     match value {
         Value::List(items) => {
             for item in items.iter().rev() {
+                if refs && matches!(item, Value::Null) {
+                    todo.push(Step::NullElement);
+                    continue;
+                }
                 todo.push(Step::Value(element, item));
                 todo.push(Step::Element);
             }

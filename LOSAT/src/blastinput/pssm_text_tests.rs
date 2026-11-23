@@ -332,6 +332,50 @@ fn errors_are_ncbis_classes_and_what_the_search_does_not_take_is_kept() {
         Some(SeqEntry::Set(_)) => {}
         other => panic!("{other:?}"),
     }
+    // An element of the query's `id` stated as `NULL` is refused (NCBI's object manager
+    // dereferences it); one of its `descr` is kept (`Seqdesc::Empty`), and one of another list
+    // is the reader's `Value::Null` (probe D3c-3b probe4, probe6, probe7).
+    let null_id = SMALL_PSSM.replace(
+        "        local str \"Query_7\"\n",
+        "        local str \"Query_7\",\n        NULL\n",
+    );
+    match read_pssm_with_parameters(null_id.as_bytes()) {
+        Err(PssmReadError::Refused(what)) => assert!(
+            what.starts_with("an element of PssmWithParameters.pssm.query.seq.id stated as NULL"),
+            "{what}"
+        ),
+        other => panic!("{other:?}"),
+    }
+    let null_descr = SMALL_PSSM.replace(
+        "        title \"a \"\"quoted\"\" title\"\n",
+        "        NULL,\n        title \"a\"\n",
+    );
+    let query = read_pssm_with_parameters(null_descr.as_bytes())
+        .unwrap()
+        .pssm
+        .query
+        .and_then(SeqEntry::into_seq)
+        .unwrap();
+    assert_eq!(
+        query.descr,
+        Some(vec![
+            crate::report::serial::pssm::Seqdesc::Empty,
+            crate::report::serial::pssm::Seqdesc::Title(b"a".to_vec())
+        ])
+    );
+    let null_hist = SMALL_PSSM.replace(
+        "        seq-data ncbistdaa '0C'H\n",
+        "        seq-data ncbistdaa '0C'H,\n        hist {\n          replaces {\n            ids {\n              NULL\n            }\n          }\n        }\n",
+    );
+    assert!(read_pssm_with_parameters(null_hist.as_bytes())
+        .unwrap()
+        .pssm
+        .query
+        .and_then(SeqEntry::into_seq)
+        .unwrap()
+        .inst
+        .hist
+        .is_some());
     let ncbi8aa = SMALL_PSSM.replace("seq-data ncbistdaa", "seq-data ncbi8aa");
     let query = read_pssm_with_parameters(ncbi8aa.as_bytes())
         .unwrap()
@@ -685,4 +729,54 @@ fn every_binary_twin_reads_as_its_text() {
         .map(|(&a, &b)| (a, b))
         .collect();
     assert_eq!((text.len(), differ), (binary.len(), vec![(b'#', 0xe9)]));
+}
+
+// Probe D3c-3b probe4 (`-out_pssm` of a descriptor stated as `NULL`) and probe6
+// `f_dbxref_null.opssm` (psiblast 2.17.0, rc 255): the writer throws at the element of any list
+// that holds the reader's empty reference, after the bytes before it; the post names the
+// element's stack trace, the exception its frames.
+#[test]
+fn an_element_stated_as_null_is_where_the_writer_throws() {
+    let annot = SMALL_PSSM.replace(
+        "        seq-data ncbistdaa '0C'H\n      }\n",
+        "        seq-data ncbistdaa '0C'H\n      },\n      annot {\n        {\n          data ftable {\n            {\n              data comment NULL,\n              location whole local str \"Query_7\",\n              dbxref {\n                NULL\n              }\n            }\n          }\n        }\n      }\n",
+    );
+    let descr = SMALL_PSSM.replace(
+        "        title \"a \"\"quoted\"\" title\"\n",
+        "        title \"a\",\n        NULL\n",
+    );
+    for (text, trace, frames) in [
+        (
+            annot,
+            "PssmWithParameters.pssm.query.seq.annot.E.data.ftable.E.dbxref.E",
+            "( at PssmWithParameters.pssm.query.seq.annot.[].[].data.ftable.[].[].dbxref.[].[])",
+        ),
+        (
+            descr,
+            "PssmWithParameters.pssm.query.seq.descr.E",
+            "( at PssmWithParameters.pssm.query.seq.descr.[].[])",
+        ),
+    ] {
+        let value = read_pssm_with_parameters(text.as_bytes()).unwrap();
+        let written = crate::report::serial::pssm::asn_text_written(&value, None).unwrap();
+        let thrown = written.thrown.expect("the writer throws");
+        // NCBI's line is that of the last byte written: the line break before the element is
+        // not written yet (probe4 t_dn1.opssm: line 11 after ten line breaks).
+        let element = text.find("NULL\n").unwrap();
+        let line = text[..element].matches('\n').count();
+        assert_eq!(
+            String::from_utf8(thrown.post(Some("psiblast"))).unwrap(),
+            format!("Error: (802.5) [psiblast] CObjectOStream: error at line {line}: {trace}: cannot write unassigned member NULL element while writing container \n")
+        );
+        let what = String::from_utf8(thrown.exception().what()).unwrap();
+        // `what()` ends with a line feed (`NcbiException::what`).
+        assert!(what.ends_with(&format!("{frames}\n")), "{what}");
+        assert!(text.as_bytes().starts_with(&written.bytes));
+        let rest = &text[written.bytes.len()..];
+        assert!(
+            rest.trim_start_matches([',', ' ', '\n'])
+                .starts_with("NULL"),
+            "{rest}"
+        );
+    }
 }

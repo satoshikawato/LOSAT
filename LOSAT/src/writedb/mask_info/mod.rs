@@ -88,8 +88,9 @@ pub(crate) struct MaskList {
 
 /// An element of a list of `CRef`s (`masks`, `mix`, `equiv`, `packed-int`) that the file states
 /// as `NULL` (text) or `05 00` (binary). NCBI's reader leaves the `CRef` empty
-/// (`CObjectIStream::ReadPointer`) and makeblastdb dereferences it in `x_ProcessMaskData`
-/// (`**iter`) or in `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`): a `CCoreException`
+/// (`CObjectIStream::ReadPointer`) and makeblastdb dereferences it in `x_ProcessMaskData` (the
+/// mask through its reference) or in `CSeq_loc::CheckId` (an element of the mix through its
+/// reference, for its range or for its own `CheckId`): a `CCoreException`
 /// `eNullPtr`, whose report prints a stack trace with the run's library addresses and the path of
 /// the installed binary, which no other program can reproduce.
 #[derive(Debug, Clone, PartialEq, Eq)]

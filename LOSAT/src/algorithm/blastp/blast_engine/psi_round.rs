@@ -101,8 +101,15 @@ pub(super) fn search_rounds(
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
         if let Some((_, error)) = batches.stop.as_ref() {
-            // The request of a batch that NCBI made a query factory of, before any output.
-            write_stop_request()?;
+            // The request of a batch that NCBI made a query factory of, before any output; NCBI's
+            // stream that throws while it writes the request (`encoder::NullElement`) ends the
+            // run after the prolog (psiblast_app.cpp:506, 340).
+            if let Err(error) = write_stop_request() {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
             // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
@@ -128,13 +135,17 @@ pub(super) fn search_rounds(
                             .is_none_or(|stop| stop.after_round_files())
                 });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
-                let (asn, ascii, posts) = input.files(&plan.request)?;
-                write_file_posts(args, &posts, outputs)?;
+                let files = input.files(&plan.request)?;
+                write_file_posts(args, &files.posts, outputs)?;
                 RoundFiles::new(
                     &plan.request,
                     args.out.as_deref().filter(|path| path.as_os_str() != "-"),
                 )
-                .write(asn.as_deref(), ascii.as_deref())?;
+                .write(files.asn.as_deref(), files.ascii.as_deref())?;
+                // NCBI's throw in the ASN.1 file ends the run there, before the search.
+                if let Some(thrown) = files.thrown {
+                    return Err(thrown.into());
+                }
             }
         } else {
             write_reports_without_queries(args, subject_source, subject_label, outputs)?;
@@ -328,15 +339,21 @@ fn run_queries(
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
                 (Some(current), _) => write_round_pssm(args, &mut files, current, outputs)?,
-                (None, Some((asn, ascii, posts))) if round == 1 => {
+                (None, Some(input)) if round == 1 => {
                     // NCBI's posts of the bytes replaced in the search strategy request (written
                     // above, before round 1) come before those of the PSSM file that round 1
                     // writes.
                     super::write_request_posts(args, &mut *outputs.diagnostics)?;
-                    write_file_posts(args, posts, outputs)?;
+                    write_file_posts(args, &input.posts, outputs)?;
                     // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
-                    // that cannot be written stops the run here.
-                    if let Err(error) = files.write(asn.as_deref(), ascii.as_deref()) {
+                    // that cannot be written, or NCBI's throw in it, stops the run here.
+                    let written = files
+                        .write(input.asn.as_deref(), input.ascii.as_deref())
+                        .and_then(|()| match input.thrown.take() {
+                            Some(thrown) => Err(thrown.into()),
+                            None => Ok(()),
+                        });
+                    if let Err(error) = written {
                         if calls == 0 {
                             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                         }
@@ -344,7 +361,7 @@ fn run_queries(
                     }
                     // Only the ASCII PSSM is written again (after a round 1 without alignments;
                     // the ASN.1 text is then made with the write-back).
-                    *asn = None;
+                    input.asn = None;
                 }
                 _ => {}
             }
@@ -532,10 +549,10 @@ fn run_queries(
         if plan.save_last {
             match (&pssm, &plan.input, &input_files, searched_input) {
                 (Some(current), _, _, _) => write_round_pssm(args, &mut files, current, outputs)?,
-                (None, Some(input), Some((_, ascii, _)), Some((ungapped, gapped))) => {
+                (None, Some(input), Some(round_1), Some((ungapped, gapped))) => {
                     let (asn, posts) = input.written_back(&plan.request, ungapped, gapped)?;
                     write_file_posts(args, &posts, outputs)?;
-                    files.write(asn.as_deref(), ascii.as_deref())?;
+                    files.write(asn.as_deref(), round_1.ascii.as_deref())?;
                 }
                 _ => {}
             }

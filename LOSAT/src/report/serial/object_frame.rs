@@ -91,6 +91,22 @@ pub(crate) const EXPECTED_MEMBER: ThrowSite = istr_site(
     "CSerialException::eFormatError",
     "ncbi::CObjectIStream::ExpectedMember",
 );
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1206-1219
+/// `ReadPointer`'s check of a value of a named class that is not the declared type (a class of
+/// the module has no parent class: the second throw).
+pub(crate) const READ_POINTER_INCOMPATIBLE: ThrowSite = istr_site(
+    1217,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::ReadPointer",
+);
+// NCBI reference (598d8ae6): c++/src/serial/classinfob.cpp:244-252
+/// `GetClassInfoByName` of a name that the registry of classes does not hold.
+pub(crate) const CLASS_NOT_FOUND: ThrowSite = ThrowSite {
+    file: "src/serial/classinfob.cpp",
+    line: 251,
+    kind: "CSerialException::eInvalidData",
+    function: Some("ncbi::CClassTypeInfoBase::GetClassInfoByName"),
+};
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:873-880
 // (makeblastdb's streams collect no objects: `m_Objects` is null, checked with makeblastdb
 // 2.17.0 on `@0` and `@1`.)

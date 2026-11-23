@@ -214,6 +214,31 @@ impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
         }
         self.finish()
     }
+
+    /// `finish_collecting` of a document whose stream threw (`encoder::NullElement`, the
+    /// application `application`): `collect` gets the bytes replaced before the throw, the sink the
+    /// bytes that NCBI's stream flushed, then NCBI's error ends the request
+    /// (`cli::NativeError::null_element`).
+    fn finish_thrown(
+        mut self,
+        collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
+        application: &str,
+        thrown: &crate::report::serial::encoder::NullElement,
+    ) -> Result<()> {
+        let replaced = self.enc.take_replaced_chars();
+        if !replaced.is_empty() {
+            collect(&replaced)?;
+        }
+        if self.io_error.is_none() {
+            if let Err(error) = self.enc.flush_to(self.sink, true) {
+                self.io_error = Some(error);
+            }
+        }
+        match self.io_error {
+            Some(error) => Err(error.into()),
+            None => Err(crate::cli::NativeError::null_element(application, thrown).into()),
+        }
+    }
 }
 
 /// The Seq-aligns of a batch: written as the elements of the `alignments` list.
@@ -624,7 +649,10 @@ pub(super) fn write_strategy_request(
     } else {
         let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink);
         write_strategy_document(&mut out, request, batch, sets, database_params);
-        out.finish_collecting(collect)
+        match out.enc.take_thrown() {
+            Some(thrown) => out.finish_thrown(collect, request.application, &thrown),
+            None => out.finish_collecting(collect),
+        }
     }
 }
 

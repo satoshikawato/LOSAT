@@ -252,6 +252,23 @@ pub(crate) fn type_info(ty: u16) -> &'static TypeInfo {
     &table::TYPES[usize::from(ty)]
 }
 
+/// The class of the table named `name`: a SEQUENCE, a CHOICE or a named SEQUENCE OF or SET OF
+/// (NCBI's implicit class), the types that NCBI's registry of classes holds by their names
+/// (`CClassTypeInfoBase::GetClassInfoByName`; an ENUMERATED or an alias is no class there).
+pub(crate) fn class_named(name: &[u8]) -> Option<u16> {
+    table::TYPES
+        .iter()
+        .position(|info| {
+            !info.name().is_empty()
+                && info.name().as_bytes() == name
+                && matches!(
+                    info.kind,
+                    Kind::Sequence(_) | Kind::Choice(_) | Kind::List { .. }
+                )
+        })
+        .map(|index| u16::try_from(index).expect("the table's index"))
+}
+
 /// The type `ty` with its aliases followed.
 pub(crate) fn resolved(mut ty: u16) -> &'static TypeInfo {
     loop {
@@ -288,6 +305,10 @@ pub enum Value {
     /// ENUMERATED or INTEGER with named values: the number (its name is the table's).
     Enum(i32),
     Bool(bool),
+    /// NULL; or, as an element of a list of `CRef<>`s, the empty reference that an element stated
+    /// as `NULL` leaves (`read::TypedReader::next_element`): the program that uses the list
+    /// dereferences it where NCBI's does (`blastinput::pssm_text`, `pssm_search::annot_index`),
+    /// and the writers throw where they reach it (`Encoder::null_element`).
     Null,
     Real(f64),
     /// A string as NCBI's reader keeps it (`#` in place of the bytes it replaced).

@@ -713,6 +713,7 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
+    fn null_element(&mut self) {}
     fn utf8_str(&mut self, _: &[u8]) {}
     fn delayed(&mut self, _: &[u8]) {}
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {

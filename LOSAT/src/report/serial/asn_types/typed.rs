@@ -6,8 +6,8 @@
 //! for a part it does not build: `value`).
 //!
 //! A typed reader recurses as the type nests; the types it is given nest a bounded number of
-//! levels but for a `Seq-loc` of `mix` and `equiv`, whose depth the stream's limit bounds
-//! (`ObjectStream::limit_depth`). It reads (never skips) types that have neither a delayed member
+//! levels but for a `Seq-loc` of `mix` and `equiv`, whose depth the typed read's limit bounds
+//! (`read::TYPED_MAX_DEPTH`). It reads (never skips) types that have neither a delayed member
 //! nor a hook of NCBI's classes (`super::hooks`).
 
 use super::read::{alias_target, set_flag_error, Pointee, TypedReader, NO_TYPE};

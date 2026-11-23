@@ -133,7 +133,7 @@ function onSelectCounts(target: 'ustat' | 'convert', value: string): void {
             @change="onConvertFile"
           />
           <span v-if="state.convertSource.kind !== 'none'" class="file-name" data-testid="wm-convert-chosen">
-            {{ state.convertSource.name }} ({{ formatBytes(state.convertSource.size) }})<template v-if="state.convertSource.kind === 'session'">, from run {{ state.convertSource.runNumber }}</template>
+            <span>{{ state.convertSource.name }} ({{ formatBytes(state.convertSource.size) }})<template v-if="state.convertSource.kind === 'session'">, from run {{ state.convertSource.runNumber }}</template></span>
             <button type="button" class="link" data-testid="wm-convert-clear" @click="draft.clearConvert()">Clear</button>
           </span>
         </div>
@@ -308,7 +308,7 @@ function onSelectCounts(target: 'ustat' | 'convert', value: string): void {
           @change="onUstatFile"
         />
         <span v-if="state.ustatSource.kind !== 'none'" class="file-name" data-testid="wm-ustat-chosen">
-          {{ state.ustatSource.name }} ({{ formatBytes(state.ustatSource.size) }})<template v-if="state.ustatSource.kind === 'session'">, from run {{ state.ustatSource.runNumber }}</template>
+          <span>{{ state.ustatSource.name }} ({{ formatBytes(state.ustatSource.size) }})<template v-if="state.ustatSource.kind === 'session'">, from run {{ state.ustatSource.runNumber }}</template></span>
           <button type="button" class="link" data-testid="wm-ustat-clear" @click="draft.clearUstat()">Clear</button>
         </span>
       </div>

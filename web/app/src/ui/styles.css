@@ -2524,6 +2524,25 @@ pre.range-text {
 }
 
 /* WindowMasker tab and tool run results (WW3b). */
+.wm-panel .search-block .param-control:not(.fill) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.wm-panel .param-label > .flag {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.wm-counts-pick .file-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
 .wm-command-line {
   font-size: 0.9em;
   overflow-wrap: anywhere;

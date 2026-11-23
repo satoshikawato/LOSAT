@@ -135,12 +135,12 @@ pub(crate) fn write_tblastx_sam(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
-        rps: false,
         db_title: match subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: false,
+        program_type: None,
     };
     let mut document = SamDocument::new(spec, crate::wording::LOSAT_VERSION, command_line)
         .for_program(Program::Tblastx);

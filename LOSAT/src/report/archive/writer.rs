@@ -681,11 +681,11 @@ pub fn write_archive<A: AlignSource>(
     let request = match batch.round {
         Some(round) => {
             if let Some(mode) = round.comp_based_stats {
-                sets.retain(|param| param.name != "CompositionBasedStats");
-                sets.push(Param {
-                    name: "CompositionBasedStats",
-                    value: ParamValue::Integer(mode),
-                });
+                sets.retain(|param| param.field() != fields::COMPOSITION_BASED_STATS);
+                sets.push(Param::new(
+                    fields::COMPOSITION_BASED_STATS,
+                    ParamValue::Integer(mode),
+                ));
             }
             let request = handle.request();
             round_request = super::ArchiveRequest {

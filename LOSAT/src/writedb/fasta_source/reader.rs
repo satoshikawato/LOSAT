@@ -322,6 +322,9 @@ pub(crate) enum ReadError {
     /// An allocation whose size the input states could not be made
     /// (`std::bad_alloc` in NCBI, which no reader catches).
     OutOfMemory,
+    /// The `std::out_of_range` of `basic_string::append` from position `pos` of a string of
+    /// `size` (`RecordState::substituted`), which no reader catches either.
+    OutOfRange { pos: u64, size: u64 },
 }
 
 impl From<ParseError> for ReadError {
@@ -363,7 +366,9 @@ pub(crate) enum SeqInst {
     Virtual,
     /// `repr raw`: a delta of one piece, whose `Seq-data` became the sequence's.
     Raw { length: u64, seq_data: SeqData },
-    /// `repr delta` of more than one piece over the IUPACna `residues`.
+    /// `repr delta` of more than one piece over the IUPACna `residues`. Past 2^32 letters
+    /// (`assemble_seq`) gaps that stay pieces can make the pieces longer than `length`, and
+    /// their residues repeat or skip residues where the gaps' wrapped positions do.
     Delta {
         length: u64,
         residues: Vec<u8>,
@@ -371,49 +376,16 @@ pub(crate) enum SeqInst {
     },
     /// A record longer than 2,147,483,647 residues, which `CBuildDatabase::AddSequences`
     /// rejects by its length before it reads the sequence data: LOSAT does not build it.
-    /// `length` is NCBI's (`TSeqPos`, see `PastSeqPos`).
+    /// `length` is NCBI's, the record's count modulo 2^32 (`assemble_seq`).
     TooLong { length: u64 },
-    /// A record of 4,294,967,296 residues or more, counting the letters of its gaps, that
-    /// makeblastdb's length check does not stop. NCBI counts a record's length in a `TSeqPos`
-    /// (`GetCurrentPos`, `m_TotalGapLength`, `SGap::m_uLen`, `m_CurrentGapLength`), which wraps
-    /// there, and goes on with a `Seq-inst` of the wrapped length, `seq_pos_length`, whose data
-    /// is longer (`form`). LOSAT does not build it (no allocation for the gaps).
-    /// convert2blastmask, which reads only the masks, writes them (their positions wrap as
-    /// NCBI's, `RecordState::current_pos_with_gaps`); makeblastdb follows NCBI where NCBI
-    /// skips the record or stops before it builds the data (`fasta_source::next_bioseq`) and
-    /// refuses it where NCBI builds it; dustmasker and segmasker refuse it (NCBI's object
-    /// manager reads the first `seq_pos_length` letters, the gaps as `N` or `X`, after
-    /// allocating the substituted run when the gaps are not kept; a kept gap of 4294967295,
-    /// `kInvalidSeqPos`, is its error instead: not ported yet, line RG series K). `length` is the
-    /// record's, counted on.
-    PastSeqPos {
-        length: u64,
-        seq_pos_length: u64,
-        form: PastSeqPosForm,
-    },
 }
 
-/// The `Seq-inst` that NCBI's `AssembleSeq` makes of a `SeqInst::PastSeqPos` record.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum PastSeqPosForm {
-    /// No gap is kept (no gaps, or runs of `N` or `X` substituted for them): `repr raw`, or
-    /// a delta of literals only, over the residues.
-    Residues,
-    /// The gaps are kept (`fParseGaps`, or `>?` lines whose lengths sum to a multiple of 2^32,
-    /// so that `m_TotalGapLength` is 0): `repr delta`, whose first piece is a literal.
-    Delta,
-    /// As `Delta`, with a gap of unknown length (`Seq-loc null`, a lone hyphen) first.
-    DeltaFromNull,
-}
-
-/// What LOSAT refuses in a program that reads the residues of a `SeqInst::PastSeqPos` record
-/// `id` of `length` letters (the text before `is not supported by LOSAT's <program>`).
-pub(crate) fn past_seq_pos_refusal(id: &str, length: u64) -> String {
-    format!(
-        "a FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps \
-         ({id}: {} letters; NCBI counts the length of a record in 32 bits, which wrap there),",
-        crate::ncbi_str::with_commas(length)
-    )
+// The text is observed, not taken from a library's source: NCBI's 2.17.0 binaries write this
+// `what()` for the `std::out_of_range` of `basic_string::append` (probe of line RG item KC-11d,
+// remaining-gaps-20261112/K/kc/p11d/p2).
+/// The `what()` of `ReadError::OutOfRange`.
+pub(crate) fn out_of_range_what(pos: u64, size: u64) -> String {
+    format!("basic_string::append: __pos (which is {pos}) > this->size() (which is {size})")
 }
 
 /// A record as `CFastaReader::ReadOneSeq` returns it.
@@ -527,7 +499,14 @@ struct RecordState {
     mask_start: Option<u32>,
     /// `CMaskFromFasta::m_mask`.
     masks: Vec<(u32, u32)>,
+    /// 2^32, the range of NCBI's `TSeqPos`, in which `assemble_seq` and `close_gap` count the
+    /// positions of a record (a smaller power of two in the tests of the wrap:
+    /// `FastaReader::with_seq_pos_modulus`).
+    seq_pos_modulus: u64,
 }
+
+/// The range of NCBI's `TSeqPos` (32 bits).
+const SEQ_POS_MODULUS: u64 = 1 << 32;
 
 /// NCBI's `CFastaReader` over a `CBufferedLineReader`.
 pub(crate) struct FastaReader<R: Read> {
@@ -579,8 +558,23 @@ impl<R: Read> FastaReader<R> {
                 mol: None,
                 mask_start: None,
                 masks: Vec::new(),
+                seq_pos_modulus: SEQ_POS_MODULUS,
             },
         }
+    }
+
+    /// The reader with the positions of a record counted modulo `modulus`, a power of two
+    /// below 2^32, so that a test shows the wrap at 2^32 on a short record.
+    #[cfg(test)]
+    pub(crate) fn with_seq_pos_modulus(mut self, modulus: u64) -> Self {
+        assert!(modulus.is_power_of_two() && modulus <= SEQ_POS_MODULUS);
+        self.state.seq_pos_modulus = modulus;
+        self
+    }
+
+    /// The reader's molecule is protein (`fAssumeProt` with `fForceType`).
+    pub(crate) fn is_protein(&self) -> bool {
+        self.state.flags.molecule == Molecule::Protein
     }
 
     /// The ids of each definition line are parsed (`-parse_seqids`).
@@ -1155,9 +1149,13 @@ impl RecordState {
         }
         let mut len = u64::from(self.current_gap_length);
         let pos = self.seq_data.len();
+        // `l` is the `TSeqPos` of `m_SeqData.length()` and `pos` the wrapped `m_CurrentPos`;
+        // `pos + length()` is a `size_t` sum.
+        let l = seq_data_length as u64 % self.seq_pos_modulus;
+        let pos_wrapped = pos as u64 % self.seq_pos_modulus;
         if len == 1
-            && (seq_data_length == pos
-                || (seq_data_length == pos + line_length && at_start_of_line))
+            && (l == pos_wrapped
+                || (l == pos_wrapped + line_length as u64 && at_start_of_line))
         {
             len = 0;
         }
@@ -1265,8 +1263,8 @@ impl RecordState {
     /// `Seq-data` that the database writer cannot read (`SeqData::Other`).
     ///
     /// The run of `X` or `N` is as long as the `>?` lines say, up to 2,147,483,647 residues
-    /// for a few bytes of input (makeblastdb's limit; the mask reader's is 4,294,967,295,
-    /// past which the record is `SeqInst::PastSeqPos` and nothing is allocated). NCBI
+    /// for a few bytes of input (makeblastdb's limit; the mask reader's is 4,294,967,295, the
+    /// most a wrapped length can be: `substituted`). NCBI
     /// reserves the whole string at once and a failure is a `std::bad_alloc` (makeblastdb:
     /// "BLAST ran out of memory"); here it is the error of this function
     /// (`ReadError::OutOfMemory`), where an allocation that aborts the process would lose
@@ -1284,6 +1282,18 @@ impl RecordState {
     ) -> Result<(SeqInst, bool), ReadError> {
         self.close_gap(false, self.seq_data.len(), 0);
         self.close_mask();
+        // NCBI keeps the positions of a record in `TSeqPos` (`m_CurrentPos`, `SGap::m_uPos`,
+        // `m_TotalGapLength`), which wrap at 2^32 (`RecordState::seq_pos_modulus`). Each data
+        // line resizes `m_SeqData` to `m_CurrentPos` and the line, and back to `m_CurrentPos`
+        // after it, so past 2^32 residues it holds those read since `m_CurrentPos` last
+        // wrapped, the record's last (count modulo 2^32), which all that follows reads:
+        //
+        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:816,863-865,985
+        let modulus = self.seq_pos_modulus;
+        if self.seq_data.len() as u64 >= modulus {
+            let kept = (self.seq_data.len() as u64 % modulus) as usize;
+            self.seq_data.drain(..self.seq_data.len() - kept);
+        }
         let is_aa = match self.flags.molecule {
             Molecule::Protein => true,
             Molecule::Nucleotide => false,
@@ -1295,73 +1305,23 @@ impl RecordState {
             self.parse_title(&title.text, warn);
         }
 
-        // `GetCurrentPos` with `ePosWithGaps` is a `TSeqPos`: NCBI's length of the record is
-        // `length` modulo 2^32, and makeblastdb tests that one (`SeqInst::PastSeqPos`).
-        let length = self.seq_data.len() as u64 + self.total_gap_length;
-        let seq_pos_length = u64::from(length as u32);
-        if self.flags.build_db_length_limit && seq_pos_length > i32::MAX as u64 {
-            return Ok((
-                SeqInst::TooLong {
-                    length: seq_pos_length,
-                },
-                is_aa,
-            ));
-        }
-        if length != seq_pos_length {
-            // The gaps stay a delta when they are parsed, or when their sum wraps to 0 (the
-            // test of the substitution below that `m_TotalGapLength` is above 0).
-            let form = match self.gaps.first() {
-                Some(first) if self.flags.parse_gaps || self.total_gap_length as u32 == 0 => {
-                    if first.position == 0 && first.length == 0 {
-                        PastSeqPosForm::DeltaFromNull
-                    } else {
-                        PastSeqPosForm::Delta
-                    }
-                }
-                _ => PastSeqPosForm::Residues,
-            };
-            return Ok((
-                SeqInst::PastSeqPos {
-                    length,
-                    seq_pos_length,
-                    form,
-                },
-                is_aa,
-            ));
+        // `GetCurrentPos(ePosWithGaps)`, `m_CurrentPos` plus `m_TotalGapLength`: the record's
+        // length modulo 2^32, which makeblastdb tests and the `Seq-inst` takes.
+        let current = self.seq_data.len() as u64;
+        let total_gap_length = self.total_gap_length % modulus;
+        let length = (current + total_gap_length) % modulus;
+        if self.flags.build_db_length_limit && length > i32::MAX as u64 {
+            return Ok((SeqInst::TooLong { length }, is_aa));
         }
 
-        if !self.flags.parse_gaps && self.total_gap_length > 0 {
-            let gap_char = if is_aa { b'X' } else { b'N' };
-            let mut new_data = Vec::new();
-            new_data
-                .try_reserve_exact(length as usize)
-                .map_err(|_| ReadError::OutOfMemory)?;
-            let mut pos = 0;
-            for gap in &self.gaps {
-                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
-                if gap.mods {
-                    post_warning(
-                        self.flags.ignored_problems,
-                        Problem::ModifierFoundButNoneExpected,
-                        b"CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.",
-                        warn,
-                    );
-                }
-                if gap.position > pos {
-                    new_data.extend_from_slice(&self.seq_data[pos..gap.position]);
-                    pos = gap.position;
-                }
-                new_data.resize(new_data.len() + gap.length as usize, gap_char);
-            }
-            if self.seq_data.len() > pos {
-                new_data.extend_from_slice(&self.seq_data[pos..]);
-            }
-            self.seq_data = new_data;
+        // The substituted string holds the residues and the runs, never empty; its pieces are
+        // those of its first `length` letters, and none for a length that wrapped to 0.
+        let substituted = !self.flags.parse_gaps && total_gap_length > 0;
+        if substituted {
+            self.seq_data = self.substituted(length, is_aa, warn)?;
             self.gaps.clear();
             self.total_gap_length = 0;
-        }
-
-        if self.gaps.is_empty() && self.seq_data.is_empty() {
+        } else if self.gaps.is_empty() && self.seq_data.is_empty() {
             if !self.flags.disable_no_residues {
                 return Err(ReadError::Parse(ParseError::fasta_error(
                     ErrCode::NoResidues,
@@ -1371,20 +1331,45 @@ impl RecordState {
             }
             return Ok((SeqInst::Virtual, is_aa));
         }
-        if is_aa {
+        if is_aa && self.gaps.is_empty() && !self.seq_data.is_empty() {
             let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
-        let mut pieces = Vec::new();
-        let n = self.gaps.len();
-        if n == 0 || self.gaps[0].position > 0 {
-            let end = if n > 0 {
-                self.gaps[0].position
+        // The pieces between the gaps, at the gaps' wrapped positions; a piece is `TStr(m_SeqData,
+        // pos, len)`, which `CTempString` cuts to the residues (empty from a position at or past
+        // their end), and the length after the last gap is a `TSeqPos` difference. The residues
+        // of a protein are one NCBIeaa literal each (gaps stay a protein's only when their sum
+        // wraps to 0).
+        //
+        // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:377-387
+        let size = self.seq_data.len() as u64;
+        let span = |pos: u64, len: u64| -> (usize, usize) {
+            if pos >= size {
+                (0, 0)
             } else {
-                self.seq_data.len()
-            };
-            add_and_split(&mut pieces, &self.seq_data, 0, end);
+                (pos as usize, (pos + len.min(size - pos)) as usize)
+            }
+        };
+        let mut pieces = Vec::new();
+        let add = |pieces: &mut Vec<DeltaSeq>, residues: &[u8], (start, end): (usize, usize)| {
+            if is_aa {
+                if end > start {
+                    pieces.push(DeltaSeq::Literal(Segment {
+                        coding: Coding::Ncbieaa,
+                        start: start as u32,
+                        length: (end - start) as u32,
+                    }));
+                }
+            } else {
+                add_and_split(pieces, residues, start, end);
+            }
+        };
+        let gap_pos = |gap: &Gap| gap.position as u64 % modulus;
+        let n = self.gaps.len();
+        if n == 0 || gap_pos(&self.gaps[0]) > 0 {
+            let len = if n > 0 { gap_pos(&self.gaps[0]) } else { length };
+            add(&mut pieces, &self.seq_data, span(0, len));
         }
         for i in 0..n {
             let gap = self.gaps[i];
@@ -1394,21 +1379,32 @@ impl RecordState {
                 DeltaSeq::Gap { length: gap.length }
             });
             let next_start = if i == n - 1 {
-                self.seq_data.len()
+                current
             } else {
-                self.gaps[i + 1].position
+                gap_pos(&self.gaps[i + 1])
             };
-            if next_start != gap.position {
-                add_and_split(&mut pieces, &self.seq_data, gap.position, next_start);
+            if next_start != gap_pos(&gap) {
+                let seq_len = (next_start + modulus - gap_pos(&gap)) % modulus;
+                add(&mut pieces, &self.seq_data, span(gap_pos(&gap), seq_len));
             }
         }
 
         if let [piece] = pieces[..] {
             let seq_data = match piece {
-                DeltaSeq::Literal(segment) => match segment.coding {
-                    Coding::Ncbi2na => SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(&self.seq_data)),
-                    Coding::Ncbi4na => SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&self.seq_data)),
-                },
+                DeltaSeq::Literal(segment) => {
+                    debug_assert_eq!(segment.length as usize, self.seq_data.len());
+                    match segment.coding {
+                        Coding::Ncbi2na => {
+                            SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(&self.seq_data))
+                        }
+                        Coding::Ncbi4na => {
+                            SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&self.seq_data))
+                        }
+                        Coding::Ncbieaa => {
+                            unreachable!("a protein of one literal has no gaps")
+                        }
+                    }
+                }
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
@@ -1422,6 +1418,62 @@ impl RecordState {
             },
             is_aa,
         ))
+    }
+
+    /// `AssembleSeq` without `fParseGaps` (protein input, and every input of the mask readers):
+    /// the `>?` gaps become runs of `X` (protein) or `N` (nucleotide), and the record's residues
+    /// are the first `length` letters (`GetCurrentPos(ePosWithGaps)`) of the string that this
+    /// builds. Its letters before a gap are appended where the gap's (wrapped) position is past
+    /// the last one, cut to the residues; an append from a position past them throws
+    /// `std::out_of_range` (`ReadError::OutOfRange`; only past 2^32 residues, two gaps before
+    /// the wrap beyond the residues kept). Only the first `length` letters are stored: NCBI
+    /// reserves `length` and grows the string to all of them, here they are not made (a record
+    /// whose gaps wrap past 2^32 is shorter than its runs).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1386-1424
+    fn substituted(
+        &self,
+        length: u64,
+        is_aa: bool,
+        warn: ReaderWarn<'_>,
+    ) -> Result<Vec<u8>, ReadError> {
+        let gap_char = if is_aa { b'X' } else { b'N' };
+        let residues = &self.seq_data[..];
+        let size = residues.len() as u64;
+        let mut new_data = Vec::new();
+        new_data
+            .try_reserve_exact(length as usize)
+            .map_err(|_| ReadError::OutOfMemory)?;
+        let room = |new_data: &Vec<u8>| length as usize - new_data.len();
+        let mut pos = 0u64;
+        for gap in &self.gaps {
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
+            if gap.mods {
+                post_warning(
+                    self.flags.ignored_problems,
+                    Problem::ModifierFoundButNoneExpected,
+                    b"CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.",
+                    warn,
+                );
+            }
+            let gap_pos = gap.position as u64 % self.seq_pos_modulus;
+            if gap_pos > pos {
+                if pos > size {
+                    return Err(ReadError::OutOfRange { pos, size });
+                }
+                let end = gap_pos.min(size) as usize;
+                let take = (end - pos as usize).min(room(&new_data));
+                new_data.extend_from_slice(&residues[pos as usize..pos as usize + take]);
+                pos = gap_pos;
+            }
+            let run = (gap.length as usize).min(room(&new_data));
+            new_data.resize(new_data.len() + run, gap_char);
+        }
+        if size > pos {
+            let take = ((size - pos) as usize).min(room(&new_data));
+            new_data.extend_from_slice(&residues[pos as usize..pos as usize + take]);
+        }
+        Ok(new_data)
     }
 
     /// `ParseTitle`: the reader's warning about residues at the end of a title, and the

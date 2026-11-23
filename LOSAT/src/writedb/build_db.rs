@@ -8,10 +8,9 @@ use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use super::bioseq::{Bioseq, PastSeqPos};
+use super::bioseq::{Bioseq, DeltaFix};
 use super::deflines;
 use super::dir_entry;
-use super::fasta_source::reader::past_seq_pos_refusal;
 use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
 use super::mask_data::range_set::address_order_refusal;
 use super::mask_data::{ranges_are_empty, MaskedRangeSet};
@@ -272,7 +271,7 @@ fn create_path(dir: &str) -> bool {
 // multisource_util.hpp:66-72) and prints as `eInvalid`.
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/multisource_util.hpp:65-72
 const CREATE_PATH_FAILED: ThrowSite = create_directories_site(1063);
-/// `s_FixBioseqDeltas`' throw for a protein delta (`CBuildDatabase::past_seq_pos`).
+/// `s_FixBioseqDeltas`' throw for a protein delta (`CBuildDatabase::delta_fix`).
 const PROTEIN_DELTA: ThrowSite = ThrowSite {
     file: "src/objtools/blast/seqdb_writer/build_db.cpp",
     line: 303,
@@ -678,8 +677,8 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-487
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:894-901
     // The FASTA source applies `s_FixBioseqDeltas` before it hands a
-    // sequence over; its errors arrive as errors of the source. A record past
-    // NCBI's 32-bit length comes without data and meets it here (`past_seq_pos`).
+    // sequence over; its errors arrive as errors of the source. What it makes of a delta
+    // that `Seq-inst.length` does not describe meets the sequence here (`delta_fix`).
     /// `AddSequences` of an `IBioseqSource`: `true` when a sequence was added.
     fn add_sequences<R: Read>(
         &mut self,
@@ -692,6 +691,9 @@ impl<'a> BuildDatabase<'a> {
         while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| match error.kind {
             SourceErrorKind::Creation => WriteDbError::creation(error.message),
             SourceErrorKind::OutOfMemory => WriteDbError::OutOfMemory,
+            SourceErrorKind::Std => {
+                WriteDbError::Other(String::from_utf8_lossy(&error.message).into_owned())
+            }
         })? {
             let bioseq_id = bioseq.first_id_fasta();
             if let Some(parsed) = bioseq.parsed.as_mut() {
@@ -723,8 +725,8 @@ impl<'a> BuildDatabase<'a> {
                     let mut headers = deflines::extract_bioseq_deflines(&bioseq, &mut *warn);
                     self.output_db.post_extracted_deflines(&headers);
                     self.taxids.fix_tax_id(&mut headers);
-                    if let Some(past) = bioseq.past_seq_pos {
-                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    if let Some(fix) = bioseq.delta_fix.take() {
+                        self.delta_fix(fix, &mut bioseq, &bioseq_id, &mut *warn)?;
                     }
                     if bioseq.seq_data.is_some() {
                         // `bs->GetId()`: the ids after `AddSequences`' edit of the ones of the
@@ -745,8 +747,8 @@ impl<'a> BuildDatabase<'a> {
                     // The definition line without `-parse_seqids` gets the global taxid
                     // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
                     self.output_db.extract_bioseq_deflines(&bioseq);
-                    if let Some(past) = bioseq.past_seq_pos {
-                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    if let Some(fix) = bioseq.delta_fix.take() {
+                        self.delta_fix(fix, &mut bioseq, &bioseq_id, &mut *warn)?;
                     }
                     if bioseq.seq_data.is_some() {
                         // `bs->GetId()` is the `local id N` that `CFastaReader` numbers the
@@ -1051,21 +1053,26 @@ impl<'a> BuildDatabase<'a> {
         messages
     }
 
-    /// `s_FixBioseqDeltas` on a record past NCBI's 32-bit length (`Bioseq::past_seq_pos`),
-    /// after the definition lines (`x_EditAndAddBioseq`), whose diagnostics come first.
+    /// `s_FixBioseqDeltas` on a delta that `Seq-inst.length` does not describe
+    /// (`Bioseq::delta_fix`), after the definition lines (`x_EditAndAddBioseq`), whose
+    /// diagnostics come first where it throws: the length of the raw sequence it made, or its
+    /// throw for a protein delta, or LOSAT's refusal of a sum of pieces past `int`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:297-304
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:297-304,370,395-397
     #[cold]
-    fn past_seq_pos(
+    fn delta_fix(
         &mut self,
-        past: PastSeqPos,
-        bioseq: &Bioseq,
+        fix: DeltaFix,
+        bioseq: &mut Bioseq,
         bioseq_id: &str,
         warn: Warn<'_>,
-    ) -> WriteDbError {
-        self.post_diagnostics(warn);
-        match past {
-            PastSeqPos::ProteinDelta => {
+    ) -> Result<(), WriteDbError> {
+        let error = match fix {
+            DeltaFix::Length(length) => {
+                bioseq.length = length;
+                return Ok(());
+            }
+            DeltaFix::ProteinDelta => {
                 let best_id = match &bioseq.parsed {
                     Some(parsed) => {
                         let mut out = Vec::new();
@@ -1085,11 +1092,15 @@ impl<'a> BuildDatabase<'a> {
                     .concat(),
                 ))
             }
-            PastSeqPos::Refused { length } => WriteDbError::Other(format!(
-                "{} is not supported by LOSAT's makeblastdb",
-                past_seq_pos_refusal(bioseq_id, length)
+            DeltaFix::PastInt { size } => WriteDbError::Other(format!(
+                "a delta sequence whose pieces hold {} letters ({bioseq_id}; NCBI converts \
+                 their count modulo 2^32 as a 32-bit int, here negative) is not supported by \
+                 LOSAT's makeblastdb",
+                crate::ncbi_str::with_commas(size)
             )),
-        }
+        };
+        self.post_diagnostics(warn);
+        Err(error)
     }
 
     /// Hands the diagnostics that the writer posted since the last call to

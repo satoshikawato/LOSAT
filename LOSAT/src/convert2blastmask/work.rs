@@ -14,7 +14,7 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
 use crate::seqmasks_io::writer::{MaskInfoWriter, MaskWriter, Serial, WriteError};
-use crate::writedb::fasta_source::reader::{FastaReader, ReadError, ReaderFlags};
+use crate::writedb::fasta_source::reader::{out_of_range_what, FastaReader, ReadError, ReaderFlags};
 
 /// How a run stops early.
 enum Failure {
@@ -238,6 +238,7 @@ impl<'a> MaskFromFasta<'a> {
                 ReadError::Parse(error) => Failure::Caught(error.exception()),
                 ReadError::Ncbi(exception) => Failure::Caught(*exception),
                 ReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                ReadError::OutOfRange { pos, size } => Failure::Std(out_of_range_what(pos, size)),
             }
         })?;
         let best_id = if parses_ids {

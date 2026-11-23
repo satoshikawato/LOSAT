@@ -381,41 +381,139 @@ fn the_error_of_a_record_without_residues() {
     );
 }
 
-/// A record of 4,294,967,296 letters or more, counting its gaps, is refused (NCBI's length is
-/// a 32-bit `TSeqPos`; line RG DECISIONS K3-6, K3-8), with nothing allocated for its gaps; the
-/// records before it are read, and the refusal names the record.
+/// A record of 4,294,967,296 letters or more, counting its gaps (NCBI's length is a 32-bit
+/// `TSeqPos`; line RG DECISIONS K3-6, K3-8, KC-11d), reads as NCBI's object manager reads it:
+/// the first (length modulo 2^32) letters, the gap lines as runs of `N` or `X`; gaps that sum to
+/// a multiple of 2^32 stay pieces, which read as `N` or `X` where the map resolves them and
+/// throw where a gap is 4294967295 or a piece ends past 32 bits. Bytes of dustmasker and
+/// segmasker 2.17.0 (the official release, remaining-gaps-20261112/K/kc/p11d/p2/local).
 #[test]
-fn a_record_past_32_bits_is_refused() {
-    for (input, protein, length) in [
+fn a_record_past_32_bits() {
+    let letters = |run: &Run| -> Vec<String> {
+        run.records
+            .iter()
+            .map(|record| String::from_utf8(record.letters.clone()).unwrap())
+            .collect()
+    };
+    // The run of `N` is made, then cut to the length, 0.
+    let read = run(b">a\nACGT\n>b\nA\n>?4294967295\n", false, false);
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["ACGT", ""]);
+    // Cut to 1 (the protein's `X` after it are not read).
+    let read = run(b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n", true, false);
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["MKV", "M"]);
+    // Gaps that sum to 2^32: pieces, read as N or X (dustmasker -outfmt fasta:
+    // `ACGTACGTACGTnnnnnnnn` and `nnnnnn`; segmasker: `XXXXXX`).
+    let read = run(
+        b">a\nACGTACGTACGT\n>?2147483648\n>?2147483648\nACGTaaaa\n>b\nacgtAC\n",
+        false,
+        false,
+    );
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["ACGTACGTACGTNNNNNNNN", "ACGTAC"]);
+    let read = run(b">a\n>?2147483648\n>?2147483648\nACGTAC\n", false, false);
+    assert_eq!(letters(&read), ["NNNNNN"]);
+    let read = run(b">a\n>?2147483648\n>?2147483648\nMKVLAG\n", true, false);
+    assert_eq!(letters(&read), ["XXXXXX"]);
+    let read = run(b">a\nMKVL\n>?4294967283\n>?13\nQQQQ\n", true, false);
+    assert_eq!(letters(&read), ["MKVLXXXX"]);
+    // A gap of 4294967295 within the length, and a piece that ends past 32 bits, throw
+    // (`Invalid sequence length`, `Sequence position overflow`); the records before are read.
+    for (input, protein, error, length) in [
         (
-            &b">a\nACGT\n>b\nA\n>?4294967295\n"[..],
+            &b">z\nACGT\n>a\nACGTacgtACGT\n>?4294967295\n>?1\nACGTaaaa\n"[..],
             false,
-            4_294_967_296u64,
+            SeqMapError::InvalidLength,
+            20,
         ),
         (
-            &b">a\nACGT\n>b\nAC\n>?4294967295\n>?1\nA\n"[..],
+            b">z\nACGT\n>a\nACGTACGT\n>?1\n>?4294967295\nACGT\n",
             false,
-            4_294_967_299,
+            SeqMapError::InvalidLength,
+            12,
         ),
         (
-            &b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n"[..],
+            b">z\nACGT\n>a\nACGTACGTAC\n>?4294967290\n>?6\nACGTAAAA\n",
+            false,
+            SeqMapError::PositionOverflow,
+            18,
+        ),
+        (
+            b">z\nMKVL\n>a\nMKVLMKVLMK\n>?4294967290\n>?6\nQQQQ\n",
             true,
-            8_589_934_593,
+            SeqMapError::PositionOverflow,
+            14,
         ),
     ] {
         let read = run(input, protein, false);
         assert_eq!(read.records.len(), 1);
-        let Some(MaskReadError::Refused(what)) = &read.error else {
+        let Some(MaskReadError::SeqMap {
+            error: found,
+            length: found_length,
+        }) = read.error
+        else {
             panic!("{:?}", read.error)
         };
-        assert!(
-            what.contains(&format!(
-                "(lcl|2: {} letters;",
-                crate::ncbi_str::with_commas(length)
-            )),
-            "{what}"
-        );
+        assert_eq!((found, found_length), (error, length));
     }
+    assert_eq!(
+        String::from_utf8(seq_vector_exception(14).ncbi_what()).unwrap(),
+        format!(
+            "NCBI C++ Exception:\n    T0 \"{}/src/objmgr/seq_vector_ci.cpp\", line 731: Error: \
+             (CSeqVectorException::eSeqDataError) ncbi::objects::CSeqVector_CI::GetSeqData() - \
+             CSeqVector_CI::GetSeqData: cannot get seq-data in range: 0-14\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        )
+    );
+}
+
+/// Past 2^32 residues (here past 64) the record keeps those since its position last wrapped,
+/// and an append of `AssembleSeq` from past them is `std::out_of_range` (line RG DECISIONS
+/// KC-11d).
+#[test]
+fn residues_past_32_bits() {
+    let read = |input: &[u8]| {
+        let mut reader = MaskFastaReader::new(input, false, false)
+            .unwrap()
+            .with_seq_pos_modulus(64);
+        let mut records = Vec::new();
+        let error = loop {
+            match reader.next(&mut |_| {}) {
+                Ok(Some(record)) => records.push(String::from_utf8(record.letters).unwrap()),
+                Ok(None) => break None,
+                Err(error) => break Some(error),
+            }
+        };
+        (records, error)
+    };
+    let mut input = b">a\n".to_vec();
+    input.extend(b"A".repeat(60).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend_from_slice(b"ACGTAC\nGGGG\n>b\nAC\n");
+    let (records, error) = read(&input);
+    assert!(error.is_none());
+    assert_eq!(records, ["ACGGGG", "AC"]);
+    // A gap at 20, past the 12 kept, and one at 71 (7): the runs after the residues.
+    let mut input = b">a\n".to_vec();
+    input.extend(b"A".repeat(20).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend_from_slice(b">?3\n");
+    input.extend(b"C".repeat(51).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend_from_slice(b">?2\nGGGGG\n");
+    assert_eq!(read(&input).0, ["CCCCCCCGGGGGNNNNN"]);
+    // Gaps at 20 and 30, past the 6 kept.
+    let mut input = b">a\n".to_vec();
+    input.extend(b"A".repeat(20).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend_from_slice(b">?3\nCCCCCCCCCC\n>?4\n");
+    input.extend(b"G".repeat(40).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    let (records, error) = read(&input);
+    assert!(records.is_empty());
+    let Some(MaskReadError::Std(what)) = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(
+        what,
+        "basic_string::append: __pos (which is 20) > this->size() (which is 6)"
+    );
 }
 
 struct FailingRead<'a>(&'a [u8]);

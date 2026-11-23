@@ -52,23 +52,26 @@ pub struct Bioseq {
     /// definition lines are built from them (`deflines`), and `local_id` and `title` are
     /// not used.
     pub parsed: Option<ParsedIds>,
-    /// What `s_FixBioseqDeltas` meets in a record whose length NCBI counts past 32 bits
-    /// (`fasta_source::reader::SeqInst::PastSeqPos`), whose data LOSAT does not build; `None`
-    /// for every other record (and for one whose delta starts with a gap of unknown length,
-    /// which NCBI leaves without data: `seq_data` is `None`).
-    pub past_seq_pos: Option<PastSeqPos>,
+    /// What `s_FixBioseqDeltas` makes of a delta sequence that `length` (its `Seq-inst.length`,
+    /// which `AddSequences` tests) does not describe; `None` for every other record (and for a
+    /// delta that starts with a gap of unknown length, which NCBI leaves without data:
+    /// `seq_data` is `None`).
+    pub delta_fix: Option<DeltaFix>,
 }
 
-/// See `Bioseq::past_seq_pos`.
+/// See `Bioseq::delta_fix`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PastSeqPos {
-    /// A protein whose gaps stayed a delta: NCBI throws "Protein delta sequences are not
-    /// supported." (`CMultisourceException`).
+pub enum DeltaFix {
+    /// A protein whose gaps stayed a delta (their sum wrapped to 0 past 2^32): NCBI throws
+    /// "Protein delta sequences are not supported." (`CMultisourceException`).
     ProteinDelta,
-    /// A sequence whose data NCBI builds from more letters than its length says (the
-    /// residues, a gap or a run of `X` of 4,294,967,296 letters or more): LOSAT refuses it.
-    /// `length` is the record's, counted on.
-    Refused { length: u64 },
+    /// The length of the raw sequence made of the delta, `int length = seq8na.size()`, the sum
+    /// of its pieces (a gap of unknown length is one letter) modulo 2^32, which the database
+    /// takes; `seq_data` holds that many letters.
+    Length(u64),
+    /// That sum modulo 2^32 is 2^31 or more, a negative `int` that NCBI converts with as a
+    /// `TSeqPos`: LOSAT refuses it (`size` is the sum).
+    PastInt { size: u64 },
 }
 
 /// The parts of a Bioseq of `CFastaReader` with the flags `fRequireID` and `fParseRawID` that the

@@ -304,7 +304,11 @@ impl Source<'_> {
                         MaskReadError::Ncbi(exception) => Failure::Caught(exception),
                         MaskReadError::Read(error) => read_failure(error),
                         MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
-                        MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
+                        MaskReadError::Std(what) => Failure::Std(what),
+                        // `CanGetRange` catches the map's exception.
+                        MaskReadError::SeqMap { length, .. } => Failure::Caught(
+                            crate::seqmasks_io::fasta_reader::seq_vector_exception(length),
+                        ),
                     })?;
                 Ok(record.map(|record| Record {
                     ids: record.ids,

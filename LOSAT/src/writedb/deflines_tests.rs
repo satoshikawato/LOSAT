@@ -74,7 +74,7 @@ fn the_second_parse_splits_at_ctrl_a_and_keeps_the_spaces_of_titles() {
         length: 1,
         seq_data: None,
         parsed: Some(p),
-        past_seq_pos: None,
+        delta_fix: None,
     };
     let set = extract_bioseq_deflines(&bioseq, &mut no_warn);
     assert_eq!(
@@ -115,7 +115,7 @@ fn ids_of_the_other_molecule_become_local() {
         length: 1,
         seq_data: None,
         parsed: Some(p),
-        past_seq_pos: None,
+        delta_fix: None,
     };
     let set = extract_bioseq_deflines(&bioseq, &mut no_warn);
     assert_eq!(

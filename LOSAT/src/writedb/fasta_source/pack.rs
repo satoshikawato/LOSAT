@@ -2,11 +2,14 @@
 //! (`CDelta_ext::AddAndSplit`), and the conversions of the residues into NCBI2na,
 //! NCBI4na and NCBI8na (`c++/src/util/sequtil/`).
 
-/// The codings that `Pack` chooses for IUPACna residues without gaps.
+/// The codings that `Pack` chooses for IUPACna residues without gaps, and NCBIeaa, the one
+/// literal of a protein's residues (`CSeqConvert::Pack` copies NCBIeaa when the target takes
+/// no gaps).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Coding {
     Ncbi2na,
     Ncbi4na,
+    Ncbieaa,
 }
 
 /// One segment of the packed residues (`IPackTarget::NewSegment`).
@@ -50,6 +53,7 @@ fn bytes_needed(coding: Coding, length: u32) -> u64 {
     match coding {
         Coding::Ncbi2na => u64::from(length).div_ceil(4),
         Coding::Ncbi4na => u64::from(length).div_ceil(2),
+        Coding::Ncbieaa => u64::from(length),
     }
 }
 

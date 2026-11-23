@@ -36,10 +36,7 @@ fn fresh_retained_and_threshold_reset_word_finder_match_ncbi() {
             "-window_size",
             &window.to_string(),
         ];
-        let crate::cli::Commands::Blastx(args) =
-            crate::cli::try_parse_from(args)
-                .unwrap()
-                .command
+        let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
         else {
             unreachable!()
         };

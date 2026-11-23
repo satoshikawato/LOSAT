@@ -1413,7 +1413,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
 /// words after the program's name).
 pub(super) fn parse_makedb_words(words: &[String]) -> MakedbArgs {
-    use crate::cli::{Cli, Commands};
+    use crate::cli::Commands;
     let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
     argv.extend(words.iter().cloned());
     match crate::cli::try_parse_from(argv) {
@@ -2194,7 +2194,7 @@ fn s3a_gate() {
 #[test]
 #[ignore = "driver of an external gate (LOSAT_S3B_GATE_MANIFEST)"]
 fn s3b_gate() {
-    use crate::cli::{Cli, Commands};
+    use crate::cli::Commands;
     let manifest = std::env::var("LOSAT_S3B_GATE_MANIFEST").expect("LOSAT_S3B_GATE_MANIFEST");
     for line in std::fs::read_to_string(manifest).unwrap().lines() {
         let mut fields = line.split('\t');

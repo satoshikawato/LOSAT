@@ -637,7 +637,10 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
     let parse_words = |line: &[&str]| parse_words("dustmasker", line);
     let messages = |line: &[&str]| messages("dustmasker", line);
     assert_eq!(parse_words(&["-h"]).unwrap_err(), ArgsError::Usage);
-    assert_eq!(parse_words(&["-help-full"]).unwrap_err(), ArgsError::HelpFull);
+    assert_eq!(
+        parse_words(&["-help-full"]).unwrap_err(),
+        ArgsError::HelpFull
+    );
     assert_eq!(parse_words(&["-xmlhelp"]).unwrap_err(), ArgsError::XmlHelp);
     let args = parse_words(&["-logfile", "log.txt", "-conffile", "t.ini"]).unwrap();
     assert_eq!(args.value("logfile"), Some("log.txt"));

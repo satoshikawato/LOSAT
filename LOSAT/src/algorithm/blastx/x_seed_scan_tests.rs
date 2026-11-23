@@ -70,10 +70,7 @@ fn direct_scan_loop_matches_ncbi_hits_and_reference_diagonal_table() {
             "-window_size",
             &window.to_string(),
         ];
-        let crate::cli::Commands::Blastx(args) =
-            crate::cli::try_parse_from(args)
-                .unwrap()
-                .command
+        let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
         else {
             unreachable!()
         };
@@ -464,10 +461,7 @@ fn blastx_lookup(letters: &[u8], extra: &[&str]) -> Lookup {
         "losat", "blastx", "-query", "query", "-subject", "subject", "-seg", "no",
     ];
     args.extend_from_slice(extra);
-    let crate::cli::Commands::Blastx(args) =
-        crate::cli::try_parse_from(args)
-            .unwrap()
-            .command
+    let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
     else {
         unreachable!()
     };

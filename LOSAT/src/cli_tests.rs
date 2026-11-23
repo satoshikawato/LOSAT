@@ -339,7 +339,10 @@ fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
         ];
         let error = try_parse_from(argv).unwrap_err();
         let message = error.to_string();
-        assert!(matches!(error, ArgvError::Refused(_)), "{option}: {message}");
+        assert!(
+            matches!(error, ArgvError::Refused(_)),
+            "{option}: {message}"
+        );
         assert!(
             message.contains(&format!("the value of {option} is not UTF-8"))
                 && message.contains("not supported by LOSAT's makeblastdb"),

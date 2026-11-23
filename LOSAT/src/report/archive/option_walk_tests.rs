@@ -102,7 +102,7 @@ fn walk(app: &App) {
     let missing: Vec<String> = subcommand
         .get_arguments()
         .map(|arg| arg.get_id().as_str().to_string())
-        .filter(|id| !matches!(id.as_str(), "help" | "ncbi_help"))
+        .filter(|id| id.as_str() != "help")
         .filter(|id| !app.cases.iter().any(|case| case.0 == id))
         .collect();
     assert!(

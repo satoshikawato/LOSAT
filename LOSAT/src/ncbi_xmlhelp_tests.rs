@@ -324,7 +324,10 @@ fn the_web_engine_prints_the_command_lines_help() {
         for (word, text) in [
             ("-h", crate::ncbi_app::short_usage(tool)),
             ("-help", crate::ncbi_app::help_text(tool.help).into_owned()),
-            ("-help-full", crate::ncbi_app::help_text(tool.help).into_owned()),
+            (
+                "-help-full",
+                crate::ncbi_app::help_text(tool.help).into_owned(),
+            ),
         ] {
             let help = web(&["-dryrun", word]).unwrap_err();
             assert_eq!(help, ArgvError::Printed(text.clone()), "{program} {word}");

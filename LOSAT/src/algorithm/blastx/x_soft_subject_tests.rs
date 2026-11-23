@@ -19,10 +19,7 @@ fn search(
         "losat", "blastx", "-query", "query", "-subject", "subject", "-seg", "no",
     ];
     args.extend_from_slice(extra);
-    let crate::cli::Commands::Blastx(args) =
-        crate::cli::try_parse_from(args)
-            .unwrap()
-            .command
+    let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
     else {
         unreachable!()
     };

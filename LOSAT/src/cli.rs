@@ -395,8 +395,6 @@ programs! {
         #[command(help_template = NCBI_HELP_TEMPLATE)]
         Rpsblast(rpsblast::RpsblastArgs),
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
-        // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
-        // reader stops at them, `try_parse_from_command`).
         /// Translated Reverse Position Specific BLAST (rpstblastn)
         #[command(help_template = NCBI_HELP_TEMPLATE)]
         Rpstblastn(rpstblastn::RpstblastnArgs),
@@ -489,8 +487,7 @@ pub(crate) fn top_level_error(argv: &[OsString]) -> clap::Error {
         }
     }
     let argv0 = argv.first().cloned().unwrap_or_else(|| "losat".into());
-    match Cli::program_command(argv)
-        .try_get_matches_from(std::iter::once(argv0).chain(translated))
+    match Cli::program_command(argv).try_get_matches_from(std::iter::once(argv0).chain(translated))
     {
         Err(error) => error,
         Ok(_) => unreachable!("a top level without a program stops at its first flag"),

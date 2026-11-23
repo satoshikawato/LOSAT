@@ -1092,9 +1092,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
     let args = |words: &[&str]| {
         let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(words);
-        crate::cli::try_parse_from(argv)
-            .unwrap()
-            .blastn()
+        crate::cli::try_parse_from(argv).unwrap().blastn()
     };
     let native = |error: anyhow::Error| {
         let native = error.downcast::<crate::cli::NativeError>().unwrap();

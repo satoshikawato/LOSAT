@@ -28,7 +28,6 @@ mod query;
 mod segset;
 mod sites;
 
-pub(crate) use args::alias_word;
 pub use args::RpsbprocArgs;
 
 use std::ffi::{OsStr, OsString};

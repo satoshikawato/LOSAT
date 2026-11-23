@@ -45,9 +45,7 @@ fn a_batch_input_is_the_batch_part_numbered_from_zero() {
 fn args(extra: &[&str]) -> BlastnArgs {
     let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
     argv.extend_from_slice(extra);
-    crate::cli::try_parse_from(argv)
-        .unwrap()
-        .blastn()
+    crate::cli::try_parse_from(argv).unwrap().blastn()
 }
 
 fn record(

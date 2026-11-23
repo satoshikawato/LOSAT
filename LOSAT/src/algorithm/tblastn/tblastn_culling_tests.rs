@@ -1,7 +1,7 @@
 //! The `-culling_limit` option of TBLASTN as the parser reads it (the integration test
 //! `tests/tblastn_culling.rs` runs the binary with the option).
 
-use crate::cli::{try_parse_from, Cli, Commands};
+use crate::cli::{try_parse_from, Commands};
 
 fn limit(words: &[&str]) -> Result<i32, String> {
     let mut argv = vec!["losat", "tblastn", "-query", "q.fa", "-subject", "s.fa"];

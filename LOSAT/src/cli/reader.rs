@@ -181,7 +181,11 @@ fn clap_argv(tool: &Tool, args: &Args, command: &clap::Command, dry_run: bool) -
     let program = command
         .find_subcommand(tool.program)
         .expect("each program on the reader is a command");
-    let has_long = |name: &str| program.get_arguments().any(|arg| arg.get_long() == Some(name));
+    let has_long = |name: &str| {
+        program
+            .get_arguments()
+            .any(|arg| arg.get_long() == Some(name))
+    };
     let mut argv: Vec<OsString> = vec!["losat".into(), tool.program.into()];
     for (name, value) in args.given_values() {
         if is_file_argument(name) && !has_long(name) {
@@ -293,11 +297,7 @@ pub(crate) enum Caller {
 /// (`refusal_after_read`), then clap's conversion (`convert`). An argv that names no program on
 /// this reader is read by the top level (`top_level_error`).
 pub(crate) fn read_argv(argv: &[OsString], caller: Caller) -> Result<Commands, ArgvError> {
-    let Some(tool) = argv
-        .get(1)
-        .and_then(|word| word.to_str())
-        .and_then(tool)
-    else {
+    let Some(tool) = argv.get(1).and_then(|word| word.to_str()).and_then(tool) else {
         let error = super::top_level_error(argv);
         return Err(match error.use_stderr() {
             true => ArgvError::Report(super::top_level_message(&error).into_bytes()),

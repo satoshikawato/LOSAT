@@ -190,10 +190,7 @@ fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
     ] {
         let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
         argv.extend(extra);
-        assert!(
-            crate::cli::try_parse_from(argv).is_err(),
-            "{extra:?}"
-        );
+        assert!(crate::cli::try_parse_from(argv).is_err(), "{extra:?}");
     }
 }
 

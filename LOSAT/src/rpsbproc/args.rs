@@ -92,31 +92,6 @@ fn rpsbproc_real(value: &str) -> Result<f64, String> {
     crate::blastinput::value_parsers::ncbi_double(value)
 }
 
-/// The long forms of rpsbproc's arguments (`AddAlias`): `--infile` is `-i`, and so on.
-const ALIASES: [(&str, &str); 8] = [
-    ("--infile", "-i"),
-    ("--outfile", "-o"),
-    ("--evalue", "-e"),
-    ("--data-mode", "-m"),
-    ("--target-data", "-t"),
-    ("--data-path", "-d"),
-    ("--show-families", "-f"),
-    ("--quiet", "-q"),
-];
-
-/// The argument word `text` with an alias replaced by its argument (`--infile=X` is `-i=X`).
-pub(crate) fn alias_word(text: &str) -> Option<String> {
-    let (name, value) = match text.split_once('=') {
-        Some((name, value)) => (name, Some(value)),
-        None => (text, None),
-    };
-    let (_, short) = ALIASES.iter().find(|(alias, _)| *alias == name)?;
-    Some(match value {
-        Some(value) => format!("{short}={value}"),
-        None => (*short).to_string(),
-    })
-}
-
 impl RpsbprocArgs {
     /// `-m`.
     pub(crate) fn mode(&self) -> DataMode {

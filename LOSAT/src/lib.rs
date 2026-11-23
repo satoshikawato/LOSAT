@@ -106,6 +106,7 @@ pub(crate) mod rpsbproc;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_api;
 // The words of a request of LOSAT Web's ABI v1 (frozen), read as v1 reads them.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod web_v1_argv;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.

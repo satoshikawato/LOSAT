@@ -13,13 +13,8 @@ use crate::blastinput::report_counts::FormattingArgs;
 use crate::blastinput::value_parsers::*;
 
 /// The text of `rpstblastn -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage`), frozen as NCBI
-/// writes it. `losat rpstblastn -help` writes it (`RpstblastnArgs::ncbi_help`).
+/// writes it: its `Tool`'s help (`cli::reader`), which `-h` shortens as NCBI does.
 pub const HELP: &str = include_str!("help.txt");
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
-/// The text of `rpstblastn -h`: the head of `HELP` before `OPTIONAL ARGUMENTS`, then NCBI's
-/// pointer to `-help` (frozen as NCBI writes it).
-pub const USAGE: &str = include_str!("usage.txt");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110
 // rpstblastn's arguments: rpsblast's, with the genetic code of the query (`-query_gencode`), the
@@ -127,29 +122,9 @@ pub struct RpstblastnArgs {
     /// nothing.
     #[arg(long = "use_sw_tback", default_value_t = false)]
     pub use_sw_tback: bool,
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (cited at `USAGE`)
-    /// `-help` or `-help-full` (`full`: NCBI 2.17.0 writes one text for both) or `-h` (`short`):
-    /// NCBI's reader stops at them, the words before them read first. The command line's reader sets this hidden argument there
-    /// (`cli::try_parse_from_command`; no word of the user names it, `NCBI_HELP_ARG`), and the
-    /// run writes NCBI's text (`ncbi_help_text`).
-    #[arg(long = NCBI_HELP_ARG, hide = true, value_parser = ["full", "short"])]
-    pub(crate) ncbi_help: Option<String>,
 }
 
-/// The long name of the reader's own argument `RpstblastnArgs::ncbi_help`, which no word of the
-/// command line names (the toolkit's hidden `-logfile` and `-conffile` are named by theirs).
-pub(crate) const NCBI_HELP_ARG: &str = "ncbi_help";
-
 impl RpstblastnArgs {
-    /// NCBI's text of `-help` or `-h` when the command line asks for it (`ncbi_help`).
-    pub fn ncbi_help_text(&self) -> Option<&'static str> {
-        match self.ncbi_help.as_deref() {
-            Some("full") => Some(HELP),
-            Some(_) => Some(USAGE),
-            None => None,
-        }
-    }
-
     /// The RPS search of the arguments (what BLASTX's arguments do not hold), after NCBI's reading
     /// of `-outfmt`, which comes before its option handlers. LOSAT's refusals of options come once
     /// per run before the first byte, after NCBI's own errors of the options and the database

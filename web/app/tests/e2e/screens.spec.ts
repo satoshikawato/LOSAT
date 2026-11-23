@@ -415,3 +415,79 @@ for (const size of SIZES) {
     await page.getByTestId('run-status-cancel').click();
   });
 }
+
+// --- the WindowMasker tab and tool results (WW3b1) -----------------------------------------
+
+for (const size of SIZES) {
+  test(`windowmasker screen at the ${size.name} size`, async ({ page, browserName }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await navigate(page, '/');
+    await expect(page.getByTestId('storage-status')).toBeAttached();
+    await page.getByTestId('tab-windowmasker').click();
+    await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+
+    const dm60k = readFileSync(join(REPOSITORY, 'LOSAT/tests/winmask/fasta/dm2L_60k.fa'));
+    const multi = readFileSync(join(REPOSITORY, 'LOSAT/tests/windowmasker/in/multi.fa'));
+    const garbage = readFileSync(join(REPOSITORY, 'LOSAT/tests/windowmasker/in/garbage.counts'));
+
+    // 26: Make counts with options open and a changed parameter.
+    await page.getByTestId('wm-fasta-files').setInputFiles({ name: 'dm2L_60k.fa', mimeType: 'text/plain', buffer: dm60k });
+    await expect(page.locator('[data-testid="wm-fasta-list"] > li').first()).toHaveAttribute('data-status', 'ready', { timeout: 60_000 });
+    await page.getByTestId('wm-options-toggle').click();
+    await page.getByTestId('wm-param-unit').fill('5');
+    await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+    await shoot(page, browserName, size.name, '26-wm-mk-counts-options');
+
+    // Run Make counts -> 29: Results view with counts preview and actions.
+    await page.getByTestId('wm-run-losat').click();
+    await waitStatus(page, 1, 'completed');
+    await pickRun(page, 1);
+    await expect(page.getByTestId('tool-output-text')).toBeVisible({ timeout: 60_000 });
+    await shoot(page, browserName, size.name, '29-wm-counts-result');
+
+    // 32: "Use in BLASTN" opens Search on BLASTN with attached counts + "Make counts…" link.
+    await page.getByTestId('tool-use-in-blastn').click();
+    await expect(page.getByTestId('param-window_masker_db-name')).toBeVisible();
+    await expect(page.getByTestId('param-window_masker_db-make-counts')).toBeVisible();
+    await shoot(page, browserName, size.name, '32-blastn-use-counts');
+
+    // 27: Mask stage with options open and session counts preselected via "Mask with these counts".
+    await pickRun(page, 1);
+    await page.getByTestId('tool-mask-with-counts').click();
+    await expect(page.getByTestId('wm-stage-mask')).toBeChecked();
+    const toggle = page.getByTestId('wm-options-toggle');
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    await page.getByTestId('wm-param-outfmt').selectOption('fasta');
+    await page.getByTestId('wm-param-dust').selectOption('true');
+    await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+    await shoot(page, browserName, size.name, '27-wm-mask-options');
+
+    // Run Mask -> 30: Results view for Mask output.
+    await page.getByTestId('wm-fasta-remove-0').click();
+    await page.getByTestId('wm-fasta-files').setInputFiles({ name: 'multi.fa', mimeType: 'text/plain', buffer: multi });
+    await expect(page.locator('[data-testid="wm-fasta-list"] > li').first()).toHaveAttribute('data-status', 'ready', { timeout: 60_000 });
+    await page.getByTestId('wm-run-losat').click();
+    await waitStatus(page, 2, 'completed');
+    await pickRun(page, 2);
+    await expect(page.getByTestId('tool-output-text')).toBeVisible({ timeout: 60_000 });
+    await shoot(page, browserName, size.name, '30-wm-mask-result');
+
+    // 28: Convert counts stage with options open.
+    await page.getByTestId('tab-windowmasker').click();
+    await page.getByTestId('wm-stage-convert').check();
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    await page.getByTestId('wm-convert-select').selectOption({ index: 1 });
+    await page.getByTestId('wm-param-sformat').selectOption('obinary');
+    await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+    await shoot(page, browserName, size.name, '28-wm-convert-options');
+
+    // 31: Failed WindowMasker run (bad counts file -> Exit status 3 + Warnings).
+    await page.getByTestId('wm-stage-mask').check();
+    await page.getByTestId('wm-ustat-file').setInputFiles({ name: 'garbage.counts', mimeType: 'application/octet-stream', buffer: garbage });
+    await page.getByTestId('wm-run-losat').click();
+    await waitStatus(page, 3, 'failed');
+    await pickRun(page, 3);
+    await expect(page.getByTestId('tool-exit-status')).toBeVisible();
+    await shoot(page, browserName, size.name, '31-wm-failed-result');
+  });
+}

@@ -1,0 +1,564 @@
+// Unit tests for the WindowMasker tool tab: argv builder, stage option filtering from -xmlhelp,
+// blastdb name detection, UTF-8 preview decoding, ToolDraft, SearchDraft.useCounts, shared
+// Coordinator queue (search -> tool -> search, cancel, non-zero exit, Data worker end), and
+// DataService tool output storage / OPFS-backed session inflation.
+import { gzipSync } from 'node:zlib';
+import { describe, expect, it } from 'vitest';
+import { sha256Hex } from 'losat';
+import { parseToolDescription } from 'losat/domain';
+import {
+  RunCancelledError,
+  type EngineGateway,
+  type EngineRunRequest,
+  type ToolEngine,
+  type ToolRunOptions,
+  type ToolRunResult,
+} from 'losat/ports';
+import { Coordinator, isToolRun, type SearchRequest, type ToolRequest } from '../../src/application/coordinator';
+import { SearchDraft } from '../../src/application/draft';
+import { ResultsBrowser } from '../../src/application/results';
+import { ToolDraft } from '../../src/application/tool-draft';
+import {
+  buildWindowMaskerArgv,
+  changedToolOptionsCount,
+  isCountsOutputFile,
+  refusedToolFields,
+  toolCommandWords,
+  toolFileOptionLabel,
+  toolValidationSummary,
+} from '../../src/domain/tool-argv';
+import {
+  decodeUtf8Preview,
+  detectBlastDbName,
+  stageOptionParameters,
+} from '../../src/domain/tools';
+import { DataService } from '../../src/infra/data/data-service';
+import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
+import { FakeEngine } from '../../src/infra/fake/fake-engine';
+import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
+import WINDOWMASKER_XMLHELP from '../../src/infra/fake/windowmasker-xmlhelp.xml?raw';
+import type { Downloader } from '../../src/ports/download';
+import { NodeInflater } from './support/node-inflater';
+
+const WM_DESC = parseToolDescription(WINDOWMASKER_XMLHELP);
+
+function makeData(store = new MemoryBlockStore()) {
+  let tok = 0;
+  const data = new DataService({
+    store,
+    scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
+    checker: new FakeInputChecker(),
+    digest: sha256Hex,
+    newToken: () => `t-${++tok}`,
+    cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
+  });
+  return { data, store };
+}
+
+function makeCoordinator(engine: EngineGateway & Partial<ToolEngine> = new FakeEngine(), dataWorkerEnded?: Promise<Error>) {
+  const { data, store } = makeData();
+  const saved: Array<{ readonly fileName: string; readonly bytes: Uint8Array }> = [];
+  const downloader: Downloader = {
+    save: (fileName, bytes) => saved.push({ fileName, bytes }),
+    saveBlob: (fileName, blob) => {
+      void blob.arrayBuffer().then((buf) => saved.push({ fileName, bytes: new Uint8Array(buf) }));
+    },
+  };
+  let id = 0;
+  const coordinator = new Coordinator({
+    engine,
+    data,
+    downloader,
+    now: () => 10_000,
+    newRunId: () => `run-${++id}`,
+    digest: sha256Hex,
+    ...(dataWorkerEnded === undefined ? {} : { dataWorkerEnded }),
+  });
+  return { coordinator, data, store, saved };
+}
+
+async function waitTerminal(coordinator: Coordinator, runId: string) {
+  for (let i = 0; i < 400; i++) {
+    const run = coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId);
+    if (run !== undefined && ['completed', 'cancelled', 'failed'].includes(run.status)) return run;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`run ${runId} did not finish`);
+}
+
+describe('windowmasker domain helpers', () => {
+  it('filters options per stage from -xmlhelp exclusions in usage order', () => {
+    const flagsOf = (stage: 'mk_counts' | 'mask' | 'convert') =>
+      stageOptionParameters(WM_DESC, stage).map((param) => param.flag);
+
+    const mk = flagsOf('mk_counts');
+    expect(mk).toContain('-checkdup');
+    expect(mk).toContain('-fa_list');
+    expect(mk).toContain('-unit');
+    expect(mk).toContain('-smem');
+    expect(mk).toContain('-ids');
+    expect(mk).not.toContain('-dust');
+    expect(mk).not.toContain('-window');
+    expect(mk).not.toContain('-outfmt');
+    expect(mk).not.toContain('-sformat');
+
+    const mask = flagsOf('mask');
+    expect(mask).toContain('-window');
+    expect(mask).toContain('-dust');
+    expect(mask).toContain('-dust_level');
+    expect(mask).toContain('-t_thres');
+    expect(mask).toContain('-exclude_ids');
+    expect(mask).not.toContain('-checkdup');
+    expect(mask).not.toContain('-unit');
+    expect(mask).not.toContain('-sformat');
+
+    const conv = flagsOf('convert');
+    expect(conv).toEqual(['-meta', '-t_high_pct', '-t_thres_pct', '-t_extend_pct', '-t_low_pct', '-smem']);
+  });
+
+  it('builds argv omitting defaults and respecting -out and -sformat', () => {
+    const mkDefault = buildWindowMaskerArgv({
+      stage: 'mk_counts',
+      inputName: 'genome.fa',
+      values: { '-sformat': 'ascii', '-checkdup': 'false' },
+      description: WM_DESC,
+    });
+    expect(mkDefault).toEqual(['windowmasker', '-mk_counts', '-in', 'genome.fa', '-out', 'wmasker.ascii']);
+    expect(toolCommandWords(mkDefault)).toEqual(['losat', ...mkDefault]);
+
+    const mkStdout = buildWindowMaskerArgv({
+      stage: 'mk_counts',
+      inputName: 'genome.fa',
+      outName: '-',
+      values: { '-sformat': 'obinary', '-unit': '9' },
+      description: WM_DESC,
+    });
+    expect(mkStdout).toEqual(['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '9', '-sformat', 'obinary']);
+
+    const maskArgv = buildWindowMaskerArgv({
+      stage: 'mask',
+      inputName: 'seq.fa',
+      ustatName: 'wmasker.obinary',
+      outName: '',
+      values: { '-outfmt': 'fasta', '-dust': 'true' },
+      description: WM_DESC,
+    });
+    expect(maskArgv).toEqual([
+      'windowmasker',
+      '-ustat',
+      'wmasker.obinary',
+      '-in',
+      'seq.fa',
+      '-outfmt',
+      'fasta',
+      '-dust',
+      'true',
+    ]);
+
+    const convArgv = buildWindowMaskerArgv({
+      stage: 'convert',
+      inputName: 'u4.ascii',
+      outName: 'u4.obinary',
+      values: { '-sformat': 'obinary', '-meta': 'demo' },
+      description: WM_DESC,
+    });
+    expect(convArgv).toEqual(['windowmasker', '-convert', '-in', 'u4.ascii', '-out', 'u4.obinary', '-meta', 'demo', '-sformat', 'obinary']);
+
+    expect(changedToolOptionsCount('mk_counts', { '-unit': '9', '-sformat': 'obinary' }, '', WM_DESC)).toBe(1);
+    expect(changedToolOptionsCount('mk_counts', { '-unit': '9' }, '-logfile run.log', WM_DESC)).toBe(2);
+  });
+
+  it('labels output files by option and recognizes counts outputs', () => {
+    const argv = ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'x.txt', '-logfile', './x.txt'];
+    expect(toolFileOptionLabel(argv, 'x.txt')).toBe('-out, -logfile');
+    expect(isCountsOutputFile('mk_counts', argv, 'x.txt')).toBe(true);
+    expect(isCountsOutputFile('mask', ['windowmasker', '-ustat', 'c', '-out', 'masked.fa'], 'masked.fa')).toBe(false);
+    expect(isCountsOutputFile('convert', ['windowmasker', '-convert', '-in', 'a', '-out', 'b'], 'b')).toBe(true);
+    expect(isCountsOutputFile('mk_counts', ['windowmasker', '-mk_counts', '-out', 'a', '-logfile', 'log'], 'log')).toBe(false);
+  });
+
+  it('detects BLAST database names preferring alias files over volume files', () => {
+    expect(detectBlastDbName(['db/wm.nin', 'db/wm.nsq', 'db/wm.nhr'])).toBe('db/wm');
+    expect(detectBlastDbName(['db/vol.00.nin', 'db/vol.01.nin', 'db/all.nal'])).toBe('db/all');
+    expect(detectBlastDbName(['plain.fa', 'ids.txt'])).toBeUndefined();
+  });
+
+  it('decodes UTF-8 preview slices safely across multi-byte boundaries and rejects binary', () => {
+    const utf8 = new TextEncoder().encode('hello日本語world');
+    // Cut inside the 3-byte UTF-8 sequence for '日' (starts at byte 5).
+    const cut = utf8.subarray(0, 7);
+    expect(decodeUtf8Preview(cut, true)).toBe('hello');
+    expect(decodeUtf8Preview(cut, false)).toBeUndefined();
+    expect(decodeUtf8Preview(new Uint8Array([0x41, 0x00, 0x42]), false)).toBeUndefined();
+    expect(decodeUtf8Preview(utf8, false)).toBe('hello日本語world');
+  });
+
+  it('extracts concise CLI error lines and maps refused fields from ncbi_app::args stderr', () => {
+    const unitErr = [
+      'USAGE',
+      '  windowmasker [-h] [-unit unit_length] [-dust use_dust]',
+      '========================================================================',
+      '',
+      "Error: Argument \"unit\". Illegal value, expected 1..16:  `0'",
+      "Error:  Argument \"unit\". Illegal value, expected 1..16:  `0'",
+    ].join('\n');
+    expect(toolValidationSummary(unitErr)).toBe('Error: Argument "unit". Illegal value, expected 1..16:  `0\'');
+    expect(refusedToolFields(unitErr, '')).toEqual({ extra: false, flags: new Set(['-unit']) });
+
+    const dustErr = [
+      'USAGE',
+      '  windowmasker [-mk_counts] [-dust use_dust]',
+      '========================================================================',
+      '',
+      "Error: Argument \"mk_counts\". Incompatible with argument:  `dust'",
+    ].join('\n');
+    expect(refusedToolFields(dustErr, '-dust T')).toEqual({ extra: true, flags: new Set(['-mk_counts']) });
+
+    const unknownErr = '========================================================================\n\nError: Unknown argument: "nosuchopt"';
+    expect(refusedToolFields(unknownErr, '-nosuchopt')).toEqual({ extra: true, flags: new Set() });
+
+    const dupErr = '========================================================================\n\nError: Argument with this name is defined already: window';
+    expect(refusedToolFields(dupErr, '-window 20')).toEqual({ extra: true, flags: new Set() });
+  });
+});
+
+describe('ToolDraft and SearchDraft.useCounts', () => {
+  function setupDraft() {
+    const { coordinator, data } = makeCoordinator(new FakeEngine());
+    const submitted: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueToolAll: async (requests) => {
+        submitted.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      debounceMs: 0,
+    });
+    return { draft, coordinator, data, submitted };
+  }
+
+  it('updates default -out when -sformat changes until edited, and combines FASTA files with newline check', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(draft.state.get().outNames.mk_counts).toBe('wmasker.ascii');
+
+    draft.setField('-sformat', 'obinary');
+    expect(draft.state.get().outNames.mk_counts).toBe('wmasker.obinary');
+
+    draft.setOutName('custom.obinary');
+    draft.setField('-sformat', 'oascii');
+    expect(draft.state.get().outNames.mk_counts).toBe('custom.obinary');
+
+    draft.addFastaFiles([
+      new File(['>a\nACGT'], 'a.fa'),
+      new File([gzipSync('>b\nTGCA\n')], 'b.fa.gz'),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(draft.state.get().fastaFiles.map((f) => [f.name, f.inflatedFrom, f.status])).toEqual([
+      ['a.fa', undefined, 'ready'],
+      ['b.fa', 'b.fa.gz', 'ready'],
+    ]);
+
+    const res = await draft.submit();
+    expect(res.ok).toBe(true);
+    expect(submitted).toHaveLength(1);
+    const req = submitted[0]![0]!;
+    expect(req.argv).toContain('combined_input.fa');
+    const combined = req.directory.find((d) => d.name === 'combined_input.fa');
+    expect(combined?.origin).toEqual({ kind: 'combined', parts: ['a.fa', 'b.fa'] });
+    expect(await combined!.file.text()).toBe('>a\nACGT\n>b\nTGCA\n');
+  });
+
+  it('refuses duplicate filenames and detects blastdb names from opened folder files', async () => {
+    const { draft } = setupDraft();
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      [new File([new Uint8Array([1])], 'wm.nin'), new File([new Uint8Array([2])], 'wm.nsq')],
+      ['db/wm.nin', 'db/wm.nsq'],
+    );
+    expect(draft.state.get().blastDbIn).toBe('db/wm');
+    expect(draft.state.get().runFilesError).toBeUndefined();
+
+    draft.addRunFiles([new File([new Uint8Array([3])], 'wm.nin')], ['db/wm.nin']);
+    expect(draft.state.get().runFilesError).toContain('db/wm.nin');
+    expect(draft.state.get().runFiles).toHaveLength(2);
+  });
+
+  it('SearchDraft.useCounts switches to BLASTN with -window_masker_db file attached', () => {
+    const { data } = makeData();
+    const draft = new SearchDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueAll: async () => ({ ok: true, runIds: ['r1'] }),
+      fetcher: { fetch: async () => ({ ok: false, reason: 'not-found' }) },
+      now: () => 0,
+      debounceMs: 0,
+    });
+    draft.setProgram('blastp');
+    const counts = new File(['counts'], 'wmasker.ascii');
+    draft.useCounts(counts);
+    expect(draft.state.get().program).toBe('blastn');
+    expect(draft.state.get().values.blastn['-window_masker_db']).toBe('wmasker.ascii');
+    expect(draft.state.get().files.blastn['-window_masker_db']).toBe(counts);
+  });
+});
+
+describe('Coordinator single queue and DataService tool storage', () => {
+  it('runs search -> tool -> search in order with shared numbering and handles queued cancel', async () => {
+    const order: string[] = [];
+    const base = new FakeEngine();
+    const gates: Array<() => void> = [];
+    const engine: EngineGateway & ToolEngine = {
+      describe: (p) => base.describe(p),
+      describeTool: (t) => base.describeTool(t),
+      start: () => base.start(),
+      validate: (a) => base.validate(a),
+      validateTool: (a) => base.validateTool(a),
+      cancel: (id) => base.cancel(id),
+      async run(req: EngineRunRequest, out, onPhase) {
+        order.push(`search:${req.runId}:start`);
+        await new Promise<void>((resolve) => gates.push(resolve));
+        const info = await base.run(req, out, onPhase);
+        order.push(`search:${req.runId}:end`);
+        return info;
+      },
+      async runTool(argv: readonly string[], opts?: ToolRunOptions): Promise<ToolRunResult> {
+        order.push(`tool:${argv[1]}:start`);
+        await new Promise<void>((resolve) => gates.push(resolve));
+        const res = await base.runTool(argv, opts);
+        order.push(`tool:${argv[1]}:end`);
+        return res;
+      },
+    };
+    const { coordinator } = makeCoordinator(engine);
+    const searchReq: SearchRequest = {
+      program: 'blastn',
+      query: { text: '>q\nACGT\n' },
+      subject: { text: '>s\nACGT\n' },
+      parameters: [],
+      requestedThreads: 1,
+    };
+    const toolReq: ToolRequest = {
+      tool: 'windowmasker',
+      stage: 'mk_counts',
+      argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'wmasker.ascii'],
+      directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
+    };
+
+    const r1 = (await coordinator.enqueue(searchReq)).runId!;
+    const r2 = (await coordinator.enqueueTool(toolReq)).runId!;
+    const r3 = (await coordinator.enqueueTool(toolReq)).runId!;
+    const r4 = (await coordinator.enqueue(searchReq)).runId!;
+    expect(coordinator.state.get().runs.map((r) => r.snapshot.number)).toEqual([1, 2, 3, 4]);
+
+    // Cancel queued tool run r3 before it starts.
+    coordinator.cancel(r3);
+    expect(coordinator.state.get().runs[2]!.status).toBe('cancelled');
+
+    // Release r1 -> r2 -> r4 sequentially.
+    while (gates.length === 0) await new Promise((r) => setTimeout(r, 5));
+    gates.shift()!();
+    await waitTerminal(coordinator, r1);
+    while (gates.length === 0) await new Promise((r) => setTimeout(r, 5));
+    gates.shift()!();
+    const run2 = await waitTerminal(coordinator, r2);
+    expect(isToolRun(run2) && run2.status === 'completed' && run2.record.exitStatus === 0).toBe(true);
+    expect(coordinator.sessionMadeCounts()).toHaveLength(1);
+
+    while (gates.length === 0) await new Promise((r) => setTimeout(r, 5));
+    gates.shift()!();
+    await waitTerminal(coordinator, r4);
+
+    expect(order).toEqual([
+      `search:${r1}:start`,
+      `search:${r1}:end`,
+      'tool:-mk_counts:start',
+      'tool:-mk_counts:end',
+      `search:${r4}:start`,
+      `search:${r4}:end`,
+    ]);
+  });
+
+  it('commits outputs and stderr of a non-zero exit status tool run and opens them in ResultsBrowser', async () => {
+    const base = new FakeEngine();
+    const engine: EngineGateway & ToolEngine = {
+      describe: (p) => base.describe(p),
+      describeTool: (t) => base.describeTool(t),
+      start: () => base.start(),
+      validate: (a) => base.validate(a),
+      validateTool: async () => ({ ok: true }),
+      cancel: () => undefined,
+      run: (req, out, onPhase) => base.run(req, out, onPhase),
+      async runTool(_argv, opts) {
+        const enc = new TextEncoder();
+        await opts?.sinks?.onStderr?.(enc.encode('ERROR: invalid counts header\n'));
+        const sink = await opts?.sinks?.onFile?.('partial.out');
+        await sink?.write(enc.encode('partial'), 0);
+        await sink?.close();
+        return { status: 3, stdout: new Blob(), stderr: new Blob(), files: [] };
+      },
+    };
+    const { coordinator, data } = makeCoordinator(engine);
+    const results = new ResultsBrowser({
+      data,
+      describe: (p) => engine.describe(p),
+      describeTool: (t) => engine.describeTool(t),
+      runs: coordinator.state,
+      verification: { ncbi: '2.17.0', sources: [], programs: {} },
+    });
+    const { runId } = await coordinator.enqueueTool({
+      tool: 'windowmasker',
+      stage: 'mask',
+      argv: ['windowmasker', '-ustat', 'bad.counts', '-in', 'a.fa', '-out', 'partial.out'],
+      directory: [],
+    });
+    const finished = await waitTerminal(coordinator, runId!);
+    expect(finished.status).toBe('failed');
+    expect(isToolRun(finished) && finished.record.exitStatus).toBe(3);
+
+    await results.open(runId!);
+    expect(results.state.get().phase).toBe('ready');
+    expect(results.state.get().toolRun?.record.exitStatus).toBe(3);
+    const stderrPreview = await coordinator.readToolOutputPreview(runId!, 'stderr', 1024);
+    expect(new TextDecoder().decode(stderrPreview.bytes)).toContain('invalid counts header');
+    const filePreview = await coordinator.readToolOutputPreview(runId!, 'file:0', 1024);
+    expect(new TextDecoder().decode(filePreview.bytes)).toBe('partial');
+  });
+
+  it('cancels a running tool run and handles Data worker end cleanly', async () => {
+    const base = new FakeEngine({ phaseDelayMs: 500 });
+    const { coordinator } = makeCoordinator(base);
+    const { runId } = await coordinator.enqueueTool({
+      tool: 'windowmasker',
+      stage: 'mk_counts',
+      argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'wmasker.ascii'],
+      directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    coordinator.cancel(runId!);
+    const cancelled = await waitTerminal(coordinator, runId!);
+    expect(cancelled.status).toBe('cancelled');
+
+    let endWorker!: (err: Error) => void;
+    const ended = new Promise<Error>((resolve) => (endWorker = resolve));
+    const hangingEngine: EngineGateway & ToolEngine = {
+      describe: (p) => base.describe(p),
+      describeTool: (t) => base.describeTool(t),
+      start: () => base.start(),
+      validate: (a) => base.validate(a),
+      validateTool: async () => ({ ok: true }),
+      cancel: () => undefined,
+      run: (req, out, onPhase) => base.run(req, out, onPhase),
+      runTool: (_argv, opts) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () => reject(new RunCancelledError('tool')));
+        }),
+    };
+    const second = makeCoordinator(hangingEngine, ended);
+    const { runId: r2 } = await second.coordinator.enqueueTool({
+      tool: 'windowmasker',
+      stage: 'mk_counts',
+      argv: ['windowmasker', '-mk_counts'],
+      directory: [],
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    endWorker(new Error('Data worker stopped'));
+    const failed = await waitTerminal(second.coordinator, r2!);
+    expect(failed.status).toBe('failed');
+    expect(failed.record.error).toContain('Data worker stopped');
+  });
+
+  it('queues a tool run immediately behind an active run even when validateTool would wait behind the worker', async () => {
+    const base = new FakeEngine();
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let validateCalledWhileActive = false;
+    let activeRun = false;
+    const blockingEngine: EngineGateway & ToolEngine = {
+      describe: (p) => base.describe(p),
+      describeTool: (t) => base.describeTool(t),
+      start: () => base.start(),
+      validate: (a) => base.validate(a),
+      validateTool: async (argv) => {
+        if (activeRun) {
+          validateCalledWhileActive = true;
+          await gate;
+        }
+        return base.validateTool(argv);
+      },
+      cancel: () => undefined,
+      run: (req, out, onPhase) => base.run(req, out, onPhase),
+      async runTool(argv, opts) {
+        if (!activeRun && argv.includes('slow.fa')) {
+          activeRun = true;
+          await gate;
+          activeRun = false;
+        }
+        return base.runTool(argv, opts);
+      },
+    };
+    const { coordinator } = makeCoordinator(blockingEngine);
+    const first = await coordinator.enqueueTool({
+      tool: 'windowmasker',
+      stage: 'mk_counts',
+      argv: ['windowmasker', '-mk_counts', '-in', 'slow.fa', '-out', 'a.ascii'],
+      directory: [{ name: 'slow.fa', file: new Blob(['>s\nACGT\n']), origin: { kind: 'picked' } }],
+    });
+    expect(first.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(coordinator.isBusy()).toBe(true);
+
+    // Enqueueing a second tool run must NOT block waiting on validateTool behind the active run.
+    const second = await coordinator.enqueueTool({
+      tool: 'windowmasker',
+      stage: 'mk_counts',
+      argv: ['windowmasker', '-mk_counts', '-in', 'fast.fa', '-out', 'b.ascii'],
+      directory: [{ name: 'fast.fa', file: new Blob(['>f\nACGT\n']), origin: { kind: 'picked' } }],
+    });
+    expect(second.ok).toBe(true);
+    expect(validateCalledWhileActive).toBe(false);
+    expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === second.runId)?.status).toBe('queued');
+
+    releaseFirst();
+    expect((await waitTerminal(coordinator, first.runId!)).status).toBe('completed');
+    expect((await waitTerminal(coordinator, second.runId!)).status).toBe('completed');
+  });
+
+  it('supports POSIX writeAt/truncate on tool output files and OPFS-backed session inflation', async () => {
+    const { data, store } = makeData();
+    const port = await data.openToolRun('tool-posix');
+    const enc = new TextEncoder();
+    const call = (msg: object) =>
+      new Promise<{ ok: boolean; summary?: { files: Array<{ key: string; size: number }> } }>((resolve) => {
+        port.onmessage = (event) => resolve(event.data);
+        port.postMessage(msg);
+      });
+    expect((await call({ id: 1, op: 'open', key: 'file:0', name: 'both.txt' })).ok).toBe(true);
+    expect((await call({ id: 2, op: 'write', key: 'file:0', offset: 0, bytes: enc.encode('log-line\n') })).ok).toBe(true);
+    expect((await call({ id: 3, op: 'truncate', key: 'file:0', length: 0 })).ok).toBe(true);
+    expect((await call({ id: 4, op: 'write', key: 'file:0', offset: 0, bytes: enc.encode('COUNTS') })).ok).toBe(true);
+    expect((await call({ id: 5, op: 'write', key: 'file:0', offset: 8, bytes: enc.encode('END') })).ok).toBe(true);
+    expect((await call({ id: 6, op: 'close', key: 'file:0' })).ok).toBe(true);
+    const committed = await call({ id: 7, op: 'commit' });
+    expect(committed.ok).toBe(true);
+    expect(committed.summary?.files[0]?.size).toBe(11);
+    const bytes = await data.readToolOutputRange('tool-posix', 'file:0', 0, 11);
+    expect([...bytes]).toEqual([...enc.encode('COUNTS'), 0, 0, ...enc.encode('END')]);
+    const file = await data.getToolOutputFile('tool-posix', 'file:0', 'both.txt');
+    expect(file.name).toBe('both.txt');
+    expect(file.size).toBe(11);
+    await data.deleteRun('tool-posix');
+    expect(store.usage()).toBe(0);
+
+    const ref = await data.inflateToSessionFile(new File([gzipSync('>x\nACGT\n')], 'x.fa.gz'));
+    expect(ref.name).toBe('x.fa');
+    expect(ref.inflatedFrom).toBe('x.fa.gz');
+    expect(ref.token).toBeDefined();
+    expect(await ref.file.text()).toBe('>x\nACGT\n');
+    expect(store.usage()).toBe(8);
+    await data.dropSessionFile(ref.token!);
+    expect(store.usage()).toBe(0);
+  });
+});

@@ -7,7 +7,7 @@
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
 // page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
 // stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
@@ -33,10 +33,15 @@ const props = defineProps<{
   attention: Attention;
   attentionState: AttentionState;
 }>();
-/** A search was started: the ID of its first run (a group of separate searches starts several). */
-const emit = defineEmits<{ submitted: [runId: string] }>();
+/** A search was started, or the user clicked "Make counts…" in BLASTN's repeats row. */
+const emit = defineEmits<{ submitted: [runId: string]; 'make-counts': [] }>();
 const state = useStore(props.draft.state);
-const formModel = computed(() => searchFormModel(props.draft, state.value, { counts: props.counts }));
+const formModel = computed(() =>
+  searchFormModel(props.draft, state.value, {
+    counts: props.counts,
+    onMakeCounts: () => emit('make-counts'),
+  }),
+);
 const program = computed(() => programById(state.value.program));
 const options = computed(() => state.value.description?.parameters);
 const values = computed(() => state.value.values[state.value.program]);
@@ -148,6 +153,16 @@ function onThreads(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   props.draft.setThreads(value === 'auto' ? 'auto' : Number(value));
 }
+
+/** Opens Algorithm parameters and moves focus to BLASTN's repeats row ("Use in BLASTN"). */
+async function focusRepeats(): Promise<void> {
+  open.value = true;
+  await nextTick();
+  const target = document.getElementById('param-window_masker_db');
+  target?.scrollIntoView({ block: 'center' });
+  target?.focus({ preventScroll: true });
+}
+defineExpose({ focusRepeats });
 </script>
 
 <template>

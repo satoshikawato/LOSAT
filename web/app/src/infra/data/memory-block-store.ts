@@ -43,23 +43,94 @@ export class MemoryBlockStore implements BlockStore {
     const block: MemoryBlock = { chunks: [], length: 0, state: 'open' };
     this.blocks.set(path, block);
     const live = () => this.blocks.get(path) === block;
-    return {
-      append: (bytes) => {
-        if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
-        if (this.used + bytes.length > this.capacity) {
+    const append = (bytes: Uint8Array) => {
+      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      if (this.used + bytes.length > this.capacity) {
+        block.state = 'full';
+        throw new StorageFullError(this.fullMessage);
+      }
+      if (bytes.length === 0) return;
+      block.chunks.push(bytes.slice());
+      block.length += bytes.length;
+      this.used += bytes.length;
+    };
+    const writeAt = (offset: number, bytes: Uint8Array) => {
+      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      if (!Number.isSafeInteger(offset) || offset < 0) {
+        throw new RangeError(`invalid write offset ${offset} of block ${path}`);
+      }
+      if (bytes.length === 0) return;
+      if (offset === block.length) {
+        append(bytes);
+        return;
+      }
+      const nextLength = Math.max(block.length, offset + bytes.length);
+      const delta = nextLength - block.length;
+      if (this.used + delta > this.capacity) {
+        block.state = 'full';
+        throw new StorageFullError(this.fullMessage);
+      }
+      const merged = new Uint8Array(nextLength);
+      let cursor = 0;
+      for (const chunk of block.chunks) {
+        merged.set(chunk, cursor);
+        cursor += chunk.length;
+      }
+      merged.set(bytes, offset);
+      block.chunks.length = 0;
+      block.chunks.push(merged);
+      block.length = nextLength;
+      this.used += delta;
+    };
+    const clear = () => {
+      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      this.used -= block.length;
+      block.chunks.length = 0;
+      block.length = 0;
+    };
+    const truncate = (length: number) => {
+      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      if (!Number.isSafeInteger(length) || length < 0) {
+        throw new RangeError(`invalid truncate length ${length} of block ${path}`);
+      }
+      if (length === 0) {
+        clear();
+        return;
+      }
+      if (length === block.length) return;
+      if (length > block.length) {
+        const delta = length - block.length;
+        if (this.used + delta > this.capacity) {
           block.state = 'full';
           throw new StorageFullError(this.fullMessage);
         }
-        block.chunks.push(bytes.slice());
-        block.length += bytes.length;
-        this.used += bytes.length;
-      },
-      clear: () => {
-        if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
-        this.used -= block.length;
-        block.chunks.length = 0;
-        block.length = 0;
-      },
+        block.chunks.push(new Uint8Array(delta));
+        block.length = length;
+        this.used += delta;
+        return;
+      }
+      const kept: Uint8Array[] = [];
+      let remain = length;
+      for (const chunk of block.chunks) {
+        if (remain <= 0) break;
+        if (chunk.length <= remain) {
+          kept.push(chunk);
+          remain -= chunk.length;
+        } else {
+          kept.push(chunk.slice(0, remain));
+          remain = 0;
+        }
+      }
+      block.chunks.length = 0;
+      for (const chunk of kept) block.chunks.push(chunk);
+      this.used -= block.length - length;
+      block.length = length;
+    };
+    return {
+      append,
+      writeAt,
+      truncate,
+      clear,
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError(this.fullMessage);
         if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
@@ -90,6 +161,11 @@ export class MemoryBlockStore implements BlockStore {
       chunkStart = chunkEnd;
     }
     return bytes;
+  }
+
+  async readFile(path: string, name: string, type = 'application/octet-stream'): Promise<File> {
+    const block = this.sealed(path);
+    return new File(block.chunks as BlobPart[], name, { type });
   }
 
   async size(path: string): Promise<number> {

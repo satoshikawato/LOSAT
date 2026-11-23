@@ -8,6 +8,7 @@
 import { isUnavailable } from 'losat/ports';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
+import type { ToolDraft, ToolDraftState } from './tool-draft';
 
 export interface AvailabilityState {
   /** What of LOSAT could not be loaded or stopped (an UnavailableError's message); undefined while LOSAT works. */
@@ -20,6 +21,8 @@ export interface AvailabilityDeps {
    * which asks the engine again (recheck).
    */
   readonly draft: { readonly state: Store<DraftState> } & Pick<SearchDraft, 'askAgain'>;
+  /** The WindowMasker form, whose describeTool and validateTool can also observe an unavailable engine. */
+  readonly toolDraft?: { readonly state: Store<ToolDraftState> } & Pick<ToolDraft, 'askAgain'>;
   /** Settles when the Data worker could not start or ended: for good, as no call of it can succeed again. */
   readonly dataWorkerEnded: Promise<Error>;
 }
@@ -30,6 +33,7 @@ export class Availability {
 
   constructor(private readonly deps: AvailabilityDeps) {
     deps.draft.state.subscribe(() => this.update());
+    deps.toolDraft?.state.subscribe(() => this.update());
     void deps.dataWorkerEnded.then((error) => {
       this.ended = error.message;
       this.update();
@@ -46,15 +50,28 @@ export class Availability {
    * unavailable meanwhile: a second press was refused at once, or downloaded at once (its fifth review, M1).
    */
   async recheck(): Promise<string | undefined> {
-    if (this.ended === undefined) await this.deps.draft.askAgain();
+    if (this.ended === undefined) {
+      await Promise.all([this.deps.draft.askAgain(), this.deps.toolDraft?.askAgain()]);
+    }
     return this.state.get().problem;
   }
 
   private update(): void {
-    const problem = this.ended ?? unavailableOf(this.deps.draft.state.get());
+    const toolState = this.deps.toolDraft?.state.get();
+    const problem =
+      this.ended ?? unavailableOf(this.deps.draft.state.get()) ?? (toolState === undefined ? undefined : unavailableOfTool(toolState));
     if (problem === this.state.get().problem) return;
     this.state.set(problem === undefined ? {} : { problem });
   }
+}
+
+export function unavailableOfTool(state: ToolDraftState): string | undefined {
+  if (state.descriptionUnavailable === true && state.descriptionError !== undefined) return state.descriptionError;
+  if (state.validation.state === 'unavailable') return state.validation.message;
+  for (const file of state.fastaFiles) {
+    if (file.status === 'failed' && file.unavailable === true && file.error !== undefined) return file.error;
+  }
+  return undefined;
 }
 
 /**

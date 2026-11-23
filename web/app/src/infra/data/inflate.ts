@@ -1,4 +1,5 @@
 import { INFLATED_TOO_LARGE, type FileInflater } from 'losat/ports';
+import { asStorageFull, isStorageFull, type BlockWriter } from './block-store';
 // A source file named `.gz`, `.bz2` or `.zst` is inflated when it is opened (DW-45, line GZ), by the
 // engine's own decoders through the FileInflater port (swebok-improve SW8 D2): the command line and
 // the web app read such a file with the same code, so it inflates to the same bytes, or fails with
@@ -91,4 +92,50 @@ export async function inflateFile(file: File, inflater: FileInflater, maxBytes =
     await inflation.cancel();
   }
   return new File(collector.finish(), inflation.plainName, { type: 'text/plain' });
+}
+
+/**
+ * Inflates a compressed file directly into a `BlockWriter` (OPFS session storage) in chunks so
+ * inflated bytes are never held in JS memory. Returns `undefined` when the file name is plain.
+ */
+export async function inflateToWriter(
+  file: File,
+  inflater: FileInflater,
+  openWriter: () => Promise<BlockWriter>,
+  maxBytes = Number.POSITIVE_INFINITY,
+): Promise<{ readonly plainName: string; readonly size: number } | undefined> {
+  let writer: BlockWriter | undefined;
+  let bytes = 0;
+  let failure: Error | undefined;
+  const inflation = await inflater.open(file.name, (chunk) => {
+    if (failure !== undefined) return;
+    bytes += chunk.length;
+    if (bytes > maxBytes) {
+      failure = new InflatedTooLargeError(maxBytes);
+      return;
+    }
+    try {
+      writer!.append(chunk);
+    } catch (error) {
+      failure = isStorageFull(error) ? asStorageFull(error) : error instanceof Error ? error : new Error(String(error));
+    }
+  });
+  if (inflation === undefined) return undefined;
+  try {
+    writer = await openWriter();
+    for (let start = 0; start < file.size; start += SLICE_BYTES) {
+      const end = Math.min(start + SLICE_BYTES, file.size);
+      await inflation.push(new Uint8Array(await file.slice(start, end).arrayBuffer()));
+      if (failure !== undefined) throw failure;
+    }
+    await inflation.end();
+    if (failure !== undefined) throw failure;
+    const size = await writer.seal();
+    return { plainName: inflation.plainName, size };
+  } catch (error) {
+    await writer?.discard().catch(() => undefined);
+    throw error;
+  } finally {
+    await inflation.cancel();
+  }
 }

@@ -306,6 +306,15 @@ function onList(next: string): void {
             {{ field.file?.label }}: {{ chosenFile.name }} ({{ formatBytes(chosenFile.size) }})
           </span>
           <span v-else class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.missing }}</span>
+          <button
+            v-if="model.onMakeCounts"
+            type="button"
+            class="link"
+            :data-testid="`${id}-make-counts`"
+            @click="model.onMakeCounts()"
+          >
+            Make counts…
+          </button>
         </span>
       </template>
       <template v-else-if="field.kind === 'file-text'">

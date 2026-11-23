@@ -2522,3 +2522,60 @@ pre.range-text {
     padding-left: 5px;
   }
 }
+
+/* WindowMasker tab and tool run results (WW3b). */
+.wm-command-line {
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.wm-command-line code {
+  font-family: ui-monospace, monospace;
+}
+
+.wm-counts-pick,
+.wm-in-row,
+.wm-run-files-controls,
+.tool-output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.tool-output-actions {
+  margin-top: 10px;
+}
+
+.wm-paste-tools {
+  margin-top: 4px;
+}
+
+.wm-in-count,
+.wm-run-files-error {
+  margin: 4px 6px 0;
+}
+
+.wm-file-list,
+.wm-details-files {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wm-file-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.wm-file-item .link {
+  margin-left: auto;
+}

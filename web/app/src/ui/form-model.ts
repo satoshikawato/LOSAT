@@ -5,6 +5,7 @@ import type { ParameterDescription } from 'losat/ports';
 import { registryName } from '../application/conffile';
 import type { CountsLoader } from '../application/counts';
 import type { DraftState, SearchDraft } from '../application/draft';
+import type { ToolDraft, ToolDraftState } from '../application/tool-draft';
 import {
   fieldList,
   knownDefault,
@@ -20,6 +21,8 @@ import {
   type PairRow,
 } from '../domain/parameters';
 import { programById, type ParameterField, type ParameterSection } from '../domain/programs';
+import { refusedToolFields } from '../domain/tool-argv';
+import { allStageParameters, stageOptionParameters, toToolEngineOption, toToolParameterField } from '../domain/tools';
 import { refusal, REFUSAL_ID } from './refusal';
 
 export interface FormRefusal {
@@ -126,5 +129,54 @@ export function searchFormModel(draft: SearchDraft, state: DraftState, extras: S
     pairList: (pair) => pairList(program, pair, values, options),
     pairValue: (pair) => pairValue(program, pair, values, options),
     setPair: (pair, value) => draft.setFields(pairEntries(program, pair, value, values, options)),
+  };
+}
+
+/** DOM id of the WindowMasker argv refusal element, pointed to by refused fields via `aria-describedby`. */
+export const WM_REFUSAL_ID = 'wm-argv-validation-message';
+
+const WM_EXTRA_HELP =
+  'Other options of the losat windowmasker command line, written as there: -logfile run.log -conffile app.ini -h -version-full';
+
+/** Adapts `ToolDraft` + `ToolDraftState` into a `FormModel` driven by `-xmlhelp`. */
+export function windowMaskerFormModel(draft: ToolDraft, state: ToolDraftState): FormModel {
+  const stage = state.stage;
+  const allParams = allStageParameters(state.description, stage);
+  const options: readonly ParameterDescription[] | undefined =
+    state.description === undefined ? undefined : allParams.map(toToolEngineOption);
+  const optionFields = stageOptionParameters(state.description, stage).map(toToolParameterField);
+  const sections: readonly ParameterSection[] =
+    state.descriptionUnavailable === true || optionFields.length === 0
+      ? []
+      : [{ title: 'Options', placement: 'algorithm', fields: optionFields }];
+  const values = state.values[stage];
+  const files: Record<string, File> = {};
+  for (const entry of state.runFiles) {
+    if (entry.flag !== undefined) files[entry.flag] = entry.file;
+  }
+  const currentRefusal =
+    state.validation.state === 'invalid' ? refusedToolFields(state.validation.message, state.extra[stage]) : undefined;
+
+  return {
+    key: `wm-${stage}`,
+    values,
+    options,
+    files,
+    knownDefault: (flag) => {
+      const def = options?.find((option) => option.flag === flag)?.defaultValue;
+      return def === undefined ? undefined : { defaultValue: def };
+    },
+    fieldList: () => [],
+    refusal: currentRefusal,
+    refusalId: WM_REFUSAL_ID,
+    idPrefix: 'wm-param',
+    ...(state.descriptionError === undefined ? {} : { descriptionError: state.descriptionError }),
+    ...(state.descriptionUnavailable === undefined ? {} : { descriptionUnavailable: state.descriptionUnavailable }),
+    setField: (flag, value) => draft.setField(flag, value),
+    setFile: (flag, file) => draft.setOptionFile(flag, file),
+    sections,
+    extra: state.extra[stage],
+    extraHelp: WM_EXTRA_HELP,
+    setExtra: (text) => draft.setExtra(text),
   };
 }

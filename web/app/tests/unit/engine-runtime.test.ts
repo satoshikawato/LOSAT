@@ -17,7 +17,9 @@ import {
   toProgramDescription,
 } from 'losat';
 import { INFLATED_TOO_LARGE } from 'losat/ports';
+import { parseToolDescription } from 'losat/domain';
 import { findReactors } from '../../build/reactors';
+import { WINDOWMASKER_USAGE_ORDER } from '../../src/domain/tools';
 import { ABI_VERSION, EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import { inflateFile } from '../../src/infra/data/inflate';
@@ -606,6 +608,22 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     const abi = await open();
     const described = Object.fromEntries(PROGRAMS.map(({ id }) => [id, abi.describe(id)]));
     await expect(`${JSON.stringify(described, null, 1)}\n`).toMatchFileSnapshot('../../src/infra/fake/describe.json');
+  });
+
+  it("FakeEngine's windowmasker-xmlhelp.xml is the reactor's windowmasker -xmlhelp", async () => {
+    const abi = await open();
+    const chunks: Uint8Array[] = [];
+    const status = abi.tool(['windowmasker', '-xmlhelp'], {
+      stdout: (bytes) => chunks.push(bytes.slice()),
+      stderr: () => undefined,
+      file: () => undefined,
+    });
+    expect(status).toBe(0);
+    const xml = Buffer.concat(chunks).toString('utf8');
+    await expect(xml).toMatchFileSnapshot('../../src/infra/fake/windowmasker-xmlhelp.xml');
+    const parsed = parseToolDescription(xml);
+    const flags = new Set(parsed.parameters.map((param) => param.flag));
+    for (const flag of WINDOWMASKER_USAGE_ORDER) expect(flags, flag).toContain(flag);
   });
 
   it('every field of the search form is an option that the engine describes', async () => {

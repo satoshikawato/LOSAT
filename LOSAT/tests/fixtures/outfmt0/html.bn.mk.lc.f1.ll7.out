@@ -1,0 +1,216 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_mask.fna).
+           1 sequences; 353 total letters
+
+
+
+<b>Query=</b> nq_mask query masks 0-74 100-119 170-180 240-250 255-270(gap
+262-264) 310-319(gap 320-321)
+
+Length=355
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns_mask subject masks 0 135-146(gap 140-141) 190-199(gap 200-202)...  <a href=#Subject_1>562</a>     7e-165
+
+
+
+Query_1    1    ttgccta  7
+Subject_1  1    .......  7
+
+Query_1    8    <font color="#000000">tccgctg</font>  14
+Subject_1  8    .......  14
+
+Query_1    15   <font color="#000000">gcgagaa</font>  21
+Subject_1  15   .......  21
+
+Query_1    22   <font color="#000000">gtggtgg</font>  28
+Subject_1  22   .......  28
+
+Query_1    29   <font color="#000000">acgttat</font>  35
+Subject_1  29   ..A....  35
+
+Query_1    36   <font color="#000000">gagtttt</font>  42
+Subject_1  36   .......  42
+
+Query_1    43   <font color="#000000">gtgatag</font>  49
+Subject_1  43   .......  49
+
+Query_1    50   <font color="#000000">accacgg</font>  56
+Subject_1  50   .......  56
+
+Query_1    57   <font color="#000000">gtcaatg</font>  63
+Subject_1  57   .......  63
+
+Query_1    64   <font color="#000000">agacaaa</font>  70
+Subject_1  64   .......  70
+
+Query_1    71   <font color="#000000">gtcga</font>GA  77
+Subject_1  71   .......  77
+
+Query_1    78   CAAGACC  84
+Subject_1  78   .......  84
+
+Query_1    85   ATTGTGG  91
+Subject_1  85   ......T  91
+
+Query_1    92   TAAAAGT  98
+Subject_1  92   .......  98
+
+Query_1    99   TC<font color="#000000">gcagt</font>  105
+Subject_1  99   .......  105
+
+Query_1    106  <font color="#000000">tgggtat</font>  112
+Subject_1  106  .......  112
+
+Query_1    113  <font color="#000000">tgtccga</font>  119
+Subject_1  113  .......  119
+
+Query_1    120  <font color="#000000">gCAATCC</font>  126
+Subject_1  120  .......  126
+
+Query_1    127  GCTATCC  133
+Subject_1  127  .......  133
+
+Query_1    134  TTAAGTA  140
+Subject_1  134  ..<font color="#000000">.....</font>  140
+
+Query_1    141  GCCACGG  147
+Subject_1  141  <font color="#000000">--.....</font>  145
+
+Query_1    148  TCTCGTG  154
+Subject_1  146  .......  152
+
+Query_1    155  CCACCAT  161
+Subject_1  153  .A.....  159
+
+Query_1    162  ATACTGT  168
+Subject_1  160  .......  166
+
+Query_1    169  TA<font color="#000000">tgaga</font>  175
+Subject_1  167  .......  173
+
+Query_1    176  <font color="#000000">cattgg</font>A  182
+Subject_1  174  .......  180
+
+Query_1    183  TTTGCCA  189
+Subject_1  181  .......  187
+
+Query_1    190  GCAATGT  196
+Subject_1  188  .<font color="#000000">......</font>  194
+
+Query_1    197  TAAGACA  203
+Subject_1  195  <font color="#000000">....</font>---  198
+
+Query_1    204  CGCCATT  210
+Subject_1  199  .......  205
+
+Query_1    211  TCTAGAG  217
+Subject_1  206  .......  212
+
+Query_1    218  ATTTAGG  224
+Subject_1  213  .......  219
+
+Query_1    225  TTGGAGG  231
+Subject_1  220  .G.....  226
+
+Query_1    232  TGGTGGT  238
+Subject_1  227  .......  233
+
+Query_1    239  CG<font color="#000000">acgac</font>  245
+Subject_1  234  .......  240
+
+Query_1    246  <font color="#000000">tgtggt</font>T  252
+Subject_1  241  .......  247
+
+Query_1    253  AGT<font color="#000000">cgtg</font>  259
+Subject_1  248  .......  254
+
+Query_1    260  <font color="#000000">gcggcac</font>  266
+Subject_1  255  .......  264
+                   \   
+                   |   
+                 ACC
+
+Query_1    267  <font color="#000000">cc</font>AATTG  273
+Subject_1  265  .......  271
+
+Query_1    274  GCGTTGT  280
+Subject_1  272  ....<font color="#000000">...</font>  278
+
+Query_1    281  TCACTCC  287
+Subject_1  279  <font color="#000000">...</font>.<font color="#000000">...</font>  285
+
+Query_1    288  CTAAACC  294
+Subject_1  286  <font color="#000000">...</font>..G.  292
+
+Query_1    295  GGAAACA  301
+Subject_1  293  .......  299
+
+Query_1    302  GATCTC<font color="#000000">c</font>  308
+Subject_1  300  .......  306
+
+Query_1    309  <font color="#000000">tcacacc</font>  315
+Subject_1  307  .......  313
+
+Query_1    316  <font color="#000000">cc</font>ACCAA  322
+Subject_1  314  .......  322
+                  \    
+                  |    
+                 GT
+
+Query_1    323  AATCATG  329
+Subject_1  323  .......  329
+
+Query_1    330  ACAAGTT  336
+Subject_1  330  ..--<font color="#000000">...</font>  334
+
+Query_1    337  CACGTCG  343
+Subject_1  335  <font color="#000000">....</font>...  341
+
+Query_1    344  ACGTCGT  350
+Subject_1  342  ..<font color="#000000">.....</font>  348
+
+Query_1    351  CCCGT  355
+Subject_1  349  <font color="#000000">.....</font>  353
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 117648
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_mask.fna).
+    Posted date:  Unknown
+  Number of letters in database: 353
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2
+</PRE>
+</BODY>
+</HTML>

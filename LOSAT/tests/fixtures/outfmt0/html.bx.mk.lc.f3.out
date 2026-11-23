@@ -1,0 +1,81 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ps_mask.faa).
+           1 sequences; 268 total letters
+
+
+
+<b>Query=</b> nq_pmask back-translation of pq_mask, masked codons lowercase
+
+Length=804
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ps_mask subject masks 0-64 112-119 195-206(gap 200-201) 236-240 2...  <a href=#Subject_1>541</a>     0.0  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    dasedngwcwyilldmkdapagagvsmvqpaermgllweteecneprrpcwhvtripqfa  180
+Subject_1  1    ........................................k...................  60
+
+Query_1    181  <font color="#000000">kfymmdclqq</font>IELNACHTNSMWPSSLGYLFADLSGEWVWAKLFSW<font color="#000000">yiwrinltdphihye</font>  360
+Subject_1  61   <font color="#000000">.....</font>..............................T................<font color="#000000">........</font>  120
+
+Query_1    361  QMAVGAHFSQAKWKYCMVETAKKDS<font color="#000000">gkewk--ktfrg</font>CDCETWKQKYFCLLWRQERTTNV  534
+Subject_1  121  ..........Q...................DA.......................A....  180
+
+Query_1    535  <font color="#000000">fmhwphc</font>WEIKQIHFSYVMLIMVLNFQNINRRVIVYVNMVCPEDPHQHDV<font color="#000000">mlsnadfire</font>  714
+Subject_1  181  ...............<font color="#000000">.....--.....</font>.............A...............<font color="#000000">....</font>  238
+
+Query_1    715  <font color="#000000">cAHFITLQGRFCNVNKHAYYPPYKRMGVHI</font>  804
+Subject_1  239  <font color="#000000">..........c</font>...................  268
+
+For reading frame -2 of query sequence:
+
+Query_1    503  RQKYFCFQVSQS<font color="#000000">hprkvffhsf</font>PESFLAVSTIQYFHLAWLK*APTAI  363
+Subject_1  164  K.....LLWR.EATTN..M.                             183
+Subject_1  166                                  K..C.L.RQE.T.NV  180
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 59049
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ps_mask.faa).
+    Posted date:  Unknown
+  Number of letters in database: 268
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

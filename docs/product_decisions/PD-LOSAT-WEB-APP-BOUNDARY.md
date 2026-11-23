@@ -48,7 +48,7 @@ NCBI source authority, NCBI reference comments and the parity gates.
    only while the invariants below hold.
 2. Invariants:
    1. **Engine input.** The engine receives exactly what an equivalent CLI invocation
-      receives: an argv parsed by the same clap parser as the CLI; FASTA bytes made
+      receives: an argv read by the same argument reader as the CLI; FASTA bytes made
       only of whole original records, in their original order, as stored in the run
       snapshot (a single newline may be added between concatenated files that do not
       end with one); and the files that the argv names (a BLAST database of `-db` and

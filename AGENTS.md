@@ -55,9 +55,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      statistical formulas, or formatting is permitted. This does not expand
      the TBLASTX exception or authorize NCBI as a runtime/build dependency.
    - Approved CLI exceptions outside the search results, for every program
-     (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): argument-parser syntax errors and
-     `-help`/`-h` use LOSAT's parser text and exit code 2 (NCBI: USAGE, exit
-     1); with `-subject`, LOSAT honors `-num_threads` and does not print NCBI's
+     (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): with `-subject`, LOSAT honors `-num_threads` and does not print NCBI's
      two thread warnings; a write failure in outfmt 6/7, where NCBI aborts,
      is reported with a non-zero exit; an allocation failure aborts (NCBI:
      "BLAST ran out of memory", exit 4); an outfmt 0 write to a closed pipe,
@@ -99,7 +97,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      every other byte of every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit rejections, not
      exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's version and package),
-     `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
+     argument errors (NCBI's usage and messages, exit 1), `-help` and `-h` (NCBI's texts in
+     LOSAT's words, since line RG item K4i-2b), `-help-full` (the text of `-help`;
+     makeblastdb's also lists `-randomize`), and on the command line `-xmlhelp` (NCBI's XML
      without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
      run as in NCBI (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
@@ -508,6 +508,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd, rpsbproc
+│   ├── cli/reader.rs      # NCBI's argument reader for the programs whose types clap converts (all above but blastdbcmd, plus rpstblastn)
 │   ├── common.rs          # Shared hit type, gap edit operations and the HSP comparators
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)

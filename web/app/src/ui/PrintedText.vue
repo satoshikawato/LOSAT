@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The text that a run printed in place of a search (line WQA's D14, 2026-11-20; docs/web/abi_v2.md §5,
-// stream 11): the command line's help (`-h`, `-help`, `-help-full`, `--help`, the XML of `-xmlhelp`) or
+// stream 11): the command line's help (`-h`, `-help`, `-help-full`, the XML of `-xmlhelp`) or
 // version (`-version` and the full versions), byte for byte as the engine wrote it, shown as the
 // Outputs show an output (OutputText, the bytes read once as UTF-8), with the command that prints it,
 // one line that says so, and its export under the run's name (domain/output-format.ts,

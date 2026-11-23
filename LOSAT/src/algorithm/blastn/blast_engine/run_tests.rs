@@ -762,13 +762,6 @@ fn test_blastn_context_statistics_rounds_evalue_score_only() {
 // into extra gapped HSPs under an incorrectly lowered per-subject cutoff.
 #[test]
 fn word7_uses_subject_set_cutoffs() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let sequence: String = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fasta/small_test.fasta"
@@ -795,8 +788,9 @@ fn word7_uses_subject_set_cutoffs() {
         &[1]
     };
     for n in threads {
-        let options = crate::cli::try_parse_from::<Options, _, _>([
-            "test",
+        let options = crate::cli::try_parse_from([
+            "losat",
+            "blastn",
             "-query",
             "memory-query",
             "-subject",
@@ -815,7 +809,7 @@ fn word7_uses_subject_set_cutoffs() {
         let mut output = Vec::new();
         let mut stderr = std::io::stderr();
         run_local(
-            options.blastn,
+            options.blastn(),
             &reader_records(&query, ReaderConfig::query("BLASTN", false, false)),
             &crate::api::QueryEnd::Input,
             &reader_records(&subject, ReaderConfig::subject("BLASTN", false, false)),
@@ -833,14 +827,7 @@ fn word7_uses_subject_set_cutoffs() {
 #[cfg(feature = "parallel")]
 #[test]
 fn speculative_traceback_preserves_ordered_gapped_hsps() {
-    use clap::Parser;
     use rayon::prelude::*;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let mut state = 0x12345678_u32;
     let query: Vec<u8> = (0..512)
         .map(|_| {
@@ -883,8 +870,9 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
     )
     .unwrap();
     let execute = |threads: usize, outfmt: &str| {
-        let args = crate::cli::try_parse_from::<Options, _, _>([
-            "test",
+        let args = crate::cli::try_parse_from([
+            "losat",
+            "blastn",
             "-query",
             query_path.to_str().unwrap(),
             "-subject",
@@ -901,7 +889,7 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
             output_path.to_str().unwrap(),
         ])
         .unwrap()
-        .blastn;
+        .blastn();
         run(
             args,
             crate::blastinput::ncbi_environment::ApplicationSettings::default(),
@@ -1101,19 +1089,10 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
 /// 2874-2886, 2975-2977; blastn_app.cpp:255-258).
 #[test]
 fn output_formats_raise_ncbis_errors_where_ncbi_does() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let args = |words: &[&str]| {
-        let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+        let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(words);
-        crate::cli::try_parse_from::<Options, _, _>(argv)
-            .unwrap()
-            .blastn
+        crate::cli::try_parse_from(argv).unwrap().blastn()
     };
     let native = |error: anyhow::Error| {
         let native = error.downcast::<crate::cli::NativeError>().unwrap();
@@ -2143,19 +2122,10 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
 // populate the counts source, registry, or resolved repeat filter before calling `run_local`.
 #[test]
 fn run_local_refuses_database_and_unresolved_filter_inputs() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
     let parse = |words: &[&str]| {
-        let mut argv = vec!["test", "-query", "q"];
+        let mut argv = vec!["losat", "blastn", "-query", "q"];
         argv.extend_from_slice(words);
-        crate::cli::try_parse_from::<Options, _, _>(argv)
-            .unwrap()
-            .blastn
+        crate::cli::try_parse_from(argv).unwrap().blastn()
     };
     let call = |args: BlastnArgs, outfmt: &str| {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());

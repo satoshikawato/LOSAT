@@ -73,13 +73,14 @@ impl EngineCounts {
 }
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it (`write_hit_list_seqaligns`). `rps`: the search is rpsblast's
-/// (`RunRecord::rps`). `gapped` is `!args.ungapped`: an ungapped search's HSPs are Dense-diag
-/// Seq-aligns (`report::serial::seqalign`).
+/// query's warnings before it (`write_hit_list_seqaligns`). `program_type` is the app's
+/// (`BlastpApp::program_type`: psiblast's, rpsblast's; `None` for BLASTP's). `gapped` is
+/// `!args.ungapped`: an ungapped search's HSPs are Dense-diag Seq-aligns
+/// (`report::serial::seqalign`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastp_seqalign(
     format: SerialFormat,
-    rps: bool,
+    program_type: Option<crate::report::record::ProgramType>,
     gapped: bool,
     hit_lists: &[Option<BlastpHitList>],
     queries: &QueryNames<'_>,
@@ -91,13 +92,13 @@ pub(crate) fn write_blastp_seqalign(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
-        rps,
         db_title: subjects.db_title(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
         // (`BLASTUngappedHspListToSeqAlign`, cited at `report::serial::seqalign`): an ungapped
         // search's HSPs are Dense-diags (no gap information: `ops` is empty, the strands are
         // unknown as in the Dense-seg of a gapped one).
         gapped,
+        program_type,
     };
     write_hit_list_seqaligns(
         format,

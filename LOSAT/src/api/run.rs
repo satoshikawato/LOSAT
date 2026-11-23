@@ -546,30 +546,50 @@ fn hit_list_size(command: &Commands, number: i32) -> usize {
     .hitlist_size
 }
 
-/// The searches of a run: the requested output formats grouped by hit list size, each group a
-/// list of positions in `numbers`, the tabular formats first. One group is one search
+/// How the formatter of the output format `number` cuts the hit lists of `command`'s search
+/// (`BlastpApp::list_cut`: psiblast's and rpsblast's lists; the other programs' are not cut).
+fn list_cut(command: &Commands, number: i32) -> crate::algorithm::blastp::args::ListCut {
+    use crate::algorithm::blastp::args::{BlastpApp, ListCut};
+    match command {
+        Commands::Psiblast(_) => BlastpApp::Psiblast.list_cut(number),
+        Commands::Rpsblast(_) => BlastpApp::Rpsblast.list_cut(number),
+        _ => ListCut::Uncut,
+    }
+}
+
+/// The searches of a run: the requested output formats grouped by hit list size and by the cut
+/// of the hit lists, each group a list of positions in `numbers`. One group is one search
 /// (`run_local` call), and every format of it is written from that search, as the command line
 /// writes it alone: the command line's search depends on the hit list size, which
 /// `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make differ
-/// between the pairwise formats (0 to 4) and the tabular ones. Without those options the sizes
-/// are equal and the one group is every format in the requested order. The tabular group goes
-/// first because the warnings that the formats share belong to the first search's diagnostics,
-/// and the command line writes the tabular formats' (`ReportCounts::warnings`).
+/// between the pairwise formats (0 to 4) and the tabular ones, and on how the format's
+/// formatter cuts the hit lists (`list_cut`): psiblast's XML cuts each round's results before
+/// its PSSM (so its rounds can differ from the other formats'), and psiblast's and rpsblast's
+/// archive keeps the uncut lists. Without the count options the sizes are equal, and formats of
+/// one cut are one group in the requested order (the first group's first format is the first
+/// requested one). With them the tabular groups go first because the warnings that the formats
+/// share belong to the first search's diagnostics, and the command line writes the tabular
+/// formats' (`ReportCounts::warnings`).
 ///
-/// LOSAT Web ABI v2 groups its searches the same way (`web/adapter/src/run.rs`).
+/// LOSAT Web ABI v2 groups its searches by hit list size the same way (`web/adapter/src/run.rs`;
+/// it runs neither psiblast nor rpsblast).
 pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usize>> {
     let [_, descriptions, alignments] = count_options(command);
-    if descriptions.is_none() && alignments.is_none() {
-        return vec![(0..numbers.len()).collect()];
-    }
+    let sizes_differ = descriptions.is_some() || alignments.is_some();
     let mut ordered: Vec<usize> = (0..numbers.len()).collect();
-    ordered.sort_by_key(|&position| numbers[position] <= 4);
-    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    if sizes_differ {
+        ordered.sort_by_key(|&position| numbers[position] <= 4);
+    }
+    let mut groups: Vec<(_, Vec<usize>)> = Vec::new();
     for position in ordered {
-        let size = hit_list_size(command, numbers[position]);
-        match groups.iter_mut().find(|(group, _)| *group == size) {
+        let number = numbers[position];
+        let key = (
+            sizes_differ.then(|| hit_list_size(command, number)),
+            list_cut(command, number),
+        );
+        match groups.iter_mut().find(|(group, _)| *group == key) {
             Some((_, group)) => group.push(position),
-            None => groups.push((size, vec![position])),
+            None => groups.push((key, vec![position])),
         }
     }
     groups.into_iter().map(|(_, group)| group).collect()
@@ -841,10 +861,10 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
     Ok(())
 }
 
-/// The searches of a call: `formats` grouped by hit list size (`search_groups`), and the threads
-/// of the pool they share. A `-outfmt` value that the command line rejects, and a call without
-/// formats (the engines refuse one), fail here, before any search; the command line's error of
-/// a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
+/// The searches of a call: `formats` grouped by hit list size and cut (`search_groups`), and the
+/// threads of the pool they share. A `-outfmt` value that the command line rejects, and a call
+/// without formats (the engines refuse one), fail here, before any search; the command line's
+/// error of a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
 fn searches(
     search: &Search,
     inputs: Inputs<'_>,
@@ -877,7 +897,7 @@ fn searches(
     if groups.len() > 1 {
         if let Some(option) = pssm_file_option(command) {
             return Err(Error::Argv(format!(
-                "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
+                "{option} is not accepted by the library API with formats that take two searches (two hit list sizes, or psiblast's outfmt 5 or 11 with other formats): the PSSM files are one search's; search those formats in calls of their own"
             ).into()));
         }
     }
@@ -885,7 +905,7 @@ fn searches(
 }
 
 // No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
-// files; the library's call of formats of two hit list sizes searches twice (`search_groups`).
+// files; the library's call of formats that take two searches searches twice (`search_groups`).
 /// The PSSM file option (`-out_pssm`, else `-out_ascii_pssm`) of a psiblast search that can write
 /// one (`PsiblastPssmOptions::writes_files`).
 fn pssm_file_option(command: &Commands) -> Option<&'static str> {
@@ -1263,15 +1283,17 @@ pub(super) fn records(
 /// the statistics of each query and the diagnostics.
 ///
 /// Each report is what the command line writes to `-out` for that `-outfmt` alone: the formats
-/// are grouped by hit list size (`search_groups`), one search per group, so a run with
-/// `-num_descriptions` or `-num_alignments` may search twice. The HSP records and the statistics
-/// are those of the first search (the tabular formats'), with their rows and sections in the
-/// reports of that search; the reports of another search give them no span. The diagnostics
-/// are the first search's: the command line's standard error for its first format (the first
-/// tabular format when the formats split, the first requested format otherwise), which holds
-/// the warnings the command line writes once for the run; then the posts of the `-html` reports
-/// of the later searches (their reads of NCBI's formatter registries), which only their search
-/// writes. Each `-html` report posts what the command line's run of its format alone posts.
+/// are grouped by hit list size and by the cut of the hit lists (`search_groups`), one search per
+/// group, so a run with `-num_descriptions` or `-num_alignments`, and psiblast's outfmt 5 or 11
+/// (rpsblast's 11) with other formats, may search twice. The HSP records and the statistics
+/// are those of the first search (the tabular formats' when the hit list sizes split them, else
+/// the first requested format's), with their rows and sections in the reports of that search;
+/// the reports of another search give them no span. The diagnostics are the first search's: the
+/// command line's standard error for its first format (the first tabular format when the hit list
+/// sizes split the formats, the first requested format otherwise), which holds the warnings the
+/// command line writes once for the run; then the posts of the `-html` reports of the later
+/// searches (their reads of NCBI's formatter registries), which only their search writes. Each
+/// `-html` report posts what the command line's run of its format alone posts.
 ///
 /// Any failure fails the call with the command line's message, for the format whose search
 /// failed. A `-outfmt` value that the command line rejects, and a call without formats, fail

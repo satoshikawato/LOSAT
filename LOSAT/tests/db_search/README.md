@@ -117,7 +117,10 @@ FASTA files:
   `x2g_f3147_s.faa` and `x2g_f1144_s.faa` there (cases of the line's format survey: an HSP of length 0 in frame
   -2, in frame +1 at query offset 0, at subject offset 0), `x2g_ms` the two subjects `x2g_ms.faa` (with the two
   queries `x2g_mq.fna`, the second's HSP of length 0) and `x2g_rk` the two subjects `x2g_rk.faa` (the one
-  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
+  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`); `x2g_rk_ver.faa` and `x2g_rk_lcl.faa` there are its
+  letters under the ids `gb|AAA00001.1|` and `gb|AAA00001.2|`, and `lcl|AAA00001` and `gb|AAA00001.1|` (written by hand
+  for the rows `db.html.bx.x2g.rk.ver.subj.pd.f0` and `db.html.bx.x2g.rk.lcl.subj.pd.f0`: two versions of one accession,
+  and a local id before a versioned one). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
   subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
   one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
   one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.
@@ -1161,7 +1164,19 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   (run in this directory). `tm_cache150` holds the taxids 99990, 150, 99990: 150 takes the slot of 99990 (`99990 & 255`) in
   NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
-  database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
+  database or an absolute `BLASTDB`). NCBI's prefetch loads the batch's subjects in the order of their Seq-id handles; the
+  mapper does not pack these local ids, so the order is that of the handles' addresses, and LOSAT refuses the run (line NP
+  item O4b2-3). `tm_cache151` (151 instead of 150) is the control: once.
+- `tm_cache_gi.faa` and `tm_cache_gi.map` (line NP item O4b2-3): 12 copies of the protein of `tm_cache.faa` with the ids
+  `gi|7`, `gi|3`, `gi|12`, `gi|1`, `gi|9`, `gi|5`, `gi|11`, `gi|2`, `gi|8`, `gi|4`, `gi|10`, `gi|6` (in this OID order) and the
+  taxids 99990 and 150 (the map), built with
+
+      makeblastdb -in tm_cache_gi.faa -dbtype prot -out tm_cache_gi -title "tm cache gi" \
+          -parse_seqids -taxid_map tm_cache_gi.map
+
+  NCBI's mapper packs gi ids, so its prefetch loads the batch's subjects in the order of their gi numbers, where the taxids
+  alternate from gi 1 to gi 10: the offset error comes six times (the order of the OIDs would give it once). Rows
+  `db.tm.bp.cachegi.*`.
 
 Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
 NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of
@@ -1988,6 +2003,9 @@ only the report sums can make BLASTX's library hold its XML2 start before the re
   `db.ps.q1.in.*`.
 - `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
   by hand (rows `db.ps.q1.in.id5.*`).
+- `tests/fixtures/pssm/ps15b_rnd_id0.asn.gz` and `ps15b_rnd_idmax.asn.gz`: `tests/fixtures/db_search/db.ps.asn.rnd.6.asn`
+  with its query's `local str "Query_1"` replaced by `local id 0` and `local id 2147483647` by hand (gzip -n -9; rows
+  `db.ps15b.fix.id0.*` and `db.ps15b.fix.idmax.*`: the Seq-aligns keep the integer Object-id).
 
 Query-anchored inputs (rows `db.of1.bp.*`, line RG T3a: BLASTP `-outfmt 1` to `4`), in `of1/`, from the
 survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made records):
@@ -2576,7 +2594,7 @@ M1 and S1): `qpa` and `r3` the same of `x1bp_qpA_s.fna` and `x1bo_r3_s.fna`; `d3
 
 ## `html/`: inputs of the `-html` rows (line RG, item T4a2)
 
-Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 and 18 with `-db`, and the registry
+Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 to 4 and 18 with `-db` (formats 1 to 4: line RG T4b), and the registry
 and environment cases of NCBI's HTML formatter. The inputs are those of the survey T4 of line RG
 (`remaining-gaps-20261112/T/t4`, written by its `scripts/gen.py` and `in2/gen2.py`), copied byte for byte so that the
 frozen bytes can be compared with the survey's runs. The rows also use `of18/ps_ids`, `of18/ns_ids`, `of18/ps_plain`,

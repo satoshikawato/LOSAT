@@ -279,9 +279,10 @@ struct TrackedSeeds {
 /// order with a gap of unused slots (`gap_start..gap_end`), and the slot of the seed at the cursor
 /// (`at`: never in the gap; the buffer's end at the list's end) and of the first seed (`first`).
 /// The gap moves to the cursor only when a seed is inserted or erased there: a step of the cursor
-/// and its return to the start move no seed, and an insertion or an erasure moves the seeds between
-/// it and the last one, so that a long list (many diagonals of one local id at once) costs per root
-/// what a short one does.
+/// and its return to the start move no seed, an insertion or an erasure moves the seeds between the
+/// cursor and the gap (where the edit before it was), and an insertion with no unused slot doubles
+/// the buffer. The seeds moved in all are at most about twice the cursor's steps and insertions,
+/// however long the list (many diagonals of one local id at once).
 #[derive(Default)]
 struct SeedList {
     buf: Vec<TrackedSeed>,
@@ -334,13 +335,15 @@ impl SeedList {
     /// `it_ = seeds_.erase(it_)` (not at the end).
     #[inline(never)]
     fn erase(&mut self) {
+        debug_assert!(self.at < self.buf.len());
         self.gap_to_cursor();
         self.gap_end += 1;
         self.at = self.gap_end;
         self.edited();
     }
 
-    /// `seeds_.insert(it_, seed)`: before the cursor.
+    /// `seeds_.insert(it_, seed)`: before the cursor (the buffer doubled, to at least 8 slots, when
+    /// the gap is empty).
     #[inline(never)]
     fn insert(&mut self, seed: TrackedSeed) {
         self.gap_to_cursor();
@@ -358,7 +361,7 @@ impl SeedList {
         self.edited();
     }
 
-    /// The seed before the cursor.
+    /// The seed before the cursor, `None` at the start.
     #[inline(always)]
     fn before_cursor(&mut self) -> Option<&mut TrackedSeed> {
         let before = if self.at == self.gap_end {
@@ -369,10 +372,12 @@ impl SeedList {
         Some(&mut self.buf[before])
     }
 
-    /// `seeds_.erase(--it_)`: the seed before the cursor.
+    /// `seeds_.erase(std::prev(it_))` (not at the start): the seed before the cursor, the cursor
+    /// unchanged.
     #[inline(never)]
     fn erase_before_cursor(&mut self) {
         self.gap_to_cursor();
+        debug_assert!(self.gap_start > 0);
         self.gap_start -= 1;
         self.edited();
     }

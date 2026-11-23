@@ -7043,9 +7043,9 @@ impl PrefetchSlots {
 /// [`load_read_texts`] reads them), on a database whose volume holds that taxid and another of
 /// its slot ([`TaxdbRun::cache_collision`]); `None` on any other database, whose loads give the
 /// same texts in any order. NCBI loads the batch's Seq-align ids in the order of its map of their
-/// Seq-id handles (cited above [`LoadBeforeStop`], [`load_places`]), ties by the addresses of the handles' infos;
-/// so LOSAT follows the slot through the loads by their handles' keys and takes the loads of one
-/// key as one step whose order only the boundaries between them decide
+/// Seq-id handles (cited above [`LoadBeforeStop`]; [`load_places`]), ties by the addresses of
+/// the handles' infos; so LOSAT follows the slot through the loads by their handles' keys and
+/// takes the loads of one key as one step whose order only the boundaries between them decide
 /// ([`VolumeLookups::prefetch_slots`]). LOSAT's refusal where that order changes the texts, or
 /// leaves a slot that a later load's texts depend on (`SlotHolds::Either`). The reads of each
 /// subject are [`load_read_texts`]'s, whose refusals come first. `stop`: a Seq-align id of the

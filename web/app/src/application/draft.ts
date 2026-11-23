@@ -24,6 +24,7 @@ import {
   type FastaParserKind,
   type FastaReader,
   type InputRole,
+  type PrintedKind,
   type ProgramId,
   type RegistryFile,
   type SequenceKind,
@@ -893,8 +894,13 @@ export class SearchDraft {
     return sources.length === 0 ? PASTED_NAMES[role] : COMBINED_NAMES[role];
   }
 
-  /** The runs that "Run LOSAT" would make now. */
+  /**
+   * The runs that "Run LOSAT" would make now: the runs that `submit` starts (one `inputGroups` for both). A draft whose argv
+   * prints the command line's help or version starts the one run that prints it, whatever the inputs (line WQA's D20, S3-2,
+   * 2026-11-23).
+   */
   runCount(): number {
+    if (this.printsKind() !== null) return 1;
     return ROLES.map((role) => this.inputGroups(role).length).reduce((a, b) => a * Math.max(1, b), 1);
   }
 
@@ -946,7 +952,10 @@ export class SearchDraft {
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
     // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
-    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20).
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20): it is read once the
+    // validation of the draft's argv has answered (not `idle`, which waits for a fetch too), so that a word typed just before
+    // Run, or taken out, decides as the engine's answer for the argv says (line WQA's D20 round 4, 2026-11-23).
+    await this.validationSettled();
     for (const role of ROLES) {
       const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -1023,8 +1032,19 @@ export class SearchDraft {
    * line reads none for it.
    */
   private printsText(): boolean {
+    return this.printsKind() !== null;
+  }
+
+  /**
+   * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, as the
+   * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
+   * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
+   * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
+   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23).
+   */
+  printsKind(): PrintedKind | null {
     const { start, validation } = this.state.get();
-    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+    return validation.state === 'ok' ? (start?.prints ?? null) : null;
   }
 
   /**

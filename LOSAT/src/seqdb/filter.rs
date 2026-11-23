@@ -458,7 +458,8 @@ pub(crate) fn line_mask(
     let mut user_passed_any = false;
     let mut mask = Vec::with_capacity(set.deflines.len());
     for defline in &set.deflines {
-        let (mut have_user, mut have_vol) = (false, false);
+        // Without a list of its kind a test passes; with one, a line passes it by a Seq-id.
+        let (mut have_user, mut have_vol) = (rule.is_none(), lists.is_empty());
         for id in &defline.ids {
             if !have_user {
                 have_user = match rule.and_then(|rule| rule.includes_id(id)) {
@@ -467,7 +468,7 @@ pub(crate) fn line_mask(
                 };
             }
             if !have_vol {
-                have_vol = lists.is_empty() || super::id_list::lists_hold(lists, id)?;
+                have_vol = super::id_list::lists_hold(lists, id)?;
             }
             if have_user && have_vol {
                 break;

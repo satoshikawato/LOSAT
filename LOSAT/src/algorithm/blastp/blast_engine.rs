@@ -2795,6 +2795,49 @@ fn result_query_masks(
     query_record_masks(query_frames, offsets)
 }
 
+/// Outfmt 0's refusal of a query that is also a subject and has masks, each outfmt 0 output's
+/// (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
+/// does, `query_anchored::fill_loc_list`). A PSSM search's results carry no query masks
+/// (`report::record::carries_query_masks`), so neither arm of the refusal applies to psiblast:
+/// its Sbjct rows show the subject's masks on the subject's rows only (`SetSubjectMasks`, and only
+/// query masks are drawn by id).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1583-1584
+fn refuse_shared_record_masks(
+    args: &ResolvedBlastpArgs,
+    format_plans: &[BlastpReport],
+    outputs: &mut ReportOutputs<'_>,
+    query_records: &[FastaRecord],
+    query_frames: &[Vec<QueryFrame>],
+    offsets: &seq_range::Placements,
+) -> Result<()> {
+    let pairwise = |outfmt: &BlastpReport| {
+        matches!(
+            outfmt,
+            BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+        )
+    };
+    if !args.parse_deflines
+        || !crate::report::record::carries_query_masks(args.app.program_type())
+        || !format_plans.iter().any(pairwise)
+    {
+        return Ok(());
+    }
+    let masks = query_record_masks(query_frames, offsets);
+    crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+        outputs
+            .formats
+            .iter_mut()
+            .zip(format_plans)
+            .filter(|(_, outfmt)| pairwise(outfmt))
+            .map(|(format, _)| &mut format.refusal),
+        query_records,
+        |query| masks.get(query).is_some_and(|m| !m.is_empty()),
+        args.lcase_masking,
+        args.app.name(),
+    )
+}
+
 /// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
 /// api/blast_aux.cpp:825-842): the SEG masks merged, a mask that covers the whole query
 /// dropped, and the rest moved into the query's record by the start of its interval
@@ -10452,44 +10495,17 @@ fn run_call(
         database.is_none(),
     );
     let unreportable = report_prep::refuse_unreportable(&prep, &rows_of);
-    // Outfmt 0's refusal of a query that is also a subject and has masks, each outfmt 0 output's
-    // (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
-    // does, `query_anchored::fill_loc_list`). It was the first of `refuse_unreportable`'s refusals
-    // and its error still comes first; it is made after them because they read `prep`, which
-    // holds the outputs (line WQA's sweep, D7, 2026-11-19). A PSSM search's results carry no query
-    // masks (`report::record::carries_query_masks`), so neither arm of the refusal applies to
-    // psiblast: its Sbjct rows show the subject's masks on the subject's rows only
-    // (`SetSubjectMasks`, and only query masks are drawn by id).
-    //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1583-1584
-    if args.parse_deflines
-        && crate::report::record::carries_query_masks(args.app.program_type())
-        && format_plans.iter().any(|outfmt| {
-            matches!(
-                outfmt,
-                BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-            )
-        })
-    {
-        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
-            outputs
-                .formats
-                .iter_mut()
-                .zip(format_plans.iter())
-                .filter(|(_, outfmt)| {
-                    matches!(
-                        outfmt,
-                        BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-                    )
-                })
-                .map(|(format, _)| &mut format.refusal),
-            query_records,
-            |query| masks.get(query).is_some_and(|m| !m.is_empty()),
-            args.lcase_masking,
-            args.app.name(),
-        )?;
-    }
+    // It was the first of `refuse_unreportable`'s refusals and its error still comes first; it is
+    // made after them because they read `prep`, which holds the outputs (line WQA's sweep, D7,
+    // 2026-11-19).
+    refuse_shared_record_masks(
+        &args,
+        format_plans,
+        outputs,
+        query_records,
+        query_frames,
+        &ranges.query_input.placements,
+    )?;
     unreportable?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block

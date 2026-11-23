@@ -2901,7 +2901,7 @@ fn psiblast_pssms(
             .flat_map(|hsp_list| &hsp_list.hsps)
             .map(|hsp| PssmAlignment {
                 subject: hsp.s_idx,
-                e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
+                e_value: psi_round::seqalign_pssm_evalue(hsp.e_value),
                 q_start: hsp.q_start - 1 + q_shift,
                 s_start: hsp.s_start - 1,
                 q_length: hsp.q_end + 1 - hsp.q_start,

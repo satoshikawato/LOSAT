@@ -834,9 +834,21 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 /// below `-inclusion_ethresh`, `x_ExtractAlignmentData`): the round's inclusion set and the
 /// subjects whose letters the PSSM reads (`ListedTitles::pssm_reads`).
 pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
+    seqalign_pssm_evalue(e_value) < inclusion_ethresh
+}
+
+/// The E-value that the PSSM reads of an HSP of the final list (`GetLowestEvalue`: the lowest
+/// `e_value` or `sum_e` score of the Seq-align, 10 where it has none). A Seq-align lacks the
+/// E-value of a NaN one, which the final lists carry as -1 (`seqalign_scores`); a value of 1e-180
+/// or less is 0.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545
+pub(crate) fn seqalign_pssm_evalue(e_value: f64) -> f64 {
     const BLAST_EXPECT_VALUE: f64 = 10.0;
+    if e_value < 0.0 {
+        return BLAST_EXPECT_VALUE;
+    }
     crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
-        < inclusion_ethresh
 }
 
 #[cold]
@@ -1092,7 +1104,7 @@ fn next_pssm(
         .iter()
         .map(|hsp| PssmAlignment {
             subject: hsp.s_idx,
-            e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
+            e_value: seqalign_pssm_evalue(hsp.e_value),
             q_start: hsp.q_start - 1 + q_shift,
             s_start: hsp.s_start - 1,
             q_length: hsp.q_end + 1 - hsp.q_start,

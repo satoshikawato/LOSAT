@@ -680,10 +680,15 @@ impl RedoMatch<'_> {
         };
         redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
+        // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
+        // block gives them) pass the reaping above but leave it at `INT4_MAX`.
+        if !(best_evalue <= self.expect_value) {
+            return None;
+        }
         let best_score = first.align.score;
-        // NCBI's test that `best_evalue` is at most `hitParams->options->expect_value` passes: the
-        // list keeps an HSP, whose e-value is at most `-evalue`, and `best_evalue` is the smallest
-        // of all.
+        // The list passed NCBI's test that `best_evalue` is at most
+        // `hitParams->options->expect_value` (above).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
@@ -929,6 +934,12 @@ impl RedoMatch<'_> {
         };
         redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
+        // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
+        // block gives them) pass the reaping above but leave it at `INT4_MAX`.
+        if !(best_evalue <= self.expect_value) {
+            return None;
+        }
         let best_score = first.align.score;
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {

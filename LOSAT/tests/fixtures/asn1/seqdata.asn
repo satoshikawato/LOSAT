@@ -1,0 +1,18 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { local str "d1" }, descr { title "delta 2na 4na gap" },
+      inst { repr delta, mol dna, length 14, ext delta {
+        literal { length 4, seq-data ncbi2na '1B'H },
+        literal { length 2 },
+        literal { length 4, seq-data ncbi4na '1248'H },
+        literal { length 4, seq-data gap { type unknown } } } } },
+    seq { id { local str "d2" }, descr { title "ncbi8na raw" },
+      inst { repr raw, mol dna, length 4, seq-data ncbi8na '01020408'H } },
+    seq { id { local str "d3" }, descr { title "virtual no data" },
+      inst { repr virtual, mol dna, length 4 } },
+    seq { id { local str "d4" }, descr { title "lowercase iupacna" },
+      inst { repr raw, mol dna, length 6, seq-data iupacna "acgtnn" } },
+    seq { id { local str "d5" }, descr { title "length mismatch" },
+      inst { repr raw, mol dna, length 3, seq-data iupacna "ACGTAC" } }
+  }
+}

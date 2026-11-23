@@ -11,9 +11,10 @@ use super::options::archive_request;
 use super::request::{ParamSet, Queries, Request, Subject};
 use super::results::{KarlinBlocks, MaskRange, Results, SearchStats};
 use super::{seq_align_id, seq_loc_id, Archive, ArchiveReader, Message, Search, Severity, Stop};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::real_of_parts;
-use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, ObjectStream};
+use crate::report::serial::asn_types::stream::{guess_encoding, text_stream, Encoding};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_document;
@@ -33,7 +34,7 @@ fn fixture(name: &str) -> Vec<u8> {
 fn archives(text: &[u8]) -> (Vec<Archive>, Option<ReadError>) {
     let guessed = guess_encoding(text);
     assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Text));
-    let mut reader = ArchiveReader::new(guessed.into_text());
+    let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
     let mut out = Vec::new();
     while let Some((archive, posts)) = reader.next_archive() {
         assert!(posts.is_empty(), "{posts:?}");
@@ -71,7 +72,7 @@ fn label(id: &ParsedSeqId) -> String {
 
 /// The value of a text of the type `root`, read whole without a message.
 fn value(root: u16, text: &str) -> Value {
-    let (value, posts) = read_document(text.as_bytes(), root);
+    let (value, posts) = read_document(text.as_bytes(), root, Names::TEST);
     assert!(posts.is_empty(), "{posts:?}");
     value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
 }
@@ -184,11 +185,11 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
                 continue;
             }
             files += 1;
-            let mut stream = ObjectStream::new(&text[..], b"");
+            let mut stream = text_stream(&text[..], b"", Names::ARCHIVE);
             let mut out = Vec::new();
             let mut error = None;
             while !stream.end_of_data() {
-                let (value, posts) = stream.read(named::BLAST4_ARCHIVE);
+                let (value, posts) = stream.read_object(named::BLAST4_ARCHIVE);
                 if !posts.is_empty() {
                     error = Some(format!("messages {posts:?}"));
                 }
@@ -265,7 +266,7 @@ fn outcome(text: &[u8]) -> Result<(usize, End), Encoding> {
         Ok(other) => return Err(*other),
         Err(stop) => panic!("{stop:?}"),
     }
-    let mut reader = ArchiveReader::new(guessed.into_text());
+    let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
     let mut count = 0;
     while let Some((archive, _)) = reader.next_archive() {
         match archive {

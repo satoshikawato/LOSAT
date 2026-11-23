@@ -48,7 +48,8 @@ fn the_texts_are_losat_s() {
     );
     assert_eq!(
         Refusal::Rid.reason(),
-        "error: the NCBI BLAST+ option -rid is not supported by LOSAT's BLAST_FORMATTER\n"
+        "-rid (the results of a search on NCBI's servers) is not supported by LOSAT's \
+         BLAST_FORMATTER"
     );
     assert_eq!(
         Refusal::Database("nt".to_string()).reason(),

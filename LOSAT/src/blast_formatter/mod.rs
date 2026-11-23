@@ -10,7 +10,7 @@ mod formatting;
 pub(crate) mod refusals;
 mod search_program;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -92,8 +92,9 @@ pub(crate) struct Options {
     pub(crate) sort_hits: Option<u8>,
     pub(crate) sort_hsps: Option<u8>,
     pub(crate) max_target_seqs: Option<usize>,
-    /// `-out`: `-` is the standard output (`files::open_output_file`).
-    pub(crate) out: String,
+    /// `-out` (its bytes, as NCBI opens the file): `-` is the standard output
+    /// (`files::open_output_file`).
+    pub(crate) out: OsString,
     pub(crate) parse_deflines: bool,
 }
 
@@ -119,7 +120,7 @@ impl Options {
             sort_hits: sort("sorthits"),
             sort_hsps: sort("sorthsps"),
             max_target_seqs: count("max_target_seqs"),
-            out: args.value("out").unwrap_or("-").to_string(),
+            out: args.os_value("out").unwrap_or(OsStr::new("-")).to_owned(),
             parse_deflines: args.flag("parse_deflines"),
         }
     }

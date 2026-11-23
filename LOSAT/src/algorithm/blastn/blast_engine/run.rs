@@ -6951,10 +6951,12 @@ fn run_local_formats(
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
-    // them, `api::run`); LOSAT Web has no databases.
+    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
+    // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
+    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+            "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -7306,7 +7308,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    args.megablast_index_loaded = megablast_index.check(&args)?;
+    args.megablast_index_loaded = megablast_index.check()?;
     if args.megablast_index_loaded.is_some() {
         mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
     }
@@ -10635,8 +10637,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
 
     // Whether the batch is searched with a MegaBLAST database index (`index_seeds` below; only a
-    // database search keeps one, `mb_index::MegablastIndex::check`).
+    // database search keeps one, `mb_index::MegablastIndex::check`), and whether the index leaves
+    // database volumes to the scan (a mixed search).
     let index_search = args.megablast_index_loaded.is_some() && split_prelim_lists.is_none();
+    let index_mixed = args
+        .megablast_index_loaded
+        .as_deref()
+        .is_some_and(crate::dbindex::search::LoadedIndex::mixed);
     // Build lookup tables
     let (lookup_tables, scan_step, offset_array_size) =
         batch_setup::batch_lookup_tables(&batch_setup::LookupInputs {
@@ -10650,9 +10657,13 @@ fn search_query_batch<const UNGAPPED: bool>(
             approx_table_entries,
             x_keep,
             subjects,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-114
-            // A search with a MegaBLAST database index has no lookup table.
-            split: split_prelim_lists.is_some() || index_search,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-163
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:460-462
+            // A search with a MegaBLAST database index has no lookup table, except a mixed
+            // one (`eMixedMBLookupTable`: the table without an index). (NCBI also builds the
+            // table for an old-style index found after the new style left a database volume
+            // without an index, `partial`, and never reads it: every OID is the index's.)
+            split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -10812,7 +10823,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                 encoded_query_concat_blastna,
                 &query_contexts,
                 &context_valid,
-                effective_word_size,
+                crate::dbindex::search::SearchOptions {
+                    word_size: effective_word_size as u64,
+                    two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
+                        as u64,
+                },
+                db_hard_mask.map(|algo_id| (database, algo_id)),
             ))
         }
         _ => None,
@@ -10906,7 +10922,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        // A batch split into query chunks traces what its chunks' indexed searches kept.
+        // A batch split into query chunks traces what its chunks' indexed searches kept. (With
+        // an index of only some volumes this is 1 for every subject: the traceback sees only
+        // subjects with kept HSPs, and a scanned subject shorter than a word has none.)
         shortest_subject: prelim_subject::shortest_subject(
             effective_word_size,
             args.megablast_index_loaded.is_some(),

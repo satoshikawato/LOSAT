@@ -14,7 +14,7 @@ fn options(outfmt: &str) -> Options {
         sort_hits: None,
         sort_hsps: None,
         max_target_seqs: None,
-        out: "-".to_string(),
+        out: "-".into(),
         parse_deflines: false,
     }
 }

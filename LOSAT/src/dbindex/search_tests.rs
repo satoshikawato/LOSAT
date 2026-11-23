@@ -1,5 +1,3 @@
-use std::sync::atomic::AtomicU32;
-
 use super::*;
 use crate::dbindex::{test_letters, test_volume, Options};
 
@@ -17,7 +15,30 @@ fn blastna(letters: &str) -> Vec<u8> {
 }
 
 fn search_of(fasta: &str, options: &Options, query: &str, word_size: u64) -> VolumeSeeds {
-    let path = test_volume(&format!("search{word_size}"), fasta, options);
+    search_with(fasta, options, query, word_size, 0)
+}
+
+/// The search of `query` with the two-hit window `two_hits` (0: the one-hit search).
+fn search_with(
+    fasta: &str,
+    options: &Options,
+    query: &str,
+    word_size: u64,
+    two_hits: u64,
+) -> VolumeSeeds {
+    search_masked(fasta, options, query, word_size, two_hits, &[])
+}
+
+/// `search_with` with the masked letters `masks` of `-db_hard_mask`.
+fn search_masked(
+    fasta: &str,
+    options: &Options,
+    query: &str,
+    word_size: u64,
+    two_hits: u64,
+    masks: &[(u32, Vec<(u32, u32)>)],
+) -> VolumeSeeds {
+    let path = test_volume(&format!("search{word_size}-{two_hits}"), fasta, options);
     let volume = IndexVolume::open(&path).unwrap();
     let query = blastna(query);
     search(
@@ -26,10 +47,151 @@ fn search_of(fasta: &str, options: &Options, query: &str, word_size: u64) -> Vol
         &[(0, query.len() as u32)],
         SearchOptions {
             word_size,
-            two_hits: 0,
+            two_hits,
         },
+        masks,
     )
     .unwrap()
+}
+
+/// Each letter of `letters` replaced by another one.
+fn other_letters(letters: &str) -> String {
+    letters
+        .chars()
+        .map(|c| match c {
+            'A' => 'C',
+            'C' => 'G',
+            'G' => 'T',
+            _ => 'A',
+        })
+        .collect()
+}
+
+/// Two runs on one diagonal, each of at least the word size and shorter than the two-hit
+/// search's contig length (twice the word size), `gap` letters apart: the one-hit search saves
+/// both; the two-hit search saves the second where its end is at most the window past the first's
+/// end and the second's length, and neither otherwise.
+#[test]
+fn the_two_hit_search_saves_a_seed_with_an_earlier_hit_within_the_window() {
+    let s1 = test_letters(400, 23);
+    let fasta = format!(">s1\n{s1}\n");
+    let gap = 5;
+    let second = 114 + gap;
+    let query = format!(
+        "{}{}{}",
+        &s1[100..114],
+        other_letters(&s1[114..second]),
+        &s1[second..second + 14]
+    );
+    let both = [
+        Seed {
+            q_off: 0,
+            s_off: 100,
+        },
+        Seed {
+            q_off: 14 + gap as u32,
+            s_off: second as u32,
+        },
+    ];
+    let one_hit = search_with(&fasta, &small_options(), &query, 12, 0);
+    assert_eq!(one_hit.seeds(0, 0), Some(&both[..]));
+    for window in [gap as u64, 40] {
+        let two_hits = search_with(&fasta, &small_options(), &query, 12, window);
+        assert_eq!(two_hits.seeds(0, 0), Some(&both[1..]), "window {window}");
+    }
+    let two_hits = search_with(&fasta, &small_options(), &query, 12, gap as u64 - 1);
+    assert_eq!(two_hits.seeds(0, 0), None);
+    // A run of the contig length is saved without an earlier hit.
+    let long = search_with(&fasta, &small_options(), &s1[100..124], 12, 1);
+    assert_eq!(
+        long.seeds(0, 0),
+        Some(
+            &[Seed {
+                q_off: 0,
+                s_off: 100
+            }][..]
+        )
+    );
+}
+
+/// With `-db_hard_mask` a masked letter matches no query letter: an exact run of the query over
+/// masked letters is the seeds of its unmasked stretches (the one-hit search), and the two-hit
+/// search pairs no two hits of a diagonal across a masked letter; a run over masked letters alone
+/// is no seed.
+#[test]
+fn a_masked_letter_ends_a_run_and_pairs_no_hits() {
+    let s1 = test_letters(400, 23);
+    let fasta = format!(">s1\n{s1}\n");
+    let gap = 5;
+    let second = 114 + gap;
+    // The query is the subject's letters 100..133: one run of 33 letters.
+    let query = &s1[100..second + 14];
+    let masks = [(0, vec![(114, second as u32)])];
+    let whole = [Seed {
+        q_off: 0,
+        s_off: 100,
+    }];
+    let parts = [
+        Seed {
+            q_off: 0,
+            s_off: 100,
+        },
+        Seed {
+            q_off: 14 + gap as u32,
+            s_off: second as u32,
+        },
+    ];
+    let one_hit = search_with(&fasta, &small_options(), query, 12, 0);
+    assert_eq!(one_hit.seeds(0, 0), Some(&whole[..]));
+    let one_hit = search_masked(&fasta, &small_options(), query, 12, 0, &masks);
+    assert_eq!(one_hit.seeds(0, 0), Some(&parts[..]));
+    // The run is of the contig length (24) without the masks; the parts are shorter, and the
+    // second's earlier hit is across the masked letters.
+    let two_hits = search_with(&fasta, &small_options(), query, 12, 40);
+    assert_eq!(two_hits.seeds(0, 0), Some(&whole[..]));
+    let two_hits = search_masked(&fasta, &small_options(), query, 12, 40, &masks);
+    assert_eq!(two_hits.seeds(0, 0), None);
+    // Masked letters 90..140 hold the whole run.
+    let masks = [(0, vec![(90, 140)])];
+    let none = search_masked(&fasta, &small_options(), query, 12, 0, &masks);
+    assert!(!none.has_seeds(0));
+}
+
+/// A sequence without masked letters keeps the seeds of the search without `-db_hard_mask` where
+/// another sequence of its local id has some, and a mask of a sequence is of its own letters.
+#[test]
+fn the_masks_are_of_their_own_sequence() {
+    let s1 = test_letters(300, 29);
+    let s2 = test_letters(300, 31);
+    let fasta = format!(">s1\n{s1}\n>s2\n{s2}\n");
+    let query = format!("{}{}", &s2[100..160], &s1[100..160]);
+    let plain = search_with(&fasta, &small_options(), &query, 28, 0);
+    let masks = [(0, vec![(10, 20), (200, 220)])];
+    let masked = search_masked(&fasta, &small_options(), &query, 28, 0, &masks);
+    assert_eq!(masked.seeds(1, 0), plain.seeds(1, 0));
+    assert_eq!(masked.seeds(0, 0), plain.seeds(0, 0));
+    assert_eq!(
+        masked.seeds(1, 0),
+        Some(
+            &[Seed {
+                q_off: 0,
+                s_off: 100
+            }][..]
+        )
+    );
+    // Sequence 1's letters 120..130 masked: its run is cut there (s1's run stays whole).
+    let masks = [(1, vec![(120, 130)])];
+    let masked = search_masked(&fasta, &small_options(), &query, 28, 0, &masks);
+    assert_eq!(masked.seeds(0, 0), plain.seeds(0, 0));
+    assert_eq!(
+        masked.seeds(1, 0),
+        Some(
+            &[Seed {
+                q_off: 30,
+                s_off: 130
+            }][..]
+        )
+    );
 }
 
 fn small_options() -> Options {
@@ -128,21 +290,14 @@ fn an_oid_is_located_in_its_volume() {
         path: String::new(),
         start_oid,
         n_oids,
+        has_index: true,
     };
-    let new = LoadedIndex {
-        old_style: false,
-        volumes: vec![volume(0, 3), volume(3, 2), volume(5, 4)],
-        searches: AtomicU32::new(0),
-    };
+    let new = LoadedIndex::new(false, vec![volume(0, 3), volume(3, 2), volume(5, 4)]);
     assert_eq!(new.locate(0), (0, 0));
     assert_eq!(new.locate(4), (1, 1));
     assert_eq!(new.locate(5), (2, 0));
     assert_eq!(new.locate(12), (2, 7));
-    let old = LoadedIndex {
-        old_style: true,
-        volumes: new.volumes.clone(),
-        searches: AtomicU32::new(0),
-    };
+    let old = LoadedIndex::new(true, new.volumes.clone());
     assert_eq!(old.locate(4), (1, 1));
     assert_eq!(old.locate(8), (2, 3));
     // Past every volume: the first volume, with the OID itself.

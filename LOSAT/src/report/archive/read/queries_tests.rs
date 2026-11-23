@@ -5,6 +5,7 @@
 //! cases LOSAT refuses and why.
 
 use super::*;
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::{read_document, table::named};
 
 const FIXTURES: &str = concat!(
@@ -22,7 +23,7 @@ fn read(name: &str) -> Option<Vec<u8>> {
 /// The text of the query set `text` held whole, after the check that the text written to a file a
 /// block at a time is the same, or the same error.
 fn render(text: &[u8]) -> Result<Vec<u8>, RenderError> {
-    let (value, posts) = read_document(text, named::BIOSEQ_SET);
+    let (value, posts) = read_document(text, named::BIOSEQ_SET, Names::STRATEGY);
     assert!(posts.is_empty(), "{posts:?}");
     let value = value.unwrap_or_else(|error| panic!("{error:?}"));
     let set = V::new(named::BIOSEQ_SET, &value);

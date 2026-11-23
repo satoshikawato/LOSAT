@@ -25,7 +25,8 @@ pub(crate) const COMPO_SCORE_MIN: i32 = i16::MIN as i32;
 /// second redo (line PS `DECISIONS.md` 11 and 63; series PR, item PS11c-3). `XDropRedo` is
 /// psiblast's and rpsblast's redo (`Blast_RedoOneMatch`), `SwRedo` rpsblast's `-use_sw_tback`
 /// (`Blast_RedoOneMatchSmithWaterman`), `FrameRedo` rpstblastn's (`Blast_RedoOneMatch` with a
-/// translated subject: series PR, item PS12b).
+/// translated subject: series PR, item PS12b) and `SwFrameRedo` rpstblastn's `-use_sw_tback`
+/// (`Blast_RedoOneMatchSmithWaterman` with a translated subject: item PS12c).
 pub(crate) trait RedoInstance {
     /// NCBI's `subject_is_translated` of the redo (`s_GetAlignParams`): the subject is the six
     /// frames of a translated sequence, each alignment in its frame.
@@ -44,9 +45,16 @@ pub(crate) enum SwRedo {}
 /// user query's frames.
 pub(crate) enum FrameRedo {}
 
+/// The Smith-Waterman redo of a translated subject (`RedoInstance`): rpstblastn's
+/// `-use_sw_tback`.
+pub(crate) enum SwFrameRedo {}
+
 impl RedoInstance for XDropRedo {}
 impl RedoInstance for SwRedo {}
 impl RedoInstance for FrameRedo {
+    const SUBJECT_IS_TRANSLATED: bool = true;
+}
+impl RedoInstance for SwFrameRedo {
     const SUBJECT_IS_TRANSLATED: bool = true;
 }
 

@@ -14,6 +14,7 @@
 //! here), on memory its input does not decide, or on a form LOSAT does not read, the run stops
 //! with LOSAT's refusal (`refusals::Refusal`) at the point where NCBI meets it.
 
+use std::ffi::OsStr;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
@@ -40,6 +41,7 @@ use crate::report::archive::read::request::{Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_value;
@@ -125,7 +127,7 @@ impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:335
     /// `args[kArgOutput].AsOutputFile()` of `-out` `value`: opened the first time (NCBI's
     /// `Argument "out". File is not accessible` there), the same stream after.
-    fn open(&mut self, value: &str) -> anyhow::Result<()> {
+    fn open(&mut self, value: &OsStr) -> anyhow::Result<()> {
         if self.file.is_some() {
             return Ok(());
         }
@@ -203,7 +205,7 @@ impl<'r, 'o> Run<'r, 'o> {
             Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
             Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
         }
-        let mut reader = ArchiveReader::new(guessed.into_text());
+        let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
         while let Some((read, posts)) = reader.next_archive() {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
@@ -688,6 +690,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
         ReadError::Eof => NativeError::silent_end().into(),
         ReadError::Exception(exception) => exception_error(&exception),
         ReadError::Std(what) => NativeError::std_exception(what).into(),
+        ReadError::OutOfMemory => NativeError::out_of_memory().into(),
         ReadError::Unsupported(text) => Refusal::UnreadText(text).into(),
     }
 }

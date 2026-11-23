@@ -6,16 +6,22 @@
 use std::io::Cursor;
 
 use super::read::{read_document, ReadError};
-use super::stream::{guess_encoding, Encoding, ObjectStream};
+use super::stream::{guess_encoding, text_stream, Encoding};
 use super::table::named;
 use super::Value;
+use crate::report::serial::asn_input::Names;
+
+/// Whether `error` is a `CSerialException` whose report holds `message`.
+fn is_serial(error: &Option<ReadError>, message: &str) -> bool {
+    matches!(error, Some(ReadError::Serial(e)) if String::from_utf8_lossy(&e.what()).contains(message))
+}
 
 /// The objects of `text` read as `root` until `EndOfData`, and the error that ended them.
 fn objects(text: &[u8], root: u16) -> (Vec<Value>, Option<ReadError>) {
-    let mut stream = ObjectStream::new(text, b"");
+    let mut stream = text_stream(text, b"", Names::TEST);
     let mut out = Vec::new();
     while !stream.end_of_data() {
-        match stream.read(root).0 {
+        match stream.read_object(root).0 {
             Ok(value) => out.push(value),
             Err(error) => return (out, Some(error)),
         }
@@ -40,7 +46,7 @@ fn end_of_data_skips_white_space_and_comments() {
     assert_eq!((values.len(), error), (1, Some(ReadError::Eof)));
     let (values, error) = objects(format!("{id}\0").as_bytes(), named::SEQ_ID);
     assert_eq!(values.len(), 1);
-    assert_eq!(error, Some(ReadError::Serial("'::=' expected".into())));
+    assert!(is_serial(&error, "'::=' expected"), "{error:?}");
     let (values, error) = objects(b"", named::SEQ_ID);
     assert_eq!((values.len(), error), (0, None));
     let (values, error) = objects(b" \n\t\r\n", named::SEQ_ID);
@@ -50,9 +56,9 @@ fn end_of_data_skips_white_space_and_comments() {
 /// A failed read leaves the stream failed: `EndOfData` is true after it.
 #[test]
 fn a_failed_read_ends_the_data() {
-    let mut stream = ObjectStream::new(&b"Seq-id ::= locl 5\nSeq-id ::= gi 5"[..], b"");
+    let mut stream = text_stream(&b"Seq-id ::= locl 5\nSeq-id ::= gi 5"[..], b"", Names::TEST);
     assert!(!stream.end_of_data());
-    assert!(stream.read(named::SEQ_ID).0.is_err());
+    assert!(stream.read_object(named::SEQ_ID).0.is_err());
     assert!(stream.end_of_data());
 }
 
@@ -62,12 +68,12 @@ fn a_failed_read_ends_the_data() {
 #[test]
 fn one_object_read_leaves_the_rest() {
     let text = b"Seq-id ::= local str \"a\"\n-- c\nSeq-id ::= gi 5\n";
-    let mut stream = ObjectStream::new(&text[4..], &text[..4]);
-    let (value, posts) = stream.read(named::SEQ_ID);
+    let mut stream = text_stream(&text[4..], &text[..4], Names::TEST);
+    let (value, posts) = stream.read_object(named::SEQ_ID);
     assert!(posts.is_empty());
     assert_eq!(
         value,
-        read_document(b"Seq-id ::= local str \"a\"", named::SEQ_ID).0
+        read_document(b"Seq-id ::= local str \"a\"", named::SEQ_ID, Names::TEST).0
     );
     let (mut rest, mut input) = stream.into_rest();
     std::io::Read::read_to_end(&mut input, &mut rest).expect("a slice reads");
@@ -78,20 +84,21 @@ fn one_object_read_leaves_the_rest() {
 #[test]
 fn a_seekable_input_rewinds() {
     let text = b"Blast4-request ::= { body get-matrices NULL }\n".to_vec();
-    let mut stream = ObjectStream::new(Cursor::new(text.clone()), b"");
+    let mut stream = text_stream(Cursor::new(text.clone()), b"", Names::TEST);
     // NCBI's strategy reader tries the reply first: the header names another type.
-    let (reply, _) = stream.read(named::BLAST4_GET_SEARCH_STRATEGY_REPLY);
-    assert_eq!(
-        reply,
-        Err(ReadError::Serial(
-            "incompatible type Blast4-request<>Blast4-get-search-strategy-reply".into()
-        ))
+    let (reply, _) = stream.read_object(named::BLAST4_GET_SEARCH_STRATEGY_REPLY);
+    assert!(
+        is_serial(
+            &reply.err(),
+            "incompatible type Blast4-request<>Blast4-get-search-strategy-reply"
+        ),
+        "the reply's read fails"
     );
     let input = stream.rewind().expect("a cursor seeks");
     let guessed = guess_encoding(input);
     assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Text));
-    let mut stream = guessed.into_text();
-    assert!(stream.read(named::BLAST4_REQUEST).0.is_ok());
+    let mut stream = guessed.into_text(Names::TEST);
+    assert!(stream.read_object(named::BLAST4_REQUEST).0.is_ok());
     assert!(stream.end_of_data());
 }
 
@@ -101,10 +108,10 @@ fn a_seekable_input_rewinds() {
 fn a_stream_keeps_one_object() {
     let one = "Seq-id ::= local str \"an identifier of some length\"\n";
     let text = one.repeat(40_000);
-    let mut stream = ObjectStream::new(text.as_bytes(), b"");
+    let mut stream = text_stream(text.as_bytes(), b"", Names::TEST);
     let mut count = 0;
     while !stream.end_of_data() {
-        assert!(stream.read(named::SEQ_ID).0.is_ok());
+        assert!(stream.read_object(named::SEQ_ID).0.is_ok());
         count += 1;
     }
     assert_eq!(count, 40_000);
@@ -125,13 +132,13 @@ fn a_delayed_member_keeps_its_text_in_a_stream() {
         "Auth-list ::= {{ names str {{ {} }}, affil str \"x\" }}\n",
         names.join(",\n")
     );
-    let whole = read_document(text.as_bytes(), named::AUTH_LIST).0;
+    let whole = read_document(text.as_bytes(), named::AUTH_LIST, Names::TEST).0;
     let (values, error) = objects(text.as_bytes(), named::AUTH_LIST);
     assert_eq!(error, None);
     assert_eq!(values.len(), 1);
     assert_eq!(Ok(&values[0]), whole.as_ref());
     assert!(
-        matches!(&values[0], Value::Sequence(members) if matches!(members[0].1, Value::Delayed(ref t) if t.len() > 5 * 64 * 1024))
+        matches!(&values[0], Value::Sequence(members) if matches!(members[0].1, Value::Delayed { ref bytes, .. } if bytes.len() > 5 * 64 * 1024))
     );
 }
 
@@ -198,15 +205,13 @@ fn the_encoding_is_guessed_as_ncbi_guesses_it() {
         assert_eq!(guess(&bytes), encoding, "{name}");
     }
     // A text read from where the guess left the stream: the guess's bytes, then the input.
-    let mut stream = guess_encoding(&text[..]).into_text();
-    assert!(stream.read(named::BLAST4_ARCHIVE).0.is_ok());
+    let mut stream = guess_encoding(&text[..]).into_text(Names::TEST);
+    assert!(stream.read_object(named::BLAST4_ARCHIVE).0.is_ok());
     assert!(stream.end_of_data());
     let (values, error) = objects(&fixture("bad/other_type"), named::BLAST4_ARCHIVE);
     assert_eq!(values.len(), 0);
-    assert_eq!(
-        error,
-        Some(ReadError::Serial(
-            "incompatible type Seq-entry<>Blast4-archive".into()
-        ))
+    assert!(
+        is_serial(&error, "incompatible type Seq-entry<>Blast4-archive"),
+        "{error:?}"
     );
 }

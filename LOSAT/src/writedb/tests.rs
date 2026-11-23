@@ -545,6 +545,8 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             mask_data: None,
             mask_id: None,
             mask_desc: None,
+            gi_mask: false,
+            gi_mask_name: None,
             randomize: false,
         };
         // A run that writes no database stores no date; any time will do.
@@ -647,6 +649,8 @@ fn makedb_version(
         mask_data: None,
         mask_id: None,
         mask_desc: None,
+        gi_mask: false,
+        gi_mask_name: None,
         randomize: false,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");

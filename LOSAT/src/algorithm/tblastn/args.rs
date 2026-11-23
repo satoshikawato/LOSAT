@@ -278,6 +278,12 @@ pub struct TblastnArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// The file that NCBI BLAST+ reads for an ungapped search's `-matrix` that its tables do not
+    /// have (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
+    /// command line and the library (`find_matrix_file`); `None` in LOSAT Web. Not a public
+    /// option.
+    #[arg(skip)]
+    pub matrix_file: Option<PathBuf>,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
     /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
     /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
@@ -355,6 +361,12 @@ pub struct ResolvedTblastnArgs {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
     pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// What NCBI's score block makes of an ungapped search's `-matrix` that its tables do not
+    /// have (`unknown_matrix_name`); `None` for a matrix of the tables and for a gapped search,
+    /// which refuses such a name first (`validate_protein_options`).
+    pub unknown_matrix: Option<crate::algorithm::tblastx::args::TblastxMatrix>,
+    /// The file that NCBI reads for an `Unknown` matrix (`TblastnArgs::matrix_file`).
+    pub matrix_file: Option<PathBuf>,
     /// The database masking as the formatter resolved it (`tblastn_app::resolve_db_mask`; series
     /// NP, M4b PR 2); `None` before, and for a search without it.
     pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
@@ -365,6 +377,41 @@ impl TblastnArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// What NCBI's score block makes of an ungapped search's `-matrix` name that its tables do
+    /// not have (`tblastx::args::ungapped_matrix`: IDENTITY without a table, or a name that it
+    /// looks for as a file); `None` for a gapped search or a matrix of the tables.
+    pub(crate) fn unknown_matrix_name(
+        &self,
+    ) -> Option<crate::algorithm::tblastx::args::TblastxMatrix> {
+        use crate::algorithm::tblastx::args::{ungapped_matrix, TblastxMatrix};
+        if !self.ungapped {
+            return None;
+        }
+        match ungapped_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")) {
+            TblastxMatrix::Table(_) => None,
+            other => Some(other),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306
+    /// Looks up the file that NCBI reads for an `Unknown` matrix name (`unknown_matrix_name`)
+    /// with `search` (`MatrixSearch::file`) into `matrix_file`: the first step of the command
+    /// line's run and of the library's searches, as TBLASTX's (`TblastxArgs::find_matrix_file`);
+    /// `check_search_limits` refuses a search with such a file where NCBI sets up its first batch.
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> Result<()> {
+        if self.unknown_matrix_name()
+            == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
+        {
+            self.matrix_file = search
+                .file(self.matrix.as_deref().unwrap_or("BLOSUM62"))
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
     }
 
     /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
@@ -628,6 +675,8 @@ impl TblastnArgs {
             num_threads: self.num_threads,
             query_range,
             pssm,
+            unknown_matrix: self.unknown_matrix_name(),
+            matrix_file: self.matrix_file.clone(),
             db_mask: None,
         })
     }
@@ -641,16 +690,50 @@ impl TblastnArgs {
 /// psiblast's `validate_requested_blastp_support`).
 pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
     use crate::blastinput::app::CompositionMode;
-    if !args.gapped {
-        anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
+    // An ungapped search of a PSSM query: NCBI BLAST+ 2.17.0's tblastn dies with SIGSEGV
+    // (fixture `db.tbn.inpssm.rej.ungapped`, line PS7), so no result is defined.
+    if !args.gapped && args.pssm.is_some() {
+        anyhow::bail!("{}", ungapped_pssm_refusal());
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105,3136
+    // An ungapped search's matrix name that NCBI's loader reads as IDENTITY without a table, or
+    // whose file it reads: NCBI 2.17.0 aborts when it sets up the first batch (as TBLASTX's,
+    // `tblastx::args::ungapped_matrix`). A name without a file fails the batch with NCBI's
+    // engine error (`stage_d_pipeline::SetupEngineError::unknown_matrix`).
+    if args.unknown_matrix == Some(crate::algorithm::tblastx::args::TblastxMatrix::Aborts) {
+        return Err(
+            crate::algorithm::tblastx::args::identity_named_matrix_refusal(
+                &args.matrix_name,
+                "TBLASTN",
+            ),
+        );
+    }
+    if let Some(file) = args.matrix_file.as_deref() {
+        anyhow::bail!(
+            "{}",
+            crate::blastinput::ncbi_environment::matrix_file_refusal(
+                &args.matrix_name,
+                file,
+                "TBLASTN"
+            )
+        );
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:449-464
+    // NCBI converts the gapped X-drops to raw scores only when the search has gapped Karlin
+    // blocks (with the smallest gapped Lambda). An ungapped search has no gapped Karlin block (blast_setup.c:517-527), so it reads neither
+    // gapped X-drop nor the gap costs.
     // The gapped X-drops that NCBI's kernels cannot size are refused where the search starts
     // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's, or a
     // PSSM query's `kbp_gap_psi` (`PsiSearch::gapped_karlin`, whose Lambda NCBI's X-drops read,
     // blast_parameters.c:455-458). A PSI-TBLASTN run that NCBI's object manager ends as its query
     // joins the scope never gets here (NCBI BLAST+ 2.17.0 writes that stop with any -xdrop_gap,
     // line RG D3-1 fix 4). (A name that LOSAT has no matrix for is refused below.)
-    if let Ok(matrix) = args.matrix_name.parse::<ScoringMatrix>() {
+    if let Some(matrix) = args
+        .matrix_name
+        .parse::<ScoringMatrix>()
+        .ok()
+        .filter(|_| args.gapped)
+    {
         let gapped = crate::stats::lookup_protein_params(&crate::config::ProteinScoringSpec {
             matrix,
             gap_open: args.gap_open,
@@ -673,20 +756,20 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
                 || args.matrix_name.eq_ignore_ascii_case("identity"),
         )?;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
-    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
-    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
-    // and NCBI's tblastn dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
-    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
-    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // smaller -evalue such as 1e308 runs.
-    if args.evalue >= f64::MAX {
-        anyhow::bail!(
-            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
-            args.evalue
-        );
-    }
+    let (compo_adjust_mode, _) = composition(args);
+    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
+    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    crate::blastinput::protein_options_check::check_evalue_limit(
+        args.evalue,
+        compo_adjust_mode.is_enabled(),
+        "TBLASTN",
+    )?;
     Ok(())
+}
+
+/// The refusal of `-ungapped` with `-in_pssm` (`check_search_limits`).
+pub(super) fn ungapped_pssm_refusal() -> &'static str {
+    "-ungapped with -in_pssm (an ungapped search of a PSSM query, which crashes NCBI BLAST+ 2.17.0's tblastn) is not supported by LOSAT's TBLASTN"
 }
 
 /// The search's composition mode, and IDENTITY's reset (IDENTITY with a mode above 0, which NCBI
@@ -723,7 +806,12 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-147:
     crate::utils::threading::validate_threads(args.num_threads)?;
-    let matrix: Option<ScoringMatrix> = args.matrix_name.parse().ok();
+    // An ungapped search's name that NCBI's tables do not have scores with BLOSUM62 until the
+    // setup of its first batch fails (`LocalStageDScoring::unknown_matrix`).
+    let matrix: Option<ScoringMatrix> = match args.unknown_matrix {
+        Some(_) => Some(ScoringMatrix::Blosum62),
+        None => args.matrix_name.parse().ok(),
+    };
     let threshold = args.threshold;
     let window = args.window_size;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137 and
@@ -756,6 +844,8 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
             word_xdrop_bits: args.xdrop_ungap,
+            gapped: args.gapped,
+            unknown_matrix: args.unknown_matrix.is_some(),
             // NCBI's traceback runs the redo when composition-based statistics are on or the
             // traceback is Smith-Waterman: `-use_sw_tback` runs the redo with or without them.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
@@ -778,10 +868,8 @@ pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`TblastnArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     refuse_browser_pssm_query(args)?;
     let resolved = args.resolve()?;
     search_settings(&resolved)?;

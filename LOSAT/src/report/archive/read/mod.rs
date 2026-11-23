@@ -4,7 +4,7 @@
 //! results (`results`).
 //!
 //! The objects are read by the generic reader of the type table (`report::serial::asn_types`:
-//! the encoding guessed by `stream::guess_encoding`, the text read by `stream::ObjectStream`);
+//! the encoding guessed by `stream::guess_encoding`, the text read by `stream::TextStream`);
 //! this module makes the typed model of each value. It models what NCBI's archive reader and
 //! blast_formatter read of the archive; the members they ignore stay in the values (the Bioseqs,
 //! Seq-locs, PSSM and Seq-aligns are kept as read, for the formats that write them again).
@@ -32,7 +32,7 @@ mod strategy_tests;
 use std::io::Read;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_types::stream::ObjectStream;
+use crate::report::serial::asn_types::stream::TextStream;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::{member_index, Post, ReadError, Value};
@@ -114,12 +114,12 @@ pub(crate) struct Search {
 /// The objects of an archive stream (the `CRemoteBlast` made of a stream, with its object
 /// stream), one at a time.
 pub(crate) struct ArchiveReader<R: Read> {
-    objects: ObjectStream<R>,
+    objects: TextStream<R>,
 }
 
 impl<R: Read> ArchiveReader<R> {
     /// The archive objects of a text stream.
-    pub(crate) fn new(objects: ObjectStream<R>) -> Self {
+    pub(crate) fn new(objects: TextStream<R>) -> Self {
         ArchiveReader { objects }
     }
 
@@ -130,7 +130,7 @@ impl<R: Read> ArchiveReader<R> {
         if self.objects.end_of_data() {
             return None;
         }
-        let (value, posts) = self.objects.read(named::BLAST4_ARCHIVE);
+        let (value, posts) = self.objects.read_object(named::BLAST4_ARCHIVE);
         Some((value.map(Archive::from_value), posts))
     }
 }

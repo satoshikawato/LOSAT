@@ -48,7 +48,7 @@ fn the_dependencies_are_in_ncbi_s_order() {
 
 #[test]
 fn the_arguments_are_read_into_the_options() {
-    let words: Vec<String> = [
+    let words: Vec<OsString> = [
         "-archive",
         "a",
         "-outfmt",
@@ -70,7 +70,7 @@ fn the_arguments_are_read_into_the_options() {
         "-parse_deflines",
     ]
     .iter()
-    .map(|word| word.to_string())
+    .map(OsString::from)
     .collect();
     let args = crate::ncbi_app::args::parse(&TOOL, &words).unwrap();
     assert_eq!(
@@ -85,15 +85,18 @@ fn the_arguments_are_read_into_the_options() {
             sort_hits: Some(4),
             sort_hsps: Some(0),
             max_target_seqs: None,
-            out: "o.txt".to_string(),
+            out: OsString::from("o.txt"),
             parse_deflines: true,
         }
     );
     let args =
-        crate::ncbi_app::args::parse(&TOOL, &["-max_target_seqs".to_string(), "7".to_string()])
+        crate::ncbi_app::args::parse(&TOOL, &[OsString::from("-max_target_seqs"), "7".into()])
             .unwrap();
     let options = Options::of(&args);
-    assert_eq!((options.outfmt.as_str(), options.out.as_str()), ("0", "-"));
+    assert_eq!(
+        (options.outfmt.as_str(), options.out.as_os_str()),
+        ("0", OsStr::new("-"))
+    );
     assert_eq!(options.max_target_seqs, Some(7));
     assert!(!options.show_gis && !options.html && !options.parse_deflines);
 }
@@ -125,12 +128,12 @@ fn an_empty_rid_is_ncbi_s_engine_error() {
     );
 }
 
-// Where NCBI asks its servers for the search (P2.219, P2.222), LOSAT refuses `-rid` as the
-// search programs refuse `-remote`.
+// Where NCBI asks its servers for the search (P2.219, P2.222), LOSAT refuses `-rid` at the run, as
+// the one list of refused arguments says (`ncbi_app::args::refusal`, `Refusal::Run`).
 #[test]
-fn a_rid_is_refused_as_remote_is() {
-    let refusal =
-        "error: the NCBI BLAST+ option -rid is not supported by LOSAT's BLAST_FORMATTER\n";
+fn a_rid_is_refused_at_the_run() {
+    let refusal = "Error: -rid (the results of a search on NCBI's servers) is not supported by \
+                   LOSAT's BLAST_FORMATTER\n";
     for line in [
         &["-rid", "ABCDEFGH01R"][..],
         &["-rid", "ABCDEFGH01R", "-outfmt", "6"],
@@ -138,7 +141,7 @@ fn a_rid_is_refused_as_remote_is() {
     ] {
         assert_eq!(
             run_words(line, b""),
-            (2, String::new(), refusal.to_string()),
+            (1, String::new(), refusal.to_string()),
             "{line:?}"
         );
     }

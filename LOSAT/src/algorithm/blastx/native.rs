@@ -273,7 +273,7 @@ fn run_inner(
     })?;
     // The subjects as NCBI searches them: each cut to its interval (an interval without letters
     // leaves a record without letters, `write_empty_subject_warnings`). The Bioseqs of the archive
-    // and of the search strategy and the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_masked_subject_rows`, records
+    // and of the search strategy and the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_set_subject_row_masks`, records
     // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
         // Outfmt 0 to 4: the rows of outfmt 0 and the query-anchored sections (1 to 4).
@@ -1540,15 +1540,29 @@ pub(super) fn reported_batch(
 }
 
 /// Whether an error of a search ends the run as it is: LOSAT's refusal, not an error of NCBI's
-/// engine, or an error that has NCBI's report already (the exception of a query split size that
-/// NCBI cannot convert, `split::split_sizes`). The one list of both callers
-/// (`database_search_error`, `local::search_records`).
+/// engine, an error that has NCBI's report already (the exception of a query split size that
+/// NCBI cannot convert, `split::split_sizes`), or an error of a query batch's search after the
+/// reports of the batches before (`app::ErrorAfterBatchReports`: the failed or endless
+/// Smith-Waterman redo of `-use_sw_tback`, `kappa`), which `search_error_held` unwraps. The one
+/// list of both callers (`database_search_error`, `local::search_records`).
 pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
     error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<super::database::LongSubjectRefusal>()
         || error.is::<NativeError>()
+        || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
+}
+
+/// An error that ends the run as it is (`search_error_as_is`) as the run reports it: the error
+/// that an `app::ErrorAfterBatchReports` holds (NCBI's engine error `Traceback failed`, exit
+/// status 3, or LOSAT's refusal), any other as it is. The flow writes the reports of the
+/// batches before when it meets the batch's error, so the marker has done its work here.
+pub(super) fn search_error_held(error: anyhow::Error) -> anyhow::Error {
+    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+        Ok(crate::blastinput::app::ErrorAfterBatchReports(held)) => held,
+        Err(error) => error,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227
@@ -1573,7 +1587,7 @@ pub(super) fn database_search_error(
         Err(error) => error,
     };
     if search_error_as_is(&error) {
-        return error;
+        return search_error_held(error);
     }
     if error.is::<UnreadableSubjects>() {
         let kept = unreadable
@@ -2246,7 +2260,8 @@ fn reader_batch_skipped(results: &mut [BatchResults]) {
 
 // No NCBI counterpart: how LOSAT schedules the search of a reader batch (NCBI's query batch,
 // `BATCH_SIZE` letters). The search keeps units of at most 10002 letters (`batch_ranges` with
-// the constant), whatever `BATCH_SIZE` is: the flow and the waves schedule the units as they
+// the constant), whatever `BATCH_SIZE` is (with `-use_sw_tback` the reader batch is one unit,
+// `query_setup::unit_ranges`): the flow and the waves schedule the units as they
 // scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
 // written when its last unit is searched. The values that NCBI takes of the whole query batch
 // (the split decision, the ungapped link cutoffs, the sum-statistics average length, the
@@ -2338,7 +2353,7 @@ impl XUnit {
         ahead: bool,
     ) -> Vec<XUnit> {
         let batch = std::sync::Arc::new(queries.to_vec());
-        let ranges = super::query_setup::batch_ranges(&batch, BATCH_SIZE);
+        let ranges = super::query_setup::unit_ranges(&batch, options);
         let count = ranges.len();
         let ahead = ahead
             && count == 1

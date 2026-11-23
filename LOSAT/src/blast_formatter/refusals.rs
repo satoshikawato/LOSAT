@@ -24,8 +24,8 @@ const NCBI_FORMATS: [i32; 20] = [
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Refusal {
     /// `-rid`: the results of a search that NCBI's servers ran, which NCBI's blast_formatter
-    /// fetches from them; refused where NCBI asks for them, as the search programs refuse
-    /// `-remote` (`cli::named_option_refusal`).
+    /// fetches from them; refused where NCBI asks for them (the row of the one list of refused
+    /// arguments, `ncbi_app::args::refusal`, read by `cli::run_refusal`).
     Rid,
     /// An output format of NCBI's blast_formatter that LOSAT's does not write
     /// (`WRITTEN_FORMATS`).
@@ -50,19 +50,17 @@ pub(crate) enum Refusal {
     /// (its BLAST database loader, or NCBI's servers where the database or the subjects lack
     /// one), which may post their own texts (decision C3-1 of line RG).
     Prefetch,
-    /// An archive of a program whose Seq-annot NCBI's formatter does not name as the others
-    /// (PHI-BLAST, the mapper): its task.
+    /// An archive of the mapper (its task, `mapr2g`), whose name NCBI's formatter maps back to
+    /// the mapper; NCBI's programs write no such archive (PHI-BLAST's archives end with NCBI's
+    /// engine error instead, `search_program::blast_type`).
     Program(&'static str),
 }
 
 impl Refusal {
-    /// The refusal's message (after `Error: `; the clap form `error: ...` for `-rid`).
+    /// The refusal's message (after `Error: `).
     pub(crate) fn reason(&self) -> String {
         match self {
-            Refusal::Rid => crate::cli::command_line_message(
-                &crate::cli::named_option_refusal("rid", super::PROGRAM),
-                false,
-            ),
+            Refusal::Rid => crate::cli::run_refusal(super::PROGRAM, "rid"),
             Refusal::OutputFormat(number) => format!(
                 "output format {number} is not supported by LOSAT's {} (it writes {})",
                 super::PROGRAM,
@@ -111,18 +109,10 @@ impl Refusal {
         }
     }
 
-    /// Stops the run with the refusal: `-rid` as the search programs' `-remote` (clap's error on
-    /// the standard error stream, exit status 2), the others as LOSAT's refusals of NCBI's
-    /// applications (`Diag::refuse`, exit status 1).
+    /// Stops the run with the refusal, as LOSAT's refusals of NCBI's applications
+    /// (`Diag::refuse`, exit status 1).
     pub(crate) fn refuse(&self, diag: &mut Diag) -> i32 {
-        match self {
-            Refusal::Rid => {
-                let error = crate::cli::named_option_refusal("rid", super::PROGRAM);
-                diag.cerr(crate::cli::command_line_message(&error, false).as_bytes());
-                error.exit_code()
-            }
-            _ => diag.refuse(&self.reason()),
-        }
+        diag.refuse(&self.reason())
     }
 
     /// The words of the manual's section on blast_formatter (`docs/manual/src/refusals.md`) that
@@ -139,7 +129,7 @@ impl Refusal {
             Refusal::UnreadText(_) => "form of ASN.1 text".to_string(),
             Refusal::FatalMessage => "severity Fatal".to_string(),
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
-            Refusal::Program(_) => "PHI-BLAST".to_string(),
+            Refusal::Program(_) => "mapper".to_string(),
         }
     }
 }
@@ -183,7 +173,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::UnreadText(String::new()),
         Refusal::FatalMessage,
         Refusal::Prefetch,
-        Refusal::Program("phiblastp"),
+        Refusal::Program("mapr2g"),
     ]);
     refusals
 }

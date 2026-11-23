@@ -1,9 +1,9 @@
 // WASI preview1 for the engine modules, from @bjorn3/browser_wasi_shim (the shim that
 // gbdraw uses; the version is pinned in package.json). The reactors get no arguments, an
-// empty environment (docs/web/abi_v2.md §3), no preopened directory (so the filesystem
-// functions that the engine links but the ABI does not use fail instead of touching
-// files, docs/web/abi_v2.md §3), an empty standard input, and standard output and error
-// kept in a small buffer. The engine's warnings do not go there (they are ABI stream 3);
+// empty environment (docs/web/abi_v2.md §3), the run's working directory preopened as `/work`,
+// read-only, with the files that the argv names (run-directory.ts; none for most runs, so
+// that a file the run does not have is missing as on the command line), an empty standard
+// input, and standard output and error kept in a small buffer. The engine's warnings do not go there (they are ABI stream 3);
 // the buffer holds what the engine writes when it stops, such as a panic message, so that
 // the host can report it.
 //
@@ -14,6 +14,7 @@
 // descriptor, flags), so the imports pass each one on as its unsigned value; the i64
 // parameters are BigInt and pass unchanged.
 import { ConsoleStdout, File as WasiFile, OpenFile, WASI } from '@bjorn3/browser_wasi_shim';
+import type { RunDirectory } from './run-directory.js';
 
 /** How much of the engine's standard output and error is kept. */
 const LOG_BYTES = 64 * 1024;
@@ -52,7 +53,11 @@ export function unsignedImports(imports: Record<string, unknown>): WebAssembly.M
   return wrapped as WebAssembly.ModuleImports;
 }
 
-export function createWasi(): WasiContext {
+/**
+ * The WASI of one instance; `directory`, the run's working directory of the instance (run-directory.ts), which the
+ * threads of a threaded instance share. Without it, the instance has no preopened directory.
+ */
+export function createWasi(directory?: RunDirectory): WasiContext {
   let log = new Uint8Array(0);
   const keep = (bytes: Uint8Array) => {
     const joined = new Uint8Array(log.length + bytes.length);
@@ -64,8 +69,9 @@ export function createWasi(): WasiContext {
   const stdin = new OpenFile(new WasiFile(new Uint8Array(0), { readonly: true }));
   // The shim logs its calls to the console unless debug is off.
   const wasi = new WASI([], [], [stdin, output, output], { debug: false });
+  const memory = () => (wasi.inst as unknown as { exports: { memory: WebAssembly.Memory } }).exports.memory;
   return {
-    imports: unsignedImports(wasi.wasiImport),
+    imports: unsignedImports(directory === undefined ? wasi.wasiImport : directory.imports(wasi.wasiImport as WebAssembly.ModuleImports, memory)),
     bind(instance) {
       wasi.inst = instance as unknown as WasiInstance;
     },

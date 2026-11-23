@@ -67,6 +67,8 @@ mod library_strategy;
 mod llvm_profile;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
+#[path = "../makeblastdb_gi_mask.rs"]
+mod makeblastdb_gi_mask;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]

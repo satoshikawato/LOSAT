@@ -1,0 +1,165 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>makeprofiledb</name>
+<version>2.17.0</version>
+<description>Application to create databases for rpsblast, cobalt and deltablast, version 2.17.0+</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="blastdb_version" type="Integer" optional="true">
+<description>Version of BLAST database to be created</description>
+<group>3</group>
+<synopsis>version</synopsis>
+<constraint>
+<description>4..5</description>
+<Integers>
+<min>4</min>
+<max>5</max>
+</Integers>
+</constraint>
+<default>5</default>
+</key>
+<key name="dbtype" type="String" optional="true">
+<description>Output database type: cobalt, delta, rps</description>
+<group>3</group>
+<synopsis>output_db_type</synopsis>
+<constraint>
+<description>`cobalt&apos;, `delta&apos;, `rps&apos;</description>
+<Strings case_sensitive="true">
+<value>cobalt</value>
+<value>delta</value>
+<value>rps</value>
+</Strings>
+</constraint>
+<default>rps</default>
+</key>
+<key name="exclude_invalid" type="Boolean" optional="true">
+<description>Exclude domains that do not pass validation test</description>
+<group>5</group>
+<synopsis>exclude_invalid</synopsis>
+<default>true</default>
+</key>
+<key name="gapextend" type="Integer" optional="true">
+<description>Cost to extend a gap, </description>
+<group>4</group>
+<synopsis>gap_extend_penalty</synopsis>
+</key>
+<key name="gapopen" type="Integer" optional="true">
+<description>Cost to open a gap</description>
+<group>4</group>
+<synopsis>gap_open_penalty</synopsis>
+</key>
+<key name="in" type="File_In">
+<description>Input file that contains a list of smp files (delimited by space, tab or newline)</description>
+<synopsis>in_pssm_list</synopsis>
+</key>
+<key name="index" type="Boolean" optional="true">
+<description>Create Index Files</description>
+<group>3</group>
+<synopsis>create_index_files</synopsis>
+<default>true</default>
+</key>
+<key name="logfile" type="File_Out" optional="true">
+<description>File to which the program log should be redirected</description>
+<group>6</group>
+<synopsis>File_Name</synopsis>
+</key>
+<key name="matrix" type="String" optional="true">
+<description>Scoring matrix name</description>
+<group>4</group>
+<synopsis>matrix_name</synopsis>
+<constraint>
+<description>`BLOSUM45&apos;, `BLOSUM50&apos;, `BLOSUM62&apos;, `BLOSUM80&apos;, `BLOSUM90&apos;, `PAM250&apos;, `PAM30&apos;, `PAM70&apos;</description>
+<Strings case_sensitive="true">
+<value>BLOSUM45</value>
+<value>BLOSUM50</value>
+<value>BLOSUM62</value>
+<value>BLOSUM80</value>
+<value>BLOSUM90</value>
+<value>PAM250</value>
+<value>PAM30</value>
+<value>PAM70</value>
+</Strings>
+</constraint>
+<default>BLOSUM62</default>
+</key>
+<key name="max_smp_vol" type="Integer" optional="true">
+<description>Maximum number of SMP files per DB volume</description>
+<group>3</group>
+<synopsis>max_smp_files_per_vol</synopsis>
+<default>2500</default>
+</key>
+<key name="obsr_threshold" type="Real" optional="true">
+<description>Exclude domains with with maximum number of independent observations below this threshold</description>
+<group>5</group>
+<synopsis>observations_threshold</synopsis>
+<default>6</default>
+</key>
+<key name="out" type="String" optional="true">
+<description>Name of database to be created&#xa;Default = input file name provided to -in argument</description>
+<group>3</group>
+<synopsis>database_name</synopsis>
+</key>
+<key name="scale" type="Real" optional="true">
+<description>Pssm Scale factor </description>
+<group>4</group>
+<synopsis>pssm_scale_factor</synopsis>
+<default>100</default>
+</key>
+<key name="taxid" type="Integer" optional="true">
+<description>Taxonomy ID to assign to all sequences</description>
+<group>6</group>
+<synopsis>TaxID</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+</key>
+<key name="taxid_map" type="File_In" optional="true">
+<description>Text file mapping sequence IDs to taxonomy IDs.&#xa;Format:&lt;SequenceId&gt; &lt;TaxonomyId&gt;&lt;newline&gt;</description>
+<group>6</group>
+<synopsis>TaxIDMapFile</synopsis>
+</key>
+<key name="threshold" type="Real" optional="true">
+<description>Minimum word score to add a word to the lookup table</description>
+<group>2</group>
+<synopsis>word_score_threshold</synopsis>
+<default>9.82</default>
+</key>
+<key name="title" type="String" optional="true">
+<description>Title for database&#xa;Default = input file name provided to -in argument</description>
+<group>2</group>
+<synopsis>database_title</synopsis>
+</key>
+<flag name="binary" optional="true">
+<description>Scoremats are in binary format</description>
+<group>1</group>
+</flag>
+<flag name="force" optional="true">
+<description>Use cmdline threshold</description>
+<group>2</group>
+</flag>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+<dependencies>
+<first_excludes_second>
+<arg1>taxid</arg1>
+<arg2>taxid_map</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>taxid_map</arg1>
+<arg2>taxid</arg2>
+</first_excludes_second>
+</dependencies>
+</arguments>
+</ncbi_application>

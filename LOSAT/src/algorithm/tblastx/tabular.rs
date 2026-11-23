@@ -204,6 +204,7 @@ pub(super) fn write_tblastx_tabular(
             &queries,
             writer,
             warnings,
+            args.html,
         );
     }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;

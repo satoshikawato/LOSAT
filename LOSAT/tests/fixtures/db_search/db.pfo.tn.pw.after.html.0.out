@@ -1,0 +1,80 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb na; multidb nnp
+           17 sequences; 11,514 total letters
+
+
+
+<b>Query=</b> mix2_u the glob1 ORF of multidb/nnp
+
+Length=153
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-...  <a href=#BL_ORD_ID:13>315</a>     3e-113
+
+
+><a name=BL_ORD_ID:13></a> FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-1 
+gene:FBgn0027657 gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob1 description:globin 
+1
+Length=1043
+
+ Score = 315 bits (808),  Expect = 3e-113, Method: Compositional matrix adjust.
+ Identities = 153/153 (100%), Positives = 153/153 (100%), Gaps = 0/153 (0%)
+ Frame = +3
+
+Query  1    MNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRA  60
+            MNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRA
+Sbjct  225  MNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRA  404
+
+Query  61   HAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAA  120
+            HAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAA
+Sbjct  405  HAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAA  584
+
+Query  121  CSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK  153
+            CSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK
+Sbjct  585  CSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK  683
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.135    0.396    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 367080
+
+
+<b>Query=</b> P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] &gt;P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] &gt;P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ENSTTEST0001.1 copy of record 1                                       <a href=#BL_ORD_ID:16>286</a>     4e-104

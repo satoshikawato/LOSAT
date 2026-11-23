@@ -608,7 +608,7 @@ function checkFailure(run, expected, search, label) {
   }
 }
 
-function checkHits(streams, program, label, queryIds, shownIds, database = false) {
+function checkHits(streams, program, label, queryIds, shownIds, database = false, html = false) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
@@ -667,7 +667,10 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
     // A local id that is not shown leaves "> " before the title; under -parse_deflines the
     // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19),
     // as it does for a subject of a database, whose ids the database holds (line WQA D12a, 2026-11-20).
-    assert.ok(heading.startsWith(shownIds || database ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+    // Under -html NCBI writes an anchor first in a heading whose id is not shown (`><a name=Subject_1></a> s1`,
+    // the bytes of html.bp.s.f0): the raw prefix is "><a ", not "> " (line RG T4a2, 2026-11-23).
+    const prefix = shownIds || database ? ">" : html ? "><a " : "> ";
+    assert.ok(heading.startsWith(prefix) && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
   });
   return records.length;
 }
@@ -1419,7 +1422,7 @@ async function main() {
         }
         if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
         if (search.fails_alone) row.fails_alone = search.fails_alone;
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds, search.database) : null;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds, search.database, search.argv.includes("-html")) : null;
         if (together) row.inputs = "register_inputs";
         results.push(row);
         console.log(`ok ${label}`);

@@ -151,9 +151,14 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
         error
     } else if error.downcast_ref::<io::Error>().is_some() {
-        // Any other error carried as an `io::Error` is LOSAT's own (an internal error of a
-        // formatter, `report::query_anchored::internal`): only the report stream's failure (a
-        // closed pipe's too) is NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+        // Any other error carried as an `io::Error` is an exception of NCBI's that a report's
+        // writer raised (`NcbiException::into_io_error`: the `-html` registries,
+        // `formatter_registry::FormatterNcbirc` in the prolog and `InitConfig` at the first id
+        // link), which is `CATCH_ALL`'s `CException` report, exit status 255
+        // (`cli::exit_on_native_error`), or LOSAT's own error (an internal error of a formatter,
+        // `report::query_anchored::internal`): only the report stream's failure (a closed pipe's
+        // too) is NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
         error
     } else {
         engine(error)
@@ -361,11 +366,19 @@ fn run_inner(
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
     let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
+    app::html_format_check(choice.number, Program::Blastx, args.html)?;
+    let html = app::html_links(
+        args.html,
+        Program::Blastx,
+        args.database_name(),
+        &[choice.number],
+    )?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     let mut options = resolution.map_err(options_error)?;
+    options.html = html;
     options.query_range = query_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
     // The database of `-db` opens after the arguments (the query and output files) and the
@@ -698,8 +711,15 @@ fn run_inner(
         };
         super::blast_xml::xml2_writer(kind, &options, &subjects, &shown_run, files)
     }));
-    report::write_prolog(&mut *writer, &mut *stderr, &options, &subjects, &shown_run)
-        .map_err(report_error)?;
+    report::write_prolog(
+        &mut *writer,
+        &mut *stderr,
+        None,
+        &options,
+        &subjects,
+        &shown_run,
+    )
+    .map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.document_mut().start(&mut start);

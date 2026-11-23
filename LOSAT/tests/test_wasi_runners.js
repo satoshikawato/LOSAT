@@ -171,7 +171,7 @@ function run(options) {
     fs.writeFileSync(fixture, bytes);
     const runner = options.threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js";
     const result = spawnSync(process.execPath, [path.join(__dirname, runner), fixture], {
-      env: hostEnv(), encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
+      env: hostEnv(), encoding: "utf8", timeout: options.timeout || 10000, killSignal: "SIGKILL",
     });
     assert.ifError(result.error);
     return result;
@@ -200,17 +200,20 @@ test("worker memory trap terminates the command while its main thread waits", ()
 // The module's abort, a trap of `unreachable` (wasi_artifact.js `endOnAbortTrap`), ends the command
 // as the native command's abort ends: by SIGABRT, with the module's text on standard error and none
 // of the host's, on the main thread of either runner and on a guest thread. Another trap keeps its
-// report (the worker's memory trap above).
+// report (the worker's memory trap above). The abort may dump core first, where the system takes
+// its time (WSL's crash capture: 4-10 s for each under load, 2026-11-23), so these runs get a
+// longer limit than the others.
+const ABORT_TIMEOUT_MS = 120000;
 for (const threaded of [false, true]) {
   test(`${threaded ? "threaded" : "serial"} runner ends the module's abort by SIGABRT`, () => {
-    const result = run({ threaded, writes: 1, fd: 2, abort: true });
+    const result = run({ threaded, writes: 1, fd: 2, abort: true, timeout: ABORT_TIMEOUT_MS });
     assert.equal(result.signal, "SIGABRT", result.stderr);
     assert.equal(result.stderr, "\0".repeat(4096));
   });
 }
 
 test("a guest thread's abort ends the command by SIGABRT while its main thread waits", () => {
-  const result = run({ threaded: true, worker: "abort" });
+  const result = run({ threaded: true, worker: "abort", timeout: ABORT_TIMEOUT_MS });
   assert.equal(result.signal, "SIGABRT", result.stderr);
   assert.equal(result.stderr, "");
 });

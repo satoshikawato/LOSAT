@@ -578,9 +578,14 @@ fn few_subjects_give_the_report_without_kappa_fit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The matches the composition redo's flow made ahead in one search (`LOSAT_TIMING`'s `ahead=` of
-/// both `[TIMING] blastx_batch_end_*` lines).
-fn redone_ahead(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)]) -> u64 {
+/// The counts of the composition redo in one search, summed over both `[TIMING]
+/// blastx_batch_end_*` lines of `LOSAT_TIMING`: (matches, reused, serial, ahead).
+fn redo_counts(
+    query: &Path,
+    args: &[&str],
+    threads: u32,
+    env: &[(&str, &str)],
+) -> (u64, u64, u64, u64) {
     let output = losat()
         .arg("blastx")
         .arg("-query")
@@ -595,60 +600,97 @@ fn redone_ahead(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)])
         output.status.success(),
         "{args:?} {env:?}: LOSAT_TIMING run failed"
     );
-    String::from_utf8_lossy(&output.stderr)
+    let count = |line: &str, name: &str| -> u64 {
+        let field = line
+            .split(&format!("{name}="))
+            .nth(1)
+            .unwrap_or_else(|| panic!("the batch end line counts {name}: {line}"));
+        let digits: String = field.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().unwrap()
+    };
+    let mut sums = (0, 0, 0, 0);
+    for line in String::from_utf8_lossy(&output.stderr)
         .lines()
         .filter(|line| line.starts_with("[TIMING] blastx_batch_end_"))
-        .map(|line| {
-            let count = line
-                .split("ahead=")
-                .nth(1)
-                .expect("the batch end line counts the matches made ahead");
-            count.trim_end_matches(')').parse::<u64>().unwrap()
-        })
-        .sum()
+    {
+        sums.0 += count(line, "matches");
+        sums.1 += count(line, "reused");
+        sums.2 += count(line, "serial");
+        sums.3 += count(line, "ahead");
+    }
+    sums
 }
 
 #[test]
 fn the_redo_flow_gives_the_report_of_one_thread() {
     // One query of 9,000 letters (one batch searched with the pool inside) against 40 and 595
-    // proteins, and eight of 4,000 against 40 (batch ends with fewer matches than threads), with
-    // the X-drop redo of the default and with -use_sw_tback (cutoff-score mode: the matches are
-    // redone ahead). The report at 2, 4 and 8 threads with the composition redo's flow
+    // proteins, and eight of 4,000 against 40 (the batch flow: three batch ends of about 70
+    // matches each), with the X-drop redo of the default and with -use_sw_tback (cutoff-score
+    // mode: the matches are redone ahead). Two rows with a short hit list end the redo early
+    // for most matches while the flow's ring of matches ahead wraps: 1 x 9,000 x 595
+    // -use_sw_tback -max_target_seqs 3 (205 matches) and 8 x 4,000 x 595 -max_target_seqs 1
+    // (about 1,000). The report at 2, 4 and 8 threads with the composition redo's flow
     // (LOSAT_X_BXREDOFLOW) and with its fork-join batches (=0) equals the report at one thread.
     let dir = temp_dir("redo-flow");
-    for (pieces, length, proteins, sw) in [
-        (1, 9_000, 40, false),
-        (1, 9_000, 40, true),
-        (1, 9_000, 595, false),
-        (8, 4_000, 40, false),
-    ] {
+    let rows: [(usize, usize, usize, &[&str]); 6] = [
+        (1, 9_000, 40, &[]),
+        (1, 9_000, 40, &["-use_sw_tback"]),
+        (1, 9_000, 595, &[]),
+        (8, 4_000, 40, &[]),
+        (1, 9_000, 595, &["-use_sw_tback", "-max_target_seqs", "3"]),
+        (8, 4_000, 595, &["-max_target_seqs", "1"]),
+    ];
+    for (pieces, length, proteins, extra) in rows {
         let (query, set) = inputs_from(&dir, 0, pieces, length, proteins);
         let mut args = vec!["-subject", set.to_str().unwrap(), "-outfmt", "6"];
-        if sw {
-            args.push("-use_sw_tback");
-        }
+        args.extend_from_slice(extra);
         let reference = blastx(&query, &args, 1, &[]);
         assert!(
             reference.iter().filter(|&&b| b == b'\n').count() > 2,
-            "{pieces} x {length} against {proteins}, sw {sw}: too few hits to test"
+            "{pieces} x {length} against {proteins} {extra:?}: too few hits to test"
         );
         for threads in [2, 4, 8] {
             for env in [&[][..], &[("LOSAT_X_BXREDOFLOW", "0")][..]] {
                 assert!(
                     blastx(&query, &args, threads, env) == reference,
-                    "{pieces} x {length} against {proteins}, sw {sw}, {threads} threads, {env:?}: \
-                     report differs"
+                    "{pieces} x {length} against {proteins} {extra:?}, {threads} threads, \
+                     {env:?}: report differs"
                 );
             }
         }
     }
-    // The flow made matches ahead; with =0 the batches did and the flow none.
+    // The flow ran: it made matches ahead; with =0 the batches did and the flow none.
     let (query, set) = inputs_from(&dir, 0, 1, 9_000, 595);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
-    assert!(redone_ahead(&query, &args, 4, &[]) > 0);
+    assert!(redo_counts(&query, &args, 4, &[]).3 > 0);
     assert_eq!(
-        redone_ahead(&query, &args, 4, &[("LOSAT_X_BXREDOFLOW", "0")]),
+        redo_counts(&query, &args, 4, &[("LOSAT_X_BXREDOFLOW", "0")]).3,
         0
     );
+    // Early termination with the flow: the loop's test in stream order skipped some matches
+    // (reused + serial < matches), and the flow redid ahead matches the loop then did not take
+    // (ahead > reused, summed over 2, 4 and 8 threads: how many depends on the threads' timing).
+    for (pieces, length, extra) in [
+        (1, 9_000, &["-use_sw_tback", "-max_target_seqs", "3"][..]),
+        (8, 4_000, &["-max_target_seqs", "1"][..]),
+    ] {
+        let (query, set) = inputs_from(&dir, 0, pieces, length, 595);
+        let mut args = vec!["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        args.extend_from_slice(extra);
+        let (mut reused, mut ahead) = (0, 0);
+        for threads in [2, 4, 8] {
+            let counts = redo_counts(&query, &args, threads, &[]);
+            assert!(
+                counts.1 + counts.2 < counts.0,
+                "{pieces} x {length} {extra:?}, {threads} threads: no early termination {counts:?}"
+            );
+            reused += counts.1;
+            ahead += counts.3;
+        }
+        assert!(
+            ahead > reused,
+            "{pieces} x {length} {extra:?}: the flow redid no match ahead that the loop left"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

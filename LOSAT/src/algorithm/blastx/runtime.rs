@@ -176,6 +176,13 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     ) {
     }
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
+    // No NCBI counterpart (scheduling only, LOSAT_X_BXREDOFLOW): the form in which the composition
+    // redo makes its matches ahead; it does not change any value NCBI computes.
+    /// `None`: the switch's choice; `Some(true)` the flow, `Some(false)` the fork-join batches of
+    /// `=0`. A test's observer chooses each in one process (`runtime/kappa_batch_tests.rs`).
+    fn x_redo_flow(&self) -> Option<bool> {
+        None
+    }
     // No NCBI counterpart: tells the search whether any observer callback records something; it
     // does not change any value NCBI computes.
     /// True when no callback records anything, so that work may be done out of order (and some of
@@ -849,6 +856,7 @@ impl PreliminarySink for Runtime<'_> {
         &mut self,
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
+        x_threads: usize,
     ) -> Result<()> {
         // Diagnostic (LOSAT_TIMING): the clocks of the intervals of this function
         // (x_timing.rs). No NCBI counterpart.
@@ -983,6 +991,7 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
+                threads: x_threads,
             };
             x_t_finish = if sw_redo {
                 self.kappa_redo_batch::<true>(kappa_batch)?

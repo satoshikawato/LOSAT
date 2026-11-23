@@ -28,7 +28,8 @@ use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 /// unless `=0`), the matches redone ahead as a flow instead of in fork-join batches (see
 /// `kappa_redo_batch`). It acts wherever the batches would run (LOSAT_X_BXPAR's rule: a pool of
 /// two or more threads, two or more matches, no recording observer, not e-value mode of
-/// `-use_sw_tback`), and has no rule of its own.
+/// `-use_sw_tback`), and has no rule of its own; its workers are the unit's threads, those of its
+/// subject flow (`x_bx_mem::flow_threads`).
 #[cfg(feature = "parallel")]
 fn x_redo_flow() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -50,6 +51,10 @@ pub(super) struct KappaBatch<'a> {
     pub(super) queries: &'a mut [HitList],
     pub(super) heaps: &'a mut [CompoHeap],
     pub(super) inactive_heaps: &'a mut [CompoHeap],
+    /// No NCBI counterpart (scheduling only): the threads the unit's flows take
+    /// (`search::PreliminarySink::batch_end`, `x_bx_mem::flow_threads`): the redo's flow
+    /// (`LOSAT_X_BXREDOFLOW`) makes no more workers.
+    pub(super) threads: usize,
 }
 
 impl Runtime<'_> {
@@ -82,7 +87,10 @@ impl Runtime<'_> {
             queries,
             heaps,
             inactive_heaps,
+            threads: x_unit_threads,
         } = args;
+        #[cfg(not(feature = "parallel"))]
+        let _ = x_unit_threads;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
         let x_t = x_timing::lap();
         let mut matches = Vec::new();
@@ -126,6 +134,10 @@ impl Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
         // One Kappa state per pool thread, as NCBI keeps one NRrecord, redo_align_params and
         // matrix per thread.
+        // EXPERIMENT (LOSAT_X_BXREDOFLOW): the form of the redo made ahead (below); a test's
+        // observer may choose it (`RuntimeObserver::x_redo_flow`).
+        #[cfg(feature = "parallel")]
+        let x_flow = self.observer.x_redo_flow().unwrap_or_else(x_redo_flow);
         #[cfg(feature = "parallel")]
         let x_workers = if x_bx_par_rule(|| {
             self.observer.x_passive()
@@ -135,7 +147,15 @@ impl Runtime<'_> {
                 && matches.len() > 1
                 && !reads_heaps
         }) {
-            (0..x_kappa_workers(rayon::current_num_threads(), matches.len()))
+            // The flow's workers are the unit's threads, those its subject flow takes
+            // (`x_unit_threads`: under the cap, a batch of one task is left fewer than the
+            // pool's); the batches' the pool's.
+            let x_threads = if x_flow {
+                x_unit_threads
+            } else {
+                rayon::current_num_threads()
+            };
+            (0..x_kappa_workers(x_threads, matches.len()))
                 .map(|_| {
                     Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
                         batch,
@@ -147,9 +167,9 @@ impl Runtime<'_> {
         } else {
             Vec::new()
         };
-        // `x_workers` has one entry per pool thread, or one per match where there are fewer
-        // matches (`x_kappa_workers`); none outside a pool (asking Rayon for the thread count
-        // there would start its global pool).
+        // `x_workers` has one entry per pool thread (with the flow, per thread of the unit), or one
+        // per match where there are fewer matches (`x_kappa_workers`); none outside a pool
+        // (asking Rayon for the thread count there would start its global pool).
         // No NCBI counterpart: size of one speculative batch (scheduling only); it does not
         // change any value NCBI computes.
         #[cfg(feature = "parallel")]
@@ -168,12 +188,12 @@ impl Runtime<'_> {
         // loop's thread offers the next `x_batch` matches as it walks the stream, each worker
         // takes the next one offered, and the loop takes a match's result when it reaches it
         // (redoing other offered matches while one is still being redone). No thread waits for
-        // the longest match of a batch. The workers are the batches' (one per pool thread,
-        // `x_kappa_workers`): the loop's thread keeps one, each helper one. A match's result does
-        // not depend on who redoes it or when (`x_speculate_match`), so the schedule changes the
-        // time only.
+        // the longest match of a batch. The workers (`x_kappa_workers`: one per thread of the
+        // unit, at most one per match) are the loop's thread's and one per helper. A match's
+        // result does not depend on who redoes it or when (`x_speculate_match`), so the schedule
+        // changes the time only.
         #[cfg(feature = "parallel")]
-        let (x_workers, mut x_own, x_helpers) = if !x_workers.is_empty() && x_redo_flow() {
+        let (x_workers, mut x_own, x_helpers) = if !x_workers.is_empty() && x_flow {
             let mut all = x_workers
                 .into_iter()
                 .map(|worker| worker.into_inner().unwrap_or_else(|p| p.into_inner()));
@@ -474,3 +494,7 @@ impl Runtime<'_> {
         Ok(x_t_finish)
     }
 }
+
+#[cfg(all(test, feature = "parallel"))]
+#[path = "kappa_batch_tests.rs"]
+mod tests;

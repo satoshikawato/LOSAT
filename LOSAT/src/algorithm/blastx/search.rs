@@ -79,10 +79,14 @@ pub(crate) trait PreliminarySink {
     fn chunk_end(&mut self, _chunk: &QueryChunk, _is_split: bool) -> Result<()> {
         Ok(())
     }
+    /// `x_threads`: the threads the unit's flows take, those of its subject flow
+    /// (`x_bx_mem::flow_threads`), which its composition redo's flow takes as well
+    /// (`LOSAT_X_BXREDOFLOW`, `runtime/kappa_batch.rs`); scheduling only.
     fn batch_end(
         &mut self,
         _batch: &PreparedQueryBatch,
         _params: &[ContextParameters],
+        _x_threads: usize,
     ) -> Result<()> {
         Ok(())
     }
@@ -189,6 +193,14 @@ fn x_search_core(
             .map_or(records.len(), |shape| shape.query_count),
     )?;
     let ranges = unit_ranges(records, options);
+    // Dispatch point (LOSAT_X_BXCAPFILL, LOSAT_X_BXREDOFLOW, in the strict set): the threads the
+    // unit's flows take, its subject flow (below) and its composition redo's (`batch_end`): the
+    // pool's, or for a batch of one task of the capped batch flow the threads the cap leaves it
+    // (x_bx_mem::flow_threads).
+    #[cfg(feature = "parallel")]
+    let x_threads = x_bx_mem::flow_threads(pool, options, subjects.len());
+    #[cfg(not(feature = "parallel"))]
+    let x_threads = 1;
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
     // from its preparation. A caller that searches the units one by one has prepared them
@@ -554,10 +566,7 @@ fn x_search_core(
             #[cfg(feature = "parallel")]
             let x_flowed = if let Some(x_k) = x_flow_k {
                 let x_t = super::x_timing::lap();
-                // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): a batch of one task of the
-                // capped batch flow has helpers for the threads the cap leaves it
-                // (x_bx_mem::flow_threads).
-                let x_threads = x_bx_mem::flow_threads(pool, options, subjects.len());
+                // Helpers for the unit's threads (`x_threads`, above).
                 let helper_tables = if x_keep {
                     (1..x_threads)
                         .map(|_| {
@@ -723,7 +732,7 @@ fn x_search_core(
         // full preparation retains full DNA lengths, masked/nomask bytes and ordinal.
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:292-301
         let x_t = super::x_timing::lap();
-        sink.batch_end(&full, &full_params)?;
+        sink.batch_end(&full, &full_params, x_threads)?;
         super::x_timing::batch(XBatch::BatchEnd, x_t);
         super::x_timing::batch(XBatch::Sum, x_t_batch);
         super::x_timing::batch_count();

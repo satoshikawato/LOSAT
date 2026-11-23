@@ -536,19 +536,20 @@ impl PsiblastArgs {
             return Ok(());
         }
         if let Some(format) = ReportFormat::from_number(choice.number) {
-            if !matches!(
+            // With a pattern, formats 8, 9 and 12 reach NCBI's engine error.
+            let runs = matches!(
                 format,
                 ReportFormat::Pairwise
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::CommaSeparatedValuesWithHeader
-            ) && !(phi
+            ) || (phi
                 && matches!(
                     format,
                     ReportFormat::AsnText | ReportFormat::AsnBinary | ReportFormat::JsonSeqalign
-                ))
-            {
+                ));
+            if !runs {
                 bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST",
                     choice.number

@@ -59,7 +59,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
 | `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (`0, 6, 7, 10, 20`, with `-phi_pattern` too; `-in_pssm` / `-in_msa`: `0, 6, 7`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
-| `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
+| `deltablast`, `blast_formatter` | Standalone executables | Not yet provided |
 
 ## All five search programs
 

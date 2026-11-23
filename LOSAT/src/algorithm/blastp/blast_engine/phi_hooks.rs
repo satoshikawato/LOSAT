@@ -108,6 +108,25 @@ pub(super) enum PhiStart<'p> {
     EngineError { query: usize, text: String },
 }
 
+/// psiblast `-phi_pattern`: the run's PHI-BLAST call (`phi_start` with the table's Karlin block,
+/// `phi_karlin`), `None` without a pattern; NCBI's engine error of a query's setup is
+/// `setup_error(query, text)` (`phi_setup_error` of `run_call`).
+pub(super) fn phi_call<'p>(
+    args: &'p ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+    db_length: i64,
+    db_num_seqs: i64,
+    setup_error: impl FnOnce(usize, &str) -> anyhow::Error,
+) -> Result<Option<PhiCall<'p>>> {
+    if args.phi.is_none() {
+        return Ok(None);
+    }
+    match phi_start(args, query_frames, phi_karlin(args), db_length, db_num_seqs)? {
+        PhiStart::Search(call) => Ok(Some(call)),
+        PhiStart::EngineError { query, text } => Err(setup_error(query, &text)),
+    }
+}
+
 /// The setup of each query of the call: NCBI's errors of the pattern (`PhiError::Ncbi`) and of
 /// the query's occurrences (`PhiSetupError`), LOSAT's refusals of the query's scan, or the
 /// searches. `db_length` and `db_num_seqs` are the database's (`-dbsize` replaces the length).
@@ -135,7 +154,7 @@ pub(super) fn phi_start<'p>(
             return Ok(PhiStart::EngineError {
                 query: 0,
                 text: format!("Warning: {message} "),
-            })
+            });
         }
         // `validate_requested_blastp_support` has refused it.
         Err(PhiError::Refusal(message)) => anyhow::bail!("{message}"),
@@ -177,7 +196,7 @@ pub(super) fn phi_start<'p>(
                 return Ok(PhiStart::EngineError {
                     query,
                     text: format!("Warning: {} ", String::from_utf8_lossy(&error.message())),
-                })
+                });
             }
         }
     }
@@ -456,7 +475,7 @@ pub(super) fn occurrence_list(
             // NCBI's lists of the split keep the best e-value of a new list, 0
             // (`Blast_HSPListNew`), which the sort below reads: they sort by their first HSP's
             // score, then by subject.
-            (!hsps.is_empty()).then(|| BlastpHspList {
+            (!hsps.is_empty()).then_some(BlastpHspList {
                 oid: list.oid,
                 query_index: list.query_index,
                 hsps,

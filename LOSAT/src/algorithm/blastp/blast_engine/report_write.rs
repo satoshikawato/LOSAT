@@ -630,6 +630,7 @@ pub(super) fn write_xml(
 /// :1589).
 /// PHI-BLAST's outfmt 0 (`write_pairwise`): the call's searches and the rows of a query's hit
 /// lists (`rows_of_lists` of `run_call`), which it makes for each occurrence.
+#[derive(Clone, Copy)]
 pub(super) struct PhiPairwise<'a> {
     pub(super) call: &'a super::phi_hooks::PhiCall<'a>,
     #[allow(clippy::type_complexity)]
@@ -638,6 +639,60 @@ pub(super) struct PhiPairwise<'a> {
     /// Each query's messages as PHI-BLAST's report writes them before the query's report
     /// (`report_prep::phi_result_warnings`).
     pub(super) result_warnings: &'a [Vec<u8>],
+}
+
+/// psiblast `-phi_pattern` (item PS8a): the report of format `outfmt` of PHI-BLAST's call
+/// `phi`: outfmt 0 (`write_pairwise`), the custom tabular reports (`write_custom_tabular`), outfmt 6
+/// and 7 (`write_phi_text`), and NCBI's engine error of outfmt 8, 9 and 12, whose Seq-annot writer
+/// does not take the program (`ProgramNameToEnum`), after the search of the first query; without
+/// NCBI's Karlin block (`PhiCall::no_statistics`) there is no alignment to write, and no error.
+/// psiblast's parser refuses the other formats with a pattern.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1658-1664
+#[allow(clippy::too_many_arguments)]
+pub(super) fn write_phi_report(
+    view: &ReportView<'_>,
+    outfmt: BlastpReport,
+    phi: PhiPairwise<'_>,
+    format: &mut FormatOutput<'_>,
+    warnings: &mut Option<QueryWarnings<'_>>,
+    probe: &mut Option<FormatProbe<'_>>,
+    pairwise_shown: &Option<BTreeSet<usize>>,
+    rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
+) -> Result<()> {
+    match outfmt {
+        BlastpReport::Pairwise(pairwise) => write_pairwise(
+            view,
+            pairwise,
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+            Some(phi),
+        ),
+        BlastpReport::CustomTabular(spec) => {
+            write_custom_tabular(view, spec, format, warnings, probe, rows_of, Some(phi))
+        }
+        BlastpReport::Text(text) => write_phi_text(
+            view,
+            phi.call,
+            phi.result_warnings,
+            text,
+            format,
+            warnings,
+            probe,
+        ),
+        BlastpReport::Seqalign(_) => match phi.call.no_statistics {
+            Some(_) => Ok(()),
+            None => Err(crate::blastinput::app::engine_error(
+                "Program type 'phiblastp' not supported",
+            )),
+        },
+        BlastpReport::Xml | BlastpReport::Xml2(_) | BlastpReport::Archive => Err(anyhow::anyhow!(
+            "LOSAT internal error: a PHI-BLAST report of a format that psiblast refuses with -phi_pattern"
+        )),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

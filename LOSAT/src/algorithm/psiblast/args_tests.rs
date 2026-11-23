@@ -294,17 +294,11 @@ fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
 
 #[test]
 fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-    for (option, value) in [("-html", None::<&str>)] {
-        let mut extra = vec![option];
-        extra.extend(value);
-        let error = parse(&extra).unwrap_err();
-        assert!(
-            error.contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's PSIBLAST"
-            )),
-            "{option}: {error}"
-        );
-    }
+    let error = parse(&["-html"]).unwrap_err();
+    assert!(
+        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
+        "-html: {error}"
+    );
     // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();

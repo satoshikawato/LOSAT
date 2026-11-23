@@ -9738,36 +9738,30 @@ fn run_call(
         rps_units,
         ..
     } = extent;
-    // psiblast `-phi_pattern` (item PS8a): each query's PHI-BLAST setup (`phi_hooks::phi_start`),
+    // psiblast `-phi_pattern` (item PS8a): each query's PHI-BLAST setup (`phi_hooks::phi_call`),
     // whose errors follow the reports of the queries before (`phi_setup_error`).
-    let phi_call = match args.phi.as_ref() {
-        None => None,
-        Some(_) => match phi_hooks::phi_start(
-            &args,
-            query_frames,
-            phi_hooks::phi_karlin(&args),
-            eff_db_length,
-            i64::from(num_subjects),
-        )? {
-            phi_hooks::PhiStart::Search(call) => Some(call),
-            phi_hooks::PhiStart::EngineError { query, text } => {
-                return Err(phi_setup_error(
-                    &args,
-                    query_records,
-                    subject_source,
-                    subject_label,
-                    outputs,
-                    blastp_parallel_pool,
-                    ranges,
-                    reports,
-                    &query_batches,
-                    &query_batch_skipped,
-                    query,
-                    &text,
-                ))
-            }
+    let phi_call = phi_hooks::phi_call(
+        &args,
+        query_frames,
+        eff_db_length,
+        i64::from(num_subjects),
+        |query, text| {
+            phi_setup_error(
+                &args,
+                query_records,
+                subject_source,
+                subject_label,
+                outputs,
+                blastp_parallel_pool,
+                ranges,
+                reports,
+                &query_batches,
+                &query_batch_skipped,
+                query,
+                text,
+            )
         },
-    };
+    )?;
     let call_statistics = call_setup::CallStatistics {
         args: &args,
         database,
@@ -10559,9 +10553,19 @@ fn run_call(
         pssm_reads: &pssm_reads,
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
+    // PHI-BLAST's reports (`report_write::write_phi_report`) with each query's messages.
     let phi_result_warnings = phi_call
         .as_ref()
         .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
+    let phi_reports =
+        phi_call
+            .as_ref()
+            .zip(phi_result_warnings.as_deref())
+            .map(|(call, result_warnings)| report_write::PhiPairwise {
+                call,
+                rows_of_lists: &rows_of_lists,
+                result_warnings,
+            });
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -10985,30 +10989,16 @@ fn run_call(
                 &pairwise_shown,
                 &rows_of,
             ),
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1658-1664
-            // psiblast `-phi_pattern` (item PS8a): NCBI's Seq-annot writer does not take the
-            // program (`ProgramNameToEnum`), after the search of the first query.
-            // Without NCBI's Karlin block there is no alignment to write, and no error.
-            BlastpReport::Seqalign(_) if phi_call.is_some() => {
-                match phi_call
-                    .as_ref()
-                    .and_then(|call| call.no_statistics.as_ref())
-                {
-                    Some(_) => Ok(()),
-                    None => Err(crate::blastinput::app::engine_error(
-                        "Program type 'phiblastp' not supported",
-                    )),
-                }
-            }
-            // psiblast `-phi_pattern`: the tabular reports of each query occurrence.
-            BlastpReport::Text(outfmt) if phi_call.is_some() => report_write::write_phi_text(
+            // psiblast `-phi_pattern` (item PS8a): PHI-BLAST's reports.
+            _ if phi_reports.is_some() => report_write::write_phi_report(
                 &report_view,
-                phi_call.as_ref().expect("a PHI-BLAST call"),
-                phi_result_warnings.as_deref().unwrap_or_default(),
                 outfmt,
+                phi_reports.expect("a PHI-BLAST call"),
                 format,
                 &mut warnings,
                 &mut probe,
+                &pairwise_shown,
+                &rows_of,
             ),
             BlastpReport::Seqalign(serial) => {
                 report_write::write_seqalign(&report_view, serial, format, &mut warnings)
@@ -11037,11 +11027,7 @@ fn run_call(
                 &mut probe,
                 &pairwise_shown,
                 &rows_of,
-                phi_call.as_ref().map(|call| report_write::PhiPairwise {
-                    call,
-                    rows_of_lists: &rows_of_lists,
-                    result_warnings: phi_result_warnings.as_deref().unwrap_or_default(),
-                }),
+                None,
             ),
             BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
                 &report_view,
@@ -11050,11 +11036,7 @@ fn run_call(
                 &mut warnings,
                 &mut probe,
                 &rows_of,
-                phi_call.as_ref().map(|call| report_write::PhiPairwise {
-                    call,
-                    rows_of_lists: &rows_of_lists,
-                    result_warnings: phi_result_warnings.as_deref().unwrap_or_default(),
-                }),
+                None,
             ),
             BlastpReport::Text(
                 outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),

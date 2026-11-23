@@ -327,8 +327,8 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Read"], 149);
-    assert_eq!(classes.values().sum::<usize>(), 223);
+    assert_eq!(classes["Read"], 163);
+    assert_eq!(classes.values().sum::<usize>(), 245);
 }
 
 #[test]

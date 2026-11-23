@@ -331,11 +331,11 @@ impl LocLevel {
 }
 
 /// What the Seq-loc reader does next: read a Seq-loc, the next element of the innermost `mix` or
-/// `equiv` (or its end), or the end of a Seq-loc whose value it has read, with its walk.
+/// `equiv` (or its end), or the end of a Seq-loc whose value it has read.
 enum LocStep {
     Begin,
     Element,
-    End(IdWalk),
+    End,
 }
 
 const IN_A_LEVEL: &str = "an element frame belongs to a mix or equiv";
@@ -441,11 +441,18 @@ impl<I: Input> Rd<I> {
     /// error gets [`leave`](Self::leave) (`exit_traced`, the one place that needs the frame).
     #[inline(always)]
     fn exit<T>(&mut self, depth: usize, frame: Frame, result: R<T>) -> R<T> {
+        self.exit_of(depth, || frame, result)
+    }
+
+    /// [`exit`](Self::exit) of the frame that `frame` makes, which it makes only where it is
+    /// needed.
+    #[inline(always)]
+    fn exit_of<T>(&mut self, depth: usize, frame: impl FnOnce() -> Frame, result: R<T>) -> R<T> {
         self.depth = depth;
         self.inp.set_stack_depth(depth);
         match result {
             Ok(value) if self.traces.is_empty() => Ok(value),
-            result => self.exit_traced(depth, frame, result),
+            result => self.exit_traced(depth, frame(), result),
         }
     }
 
@@ -1144,9 +1151,10 @@ impl<I: Input> Rd<I> {
     /// One `Seq-loc` (any variant, nested `mix` and `equiv` included): appends the ranges
     /// `CSeq_loc_CI` visits to `parts`, in its order (a `whole` Seq-loc is the interval 0 to
     /// 4294967294, whose `CRange` is `TRange::GetWhole()`; a point the interval of one position),
-    /// and returns its walk ([`IdWalk`]) as `CSeq_loc::CheckId` walks it. An element of
-    /// `packed-int`, `mix` or `equiv` stated as `NULL` (an empty `CRef<>`) is where the walk
-    /// dereferences it, if it gets that far (`**ii`, `(*li)->CheckId`).
+    /// and walks its Seq-ids in `walk` ([`IdWalk`], `Same(None)` before) as `CSeq_loc::CheckId`
+    /// walks them. An element of `packed-int`, `mix` or `equiv` stated as `NULL` (an empty
+    /// `CRef<>`) is where the walk dereferences it, if it gets that far (`**ii`,
+    /// `(*li)->CheckId`).
     ///
     /// NCBI reads a `mix` or `equiv` by recursion (`ReadChoiceSimple`, `ReadContainer` and
     /// `ReadPointer` of each element), so a Seq-loc nested deep enough overflows its stack
@@ -1157,98 +1165,94 @@ impl<I: Input> Rd<I> {
     /// `read_pointer` for a Seq-loc, and an error leaves every frame still open, innermost first,
     /// as each of NCBI's functions passes it on. A variant that holds no Seq-loc is read by
     /// [`read_seq_loc_variant`](Self::read_seq_loc_variant).
-    fn read_seq_loc_parts(&mut self, parts: &mut Vec<MaskPart>) -> R<IdWalk> {
-        let mut frames = std::mem::take(&mut self.loc_frames);
-        let mut levels = std::mem::take(&mut self.loc_levels);
-        let result = match self.read_seq_loc_steps(parts, &mut frames, &mut levels) {
-            Ok(walk) => Ok(walk),
-            Err(mut fail) => {
-                while let Some(frame) = frames.pop() {
-                    let depth = self.depth - 1;
-                    fail = match self.exit(depth, frame.frame(), Err::<(), Fail>(fail)) {
-                        Err(fail) => fail,
-                        Ok(()) => unreachable!("an error leaves its frames as an error"),
-                    };
-                }
-                Err(fail)
-            }
-        };
-        debug_assert!(frames.is_empty());
-        levels.clear();
-        self.loc_frames = frames;
-        self.loc_levels = levels;
-        result
+    fn read_seq_loc_parts(&mut self, parts: &mut Vec<MaskPart>, walk: &mut IdWalk) -> R<()> {
+        debug_assert!(self.loc_frames.is_empty() && self.loc_levels.is_empty());
+        if let Err(fail) = self.read_seq_loc_steps(parts, walk) {
+            return Err(self.unwind_seq_loc(fail));
+        }
+        debug_assert!(self.loc_frames.is_empty() && self.loc_levels.is_empty());
+        Ok(())
     }
 
-    /// [`read_seq_loc_parts`](Self::read_seq_loc_parts) up to its end or its error: `frames` holds
-    /// the frames it entered and has not left, `levels` the mixes and equivs it reads.
-    fn read_seq_loc_steps(
-        &mut self,
-        parts: &mut Vec<MaskPart>,
-        frames: &mut Vec<LocFrame>,
-        levels: &mut Vec<LocLevel>,
-    ) -> R<IdWalk> {
+    /// [`read_seq_loc_parts`](Self::read_seq_loc_parts) up to its end or its error: the frames it
+    /// entered and has not left are on `Rd::loc_frames`, the mixes and equivs it reads on
+    /// `Rd::loc_levels`. The walk of a Seq-loc inside a mix or equiv is its own, which the walk
+    /// of the mix or equiv takes ([`LocLevel::nested`]); the outermost Seq-loc's is `walk`.
+    fn read_seq_loc_steps(&mut self, parts: &mut Vec<MaskPart>, walk: &mut IdWalk) -> R<()> {
         let mut step = LocStep::Begin;
         loop {
             step = match step {
                 LocStep::Begin => {
                     // `read_choice` of a Seq-loc
-                    self.enter_loc(frames, LocFrame::Choice);
+                    self.enter_loc(LocFrame::Choice);
                     self.inp.begin_choice()?;
-                    self.enter_loc(frames, LocFrame::Variant(None));
+                    self.enter_loc(LocFrame::Variant(None));
                     let index = self.inp.begin_variant(&SEQ_LOC)?;
-                    self.set_loc_variant(frames, index);
+                    self.set_loc_variant(index);
                     if index == SEQ_LOC_MIX || index == SEQ_LOC_EQUIV {
                         // `read_container` of its elements, each a Seq-loc by `read_pointer`
                         let equiv = index == SEQ_LOC_EQUIV;
-                        self.enter_loc(frames, LocFrame::Array);
+                        self.enter_loc(LocFrame::Array);
                         self.inp.begin_container(equiv)?;
-                        self.enter_loc(frames, LocFrame::Element);
-                        levels.push(LocLevel { walk: None, equiv });
+                        self.enter_loc(LocFrame::Element);
+                        self.loc_levels.push(LocLevel { walk: None, equiv });
                         LocStep::Element
                     } else {
-                        let mut walk = IdWalk::Same(None);
-                        self.read_seq_loc_variant(index, parts, &mut walk)?;
-                        LocStep::End(walk)
+                        let mut inner = IdWalk::Same(None);
+                        let own = if self.loc_levels.is_empty() {
+                            &mut *walk
+                        } else {
+                            &mut inner
+                        };
+                        self.read_seq_loc_variant(index, parts, own)?;
+                        if let Some(level) = self.loc_levels.last_mut() {
+                            level.nested(inner);
+                        }
+                        LocStep::End
                     }
                 }
                 LocStep::Element => {
                     if self.inp.begin_element()? {
                         match self.begin_pointer(SEQ_LOC.name)? {
                             Pointee::Null => {
-                                let level = levels.last_mut().expect(IN_A_LEVEL);
-                                let null = self.null_element(level.list());
+                                let list = self.loc_levels.last().expect(IN_A_LEVEL).list();
+                                let null = self.null_element(list);
+                                let level = self.loc_levels.last_mut().expect(IN_A_LEVEL);
                                 level.walk().null(null);
                                 LocStep::Element
                             }
                             Pointee::This => LocStep::Begin,
                             Pointee::Other(..) => {
                                 // `begin_pointer` entered the named frame of `ReadPointer`
-                                frames.push(LocFrame::Pointer);
+                                self.loc_frames.push(LocFrame::Pointer);
                                 LocStep::Begin
                             }
                         }
                     } else {
-                        self.exit_loc(frames);
+                        self.exit_loc();
                         self.inp.end_container()?;
-                        self.exit_loc(frames);
-                        let level = levels.pop().expect(IN_A_LEVEL);
-                        LocStep::End(level.walk.map_or(IdWalk::Same(None), |walk| *walk))
+                        self.exit_loc();
+                        let level = self.loc_levels.pop().expect(IN_A_LEVEL);
+                        let inner = level.walk.map_or(IdWalk::Same(None), |own| *own);
+                        match self.loc_levels.last_mut() {
+                            Some(outer) => outer.nested(inner),
+                            None => *walk = inner,
+                        }
+                        LocStep::End
                     }
                 }
-                LocStep::End(walk) => {
+                LocStep::End => {
                     // the end of `read_choice`
                     self.inp.end_variant()?;
-                    self.exit_loc(frames);
+                    self.exit_loc();
                     self.inp.end_choice()?;
-                    self.exit_loc(frames);
-                    let Some(level) = levels.last_mut() else {
-                        return Ok(walk);
-                    };
-                    // the end of `read_pointer` of an element of `level`
-                    level.nested(walk);
-                    if matches!(frames.last(), Some(LocFrame::Pointer)) {
-                        self.exit_loc(frames);
+                    self.exit_loc();
+                    if self.loc_levels.is_empty() {
+                        return Ok(());
+                    }
+                    // the end of `read_pointer` of an element of the innermost mix or equiv
+                    if matches!(self.loc_frames.last(), Some(LocFrame::Pointer)) {
+                        self.exit_loc();
                         self.inp.read_other_pointer_end()?;
                     }
                     LocStep::Element
@@ -1257,28 +1261,52 @@ impl<I: Input> Rd<I> {
         }
     }
 
-    /// `BEGIN_OBJECT_FRAME` of `frame`, a frame of the Seq-loc reader, kept on `frames`.
-    #[inline(always)]
-    fn enter_loc(&mut self, frames: &mut Vec<LocFrame>, frame: LocFrame) {
-        self.enter();
-        frames.push(frame);
+    /// The error `fail` of [`read_seq_loc_steps`](Self::read_seq_loc_steps) as it leaves every
+    /// frame still open, innermost first; the lists are left empty.
+    #[cold]
+    #[inline(never)]
+    fn unwind_seq_loc(&mut self, mut fail: Fail) -> Fail {
+        while let Some(frame) = self.loc_frames.pop() {
+            let depth = self.depth - 1;
+            fail = match self.exit(depth, frame.frame(), Err::<(), Fail>(fail)) {
+                Err(fail) => fail,
+                Ok(()) => unreachable!("an error leaves its frames as an error"),
+            };
+        }
+        self.loc_levels.clear();
+        fail
     }
 
-    /// `END_OBJECT_FRAME` of the top frame of `frames` once what it holds has been read (`exit`).
+    /// `BEGIN_OBJECT_FRAME` of `frame`, a frame of the Seq-loc reader, kept on `Rd::loc_frames`.
     #[inline(always)]
-    fn exit_loc(&mut self, frames: &mut Vec<LocFrame>) {
-        let frame = frames.pop().expect("the Seq-loc reader's frame is open");
+    fn enter_loc(&mut self, frame: LocFrame) {
+        self.enter();
+        self.loc_frames.push(frame);
+    }
+
+    /// `END_OBJECT_FRAME` of the top frame of `Rd::loc_frames` once what it holds has been read
+    /// (`exit`).
+    #[inline(always)]
+    fn exit_loc(&mut self) {
+        let frame = self
+            .loc_frames
+            .pop()
+            .expect("the Seq-loc reader's frame is open");
         let depth = self.depth - 1;
-        let left: R<()> = self.exit(depth, frame.frame(), Ok(()));
+        let left: R<()> = self.exit_of(depth, || frame.frame(), Ok(()));
         debug_assert!(left.is_ok());
     }
 
-    /// `SetTopMemberId` of the Seq-loc's variant `index` on its variant frame, the top of `frames`.
+    /// `SetTopMemberId` of the Seq-loc's variant `index` on its variant frame, the top of
+    /// `Rd::loc_frames`.
     #[inline(always)]
-    fn set_loc_variant(&mut self, frames: &mut [LocFrame], index: usize) {
-        let top = frames.last_mut().expect("the variant frame is open");
-        let mut frame = top.frame();
+    fn set_loc_variant(&mut self, index: usize) {
+        let mut frame = LocFrame::Variant(None).frame();
         self.set_member(&mut frame, &SEQ_LOC.variants[index].name);
+        let top = self
+            .loc_frames
+            .last_mut()
+            .expect("the variant frame is open");
         // Seq-loc has 11 variants.
         *top = LocFrame::Variant(Some(index as u8));
     }
@@ -1390,7 +1418,9 @@ impl<I: Input> Rd<I> {
     /// element stated as `NULL` that `GetId` dereferences.
     fn read_seq_loc(&mut self) -> R<Result<MaskLoc, NullElement>> {
         let mut parts = Vec::new();
-        let id = match self.read_seq_loc_parts(&mut parts)? {
+        let mut walk = IdWalk::Same(None);
+        self.read_seq_loc_parts(&mut parts, &mut walk)?;
+        let id = match walk {
             IdWalk::Same(id) => id,
             IdWalk::Stopped => None,
             IdWalk::Null(null) => return Ok(Err(null)),

@@ -14,3 +14,4 @@ sv5	losat-sv	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	
 sv4	losat-sv	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	gm1
 svp	losat-sv	prot.fa seg_prot.asnb	-in	prot.fa	-dbtype	prot	-parse_seqids	-out	db	-title	pt	-mask_data	seg_prot.asnb	-gi_mask	-gi_mask_name	pm1
 big	losat-sv	big.fa dust_big.asnb	-in	big.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-mask_data	dust_big.asnb	-gi_mask	-gi_mask_name	big
+wide	losat-sv	wide.fa wide.asnt	-in	wide.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-mask_data	wide.asnt	-gi_mask	-gi_mask_name	wd

@@ -1,0 +1,2 @@
+creating o.00.idx...Error: (CSeqDBException::eInvalid) To be memory mapped the file must exist: ''
+Error: (106.16) Application's execution failed (CSeqDBException::eInvalid) To be memory mapped the file must exist: ''

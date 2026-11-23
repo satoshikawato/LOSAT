@@ -146,3 +146,25 @@ raw_m01_hard12	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	copy	-db_hard_mask	
 raw_m01_parent	m01	.	-	makeblastdb	-in	m01/db	-input_type	blastdb	-dbtype	nucl	-out	m01/copy_up
 raw_m01_two	m01	m01	-	makeblastdb	-in	db db	-input_type	blastdb	-dbtype	nucl	-title	t2	-out	copy2
 raw_m01_two_info	m01	m01	-	blastdbcmd	-db	copy2	-info
+bdc_wide_m0	wide	wide	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_wide_info	wide	wide	-	blastdbcmd	-db	db	-info
+bdc_wide_msw0	wide	wide	-	blastdbcmd	-db	db	-entry	WD000003.1	-mask_sequence_with	0
+bdc_sv4n12_m0	sv4n12	sv4n12	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4n15_m0	sv4n15	sv4n15	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4n42_m0	sv4n42	sv4n42	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4nx_m0	sv4nx	sv4nx	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4nf_m0	sv4nf	sv4nf	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bn_sv4n42_soft0_f6	sv4n42	sv4n42	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_sv4nf_hard0_f6	sv4nf	sv4nf	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	0	-outfmt	6
+mbi_m01_id0	m01	m01	-	makembindex	-input	db	-db_mask	0	-nmer	8
+mbi_m01_show	m01	m01	-	makembindex	-input	db	-show_filters
+mbi_m01_old_m1	m01	m01	-	makembindex	-old_style_index	true	-iformat	blastdb	-output	o	-input	db	-db_mask	m1	-nmer	8
+mbi_m01_old_show	m01	m01	-	makembindex	-old_style_index	true	-iformat	blastdb	-input	db	-show_filters
+mbi_sv5_id0	sv5	sv5	-	makembindex	-input	db	-db_mask	0	-nmer	8
+mbi_sv5_gm1	sv5	sv5	-	makembindex	-input	db	-db_mask	gm1	-nmer	8
+mbi_sv5_nosuch	sv5	sv5	-	makembindex	-input	db	-db_mask	nosuch	-nmer	8
+mbi_sv5_id7	sv5	sv5	-	makembindex	-input	db	-db_mask	7	-nmer	8
+mbi_sv5_show	sv5	sv5	-	makembindex	-input	db	-show_filters
+mbi_sv5_old_gm1	sv5	sv5	-	makembindex	-old_style_index	true	-iformat	blastdb	-output	o	-input	db	-db_mask	gm1	-nmer	8
+mbi_sv5_parent	sv5	.	-	makembindex	-input	sv5/db	-db_mask	0	-nmer	8
+mbi_d10_old0	d10	d10	-	makembindex	-old_style_index	true	-iformat	blastdb	-output	o	-input	db	-db_mask	0	-nmer	8

@@ -328,7 +328,7 @@ const fn create_directories_site(line: u32) -> ThrowSite {
 }
 
 /// `CBuildDatabase::CreateDirectories`.
-fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
+pub(crate) fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
     let Some(at) = dir_entry.rfind(is_any_separator) else {
         return Ok(());
@@ -406,7 +406,7 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //   replaced.
 /// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
 /// of one of their names, with its contents); `true` when one was removed.
-fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
+pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
         SeqType::Protein
@@ -1016,6 +1016,7 @@ impl<'a> BuildDatabase<'a> {
     pub(crate) fn close_at_destruction(&mut self) -> Vec<Vec<u8>> {
         let mut messages = Vec::new();
         let error = self.output_db.close().err();
+        self.assert_no_stdout();
         let diagnostics = self.output_db.take_diagnostics();
         if !diagnostics.is_empty() {
             messages.push(
@@ -1026,9 +1027,11 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         if let Some(error) = error {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
             messages.push(match error {
-                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_) => {
+                WriteDbError::Creation(_)
+                | WriteDbError::CreationBytes(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. } => {
                     [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
                 }
                 other => other.message(),
@@ -1085,6 +1088,20 @@ impl<'a> BuildDatabase<'a> {
         if !diagnostics.is_empty() {
             warn(diagnostics.strip_suffix(b"\n").unwrap_or(&diagnostics));
         }
+        self.assert_no_stdout();
+    }
+
+    /// The writer writes to the standard output only for NCBI4na data of another size than its
+    /// length needs (`WriteDb::take_stdout`), which makeblastdb's sources never give: the FASTA
+    /// source packs exactly that size, and the sequences of `-input_type blastdb` are copied, not
+    /// converted.
+    fn assert_no_stdout(&mut self) {
+        let stdout = self.output_db.take_stdout();
+        debug_assert!(
+            stdout.is_empty(),
+            "makeblastdb's writer wrote {:?} to the standard output",
+            String::from_utf8_lossy(&stdout)
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1423-1475
@@ -1138,7 +1155,7 @@ impl<'a> BuildDatabase<'a> {
             return Err(refusal);
         }
         if close_error.is_some() {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
         }
         // `NCBI_RETHROW` of the close exception as a `CWriteDBException` of `eArgErr` with the
         // message of the close exception: an exception of the close becomes a creation error with

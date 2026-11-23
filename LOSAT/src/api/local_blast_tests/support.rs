@@ -194,6 +194,7 @@ pub(super) fn run_formats_with(
     {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())

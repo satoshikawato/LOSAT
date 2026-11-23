@@ -1,1 +1,1 @@
-- tblastn searches run faster: one protein against the human genome takes about 3 % less time at one thread, and 40 BUSCO proteins against yeast about 6 % less. Reports do not change.
+- tblastn searches run faster: one protein against the human genome takes about 3 % less time at one thread, and 40 BUSCO proteins against yeast about 7 % less. Reports do not change.

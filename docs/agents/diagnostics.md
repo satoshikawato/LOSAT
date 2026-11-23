@@ -5891,6 +5891,14 @@ Scheduling (each value computed by one thread with the original function; order 
   i32::MAX and wrapping offsets, and `x_hits_bf_on_packed_cells_equals_pair_cells` on both layouts;
   `tests/tblastn_scan_byte.rs` `the_hit_steps_change_no_report`: the report of `=0` at one and four threads). Always:
   every tblastn search whose two-hit window is above the word size.
+  Measured 2026-11-24 on the workstation (2x Xeon Gold 6338, node 1, one core, `-num_threads 1`, against dev 016d73cad
+  built in a tree path of the same length, a warm-up and 5 rounds, arm order rotated; every output the same bytes): one
+  protein x the human genome (`-db`) cycles x0.968 (35.15 -> 34.03 G, 11.46 -> 11.11 s, instructions x0.962, max RSS
+  107,372 KiB in both; `=0` x0.995); 40 BUSCO proteins x yeast (`-db`) x0.927 (3.480 -> 3.226 G, 1.131 -> 1.052 s,
+  instructions x0.928; `=0` x0.988); TBLASTX AP027131 x AP027133 (gencode 4) and BLASTX of 5 cDNAs and of a 50 kb
+  genomic query x dmel proteins x0.9985, x0.999 and x0.996 with the instructions of dev (they do not take this loop).
+  Wasm (the serial WASI command, one Node process, `=1` / `=0` / `=1` as an A/A arm, a warm-up and 6 rounds): the BUSCO
+  case x0.980 (the A/A arm x0.981).
 - `LOSAT_X_CHAINRUN=1` tblastn, blastx (speed; in the strict set from the pull request that added it, 2026-11-16;
   `=0` turns it off; `tblastx/x_scan_byte.rs` `write_avx2`, `copy_avx2_run`, `X_CHAIN_RUN`): the AVX2 copy of the scan on
   presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, BLASTX's direct loop under `LOSAT_X_BXSCANBYTE`) writes the first 24

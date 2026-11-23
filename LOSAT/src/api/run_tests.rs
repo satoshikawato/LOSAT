@@ -59,8 +59,12 @@ fn groups_follow_the_hit_list_sizes() {
 #[test]
 fn groups_follow_the_cuts_of_the_hit_lists() {
     let inputs = Inputs::new(&[], &[]);
-    let command =
-        |program, options: &[&str]| validate(program, options).unwrap().command(inputs).unwrap();
+    let command = |program, options: &[&str]| {
+        validate(program, options)
+            .unwrap()
+            .command(inputs, &DiagTarget::Stderr)
+            .unwrap()
+    };
     let psiblast = command(Program::Psiblast, &[]);
     assert_eq!(search_groups(&psiblast, &[6, 11]), vec![vec![0], vec![1]]);
     assert_eq!(search_groups(&psiblast, &[11, 6]), vec![vec![0], vec![1]]);

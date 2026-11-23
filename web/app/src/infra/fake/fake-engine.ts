@@ -78,7 +78,7 @@ export class FakeEngine implements EngineGateway {
       }
       const [flag, value] = word.split(/=(.*)/s, 2);
       const option = parameters.find((p) => p.flag === flag);
-      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help to list the options\n` };
+      if (option === undefined) return { ok: false, message: unknownArgument(program as ProgramId, word) };
       if (option.takesValue && value === undefined) i++;
     }
     // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
@@ -229,6 +229,30 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+}
+
+/**
+ * The engine's argument error for a word that the fake does not read, in its form: a short usage,
+ * a line of 72 `=`, an empty line and the two posts (the second with two spaces after `Error:`).
+ * An option word is `Unknown argument` without its first dash; a word that is not one is a
+ * positional argument, of which the programs take none.
+ */
+function unknownArgument(program: ProgramId, word: string): string {
+  const post = word.startsWith('-') ? `Unknown argument: "${word.slice(1)}"` : `Too many positional arguments (1), the offending value: ${word}`;
+  return [
+    'USAGE',
+    `  ${program} [-h] [-help] [-query input_file] [-subject subject_input_file] [-out output_file]`,
+    '',
+    'DESCRIPTION',
+    '   Fake engine',
+    '',
+    "Use '-help' to print detailed descriptions of command line arguments",
+    '='.repeat(72),
+    '',
+    `Error: ${post}`,
+    `Error:  ${post}`,
+    '',
+  ].join('\n');
 }
 
 /** The output that the CLI's run of the argv writes: the argv's own -outfmt output, else the format of its number (0 without one). */

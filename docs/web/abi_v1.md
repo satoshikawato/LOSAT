@@ -86,6 +86,12 @@ needs a result later copies it out first.
   `: ` (`engine_error`, `LOSAT/src/web_api.rs:113-115`). Its words are the engine's, as on
   the CLI: since v0.2.0 LOSAT's words (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12,
   `LOSAT/src/wording.rs`), and an unknown option ends `use -help to list the options`.
+  The texts of an argument error are frozen with the ABI: since line RG item K4i-2b the command
+  line and ABI v2 read the arguments with NCBI's argument reader and write NCBI's usage and posts
+  ([`abi_v2.md`](abi_v2.md)), but ABI v1 keeps the texts it had, which the argument reader of its
+  BLASTX and TBLASTN (a copy of the one the command line had before, `LOSAT/src/web_v1_argv.rs`)
+  and the parsers of its other three programs write (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+  exception 1).
 - A pointer is valid until the next call into the module that writes the same buffer
   (the table above). A host's view of the memory (`memory.buffer` in JavaScript) is
   replaced when the memory grows, and any call that allocates (`losat_web_alloc`
@@ -202,8 +208,8 @@ same request.
 | `blastn` | `LOSAT/src/web_api/v1_blastn.rs`; arguments `parse_blastn_args` (`LOSAT/src/web_api.rs`) | `6`, `7`. `0` fails with `unsupported BLASTN output format: 0`; a value with more than one word fails with `unsupported BLASTN custom outfmt specification` | `-task` (`megablast` or `blastn`), `-outfmt`, `-word_size`, `-num_threads`, `-evalue`, `-searchsp`, `-dbsize` |
 | `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`LOSAT/src/web_api.rs`) | `0`, `6` and `7`, the number written so (`06` fails with `Unsupported output format: 06. Supported: 0, 6, 7`), with field lists of `V1_TABULAR_FIELDS` and `std` for `6` and `7`; `0` with words fails with `blastp outfmt 0 does not accept custom field lists` (`check_web_v1_request` in `v1_blastp.rs`, and its reader `v1_output_format`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback`, `-searchsp`, `-dbsize` |
 | `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`LOSAT/src/web_api.rs`) | `6` only (`tblastx_v1_outfmt` in `LOSAT/src/blastinput/value_parsers.rs`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue`, `-searchsp`, `-dbsize` |
-| `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt` in `web.rs`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `--version` (`parse_args` in `web.rs`) |
-| `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the CLI's `-outfmt` parser with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `-version`, `--version` (`parse_args`) |
+| `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt` in `web.rs`) | the BLASTX options of the CLI (read as the CLI read them before line RG item K4i-2b), except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `--version` (`parse_args` in `web.rs`) |
+| `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the `-outfmt` parser the CLI had before line RG item K4i-2b, with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI (read as the CLI read them before line RG item K4i-2b), except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `-help-full`, `-xmlhelp`, `--help`, `-version`, `--version` (`parse_args`) |
 
 - For `blastn`, `blastp` and `tblastx` any other word fails with
   `unsupported <program> argument for web API: <word>` (`:352`, `:484`, `:746`). A flag

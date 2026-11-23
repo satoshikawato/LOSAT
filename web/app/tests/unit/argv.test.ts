@@ -269,52 +269,98 @@ describe('refusedFields', () => {
     const { extra: inExtra, flags } = refusedFields(message, extra);
     return { extra: inExtra, flags: [...flags].sort() };
   };
+  // The engine's argument error: a usage that lists every option of the program, a line of 72 "=",
+  // an empty line, and two posts (the second with two spaces after "Error:").
+  const USAGE = [
+    'USAGE',
+    '  blastn [-h] [-help] [-query input_file] [-subject subject_input_file]',
+    '    [-evalue evalue] [-word_size int_value] [-culling_limit int_value]',
+    '    [-best_hit_overhang float_value] [-ungapped] [-num_threads int_value]',
+    '',
+    'DESCRIPTION',
+    '   Nucleotide-Nucleotide BLAST (LOSAT)',
+    '',
+    "Use '-help' to print detailed descriptions of command line arguments",
+    '='.repeat(72),
+    '',
+  ];
+  const ncbi = (post: string) => [...USAGE, `Error: ${post}`, `Error:  ${post}`, ''].join('\n');
   it("names the form's fields of the options that a message names, and no words of its sentences", () => {
-    expect(fields("error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4\n\nFor more information, try '--help'.")).toEqual({
-      extra: false,
-      flags: ['-word_size'],
-    });
     expect(fields('LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
       extra: false,
       flags: [],
     });
     expect(fields('the e-value of -penalty -3 and -2')).toEqual({ extra: false, flags: ['-penalty'] });
   });
+  it("names the options of NCBI's argument error posts, and not those of its usage", () => {
+    // Both options of "Incompatible with" (the first by its name, the second in backquotes).
+    expect(fields(ncbi('Argument "culling_limit". Incompatible with argument:  `best_hit_overhang\''))).toEqual({
+      extra: false,
+      flags: ['-best_hit_overhang', '-culling_limit'],
+    });
+    expect(fields(ncbi('Argument "mask_data". Must be specified, as it is required by argument:  `mask_id\''))).toEqual({
+      extra: false,
+      flags: ['-mask_data', '-mask_id'],
+    });
+    // The value in backquotes is not an option.
+    expect(fields(ncbi('Argument "word_size". Illegal value, expected >=4:  `3\''))).toEqual({ extra: false, flags: ['-word_size'] });
+    expect(fields(ncbi('Argument "evalue". Argument cannot be converted:  `abc\''))).toEqual({ extra: false, flags: ['-evalue'] });
+    // Only "Value is missing" writes the dash.
+    expect(fields(ncbi('Argument "-evalue". Value is missing'))).toEqual({ extra: false, flags: ['-evalue'] });
+    expect(fields(ncbi('Argument "dbtype". Mandatory value is missing:  `String, `nucl\', `prot\''))).toEqual({ extra: false, flags: ['-dbtype'] });
+    expect(fields(ncbi('Argument with this name is defined already: evalue'))).toEqual({ extra: false, flags: ['-evalue'] });
+  });
+  it("names \"Additional options\" for the words that NCBI's posts name there, also those of the form", () => {
+    expect(fields(ncbi('Argument "culling_limit". Incompatible with argument:  `best_hit_overhang\''), '-culling_limit 1 -best_hit_overhang 0.1')).toEqual({
+      extra: true,
+      flags: [],
+    });
+    // Only one of the two typed there: the other is the form's field.
+    expect(fields(ncbi('Argument "culling_limit". Incompatible with argument:  `best_hit_overhang\''), '-best_hit_overhang 0.1')).toEqual({
+      extra: true,
+      flags: ['-culling_limit'],
+    });
+    expect(fields(ncbi('Argument "-evalue". Value is missing'), '-evalue')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Argument with this name is defined already: evalue'), '-evalue 1 -evalue 2')).toEqual({ extra: true, flags: [] });
+    // The usage lists -word_size and -ungapped, which the extra box types: not named.
+    expect(fields(ncbi('Argument "evalue". Argument cannot be converted:  `abc\''), '-word_size 11 -ungapped')).toEqual({
+      extra: false,
+      flags: ['-evalue'],
+    });
+  });
+  it('reads the typed word that Unknown argument, Invalid argument and the offending value name', () => {
+    // `-foo` is "foo": the word without its first dash; `--foo` is "-foo".
+    expect(fields(ncbi('Unknown argument: "foo"'), '-qcov_hsp_perc 50 -foo')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Unknown argument: "foo"'), '-foo=3')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Unknown argument: "-foo"'), '--foo')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Unknown argument: "foo"'), '-strand plus')).toEqual({ extra: false, flags: [] });
+    // The whole typed word.
+    expect(fields(ncbi('Invalid argument: -ungapped=1'), '-ungapped=1')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Invalid argument: -ungapped=1'), '-strand plus')).toEqual({ extra: false, flags: [] });
+    expect(fields(ncbi('Too many positional arguments (1), the offending value: evalue'), 'evalue 1e-5')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Too many positional arguments (1), the offending value: evalue'), '-strand plus')).toEqual({ extra: false, flags: [] });
+    // CRLF line ends are read alike.
+    expect(fields(ncbi('Unknown argument: "foo"').replaceAll('\n', '\r\n'), '-foo')).toEqual({ extra: true, flags: [] });
+  });
+  it("reads LOSAT's one-line refusals whole, with the dash of their names", () => {
+    expect(fields("the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTN", '-remote')).toEqual({ extra: true, flags: [] });
+    expect(fields("the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTN", '-strand plus')).toEqual({
+      extra: false,
+      flags: ['-remote'],
+    });
+    expect(fields("the option -dryrun runs on the command line of LOSAT's BLASTN only: use it there")).toEqual({ extra: false, flags: ['-dryrun'] });
+  });
   it('names "Additional options" for the options typed there, also those of the form', () => {
     expect(fields('-evalue is set in the form: Expect threshold', '-evalue abc')).toEqual({ extra: true, flags: [] });
-    expect(fields("error: unknown option or argument '-foo'; use -help to list the options", '-qcov_hsp_perc 50 -foo')).toEqual({
-      extra: true,
-      flags: ['-help'],
-    });
     expect(fields('-num_threads is set in the form: Threads', '-num_threads=2')).toEqual({ extra: true, flags: [] });
-    expect(fields("error: invalid value 'x' for '-qcov_hsp_perc <QCOV_HSP_PERC>'", '-qcov_hsp_perc x')).toEqual({ extra: true, flags: [] });
-  });
-  it('does not read the options of clap\'s Usage line, which the argv lists, as named by the sentence', () => {
-    const message = [
-      "error: the argument '-max_target_seqs <MAX_TARGET_SEQS>' cannot be used with '-num_alignments <int_value>'",
-      '',
-      'Usage: losat blastn -query <PATH> -subject <PATH> -evalue <EVALUE> -max_target_seqs <MAX_TARGET_SEQS>',
-      '',
-      "For more information, try '--help'.",
-    ].join('\n');
-    expect(fields(message)).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
-    // --help of the closing line is not the option typed in Additional options.
-    expect(fields(message, '--help')).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
   });
   it('names "Additional options" for a word typed there that is not an option name', () => {
     expect(fields('--help is not available in the browser', '--help')).toEqual({ extra: true, flags: [] });
     expect(fields('--help is not available in the browser', '-strand plus')).toEqual({ extra: false, flags: [] });
-    expect(fields("error: unknown option or argument 'evalue'; use -help to list the options", 'evalue 1e-5')).toEqual({
-      extra: true,
-      flags: ['-help'],
-    });
-    expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
-    // The engine quotes the whole word, with its =value.
-    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help to list the options", '--evalue=1e-5')).toEqual({
-      extra: true,
-      flags: ['-help'],
-    });
-    expect(fields("error: unknown option or argument 'evalue=10'", '-strand plus evalue=10')).toEqual({ extra: true, flags: [] });
+    // A word that a message quotes, with its =value.
+    expect(fields("the word 'evalue' is not read", 'evalue 1e-5')).toEqual({ extra: true, flags: [] });
+    expect(fields("the word 'evalue' is not read", '-strand plus')).toEqual({ extra: false, flags: [] });
+    expect(fields("the word '--evalue=1e-5' is not read", '--evalue=1e-5')).toEqual({ extra: true, flags: [] });
   });
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });

@@ -170,7 +170,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | **I** インターフェース分離 | UI は wasm のポインタも Worker のメッセージも知らない。アプリ層が使うのは `EngineGateway`・`DataGateway`・`Downloader` の小さな interface だけ（計測を入れるときに `Analytics` を足す） |
 | **D** 依存性逆転 | アプリ層は上の interface にだけ依存し、実装は起動時に組み立てる。試験では FakeEngine などを差し込む。これにより、エンジン側が出来る前からアプリ側を進められる |
 | **KISS** | 物理構成は UI・Data worker・Engine worker（＋スレッド用 worker）の 3 種類だけ。検索条件の表現は LOSAT CLI の argv ひとつ。取消は Worker の終了だけ。進捗は段階と経過時間だけ |
-| **DRY** | ① program ごとに核の入口は `run_local` の 1 本（TD-2）。② argv ひとつで、実行・入力検証・CLI コマンドの表示・セッションをまかなう。③ 既定値・選択肢・help は clap の定義から取る。④ 検索に渡す FASTA は各 program のエンジンの解析器が読む（索引用の走査は TD-8 の例外）。⑤ NCBI 形式の数値整形と詳細アラインメントは、既存の formatter の出力をそのまま使い、TS で作り直さない。⑥ 応答ヘッダーは `web/app/public/_headers` の 1 か所で定義する |
+| **DRY** | ① program ごとに核の入口は `run_local` の 1 本（TD-2）。② argv ひとつで、実行・入力検証・CLI コマンドの表示・セッションをまかなう。③ 既定値・選択肢・help は CLI の定義から取る（2026-11-23 から、選択肢は NCBI の引数の表、既定値は NCBI の XML の `<default>`、help は clap の定義。線 RG の K4i-2b）。④ 検索に渡す FASTA は各 program のエンジンの解析器が読む（索引用の走査は TD-8 の例外）。⑤ NCBI 形式の数値整形と詳細アラインメントは、既存の formatter の出力をそのまま使い、TS で作り直さない。⑥ 応答ヘッダーは `web/app/public/_headers` の 1 か所で定義する |
 | **YAGNI** | 結果アーカイブ形式、協調取消、部分読み出し、前処理キャッシュ、形式ごとの別の検索、複数の計算プール、query ごとの途中経過は作らない。そのうち前の 5 つは §2.3 のトリガーが立ってから入れる（共有メモリの拡大は DW-28 で行った） |
 
 **`web/` の中の線引き**：BLAST が定義する値（スコア、E 値、identity、被覆率、NCBI 形式の数値やアラインメントの整形）を計算・整形するコードは `web/` に置かない。必要なものはエンジンから受け取る。こうすると、NCBI 参照コメントの要らないアプリのコードと、NCBI が権威となるコードとが混ざらない。

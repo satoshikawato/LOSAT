@@ -55,8 +55,9 @@ test('a refusal of "Additional options" marks its text box, which points to the 
   await expect(page.locator(`#${REFUSAL}`)).toHaveText('-evalue is set in the form: Expect threshold');
   // The engine's refusal of an option typed there.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
-  await expectRefused(extra, "error: unknown option or argument '-foo'; use -help to list the options");
+  // The fake engine and the engine both end with NCBI's two posts (`Unknown argument: "foo"`), after a usage.
+  await expect(validation).toContainText('Error: Unknown argument: "foo"');
+  await expectRefused(extra, /Error:\s+Unknown argument: "foo"\s*$/);
   // A message about its text.
   await extra.fill("-strand 'plus");
   await expect(validation).toHaveText("Additional options: a quote (') is not closed");
@@ -109,7 +110,8 @@ test("the engine's refusal of a form's value marks the field that holds it, unti
   await page.getByTestId('param-word_size').selectOption('other');
   const other = page.getByTestId('param-word_size-other');
   await other.fill('3');
-  const message = /^error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4/;
+  // The engine's argument error: the usage, a line of 72 "=", and the posts.
+  const message = /Error: Argument "word_size"\. Illegal value, expected >=4:\s+`3'\s*$/;
   await expect(page.getByTestId('argv-validation')).toHaveText(message);
   await expectRefused(other, message);
   // The text box after "Other" holds the value; the select beside it and the other fields are not marked.

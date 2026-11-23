@@ -15,7 +15,8 @@ Programs: BLASTP, TBLASTN, BLASTN, TBLASTX and BLASTX (since session SX).
 The application (`web/app`) runs LOSAT searches through a Wasm module built from the
 adapter crate `web/adapter`, which links the engine crate `LOSAT/` as a library.
 
-- Search conditions are one CLI argv, parsed by the same clap parser as the CLI.
+- Search conditions are one CLI argv, read by the same argument reader as the CLI (NCBI's argument
+  reader since line RG item K4i-2b, 2026-11-23).
 - One run writes every output format the program supports (listed by `describe`),
   the HSP records and the diagnostics from the same search result (§7), and the output of
   the argv's own `-outfmt` when it is another format that the CLI writes, or 6 or 7 with fields
@@ -85,11 +86,14 @@ On failure, `losat_web2_last_error_ptr/len` hold a UTF-8 message. Engine errors 
 CLI's wording, which is NCBI's in LOSAT's words (`LOSAT/src/wording.rs`, AGENTS.md rule 8): every
 message that this document quotes as NCBI's (`BLAST query/options error: …`, `BLAST engine error: …`)
 reaches the host with LOSAT's prefix (`LOSAT query/options error: …`, `LOSAT engine error: …`), and a
-printed version states LOSAT's (`blastn: LOSAT 0.2.0`) where NCBI's states `2.17.0+`. Argv errors are the message of the engine's parser as the command line
-writes it, ending with a line end (`losat::web_adapter::command_line_message`), search errors are the error and its causes joined by
-`: ` (as ABI v1 reports them). The adapter parses the argv exactly as the command line
+printed version states LOSAT's (`blastn: LOSAT 0.2.0`) where NCBI's states `2.17.0+`. Argv errors are the command line's standard error for the argv, ending with a line end
+(`losat::web_adapter::argv_message`): NCBI's short usage, a line of 72 `=`, an empty line and NCBI's
+two posts (`Error: <message>` and `Error:  <message>`), or, where LOSAT refuses an NCBI option that it does
+not run, the refusal text (`the NCBI BLAST+ option -NAME is not supported by LOSAT's PROGRAM`, without the
+command line's `Error: `). The application marks the fields that the posts name. Search errors are the error and its causes joined by
+`: ` (as ABI v1 reports them). The adapter reads the argv exactly as the command line
 (every program accepts the CLI's default `-outfmt 0`), so an argv error of `validate`, an
-unknown program's included, is the CLI's message (session S08). Only the adapter's own
+unknown program's included, is the CLI's message (session S08; line RG item K4i-2b). Only the adapter's own
 rules give other messages: `-out` is not accepted (an argv whose parse stops at a help word prints the help, as the CLI
 does, `-out` or not; line WQA's D14 review, 2026-11-20), an `-outfmt` of a format other than 0, 6
 and 7 is refused (§7). `run` finds the
@@ -290,7 +294,7 @@ the WASI imports.
   module, it passes `-num_threads 1` and records the reason (plan §4.7). The host
   validates the argv that it will run, with its `-num_threads`, so a `-num_threads` in
   the user's words is reported by `validate` (the parser rejects the repeated option).
-- Every other word is parsed by the engine's CLI parser, so options and errors behave
+- Every other word is read by the engine's CLI argument reader, so options and errors behave
   exactly as on the command line. LOSAT's own debug output (environment variables such
   as `LOSAT_TIMING`) goes to the module's WASI standard error, not to stream 3; stream 3
   carries the warnings that the CLI writes.
@@ -365,7 +369,7 @@ formatted from the raw values (plan §4.4).
 
 ## 9. JSON responses (stream 2)
 
-- *describe*: `{ "program", "formats": [0, 6, 7], "parameters": [{ "flag", "help", "takes_value", "default"?, "choices"? }], "query_gencodes"?, "subject_gencodes"? }`, generated from the clap definitions (without `-out`, `-outfmt` and `-num_threads`, which the adapter and the host set or refuse, or read from the argv's words as the CLI does: `-outfmt`, §7; `-num_descriptions` and `-num_alignments` are listed with the CLI's help text, which carries the defaults 500 and 250), the program's supported output formats and the genetic codes that the engine's parser accepts for `-query_gencode` and `-db_gencode`, and `"defaults"`.
+- *describe*: `{ "program", "formats": [0, 6, 7], "parameters": [{ "flag", "help", "takes_value", "default"?, "choices"? }], "query_gencodes"?, "subject_gencodes"? }`, generated from the clap definitions for the help and `takes_value`, and, since line RG item K4i-2b, from NCBI's argument tables for `choices` (a flag has none; `-template_type` and `-template_length` have theirs) and from NCBI's argument XML for `default` (none for `-evalue` of BLASTX and TBLASTX, whose help says `[default: 10]`) (without `-out`, `-outfmt` and `-num_threads`, which the adapter and the host set or refuse, or read from the argv's words as the CLI does: `-outfmt`, §7; `-num_descriptions` and `-num_alignments` are listed with the CLI's help text, which carries the defaults 500 and 250), the program's supported output formats and the genetic codes that the engine's parser accepts for `-query_gencode` and `-db_gencode`, and `"defaults"`.
   - `"defaults": { "tasks": { "<task>": { "<flag>": "<value>" } }, "by": { "<flag>": { "<value>": { "<task>": { "<flag>": "<value>" } } } }, "unless": { "<flag>": ["<flag>"] }, "given": ["<flag>"] }` are the values that the engine resolves for the options a search leaves out (`web/adapter/src/defaults.rs`), from the engine's own resolution of an argv (BLASTP's, TBLASTN's and BLASTX's `resolve`, BLASTN's `coordination` functions, TBLASTX's getters), printed as the CLI's help prints them (`"10"`, `"19.3"`, `"20 64 1"`, `"no"`, `"true"`). `tasks`: each task's values with no other option given (the key `""` for TBLASTX, which has no `-task`). `by`: for `-matrix` and `-word_size`, for each value that the engine resolves (the nine matrices of `ScoringMatrix::ALL`, word sizes 1-32), the values by task of the options that some value changes (a matrix's gap costs, threshold and window; the threshold of a given word size); a program lists only the options that change something (BLASTN neither, BLASTX the word size). `unless`: an option's default holds only while none of these options is given (`-max_target_seqs` excludes `-num_descriptions` and `-num_alignments`, §7). `given`: the options that BLAST+ tells given from not given, with the tasks where it does, so that a host writes one that is set even at its default: the hit list options in every task (§7), and each option that, given at the value shown for it (the task's, or the table's value for a given `-matrix` or `-word_size`), resolves another search (the word size of blastp-fast, tblastn-fast and blastx-fast, whose given 5 sets NCBI's threshold 19.3 where the task's own 5 keeps 20). The response of each program is computed once (some hundred probe argvs) and kept. An option without an entry has the clap `default` of `parameters`, or no default.
 - *validation*: `{ "data_loaders" }` of `losat_web2_validate` (§4): `true` when the run reads its inputs with NCBI's data loaders on (the CLI's default), `false` when the `DATA_LOADERS` entry of the `[BLAST]` section of a registry file that the run's start reads (the file of `-conffile`) turns them off, by the CLI's rule (`ApplicationSettings::data_loaders`, NCBI's `SDataLoaderConfig`): a value that names neither `blastdb` nor `genbank`, or that names `none` (case folded; `DATA_LOADERS=none`, `DATA_LOADERS=foo` and `DATA_LOADERS=blastdb none` turn them off, `DATA_LOADERS=BlastDB` and `DATA_LOADERS=genbank,foo` keep them on). An empty value in a registry file is no entry, and keeps them on (NCBI's registry; the CLI's probe of 2026-11-20). The CLI reads the setting from `.ncbirc` too, which the browser has not; line WQA's D16, 2026-11-20. A host gives it to `register` and `scan_begin` for the run's inputs. It comes before the option checks (§4), so a host has it also while another option refuses the argv.
 - *register*: `{ "handle", "records": [{ "index", "id", "length" }], "reader_error"? }`, from the records of the program's own reader (§4). `reader_error`, a query's only: the reader's error on the record after the records, with the CLI's text, which a run ends with in that record's query batch (§4). `id` is the record's title up to its first space (0x20), empty when the record has no title (never NCBI's `Query_N` or `Subject_N`); bytes that are not UTF-8 become U+FFFD in the JSON only (the output streams keep the title's bytes). `length` is the number of residues the reader stores. `register` also scans the same bytes with the reader of the input (`scan_begin`) and fails if the records, IDs, lengths or residue counts differ.

@@ -549,4 +549,35 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
         );
         assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pssm), None, "{path}");
     }
+    // A frequency ratio of PLUS-INFINITY (a PSSM file in ASN.1 binary, whose REAL NCBI's reader
+    // takes): NCBI writes it in each stream, LOSAT's BER encoder does not (`NonFiniteReal`).
+    let bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pssm/ps9_ber_real_list_pinf.asnb"),
+    )
+    .unwrap();
+    let pinf = crate::blastinput::pssm_text::read_pssm_binary(&bytes)
+        .result
+        .unwrap();
+    assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pinf), None);
+    assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pinf), None);
+    assert_eq!(
+        pssm_unwritten(ArchiveEncoding::Binary, &pinf),
+        Some("a NaN or an infinite REAL")
+    );
+    // A member that the ASN.1 text stream re-reads with a message (a delay buffer of a binary
+    // file): the one arm of `unread_delayed` for every stream that fails on it.
+    for (encoding, gap) in [
+        (ArchiveEncoding::Xml, true),
+        (ArchiveEncoding::Binary, true),
+        (ArchiveEncoding::Text, true),
+        (ArchiveEncoding::Nothing, false),
+    ] {
+        let mut check = PssmGaps {
+            encoding,
+            gap: None,
+        };
+        crate::report::serial::encoder::Encoder::unread_delayed(&mut check);
+        assert_eq!(check.gap.is_some(), gap, "{encoding:?}");
+    }
 }

@@ -736,8 +736,10 @@ pub(crate) fn seq_id_written_as_is(
 /// stream of the archive does not write as NCBI's does yet: in XML an anonymous SEQUENCE or
 /// CHOICE (`User-field.data`, `Seq-annot.data`; LOSAT's object mode writes `<>` for its tag), a
 /// NULL, a UTF8String or a member read into a delay buffer (`Auth-list.names`, which NCBI parses
-/// first); in ASN.1 binary the last two. NCBI BLAST+ 2.17.0 writes them all (probe XA of the
-/// review fixes of line PS item PS15b-1, 2026-11-23); ASN.1 text writes them as NCBI does.
+/// first); in ASN.1 binary the last two and a NaN or infinite REAL (`SerialError::NonFiniteReal`);
+/// in ASN.1 text a member of a binary file that NCBI re-reads with a message (`unread_delayed`).
+/// NCBI BLAST+ 2.17.0 writes them all (probe XA of the review fixes of line PS item PS15b-1,
+/// 2026-11-23); ASN.1 text writes the rest as NCBI does.
 struct PssmGaps {
     encoding: ArchiveEncoding,
     gap: Option<&'static str>,
@@ -779,7 +781,11 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn named_int(&mut self, _: &str, _: i32) {}
     fn boolean(&mut self, _: bool) {}
     fn visible_str(&mut self, _: &[u8]) {}
-    fn real(&mut self, _: f64) {}
+    fn real(&mut self, value: f64) {
+        if !value.is_finite() {
+            self.note("a NaN or an infinite REAL", &[ArchiveEncoding::Binary]);
+        }
+    }
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {
         self.note("a NULL", &[ArchiveEncoding::Xml]);
@@ -794,6 +800,16 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
         self.note(
             "a member read into a delay buffer",
             &[ArchiveEncoding::Xml, ArchiveEncoding::Binary],
+        );
+    }
+    fn unread_delayed(&mut self) {
+        self.note(
+            "a member read into a delay buffer",
+            &[
+                ArchiveEncoding::Xml,
+                ArchiveEncoding::Binary,
+                ArchiveEncoding::Text,
+            ],
         );
     }
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {

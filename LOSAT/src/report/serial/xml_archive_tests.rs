@@ -698,6 +698,58 @@ fn a_big_integer_of_minus_two_to_the_63_is_its_digits() {
     }
 }
 
+/// A fixture of LOSAT's tests (`tests/fixtures/<path>`).
+fn test_fixture(path: &str) -> Vec<u8> {
+    std::fs::read(format!(
+        "{}/tests/fixtures/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
+}
+
+fn gunzip(bytes: Vec<u8>) -> Vec<u8> {
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut out).unwrap();
+    out
+}
+
+/// The `Blast4-archive` frame of NCBI's archive of a PSSM search around its request's PSSM query
+/// (`queries pssm`, `pssm::write_value`), as deep as NCBI's (its ident, program and service are
+/// NCBI's), closed to the end of the document (`close`) or left after the member `queries`.
+fn write_pssm_query<E: Encoder>(enc: &mut E, pssm: &super::pssm::PssmWithParameters, close: bool) {
+    enc.begin_document("Blast4-archive");
+    enc.begin_sequence("Blast4-archive");
+    enc.member("request", 0);
+    enc.begin_sequence("Blast4-request");
+    enc.member("ident", 0);
+    enc.visible_str(b"2.17.0+");
+    enc.end_member();
+    enc.member("body", 1);
+    enc.variant("Blast4-request-body", "queue-search", 8);
+    enc.begin_sequence("Blast4-queue-search-request");
+    enc.member("program", 0);
+    enc.visible_str(b"blastp");
+    enc.end_member();
+    enc.member("service", 1);
+    enc.visible_str(b"psi");
+    enc.end_member();
+    enc.member("queries", 2);
+    enc.variant("Blast4-queries", "pssm", 0);
+    super::pssm::write_value(enc, pssm);
+    enc.end_variant();
+    enc.end_member();
+    if !close {
+        return;
+    }
+    enc.end_sequence();
+    enc.end_variant();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+}
+
 /// The request's PSSM query (`Blast4-queries pssm`) of an archive with `ARCHIVE_FORMAT=xml`, its
 /// parts written by the writer of the type table's values (`pssm::write_value`, `asn_types::write`),
 /// which names an anonymous SEQUENCE or CHOICE by its empty name: the bytes of NCBI BLAST+ 2.17.0
@@ -716,19 +768,7 @@ fn a_big_integer_of_minus_two_to_the_63_is_its_digits() {
 /// command line writes this member yet.
 #[test]
 fn a_pssm_query_s_anonymous_types_are_nested_as_ncbi_s_xml_archive_writes_them() {
-    let fixture = |path: &str| {
-        std::fs::read(format!(
-            "{}/tests/fixtures/{path}",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .unwrap()
-    };
-    let gunzip = |bytes: Vec<u8>| {
-        let mut out = Vec::new();
-        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut out)
-            .unwrap();
-        out
-    };
+    let (fixture, gunzip) = (test_fixture, gunzip);
     let mut failures = Vec::new();
     for (case, posts) in [
         ("d3a_c17_locs", Vec::new()),
@@ -746,34 +786,7 @@ fn a_pssm_query_s_anonymous_types_are_nested_as_ncbi_s_xml_archive_writes_them()
         .unwrap();
         let mut buf = Vec::new();
         let mut enc = Traced::xml(XmlEncoder::archive(&mut buf), 0);
-        enc.begin_document("Blast4-archive");
-        enc.begin_sequence("Blast4-archive");
-        enc.member("request", 0);
-        enc.begin_sequence("Blast4-request");
-        enc.member("ident", 0);
-        enc.visible_str(b"2.17.0+");
-        enc.end_member();
-        enc.member("body", 1);
-        enc.variant("Blast4-request-body", "queue-search", 8);
-        enc.begin_sequence("Blast4-queue-search-request");
-        enc.member("program", 0);
-        enc.visible_str(b"blastp");
-        enc.end_member();
-        enc.member("service", 1);
-        enc.visible_str(b"psi");
-        enc.end_member();
-        enc.member("queries", 2);
-        enc.variant("Blast4-queries", "pssm", 0);
-        super::pssm::write_value(&mut enc, &pssm);
-        enc.end_variant();
-        enc.end_member();
-        enc.end_sequence();
-        enc.end_variant();
-        enc.end_member();
-        enc.end_sequence();
-        enc.end_member();
-        enc.end_sequence();
-        enc.end_document();
+        write_pssm_query(&mut enc, &pssm, true);
         if let Some(error) = enc.error() {
             failures.push(format!("{case}: {error:?}"));
         }
@@ -821,6 +834,62 @@ fn a_pssm_query_s_anonymous_types_are_nested_as_ncbi_s_xml_archive_writes_them()
                 String::from_utf8_lossy(&written),
                 String::from_utf8_lossy(&posts)
             ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The request's PSSM query of an archive with `ARCHIVE_FORMAT=bin` (`AsnBinaryEncoder`, its
+/// parts written by `pssm::write_value` and `asn_types::write`): the bytes of NCBI BLAST+ 2.17.0
+/// from the start of the archive to the end of the member `queries` (`psiblast -db
+/// tests/db_search/paja -in_pssm <case> -comp_based_stats 0 -outfmt 11 -num_threads 1` with
+/// `ARCHIVE_FORMAT=bin`, line RG-F3 PR 2 probe XB, 2026-11-23; NCBI's whole archive in
+/// tests/fixtures/outfmt11/psi_bin_pssm_<case>.bin.gz). `d3a_c10_user`'s `User-field` `str`
+/// is a UTF8String with `é` and the byte 0x01, which NCBI writes with a VisibleString's tag and
+/// does not post; `d3a_c17_locs` holds a NULL Seq-loc in the anonymous CHOICE `Seq-annot.data`.
+#[test]
+fn a_pssm_query_is_written_in_binary_as_ncbi_s_archive_writes_it() {
+    let mut failures = Vec::new();
+    for case in ["d3a_c10_user", "d3a_c17_locs"] {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(test_fixture(
+            &format!("pssm/{case}.asn.gz"),
+        )))
+        .unwrap();
+        let mut buf = Vec::new();
+        let mut enc = Traced::new(super::asn_ber::AsnBinaryEncoder::new(&mut buf), 0);
+        write_pssm_query(&mut enc, &pssm, false);
+        if let Some(error) = enc.error() {
+            failures.push(format!("{case}: {error:?}"));
+        }
+        if !enc.take_replaced_chars().is_empty() {
+            failures.push(format!("{case}: a byte replaced"));
+        }
+        drop(enc);
+        if !crate::report::archive::pssm_written_as_is(
+            crate::report::archive::ArchiveEncoding::Binary,
+            &pssm,
+        ) {
+            failures.push(format!("{case}: not written as it is"));
+        }
+        let ncbi = gunzip(test_fixture(&format!(
+            "outfmt11/psi_bin_pssm_{case}.bin.gz"
+        )));
+        let around = |bytes: &[u8], at: usize| bytes[at..(at + 16).min(bytes.len())].to_vec();
+        match buf
+            .iter()
+            .zip(&ncbi)
+            .position(|(losat, ncbi)| losat != ncbi)
+        {
+            Some(at) => failures.push(format!(
+                "{case}: from byte {at}: NCBI {:02x?}, LOSAT {:02x?}",
+                around(&ncbi, at),
+                around(&buf, at)
+            )),
+            // NCBI's next member is `subject` (`a3 80`).
+            None if !ncbi[buf.len().min(ncbi.len())..].starts_with(&[0xa3, 0x80]) => failures.push(
+                format!("{case}: {} bytes of NCBI's {}", buf.len(), ncbi.len()),
+            ),
+            None => {}
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");

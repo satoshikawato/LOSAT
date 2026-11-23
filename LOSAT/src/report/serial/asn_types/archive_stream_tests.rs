@@ -156,8 +156,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
 /// Every archive of the fixtures read as text, each object written by `write` (one encoding's
 /// writer: `Some` of what it could not write) and the whole read back by the stream `stream` makes
 /// of those bytes, written back as text: its bytes. The archives that the writer does not write
-/// (the binary writer's UTF8String, a delayed member: `SerialError::Unwritten`) are counted, not
-/// compared.
+/// (a delayed member: `SerialError::Unwritten`) are counted, not compared.
 fn every_archive_reads_back(
     write: impl Fn(&Value, &mut Vec<u8>) -> Option<String>,
     stream: impl Fn(&[u8]) -> ObjectStream<&[u8]>,
@@ -197,9 +196,7 @@ fn every_archive_reads_back(
         failures.len(),
         &failures[..failures.len().min(10)]
     );
-    // The binary writer does not write a UTF8String (its tag depends on NCBI's parameter
-    // `SERIAL_WRITE_UTF8STRING_TAG`): the archives that hold one are left out of its round trip,
-    // and NCBI's own binary and XML archives of them are read below
+    // NCBI's own binary and XML archives are read below
     // (`ncbis_binary_archives_read_as_their_text`, `..._xml_...`).
     assert!(
         files >= 100,
@@ -277,6 +274,74 @@ fn ncbis_binary_archives_read_as_their_text() {
             ("blastp_query_loc.asn", "blastp_query_loc.bin"),
         ],
     );
+}
+
+/// A gzipped fixture of `LOSAT/tests/fixtures/outfmt11`, unzipped.
+fn outfmt11_gunzipped(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/outfmt11")
+        .join(name);
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut out).unwrap();
+    out
+}
+
+/// The archives that NCBI BLAST+ 2.17.0 wrote with `ARCHIVE_FORMAT=bin` and in ASN.1 text of a
+/// psiblast search of a PSSM (`psiblast -db tests/db_search/paja -in_pssm <case>
+/// -comp_based_stats 0 -outfmt 11 -num_threads 1`, line RG-F3 PR 2 probes XB and real,
+/// 2026-11-23): a `User-field` UTF8String with `é` and the byte 0x01 (`d3a_c10_user`), a NULL
+/// Seq-loc in an anonymous CHOICE (`d3a_c17_locs`), and the REALs that BER writes as one special
+/// octet (a list with `PLUS-INFINITY`, a `MINUS-INFINITY` lambda, a NaN; line PS's
+/// `ps9_ber_real_*` inputs). The text, read and written by `AsnBinaryEncoder`, is NCBI's binary
+/// archive; the binary archive, read, is the text.
+#[test]
+fn ncbis_binary_archives_of_psiblast_in_pssm_are_their_text() {
+    let mut failures = Vec::new();
+    for (text_name, bin_name) in [
+        (
+            "psi_bin_pssm_d3a_c10_user.asn.gz",
+            "psi_bin_pssm_d3a_c10_user.bin.gz",
+        ),
+        (
+            "psi_bin_pssm_d3a_c17_locs.asn.gz",
+            "psi_bin_pssm_d3a_c17_locs.bin.gz",
+        ),
+        (
+            "psi_ber_real_list_pinf.asn.gz",
+            "psi_ber_real_list_pinf.bin.gz",
+        ),
+        ("psi_ber_real_ninf.asn.gz", "psi_ber_real_ninf.bin.gz"),
+        ("psi_ber_real_nan.asn.gz", "psi_ber_real_nan.bin.gz"),
+    ] {
+        let (text, bin) = (outfmt11_gunzipped(text_name), outfmt11_gunzipped(bin_name));
+        let mut objects = ObjectStream::new(&text[..], b"");
+        let mut written = Vec::new();
+        while !objects.end_of_data() {
+            let (value, posts) = objects.read(named::BLAST4_ARCHIVE);
+            assert!(posts.is_empty(), "{text_name}: {posts:?}");
+            let value = value.unwrap_or_else(|error| panic!("{text_name}: {error:?}"));
+            let mut enc = AsnBinaryEncoder::new(&mut written);
+            write_document(&mut enc, named::BLAST4_ARCHIVE, &value);
+            if let Some(error) = enc.error() {
+                failures.push(format!("{text_name}: {error:?}"));
+            }
+        }
+        if written != bin {
+            failures.push(format!("{bin_name}: {}", first_difference(&bin, &written)));
+        }
+        let guessed = guess_encoding(&bin[..]);
+        assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Binary));
+        match as_text(guessed.into_stream().expect("a stream")) {
+            Ok((out, _)) if out == text => {}
+            Ok((out, _)) => failures.push(format!(
+                "{bin_name} read: {}",
+                first_difference(&text, &out)
+            )),
+            Err(error) => failures.push(format!("{bin_name} read: {error}")),
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 /// The XML archives (the psiblast ones are 200 kB and not copied: the round trip through

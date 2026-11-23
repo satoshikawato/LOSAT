@@ -276,11 +276,8 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.write_string::<true>(value);
     }
 
-    /// `WriteDouble2` of `data` with `DBL_DIG`: `09`, the length, the decimal form byte 0 and the
-    /// digits of `DoubleToStringPosix`. (NCBI marks a NaN or an infinity by another form
-    /// byte, which LOSAT does not write: BLAST reports have none.)
+    /// An OCTET STRING: `04`, the length and the bytes.
     ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:797-816
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1704-1708
     fn octets(&mut self, value: &[u8]) {
         self.out.push(TAG_OCTET_STRING);
@@ -300,12 +297,18 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.out.extend_from_slice(&[TAG_NULL, 0]);
     }
 
-    /// The tag of NCBI's UTF8String depends on its parameter `SERIAL_WRITE_UTF8STRING_TAG`
-    /// (objostrasnb.cpp:281-301): no BLAST document that LOSAT writes in ASN.1 binary holds one.
-    fn utf8_str(&mut self, _value: &[u8]) {
-        if self.error.is_none() {
-            self.error = Some(SerialError::Unwritten("a UTF8String"));
-        }
+    /// `WriteString` of a UTF8String: the tag of its parameter `SERIAL_WRITE_UTF8STRING_TAG`,
+    /// whose default (false, the one LOSAT writes) is a VisibleString's, the length and the
+    /// bytes as they are (no byte is checked: only a VisibleString's are). NCBI BLAST+ 2.17.0's
+    /// `psiblast -in_pssm d3a_c10_user -outfmt 11` with `ARCHIVE_FORMAT=bin` writes the
+    /// `User-field` string `é\x01` as `1a 03 c3 a9 01` (probe XB of line RG-F3 PR 2, 2026-11-23).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:281-314
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:831-873
+    fn utf8_str(&mut self, value: &[u8]) {
+        self.out.push(TAG_VISIBLE_STRING);
+        self.length(value.len());
+        self.out.extend_from_slice(value);
     }
 
     /// NCBI parses a delay buffer read from text before it writes it in binary
@@ -327,11 +330,25 @@ impl Encoder for AsnBinaryEncoder<'_> {
         Ok(())
     }
 
+    /// `WriteDouble2` of `data` with `DBL_DIG`: `09`, the length, the decimal form byte 0 and the
+    /// digits of `DoubleToStringPosix`; a NaN or an infinity is its one special content octet
+    /// (`09 01 42`, `40`, `41`; NCBI's branch for a negative zero is compiled out, so it takes the
+    /// decimal form). NCBI BLAST+ 2.17.0's `psiblast -in_pssm` of a binary PSSM with
+    /// `PLUS-INFINITY` in its frequency ratios, or `MINUS-INFINITY` or `NOT-A-NUMBER` as its
+    /// lambda, `-outfmt 11` with `ARCHIVE_FORMAT=bin` (probe real of line RG-F3 PR 2,
+    /// 2026-11-23).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:738-816
     fn real(&mut self, value: f64) {
         if !value.is_finite() {
-            if self.error.is_none() {
-                self.error = Some(SerialError::NonFiniteReal);
-            }
+            let special = if value.is_nan() {
+                REAL_NOT_A_NUMBER
+            } else if value > 0.0 {
+                REAL_PLUS_INFINITY
+            } else {
+                REAL_MINUS_INFINITY
+            };
+            self.out.extend_from_slice(&[TAG_REAL, 1, special]);
             return;
         }
         let mut digits = Vec::with_capacity(24);

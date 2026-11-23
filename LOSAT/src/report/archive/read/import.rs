@@ -1575,7 +1575,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                 }
             }
             // Else the strategy's subjects. The Owner's decision F2-Q1 (2026-11-20 「Q1=C」,
-            // PD-LOSAT-NCBI-DEFECTS exception 26): they are searched once with the command line's
+            // PD-LOSAT-NCBI-DEFECTS exception 27): they are searched once with the command line's
             // `-num_threads`, as `-subject`'s records are, and the output is the `-num_threads 1`
             // output (NCBI searches them once per thread or aborts: its thread check reads only
             // the command line's `-subject`). The run keeps the threads: nothing here changes them

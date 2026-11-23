@@ -221,9 +221,10 @@ fn the_library_refuses_xmlhelp() {
             ArgvError::Refused(xml_help_refusal(shown)),
             "{program}"
         );
+        // The printed `-h` may name `-xmlhelp` (rpsbproc's synopsis does); it is not refused.
         let short = try_parse_from(["losat", program, "-h", "-xmlhelp"]);
         assert!(
-            !matches!(&short, Err(error) if error.to_string().contains("-xmlhelp")),
+            !matches!(&short, Err(ArgvError::Refused(text)) if text.contains("-xmlhelp")),
             "{program}"
         );
     }

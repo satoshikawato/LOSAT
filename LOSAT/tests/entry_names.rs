@@ -302,69 +302,6 @@ fn top_level_help_names_every_program() {
     }
 }
 
-/// Every search program's `-outfmt` help in `describe` (LOSAT Web's form) says which numbers it
-/// writes and which take a field list (README's "Output formats" tables; `cli::outfmt_help`), and
-/// none of the old notes. (The command line's `-help` is NCBI's text, line RG item K4i-2b.)
-#[test]
-fn search_program_help_says_what_outfmt_writes() {
-    for (program, written, fields) in [
-        (
-            "blastn",
-            "Written: 0 to 18 and 20.",
-            "Formats 6, 7, 10 and 20 take",
-        ),
-        (
-            "blastp",
-            "Written: 0 to 16, 18 and 20.",
-            "Formats 6, 7, 10 and 20 take",
-        ),
-        (
-            "blastx",
-            "Written: 0 to 16, 18 and 20.",
-            "Formats 6, 7, 10 and 20 take",
-        ),
-        (
-            "tblastn",
-            "Written: 0 to 16, 18 and 20; with -in_pssm: 0 to 4, 6, 7 and 10.",
-            "Formats 6, 7, 10 and 20 take",
-        ),
-        (
-            "tblastx",
-            "Written: 0 to 16, 18 and 20.",
-            "Formats 6, 7, 10 and 20 take",
-        ),
-        (
-            "psiblast",
-            "Written: 0, 6, 7, 10 and 20; with -in_pssm or -in_msa: 0, 6 and 7.",
-            "Formats 6, 7, 10 and 20 take",
-        ),
-    ] {
-        let parsed = losat::api::Program::parse(program).unwrap();
-        let help = losat::api::describe(parsed)
-            .parameters
-            .into_iter()
-            .find(|parameter| parameter.flag == "-outfmt")
-            .unwrap_or_else(|| panic!("{program}: no -outfmt"))
-            .help;
-        let text = help.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(text.starts_with("Output format. "), "{program}: {text}");
-        assert!(text.contains(written), "{program}: {text}");
-        assert!(text.contains(fields), "{program}: {text}");
-        assert!(
-            text.contains("a field list, for example -outfmt \"6 qseqid sseqid evalue\"")
-                && text.contains("qaccver saccver pident length mismatch"),
-            "{program}: {text}"
-        );
-        for stale in [
-            "not yet ported",
-            "without custom fields",
-            "Supported formats",
-        ] {
-            assert!(!text.contains(stale), "{program}: {stale:?}");
-        }
-    }
-}
-
 /// The programs' argument errors are NCBI's reader's (its usage, the line of `=` and its two
 /// posts, exit status 1; line RG item K4i-2b) and LOSAT's refusals by name are one line after
 /// `Error: ` (status 1); both end with one line end, so that the shell prompt starts a line of its

@@ -55,10 +55,10 @@ fn the_cli_writes_the_bytes_of_the_web_v1_tblastn_vector() {
             &std::fs::read(dir.join(format!("{name}.{kind}"))).expect(name),
         )
         .into_owned();
-        // ABI v1 returns LOSAT's own parser messages without a line end, as when it was frozen;
-        // the command line writes NCBI's reader's report for them (its usage, the line of `=`
-        // and NCBI's posts, exit status 1).
-        if kind == "err" && expected.last() != Some(&b'\n') {
+        // ABI v1 returns LOSAT's own parser messages (`error: ...`), as when it was frozen; the
+        // command line writes NCBI's reader's report for them (its usage, the line of `=` and
+        // NCBI's posts, exit status 1).
+        if kind == "err" && expected.starts_with(b"error: ") {
             let report = String::from_utf8_lossy(&output.stderr);
             assert_eq!(output.status.code(), Some(1), "{name}: {report}");
             assert!(output.stdout.is_empty(), "{name}: wrote a report");

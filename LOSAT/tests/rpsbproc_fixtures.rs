@@ -742,8 +742,8 @@ fn rpsbproc_refuses_what_it_does_not_give() {
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
 // prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), so does `-version-full` in NCBI's form
 // with LOSAT's values (line RG item E3), `-help` NCBI's help in LOSAT's words, the argument
-// errors are NCBI's reader's (status 1: `-dryrun=1` gives a value to a flag, `--i` is the unknown
-// `-i`; line RG item K4i-2b), and a file name that is not UTF-8 is refused before anything is
+// errors are NCBI's reader's (status 1: `-dryrun=1` is the unknown `dryrun`, as `-dryrun` is not
+// an argument of the reader, `--i` is the unknown `-i`; line RG item K4i-2b), and a file name that is not UTF-8 is refused before anything is
 // written.
 #[test]
 fn rpsbproc_command_line() {
@@ -785,7 +785,7 @@ fn rpsbproc_command_line() {
     let err = String::from_utf8(err).unwrap();
     assert_eq!(status, 1, "{err}");
     assert!(
-        err.ends_with("\nError:  Invalid argument: -dryrun=1\n"),
+        err.ends_with("\nError:  Unknown argument: \"dryrun\"\n"),
         "{err}"
     );
     let (_, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-m", "xx"], None);

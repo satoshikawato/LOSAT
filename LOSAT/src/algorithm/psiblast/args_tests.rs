@@ -245,7 +245,7 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
         argv.extend_from_slice(extra);
         let error = crate::cli::try_parse_from(argv).unwrap_err();
         assert!(
-            error.to_string().contains("cannot be used with"),
+            error.to_string().contains("Incompatible with argument:  `"),
             "{extra:?}"
         );
     }
@@ -305,15 +305,15 @@ fn psiblasts_arguments_that_losat_does_not_run_are_named() {
             "{option}: {error}"
         );
     }
-    // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
+    // `-in_pssm` (PS4a) is an argument: with `-query` it is NCBI's reader's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();
-    assert!(error.contains("cannot be used with"), "{error}");
-    // Arguments that psiblast does not have are unknown, as in NCBI's parser.
+    assert!(error.contains("Incompatible with argument:  `"), "{error}");
+    // Arguments that psiblast does not have are unknown, as in NCBI's reader.
     for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {
         let error = parse(&[option, "1"]).unwrap_err();
         assert!(
-            error.contains("unknown option or argument"),
+            error.contains(&format!("Unknown argument: \"{}\"", &option[1..])),
             "{option}: {error}"
         );
     }

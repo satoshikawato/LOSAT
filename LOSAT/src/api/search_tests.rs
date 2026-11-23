@@ -171,7 +171,8 @@ fn the_alignment_master_options_go_with_the_alignment_input() {
     let ranged = validate(Program::Psiblast, &["-query_loc", "1-10"]).unwrap();
     let error = ranged.command(Inputs::msa(path, &[])).unwrap_err();
     assert!(
-        matches!(&error, Error::Argv(_)) && error.to_string().contains("cannot be used with"),
+        matches!(&error, Error::Argv(_))
+            && error.to_string().contains("Incompatible with argument:  `"),
         "{error}"
     );
     // The other programs have no such options: the parser's message.
@@ -312,7 +313,8 @@ fn a_pssm_query_is_an_input_that_the_search_gives_the_parser() {
         let ranged = validate(program, &["-query_loc", "1-10"]).unwrap();
         let error = ranged.command(Inputs::pssm(path, &[])).unwrap_err();
         assert!(
-            matches!(&error, Error::Argv(_)) && error.to_string().contains("cannot be used with"),
+            matches!(&error, Error::Argv(_))
+                && error.to_string().contains("Incompatible with argument:  `"),
             "{program}: {error}"
         );
     }

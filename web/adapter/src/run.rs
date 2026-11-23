@@ -3542,7 +3542,7 @@ mod tests {
             ];
             assert!(parse(&twice)
                 .unwrap_err()
-                .contains("cannot be used multiple times"));
+                .contains("Argument with this name is defined already: outfmt"));
             assert!(validate(&[
                 program,
                 "-query",

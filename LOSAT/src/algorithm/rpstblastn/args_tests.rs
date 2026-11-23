@@ -196,14 +196,21 @@ fn options_of_later_items_are_refused() {
         .unwrap()
         .into_blastx_args()
         .is_ok());
-    for name in ["html", "remote", "entrez_query", "import_search_strategy"] {
-        let error = parse(&[&format!("-{name}"), "x"]).unwrap_err();
+    // The flags take no value; `-entrez_query` goes with `-remote` (NCBI's reader), and the first
+    // refused name in the words is the one named.
+    for (name, words) in [
+        ("html", &["-html"][..]),
+        ("remote", &["-remote"]),
+        ("entrez_query", &["-entrez_query", "x", "-remote"]),
+        ("import_search_strategy", &["-import_search_strategy", "x"]),
+    ] {
+        let error = parse(words).unwrap_err();
         assert!(
             error.contains(&format!("-{name} is not supported by LOSAT's RPSTBLASTN")),
             "{name}: {error}"
         );
     }
-    // NCBI's options of the other programs: LOSAT's parser (PD exception 1).
+    // NCBI's options of the other programs: NCBI's reader's error.
     for name in [
         "subject",
         "word_size",
@@ -215,7 +222,7 @@ fn options_of_later_items_are_refused() {
         assert!(
             parse(&[&format!("-{name}"), "1"])
                 .unwrap_err()
-                .contains("unknown option"),
+                .contains(&format!("Unknown argument: \"{name}\"")),
             "{name}"
         );
     }

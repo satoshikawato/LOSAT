@@ -84,7 +84,7 @@ fn options_of_later_items_are_refused() {
             .into_blastp_args()
             .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
     }
-    let error = parse(&["-html", "1"]).unwrap_err();
+    let error = parse(&["-html"]).unwrap_err();
     assert!(
         error.contains("-html is not supported by LOSAT's RPSBLAST"),
         "{error}"

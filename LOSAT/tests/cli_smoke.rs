@@ -977,7 +977,9 @@ fn makeblastdb_writes_a_database_and_makedb_is_unknown() {
     // `-help` works, and the top level lists makeblastdb and not makedb.
     let output = run_losat(&["makeblastdb", "-help"]);
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("-dbtype <molecule_type>"));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("\n -dbtype <String, `nucl', `prot'>\n")
+    );
     let top = String::from_utf8_lossy(&run_losat(&["-help"]).stdout).into_owned();
     assert!(
         top.contains("makeblastdb") && !top.contains("makedb"),

@@ -123,10 +123,19 @@ fn ordinary_defaults_and_code32_are_accepted() {
 // defines ID 32 for the TBLASTN-only product decision.
 #[test]
 fn invalid_codes_are_explicit_errors() {
-    for id in ["0", "7", "8", "17", "20", "34", "255", "256", "abc", "-1"] {
+    // NCBI's reader: an integer outside NCBI's set, a word that is not an integer.
+    for id in ["0", "7", "8", "17", "20", "34", "255", "256", "-1"] {
         let error = parse(&["-db_gencode", id]).unwrap_err().to_string();
-        assert!(error.contains("genetic code"), "{id}: {error}");
+        assert!(
+            error.contains("Argument \"db_gencode\". Illegal value, expected values between: "),
+            "{id}: {error}"
+        );
     }
+    let error = parse(&["-db_gencode", "abc"]).unwrap_err().to_string();
+    assert!(
+        error.contains("Argument \"db_gencode\". Argument cannot be converted:  `abc'"),
+        "{error}"
+    );
 }
 
 // NCBI's checks of the options (c++/src/algo/blast/core/blast_options.c BLAST_ValidateOptions, the option
@@ -352,8 +361,11 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
+    // With a database (`-gilist` excludes `-subject` in NCBI's reader).
     for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
-        let error = (parse(extra).unwrap_err()).to_string();
+        let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-db", "db"];
+        argv.extend_from_slice(extra);
+        let error = try_parse_from(argv).unwrap_err().to_string();
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"

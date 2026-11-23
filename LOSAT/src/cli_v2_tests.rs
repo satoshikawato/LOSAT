@@ -63,7 +63,7 @@ fn taxid_options_go_with_a_database_only() {
             assert!(parse_argv(argv).is_ok(), "{program} -db {words:?}");
             let error = (parse(program, words).unwrap_err()).to_string();
             assert!(
-                error.contains("cannot be used with"),
+                error.contains("Incompatible with argument:  `"),
                 "{program} {words:?}: {error}"
             );
         }
@@ -100,8 +100,8 @@ fn taxid_options_go_with_a_database_only() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2309-2314
 // Line DI-8b: `-seqidlist` and `-negative_seqidlist` go with `-db` only, exclude each other,
-// every taxid list and `-no_taxid_expansion` (clap's `conflicts_with`, exit status 2, as the
-// taxid lists do: PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+// every taxid list and `-no_taxid_expansion` (NCBI's argument reader's exclusions, exit status 1,
+// as the taxid lists' are).
 #[test]
 fn seqid_list_options_go_with_a_database_only() {
     let lists: [&[&str]; 2] = [
@@ -115,7 +115,7 @@ fn seqid_list_options_go_with_a_database_only() {
             assert!(parse_argv(argv).is_ok(), "{program} -db {words:?}");
             let error = (parse(program, words).unwrap_err()).to_string();
             assert!(
-                error.contains("cannot be used with"),
+                error.contains("Incompatible with argument:  `"),
                 "{program} {words:?}: {error}"
             );
             for other in [
@@ -1147,7 +1147,7 @@ fn numeric_values_are_validated_before_io() {
     assert!(!args.ungapped);
     assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
     // `-strand` is NCBI's (blast_args.cpp:1953-1955): plus, minus and both are accepted, any
-    // other value is a clap error (LOSAT's rule for argument errors, rc 2).
+    // other value is NCBI's reader's error (exit status 1).
     for (value, want) in [("plus", "plus"), ("minus", "minus"), ("both", "both")] {
         let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand", value])
             .unwrap()
@@ -1704,7 +1704,10 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("tblastx", &["-gilist", "ids.gil"]),
         ("blastp", &["-gilist", "ids.gil"]),
     ] {
-        let error = (parse(program, words).unwrap_err()).to_string();
+        // With a database (`-gilist` excludes `-subject` in NCBI's reader).
+        let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
+        argv.extend(words);
+        let error = (parse_argv(argv).unwrap_err()).to_string();
         assert!(
             error.contains(&format!(
                 "is not supported by LOSAT's {}",
@@ -1719,8 +1722,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // `blastinput::db_mask::DbMaskArgs`)
 // BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
 // PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
-// `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
-// of the M4a-2 survey); neither is refused (`ncbi_app::args::refusal`, series NP, M4a-2b).
+// `-subject_loc` (NCBI's reader's exclusions; probes o04, o05, o06 of the M4a-2 survey); neither
+// is refused (`ncbi_app::args::refusal`, series NP, M4a-2b).
 #[test]
 fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     let masks = |program: &str, words: &[&str]| {
@@ -2104,8 +2107,8 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
     // versions before parsing (`ncbi_version_request_reads_the_word_before_the_arguments`), and
     // so does the Web engine's ABI v2 (line WQA's D14, 2026-11-20); the parser's callers without
     // an application start (the library API) refuse them by name in that place too, instead of
-    // writing a file named "-version" (line RG item E3). `-version=1` is an unknown option, as in NCBI
-    // (`Unknown argument: "version"`, exit status 1; LOSAT's parser error, exception 1).
+    // writing a file named "-version" (line RG item E3). `-version=1` is an unknown option: NCBI's
+    // reader's error (`Unknown argument: "version"`, exit status 1).
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
@@ -2129,8 +2132,9 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
         }
         for word in ["-version=1", "-version-full=1"] {
             let error = parse(program, &[word]).unwrap_err().to_string();
+            let name = word.trim_start_matches('-').trim_end_matches("=1");
             assert!(
-                error.contains(&format!("unknown option or argument '{word}'")),
+                error.contains(&format!("Unknown argument: \"{name}\"")),
                 "{program} {word}: {error}"
             );
         }
@@ -2652,7 +2656,7 @@ fn mt_mode_takes_zero_to_two_and_needs_num_threads() {
                 parse(program, &["-mt_mode", mode, "-num_threads", "2"]).is_ok(),
                 "{program} {mode}"
             );
-            // clap's `requires` is not met by the default of `-num_threads`.
+            // NCBI's reader: `-mt_mode` requires `-num_threads` given (its default does not count).
             let error = parse(program, &["-mt_mode", mode]).unwrap_err().to_string();
             assert!(error.contains("num_threads"), "{program} {mode}: {error}");
         }
@@ -2669,7 +2673,7 @@ fn mt_mode_takes_zero_to_two_and_needs_num_threads() {
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("unknown option or argument"),
+            error.contains("Unknown argument: \"mt_mode\""),
             "{program}: {error}"
         );
     }

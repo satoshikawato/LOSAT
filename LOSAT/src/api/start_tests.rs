@@ -516,23 +516,12 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
         ),
         Err(refused.clone())
     );
-    // `run_to_file`'s file is the parser's `-out`: its usage line names it, as the command line's
-    // does when `-out` is given.
+    // `run_to_file`'s file is the reader's `-out`: NCBI's usage is the same with it.
     let out = dir.join("out.txt");
     assert!(matches!(refused, Error::Argv(_)), "{refused:?}");
-    let refused_out = Error::Argv(
-        refused
-            .to_string()
-            .replace(
-                "Usage: losat blastp -query <PATH> -db <NAME>\n",
-                "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
-            )
-            .into(),
-    );
-    assert_ne!(refused_out, refused);
     assert_eq!(
         run_to_file(&search, database, "6", &out, &mut diagnostics),
-        Err(refused_out)
+        Err(refused.clone())
     );
     assert_eq!(run_batches(&search, database).err(), Some(refused.clone()));
     assert!(diagnostics.is_empty() && !out.exists());

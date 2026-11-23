@@ -269,19 +269,20 @@ impl Diag<'_> {
     /// reader's entry, `read`, and `run_arg_exception`.
     fn report_arg_exception(&mut self, error: &ArgException, backlog: Option<&str>) -> i32 {
         if error.code != "eNoValue" {
-            let to_cerr = matches!(self.target, DiagTarget::Stderr);
-            let usage = short_usage(self.tool);
-            let mut stderr = self.noted();
-            let _ = stderr.write_all(usage.as_bytes());
+            // One write of the usage and the line of `=`: a caller's writer that fails keeps the
+            // whole text (`api::tools`'s record of the diagnostics), as `write!`'s pieces would not.
+            let mut text = short_usage(self.tool);
             // The diagnostics of a `-logfile` go to a stream that is not `cerr`: NCBI then says
             // where they are.
-            if !to_cerr {
-                let _ = writeln!(
-                    stderr,
-                    "Error in command-line arguments. See error logs for more details."
+            if !matches!(self.target, DiagTarget::Stderr) {
+                text.push_str(
+                    "Error in command-line arguments. See error logs for more details.\n",
                 );
             }
-            let _ = write!(stderr, "{}\n\n", "=".repeat(72));
+            text.push_str(&"=".repeat(72));
+            text.push_str("\n\n");
+            let mut stderr = self.noted();
+            let _ = stderr.write_all(text.as_bytes());
             let _ = stderr.flush();
         }
         let messages = error.messages.iter().map(Vec::as_slice);

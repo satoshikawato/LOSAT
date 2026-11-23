@@ -262,7 +262,11 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
             }
             if case.check == "parser" {
                 assert!(output.stdout.is_empty(), "{label}: standard output");
-                assert!(stderr.starts_with("error: "), "{label}: {stderr}");
+                assert!(
+                    stderr.starts_with("USAGE\n")
+                        && stderr.contains(&format!("\n{}\n\n", "=".repeat(72))),
+                    "{label}: {stderr}"
+                );
             } else {
                 let want_out = crate::outfmt11_blastx::expected_losat_bytes(
                     frozen(&case.name, "out").unwrap_or_default(),

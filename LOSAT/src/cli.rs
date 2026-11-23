@@ -139,19 +139,6 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
-/// The `-outfmt` help that every search program shows (`blastn`, `blastp`, `blastx`, `tblastn`,
-/// `tblastx`, `psiblast`, `rpsblast`): the formats the program writes (`written`, from the
-/// README's "Output formats" tables), the ones that take a field list (`fields`), and the
-/// default fields. `note` closes the sentence with what differs for `-in_pssm`, or is empty.
-/// `rpstblastn` shows NCBI's frozen text instead.
-pub(crate) fn outfmt_help(written: &str, fields: &str, note: &str) -> String {
-    format!(
-        "Output format. Written: {written}{note}. Formats {fields} take a field list, for example \
-         -outfmt \"6 qseqid sseqid evalue\"; without one they write qaccver saccver pident length \
-         mismatch gapopen qstart qend sstart send evalue bitscore"
-    )
-}
-
 /// What a program that `main_entry` runs before clap reads the command line (the programs of
 /// `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's argument
 /// reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION line of

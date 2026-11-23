@@ -95,7 +95,7 @@ pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
 /// standard error stream, on which the usage of an argument error is printed.
 pub(crate) struct Diag<'a> {
-    target: DiagTarget,
+    target: &'a DiagTarget,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
@@ -106,8 +106,13 @@ pub(crate) struct Diag<'a> {
 
 impl<'a> Diag<'a> {
     /// The diagnostics of `tool` that go to `target` (`stderr` for `cerr`), with the standard error
-    /// stream `stderr`.
-    pub(crate) fn new(target: DiagTarget, stderr: &'a mut dyn Write, tool: &'static Tool) -> Self {
+    /// stream `stderr`. The caller keeps the target for what the program writes after its
+    /// arguments.
+    pub(crate) fn new(
+        target: &'a DiagTarget,
+        stderr: &'a mut dyn Write,
+        tool: &'static Tool,
+    ) -> Self {
         Diag {
             target,
             stderr,
@@ -115,11 +120,6 @@ impl<'a> Diag<'a> {
             record: None,
             failed: false,
         }
-    }
-
-    /// The target of the diagnostics, for what the program writes after its arguments.
-    pub(crate) fn into_target(self) -> DiagTarget {
-        self.target
     }
 }
 
@@ -479,10 +479,11 @@ fn run_app(
         }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
-    let mut diag = Diag::new(target, err, tool);
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
     // `ApplicationStart::of_process`).
-    match start.write_config_load(&mut diag.target, diag.stderr) {
+    let loaded = start.write_config_load(&mut target, err);
+    let mut diag = Diag::new(&target, err, tool);
+    match loaded {
         Ok(None) => {}
         Ok(Some(status)) => return status,
         Err(reason) => return diag.refuse(&reason),

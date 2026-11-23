@@ -1067,3 +1067,70 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
         }
     }
 }
+
+/// NCBI's frozen file `<program>.<extension>` of `tests/fixtures/syntax_logfile` (the standard
+/// error, `err`, and the file of `-logfile log`, `log`, of NCBI BLAST+ 2.17.0's
+/// `<program> <inputs> -logfile log -bogus 1`; `tests/syntax_cases_cli.rs`), in LOSAT's words.
+fn frozen_logfile_case(program: &str, extension: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/syntax_logfile")
+        .join(format!("{program}.{extension}"));
+    crate::wording::losat_text(&std::fs::read_to_string(path).unwrap()).into_owned()
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112 (cited at
+// `ncbi_app::Diag::report_arg_exception`)
+// An argument error of a call's argv (line RG item K4i-2b round 2, R-H1): the call's start opens
+// the file of `-logfile`, and the reader posts there, as the command line's does (NCBI's case
+// `<program>.log.unk`): the error is what the command line writes to its standard error then, the
+// usage with NCBI's line that points to the error logs, without its last line feeds
+// (`Error::written_argv`), and the file has the posts. `validate`, which opens no file, gives the
+// report as the command line writes it without `-logfile`, its posts included, and makes no file.
+#[test]
+fn an_argument_error_posts_to_the_calls_logfile() {
+    let dir = scratch("argv-logfile");
+    let log = dir.join("log");
+    for program in Program::ALL {
+        let name = program.name();
+        let words = ["-logfile", path_text(&log), "-bogus", "1"];
+        let _ = std::fs::remove_file(&log);
+        let mut diagnostics = Vec::new();
+        let error = match CallStart::new(
+            &Search::unchecked(program, &words),
+            Inputs::new(&[], &[]),
+            &mut diagnostics,
+        ) {
+            Err(Error::Argv(bytes)) => String::from_utf8(bytes).unwrap(),
+            Err(other) => panic!("{name}: {other:?}"),
+            Ok(_) => panic!("{name}: the call started"),
+        };
+        assert_eq!(
+            error,
+            frozen_logfile_case(name, "err").trim_end_matches('\n'),
+            "{name}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            frozen_logfile_case(name, "log"),
+            "{name}"
+        );
+        assert!(diagnostics.is_empty(), "{name}");
+        std::fs::remove_file(&log).unwrap();
+        let Err(Error::Argv(checked)) = validate(program, &words) else {
+            panic!("{name}: validate accepted the argv");
+        };
+        let rule = format!("{}\n\n", "=".repeat(72));
+        let usage = frozen_logfile_case(name, "err")
+            .replace(
+                "Error in command-line arguments. See error logs for more details.\n",
+                "",
+            )
+            .replace(&rule, "");
+        assert_eq!(
+            String::from_utf8(checked).unwrap(),
+            format!("{usage}{rule}{}", frozen_logfile_case(name, "log")).trim_end_matches('\n'),
+            "{name}: validate"
+        );
+        assert!(!log.exists(), "{name}: validate makes no file");
+    }
+}

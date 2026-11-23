@@ -829,6 +829,7 @@ fn help_and_version_words_print_the_command_lines_text() {
                 _ => {
                     let error = losat::web_adapter::try_parse_cli(
                         std::iter::once("losat").chain(words.iter().copied()),
+                        None,
                     )
                     .unwrap_err();
                     match error {

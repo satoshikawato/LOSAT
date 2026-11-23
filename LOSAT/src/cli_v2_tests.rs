@@ -2,6 +2,7 @@
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-207,332-420,838-883,3158-3163
 
 use crate::algorithm::blastp::args::parse_comp_based_stats;
+use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::blastinput::value_parsers::{
     parse_dust_filtering, parse_seg_filtering, DustSpec, SegSpec,
 };
@@ -2203,7 +2204,7 @@ fn toolkit_file_options_need_an_application_start() {
     let library = |program: &str, extra: &[&str]| {
         let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
         argv.extend(extra);
-        crate::cli::try_parse_with_own_start(argv)
+        crate::cli::try_parse_with_own_start(argv, &DiagTarget::Stderr)
     };
     for (program, upper) in [
         ("blastn", "BLASTN"),
@@ -2288,7 +2289,9 @@ fn toolkit_file_options_need_an_application_start() {
         argv
     };
     let makedb = |words: &[&'static str]| try_parse_from(argv(words));
-    let library_makedb = |words: &[&'static str]| crate::cli::try_parse_with_own_start(argv(words));
+    let library_makedb = |words: &[&'static str]| {
+        crate::cli::try_parse_with_own_start(argv(words), &DiagTarget::Stderr)
+    };
     for (words, name) in [
         (&["-conffile", "c.ini"][..], "-conffile"),
         (&["-dryrun"], "-dryrun"),

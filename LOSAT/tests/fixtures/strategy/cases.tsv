@@ -4,8 +4,8 @@
 # pre: text written to {ss} before the run (- = no file). check: ncbi = the strategy file ({ss} after the run,
 # or its absence), standard output, standard error and exit status rc equal NCBI BLAST+ 2.17.0 -num_threads 1
 # (fixtures/strategy/<name>.ss, .out, .err; an absent .out or .err is empty; the run folder's path in NCBI's
-# messages is written as {ENGINE}); parser = NCBI's argument reader refuses (rc 1, its usage on standard error, nothing on standard
-# output) and the file is as NCBI left it (.ss); refuse = LOSAT refuses (rc, standard error contains expect).
+# messages is written as {ENGINE}); parser = NCBI's argument reader refuses (rc 1, its usage and posts on standard error as
+# NCBI wrote them, .err, nothing on standard output) and the file is as NCBI left it (.ss); refuse = LOSAT refuses (rc, standard error contains expect).
 # near:NAME = LOSAT refuses at a query batch (rc, standard error contains expect), and the strategy file and the
 # standard output are NCBI's of the ncbi row NAME, its run of a near input whose reader stops at that batch (line WQA
 # D10 round 5, 2026-11-20: two queries with one id under -parse_deflines write no request of the refused batch).

@@ -31,7 +31,12 @@ use super::id::DebugBytes;
 ///   the command line writes under `Caused by:`, is the error and its causes joined by `: `
 ///   (anyhow's alternate form).
 /// - [`Error::Argv`] of NCBI's argument reader (an argument error: NCBI's short usage, the line of
-///   `=` and NCBI's posts) is the command line's standard error without its last newline.
+///   `=` and NCBI's posts) is the command line's standard error without its last newline. With
+///   `-logfile`, a call's start opens the file and the reader posts there, as the command line's:
+///   the error is then the usage, NCBI's line `Error in command-line arguments. See error logs for
+///   more details.` and the line of `=`. [`validate`](super::validate), which makes no start and
+///   opens no file, gives the report as the command line writes it without `-logfile`, its posts
+///   included.
 /// - The other messages, NCBI's too, are the command line's text without its last newlines:
 ///   [`Error::Input`] (the reader's, such as that of an input that does not start with a
 ///   definition line); the error of a tool ([`run_makeblastdb`](super::run_makeblastdb) and the
@@ -115,9 +120,10 @@ impl Error {
     }
 
     /// The error of an argv that NCBI's reader and LOSAT's refusals end (`cli::ArgvError`): the
-    /// report of an argument error as the command line writes it to its standard error
-    /// (`written_argv`), LOSAT's refusal without `Error: ` and the newline, or the help text that
-    /// the command line prints in place of a run.
+    /// report of an argument error as the command line writes it to its standard error with the
+    /// reader's `-logfile` target (`written_argv`; `validate`'s target is `cerr`), LOSAT's refusal
+    /// without `Error: ` and the newline, or the help text that the command line prints in place of
+    /// a run.
     pub(crate) fn of_argv(error: crate::cli::ArgvError) -> Self {
         match error {
             crate::cli::ArgvError::Report(text) => Error::written_argv(text),

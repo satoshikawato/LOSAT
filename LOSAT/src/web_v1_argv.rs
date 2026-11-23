@@ -167,16 +167,16 @@ fn read(command: clap::Command, argv: Vec<OsString>) -> Result<Commands, clap::E
         .unwrap_or_default()
         .to_string();
     let words = argv.get(2..).unwrap_or(&[]);
+    // The refusals name the program as its other refusals do (`Tool::refusal_name`).
+    let tool =
+        crate::cli::reader::tool(&program).expect("v1 reads the words of one of its programs");
     let words = match preparse(words) {
         Preparsed::Version(request) => {
-            return Err(raw(crate::cli::version_word_refusal(
-                &program,
-                request.word(),
-            )))
+            return Err(raw(crate::cli::version_word_refusal(tool, request.word())))
         }
         Preparsed::Words { words: read, .. } => {
             if let Some(word) = crate::cli::toolkit_file_word(words, &program) {
-                return Err(raw(crate::cli::toolkit_file_word_refusal(&program, word)));
+                return Err(raw(crate::cli::toolkit_file_word_refusal(tool, word)));
             }
             read
         }

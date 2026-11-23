@@ -5,15 +5,19 @@
 //! reader that the command line, the library API and LOSAT Web share (`reader::read_argv`) holds
 //! NCBI's verdict on each: an argument error is NCBI's report byte for byte in LOSAT's words (the
 //! short usage, the line of `=`, NCBI's posts), a help word prints that help, and the words that
-//! NCBI's reader takes are taken. The library's start (`Caller::OwnStart`) writes a report as
-//! without `-logfile` (NCBI's posts are then the log's) and refuses the versions, which the
-//! command line prints before the reader.
+//! NCBI's reader takes are taken. The cases are read as the library's start reads them
+//! (`Caller::OwnStart`) with `cerr` as the target of the posts: a report is the one that NCBI
+//! writes without `-logfile` (with `-logfile`, NCBI's posts are the log's and its standard error
+//! points to them: `tests/syntax_cases_cli.rs` runs those cases through the command line's entry,
+//! and `api::start`'s tests through a library call), and the versions, which the command line
+//! prints before the reader (`tests/syntax_cases_cli.rs`), are refused.
 
 use std::ffi::OsString;
 use std::io::Read;
 
 use super::reader::{read_argv, ArgvError, Caller};
 use super::Commands;
+use crate::blastinput::ncbi_environment::DiagTarget;
 
 /// One frozen case: NCBI's verdict (`kind`), its posts (`report`) and the words after the
 /// program's name.
@@ -76,7 +80,7 @@ fn read(program: &str, words: &[&str]) -> Result<Commands, ArgvError> {
         .chain(words)
         .map(OsString::from)
         .collect();
-    read_argv(&argv, Caller::OwnStart)
+    read_argv(&argv, Caller::OwnStart, &DiagTarget::Stderr)
 }
 
 fn printed(program: &str, word: &str) -> String {
@@ -122,7 +126,13 @@ fn the_reader_gives_ncbis_verdict_on_every_frozen_syntax_case() {
             ("h" | "help" | "help-full", Err(ArgvError::Printed(text))) => {
                 *text == printed(case.program, &format!("-{}", case.kind))
             }
-            ("version", Err(ArgvError::Refused(text))) => text.contains("-version"),
+            ("version", Err(ArgvError::Refused(text))) => {
+                *text
+                    == super::version_word_refusal(
+                        super::reader::tool(case.program).unwrap(),
+                        "-version",
+                    )
+            }
             ("accepted", Ok(_)) => true,
             _ => false,
         };

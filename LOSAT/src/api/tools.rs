@@ -224,8 +224,12 @@ pub fn run_makembindex(
 /// (`-in -`, and without `-in`), so a database can be built from FASTA in memory. What the command
 /// line writes to standard output goes to `output`, what it writes to standard error to
 /// `diagnostics`. A failure is an error whose message is that text without its last newlines; an
-/// argv that the parser refuses is `Error::Argv`, with the parser's message in the diagnostics too.
-/// The call runs NCBI's application start, as the command line does:
+/// argv that NCBI's argument reader refuses is `Error::Argv`, with the reader's report in the
+/// diagnostics too (with `-logfile`, the report's posts go to its file and the diagnostics say
+/// where they are, as on the command line), and so is LOSAT's refusal of an NCBI option that it
+/// does not run. A help word (`-h`, `-help`, `-help-full`) writes the help to `output` and returns
+/// `Ok(())`, as the command line prints it and exits with status 0, and as the library's other
+/// tools do. The call runs NCBI's application start, as the command line does:
 /// the file of `-logfile` gets its messages, the file of `-conffile` is loaded, the versions are
 /// printed to `output`, and `-dryrun` ends the call after the arguments and the settings.
 pub fn run_makeblastdb(
@@ -267,7 +271,7 @@ pub fn run_makeblastdb(
         Preparsed::Version(_) => unreachable!("the versions are printed above"),
     };
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-    let mut diag = crate::ncbi_app::Diag::new(opened.target, &mut recorded, tool);
+    let mut diag = crate::ncbi_app::Diag::new(&opened.target, &mut recorded, tool);
     let read = crate::ncbi_app::read(tool, &words, output, &mut diag, None);
     drop(diag);
     let args = match read {

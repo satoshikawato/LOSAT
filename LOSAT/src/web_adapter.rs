@@ -38,14 +38,24 @@ pub use crate::ncbi_app::args::{choices, default_value, genetic_codes, string_va
 /// included: the run prints their text (`ArgvError::Printed`; line WQA's D14, 2026-11-20). The
 /// versions are printed by the start (`CallerStart::version`) and never reach the reader.
 ///
+/// The posts of an argument error go to the `-logfile` target of the run's start `started`
+/// (`CallerStart::target`: the file of `-logfile`, which the run hands over with
+/// `CallerStart::finish`), and the error's report is what the command line writes to its standard
+/// error then: NCBI's usage, its line that points to the error logs, the line of `=`. Without a
+/// start (an argv read on its own: `None`) the posts are the report's, as without `-logfile`.
+///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
 /// other clap type.
-pub fn try_parse_cli<I, S>(argv: I) -> Result<Cli, ArgvError>
+pub fn try_parse_cli<I, S>(argv: I, started: Option<&CallerStart>) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_with_printing_start(argv)
+    let target = started.map_or(
+        &crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+        CallerStart::target,
+    );
+    crate::cli::try_parse_with_printing_start(argv, target)
 }
 
 /// The message of an argv that the reader or LOSAT's refusals end (`try_parse_cli`), as LOSAT Web

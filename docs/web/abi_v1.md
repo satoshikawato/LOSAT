@@ -250,8 +250,9 @@ same request.
   `BLASTDB` for `taxdb.bti`, LOSAT's switches) are read from the module's environment
   as the CLI reads them; LOSAT Web, which calls ABI v2, gives the module an empty
   environment (`web/packages/losat/src/infra/reactor/wasi.ts`), and a host of v1 gives its own. A run that succeeds returns what the CLI writes to standard
-  output. A run that fails returns only the error, which is what the CLI writes to
-  standard error for its parser's errors (`cli::render_message`) and NCBI's
+  output. A run that fails returns only the error: for an argument error, v1's frozen text
+  (`LOSAT/src/web_v1_argv.rs` `render`, the text that the CLI wrote before line RG item K4i-2b;
+  see the frozen texts above), and NCBI's messages as the CLI writes them to standard error
   (`BLAST query/options error: ...`, `BLAST engine error: ...`); for LOSAT's own errors
   the CLI writes `Error: <message>` with a `Caused by:` list, and the module returns the
   message and its causes joined by `: ` (`engine_error`), as for the other programs.

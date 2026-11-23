@@ -1,5 +1,6 @@
 //! Public CLI v2 boundary. Clap's double-dash representation is internal only.
 
+use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::ncbi_app::args::Refusal;
 use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
@@ -408,44 +409,50 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    read_cli(argv, reader::Caller::NoStart)
+    read_cli(argv, reader::Caller::NoStart, &DiagTarget::Stderr)
 }
 
 /// `try_parse_from` for a caller whose calls run an NCBI application start of their own and return
 /// reports: the library API (`api::search`). `-logfile`, `-conffile` and `-dryrun` are the
-/// start's; the versions and `-xmlhelp`, whose texts the library has no place for, are refused
-/// (`version_word_refusal`, `xml_help_refusal`).
-pub(crate) fn try_parse_with_own_start<I, S>(argv: I) -> Result<Cli, ArgvError>
+/// start's, whose `-logfile` target (`target`) takes the posts of an argument error, as the
+/// command line's; the versions and `-xmlhelp`, whose texts the library has no place for, are
+/// refused (`version_word_refusal`, `xml_help_refusal`).
+pub(crate) fn try_parse_with_own_start<I, S>(argv: I, target: &DiagTarget) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    read_cli(argv, reader::Caller::OwnStart)
+    read_cli(argv, reader::Caller::OwnStart, target)
 }
 
 /// `try_parse_from` for LOSAT Web's ABI v2, whose runs make their own NCBI application start
 /// (`web_adapter::start_run`) and give the host the text that the command line prints in place of
 /// a run (stream 11; line WQA's D14, 2026-11-20): `-logfile`, `-conffile` and `-dryrun` are the
-/// start's, and `-xmlhelp` prints the XML, as on the command line (`ArgvError::Printed`). The
-/// versions are printed before the arguments are read (`ncbi_version_request`,
+/// start's, whose `-logfile` target (`target`) takes the posts of an argument error, as the
+/// command line's, and `-xmlhelp` prints the XML, as on the command line (`ArgvError::Printed`).
+/// The versions are printed before the arguments are read (`ncbi_version_request`,
 /// `api::start::CallerStart::version`), so a version word that reaches this reader is refused
 /// (`version_word_refusal`).
-pub(crate) fn try_parse_with_printing_start<I, S>(argv: I) -> Result<Cli, ArgvError>
+pub(crate) fn try_parse_with_printing_start<I, S>(
+    argv: I,
+    target: &DiagTarget,
+) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    read_cli(argv, reader::Caller::PrintingStart)
+    read_cli(argv, reader::Caller::PrintingStart, target)
 }
 
-/// `reader::read_argv` of `argv` for `caller`, as `Cli`.
-fn read_cli<I, S>(argv: I, caller: reader::Caller) -> Result<Cli, ArgvError>
+/// `reader::read_argv` of `argv` for `caller`, with the posts of an argument error going to
+/// `target`, as `Cli`.
+fn read_cli<I, S>(argv: I, caller: reader::Caller, target: &DiagTarget) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
     let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    reader::read_argv(&argv, caller).map(|command| Cli { command })
+    reader::read_argv(&argv, caller, target).map(|command| Cli { command })
 }
 
 /// What clap's top level makes of `argv` (`losat <words>`) whose first word names no program on
@@ -608,11 +615,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 // (`api::start`) and of each run of LOSAT Web's ABI v2 (`web_adapter::start_run`) reads `-logfile`
 // and `-conffile` before the arguments, and each ends a `-dryrun` after them; ABI v1 runs none, so
 // it does not take them (line RG items E1w, E1w-3a).
-/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
-/// `program` when the reader's caller runs no application start (`reader::Caller::NoStart`).
-pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
+/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in the
+/// program of `tool` (named as its other refusals name it, `Tool::refusal_name`) when the reader's
+/// caller runs no application start (`reader::Caller::NoStart`).
+pub(crate) fn toolkit_file_word_refusal(tool: &crate::ncbi_app::Tool, word: &str) -> String {
     let name = toolkit_option_name(word);
-    let shown = refusal_program_name(program);
+    let (program, shown) = (tool.program, tool.refusal_name);
     let places = match library_part(program) {
         LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
             "the command line, in the library API and in the Web engine's ABI v2"
@@ -663,12 +671,13 @@ fn toolkit_option_name(word: &str) -> &str {
 // tools print it to their output, `ncbi_app::run_with`, `api::run_makeblastdb`), nor has the Web
 // engine's ABI v1. A run of the Web engine's ABI v2 prints it on its stream of the command line's
 // standard output (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
-/// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
-/// the reader's caller prints no version: the library API of the search programs and the Web
-/// engine's ABI v1 (`reader::read_argv`).
-pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
+/// LOSAT's refusal of the version word `word` (`-version` or a full version) in the program of
+/// `tool` (named as its other refusals name it, `Tool::refusal_name`) where the reader's caller
+/// prints no version: the library API of the search programs and the Web engine's ABI v1
+/// (`reader::read_argv`).
+pub(crate) fn version_word_refusal(tool: &crate::ncbi_app::Tool, word: &str) -> String {
     let name = toolkit_option_name(word);
-    let shown = refusal_program_name(program);
+    let (program, shown) = (tool.program, tool.refusal_name);
     let (places, refusers) = match library_part(program) {
         LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
             ("the command line and in LOSAT Web", "the library API does")
@@ -685,15 +694,6 @@ pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
     )
 }
 
-/// `program` as the refusals of the toolkit's words name it: the BLAST programs in capitals,
-/// makeblastdb as its other refusals do.
-fn refusal_program_name(program: &str) -> String {
-    match program {
-        "makeblastdb" => program.to_string(),
-        _ => program.to_ascii_uppercase(),
-    }
-}
-
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
 // (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
 // E2x-1, the Owner's choice of 2026-11-13). The command line's entries reach the XML
@@ -702,7 +702,7 @@ fn refusal_program_name(program: &str) -> String {
 // the Owner's choice of 2026-11-20, which takes the XML into the Web engine where E2x-1 and E2x-2
 // left it out); the library and the Web engine's ABI v1 refuse it.
 /// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
-/// Web engine's ABI v1 of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
+/// Web engine's ABI v1 of `shown` (`ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {
     let web = WEB_V2_PROGRAMS
         .iter()

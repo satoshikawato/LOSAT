@@ -42,7 +42,7 @@
 - 検索の入口は program ごとの `run_local(args, query_records, subject_records, outputs)` で、blastn（`blast_engine/run.rs`）、blastp（`blast_engine.rs`。query / subject のラベルが 2 つ余分）、tblastn（`tblastn_app.rs`。`-db` を断る: Web のホストにはファイルが無い）、tblastx（`blast_engine/run_impl.rs`）の 4 つにある。**blastx には無い**: 入口は `native::run`（CLI）と ABI v1 用の `web::run_pair`（`pub(crate)`）だけで、ABI v2 も blastx を断っている（`abi_v2.md` の冒頭、adapter `run.rs`）。（2026-11-05 注: これは `4b2588e01` の時点の記録。dev では `fcbde1359`（2026-11-02）から blastx にも `run_local` がある（`algorithm/blastx/local.rs`）。§9）
 - `args` は clap 派生の `BlastnArgs` 等。`records` は **LOSAT 自前の** `blastinput::fasta_reader::FastaRecord`（`local_id`、`title: Vec<u8>`、`sequence`、`warnings`、`source`）で、reader は `FastaInputSource::from_bytes(bytes, ReaderConfig::query / subject(...))`。CLI と adapter（`store.rs`）が同じ reader を使う。rust-bio（`bio`）は 2026-11-05 に依存から外した（計画の DW-48）。
 - 結果は返り値ではなく、`ReportOutputs` の writer（outfmt ごと）と `FormatObserver`（HSP の位置）と `hits` callback（`PairwiseHit`）に流れる。1 回の `run_local` の outfmt は同じ検索条件でなければならず（blastp は違うと断る）、adapter は hit list の大きさが違う outfmt を `search_groups`（`run.rs`）で別の検索に分けている。
-- `cli` モジュール: `Cli` / `Commands`（blastx、blastn、blastp、tblastx、tblastn、psiblast、makedb の 7 つ。`blastdbcmd` は `Commands` の外で `main.rs` が扱う）、`try_parse_from`、`render_message`、`ncbi_version_request`、`exit_on_native_error`（`main.rs` 以外で `process::exit` を呼ぶ唯一の場所）、`report_standard_output`、`ReportStream`、`NativeError`、`inaccessible`、`command_line_bytes`。
+- `cli` モジュール: `Cli` / `Commands`（blastx、blastn、blastp、tblastx、tblastn、psiblast、makedb の 7 つ。`blastdbcmd` は `Commands` の外で `main.rs` が扱う）、`try_parse_from`、`ncbi_version_request`、`exit_on_native_error`（`main.rs` 以外で `process::exit` を呼ぶ唯一の場所）、`report_standard_output`、`ReportStream`、`NativeError`、`inaccessible`、`command_line_bytes`。
 
 ### 1.3 利用者
 
@@ -582,7 +582,7 @@ CLI は query を batch ごとに読む（`CBlastInput::GetNextSeqBatch`、`blas
 
 | 項目 | 形 |
 |---|---|
-| 引数の誤り | `Error::Argv`（Python は `ArgumentError`）。`message()` は CLI が標準エラーに書くものそのまま（`cli.stderr == [error.message(), b"\n"]`）：NCBI の短い usage、`=` 72 個の行、空行、`Error: <message>` と `Error:  <message>`（2 つ目は NCBI の `(CArgException::eX) ` を除く。PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 例外 12）。CLI の終了状態は 1（clap の時は 2） |
+| 引数の誤り | `Error::Argv`（Python は `ArgumentError`）。`message()` は CLI が標準エラーに書くものそのまま（`cli.stderr == [error.message(), b"\n"]`）：NCBI の短い usage、`=` 72 個の行、空行、`Error: <message>` と `Error:  <message>`（2 つ目は NCBI の `(CArgException::eX) ` を除く。PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 例外 12）。`-logfile` のある呼び出しでは CLI と同じく usage、`Error in command-line arguments. See error logs for more details.`、`=` の行が誤りで、2 つの post は `-logfile` の file に書く。`validate` は file を開かないので、`-logfile` の無い CLI の形（post を含む）を返す（K4i-2b round 2）。CLI の終了状態は 1（clap の時は 2） |
 | 断り | LOSAT が走らせない NCBI の option は、NCBI の読み手が命令行を受け取った後で `the NCBI BLAST+ option -NAME is not supported by LOSAT's PROGRAM`（理由があれば ` (why)`）。`Error::Argv` で、文は `Error: ` を除いたもの |
 | `describe` | choices は NCBI の引数の表（flag に choices は無い）、既定値は NCBI の XML の `<default>`（blastx・tblastx の `-evalue` は既定なし。help は `[default: 10]`）、`-template_type`・`-template_length` の choices は describe から。help・takes_value・引数の一覧は clap のまま（K4i-3 まで） |
 | Web | ABI v2 の検証の文は CLI の標準エラーの bytes（usage、`=` 72 個の行、post）か断りの文。form は post が挙げる欄に印を付ける。ABI v1（凍結）は自分の parser と文言のまま |

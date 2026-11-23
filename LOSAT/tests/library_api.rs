@@ -18,8 +18,9 @@ use temp_support::TempPath;
 
 use losat::api::{
     describe, read_fasta, read_input_file, read_inputs, run, run_batches, run_blastdbcmd,
-    run_collect, run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord,
-    HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
+    run_collect, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,
+    run_segmasker, run_to_file, run_windowmasker, validate, Error, FastaRecord, HspRecord, Inputs,
+    Outcome, Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -3667,4 +3668,65 @@ fn a_start_that_ends_the_program_is_its_text_without_the_last_newline() {
     assert!(matches!(error, Error::Search(_)), "{error:?}");
     assert!(diagnostics.is_empty());
     assert_eq!(cli.stderr, [error.message(), b"\n"].concat(), "{error:?}");
+}
+
+/// A tool of the library (`losat::api::run_<tool>`).
+type ToolCall = fn(
+    &[&str],
+    &mut dyn std::io::Read,
+    &mut dyn std::io::Write,
+    &mut dyn std::io::Write,
+) -> Result<(), Error>;
+
+// One rule for a help word in the library's tools (line RG item K4i-2b round 2, R-M1): each writes
+// the help that the command line prints to its output and returns `Ok`, as the command line exits
+// with status 0, makeblastdb included (it returned the help as `Error::Argv` before NCBI's reader
+// read its arguments). A search has no output for it: `validate` gives the help as `Error::Argv`.
+#[test]
+fn a_help_word_is_the_tools_output_and_the_searchs_error() {
+    let tools: [(&str, ToolCall); 7] = [
+        ("makeblastdb", run_makeblastdb),
+        ("blastdbcmd", run_blastdbcmd),
+        ("dustmasker", run_dustmasker),
+        ("segmasker", run_segmasker),
+        ("windowmasker", run_windowmasker),
+        ("convert2blastmask", run_convert2blastmask),
+        ("makembindex", run_makembindex),
+    ];
+    for (name, tool) in tools {
+        for word in ["-h", "-help"] {
+            let cli = command(env!("CARGO_BIN_EXE_losat"))
+                .args([name, word])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap();
+            assert_eq!(cli.status.code(), Some(0), "{name} {word}");
+            assert!(!cli.stdout.is_empty(), "{name} {word}");
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            tool(
+                &[word],
+                &mut std::io::empty(),
+                &mut output,
+                &mut diagnostics,
+            )
+            .unwrap();
+            assert_eq!(
+                (output, diagnostics),
+                (cli.stdout, cli.stderr),
+                "{name} {word}"
+            );
+        }
+    }
+    for word in ["-h", "-help"] {
+        let cli = command(env!("CARGO_BIN_EXE_losat"))
+            .args(["blastp", word])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(cli.status.code(), Some(0), "blastp {word}");
+        match validate(Program::Blastp, &[word]) {
+            Err(Error::Argv(help)) => assert_eq!(help, cli.stdout, "blastp {word}"),
+            other => panic!("blastp {word}: {other:?}"),
+        }
+    }
 }

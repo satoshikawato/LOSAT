@@ -662,3 +662,48 @@ fn a_deferred_program_is_built_with_its_arguments() {
         );
     }
 }
+
+// The words of the top level (`losat` without a program: `top_level_error`, clap's): the reader
+// gives what the command line prints there, `losat --version`'s version on the standard output
+// (exit status 0) and the error of a word that names no program on its standard error (exit status
+// 2), `help` too (the top level has no `help` subcommand). One case each of line RG item K4i-2b's
+// review (T-L4), with the command line's bytes of the same commit.
+#[test]
+fn the_reader_reads_the_top_levels_words_as_the_command_line() {
+    let read = |words: &[&str]| {
+        let argv: Vec<&str> = std::iter::once("losat")
+            .chain(words.iter().copied())
+            .collect();
+        let error = try_parse_from(argv).map(|_| ()).unwrap_err();
+        let code = top_level_error(
+            &std::iter::once("losat")
+                .chain(words.iter().copied())
+                .map(OsString::from)
+                .collect::<Vec<_>>(),
+        )
+        .exit_code();
+        (error, code)
+    };
+    assert_eq!(
+        read(&["--version"]),
+        (
+            ArgvError::Printed(format!("losat {}\n", env!("CARGO_PKG_VERSION"))),
+            0
+        )
+    );
+    for word in ["help", "nosuch"] {
+        assert_eq!(
+            read(&[word, "blastp"]),
+            (
+                ArgvError::Report(
+                    format!(
+                        "error: unknown option or argument '{word}'; use -help to list the options\n"
+                    )
+                    .into_bytes()
+                ),
+                2
+            ),
+            "{word}"
+        );
+    }
+}

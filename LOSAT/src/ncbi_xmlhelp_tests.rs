@@ -2,6 +2,7 @@
 //! refuses by name, against the readers themselves.
 
 use super::*;
+use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, ArgvError};
 use crate::ncbi_app::args::{refusal, Refusal};
 use std::ffi::OsString;
@@ -316,7 +317,7 @@ fn the_web_engine_prints_the_command_lines_help() {
     for program in WEB_V2_PROGRAMS {
         let web = |words: &[&str]| {
             let argv = ["losat", program].into_iter().chain(words.iter().copied());
-            try_parse_with_printing_start(argv).map(|_| ())
+            try_parse_with_printing_start(argv, &DiagTarget::Stderr).map(|_| ())
         };
         let xml = web(&["-evalue", "1", "-xmlhelp", "-bogus"]).unwrap_err();
         assert_eq!(

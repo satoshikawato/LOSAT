@@ -222,7 +222,7 @@ fn run_main_entry() -> Result<()> {
         }
     };
     let mut stderr = std::io::stderr();
-    let mut diag = crate::ncbi_app::Diag::new(target, &mut stderr, tool);
+    let mut diag = crate::ncbi_app::Diag::new(&target, &mut stderr, tool);
     let read = crate::ncbi_app::read(
         tool,
         &words,
@@ -235,7 +235,6 @@ fn run_main_entry() -> Result<()> {
         Err(crate::ncbi_app::ReadEnd::Exit(status)) => std::process::exit(status),
         Err(crate::ncbi_app::ReadEnd::Refused(reason)) => std::process::exit(diag.refuse(&reason)),
     };
-    let target = diag.into_target();
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:424-431, 1035-1041
     // `-dryrun` (`ncbi_environment::preparse`): the arguments have passed their definitions (the

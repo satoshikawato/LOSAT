@@ -234,11 +234,12 @@ export class FakeEngine implements EngineGateway {
 /**
  * The engine's argument error for a word that the fake does not read, in its form: a short usage,
  * a line of 72 `=`, an empty line and the two posts (the second with two spaces after `Error:`).
- * An option word is `Unknown argument` without its first dash; a word that is not one is a
- * positional argument, of which the programs take none.
+ * An option word is `Unknown argument` without its first dash and without a value joined by `=`
+ * (`-foo=3` is `"foo"`, as NCBI's reader splits the word at its first `=`); a word that is not one
+ * is a positional argument, of which the programs take none.
  */
 function unknownArgument(program: ProgramId, word: string): string {
-  const post = word.startsWith('-') ? `Unknown argument: "${word.slice(1)}"` : `Too many positional arguments (1), the offending value: ${word}`;
+  const post = word.startsWith('-') ? `Unknown argument: "${word.slice(1).split('=')[0]!}"` : `Too many positional arguments (1), the offending value: ${word}`;
   return [
     'USAGE',
     `  ${program} [-h] [-help] [-query input_file] [-subject subject_input_file] [-out output_file]`,

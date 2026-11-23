@@ -297,11 +297,18 @@ pub(crate) enum Caller {
 
 /// Reads `argv` (`losat <program> <words>`) as the command line reads it, for a caller other than
 /// the command line's entry (`Caller`): the toolkit's words, NCBI's reader of the program (its
-/// texts in memory: the help, or the report of an argument error as the command line writes it
-/// without `-logfile`), then, unless the argv is a dry run, LOSAT's refusals
-/// (`refusal_after_read`), then clap's conversion (`convert`). An argv that names no program on
-/// this reader is read by the top level (`top_level_error`).
-pub(crate) fn read_argv(argv: &[OsString], caller: Caller) -> Result<Commands, ArgvError> {
+/// texts in memory: the help, or the report of an argument error, whose posts go to `target`, the
+/// caller's start's `-logfile` target, as the command line's go to its own: `ArgvError::Report`
+/// holds what the command line writes to its standard error, with NCBI's line that points to the
+/// error logs when the target is not `cerr`), then, unless the argv is a dry run, LOSAT's refusals
+/// (`refusal_after_read`), then clap's conversion (`convert`). A caller without a start
+/// (`Caller::NoStart`) gives `cerr` (`DiagTarget::Stderr`): the posts are then the report's. An
+/// argv that names no program on this reader is read by the top level (`top_level_error`).
+pub(crate) fn read_argv(
+    argv: &[OsString],
+    caller: Caller,
+    target: &DiagTarget,
+) -> Result<Commands, ArgvError> {
     let Some(tool) = argv.get(1).and_then(|word| word.to_str()).and_then(tool) else {
         let error = super::top_level_error(argv);
         return Err(match error.use_stderr() {
@@ -313,7 +320,7 @@ pub(crate) fn read_argv(argv: &[OsString], caller: Caller) -> Result<Commands, A
     let (words, dry_run) = match preparse(words) {
         Preparsed::Version(request) => {
             return Err(ArgvError::Refused(super::version_word_refusal(
-                tool.program,
+                tool,
                 request.word(),
             )))
         }
@@ -325,8 +332,7 @@ pub(crate) fn read_argv(argv: &[OsString], caller: Caller) -> Result<Commands, A
             if caller == Caller::NoStart {
                 if let Some(word) = super::toolkit_file_word(words, tool.program) {
                     return Err(ArgvError::Refused(super::toolkit_file_word_refusal(
-                        tool.program,
-                        word,
+                        tool, word,
                     )));
                 }
             }
@@ -336,7 +342,7 @@ pub(crate) fn read_argv(argv: &[OsString], caller: Caller) -> Result<Commands, A
     };
     let mut out = Vec::new();
     let mut stderr = Vec::new();
-    let mut diag = Diag::new(DiagTarget::Stderr, &mut stderr, tool);
+    let mut diag = Diag::new(target, &mut stderr, tool);
     let xml_help = match caller {
         Caller::PrintingStart => Some(super::xml_help_text as fn(&str) -> Option<String>),
         Caller::NoStart | Caller::OwnStart => None,

@@ -45,6 +45,28 @@ fn task_takes_ncbis_tasks_and_the_help_names_them() {
             assert!(help.contains(task.as_str()), "{help}");
         }
     }
+    // NCBI BLAST+ 2.17.0 blastn `-task <name>` of a name that is not NCBI's (frozen on the
+    // workstation with `env -i`, line RG item K4i-2b round 2): the constraint's error, NCBI's posts in LOSAT's words; the case of the name counts.
+    for other in ["vecscreen", "MEGABLAST", "blastn-fast"] {
+        let argv = [
+            "losat", "blastn", "-query", "q.fa", "-subject", "s.fa", "-task", other,
+        ];
+        let Err(crate::cli::ArgvError::Report(bytes)) = crate::cli::try_parse_from(argv) else {
+            panic!("{other}: not NCBI's argument error");
+        };
+        let text = String::from_utf8(bytes).unwrap();
+        let line = format!(
+            "Argument \"task\". Illegal value, expected Permissible values: 'blastn' 'blastn-short' 'dc-megablast' 'megablast' 'rmblastn' :  `{other}'"
+        );
+        let ncbi = format!("Error: {line}\nError:  (CArgException::eConstraint) {line}\n");
+        assert_eq!(
+            text.split_once(&format!("{}\n\n", "=".repeat(72)))
+                .unwrap()
+                .1,
+            crate::wording::losat_text(&ncbi),
+            "{other}"
+        );
+    }
 }
 
 // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is true,

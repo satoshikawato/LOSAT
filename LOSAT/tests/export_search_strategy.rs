@@ -260,47 +260,41 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                     crate::outfmt11_blastx::first_difference(written, want)
                 );
             }
-            if case.check == "parser" {
-                assert!(output.stdout.is_empty(), "{label}: standard output");
-                assert!(
-                    stderr.starts_with("USAGE\n")
-                        && stderr.contains(&format!("\n{}\n\n", "=".repeat(72))),
-                    "{label}: {stderr}"
-                );
-            } else {
-                let want_out = crate::outfmt11_blastx::expected_losat_bytes(
-                    frozen(&case.name, "out").unwrap_or_default(),
-                );
-                assert!(
-                    output.stdout == want_out,
-                    "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
-                    output.stdout.len(),
-                    want_out.len(),
-                    crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
-                );
-                let engine = engine();
-                let rps = dir.join("rpsdb");
-                let mut stderr = stderr;
-                for form in [std::fs::canonicalize(&rps).unwrap_or_default(), rps] {
-                    if !form.as_os_str().is_empty() {
-                        stderr = stderr.replace(form.to_str().unwrap(), "{RPS}");
-                    }
+            // NCBI's bytes on both streams; a `parser` case's are NCBI's argument reader's (its
+            // usage and posts on the standard error, nothing on the standard output: line RG item
+            // K4i-2b round 2, frozen on the workstation with NCBI BLAST+ 2.17.0).
+            let want_out = crate::outfmt11_blastx::expected_losat_bytes(
+                frozen(&case.name, "out").unwrap_or_default(),
+            );
+            assert!(
+                output.stdout == want_out,
+                "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
+                output.stdout.len(),
+                want_out.len(),
+                crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
+            );
+            let engine = engine();
+            let rps = dir.join("rpsdb");
+            let mut stderr = stderr;
+            for form in [std::fs::canonicalize(&rps).unwrap_or_default(), rps] {
+                if !form.as_os_str().is_empty() {
+                    stderr = stderr.replace(form.to_str().unwrap(), "{RPS}");
                 }
-                let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
-                let stderr = if cfg!(windows) {
-                    unix_separators(&stderr)
-                } else {
-                    stderr
-                };
-                let want_err = crate::outfmt11_blastx::expected_losat_bytes(
-                    frozen(&case.name, "err").unwrap_or_default(),
-                );
-                assert_eq!(
-                    stderr,
-                    String::from_utf8_lossy(&want_err),
-                    "{label}: stderr"
-                );
             }
+            let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
+            let stderr = if cfg!(windows) {
+                unix_separators(&stderr)
+            } else {
+                stderr
+            };
+            let want_err = crate::outfmt11_blastx::expected_losat_bytes(
+                frozen(&case.name, "err").unwrap_or_default(),
+            );
+            assert_eq!(
+                stderr,
+                String::from_utf8_lossy(&want_err),
+                "{label}: stderr"
+            );
         }
         "refuse" => {
             assert!(output.stdout.is_empty(), "{label}: standard output");

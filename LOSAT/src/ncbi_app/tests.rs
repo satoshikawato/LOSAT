@@ -141,7 +141,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         dry_run: None,
     };
     let mut stderr = Vec::new();
-    let mut diag = Diag::new(DiagTarget::Stderr, &mut stderr, &TOOL);
+    let mut diag = Diag::new(&DiagTarget::Stderr, &mut stderr, &TOOL);
     let error = ArgException::new("eNoFile", "Argument \"in\". X".to_string());
     assert_eq!(diag.run_arg_exception(error), 1);
     assert_eq!(
@@ -156,7 +156,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
     );
     // `eNoValue` prints no usage.
     let mut stderr = Vec::new();
-    let mut diag = Diag::new(DiagTarget::Stderr, &mut stderr, &TOOL);
+    let mut diag = Diag::new(&DiagTarget::Stderr, &mut stderr, &TOOL);
     diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
     assert_eq!(
         String::from_utf8(stderr).unwrap(),

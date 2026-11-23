@@ -24,6 +24,61 @@ fn tblastn_genetic_codes_are_read_as_ncbi_reads_them() {
     }
 }
 
+/// The posts of an argument error's report (`ArgvError::Report`): what follows NCBI's line of `=`.
+fn posts_of(error: crate::cli::ArgvError) -> String {
+    let crate::cli::ArgvError::Report(bytes) = error else {
+        panic!("not a report: {error:?}");
+    };
+    let text = String::from_utf8(bytes).unwrap();
+    let rule = format!("{}\n\n", "=".repeat(72));
+    text.split_once(&rule)
+        .expect("the line of `=`")
+        .1
+        .to_string()
+}
+
+// NCBI BLAST+ 2.17.0 tblastn `-query <q> -subject <s> -db_gencode <value>` (frozen on the
+// workstation with `env -i`, line RG item K4i-2b round 2): a value that converts but is no code is
+// the constraint's error, one that NCBI's integer reading refuses is its conversion error, with
+// NCBI's posts (in LOSAT's words, `crate::wording::losat_text`). The edge values that the old
+// parser refused with its own text.
+#[test]
+fn tblastn_genetic_code_errors_are_ncbis_posts() {
+    let constraint = |value: &str| {
+        let line = format!(
+            "Argument \"db_gencode\". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `{value}'"
+        );
+        format!("Error: {line}\nError:  (CArgException::eConstraint) {line}\n")
+    };
+    let converted = |value: &str, position: usize| {
+        let line = format!("Argument \"db_gencode\". Argument cannot be converted:  `{value}'");
+        format!(
+            "Error: Cannot convert string '{value}' to Int8 (m_Pos = {position})\nError: {line}\nError:  (CArgException::eConvert) {line}\n"
+        )
+    };
+    let range = "Argument \"db_gencode\". Integer value is out of range:  `2147483648'";
+    for (value, ncbi) in [
+        ("-0", constraint("-0")),
+        ("-5", constraint("-5")),
+        ("256", constraint("256")),
+        ("0x", constraint("0x")),
+        ("0x5", constraint("0x5")),
+        (" 5", converted(" 5", 0)),
+        ("5 ", converted("5 ", 1)),
+        ("5.0", converted("5.0", 1)),
+        (
+            "2147483648",
+            format!("Error: {range}\nError:  (CArgException::eConvert) {range}\n"),
+        ),
+    ] {
+        assert_eq!(
+            posts_of(parse(&["-db_gencode", value]).unwrap_err()),
+            crate::wording::losat_text(&ncbi),
+            "{value:?}"
+        );
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
 #[test]
 fn lcase_masking_flag_is_explicit() {

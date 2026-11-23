@@ -68,38 +68,16 @@ pub enum XmlMatrixFailure {
     /// The XML2 and JSON documents of a `-subject` search (`m_IsBl2Seq`) or of an iterative
     /// program (`m_IsIterative`: psiblast, tblastn `-in_pssm`; `blast_xml2::reports_held`): a
     /// query's report is held until a result arrives whose query Seq-id does not match the held
-    /// one (blast_format.cpp:2377), and is made then. LOSAT refuses two queries of one Seq-id in a
-    /// `-subject` search before any output (`-parse_deflines`, `query_batch::QueryScopes`: one
-    /// scope for the run; without the option every query has its own local id), so that result is
-    /// the run's second searched query's: its batch fails, after its reader messages and search
-    /// strategy request and before anything of its reports. A run of one searched query fails at
-    /// its end (`PrintEpilog`) instead of writing the epilog, unless another error ends it first.
-    /// (psiblast's XML2 and JSON documents, outfmt 13 to 16, are not written yet, line PS item
-    /// PS15b-2's second part: there a later query of the same Seq-id would be accumulated with
-    /// the first; tblastn's `-in_pssm` search has one query.)
+    /// one (blast_format.cpp:2377); a result of the held Seq-id is accumulated with it. The report
+    /// data is made, and fails, when the result of the run's first searched query whose Seq-id
+    /// does not match the first's arrives (the run's query, `query_batch::QueryScopes::
+    /// xml_failing_query`, the one owner of it: without `-parse_deflines` every query has a local
+    /// id of its own, so the second), in its batch, after its reader messages and search strategy
+    /// request and before anything of its reports. Without such a query (or a run that searched no
+    /// further), the run fails at its end (`PrintEpilog`) instead of writing the epilog, unless
+    /// another error ends it first. (psiblast's XML2 and JSON documents, outfmt 13 to 16, are not
+    /// written yet, line PS item PS15b-2's second part; tblastn's `-in_pssm` search has one query.)
     SecondQueryOrEnd,
-}
-
-impl XmlMatrixFailure {
-    /// The run's searched query (0-based, in the run's order) whose batch fails as NCBI formats
-    /// it.
-    pub fn query(self) -> usize {
-        match self {
-            Self::FirstQuery => 0,
-            Self::SecondQueryOrEnd => 1,
-        }
-    }
-
-    /// Whether NCBI fails while it formats the batch of the run's searched queries `batch`.
-    pub fn fails_in(self, batch: std::ops::Range<usize>) -> bool {
-        batch.contains(&self.query())
-    }
-
-    /// Whether NCBI fails at the end of a run whose batches searched `searched` queries and
-    /// ended without an error (its epilog makes the held report of the one query).
-    pub fn fails_at_end(self, searched: usize) -> bool {
-        self == Self::SecondQueryOrEnd && searched == 1
-    }
 }
 
 /// Whether and where a protein program's run of the formats `outfmts` with the score matrix
@@ -110,7 +88,8 @@ impl XmlMatrixFailure {
 /// `-in_pssm`), whose XML2 and JSON reports are held (`blast_xml2::reports_held`). With several
 /// formats (the library), the first to fail stops the run. The one decision behind the error
 /// (`unsupported_score_matrix`) and the search strategy's last request
-/// (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN, TBLASTX and BLASTX.
+/// (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN, TBLASTX and BLASTX; the query
+/// whose batch fails is the run's (`query_batch::QueryScopes::xml_failing_query`).
 pub fn xml_formatting_failure<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
     matrix_name: &str,
@@ -131,7 +110,8 @@ pub fn xml_formatting_failure<'a>(
                 XmlMatrixFailure::FirstQuery
             }
         })
-        .min_by_key(|failure| failure.query())
+        // The batch of the run's first searched query fails before any held report is made.
+        .min_by_key(|&failure| failure == XmlMatrixFailure::SecondQueryOrEnd)
 }
 
 /// Whether `outfmt` is BLAST XML (5), whose report is never held (blast_format.cpp:707-743).

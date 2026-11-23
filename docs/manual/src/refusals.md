@@ -53,7 +53,7 @@ There is one section for each program, and one for the five search programs toge
 | `-gilist`, `-negative_gilist` | Five search programs, `psiblast` | Out of scope (GI lists) |
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
-| `-html` | `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` with `-outfmt 1` to `4`; `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
+| `-html` | `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
@@ -67,7 +67,6 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-html` with `-outfmt 1` to `4` | Refused: not yet supported. With `-outfmt 0` and `18`, `-html` writes the HTML report as NCBI does; the other formats are the same as without it. |
 | `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
 | `-export_search_strategy -` (standard output) | Refused where NCBI writes its request into the report: LOSAT holds the report's bytes from NCBI's formatter until NCBI's first request (after its prolog and the first batch of queries is read, before the search), refuses there and writes none of them. A file name works. A run that NCBI ends before that point (an empty query, a database error, an error of an option or of `-outfmt`, a first query record it cannot read, a `-query_loc` past the end, `BATCH_SIZE=abc`, a PSSM run with `-subject`) ends as in NCBI: the held bytes (its prolog) are written, then its error and exit status. NCBI's warnings from before its formatter come before the refusal. |
 | `-export_search_strategy` into the file of `-out`, or into standard output | Refused where NCBI writes its request into the report or over it, at the same point as the row above, with no byte written to the stream. A run that NCBI ends before its first request ends as in NCBI, including the held prolog. |
@@ -76,7 +75,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
 | `-export_search_strategy` in the library API and pylosat | Refused. The command line writes the file. |
 | `-parse_deflines` with two subjects of one id | Refused. NCBI cannot report it correctly. |
-| `-parse_deflines` with two queries of one id in one query batch | Refused. |
+| `-parse_deflines` with two queries of one id in one query batch, or in any batch with `-subject` or `-outfmt 5` | Refused, except where NCBI stops first because its BLAST XML, XML2 or JSON report (`-outfmt 5`, `13`, `14`, `15`, `16`) does not know the `-matrix` name (such as `blosum62` in lower case): then a repeated query in any batch that NCBI reads up to that error ends with NCBI's error and output, which show nothing of the repeated query, and so does a repeated query that `-query_loc` skips. It stays refused there with `-export_search_strategy`; where every query of a batch is a repeat longer than the first query of its id (NCBI stops with `CSeqVector_CI: cannot locate segment`); where a batch holds only repeats and NCBI's result would depend on the letters of their first queries; where the queries that come first with their ids in a batch have no valid context (for example only `X` letters); and where a query's ids match those of an earlier query only in part, or those of two. `psiblast` refuses these output formats on its own (see psiblast below). |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
 | `-db` with a sequence whose id NCBI cannot report correctly | Refused. The error names the sequence. |
 | An alias file with `SEQIDLIST` or `TAXIDLIST` over a version 5 database, `MEMB_BIT` or `MASKLIST` | Refused. See Alias files below. `MASKLIST` names the GI-indexed masks that `makeblastdb -gi_mask` writes; LOSAT does not read them yet. |
@@ -445,7 +444,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 - `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `13` to `16`.
-- `-html` with `-outfmt 1` to `4`, and in `psiblast`, `rpsblast` and `rpstblastn`.
+- `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 

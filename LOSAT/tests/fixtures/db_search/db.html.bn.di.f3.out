@@ -1,0 +1,181 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: in/ns_ids.fna
+           11 sequences; 4,830 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nucltop&blast_rank=1&RID=" >XM_000101.1 </a>subject one two HSPs                                      <a href=#XM_000101.1>832</a>     0.0   
+<a title="Show report for XM_000111.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000111.1?report=genbank&log$=nucltop&blast_rank=2&RID=" >XM_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XM_000111.1>555</a>     3e-161
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>521</a>     3e-151
+<a title="Show report for XM_000109.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000109.1?report=genbank&log$=nucltop&blast_rank=4&RID=" >XM_000109.1 </a>subject nine                                              <a href=#XM_000109.1>350</a>     2e-99 
+testdb:tag_s8 subject eight                                           <a href=#testdb:tag_s8>291</a>     1e-81 
+<a title="Show report for AB000106.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000106.1?report=genbank&log$=nucltop&blast_rank=6&RID=" >AB000106.1 </a>subject six                                                <a href=#AB000106.1>291</a>     1e-81 
+<a title="Show report for XM_000105.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000105.1?report=genbank&log$=nucltop&blast_rank=7&RID=" >XM_000105.1 </a>subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@...  <a href=#123457>261</a>     8e-73 
+<a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nucltop&blast_rank=8&RID=" >CAA00102.2 </a>subject two                                                <a href=#CAA00102.2>202</a>     5e-55 
+<a title="Show report for AB000110.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000110.1?report=genbank&log$=nucltop&blast_rank=9&RID=" >AB000110.1 </a>subject ten                                                <a href=#AB000110.1>183</a>     2e-49 
+
+
+
+Query_1              1     TGCTTCGATTATCAAGGCAAGGGCTTTATT--TCTATGTATTCATTGCGTTT-GACATCG  57
+XM_000101.1          1     ..............................--....................-.......  57
+XM_000111.1          1     ..............................--....................-.......  57
+tag_s8               1     ............A.T............GAC--...G................-....CT.  57
+XM_000105.1          1     ..............................--..................GGC.....A-  57
+CAA00102.2           1     ......AC..........GTT.........GGGA..C.-.-...GCT...G.-C......  57
+
+Query_1              58    AACCCAT-TCCCA--GAGATATTTAGTAGAGTAGAA-AGA-CCAATGAGGGGGCGACTGG  112
+XM_000101.1          58    .......-.....--.....................-...-...................  112
+XM_000111.1          58    .......-.....--.....................-...-...................  112
+XM_000109.1          1                                          ...-..................A  22
+tag_s8               58    .......A.TG.---......AGG............-...-...CCT.............  112
+XM_000105.1          58    ......G-AG...--......GCG............--..T...GC.......GTT....  112
+CAA00102.2           58    .......-.....TTT..-.T..C..-.........T.TT-G.-............GGC.  112
+
+Query_1              113   CATTGATAGACG-TGCGTCATAGAGTCCCCTATGCATGTG--GTGACGAGTCTCACATCG  169
+XM_000101.1          113   ............-...........................--..................  169
+XM_000111.1          113   ............-...........................--..................  169
+s3_local_identifier  1                                            .--..................  19
+XM_000109.1          23    .T.........C-CA.........................--.....CCA..........  79
+tag_s8               113   ..GAA...-...CA..TA.....................C--AA.......T.......T  169
+XM_000105.1          113   ........AC..-..............TAT.........CCA..-.-.............  169
+CAA00102.2           113   ..ACC...A.TT-.A..C......................--............TTGC..  169
+
+Query_1              170   TGGCAGGACGTCCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCAC-ACCATTTCACCC  228
+XM_000101.1          170   ...............................................-............  228
+XM_000111.1          170   ...............................................-............  228
+s3_local_identifier  20    ......AT.TA......GCC........................GTT-...........T  78
+XM_000109.1          80    ....C.....................G.A............-.A.G.T.........AA.  138
+tag_s8               170   .C......G.C.....................TT.......TTA...-............  228
+XM_000105.1          170   ................................AAA............-G.A.........  228
+CAA00102.2           170   CT.........................C.......GTG.........-.......GT...  228
+
+Query_1              229   GATCCTTTCTTTGTATGTAGGTGT-AGAAGAG-ACTATTCTATCCAATACATGCTTCAGC  286
+XM_000101.1          229   ........................-.......-...........................  286
+XM_000111.1          229   ........................-.......-...........................  286
+s3_local_identifier  79    ............CC..........-.......-...CA......................  136
+XM_000109.1          139   ............AAC.........-.......-...........ACG.............  196
+tag_s8               229   ......G............C...GG.T..T-.-...........................  286
+XM_000105.1          229   ............                                                  240
+CAA00102.2           229   A.GTA.......C.G...C.A...-.......T.G.G.GG-..................A  286
+
+Query_1              287   CGAGACTACTTCGCCC-GTCCGAAAATGTGGAATCCGGGACTTGTGCGAAC-CTAGTTAT  344
+XM_000101.1          287   ................-..................................-........  344
+XM_000111.1          287   ..............                                                300
+s3_local_identifier  137   ................-...................ATC............T..-.....  194
+XM_000109.1          197   ........TG......-.AA..GT...........................-........  254
+tag_s8               287   .........                                                     295
+AB000106.1           1                   ..-...................CAT....C.......-........  44
+CAA00102.2           287   GT............G.T.A.A.-................TA.....T..C.-.......   343
+
+Query_1              345   GCGAGCGGTTGTTAAAGTATCTGCA-TATGACTTCGCCGTTAAAACAAGTAACGATTTTG  403
+XM_000101.1          345   .........................-..................................  403
+s3_local_identifier  195   ..........AGC....CT......-..................................  253
+XM_000109.1          255   .GTT.....................-......                              285
+AB000106.1           45    T...C.A............AGA...GCC..-T.........TGT.............CC.  103
+
+Query_1              404   ATGGAGGTGTGTGCGAGCGCGACAAAAGCTATGTGACTCTTATACCAAGT-GGTTTGAGT  462
+XM_000101.1          404   ...............................................               450
+XM_000101.1          900                                                  ...G...C.....  912
+s3_local_identifier  254   .....AAG.....................C.A.............AC...-.........  312
+AB000106.1           104   ......AC......ATA.................................-.........  162
+
+Query_1              463   ACCCCATTTGTTAATCTTGTACGTCACGCCATGCAATTGAAAGTGCCAT-CACGCCTCGC  521
+XM_000101.1          913   ..............................GCC...........-.T..T..........  971
+s3_local_identifier  313   ......AGGAGG...........................C.G.......-..........  371
+AB000106.1           163   ....GT...................CT......................-.....-....  220
+
+Query_1              522   T-GCT-TGTTATA-CTCACCTAGCGGCTTTAAAAGGT-CTTGGAT-CTC-CGAGGCTTAC  575
+XM_000101.1          972   .T..---.AC..TG.C....CC...............A.CC..-.-...-..........  1025
+s3_local_identifier  372   .--..G.......-.....GGG.......CG......-......AG...A.C.--...C.  425
+AB000106.1           221   CC...-.......-.................CT....-...CCG.-...-...         268
+
+Query_1              576   AGAATATAACCGCTGTAGTACTCATTCTGGACGTGGCCTATTCGAGCCTGAATCTACGCT  635
+XM_000101.1          1026  ...C...CCG..........TC.......................C..............  1085
+XM_000111.1          601                            ..............................       630
+s3_local_identifier  426   ....AG...................                                     450
+AB000110.1           1                              ......ATC...T.T..A.................  35
+
+Query_1              636   TGGGGATCCCAGTAGAGTGCAAATACCACTCACCGAGACTAGG-TGCAACAGTCGTTTGG  694
+XM_000101.1          1086  ......C...............................G-..CC......CTG...C.--  1142
+AB000110.1           36    .............G.T......CCG..................-.........GCA....  94
+
+Query_1              695   TAACACCGA-T-CACGAATTATTGTACATCAAAGTCTAGAGAGCCACGACACTCGTGTAA  752
+XM_000101.1          1143  ..T...A.TC.C....G.C...............A.C.........GCT.........GT  1202
+AB000110.1           95    .T.......-.-....TCA..................T.C......GTTG.....CCC..  152
+
+Query_1              753   CTTAGTTCGGGTTAACGTTATATTGATATGTAACTCC-GCTAGGGGGTACCTGTGCAAGC  811
+XM_000101.1          1203  .......GAC...........................A..-.......CG..........  1261
+AB000110.1           153   ............................                                  180
+
+Query_1              812   GCTCGCGAGGGACAGAGTACCATAAATTCACATCCTCAGAATTTTCCAGCCCCCCATGGA  871
+XM_000101.1          1262  ....................AG.................GG................CC.  1321
+
+Query_1              872   TGAACCTCACTCTTGTAAATTATCAGAAT  900
+XM_000101.1          1322  ..GTGACA...T.A...............  1350
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 4142936
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 507384
+
+
+  Database: in/ns_ids.fna
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 4,830
+  Number of sequences in database:  11
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

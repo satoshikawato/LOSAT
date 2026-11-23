@@ -882,10 +882,12 @@ pub const HTML_POSTS_WITHOUT_WARNINGS: &str =
 /// exceptions of their streams, `write_hit_posts`, and the taxonomy database's messages at their
 /// `Hit`s), the BLAST archive (NCBI's posts, which it saves as messages) and the Seq-annots of
 /// outfmt 8, 9 and 12 (the posts of the bytes that NCBI's stream replaces,
-/// `serial::seqalign::write_query_to`), and the pairwise report of a run with `-html` (`html`: the
-/// posts of its reads of NCBI's formatter registries, `ReportPlace::Html`). A writer that posts
-/// without warnings is LOSAT's internal error (`write_hit_posts`, `x_pairwise_par::at_place`), not
-/// a silent loss.
+/// `serial::seqalign::write_query_to`), and the pairwise and query-anchored reports (outfmt 0 to 4,
+/// `ReportFormat::writes_html_links`) of a run with `-html` (`html`: the posts of their reads of
+/// NCBI's formatter registries, `ReportPlace::Html`; line RG T4b fix 1: outfmt 1 to 4 at a later
+/// place among a library call's formats posted without them). A writer that posts without
+/// warnings is LOSAT's internal error (`write_hit_posts`, `x_pairwise_par::at_place`), not a
+/// silent loss.
 pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: bool) -> bool {
     use crate::blastinput::app::ReportFormat;
     matches!(
@@ -901,7 +903,7 @@ pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: 
                 | ReportFormat::AsnBinary
                 | ReportFormat::JsonSeqalign
         )
-    ) || (html && format == Some(ReportFormat::Pairwise))
+    ) || (html && format.is_some_and(ReportFormat::writes_html_links))
 }
 
 /// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).

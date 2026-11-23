@@ -134,11 +134,14 @@ fn two_records_with_one_id_are_refused_in_one_scope() {
         assert!(error.contains("two query records"), "{error}");
         use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
         let mut batches = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP");
-        batches.add_batch(&records[..1], 0).unwrap();
-        batches.add_batch(&records[1..], 1).unwrap();
+        batches.add_batch(&records[..1], &[false], 0).unwrap();
+        batches.add_batch(&records[1..], &[false], 1).unwrap();
         let mut run = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
-        run.add_batch(&records[..1], 0).unwrap();
-        let error = run.add_batch(&records[1..], 1).unwrap_err().to_string();
+        run.add_batch(&records[..1], &[false], 0).unwrap();
+        let error = run
+            .add_batch(&records[1..], &[false], 1)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("two query records"), "{error}");
         let config = ReaderConfig::subject("BLASTN", false, false).with_parse_deflines(true);
         let mut source = FastaInputSource::from_bytes(fasta, config);

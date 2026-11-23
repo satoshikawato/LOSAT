@@ -1,0 +1,230 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nz nc
+           4 sequences; 978 total letters
+
+
+
+Query= q1
+
+Length=180
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 156240
+
+
+Query= q2
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sI_nz_nc subject sI                                                   154     1e-41
+sM_nz_nc subject sM                                                   114     1e-29
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 154 bits (170),  Expect = 1e-41
+ Identities = 142/180 (79%), Gaps = 0/180 (0%)
+ Strand=Plus/Plus
+
+Query  241  TTCTTCTACGAACAGTACGGGCAATTGGGCCGTTATATGGGCGGTGCACTAAAGATGTGC  300
+            || ||||| ||||||||||| ||  | || || || ||||| |||||| | |||||||||
+Sbjct  4    TTTTTCTATGAACAGTACGGACAGCTTGGGCGATACATGGGGGGTGCATTGAAGATGTGC  63
+
+Query  301  TCGGACTCGTGGGGATCCGGCGTGCCTGAGTCCAAGGTTCAGTGCACCTGGTCTTGTTCA  360
+            || |||   |||||   |||||| || ||||| ||||| |||||||| ||||| || |||
+Sbjct  64   TCCGACAGTTGGGGGAGCGGCGTACCCGAGTCGAAGGTGCAGTGCACGTGGTCATGCTCA  123
+
+Query  361  CGTCAGTATAACTACTTCATTGAGATAGCCTACACGTGCCACACCGACCCACTTCCTTGT  420
+            || |||||||| || || ||||| ||||| || || ||||| |||||||| || || |||
+Sbjct  124  CGCCAGTATAATTATTTTATTGAAATAGCGTATACCTGCCATACCGACCCCCTCCCATGT  183
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 114 bits (126),  Expect = 1e-29
+ Identities = 143/195 (73%), Gaps = 1/195 (1%)
+ Strand=Plus/Plus
+
+Query  216  TGATGATGATGATGACGATGATGATTTCTTCTACGAACAGTACGGGCAATTGGGCCGTTA  275
+            || || || || ||  | || || ||| ||||| || || || || ||  | ||| | ||
+Sbjct  220  TGGTGGTGGTGGTGGTGGTGGTGGTTT-TTCTATGAGCAATATGGCCAGCTAGGCAGATA  278
+
+Query  276  TATGGGCGGTGCACTAAAGATGTGCTCGGACTCGTGGGGATCCGGCGTGCCTGAGTCCAA  335
+            |||||| || ||||| || ||||| || ||||| ||||| || || || || ||||||||
+Sbjct  279  TATGGGTGGGGCACTCAAAATGTGTTCCGACTCCTGGGGTTCGGGGGTCCCCGAGTCCAA  338
+
+Query  336  GGTTCAGTGCACCTGGTCTTGTTCACGTCAGTATAACTACTTCATTGAGATAGCCTACAC  395
+            ||| || || || |||  |||    || || ||||| || |||||||| || || |||||
+Sbjct  339  GGTCCAATGTACTTGGAGTTGCAGCCGCCAATATAATTATTTCATTGAAATCGCGTACAC  398
+
+Query  396  GTGCCACACCGACCC  410
+            ||| || || |||||
+Sbjct  399  GTGTCATACAGACCC  413
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 376882
+
+
+Query= q3
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sM_nz_nc subject sM                                                   127     6e-34
+sI_nz_nc subject sI                                                   103     3e-26
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 127 bits (140),  Expect = 6e-34
+ Identities = 130/170 (76%), Gaps = 0/170 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTCTTCTACGAGCAATATGGGCAATTAGGCAGGTATATGGGAGGCGCCCTAAAAATGTGT  60
+            || ||||| ||||||||||| ||  ||||||| |||||||| || || || |||||||||
+Sbjct  244  TTTTTCTATGAGCAATATGGCCAGCTAGGCAGATATATGGGTGGGGCACTCAAAATGTGT  303
+
+Query  61   TCGGATTCTTGGGGATCGGGAGTTCCGGAGAGTAAAGTACAGTGTACGTGGTCCTGTTCG  120
+            || || || ||||| ||||| || || |||   || || || ||||| |||   ||    
+Sbjct  304  TCCGACTCCTGGGGTTCGGGGGTCCCCGAGTCCAAGGTCCAATGTACTTGGAGTTGCAGC  363
+
+Query  121  CGCCAATATAATTATTTCATCGAAATAGCATATACATGCCACACCGATCC  170
+            |||||||||||||||||||| ||||| || || || || || || || ||
+Sbjct  364  CGCCAATATAATTATTTCATTGAAATCGCGTACACGTGTCATACAGACCC  413
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 103 bits (113),  Expect = 3e-26
+ Identities = 130/179 (73%), Gaps = 0/179 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTCTTCTACGAGCAATATGGGCAATTAGGCAGGTATATGGGAGGCGCCCTAAAAATGTGT  60
+            || ||||| || || || || ||  | ||  | || ||||| || ||  | || ||||| 
+Sbjct  4    TTTTTCTATGAACAGTACGGACAGCTTGGGCGATACATGGGGGGTGCATTGAAGATGTGC  63
+
+Query  61   TCGGATTCTTGGGGATCGGGAGTTCCGGAGAGTAAAGTACAGTGTACGTGGTCCTGTTCG  120
+            || ||   ||||||    || || || |||   || || ||||| |||||||| || || 
+Sbjct  64   TCCGACAGTTGGGGGAGCGGCGTACCCGAGTCGAAGGTGCAGTGCACGTGGTCATGCTCA  123
+
+Query  121  CGCCAATATAATTATTTCATCGAAATAGCATATACATGCCACACCGATCCCCTACCCTG  179
+            ||||| ||||||||||| || |||||||| ||||| ||||| ||||| ||||| || ||
+Sbjct  124  CGCCAGTATAATTATTTTATTGAAATAGCGTATACCTGCCATACCGACCCCCTCCCATG  182
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 156240
+
+
+Query= q4
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sM_nz_nc subject sM                                                   136     3e-36
+sI_nz_nc subject sI                                                   98.7    7e-25
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 136 bits (150),  Expect = 3e-36
+ Identities = 132/170 (78%), Gaps = 0/170 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTTTTTTACGAACAATACGGGCAATTGGGTCGGTACATGGGAGGGGCACTTAAAATGTGT  60
+            ||||| || || ||||| || ||  | ||  | || ||||| |||||||| |||||||||
+Sbjct  244  TTTTTCTATGAGCAATATGGCCAGCTAGGCAGATATATGGGTGGGGCACTCAAAATGTGT  303
+
+Query  61   AGCGACAGTTGGGGTTCGGGTGTCCCCGAAAGTAAAGTCCAATGTACATGGAGCTGCTCC  120
+              ||||   ||||||||||| ||||||||    || ||||||||||| ||||| |||  |
+Sbjct  304  TCCGACTCCTGGGGTTCGGGGGTCCCCGAGTCCAAGGTCCAATGTACTTGGAGTTGCAGC  363
+
+Query  121  CGTCAATACAACTATTTTATTGAGATAGCTTACACGTGTCACACAGATCC  170
+            || ||||| || ||||| ||||| || || ||||||||||| ||||| ||
+Sbjct  364  CGCCAATATAATTATTTCATTGAAATCGCGTACACGTGTCATACAGACCC  413
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 98.7 bits (108),  Expect = 7e-25
+ Identities = 129/179 (72%), Gaps = 0/179 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTTTTTTACGAACAATACGGGCAATTGGGTCGGTACATGGGAGGGGCACTTAAAATGTGT  60
+            ||||| || ||||| ||||| ||  | || || |||||||| || ||| | || ||||| 
+Sbjct  4    TTTTTCTATGAACAGTACGGACAGCTTGGGCGATACATGGGGGGTGCATTGAAGATGTGC  63
+
+Query  61   AGCGACAGTTGGGGTTCGGGTGTCCCCGAAAGTAAAGTCCAATGTACATGGAGCTGCTCC  120
+              ||||||||||||    || || |||||    || || || || || |||   ||||| 
+Sbjct  64   TCCGACAGTTGGGGGAGCGGCGTACCCGAGTCGAAGGTGCAGTGCACGTGGTCATGCTCA  123
+
+Query  121  CGTCAATACAACTATTTTATTGAGATAGCTTACACGTGTCACACAGATCCCCTTCCCTG  179
+            || || || || ||||||||||| ||||| || || || || || || ||||| || ||
+Sbjct  124  CGCCAGTATAATTATTTTATTGAAATAGCGTATACCTGCCATACCGACCCCCTCCCATG  182
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 376882
+
+
+  Database: nz nc
+    Posted date:  Nov 5, 2026  5:53 AM
+  Number of letters in database: 978
+  Number of sequences in database:  4
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

@@ -4,6 +4,7 @@
 //! overlapping range.
 
 use super::view::V;
+use super::Stop;
 use std::collections::HashMap;
 
 use crate::seqid::mask_handle::{
@@ -542,7 +543,11 @@ struct AddState<'g> {
 
 impl HandleRangeMap {
     /// `AddLocation` of `loc` in `mode` on a fresh map.
-    pub(super) fn of_location(loc: V<'_>, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
+    pub(super) fn of_location(
+        loc: V<'_>,
+        mode: Mode,
+        handles: &mut LiveHandles,
+    ) -> Result<HandleRangeMap, Stop> {
         let mut map = HandleRangeMap::default();
         map.add_location(
             loc,
@@ -551,8 +556,8 @@ impl HandleRangeMap {
                 mode,
                 handles,
             },
-        );
-        map
+        )?;
+        Ok(map)
     }
 
     fn index_of(&mut self, handle: Handle) -> usize {
@@ -619,7 +624,9 @@ impl HandleRangeMap {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205
-    fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_>) {
+    // An element stated as `NULL` of a `mix`, an `equiv` or a `packed-int` is dereferenced where
+    // it is reached (`V::deref`; probe D3c-3b `probe7` `loc_mix`, `loc_mix2`).
+    fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_>) -> Result<(), Stop> {
         // The `mix` and `equiv` locations being walked (to any depth the reader read): the
         // location's parts, the next one, and whether it is an `equiv`.
         let mut sets: Vec<(V<'v>, usize, bool)> = Vec::new();
@@ -629,12 +636,13 @@ impl HandleRangeMap {
                 Some(loc) => loc,
                 None => {
                     let Some((parts, index, equiv)) = sets.last_mut() else {
-                        return;
+                        return Ok(());
                     };
                     let Some(part) = parts.item(*index) else {
                         sets.pop();
                         continue;
                     };
+                    let part = part.deref()?;
                     if *equiv && *index > 0 {
                         state.prev = None;
                     }
@@ -655,7 +663,7 @@ impl HandleRangeMap {
                 "int" => self.add_interval(value, state),
                 "packed-int" => {
                     for interval in value.items() {
-                        self.add_interval(interval, state);
+                        self.add_interval(interval.deref()?, state);
                     }
                 }
                 "pnt" => self.add_point(value, state),

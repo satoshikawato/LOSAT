@@ -107,6 +107,21 @@ impl XmlRefusal {
             error
         }
     }
+
+    /// The error of a query's writes: LOSAT's refusal of a load that the stream leaves out
+    /// (`report::query_warnings::CutRefusal`) becomes a refusal that carries its message (it drops
+    /// what the run holds, as the run's other refusals of the taxonomy cache's slot do); any other
+    /// error is returned as it is.
+    pub(super) fn of_cut(error: anyhow::Error) -> anyhow::Error {
+        let refusal = error
+            .downcast_ref::<io::Error>()
+            .and_then(crate::report::query_warnings::CutRefusal::of)
+            .map(str::to_string);
+        match refusal {
+            Some(text) => XmlRefusal(text).into(),
+            None => error,
+        }
+    }
 }
 
 /// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
@@ -1030,7 +1045,9 @@ fn scan_query_stream<R: std::io::Read>(
 /// `QueryScan::query_scopes`. LOSAT's refusal of two queries of one scope with one id stops the run
 /// at its batch, after the reports of the batches before, as a batch that NCBI fails does: the read
 /// ends there, and the search gives the refusal where it adds that batch (`QueryScopes::read_ahead`;
-/// line WQA D10 round 4, 2026-11-20). The batches are the reader's (`read`), as NCBI counts them
+/// line WQA D10 round 4, 2026-11-20). A refusal that the run's XML failure for its matrix name may
+/// take (`ScopeRefusal::xml_takes`) does not end the read: the search's add of its batch decides
+/// (`native::add_batch_scope`). The batches are the reader's (`read`), as NCBI counts them
 /// (`query_batch::BatchCount`).
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
@@ -1044,23 +1061,29 @@ pub(super) fn scan_queries(
     // the document holds its report back.
     let mut written = 0usize;
     let mut held: Option<Result<()>> = None;
-    // The batches added to the scopes, and the refusal of the batch after them.
+    // The batches added to the scopes, and the refusals of the batches: those that the run's XML
+    // failure for its matrix name may take (`ScopeRefusal::xml_takes`), after which the read goes
+    // on, and the one that ends it.
     let mut batches = 0usize;
-    let mut refusal = None;
+    let mut refusals = Vec::new();
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
         }
         if let Some(scopes) = query_scopes.as_mut() {
-            let added = scopes.add_batch_ids(
+            let added = scopes.add_batch_records(
                 super::input::scope_records(batch)
                     .into_iter()
-                    .map(|(believed, length, _)| (believed, length)),
+                    .map(|(believed, length, place)| (believed, length, place.is_some())),
                 written,
             );
             if let Err(error) = added {
-                refusal = Some((batches, error));
-                anyhow::bail!("LOSAT refuses this batch");
+                let xml_takes = crate::blastinput::query_batch::ScopeRefusal::of(&error)
+                    .is_some_and(crate::blastinput::query_batch::ScopeRefusal::xml_takes);
+                refusals.push((batches, error));
+                if !xml_takes {
+                    anyhow::bail!("LOSAT refuses this batch");
+                }
             }
             batches += 1;
         }
@@ -1093,7 +1116,7 @@ pub(super) fn scan_queries(
         written += batch.len();
         Ok(())
     });
-    scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusal));
+    scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusals));
     match scanned {
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
@@ -1251,19 +1274,18 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     batches: &[BatchResults],
     queries_before: usize,
     stops: bool,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
-    // report data of the run's first query, or of its second where the report is held
-    // (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
-    // LOSAT refuses two queries of one id before any output; `xml_matrix`, the run's
-    // `xml_matrix_failure`), in the batch of that query (`BLAST engine
-    // error:`, exit 3), before any byte of the reports; a batch before it writes nothing (its
-    // reader messages and request posts are the batch loop's).
+    // report data of the run's first query, or where the report is held of NCBI's next query of
+    // another Seq-id (`XmlMatrixFailure::SecondQueryOrEnd`; `xml_matrix`, the run's
+    // `xml_matrix_failure` at its query of the read-ahead scopes, `QueryScopes::xml_failing_query`),
+    // in the batch of that query (`BLAST engine error:`, exit 3), before any byte of the reports; a
+    // batch before it writes nothing (its reader messages and request posts are the batch loop's).
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
         let failure =
             xml_matrix.context("LOSAT internal error: no run decision for an XML matrix")?;
@@ -1581,7 +1603,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 &mut *writer,
                 &mut *diagnostics,
                 reads.as_mut(),
-            )?;
+            )
+            .map_err(XmlRefusal::of_cut)?;
             if let Some(post) = caught {
                 writer.flush()?;
                 diagnostics.write_all(&post)?;

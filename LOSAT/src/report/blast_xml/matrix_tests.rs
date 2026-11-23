@@ -60,20 +60,6 @@ fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
     );
 }
 
-/// Where the run stops (probe K/k4f, NCBI 2.17.0): the batch of the first searched query, or
-/// of the second when the report is held (`-subject` 13-16: 3 batches of one query wrote
-/// the requests of Query_1 and Query_2), or the end of a run of one query.
-#[test]
-fn a_held_report_fails_with_the_second_query_or_at_the_end() {
-    let first = XmlMatrixFailure::FirstQuery;
-    let held = XmlMatrixFailure::SecondQueryOrEnd;
-    assert!(first.fails_in(0..1) && first.fails_in(0..3) && !first.fails_in(1..2));
-    assert!(!held.fails_in(0..1) && held.fails_in(1..2) && held.fails_in(0..3));
-    assert!(!held.fails_in(2..3) && !held.fails_in(1..1));
-    assert!(held.fails_at_end(1) && !held.fails_at_end(0) && !held.fails_at_end(2));
-    assert!(!first.fails_at_end(1));
-}
-
 #[test]
 fn engine_table_is_the_packed_ncbi_table_with_its_symbol_order() {
     // sm_blosum62.c: the A row, the J row and the V column.

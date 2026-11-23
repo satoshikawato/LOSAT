@@ -1960,19 +1960,12 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
             bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
-        // An ungapped search has no `kbp_gap` array (blast_setup.c:517-527, cited at
-        // `call_setup::gapped_block`), and its traceback runs the Smith-Waterman redo all the
-        // same (blast_traceback.c:1486-1487 above), which reads it: NCBI BLAST+ 2.17.0's
-        // `blastp -ungapped -comp_based_stats 0 -use_sw_tback` ends with a segmentation fault
-        // (exit 139, task O4b). Refused by name before the refusal of `-comp_based_stats 0` below,
-        // which a later item lifts (X4-c0) while this one stays.
-        if args.ungapped {
-            bail!(
-                "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's {program}"
-            );
-        }
-        if !args.comp_based_stats.is_enabled() {
+        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
+        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
+        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
+        // batches before, which have no valid context. A run without such a batch ends as NCBI's
+        // does.
+        if !args.ungapped && !args.comp_based_stats.is_enabled() {
             bail!(
                 "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
             );
@@ -2426,7 +2419,11 @@ impl<'a> SubjectIdFields<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:271-327
-fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
+/// The Seq-aligns NCBI makes of the results `hit_lists`: one for each HSP of a `gapped` search,
+/// one for each subject of an ungapped one (`-ungapped`, `shared::subject_seq_aligns`), which
+/// the prefetch counts against `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`). Outfmt 7's
+/// count takes those of the formatter, one for each HSP in both modes (`gapped` true).
+fn blastp_seq_aligns(hit_lists: &[Option<BlastpHitList>], gapped: bool) -> usize {
     hit_lists
         .iter()
         .filter_map(|hit_list| hit_list.as_ref())
@@ -2435,7 +2432,12 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
                 .hsplist_array
                 .iter()
                 .take(hit_list.hsplist_count)
-                .map(|hsp_list| hsp_list.hsps.len())
+                .map(|hsp_list| {
+                    crate::algorithm::common::database::subject_seq_aligns(
+                        hsp_list.hsps.len(),
+                        gapped,
+                    )
+                })
                 .sum::<usize>()
         })
         .sum()
@@ -2547,8 +2549,11 @@ fn write_blastp_tabular_hit_lists(
                 context,
                 &query_titles[q_idx],
                 &crate::report::tabular::STD_FIELDS,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:763-764
+                // The formatter splits an ungapped search's Seq-align of a subject into one for
+                // each HSP before the header counts them.
                 hits_found.map_or_else(
-                    || blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
+                    || blastp_seq_aligns(std::slice::from_ref(hit_list_opt), true),
                     |found| found[q_idx],
                 ),
                 query_batch_skipped[q_idx],
@@ -2696,14 +2701,20 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 /// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
 /// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
 /// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
-/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row,
+/// except under `-html`, where each HSP's go to `html_masks` in the order of `hits`
+/// (`HspMasks::copy_rows`, `report::pairwise::HtmlRowMasks`: their spans).
 fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
     subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) {
     let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
+        if html_masks.is_some() {
+            masks.clear();
+        }
         let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
         // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
         // starts) has no mask.
@@ -2762,6 +2773,9 @@ fn set_row_masks(
             );
             masks.lower_row(1, &mut letters);
             *shown = String::from_utf8(letters).expect("ASCII alignment row");
+        }
+        if let Some(table) = html_masks.as_deref_mut() {
+            table.push(masks.copy_rows());
         }
     }
 }
@@ -5494,6 +5508,9 @@ fn resolve_for_formats(
         options.outfmt.clear();
         options.num_descriptions = 0;
         options.num_alignments = 0;
+        // The `-html` links belong to the format as well: only the pairwise report reads them
+        // (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
+        options.html = None;
         format!("{options:?}")
     };
     let mut resolved_formats = resolved_formats.into_iter();
@@ -5501,8 +5518,13 @@ fn resolve_for_formats(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no output format was requested"))?;
     let first_options = search_options(&first);
-    if resolved_formats.any(|resolved| search_options(&resolved) != first_options) {
-        bail!("the requested output formats resolve to different search options");
+    for resolved in resolved_formats {
+        if search_options(&resolved) != first_options {
+            bail!("the requested output formats resolve to different search options");
+        }
+        // The run's `-html` links are those of the format that reads them (outfmt 0, in any
+        // place among the formats).
+        first.html = first.html.or(resolved.html);
     }
     first.num_descriptions = shared.num_descriptions;
     first.num_alignments = shared.num_alignments;
@@ -6353,6 +6375,7 @@ fn search(
             later_warnings,
             hits,
             observer,
+            html_posts,
         } = &mut *outputs;
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
         let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
@@ -6564,6 +6587,9 @@ fn search(
                             .collect(),
                         diagnostics: &mut **diagnostics,
                         later_warnings: later_warnings.as_deref_mut(),
+                        html_posts: html_posts
+                            .as_deref_mut()
+                            .map(|posts| posts as &mut (dyn std::io::Write + Send)),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -7528,6 +7554,13 @@ fn write_pairwise_prologs(
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
+                args.html.as_deref().map(|links| {
+                    let posts = crate::report::query_warnings::html_posts_sink(
+                        outputs.html_posts.as_deref_mut(),
+                        &mut *outputs.diagnostics,
+                    );
+                    (links, posts as &mut dyn Write)
+                }),
             )?;
             writer.flush()?;
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
@@ -7661,8 +7694,25 @@ fn write_reports_without_queries(
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
+                    html: args
+                        .html
+                        .as_ref()
+                        .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                     unreadable_query: None,
                 };
+                // No query writes warnings; an `-html` prolog's references post on the
+                // diagnostics (`pairwise::html_with_diagnostics`).
+                let mut warnings = crate::report::query_warnings::QueryWarnings::of_posts(
+                    &[],
+                    None,
+                    &mut *outputs.diagnostics,
+                )
+                .with_html_posts(
+                    outputs
+                        .html_posts
+                        .as_deref_mut()
+                        .map(|posts| posts as &mut dyn std::io::Write),
+                );
                 write_blastp_pairwise_report(
                     &[],
                     &mut writer,
@@ -7676,7 +7726,7 @@ fn write_reports_without_queries(
                     None,
                     pairwise_database.as_ref(),
                     None,
-                    None,
+                    Some(&mut warnings),
                     true,
                     true,
                     None,
@@ -9929,6 +9979,7 @@ fn run_call(
     } else if args.ungapped {
         // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
         // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
+        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
         let finish = traceback::UngappedFinish {
             contexts: &contexts,
             subjects,
@@ -10717,7 +10768,10 @@ fn run_call(
         let own = format.later_warnings(kept.is_some(), &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
             || own.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                args.html.is_some(),
+            )
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)
@@ -10729,7 +10783,14 @@ fn run_call(
                 args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             )
-            .with_later(&query_posts, own);
+            .with_later(&query_posts, own)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,

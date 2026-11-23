@@ -18,6 +18,7 @@ fn tool(program: &'static str) -> Tool {
         "convert2blastmask" => include_str!("../convert2blastmask/help.txt"),
         "makembindex" => include_str!("../makembindex/help.txt"),
         "windowmasker" => include_str!("../windowmasker/help.txt"),
+        "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
         _ => "",
     };
     Tool {
@@ -26,17 +27,19 @@ fn tool(program: &'static str) -> Tool {
         help,
         post_prefix: None,
         components: &[],
+        dry_run: None,
     }
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 6] = [
+const ON_THE_READER: [&str; 7] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
     "convert2blastmask",
     "makembindex",
     "windowmasker",
+    "makeprofiledb",
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
@@ -245,13 +248,14 @@ fn every_argument_of_the_xml_is_in_its_table() {
             constraints += usize::from(usage.is_some());
         }
     }
-    // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), and makembindex's 6
-    // and windowmasker's 16.
-    assert_eq!(constraints, 169 + 6 + 16);
+    // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
+    // windowmasker's 16 and makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid).
+    assert_eq!(constraints, 169 + 6 + 16 + 4);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
-    // windowmasker's 76 (its 38 exclusions, each in both directions) and makembindex's 3.
+    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3 and
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2);
 }
 
 /// Which class a constraint is.

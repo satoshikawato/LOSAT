@@ -42,7 +42,8 @@ use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart, NullElement};
 use crate::ncbi_exception::{NcbiException, Severity};
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{
-    throw_error, utf8_tag_message, Fail, Input, Names, StringKind, StringPost, TextInput, R,
+    read_with_set_flag_member, throw_error, utf8_tag_message, Fail, Input, Names, StringKind,
+    StringPost, TextInput, R,
 };
 use crate::report::serial::asn_text_reader::{PointerType, StreamSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
@@ -283,28 +284,12 @@ pub(super) struct Rd<I: Input> {
     pub(super) posts: Vec<MaskPost>,
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:712-756
-// (`eNullValue` and `eMissingValue` are not thrown for these types: `ExpectedMember` throws
-// `eFormatError` with the default `eSerialVerifyData_Yes`.)
-const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
-    "src/serial/member.cpp",
-    752,
-    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
-);
-
 /// What reading `member` makes of `fail`: `ReadWithSetFlagMember` rethrows a `CSerialException`
-/// of a member with a set flag (`Member::set_flag`).
+/// of a member with a set flag (`Member::set_flag`; `asn_input::read_with_set_flag_member`).
 #[cold]
 #[inline(never)]
 fn member_error(fail: Fail, member: &Member) -> Fail {
-    match fail {
-        Fail::Serial(e) if member.set_flag => {
-            let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-            let message = format!("error while reading {}", member.name);
-            Fail::serial(e.rethrow_same(file, line, function, message))
-        }
-        other => other,
-    }
+    read_with_set_flag_member(fail, member.set_flag, member.name)
 }
 
 impl<I: Input> Rd<I> {
@@ -488,7 +473,7 @@ impl<I: Input> Rd<I> {
     /// A SEQUENCE read member by member, in declaration order (`ReadClassSequential`): a member
     /// that is not in the file is an error unless it is `OPTIONAL` or has a `DEFAULT`. `read`
     /// reads the value of member `index`; a member with a set flag reads it in
-    /// `ReadWithSetFlagMember` (cited at [`READ_WITH_SET_FLAG_MEMBER`]). An `OPTIONAL` member held
+    /// `ReadWithSetFlagMember` (`asn_input::read_with_set_flag_member`). An `OPTIONAL` member held
     /// by `CRef<>` (`Member::pointer`) is read by `read_pointer`: `read` is not called for a
     /// `NULL`, which leaves the member unset.
     pub(super) fn read_class(

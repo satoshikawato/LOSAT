@@ -1,0 +1,3 @@
+# BLASTP 2.17.0+
+# Query: qinv invalid letters
+# Database: tests/db_search/x16_taxid

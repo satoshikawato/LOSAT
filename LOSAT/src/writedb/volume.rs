@@ -14,19 +14,22 @@ use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
 
 /// `CWriteDB::EIndexType` as makeblastdb sets it (makeblastdb.cpp:1207-1209): `eFullIndex`
-/// for `-parse_seqids`, `eAddHash` for `-hash_index`; `eNoIndex` without both.
+/// for `-parse_seqids`, `eAddHash` for `-hash_index`; `eNoIndex` without both. makeprofiledb's
+/// `eDefault` is `eFullIndex` and `eAddTrace` together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Indices {
     /// `eFullIndex` (`-parse_seqids`).
     pub full: bool,
     /// `eAddHash` (`-hash_index`).
     pub hash: bool,
+    /// `eAddTrace` (makeprofiledb's `-index true`): the index of the trace ids.
+    pub trace: bool,
 }
 
 impl Indices {
     /// `m_Indices` is not `CWriteDB::eNoIndex`.
     pub fn any(self) -> bool {
-        self.full || self.hash
+        self.full || self.hash || self.trace
     }
 }
 
@@ -51,6 +54,8 @@ struct VolumeIndices {
     acc: Option<StringIsam>,
     /// `m_HashIsam` (`eAddHash`).
     hash: Option<StringIsam>,
+    /// `m_TraceIsam` (`eAddTrace`).
+    trace: Option<NumericIsam>,
     /// `m_GiIndex`.
     gi_index: GiIndex,
     /// `m_IdSet`.
@@ -83,7 +88,7 @@ pub(crate) struct Volume {
 impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:65-84
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:86-135
-    // makeblastdb never sets `eAddTrace` or `eSparseIndex`.
+    // makeblastdb never sets `eAddTrace` or `eSparseIndex`; makeprofiledb sets `eAddTrace`.
     /// `arrays`: the offset arrays of the previous volume
     /// (`take_offset_arrays`), or new ones for the first; `sizeof_long` the
     /// platform's `sizeof` of `long` (`Platform::sizeof_long`); `indices` makeblastdb's index
@@ -131,6 +136,9 @@ impl Volume {
                 gi: NumericIsam::new(IsamType::Gi, dbname, protein, index, max_file_size),
                 acc: (version != DbVersion::V5).then(|| {
                     StringIsam::new(IsamType::Acc, dbname, protein, index, max_file_size, acc)
+                }),
+                trace: indices.trace.then(|| {
+                    NumericIsam::new(IsamType::Trace, dbname, protein, index, max_file_size)
                 }),
                 hash: indices.hash.then(|| {
                     StringIsam::new(IsamType::Hash, dbname, protein, index, max_file_size, hash)
@@ -244,7 +252,12 @@ impl Volume {
             && self.seq.can_fit(seq.len() + ambig.len()));
         if let Some(indices) = &self.indices {
             let num = ids.len();
-            if !(indices.acc.as_ref().is_none_or(|acc| acc.can_fit(num)) && indices.gi.can_fit(num))
+            if !(indices.acc.as_ref().is_none_or(|acc| acc.can_fit(num))
+                && indices.gi.can_fit(num)
+                && indices
+                    .trace
+                    .as_ref()
+                    .is_none_or(|trace| trace.can_fit(num)))
             {
                 overfull = true;
             }
@@ -302,6 +315,9 @@ impl Volume {
             if let Some(pig_isam) = indices.pig.as_mut().filter(|_| pig != 0) {
                 pig_isam.add_pig(self.oid, pig);
             }
+            if let Some(trace_isam) = &mut indices.trace {
+                trace_isam.add_trace_ids(self.oid, ids);
+            }
             if let Some(hash_isam) = &mut indices.hash {
                 hash_isam.add_hash(self.oid, hash)?;
             }
@@ -351,6 +367,9 @@ impl Volume {
                     acc.close()?;
                 }
                 indices.gi_index.close()?;
+                if let Some(trace) = &mut indices.trace {
+                    trace.close()?;
+                }
                 if let Some(hash) = &mut indices.hash {
                     hash.close()?;
                 }
@@ -411,6 +430,9 @@ impl Volume {
                 acc.rename_single();
             }
             indices.gi_index.file_mut().rename_single();
+            if let Some(trace) = &mut indices.trace {
+                trace.rename_single();
+            }
             if let Some(hash) = &mut indices.hash {
                 hash.rename_single();
             }
@@ -447,6 +469,9 @@ impl Volume {
                 acc.rename_file_index(num_digits);
             }
             indices.gi_index.file_mut().rename_file_index(num_digits);
+            if let Some(trace) = &mut indices.trace {
+                trace.rename_file_index(num_digits);
+            }
             if let Some(hash) = &mut indices.hash {
                 hash.rename_file_index(num_digits);
             }
@@ -472,6 +497,9 @@ impl Volume {
             indices.gi.list_files(files);
             if let Some(pig) = &indices.pig {
                 pig.list_files(files);
+            }
+            if let Some(trace) = &indices.trace {
+                trace.list_files(files);
             }
             if let Some(hash) = &indices.hash {
                 hash.list_files(files);

@@ -123,6 +123,7 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
             let indices = Indices {
                 full: row.parse,
                 hash: false,
+                trace: false,
             };
             let run = run_case_with(
                 &case,

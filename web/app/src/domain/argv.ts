@@ -38,7 +38,7 @@ const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp'
  * application manages, and the CLI's options that a search in the browser cannot have, whose
  * CLI message would name what the user cannot change here (`-subject`, `-num_threads`; WA-FM-04);
  * undefined for the other words. The words of the CLI's help and version (`-h`, `-help`,
- * `-help-full`, `--help`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
+ * `-help-full`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
  * prints the command line's text for them and searches nothing (*start*'s `prints`; line WQA's D14,
  * 2026-11-20, in place of WA-FM-05's refusal).
  */

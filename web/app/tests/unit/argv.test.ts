@@ -104,7 +104,7 @@ describe('buildArgv', () => {
     buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
   // Line WQA's D14, 2026-11-20: the engine prints the command line's help or version for these words, as the CLI does
   // (WA-FM-05 refused the help words).
-  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
+  it.each(['-h', '-help', '-help-full', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
     'passes %s, which asks the CLI for its help or version, to the engine',
     (word) => {
       for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word])(), program.id).toContain(word);

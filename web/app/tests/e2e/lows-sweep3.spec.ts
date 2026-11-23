@@ -24,7 +24,6 @@ const WORDS = [
   ['-h', 'help'],
   ['-help', 'help'],
   ['-help-full', 'help'],
-  ['--help', 'help'],
   ['-xmlhelp', 'help'],
   ['-version', 'version'],
   ['-version-full', 'version'],

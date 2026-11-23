@@ -954,6 +954,7 @@ fn option_text(setter: &Setter) -> String {
                         .map(i32::to_string)
                         .collect::<Vec<_>>()
                         .join(","),
+                    ParamValue::StrandType(n) => n.to_string(),
                 };
                 format!("{} {value}", param.name())
             }

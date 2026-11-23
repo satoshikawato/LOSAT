@@ -10,7 +10,11 @@
 //! command line (`C.*.from.*`), the parameters that the setters take (`S1.*`: best hits, database
 //! masks, the repeat filter, the MegaBLAST index), the command line's index and database mask
 //! over a strategy's (`B.*`), and the formatting options that a strategy's hit list size above
-//! 500 leaves unread in the pairwise formats (`Y.*`).
+//! 500 leaves unread in the pairwise formats (`Y.*`), and the values of hand-edited strategies
+//! outside the command line's ranges (`S3.*`: a negative window, the HSP filtering check, the
+//! audit of the setters of F2's fix 3). The SAM documents (`-outfmt 17`) of a TBLASTX strategy that
+//! blastn runs are compared without the CL tag of their `@PG` line, which holds the program's
+//! own command line (NCBI's is removed from the frozen bytes, `F/f2/tools/freeze_b3.py`).
 //!
 //! A strategy's subjects are searched once whatever `-num_threads` says (Owner 2026-11-20 F2-Q1
 //! "Q1=C"; NCBI prints every alignment once per thread or aborts): the runs at 2, 4 and 8 threads
@@ -99,8 +103,41 @@ fn run(case: &Case, threads: Option<&str>) -> Output {
     command.output().expect("run losat")
 }
 
+/// The SAM document `document` without the CL tag of its `@PG` line: the bytes from the `\tCL:`
+/// after `\n@PG\tID:0\tVN:` up to the line's `\tPN:` tag (the rule of `freeze_b3.py`
+/// `without_sam_cl`).
+fn without_sam_cl(document: &[u8]) -> Vec<u8> {
+    let find = |needle: &[u8], from: usize| {
+        document
+            .get(from..)?
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .map(|at| at + from)
+    };
+    let Some(pg) = find(b"\n@PG\tID:0\tVN:", 0) else {
+        return document.to_vec();
+    };
+    let line_end = find(b"\n", pg + 1).unwrap_or(document.len());
+    let Some(cl) = find(b"\tCL:", pg + 1).filter(|&at| at < line_end) else {
+        return document.to_vec();
+    };
+    let Some(pn) = find(b"\tPN:", cl).filter(|&at| at < line_end) else {
+        return document.to_vec();
+    };
+    [&document[..cl], &document[pn..]].concat()
+}
+
 fn check(case: &Case, threads: Option<&str>) {
-    let output = run(case, threads);
+    let mut output = run(case, threads);
+    let sam = case
+        .args
+        .iter()
+        .position(|arg| arg == "-outfmt")
+        .and_then(|at| case.args.get(at + 1))
+        .is_some_and(|format| format.starts_with("17"));
+    if sam {
+        output.stdout = without_sam_cl(&output.stdout);
+    }
     let label = format!("{} threads {threads:?}", case.name);
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert_eq!(
@@ -157,4 +194,62 @@ fn a_strategys_subjects_are_searched_once_at_any_thread_count() {
             check(case, Some(threads));
         }
     }
+}
+
+/// F2 fix 3 (R3-B2): the values of a hand-edited strategy outside the command line's ranges that
+/// LOSAT does not run where NCBI crashes (a genetic code without a table, composition-based
+/// statistics 4, a greedy extension with dynamic programming's traceback) or runs a search that
+/// LOSAT does not have (a word size of 1, unified P-values in TBLASTN, composition mode -1, the
+/// refusals of the command line's values): LOSAT's refusal in its words, exit status 1, never a
+/// panic (`docs/manual/src/refusals.md`). The strategies are those of the audit, `ss/s3a.*`.
+#[test]
+fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
+    let refusals: &[(&str, &str, &str)] = &[
+        ("blastx", "blastx_QueryGeneticCode_0", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX"),
+        ("blastx", "blastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX"),
+        ("blastx", "blastx_QueryGeneticCode_256", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX"),
+        ("tblastn", "tblastn_DbGeneticCode_0", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN"),
+        ("tblastn", "tblastn_DbGeneticCode_7", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN"),
+        ("tblastn", "tblastn_DbGeneticCode_-1", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN"),
+        ("tblastx", "tblastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's TBLASTX"),
+        ("tblastx", "tblastx_QueryGeneticCode_-1", "a search strategy with this query genetic code is not supported by LOSAT's TBLASTX"),
+        ("tblastx", "tblastx_DbGeneticCode_7", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTX"),
+        ("blastp", "blastp_CompositionBasedStats_4", "a search strategy with composition-based statistics 4 (unified P 0) is not supported by LOSAT's BLASTP"),
+        ("blastp", "blastp_CompositionBasedStats_neg1", "a search strategy with composition-based statistics -1 (unified P 0) is not supported by LOSAT's BLASTP"),
+        ("tblastn", "tblastn_CompositionBasedStats_4", "a search strategy with composition-based statistics 4 (unified P 0) is not supported by LOSAT's TBLASTN"),
+        ("tblastn", "tblastn_UnifiedP_2", "a search strategy with composition-based statistics 2 (unified P 2) is not supported by LOSAT's TBLASTN"),
+        ("blastp", "blastp_WordSize_1", "-word_size 1 (the lookup table) is not supported by LOSAT's BLASTP"),
+        ("blastx", "blastx_WordSize_1", "-word_size 1 (the lookup table) is not supported by LOSAT's BLASTX"),
+        ("tblastn", "tblastn_WordSize_1", "the matrix BLOSUM62 with word size 1 is not supported by LOSAT's TBLASTN"),
+        ("blastn", "blastn_GapExtnAlgorithm_0_1", "a search strategy with this pair of gapped extension algorithms is not supported by LOSAT's BLASTN"),
+        ("blastn", "blastn_MatchReward_0", "is not supported by LOSAT's BLASTN"),
+        ("blastp", "blastp_EvalueThreshold_inf", "is not supported by LOSAT's BLASTP"),
+        ("tblastn", "tblastn_EvalueThreshold_inf", "is not supported by LOSAT's TBLASTN"),
+        ("blastx", "blastx_EvalueThreshold_inf", "is not supported by LOSAT's BLASTX"),
+        ("blastx", "blastx_EvalueThreshold_nan", "is not supported by LOSAT's BLASTX"),
+    ];
+    let mut failed = Vec::new();
+    for (program, strategy, words) in refusals {
+        let case = Case {
+            name: format!("refusal {program} {strategy}"),
+            program: program.to_string(),
+            args: vec![
+                "-import_search_strategy".to_string(),
+                format!("{{ss}}/s3a.{strategy}.ss"),
+            ],
+            rc: 1,
+            out: "-".to_string(),
+            err: "-".to_string(),
+        };
+        let output = run(&case, None);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if output.status.code() != Some(1) || !stderr.contains(words) || !output.stdout.is_empty() {
+            failed.push(format!(
+                "{}: exit {:?}, stderr {stderr:?}",
+                case.name,
+                output.status.code()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }

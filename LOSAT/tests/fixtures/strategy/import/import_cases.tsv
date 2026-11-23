@@ -1,7 +1,8 @@
 # The import rows of tests/import_search_strategy.rs: name, program, arguments (space-separated, %20 a
 # space, {ss} the folder ss/), exit status, and the files of bytes/ that hold NCBI BLAST+ 2.17.0's
 # -num_threads 1 standard output and standard error (- empty). Probe ids of line RG item F2
-# (remaining-gaps-20261112/F/f2/tools/freeze_import.py).
+# (remaining-gaps-20261112/F/f2/tools/freeze_import.py; the rows of fix round 3, freeze_b3.py: the SAM
+# documents without the CL tag of their @PG line).
 name	program	args	rc	out	err
 I.blastn.db.alone	blastn	-import_search_strategy {ss}/blastn.db.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
 I.blastn.db.q2	blastn	-import_search_strategy {ss}/blastn.db.ss -query tests/fixtures/strategy/import/in/q2_n.fna	0	d3756404cf373675	5fb617f6dbc5f542
@@ -634,3 +635,148 @@ S2.blastn.hlneg	blastn	-import_search_strategy {ss}/s2.blastn.hlneg.ss	1	-	99507
 S2.tblastx.hlneg	tblastx	-import_search_strategy {ss}/s2.tblastx.hlneg.ss	1	-	c92901850ff6ced5
 S2.blastn.from.tblastx.hlneg	blastn	-import_search_strategy {ss}/s2.tblastx.hlneg.ss	1	-	99507eae13ed3b51
 S2.blastn.word_neg	blastn	-import_search_strategy {ss}/s2.blastn.word_neg.ss	1	-	9ef2cb38cec78e27
+C.blastn.from.tbx4.f11	blastn	-import_search_strategy {ss}/s3.tbx4.ss -outfmt 11	0	1d2b37d7e9274d3f	c7d9e175b47ef7bc
+C.tblastx.from.bn4.f11	tblastx	-import_search_strategy {ss}/s3.bn4.ss -outfmt 11	0	0cfa196d21d01bdc	d6dbca01209bf9a6
+C.blastn.from.tbx5.f11	blastn	-import_search_strategy {ss}/s3.tbx5.ss -outfmt 11	0	e98b1d34d10ca826	c7d9e175b47ef7bc
+I.tblastx.tbx5.f11	tblastx	-import_search_strategy {ss}/s3.tbx5.ss -outfmt 11	0	763fbd3bfe8e133c	d6dbca01209bf9a6
+C.blastn.from.tbx5.f6	blastn	-import_search_strategy {ss}/s3.tbx5.ss -outfmt 6	0	6d56cfedadf9e3c9	02996e3cfa9a6e15
+C.blastn.from.tblastx.db.f17	blastn	-import_search_strategy {ss}/tblastx.db.ss -outfmt 17	0	-	dc47ca6d877a83fe
+C.blastn.from.tblastx.sub.f17	blastn	-import_search_strategy {ss}/tblastx.sub.ss -outfmt 17	0	-	dc47ca6d877a83fe
+C.blastn.from.tblastx.sub.mh1.f17	blastn	-import_search_strategy {ss}/s3.tblastx.sub.mh1.ss -outfmt 17	0	7f707b04e123f4fc	c7d9e175b47ef7bc
+C.blastn.from.tblastx.db.mh1.f17	blastn	-import_search_strategy {ss}/s3.tblastx.db.mh1.ss -outfmt 17	0	eb8cc282af3018a1	c7d9e175b47ef7bc
+C.blastn.from.tblastx.sub.e10.f17	blastn	-import_search_strategy {ss}/s3.tblastx.sub.e10.ss -outfmt 17	0	2baa618356f1eb1b	fa7b09d411446943
+C.blastn.from.tblastx.db.e15.f17	blastn	-import_search_strategy {ss}/s3.tblastx.db.e15.ss -outfmt 17	0	141482c3b26fe97b	aca15a7faf95f4ae
+C.blastn.from.tblastx.db.e20.f17	blastn	-import_search_strategy {ss}/s3.tblastx.db.e20.ss -outfmt 17	0	27fa2619b328e173	c7d9e175b47ef7bc
+C.blastn.from.tblastx.sub.e10.f17sq	blastn	-import_search_strategy {ss}/s3.tblastx.sub.e10.ss -outfmt 17%20SQ	0	5d565795fb5c3f5a	fa7b09d411446943
+C.blastn.from.tblastx.db.e15.f17sr	blastn	-import_search_strategy {ss}/s3.tblastx.db.e15.ss -outfmt 17%20SR	0	b156b1899d57d60c	aca15a7faf95f4ae
+C.blastn.from.tbx5.f17	blastn	-import_search_strategy {ss}/s3.tbx5.ss -outfmt 17	0	-	9ed4a0bff90828a9
+S3.blastn.window_neg1	blastn	-import_search_strategy {ss}/s3.blastn.window_neg1.ss	0	ce3ccf35a0a417a8	c7d9e175b47ef7bc
+S3.blastn.window_neg40	blastn	-import_search_strategy {ss}/s3.blastn.window_neg40.ss	0	76a7b61ebbd91f6b	c7d9e175b47ef7bc
+S3.blastp.window_neg1	blastp	-import_search_strategy {ss}/s3.blastp.window_neg1.ss	0	b926505ff9140792	1fc42b53917c7075
+S3.blastp.window_neg40	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss	0	aab81108e8b63879	1fc42b53917c7075
+S3.blastx.window_neg1	blastx	-import_search_strategy {ss}/s3.blastx.window_neg1.ss	0	7ccbf85851181093	570c01346c395517
+S3.blastx.window_neg40	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss	0	3c8f61de01f2ff20	570c01346c395517
+S3.tblastn.window_neg1	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg1.ss	0	d4709f4291752ef8	ce435f6509352102
+S3.tblastn.window_neg40	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss	0	171594d4f3cb3684	ce435f6509352102
+S3.tblastx.window_neg1	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg1.ss	0	10b11a192938d578	d6dbca01209bf9a6
+S3.tblastx.window_neg40	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss	0	f7287b6326ed8e9b	d6dbca01209bf9a6
+S3.tblastx.from.blastx.window_neg1	tblastx	-import_search_strategy {ss}/s3.blastx.window_neg1.ss	0	7ccbf85851181093	d6dbca01209bf9a6
+S3.tblastx.from.blastx.window_neg40	tblastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss	0	3c8f61de01f2ff20	d6dbca01209bf9a6
+S3.blastn.from.tblastx.window_neg1	blastn	-import_search_strategy {ss}/s3.tblastx.window_neg1.ss	0	10b11a192938d578	c7d9e175b47ef7bc
+S3.blastn.from.tblastx.window_neg40	blastn	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss	0	f7287b6326ed8e9b	c7d9e175b47ef7bc
+S3.blastp.window_neg1.f11	blastp	-import_search_strategy {ss}/s3.blastp.window_neg1.ss -outfmt 11	0	6a2cbcaec1becc78	1fc42b53917c7075
+S3.blastp.window_neg40.f7	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -outfmt 7	0	1048f2393efaa7fe	1fc42b53917c7075
+S3.blastn.window_neg40.nt4	blastn	-import_search_strategy {ss}/s3.blastn.window_neg40.ss -num_threads 4	0	76a7b61ebbd91f6b	c7d9e175b47ef7bc
+S3.blastp.window_neg40.nt4	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -num_threads 4	0	aab81108e8b63879	1fc42b53917c7075
+S3.blastx.window_neg40.nt4	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -num_threads 4	0	3c8f61de01f2ff20	570c01346c395517
+S3.tblastn.window_neg40.nt4	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -num_threads 4	0	171594d4f3cb3684	ce435f6509352102
+S3.tblastx.window_neg40.nt4	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -num_threads 4	0	f7287b6326ed8e9b	d6dbca01209bf9a6
+S3.tblastx.window-5	tblastx	-import_search_strategy {ss}/s3.tblastx.window-5.ss	0	48000f73fa2512ea	d6dbca01209bf9a6
+S3.tblastx.window-1000	tblastx	-import_search_strategy {ss}/s3.tblastx.window-1000.ss	0	97d7235d9a22406a	d6dbca01209bf9a6
+S3.tblastx.window-100000	tblastx	-import_search_strategy {ss}/s3.tblastx.window-100000.ss	0	468dfebcd2865389	d6dbca01209bf9a6
+S3.tblastx.window-1000000	tblastx	-import_search_strategy {ss}/s3.tblastx.window-1000000.ss	0	6535a252a9c7d831	d6dbca01209bf9a6
+S3.blastn.bho09	blastn	-import_search_strategy {ss}/s3.blastn.bho09.ss	1	-	c795b03c6df1ccb7
+S3.blastp.bho09	blastp	-import_search_strategy {ss}/s3.blastp.bho09.ss	1	-	7991c7136b15d16e
+S3.blastx.bho09	blastx	-import_search_strategy {ss}/s3.blastx.bho09.ss	1	-	eafe1bc29b89742d
+S3.tblastn.bho09	tblastn	-import_search_strategy {ss}/s3.tblastn.bho09.ss	1	-	378a67eaed9c8482
+S3.tblastx.bho09	tblastx	-import_search_strategy {ss}/s3.tblastx.bho09.ss	1	-	35aa6d0143ac04e3
+S3.blastp.r3.bho09	blastp	-import_search_strategy {ss}/s3.blastp.r3.bho09.ss	1	-	7991c7136b15d16e
+S3.blastp.r3.bhse_neg	blastp	-import_search_strategy {ss}/s3.blastp.r3.bhse_neg.ss	1	-	7991c7136b15d16e
+S3.blastp.cull_besthit	blastp	-import_search_strategy {ss}/s3.blastp.cull_besthit.ss	1	-	7991c7136b15d16e
+S3.blastn.from.tblastx.bho09	blastn	-import_search_strategy {ss}/s3.tblastx.bho09.ss	1	-	c795b03c6df1ccb7
+S3.a.blastn_Culling_neg2	blastn	-import_search_strategy {ss}/s3a.blastn_Culling_neg2.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastp_Culling_neg2	blastp	-import_search_strategy {ss}/s3a.blastp_Culling_neg2.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastx_Culling_neg2	blastx	-import_search_strategy {ss}/s3a.blastx_Culling_neg2.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.tblastn_Culling_neg2	tblastn	-import_search_strategy {ss}/s3a.tblastn_Culling_neg2.ss	0	19f948e973ed7555	ce435f6509352102
+S3.a.tblastx_Culling_neg2	tblastx	-import_search_strategy {ss}/s3a.tblastx_Culling_neg2.ss	0	f153bc90307b54d1	d6dbca01209bf9a6
+S3.a.blastn_PercentIdentity_neg10	blastn	-import_search_strategy {ss}/s3a.blastn_PercentIdentity_neg10.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_PercentIdentity_nan	blastn	-import_search_strategy {ss}/s3a.blastn_PercentIdentity_nan.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastp_QueryCovHspPerc_nan	blastp	-import_search_strategy {ss}/s3a.blastp_QueryCovHspPerc_nan.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_QueryCovHspPerc_inf	blastp	-import_search_strategy {ss}/s3a.blastp_QueryCovHspPerc_inf.ss	0	8bef500f90f164cf	1fc42b53917c7075
+S3.a.blastp_BestHitOverhang_nan	blastp	-import_search_strategy {ss}/s3a.blastp_BestHitOverhang_nan.ss	0	254940d8221c008f	1fc42b53917c7075
+S3.a.blastn_BestHitScoreEdge_nan	blastn	-import_search_strategy {ss}/s3a.blastn_BestHitScoreEdge_nan.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_MaxHspsPerSubject_neg3	blastn	-import_search_strategy {ss}/s3a.blastn_MaxHspsPerSubject_neg3.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastx_MaxHspsPerSubject_neg3	blastx	-import_search_strategy {ss}/s3a.blastx_MaxHspsPerSubject_neg3.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.tblastn_MaxHspsPerSubject_neg3	tblastn	-import_search_strategy {ss}/s3a.tblastn_MaxHspsPerSubject_neg3.ss	0	19f948e973ed7555	ce435f6509352102
+S3.a.blastp_GapXDropoff_inf	blastp	-import_search_strategy {ss}/s3a.blastp_GapXDropoff_inf.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_GapXDropoff_nan	blastp	-import_search_strategy {ss}/s3a.blastp_GapXDropoff_nan.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_GapXDropoffFinal_inf	blastp	-import_search_strategy {ss}/s3a.blastp_GapXDropoffFinal_inf.ss	0	24bbd125e2c07c04	1fc42b53917c7075
+S3.a.blastp_GapTrigger_inf	blastp	-import_search_strategy {ss}/s3a.blastp_GapTrigger_inf.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_GapTrigger_nan	blastp	-import_search_strategy {ss}/s3a.blastp_GapTrigger_nan.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastn_GapXDropoff_neg5	blastn	-import_search_strategy {ss}/s3a.blastn_GapXDropoff_neg5.ss	0	8ef327d84fbfec25	c7d9e175b47ef7bc
+S3.a.blastn_GapXDropoff_nan	blastn	-import_search_strategy {ss}/s3a.blastn_GapXDropoff_nan.ss	0	8ef327d84fbfec25	c7d9e175b47ef7bc
+S3.a.blastx_GapXDropoff_neg5	blastx	-import_search_strategy {ss}/s3a.blastx_GapXDropoff_neg5.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.blastx_GapXDropoff_inf	blastx	-import_search_strategy {ss}/s3a.blastx_GapXDropoff_inf.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.tblastn_GapXDropoff_neg5	tblastn	-import_search_strategy {ss}/s3a.tblastn_GapXDropoff_neg5.ss	0	22b16b3c8ee951fa	ce435f6509352102
+S3.a.tblastn_GapXDropoffFinal_nan	tblastn	-import_search_strategy {ss}/s3a.tblastn_GapXDropoffFinal_nan.ss	0	e64ac2e7d02d3bd5	ce435f6509352102
+S3.a.blastp_EvalueThreshold_nan	blastp	-import_search_strategy {ss}/s3a.blastp_EvalueThreshold_nan.ss	0	8bef500f90f164cf	1fc42b53917c7075
+S3.a.blastn_EvalueThreshold_nan	blastn	-import_search_strategy {ss}/s3a.blastn_EvalueThreshold_nan.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.tblastn_EvalueThreshold_nan	tblastn	-import_search_strategy {ss}/s3a.tblastn_EvalueThreshold_nan.ss	0	d303d9f777df2630	ce435f6509352102
+S3.a.tblastx_EvalueThreshold_nan	tblastx	-import_search_strategy {ss}/s3a.tblastx_EvalueThreshold_nan.ss	0	f153bc90307b54d1	d6dbca01209bf9a6
+S3.a.blastn_EvalueThreshold_inf	blastn	-import_search_strategy {ss}/s3a.blastn_EvalueThreshold_inf.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.tblastx_EvalueThreshold_inf	tblastx	-import_search_strategy {ss}/s3a.tblastx_EvalueThreshold_inf.ss	0	f153bc90307b54d1	d6dbca01209bf9a6
+S3.a.blastn_EffectiveSearchSpace_neg100	blastn	-import_search_strategy {ss}/s3a.blastn_EffectiveSearchSpace_neg100.ss	0	235beb9a07a97a96	c7d9e175b47ef7bc
+S3.a.blastx_EffectiveSearchSpace_neg100	blastx	-import_search_strategy {ss}/s3a.blastx_EffectiveSearchSpace_neg100.ss	0	7981007b8ee90b20	570c01346c395517
+S3.a.tblastn_EffectiveSearchSpace_neg100	tblastn	-import_search_strategy {ss}/s3a.tblastn_EffectiveSearchSpace_neg100.ss	0	588ec8c3c1d3a971	ce435f6509352102
+S3.a.tblastx_EffectiveSearchSpace_neg100	tblastx	-import_search_strategy {ss}/s3a.tblastx_EffectiveSearchSpace_neg100.ss	0	18aa2f1093ace4a4	d6dbca01209bf9a6
+S3.a.tblastx_EffectiveSearchSpace_pos100	tblastx	-import_search_strategy {ss}/s3a.tblastx_EffectiveSearchSpace_pos100.ss	0	133e5bb8c4881e90	d6dbca01209bf9a6
+S3.a.blastn_DbLength_neg5	blastn	-import_search_strategy {ss}/s3a.blastn_DbLength_neg5.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastx_DbLength_neg5	blastx	-import_search_strategy {ss}/s3a.blastx_DbLength_neg5.ss	0	a0bc5dd2b5ac66c8	570c01346c395517
+S3.a.tblastn_DbLength_neg5	tblastn	-import_search_strategy {ss}/s3a.tblastn_DbLength_neg5.ss	0	29da89cd3ed12d8c	ce435f6509352102
+S3.a.tblastx_DbLength_neg5	tblastx	-import_search_strategy {ss}/s3a.tblastx_DbLength_neg5.ss	0	f153bc90307b54d1	d6dbca01209bf9a6
+S3.a.tblastn_LongestIntronLength_neg5	tblastn	-import_search_strategy {ss}/s3a.tblastn_LongestIntronLength_neg5.ss	0	9530b6dc8a62e514	ce435f6509352102
+S3.a.tblastn_LongestIntronLength_maxint	tblastn	-import_search_strategy {ss}/s3a.tblastn_LongestIntronLength_maxint.ss	0	19f948e973ed7555	ce435f6509352102
+S3.a.blastn_MatchReward_65537	blastn	-import_search_strategy {ss}/s3a.blastn_MatchReward_65537.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_DustFilteringLevel_neg1	blastn	-import_search_strategy {ss}/s3a.blastn_DustFilteringLevel_neg1.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_DustFilteringWindow_0	blastn	-import_search_strategy {ss}/s3a.blastn_DustFilteringWindow_0.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_DustFilteringLinker_neg1	blastn	-import_search_strategy {ss}/s3a.blastn_DustFilteringLinker_neg1.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_WindowMaskerTaxId_0	blastn	-import_search_strategy {ss}/s3a.blastn_WindowMaskerTaxId_0.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
+S3.a.blastn_MBTemplateType_256	blastn	-import_search_strategy {ss}/s3a.blastn_MBTemplateType_256.ss	0	3ea0f8e4e78c2515	c7d9e175b47ef7bc
+S3.a.blastn_MBTemplateType_3	blastn	-import_search_strategy {ss}/s3a.blastn_MBTemplateType_3.ss	1	-	c40aaf99d6349c19
+S3.a.blastn_MBTemplateLength_17	blastn	-import_search_strategy {ss}/s3a.blastn_MBTemplateLength_17.ss	1	-	0a34a975685e8a3e
+S3.a.blastn_GapExtnAlgorithm_2_2	blastn	-import_search_strategy {ss}/s3a.blastn_GapExtnAlgorithm_2_2.ss	1	-	75c61df08ca2c57f
+S3.a.blastn_GapExtnAlgorithm_5_5	blastn	-import_search_strategy {ss}/s3a.blastn_GapExtnAlgorithm_5_5.ss	1	-	75c61df08ca2c57f
+S3.a.blastn_StrandOption_reverse	blastn	-import_search_strategy {ss}/s3a.blastn_StrandOption_reverse.ss	0	fb5875ec59a12ffc	c7d9e175b47ef7bc
+S3.a.blastp_SegFilteringLocut_e300	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringLocut_e300.ss	0	c873ae7710294f69	1fc42b53917c7075
+S3.a.blastp_SegFilteringLocut_minf	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringLocut_minf.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_SegFilteringHicut_e300	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringHicut_e300.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastx_SegFilteringLocut_e300	blastx	-import_search_strategy {ss}/s3a.blastx_SegFilteringLocut_e300.ss	0	caf1e16626ff721f	570c01346c395517
+S3.a.blastx_SegFilteringHicut_e300	blastx	-import_search_strategy {ss}/s3a.blastx_SegFilteringHicut_e300.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.blastp_SegFilteringWindow_-1	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringWindow_-1.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_SegFilteringLocut_inf	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringLocut_inf.ss	0	c873ae7710294f69	1fc42b53917c7075
+S3.a.blastp_SegFilteringLocut_nan	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringLocut_nan.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_SegFilteringHicut_inf	blastp	-import_search_strategy {ss}/s3a.blastp_SegFilteringHicut_inf.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastx_SegFilteringHicut_nan	blastx	-import_search_strategy {ss}/s3a.blastx_SegFilteringHicut_nan.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.blastx_SegFilteringLocut_inf	blastx	-import_search_strategy {ss}/s3a.blastx_SegFilteringLocut_inf.ss	0	caf1e16626ff721f	570c01346c395517
+S3.a.blastp_UnifiedP_0	blastp	-import_search_strategy {ss}/s3a.blastp_UnifiedP_0.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_UnifiedP_2cbs0	blastp	-import_search_strategy {ss}/s3a.blastp_UnifiedP_2cbs0.ss	0	e648ed32c3262c67	1fc42b53917c7075
+S3.a.blastp_UnifiedP_1cbs0	blastp	-import_search_strategy {ss}/s3a.blastp_UnifiedP_1cbs0.ss	0	e648ed32c3262c67	1fc42b53917c7075
+S3.a.blastp_UnifiedP_neg1	blastp	-import_search_strategy {ss}/s3a.blastp_UnifiedP_neg1.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastp_HitlistSize_maxint	blastp	-import_search_strategy {ss}/s3a.blastp_HitlistSize_maxint.ss	0	39de21324836dfef	1fc42b53917c7075
+S3.a.blastx_HitlistSize_maxint	blastx	-import_search_strategy {ss}/s3a.blastx_HitlistSize_maxint.ss	0	9df0120fd047fcb6	570c01346c395517
+S3.a.tblastn_HitlistSize_maxint	tblastn	-import_search_strategy {ss}/s3a.tblastn_HitlistSize_maxint.ss	0	19f948e973ed7555	ce435f6509352102
+S3.a.tblastx_HitlistSize_maxint	tblastx	-import_search_strategy {ss}/s3a.tblastx_HitlistSize_maxint.ss	0	f153bc90307b54d1	d6dbca01209bf9a6
+S3.a.tblastx_WordSize_1	tblastx	-import_search_strategy {ss}/s3a.tblastx_WordSize_1.ss	0	f70b3e422e800c89	d6dbca01209bf9a6
+S3.a.tblastx_WordSize_4nothr	tblastx	-import_search_strategy {ss}/s3a.tblastx_WordSize_4nothr.ss	0	d864d782324043ed	d6dbca01209bf9a6
+S3.a.blastp_WordSize_6nothr	blastp	-import_search_strategy {ss}/s3a.blastp_WordSize_6nothr.ss	0	e485101bc37f8f78	1fc42b53917c7075
+S3.a.blastx_WordSize_6nothr	blastx	-import_search_strategy {ss}/s3a.blastx_WordSize_6nothr.ss	0	f6d1ec8cdf6d6a49	570c01346c395517
+S3.a.tblastn_WordSize_6nothr	tblastn	-import_search_strategy {ss}/s3a.tblastn_WordSize_6nothr.ss	0	e7c24eb3aebde069	ce435f6509352102
+S3.a.blastp_WordSize_0	blastp	-import_search_strategy {ss}/s3a.blastp_WordSize_0.ss	1	-	19d86d751ce8d9b6
+S3.a.blastx_WordSize_8	blastx	-import_search_strategy {ss}/s3a.blastx_WordSize_8.ss	1	-	43a5ca7096cfa500
+S3.a.tblastn_WordSize_8	tblastn	-import_search_strategy {ss}/s3a.tblastn_WordSize_8.ss	1	-	62c34678a277ca1a
+S3.a.tblastx_WordSize_5	tblastx	-import_search_strategy {ss}/s3a.tblastx_WordSize_5.ss	1	-	8a0fbf991b7653d3
+S3.a.tblastx_WordSize_0	tblastx	-import_search_strategy {ss}/s3a.tblastx_WordSize_0.ss	1	-	3fcfacacc9f53697
+S3.a.blastn_WordSize_3	blastn	-import_search_strategy {ss}/s3a.blastn_WordSize_3.ss	1	-	5d037c892dc6e680
+S3.a.blastn_WordSize_0	blastn	-import_search_strategy {ss}/s3a.blastn_WordSize_0.ss	1	-	9ef2cb38cec78e27
+S3.a.blastn_MismatchPenalty_0	blastn	-import_search_strategy {ss}/s3a.blastn_MismatchPenalty_0.ss	1	-	becc5c29623fa9ee
+S3.a.blastn_GapOpeningCost_neg1	blastn	-import_search_strategy {ss}/s3a.blastn_GapOpeningCost_neg1.ss	3	f955a69063355502	6f924e872c3eadf7
+S3.a.blastn_GapExtensionCost_neg1	blastn	-import_search_strategy {ss}/s3a.blastn_GapExtensionCost_neg1.ss	3	f955a69063355502	d7e304b17b252c7f
+S3.a.blastn_StrandOption_reverse.f11	blastn	-import_search_strategy {ss}/s3a.blastn_StrandOption_reverse.ss -outfmt 11	0	e5843585567ed887	c7d9e175b47ef7bc
+S3.a.blastn_StrandOption_reverse.minus	blastn	-import_search_strategy {ss}/s3a.blastn_StrandOption_reverse.ss -strand minus	0	fb5875ec59a12ffc	c7d9e175b47ef7bc
+S3.b.blastp_matrix80	blastp	-import_search_strategy {ss}/s3b.blastp_matrix80.ss	0	61dbff59483540b1	1fc42b53917c7075
+S3.b.blastp_matrix45	blastp	-import_search_strategy {ss}/s3b.blastp_matrix45.ss	1	-	8100223bcd6f75a7
+S3.b.blastx_matrix80	blastx	-import_search_strategy {ss}/s3b.blastx_matrix80.ss	0	2f8c14aec228eb8a	570c01346c395517
+S3.b.tblastn_matrix80	tblastn	-import_search_strategy {ss}/s3b.tblastn_matrix80.ss	0	f6997d85217fb24b	ce435f6509352102
+S3.b.tblastx_matrix80	tblastx	-import_search_strategy {ss}/s3b.tblastx_matrix80.ss	0	dc74167bf4ab0a5d	d6dbca01209bf9a6
+S3.b.blastp_ws6	blastp	-import_search_strategy {ss}/s3b.blastp_ws6.ss	0	e485101bc37f8f78	1fc42b53917c7075
+S3.b.blastn_from_tblastx_matrix80	blastn	-import_search_strategy {ss}/s3b.tblastx_matrix80.ss	0	dc74167bf4ab0a5d	c7d9e175b47ef7bc

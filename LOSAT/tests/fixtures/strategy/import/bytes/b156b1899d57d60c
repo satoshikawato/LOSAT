@@ -1,0 +1,4 @@
+@HD	VN:1.2	GO:query
+@SQ	SN:BL_ORD_ID:1	LN:208
+@PG	ID:0	VN:2.17.0+	PN:tblastx
+Query_2	0	BL_ORD_ID:1	68	255	12H108M9H	*	0	0	*	*	NM:i:0

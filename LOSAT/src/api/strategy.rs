@@ -195,8 +195,11 @@ pub struct Strategy {
     /// The arguments of the engine's import of the strategy file, made once when the strategy is
     /// read: each of the search's calls takes a copy (`command`). The sequence texts are not here
     /// (they became the records below), and each copy has the import's warnings, which a call
-    /// takes for itself (`take_warnings`).
-    applied: Commands,
+    /// takes for itself (`take_warnings`). Nothing changes them after the read, so a call that
+    /// panics leaves them whole: the strategy stays unwind-safe, as [`Inputs`](super::Inputs) and
+    /// [`Batches`](super::Batches) that refer to it are, although the arguments hold trait objects
+    /// (the window masker's counts source).
+    applied: std::panic::AssertUnwindSafe<Commands>,
     queries: Vec<FastaRecord>,
     /// How the reading of the strategy's queries ended (`InputRecords::query_end`), which the
     /// search meets where the command line's query batches meet it.
@@ -238,7 +241,7 @@ impl Strategy {
         // arguments of a call are a copy of it, with the import's warnings for the call, and no
         // sequence text, as the call searches the records read once. The search's `-out` is the
         // only thing of the call that the copy takes.
-        let mut command = self.applied.clone();
+        let mut command = self.applied.0.clone();
         if let Some(path) = search.out_path() {
             set_out(&mut command, path);
         }
@@ -282,7 +285,7 @@ impl Search {
         Ok(Strategy {
             program: self.program(),
             argv: self.argv().to_vec(),
-            applied: applied.command,
+            applied: std::panic::AssertUnwindSafe(applied.command),
             queries: records.query,
             query_end: records.query_end,
             subjects: records.subject,

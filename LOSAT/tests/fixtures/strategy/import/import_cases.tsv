@@ -611,7 +611,6 @@ C.blastn.from.tblastx.db.mts2	blastn	-import_search_strategy {ss}/tblastx.db.ss 
 C.blastx.from.tblastx.db.f7sort	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 7 -sorthits 1	0	30c4e3e0bd37feb7	c0a9b9c156919837
 C.blastx.from.tblastx.db.f6sorthsps	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 6 -sorthsps 1	0	6b1b62178d0765f5	c823c18b190370b9
 C.tblastx.from.blastn.db.many	tblastx	-import_search_strategy {ss}/blastn.db.ss -evalue 1 -seg yes -max_target_seqs 3 -outfmt 6	0	0b1c9dbcc4a2e903	2c062fdb273202e8
-C.blastx.from.tblastx.db.mts0	blastx	-import_search_strategy {ss}/tblastx.db.ss -max_target_seqs 0	1	-	1d5d4f4f2bd4cc7a
 C.blastn.from.tblastx.db.nt4	blastn	-import_search_strategy {ss}/tblastx.db.ss -num_threads 4	0	f153bc90307b54d1	c7d9e175b47ef7bc
 C.tblastx.from.blastn.db.f17	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 17	1	-	b01bddefcaad80c8
 C.blastx.from.tblastx.db.f17	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 17	1	-	b01bddefcaad80c8

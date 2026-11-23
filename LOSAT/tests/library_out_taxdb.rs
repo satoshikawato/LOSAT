@@ -303,10 +303,9 @@ fn run_to_file_makes_out_where_the_command_line_does() {
                 assert_ne!(run.status.code(), Some(0), "{program} {binary:?} {envs:?}");
                 files.push(fs::read(dir.join("out.asn")).ok());
             }
-            // psiblast writes no BLAST archive (LOSAT refuses outfmt 11 there before any file).
-            assert_eq!(
+            // psiblast too (line PS item PS15b-1: its error archive, the subjects' engine error).
+            assert!(
                 files[0].is_some(),
-                program != "psiblast",
                 "{program} {envs:?}: the command line's file"
             );
             assert_eq!(files[1], files[0], "{program} {envs:?}: outfmt 11");

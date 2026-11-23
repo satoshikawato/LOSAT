@@ -2,13 +2,14 @@
 //! (`CSeqDB::GetDBMetaData` written by `CObjectOStreamJson`), the document makeblastdb writes
 //! as `<db>.pjs` / `<db>.njs` (`writedb::metadata`).
 
-use std::io::Write;
-
+use crate::cli::NcbiStdio;
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::Ostream;
+use crate::ncbi_app::files::OutputFile;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
-use crate::writedb::metadata::{db_files_metadata, metadata_user_path, DbMetadata};
+use crate::writedb::cout::cout;
+use crate::writedb::metadata::{db_files_metadata, metadata_user_path, write_metadata, DbMetadata};
+use crate::writedb::ofstream::OfStream;
 
 use super::{database_error, refusal, Diag};
 
@@ -18,16 +19,17 @@ use super::{database_error, refusal, Diag};
 // list go by spaces alone, and a double quote stays in the piece it is in (probes N121-N175 of
 // line BDC). A date `CTime` does not read ends NCBI with an exception that names its source files (exit status 255, probes J189,
 // J190 of line BDC), which LOSAT refuses. The JSON ends with the line feed of `NcbiEndl`
-// (`DbMetadata::to_json`, probes T13, T14, S39, J180-J199).
+// (`writedb::metadata::write_metadata`, probes T13, T14, S39, J180-J199).
 /// `-metadata` of the database `name` opened as `db`, its files named after
-/// `-metadata_output_prefix`, to `out`; the exit status.
+/// `-metadata_output_prefix`, to `out` (`-out`'s stream, nothing written to it yet); the exit
+/// status.
 pub(super) fn metadata(
     db: &SeqDb,
     name: &str,
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    out: &mut Ostream<'_>,
+    out: OutputFile<'_>,
 ) -> i32 {
     let prefix = metadata_user_path(args.value("metadata_output_prefix"));
     let dbname: Vec<&str> = name
@@ -83,21 +85,35 @@ pub(super) fn metadata(
         bytes_to_cache,
         files,
     };
-    // NCBI's serial stream (`CObjectOStreamJson`) checks its writes: NCBI 2.17.0 with `-out
-    // /dev/full` posts the failure of `json_out->Flush()` (`CObjectOStream: error at byte <the
-    // JSON's length>`, three more lines of the stream's close, `BLAST failed to write output:
-    // COStreamBuffer::Flush: failed`) and ends with exit status 6, or with other lines where a
-    // JSON longer than the stream's buffer first fails (review 2 of line RG item K1, F2). LOSAT
-    // refuses it, as dustmasker's serial writers do (RG DECISIONS K1-9). A closed pipe ends the
-    // program silently, where SIGPIPE ends NCBI's (`Ostream::closed`).
-    let _ = out.write_all(&metadata.to_json());
-    let _ = out.flush();
-    if out.bad() && !out.closed() {
-        return diag.refuse(&format!(
-            "a failed write of the -metadata output (NCBI's serial stream reports it) is not \
-             supported by LOSAT's {}",
-            super::PROGRAM
-        ));
+    // NCBI's serializer (`CObjectOStreamJson`) checks its writes and reports a failure where it
+    // finds it: through its own buffer of 4096 bytes, on the `-out` file's `ofstream` or on
+    // `cout` (`writedb::metadata::write_metadata`, `writedb::ofstream`, `writedb::cout`).
+    // blastdbcmd 2.17.0 writing to a full device or under a file size limit gives these bytes
+    // and exit statuses (line RG KC-11b-1). A closed pipe ends the program silently, where
+    // SIGPIPE ends NCBI's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). `cout`'s buffer
+    // follows this process's standard output (its block size, a terminal or not), also in the
+    // library API, whose writer takes the same bytes at other times.
+    let mut posts = Vec::new();
+    let escaped = match out {
+        OutputFile::File(file) => {
+            let mut stream = OfStream::of_file(file);
+            write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
+        }
+        OutputFile::Stdout(stdout) => {
+            let mut stream = cout(stdout, NcbiStdio::cout());
+            write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
+        }
+        // Refused when `-out` was opened (`super::output_refusal`); never a failed write of
+        // NCBI's serializer.
+        OutputFile::Refused(reason) => return diag.refuse(&super::output_refusal(&reason)),
+    };
+    diag.write_text(&posts);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    match escaped {
+        Some(message) => {
+            diag.post(&format!("BLAST failed to write output: {message}"));
+            6
+        }
+        None => 0,
     }
-    0
 }

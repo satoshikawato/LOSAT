@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "tm_cache_gi",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm cache gi",
+  "number-of-letters": 1560,
+  "number-of-sequences": 12,
+  "last-updated": "2026-11-23T22:28:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 39674,
+  "bytes-to-cache": 1765,
+  "files": [
+    "tm_cache_gi.pdb",
+    "tm_cache_gi.phr",
+    "tm_cache_gi.pin",
+    "tm_cache_gi.pnd",
+    "tm_cache_gi.pni",
+    "tm_cache_gi.pog",
+    "tm_cache_gi.pot",
+    "tm_cache_gi.psq",
+    "tm_cache_gi.ptf",
+    "tm_cache_gi.pto"
+  ]
+}

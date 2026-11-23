@@ -44,6 +44,10 @@ pub struct BelievedIds {
     /// Whether the record is one that a reader of the other role read before it
     /// (`crate::seqid::id_scope::IdScope::add_record`).
     pub shared: Option<SharedRecord>,
+    /// Whether the reports show these ids as `-parse_deflines` shows a record's ids: false for the
+    /// ids of a Bioseq that the reports show as a record without them, which only the record's
+    /// Seq-id takes (`FastaRecord::keeping_bioseq_ids`, `RecordNames::seq_id`).
+    pub shown: bool,
 }
 
 impl BelievedIds {
@@ -95,6 +99,7 @@ impl BelievedIds {
             local,
             strand,
             shared: None,
+            shown: true,
         }
     }
 

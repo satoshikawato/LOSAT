@@ -140,8 +140,8 @@ pub(super) enum Off {
     /// A database with parsed Seq-ids of more sequences than the check reads
     /// (`common::database::PARSED_CHECK_SEQUENCES_MAX`, `TblastxDatabase::parsed_beyond`).
     LargeParsed,
-    /// With the batches' prefetch, a run that NCBI's taxonomy cache refuses
-    /// (`TblastxDatabase::prefetch_refused`): the batches ask for the refusal only where NCBI
+    /// With the batches' prefetch, a run that NCBI's taxonomy cache may refuse
+    /// (`TblastxDatabase::cache_may_refuse`): the batches ask for the refusal only where NCBI
     /// fetches a subject (`run_batch_loop`), which may be a later batch.
     TaxonomyCache,
     /// A database sequence whose report could be refused (`ReportRefusal`).
@@ -327,7 +327,7 @@ fn database_check(
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();
-    if prefetch && database.prefetch_refused() {
+    if prefetch && database.cache_may_refuse() {
         return Err(Off::TaxonomyCache);
     }
     match database.reports_may_refuse(shown, prefetch, queries, pool) {

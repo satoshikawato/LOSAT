@@ -1,0 +1,19 @@
+Blast-def-line-set ::= {
+  {
+    title "first protein",
+    seqid {
+      gi 5001,
+      other {
+        accession "XP_5001",
+        version 1
+      }
+    },
+    taxid 9606,
+    memberships {
+      4
+    },
+    other-info {
+      7
+    }
+  }
+}

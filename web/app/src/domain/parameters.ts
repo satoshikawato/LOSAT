@@ -181,6 +181,15 @@ export function fieldRows(
   return rows;
 }
 
+/** Normalizes NCBI boolean spellings (`T`/`F`/`true`/`false`/`yes`/`no`/`1`/`0`) to `'true'` or `'false'`. */
+export function normalizeBooleanDefault(value: string | undefined): 'true' | 'false' | undefined {
+  if (value === undefined) return undefined;
+  const lower = value.trim().toLowerCase();
+  if (lower === 'true' || lower === 't' || lower === 'yes' || lower === '1') return 'true';
+  if (lower === 'false' || lower === 'f' || lower === 'no' || lower === '0') return 'false';
+  return undefined;
+}
+
 /**
  * What the form writes to the argv for a field: `true` for a set flag, or a value other than
  * '' and the default (white space around it dropped; a `given` option's value even when it
@@ -191,7 +200,15 @@ export function writtenValue(field: ParameterField, value: FieldValue | undefine
   if (field.kind === 'flag') return value === true ? true : undefined;
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
-  return text === '' || (known?.given !== true && text === known?.defaultValue) ? undefined : text;
+  if (text === '') return undefined;
+  if (known?.given !== true) {
+    if (text === known?.defaultValue) return undefined;
+    if (field.kind === 'boolean' && field.select === true) {
+      const normalized = normalizeBooleanDefault(text);
+      if (normalized !== undefined && normalized === normalizeBooleanDefault(known?.defaultValue)) return undefined;
+    }
+  }
+  return text;
 }
 
 /** The values of a field's select (`list`), for the task the search uses; empty without one. */

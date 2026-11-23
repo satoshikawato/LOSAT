@@ -16,6 +16,7 @@ import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
 import { printSummaryParts, programById, PROGRAMS, searchSummaryParts } from '../domain/programs';
 import { announce } from './announcer';
+import { searchFormModel } from './form-model';
 import { REFUSAL_ID } from './refusal';
 import { useStore } from './useStore';
 import ExampleLine from './ExampleLine.vue';
@@ -35,6 +36,7 @@ const props = defineProps<{
 /** A search was started: the ID of its first run (a group of separate searches starts several). */
 const emit = defineEmits<{ submitted: [runId: string] }>();
 const state = useStore(props.draft.state);
+const formModel = computed(() => searchFormModel(props.draft, state.value, { counts: props.counts }));
 const program = computed(() => programById(state.value.program));
 const options = computed(() => state.value.description?.parameters);
 const values = computed(() => state.value.values[state.value.program]);
@@ -177,7 +179,7 @@ function onThreads(event: Event): void {
 
     <fieldset v-if="taskFields.length > 0" class="search-block" data-testid="program-selection">
       <legend>Task Selection</legend>
-      <ParameterField v-for="field in taskFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
+      <ParameterField v-for="field in taskFields" :key="field.flag" :model="formModel" :field="field" />
     </fieldset>
 
     <div class="blast-row">
@@ -260,7 +262,7 @@ function onThreads(event: Event): void {
           </p>
           <button type="button" data-testid="restore-defaults" @click="restoreDefaults">Restore default search parameters</button>
         </div>
-        <ParameterForm :draft="draft" :state="state" :counts="counts" />
+        <ParameterForm :model="formModel" />
         <div class="blast-row">
           <button
             class="primary-action"

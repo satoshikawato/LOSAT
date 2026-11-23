@@ -796,7 +796,10 @@ web/app/src/domain/html-named-references.ts, written from that file by
 web/app/scripts/html-named-references.mjs.
 License: the standard is under the Creative Commons Attribution 4.0 International License;
 WHATWG's statement: "To the extent portions of it are incorporated into source code, such
-portions in the source code are licensed under the BSD 3-Clause License instead." The license:
+portions in the source code are licensed under the BSD 3-Clause License instead." WHATWG
+generates entities.json in the repository https://github.com/whatwg/html-build (the directory
+entities/, where it is checked in as entities/out/entities.json), whose LICENSE file has the
+same text. The license:
 
 -------------------------------------------------------------------------------
 Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).

@@ -6,6 +6,8 @@ pub mod defline;
 pub mod diag_log;
 pub(crate) mod formatter_registry;
 pub mod hit_sort;
+pub(crate) mod html;
+pub(crate) mod html_ids;
 pub mod outfmt6;
 pub mod pairwise;
 pub(crate) mod query_anchored;

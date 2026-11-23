@@ -1363,9 +1363,20 @@ pub(crate) fn create_out_file(
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
 /// that the run already wrote (`post_native_error`) is not written again. A failed write is
 /// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
-/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
+/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
+/// error of a report's writer that carries an exception of NCBI's (`NcbiException::into_io_error`:
+/// the `-html` links' registry, `report::formatter_registry::InitConfig`, which NCBI's formatter
+/// reads while it writes) is that exception's report (`NativeError::of_writer`), whichever program
+/// wrote it.
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    if let Some(e) = error.downcast_ref::<NativeError>() {
+    let of_writer = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
+        .map(NativeError::exception);
+    if let Some(e) = of_writer
+        .as_ref()
+        .or_else(|| error.downcast_ref::<NativeError>())
+    {
         if !posted(&e.message) {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));

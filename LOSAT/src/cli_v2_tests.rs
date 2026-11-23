@@ -1695,6 +1695,38 @@ fn show_gis_is_a_flag_of_every_search_program() {
     assert!(!args.show_gis);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+// `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
+#[test]
+fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-html"]).is_ok(), "{program}");
+        assert!(parse(program, &["-html", "true"]).is_err(), "{program}");
+        let given = match parse(program, &["-html"]).unwrap().command {
+            Commands::Blastn(args) => args.html,
+            Commands::Blastp(args) => args.html,
+            Commands::Blastx(args) => args.html,
+            Commands::Tblastn(args) => args.html,
+            Commands::Tblastx(args) => args.html,
+            _ => panic!("{program}"),
+        };
+        let absent = match parse(program, &[]).unwrap().command {
+            Commands::Blastn(args) => args.html,
+            Commands::Blastp(args) => args.html,
+            Commands::Blastx(args) => args.html,
+            Commands::Tblastn(args) => args.html,
+            Commands::Tblastx(args) => args.html,
+            _ => panic!("{program}"),
+        };
+        assert!(given && !absent, "{program}");
+    }
+    let error = parse("psiblast", &["-html"]).unwrap_err().to_string();
+    assert!(
+        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
+        "{error}"
+    );
+}
+
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
 // Toolkit's standard options (ncbiargs.cpp:78-87), are rejected explicitly.
 #[test]

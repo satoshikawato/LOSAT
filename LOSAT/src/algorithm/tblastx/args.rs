@@ -50,6 +50,11 @@ pub struct TblastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -125,6 +130,10 @@ pub struct TblastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
     #[arg(skip)]
     pub report_counts: crate::blastinput::report_counts::ReportCounts,
+    // The `-html` links of the run, which `check_ncbi_options` makes
+    // (`blastinput::app::html_links`). Not a public option.
+    #[arg(skip)]
+    pub html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-207
     #[arg(long = "max_hsps", value_parser = ncbi_integer_as::<usize>, help = "Set maximum number of HSPs per subject sequence to save for each query")]
     pub max_hsps: Option<usize>,

@@ -56,9 +56,12 @@ export default defineConfig({
   server: { headers: devHeaders },
   preview: { headers },
   worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false }), notices.worker()] },
-  // No module preload polyfill: the site has one chunk and no modulepreload link, so it would do
-  // nothing, and its code (adapted from es-module-shims) has no notice in the site
-  // (build/notices.ts stops the build if it comes back).
+  // No module preload polyfill: the site writes no modulepreload link (its one chunk besides the
+  // main one, the -html text of domain/outfmt0-html.ts that application/results.ts imports when
+  // it reads a range of such a run, imports nothing), so it would do nothing, and its code (adapted
+  // from es-module-shims) has no notice in the site (build/notices.ts stops the build if it comes
+  // back). Vite's preload helper, which calls that import(), is in the main chunk with the
+  // notices of Vite and Rolldown (build/notices.ts, VIRTUAL_OWNERS).
   build: { target: 'es2022', modulePreload: { polyfill: false } },
   test: {
     include: ['tests/unit/**/*.test.ts'],

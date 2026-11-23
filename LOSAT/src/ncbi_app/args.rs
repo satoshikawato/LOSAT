@@ -202,7 +202,7 @@ impl Refused {
 
 /// How LOSAT refuses one of NCBI's arguments that it does not run (AGENTS.md rule 2: explicit
 /// unsupported errors): the one list of them, the rows of `REFUSED` in `build/ncbi_args.rs` (line
-/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::named_refusal`,
+/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::reader::named_refusal`,
 /// `cli::run_refusal`) and `-xmlhelp` (`cli::xml_help_text`) read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refusal {

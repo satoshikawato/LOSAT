@@ -149,16 +149,19 @@ pub(super) fn x_scan(
 /// at its columns (`x_FillLocList`, `query_anchored::fill_row_loc_list`), which `x_OutputSeq`
 /// puts in lower case. The rows come back so, as the hit records that the library API and LOSAT
 /// Web hand out show them (`HspMasks::lower_row`); the lists are not kept
-/// (`query_anchored::output_seq`): one `HspMasks` serves every row. With `-subject_loc` the runs
-/// lie where they lie in the record, as the hits' positions.
+/// (`query_anchored::output_seq`): one `HspMasks` serves every row, except under `-html`, where
+/// each subject row's go to its hit's entry of `html_masks` (by the place in `hits`,
+/// `HspMasks::copy_row_from`). With `-subject_loc` the runs lie where they lie in the record, as
+/// the hits' positions.
 #[cold]
 #[inline(never)]
 pub(super) fn x_set_subject_row_masks(
     hits: &mut [PairwiseHit],
     kept: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) {
     let mut masks = crate::report::query_anchored::HspMasks::default();
-    for hit in hits.iter_mut() {
+    for (index, hit) in hits.iter_mut().enumerate() {
         let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
             continue;
         };
@@ -181,6 +184,12 @@ pub(super) fn x_set_subject_row_masks(
         );
         masks.lower_row(1, &mut letters);
         *row = String::from_utf8(letters).expect("ASCII alignment row");
+        if let Some(entry) = html_masks
+            .as_deref_mut()
+            .and_then(|table| table.get_mut(index))
+        {
+            entry.copy_row_from(1, &masks);
+        }
     }
 }
 

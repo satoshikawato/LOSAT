@@ -310,11 +310,7 @@ fn top_level_help_names_every_program() {
 fn argument_errors_and_refusals_end_with_a_line_end() {
     for (words, ncbi) in [
         (
-            &["blastn", "-query", "q.fa", "-subject", "q.fa", "-html"][..],
-            false,
-        ),
-        (
-            &["blastn", "-query", "q.fa", "-subject", "q.fa", "-remote"],
+            &["blastn", "-query", "q.fa", "-subject", "q.fa", "-remote"][..],
             false,
         ),
         (&["blastn", "-no_such_option"], true),
@@ -431,7 +427,7 @@ fn help_has_no_source_references_and_a_true_footer() {
 /// program's name, exit status 1), after NCBI's reader took the command line (line RG item K4i-2b).
 #[test]
 fn refusals_by_name_have_one_form() {
-    for option in ["-html", "-remote"] {
+    for option in ["-remote"] {
         let mut forms = Vec::new();
         for program in ["blastn", "blastp", "blastx"] {
             for with_subject in [false, true] {

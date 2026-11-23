@@ -1,0 +1,85 @@
+# BLASTP 2.17.0+
+# Query: q0
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q0	NP_000101.1	100.000	100	0	0	1	100	1	100	1.35e-77	214
+# BLASTP 2.17.0+
+# Query: q1
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	NP_000103.1	100.000	100	0	0	1	100	1	100	1.50e-76	211
+# BLASTP 2.17.0+
+# Query: q2
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q2	NP_000104.1	100.000	100	0	0	1	100	1	100	2.88e-77	212
+# BLASTP 2.17.0+
+# Query: q3
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q3	P20106.1	100.000	100	0	0	1	100	1	100	2.27e-77	213
+# BLASTP 2.17.0+
+# Query: q4
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q4	AAA00107.1	100.000	100	0	0	1	100	1	100	1.38e-76	211
+# BLASTP 2.17.0+
+# Query: q5
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q5	AAA00108.1	100.000	100	0	0	1	100	1	100	7.96e-77	211
+# BLASTP 2.17.0+
+# Query: q6
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q6	loc7	100.000	100	0	0	1	100	1	100	5.35e-76	210
+# BLASTP 2.17.0+
+# Query: q7
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q7	1ABC_A	100.000	100	0	0	1	100	1	100	1.55e-76	211
+# BLASTP 2.17.0+
+# Query: q8
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q8	NP_000111.1	100.000	100	0	0	1	100	1	100	3.88e-77	213
+# BLASTP 2.17.0+
+# Query: q9
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q9	NP_000112.1	100.000	100	0	0	1	100	1	100	2.67e-78	215
+# BLASTP 2.17.0+
+# Query: q10
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q10	NP_000113.1	100.000	100	0	0	1	100	1	100	2.40e-77	213
+# BLASTP 2.17.0+
+# Query: q11
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q11	NP_000116.1	100.000	100	0	0	1	100	1	100	6.51e-78	214
+# BLASTP 2.17.0+
+# Query: q12
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q12	NP_000117.1	100.000	100	0	0	1	100	1	100	3.19e-78	215
+# BLASTP 2.17.0+
+# Query: q13
+# Database: tests/db_search/idlist/g_bare
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q13	NP_000118.1	100.000	100	0	0	1	100	1	100	7.56e-75	206
+# BLAST processed 14 queries

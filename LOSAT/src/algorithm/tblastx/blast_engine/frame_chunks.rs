@@ -175,6 +175,18 @@ pub(super) fn search_subject_frames<S: TbxScore>(
             None => None,
         };
 
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-498 and
+        // c++/src/algo/blast/core/aa_ungapped.c:516-547
+        // A chunk whose scan reads letters before it (a range of masks stored out of order,
+        // `common::translated_chunks::scan_lead`) gives hits at offsets below 0, whose tests read
+        // the cells the frame's earlier chunks left within reach: NCBI's chunks run in order on
+        // one table, so such a frame's do here too (no parallel chunks with tables of their own).
+        let x_chunks_in_order = x_soft_calls.as_ref().is_some_and(|calls| {
+            calls.iter().any(|(_, ranges)| {
+                crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
+            })
+        });
+
         // What the word finder reads of this subject and frame (`word_finder::FrameCx`).
         let frame_cx = word_finder::FrameCx {
             cx,
@@ -215,7 +227,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         search_frame_chunks(
             &ChunkDrive {
                 use_serial_scan_chunks,
-                use_parallel_chunks,
+                use_parallel_chunks: use_parallel_chunks && !x_chunks_in_order,
                 num_threads,
                 max_dbseq_len,
                 #[cfg(all(

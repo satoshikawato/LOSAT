@@ -1,0 +1,5 @@
+TITLE gi b range
+DBLIST g
+GILIST gi_b.txt
+FIRST_OID 3
+LAST_OID 4

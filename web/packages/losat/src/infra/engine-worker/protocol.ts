@@ -107,7 +107,7 @@ export interface WorkerTool {
 
 /**
  * The check of a tool's words (`ToolEngine.validateTool`, ABI v2 `losat_web2_validate` with a tool's name as `argv[0]`): it
- * runs on the serial instance that runs tools, in the worker's turn like a run (behind a run in progress), with the files of
+ * runs on the instance that the worker has loaded (the serial one when none is), in the worker's turn like a run (behind a run in progress), with the files of
  * the run's directory opened there as for a run, because the check reads the run's registry files. The answer is
  * `tool-validated` with the same `id`.
  */

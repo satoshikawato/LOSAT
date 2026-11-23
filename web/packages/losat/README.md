@@ -212,11 +212,12 @@ reads in place, as for a search of `-db` (above). A folder of the directory open
 fails: `-in <folder>` ends as the command line does, with "Is a directory". The promise resolves with the command line's
 exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
 in the order the run opened them, named as the argv spells them: a name may hold `/`, as `sub/x` does for a folder of the
-directory). The status is the command line's: an argument error and a refusal by LOSAT are status 1, and NCBI's exceptions
-(a missing file, a bad counts file) are status 3; their text is on `stderr`, but with `-logfile FILE` NCBI's report is in that
-file, as it is on the command line. `stderr` arrives as the tool writes it, not when the run ends, so `onStderr` can show a
-warning while the run goes on. A name that is not a tool rejects. The run is one at a time with the searches;
-`options.signal` cancels it.
+directory). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
+(a missing file, a bad counts file) are status 3, a `-conffile` that is not there is status 255, and a registry file that is
+malformed (a `-conffile`, or a `windowmasker.ini` in the directory, with a bad section or entry line) is status 2; their text
+is on `stderr`, but with `-logfile FILE` NCBI's report is in that file, as it is on the command line. `stderr` arrives as
+the tool writes it, not when the run ends, so `onStderr` can show a warning while the run goes on. A name that is not a tool
+rejects. The run is one at a time with the searches; `options.signal` cancels it.
 
 ```ts
 import { WasmEngine } from 'losat';
@@ -238,7 +239,10 @@ if (status !== 0) throw new Error(await stderr.text());
 ```
 
 A tool's output may be larger than the browser's memory (human unit counts are 724 MB, a genome masked as FASTA is
-3.1 GB), so the engine sends it as it writes it, and a sink takes each chunk instead of the host keeping it:
+3.1 GB), so the engine sends it in pieces as it writes it (a file's bytes in frames of up to 1 MiB), and a sink takes each
+chunk instead of the host keeping it. A file that grows slowly, such as a `-logfile`'s messages, reaches the sink in a frame
+that is sent when it fills, before the run writes elsewhere in that file or cuts it, and when the run ends: a small log may
+arrive only then. The standard error is the exception: it arrives at each write.
 
 ```ts
 declare const folder: FileSystemDirectoryHandle; // the user's choice, from showDirectoryPicker()
@@ -296,9 +300,13 @@ output with a sink that keeps up. A file that no sink takes is collected as a Bl
 
 `engine.validateTool(argv, { directory })` checks the words as the command line does before the tool opens a file, and reads
 the run's registry files (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does, so it takes the same
-`directory` as `runTool`: it opens the files on the engine's instance that runs tools. It takes its turn there like a run: it
-waits behind a run in progress. It does not make the engine busy: a run may start while a check is pending, and a check may be
-asked during a run. When the worker that has it ends (a cancel, a renewal, a stop), the check goes to the next worker.
+`directory` as `runTool`: it opens the files on the instance that the Engine worker has loaded (a threaded runtime that the
+searches use keeps its threads, its retained subject and counts file; the serial one is loaded only when none is). It takes
+its turn there like a run: it waits behind a run in progress. It does not make the engine busy: a run may start while a
+check is pending, and a check may be asked during a run. When the worker that has it ends (a cancel, a renewal, a stop), the
+check goes to the next worker; a check that three workers ended through no run's doing is given up. A check whose instance
+stops ends the worker as a run's does: that check rejects, a run posted behind it on that worker fails with "Run the search
+again.", and the next run starts a new worker.
 
 ## License
 

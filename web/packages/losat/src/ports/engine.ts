@@ -332,7 +332,9 @@ export interface EnginePrepareHint {
  * browser's memory (human counts are 724 MB, a genome masked as FASTA 3.1 GB), so the engine hands it over in
  * chunks. The calls come in order, each after the promise of the one before has settled: the file's writes and
  * truncations in the order that the run made them, then `close`. A `chunk` is the sink's own (it is not used again by
- * the host).
+ * the host). The engine sends a file's bytes in frames of up to 1 MiB, joining writes that follow each other: a file that
+ * grows in small writes (a `-logfile`'s messages) reaches the sink when a frame fills, before the run writes to another
+ * file or cuts one, and when the run ends, so a small file may arrive only then. The standard error is sent at each write.
  *
  * A file has POSIX semantics: most writes are appends (`offset` is the length so far), but a run that opens one file
  * twice (`-out X -logfile X`) writes one file through two handles, each with its own position, so a write may come at
@@ -425,7 +427,8 @@ export interface ToolEngine {
   /**
    * Runs a tool as the command line runs it in the run's directory (`argv[0]` is the tool's name, `windowmasker`, then the
    * command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to
-   * `options.sinks` as they are written, then resolves with the exit status (the command line's, for every status, a refusal
+   * `options.sinks` as they are written (a file's bytes in frames of up to 1 MiB: a small file may arrive only when the run
+   * ends), then resolves with the exit status (the command line's, for every status, a refusal
    * of an argument included: its text is on stderr). Rejects for a name that is not a tool that the engine runs, for a
    * cancel and for a failure of the engine or of a sink. One run at a time, a search's included.
    */
@@ -433,9 +436,11 @@ export interface ToolEngine {
   /**
    * Checks the words of a tool as the command line checks them before the tool opens a file. It reads the run's registry
    * files (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does, so give it the same `directory` as
-   * `runTool`: it opens them on the engine's instance that runs tools, and takes its turn there like a run (it waits
-   * behind a run in progress). It does not make the engine busy: a run may start while a check is pending, and a check
-   * may be asked while a run is in progress.
+   * `runTool`: it opens them on the instance that the Engine worker has loaded (a threaded runtime that the searches use
+   * stays as it is), and takes its turn there like a run (it waits behind a run in progress). It does not make the engine
+   * busy: a run may start while a check is pending, and a check may be asked while a run is in progress. A check whose
+   * instance stops rejects and ends the worker as a run's stop does: a run posted behind it on that worker fails (the same
+   * error as a worker that ended), and the next run starts a new worker.
    */
   validateTool(argv: readonly string[], options?: ToolValidateOptions): Promise<ToolValidation>;
 }

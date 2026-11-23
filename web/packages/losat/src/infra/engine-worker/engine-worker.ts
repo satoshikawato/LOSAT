@@ -195,7 +195,7 @@ async function tool(command: WorkerTool): Promise<void> {
 }
 
 /**
- * The check of a tool's words (`ToolEngine.validateTool`): on the serial instance that runs tools, in its turn after the run
+ * The check of a tool's words (`ToolEngine.validateTool`): on the instance that is loaded (the serial one when none is), in its turn after the run
  * in progress, with the run's files opened for it. The answer is the verdict, or the error of an engine that stopped.
  */
 async function validateTool(command: WorkerToolValidate): Promise<void> {

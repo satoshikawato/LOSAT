@@ -118,6 +118,8 @@ interface Loaded {
   counts: HeldCounts | undefined;
   /** The argvs (without -num_threads) of the searches and warm-ups that ran on this instance. */
   readonly ran: Set<string>;
+  /** A serial instance that a check of a tool's words loaded because none was loaded, which nothing else has used (`unused`). */
+  checkOnly: boolean;
 }
 
 /** Why this worker cannot run the threaded module, or undefined if it may. */
@@ -235,21 +237,31 @@ export class EngineRuntime {
   }
 
   /**
-   * The check of a tool's words (`losat_web2_validate` with a tool's name as `argv[0]`) on the serial instance that runs
-   * tools, with the files of the run's directory opened as `tool` opens them: the check reads the run's registry files
-   * (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does. It releases nothing that the instance holds (it needs
-   * no memory of its own), and lets the files go afterwards. A stopped instance is loaded again by the next call.
+   * The check of a tool's words (`losat_web2_validate` with a tool's name as `argv[0]`) on the instance that is loaded, with the
+   * files of the run's directory opened as `tool` opens them: the check reads the run's registry files (`-conffile`,
+   * `.ncbirc`, `windowmasker.ini`) as the command line does. Both modules export it, so a threaded runtime that the searches
+   * use stays as it is (its thread workers, the subject and the counts file that it retains, its warm-up): the check takes
+   * none of it and needs no memory of its own, and the files go afterwards. The serial instance is loaded only when none is.
+   * The calls into a threaded instance are a use, as a search's are. A stopped instance is handled as after a search: the
+   * serial one is loaded again by the next call, and the threaded one is ended with its worker by the Gateway (`search`).
    */
   async validateTool(request: WorkerToolValidate): Promise<ToolValidation> {
-    const loaded = await this.load('serial');
+    const held = this.loaded;
+    const none = held === undefined || held.instance.abi.stoppedBy !== undefined;
+    const loaded = none ? await this.load('serial') : held;
+    // The check made this instance: a preparation for a threaded search may replace it (`prepare`).
+    if (none) loaded.checkOnly = true;
     const abi = loaded.instance.abi;
+    const use = loaded.path === 'threaded' ? this.options.use : undefined;
     try {
-      loaded.directory.open(request.files ?? []);
-      loaded.instance.wasi.clear();
-      return abi.validateTool(request.argv);
+      return inUse(use, () => {
+        loaded.directory.open(request.files ?? []);
+        loaded.instance.wasi.clear();
+        return abi.validateTool(request.argv);
+      });
     } finally {
       if (abi.stoppedBy === undefined) loaded.directory.open([]);
-      else this.dispose();
+      else if (loaded.path === 'serial') this.dispose();
     }
   }
 
@@ -408,16 +420,20 @@ export class EngineRuntime {
    * and, for the threaded module, its thread workers. With the search's `argv` (program
    * first, without -num_threads), it then runs that search once on one thread on built-in
    * sequences (warm-up.ts) unless one like it ran on the instance. It never ends a working
-   * instance of the other module: a queued search may still use it and the subject it holds.
+   * instance of the other module: a queued search may still use it and the subject it holds (a serial instance that only a check
+   * loaded does not count: `unused`).
    * A failure is thrown; `run` loads and prepares again and handles it as before. The Engine
    * worker calls `prepare` and `run` one after another, never together.
    */
   async prepare(threads: number, argv?: readonly string[]): Promise<void> {
     const path: RuntimePath = threads > 1 && this.threadedUnavailable === undefined ? 'threaded' : 'serial';
     const current = this.loaded;
-    if (current !== undefined && current.path !== path && current.instance.abi.stoppedBy === undefined) return;
+    // A serial instance that only a check of a tool's words loaded (none was loaded) holds nothing that a queued search
+    // needs: the preparation for a threaded search replaces it.
+    if (current !== undefined && current.path !== path && current.instance.abi.stoppedBy === undefined && !unused(current)) return;
     if (path === 'serial') {
       const loaded = await this.load('serial');
+      loaded.checkOnly = false;
       if (argv !== undefined) this.warmUp(loaded, argv);
       return;
     }
@@ -547,7 +563,7 @@ export class EngineRuntime {
     if (path === 'serial') {
       const directory = new RunDirectory();
       const instance = await instantiateSerial(await this.options.serial(), directory);
-      this.loaded = { path, instance, directory, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
+      this.loaded = { path, instance, directory, runs: 0, retained: undefined, counts: undefined, ran: new Set(), checkOnly: false };
       return this.loaded;
     }
     const unsupported = threadedSupport();
@@ -563,13 +579,18 @@ export class EngineRuntime {
     const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use, directory });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn, directory);
-      this.loaded = { path, instance, directory, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
+      this.loaded = { path, instance, directory, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set(), checkOnly: false };
       return this.loaded;
     } catch (error) {
       threads.terminate();
       throw error;
     }
   }
+}
+
+/** Whether a serial instance was loaded by a check and has run nothing and holds no subject, counts file or warm-up since. */
+function unused(loaded: Loaded): boolean {
+  return loaded.checkOnly && loaded.runs === 0 && loaded.ran.size === 0 && loaded.retained === undefined && loaded.counts === undefined;
 }
 
 /** A runtime that the Gateway ends starts nothing and makes no call into its threaded instance. */

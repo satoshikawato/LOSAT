@@ -8,10 +8,16 @@ import type { ToolPosts } from './runtime.js';
 /**
  * The posts of the tool run `command` of `generation`: `post` sends an event to the main thread. A chunk or a frame of bytes
  * is counted before it is posted (its buffer is transferred, so its length is read first), and the call returns once the
- * page has taken enough for the backlog to be within the limit, or at once when the run has no credit.
+ * page has taken enough for the backlog to be within the limit, or at once when the run has no credit. `limits` are the
+ * credit's limit and the slice of its wait: the constants of tool-credit.ts, which a test lowers (the Engine worker gives none).
  */
-export function toolPosts(command: WorkerTool, generation: number, post: (event: EngineEvent, transfer: Transferable[]) => void): ToolPosts {
-  const waiter = command.credit === undefined ? undefined : new ToolCreditWorker(command.credit);
+export function toolPosts(
+  command: WorkerTool,
+  generation: number,
+  post: (event: EngineEvent, transfer: Transferable[]) => void,
+  limits: { readonly limit?: number; readonly sliceMs?: number } = {},
+): ToolPosts {
+  const waiter = command.credit === undefined ? undefined : new ToolCreditWorker(command.credit, limits.limit, limits.sliceMs);
   const { runId } = command;
   return {
     chunk: (stream, bytes) => {

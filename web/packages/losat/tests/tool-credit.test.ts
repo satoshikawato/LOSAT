@@ -1,7 +1,10 @@
 // Backpressure of a tool run (D-WW3-11, M4; src/infra/engine-worker/tool-credit.ts, tool-posts.ts): the Engine worker waits in
-// the engine's call while the bytes that it posted and the page has not taken are above the limit. The wait is real: a
-// worker thread of Node posts over a small limit and stays blocked in `Atomics.wait` until the main thread takes bytes (a
-// slice of 10 minutes, so that only the main thread's notify can wake it within the test's time) or closes the run.
+// the engine's call while the bytes that it posted and the page has not taken are above the limit. The wait is real, and it
+// is the code of the Engine worker: a worker thread of Node runs `toolPosts` (the function that engine-worker.ts gives the
+// engine) with a small limit and stays blocked in `Atomics.wait` until the main thread takes bytes (a slice of 10 minutes, so
+// that only the main thread's notify can wake it within the test's time) or closes the run. A test fails if either `wait()` of
+// tool-posts.ts is removed (the chunk's or the file frame's), or if the run's credit is not given to the posts.
+import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createToolCredit, postedBytes, TOOL_CREDIT_LIMIT, ToolCreditPage, ToolCreditWorker } from '../src/infra/engine-worker/tool-credit.ts';
@@ -14,9 +17,12 @@ afterEach(async () => {
 });
 
 /** Starts the fixture worker thread and collects the steps that it reports. */
-function start(buffer: SharedArrayBuffer, options: { limit?: number; sliceMs?: number; sizes: number[] }) {
+function start(buffer: SharedArrayBuffer, options: { limit?: number; sliceMs?: number; steps: { kind: 'chunk' | 'file'; size: number }[] }) {
   const steps: string[] = [];
-  const worker = new Worker(new URL('./support/credit-worker.ts', import.meta.url), { workerData: { buffer, ...options } });
+  const worker = new Worker(new URL('./support/credit-worker.ts', import.meta.url), {
+    workerData: { buffer, ...options },
+    execArgv: ['--import', fileURLToPath(new URL('./support/register-ts.mjs', import.meta.url))],
+  });
   workers.push(worker);
   worker.on('message', (step: string) => steps.push(step));
   worker.on('error', (error: Error) => steps.push(`error ${error.message}`));
@@ -28,17 +34,26 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = (check: () => void) => vi.waitFor(check, { timeout: 30_000 });
 
 describe('the credit of a tool run', () => {
-  it('blocks the worker over the limit until the page takes bytes, and a close lets it go', async () => {
+  it('blocks the worker over the limit until the page takes bytes, and a close lets it go (a chunk, then a file frame, then a chunk)', async () => {
     const buffer = new SharedArrayBuffer(8);
     const page = new ToolCreditPage(buffer);
-    const { steps } = start(buffer, { limit: 10, sliceMs: 600_000, sizes: [8, 8, 8] });
+    const { steps } = start(buffer, {
+      limit: 10,
+      sliceMs: 600_000,
+      steps: [
+        { kind: 'chunk', size: 8 },
+        { kind: 'file', size: 8 },
+        { kind: 'chunk', size: 8 },
+      ],
+    });
     await until(() => expect(steps).toContain('after 1'));
-    // 16 bytes over a limit of 10: the second post is made, and the worker waits for the page.
+    // 16 bytes over a limit of 10: the file frame is posted, and the worker waits for the page in the post of the frame.
     await until(() => expect(steps).toContain('posted 2'));
     await pause(300);
     expect(steps).toEqual(['posted 1', 'after 1', 'posted 2']);
     page.take(8);
     await until(() => expect(steps).toContain('after 2'));
+    // The next chunk makes 16 again: the worker waits in the post of the chunk.
     await until(() => expect(steps).toContain('posted 3'));
     await pause(300);
     expect(steps.at(-1)).toBe('posted 3');
@@ -48,11 +63,17 @@ describe('the credit of a tool run', () => {
     expect(steps).toEqual(['posted 1', 'after 1', 'posted 2', 'after 2', 'posted 3', 'after 3', 'done']);
   });
 
-  it('waits above 64 MiB and not at it', async () => {
+  it('waits above 64 MiB and not at it, with the limit that the Engine worker has', async () => {
     expect(TOOL_CREDIT_LIMIT).toBe(64 * 1024 * 1024);
     const buffer = new SharedArrayBuffer(8);
     const page = new ToolCreditPage(buffer);
-    const { steps } = start(buffer, { sizes: [TOOL_CREDIT_LIMIT, 1] });
+    // No limit is given: the posts take the constant, as in the Engine worker.
+    const { steps } = start(buffer, {
+      steps: [
+        { kind: 'chunk', size: TOOL_CREDIT_LIMIT },
+        { kind: 'file', size: 1 },
+      ],
+    });
     await until(() => expect(steps).toContain('posted 2'));
     await pause(300);
     // The limit itself does not block (after 1); one byte over does (no after 2).

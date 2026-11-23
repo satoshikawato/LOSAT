@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE, ownedFrame, parseToolFrame, type ToolFrame } from '../src/domain/tool-frames.ts';
-import { RunCancelledError, type EngineGateway, type ToolFileSink } from '../src/ports/engine.ts';
+import { RunCancelledError, type EngineGateway, type EngineRunRequest, type ToolFileSink } from '../src/ports/engine.ts';
 import { ABI_VERSION, EngineCallError, ReactorAbi, type AbiExports } from '../src/infra/reactor/abi.ts';
 import { ABI_EXPORTS } from '../src/infra/reactor/artifact.ts';
 import { compileReactor, instantiateSerial } from '../src/infra/reactor/instance.ts';
@@ -16,7 +16,7 @@ import { RunDirectory } from '../src/infra/reactor/run-directory.ts';
 import { WasmEngine } from '../src/infra/engine-worker/gateway.ts';
 import { BLOB_FOLD_BYTES, ToolOutputRouter } from '../src/infra/engine-worker/tool-output.ts';
 import type { EngineCommand, EngineEvent, WorkerTool, WorkerToolValidate } from '../src/infra/engine-worker/protocol.ts';
-import { ENGINE_NOT_STARTED } from '../src/infra/engine-worker/gateway.ts';
+import { ENGINE_ENDED, ENGINE_NOT_STARTED } from '../src/infra/engine-worker/gateway.ts';
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
@@ -865,6 +865,7 @@ describe('WasmEngine.runTool', () => {
       const second = engine.validateTool(['windowmasker', '-b']);
       await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(2));
       const [one, two] = workers[0]!.validations as [WorkerToolValidate, WorkerToolValidate];
+      workers[0]!.send({ type: 'started', generation: one.generation });
       workers[0]!.send({ type: 'tool-validate-failed', generation: one.generation, id: one.id, error: { name: 'EngineStoppedError', message: 'the engine stopped', stopped: true } });
       await expect(first).rejects.toThrow('the engine stopped');
       expect(workers[0]!.terminated).toBe(true);
@@ -901,6 +902,162 @@ describe('WasmEngine.runTool', () => {
       await expect(pending).rejects.toThrow(ENGINE_NOT_STARTED);
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(workers).toHaveLength(1);
+    });
+
+    it('settles a run that waits behind a check whose instance stopped, and accepts the next run (M1 of the second review)', async () => {
+      const { engine, workers } = setup();
+      const checked = engine.validateTool(['windowmasker', '-conffile', 'g.fa', '-mk_counts']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(1));
+      const worker = workers[0]!;
+      const check = worker.validations[0]!;
+      // The run is posted to the same worker, behind the check.
+      const ran = engine.runTool(['windowmasker', '-mk_counts']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      await vi.waitFor(() => expect(worker.tools).toHaveLength(1));
+      worker.send({ type: 'started', generation: check.generation });
+      worker.send({ type: 'tool-validate-failed', generation: check.generation, id: check.id, error: { name: 'EngineStoppedError', message: 'the engine stopped', stopped: true } });
+      expect(await checked).toBe('the engine stopped');
+      // The worker that held the stopped instance ends, as it does for a run, and the run behind the check says so.
+      expect(worker.terminated).toBe(true);
+      expect(await ran).toBe(ENGINE_ENDED);
+      // The engine is free: the next run is accepted and goes to a new worker.
+      const next = engine.runTool(['windowmasker']);
+      await vi.waitFor(() => expect(workers[1]?.tools).toHaveLength(1));
+      const command = workers[1]!.tools[0]!;
+      workers[1]!.send({ type: 'tool-done', generation: command.generation, runId: command.runId, result: { status: 0, memory: MEMORY } });
+      expect((await next).status).toBe(0);
+    });
+
+    it('settles a search that waits behind a check whose instance stopped', async () => {
+      const { engine, workers } = setup();
+      const checked = engine.validateTool(['windowmasker']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(1));
+      const channel = new MessageChannel();
+      const request = { runId: 'search-1', argv: ['blastp'], query: { bytes: new Uint8Array(1), records: [], sha256: 'q', revisionIds: [] } } as unknown as EngineRunRequest;
+      const searched = engine.run(request, channel.port1, () => undefined).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      await vi.waitFor(() => expect(workers[0]!.posted.some((command) => command.type === 'run')).toBe(true));
+      const check = workers[0]!.validations[0]!;
+      workers[0]!.send({ type: 'started', generation: check.generation });
+      workers[0]!.send({ type: 'tool-validate-failed', generation: check.generation, id: check.id, error: { name: 'EngineStoppedError', message: 'the engine stopped', stopped: true } });
+      expect(await checked).toBe('the engine stopped');
+      expect(await searched).toBe(ENGINE_ENDED);
+      // The engine is free: the next search is accepted and goes to a new worker.
+      const second = new MessageChannel();
+      void engine.run({ ...request, runId: 'search-2' }, second.port1, () => undefined).catch(() => undefined);
+      await vi.waitFor(() => expect(workers[1]?.posted.some((command) => command.type === 'run')).toBe(true));
+      second.port2.close();
+      channel.port2.close();
+    });
+
+    it('keeps the result of a run whose status arrived when a later check stops the worker', async () => {
+      const { engine, workers } = setup();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const run = await started(engine, workers, ['windowmasker', '-mk_counts'], {
+        sinks: { onFile: () => ({ write: () => gate, truncate: () => undefined, close: () => undefined }) },
+      });
+      run.file({ number: 0, kind: 'begin', name: 'f' });
+      run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('x') });
+      run.file({ number: 0, kind: 'end' });
+      run.done(0);
+      const checked = engine.validateTool(['windowmasker']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      await vi.waitFor(() => expect(run.worker.validations).toHaveLength(1));
+      const check = run.worker.validations[0]!;
+      run.worker.send({ type: 'started', generation: check.generation });
+      run.worker.send({ type: 'tool-validate-failed', generation: check.generation, id: check.id, error: { name: 'EngineStoppedError', message: 'the engine stopped', stopped: true } });
+      expect(await checked).toBe('the engine stopped');
+      // The sink is still taking the file: the run has its status and keeps it.
+      release();
+      expect((await run.promise).status).toBe(0);
+    });
+
+    it('rejects every waiting check with the error when a worker cannot be started (no unhandled rejection)', async () => {
+      const engine = new WasmEngine({
+        assets: ASSETS,
+        control: { describe: () => Promise.reject(new Error('unused')), start: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
+        hardwareConcurrency: 8,
+        createWorker: () => {
+          throw new Error('workers are refused here');
+        },
+        loadModules: async () => ({ serial: { asset: ASSETS.serial }, threads: { asset: ASSETS.threads } }),
+      });
+      const verdicts = [engine.validateTool(['windowmasker', '-a']), engine.validateTool(['windowmasker', '-b'])].map((check) =>
+        Promise.race([check.then(() => 'resolved', (error: Error) => error.message), new Promise<string>((resolve) => setTimeout(() => resolve('never settled'), 1000))]),
+      );
+      expect(await Promise.all(verdicts)).toEqual(['workers are refused here', 'workers are refused here']);
+      // A later check asks again (and fails the same way): none is left waiting.
+      await expect(engine.validateTool(['windowmasker'])).rejects.toThrow('workers are refused here');
+    });
+
+    it('does not count the ends that other runs caused: a check behind three cancelled runs is posted a fourth time', async () => {
+      const { engine, workers } = setup();
+      const pending = engine.validateTool(['windowmasker', '-mk_counts']);
+      for (let n = 0; n < 3; n++) {
+        await vi.waitFor(() => expect(workers[n]?.validations).toHaveLength(1));
+        const controller = new AbortController();
+        const run = engine.runTool(['windowmasker'], { signal: controller.signal });
+        await vi.waitFor(() => expect(workers[n]!.tools).toHaveLength(1));
+        controller.abort();
+        await expect(run).rejects.toBeInstanceOf(RunCancelledError);
+        expect(workers[n]!.terminated).toBe(true);
+      }
+      await vi.waitFor(() => expect(workers[3]?.validations).toHaveLength(1));
+      const again = workers[3]!.validations[0]!;
+      workers[3]!.send({ type: 'tool-validated', generation: again.generation, id: again.id, verdict: { ok: true } });
+      expect(await pending).toEqual({ ok: true });
+    });
+
+    it('counts the ends that the check\'s own worker caused: a stop or a crash while it held the check', async () => {
+      const { engine, workers } = setup();
+      const stopped = engine.validateTool(['windowmasker', '-a']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      const bystander = engine.validateTool(['windowmasker', '-b']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      // Two workers end by a crash, one with a run on it (not the check's), one with none; a third ends by the stop of the
+      // first check. The bystander has then been ended by two workers that held it, and a run's crash does not count.
+      await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(2));
+      const run = engine.runTool(['windowmasker']).then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      await vi.waitFor(() => expect(workers[0]!.tools).toHaveLength(1));
+      workers[0]!.send({ type: 'started', generation: workers[0]!.generation });
+      workers[0]!.onerror?.({ preventDefault: () => undefined, message: 'the run crashed' } as unknown as ErrorEvent);
+      expect(await run).toMatch(/the run crashed/);
+      for (const n of [1, 2]) {
+        await vi.waitFor(() => expect(workers[n]?.validations).toHaveLength(2));
+        workers[n]!.send({ type: 'started', generation: workers[n]!.generation });
+        workers[n]!.onerror?.({ preventDefault: () => undefined, message: 'boom' } as unknown as ErrorEvent);
+      }
+      // The run's crash did not count: the two checks went to a fourth worker after the crashes of workers 1 and 2.
+      await vi.waitFor(() => expect(workers[3]?.validations).toHaveLength(2));
+      const first = workers[3]!.validations.find((command) => command.argv[1] === '-a')!;
+      const second = workers[3]!.validations.find((command) => command.argv[1] === '-b')!;
+      workers[3]!.send({ type: 'started', generation: first.generation });
+      workers[3]!.send({ type: 'tool-validate-failed', generation: first.generation, id: first.id, error: { name: 'EngineStoppedError', message: 'the engine stopped', stopped: true } });
+      expect(await stopped).toBe('the engine stopped');
+      // The second check was ended by three workers that held it (two crashes and the stop of the first): it is given up.
+      expect(await bystander).toBe(ENGINE_ENDED);
+      expect(second.id).toBeDefined();
+      expect(workers).toHaveLength(4);
     });
 
     it('gives up a check that three workers ended', async () => {

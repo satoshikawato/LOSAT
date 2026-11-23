@@ -143,6 +143,8 @@ interface ActiveRun {
   readonly credit?: { readonly page: ToolCreditPage; readonly buffer: SharedArrayBuffer };
   generation: Generation | undefined;
   settled: boolean;
+  /** A tool run whose status arrived: it waits for its sinks only, and the end of its worker no longer takes its result. */
+  finishing?: boolean;
 }
 
 /** A check of a tool's words that waits for its answer (`WasmEngine.validateTool`). */
@@ -154,12 +156,15 @@ interface PendingValidation {
   readonly reject: (error: Error) => void;
   /** The generation that it was posted to; undefined before the post, and after that generation ended (it is posted again). */
   generation: number | undefined;
-  /** How many workers it has been posted to. */
-  posts: number;
+  /**
+   * How many workers that held it ended through no run's doing (a stop of the instance, a crash with no run on the worker):
+   * cancels, renewals and the ends that a run caused are not counted.
+   */
+  ends: number;
 }
 
-/** How many workers a check goes to before it fails: a worker that ends each time it is asked would otherwise be started again for good. */
-const VALIDATION_POSTS = 3;
+/** How many such ends a check survives: a worker that ends each time it is asked would otherwise be started again for good. */
+const VALIDATION_ENDS = 3;
 
 export class WasmEngine implements EngineGateway, ToolEngine {
   private current: Generation | undefined;
@@ -208,15 +213,16 @@ export class WasmEngine implements EngineGateway, ToolEngine {
 
   /**
    * Checks the words of a tool (`windowmasker`) as the command line does before the tool opens a file (`ToolEngine.validateTool`),
-   * on the Engine worker's serial instance, with `options.directory` opened there as for `runTool` (the check reads the run's
-   * registry files). It takes its turn in the worker like a run: behind the run in progress, if there is one. It makes the
-   * engine no busier: a run may start while it is pending, and it may be asked during a run. When the worker that it went to
-   * ends (a cancel, a renewal, a stop), it is posted again to the next one.
+   * on the Engine worker's loaded instance (the serial one when none is: it disturbs no runtime that the searches use), with
+   * `options.directory` opened there as for `runTool` (the check reads the run's registry files). It takes its turn in the
+   * worker like a run: behind the run in progress, if there is one. It makes the engine no busier: a run may start while it is
+   * pending, and it may be asked during a run. When the worker that it went to ends (a cancel, a renewal, a stop), it is posted
+   * again to the next one; a stop of its own instance ends the worker as a run's does (`validated`).
    */
   validateTool(argv: readonly string[], options: ToolValidateOptions = {}): Promise<ToolValidation> {
     return new Promise<ToolValidation>((resolve, reject) => {
       const id = `validate:${crypto.randomUUID()}`;
-      this.validations.set(id, { id, argv, files: options.directory, resolve, reject, generation: undefined, posts: 0 });
+      this.validations.set(id, { id, argv, files: options.directory, resolve, reject, generation: undefined, ends: 0 });
       this.postValidations();
     });
   }
@@ -327,10 +333,17 @@ export class WasmEngine implements EngineGateway, ToolEngine {
       (modules) => {
         const waiting = [...this.validations.values()].filter((validation) => validation.generation === undefined);
         if (waiting.length === 0) return;
-        const generation = this.current ?? this.startGeneration(modules);
+        let generation: Generation;
+        try {
+          generation = this.current ?? this.startGeneration(modules);
+        } catch (error) {
+          // A worker that cannot be started (a refused `new Worker`, a throwing `createWorker`): every check that waits for one
+          // fails with the reason, as a run does (`launchTool`); a later call asks again.
+          for (const validation of waiting) this.dropValidation(validation, toThrown(error));
+          return;
+        }
         for (const validation of waiting) {
           validation.generation = generation.id;
-          validation.posts++;
           const command: WorkerToolValidate = {
             type: 'tool-validate',
             generation: generation.id,
@@ -341,14 +354,14 @@ export class WasmEngine implements EngineGateway, ToolEngine {
           try {
             this.post(generation.worker, command);
           } catch (error) {
-            this.dropValidation(validation, error instanceof Error ? error : new Error(String(error)));
+            this.dropValidation(validation, toThrown(error));
           }
         }
       },
       (error: unknown) => {
         // The modules did not load: the checks that wait fail with the reason (a later call loads them again).
         for (const validation of [...this.validations.values()].filter((entry) => entry.generation === undefined)) {
-          this.dropValidation(validation, error instanceof Error ? error : new Error(String(error)));
+          this.dropValidation(validation, toThrown(error));
         }
       },
     );
@@ -359,7 +372,12 @@ export class WasmEngine implements EngineGateway, ToolEngine {
     validation.reject(error);
   }
 
-  /** The answer of the worker to a check: its verdict, or its error (a stopped instance ends the worker, and the other checks go to the next). */
+  /**
+   * The answer of the worker to a check: its verdict, or its error. A stopped instance ends the worker as it does after a run
+   * (`done` with `stopped`, `fail`): the instance of a threaded runtime keeps its thread workers and keeper until the Gateway
+   * ends the worker (retire), so a check and a run are handled alike. The run that waits behind the check on that worker
+   * fails with ENGINE_ENDED (it never ran), and the other checks go to the next worker.
+   */
   private validated(generation: Generation, event: Extract<EngineEvent, { type: 'tool-validated' | 'tool-validate-failed' }>): void {
     const validation = this.validations.get(event.id);
     if (validation === undefined || validation.generation !== generation.id) return;
@@ -368,7 +386,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
       validation.resolve(event.verdict);
       return;
     }
-    if (event.error.stopped === true) this.retire();
+    if (event.error.stopped === true) this.fail(generation, new Error(ENGINE_ENDED), true);
     validation.reject(toError(event.error));
   }
 
@@ -534,6 +552,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
     if (event.type === 'tool-done') {
       const router = active.tool;
       if (router === undefined) return;
+      active.finishing = true;
       const { status, memory, countsBytes } = event.result;
       generation.renew = renewalReason(memory, limitsHolding(this.renewal, countsBytes));
       // The result comes once the router has handed every chunk and frame that the worker posted before it to the sinks.
@@ -591,16 +610,21 @@ export class WasmEngine implements EngineGateway, ToolEngine {
     });
   }
 
-  /** The runtime stopped (a trap in a thread, or the worker itself); its search fails. */
-  private fail(generation: Generation, error: Error): void {
+  /**
+   * The runtime stopped (a trap in a thread, the worker itself, or the instance of a check); its search fails. The end counts
+   * against the checks that the worker held unless a run is on it (the run is the likelier cause) or `byCheck` says that a
+   * check stopped it (VALIDATION_ENDS).
+   */
+  private fail(generation: Generation, error: Error, byCheck = false): void {
     if (generation !== this.current) return;
     // A worker that never started cannot answer a check: it fails with the reason, rather than asking the next worker for good.
     if (!generation.started) {
       for (const validation of [...this.validations.values()]) if (validation.generation === generation.id) this.dropValidation(validation, error);
     }
-    this.retire();
     const active = this.active;
-    if (active !== undefined && active.generation === generation) this.settle(active, error);
+    const run = active !== undefined && active.generation === generation ? active : undefined;
+    this.retire(byCheck || run === undefined);
+    if (run !== undefined && !run.finishing) this.settle(run, error);
   }
 
   /**
@@ -634,15 +658,17 @@ export class WasmEngine implements EngineGateway, ToolEngine {
    * port, whose Data worker side the coordinator discards. The page waits for the worker's lock until
    * the generation has ended: a worker that ends meanwhile ends it at once (lifeEnded).
    */
-  private retire(): void {
+  private retire(endsChecks = false): void {
     const generation = this.current;
     if (generation === undefined) return;
     this.current = undefined;
-    // The checks of tools that went to this worker are posted again to the next (validateTool).
+    // The checks of tools that went to this worker are posted again to the next (validateTool); `endsChecks`: the end counts
+    // against them (it is the checks' doing, or no run's: a cancel or a renewal of a run does not).
     for (const validation of [...this.validations.values()]) {
       if (validation.generation !== generation.id) continue;
       validation.generation = undefined;
-      if (validation.posts >= VALIDATION_POSTS) this.dropValidation(validation, new Error(ENGINE_ENDED));
+      if (endsChecks) validation.ends++;
+      if (validation.ends >= VALIDATION_ENDS) this.dropValidation(validation, new Error(ENGINE_ENDED));
     }
     if (this.validations.size > 0) this.postValidations();
     // A worker that ended took its threads and its keeper with it (lifeEnded).
@@ -708,6 +734,11 @@ function workerCounts(counts: CountsFile): WorkerCounts {
 
 function workerInput(program: string, input: EngineInput): WorkerInput {
   return { bytes: input.bytes, records: input.records, key: inputKey(program, input) };
+}
+
+/** A thrown value as an Error. */
+function toThrown(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 /**

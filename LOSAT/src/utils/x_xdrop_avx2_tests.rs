@@ -17,6 +17,8 @@ enum Kern {
     V256,
     /// LOSAT_X_DPEMASK=0: the 8-bit lanes' row end of before (16-bit lanes: the same kernel)
     V256Z,
+    /// EXPERIMENT (LOSAT_X_FNFRAME): the default instances with the lighter row frame
+    V256F,
     W128,
 }
 
@@ -54,33 +56,43 @@ unsafe fn run(
         }
         (Kern::V256, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256, false, Some(m)) => {
-            align8::<false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
-        (Kern::V256 | Kern::V256Z, true, None) => {
+        (Kern::V256F, true, Some(m)) => {
+            if sc.x_nib {
+                align8::<true, true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            } else {
+                align8::<true, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+        }
+        (Kern::V256F, false, Some(m)) => {
+            align8::<false, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+        }
+        (Kern::V256 | Kern::V256Z | Kern::V256F, true, None) => {
             if sc.x_nib {
                 align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             } else {
                 align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
         }
-        (Kern::V256 | Kern::V256Z, false, None) => {
+        (Kern::V256 | Kern::V256Z | Kern::V256F, false, None) => {
             align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::V256Z, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256Z, false, Some(m)) => {
-            align8::<false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::W128, true, Some(m)) => {
             w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -223,6 +235,9 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         XdropScratch::new(),
         XdropScratch::new(),
     );
+    let mut sc256f = XdropScratch::new();
+    // calls of the `F` instances whose rows were moved
+    let mut moved_f = 0usize;
     // [width 8 / 16][tb][reverse]
     let mut handled = [[[0usize; 2]; 2]; 2];
     let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
@@ -234,9 +249,11 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         sc128.x_test_rows(lanes);
         sc256.x_test_rows(lanes);
         sc256z.x_test_rows(lanes);
+        sc256f.x_test_rows(lanes);
         // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
         let nib = case % 2 == 0;
         (sc128.x_nib, sc256.x_nib, sc256z.x_nib) = (nib, nib, nib);
+        sc256f.x_nib = nib;
         let n = if rng.below(2) == 0 { 16 } else { 28 };
         let scale = if rng.below(3) == 0 { 32 } else { 1 };
         let long = rng.below(6) == 0;
@@ -425,6 +442,31 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
                         }
                     };
                     assert_eq!(r256, r256z, "{tag}: 256 vs 256 with the E clearing");
+                    if wide8 {
+                        // SAFETY: AVX2 detected above.
+                        let r256f = unsafe {
+                            run(
+                                Kern::V256F,
+                                m,
+                                tb,
+                                &rows,
+                                &cols,
+                                &scores,
+                                len1,
+                                len2,
+                                go,
+                                ge,
+                                x,
+                                tb,
+                                &mut sc256f,
+                            )
+                        };
+                        assert_eq!(r256, r256f, "{tag}: 256 vs 256 with the lighter row frame");
+                        if r256.is_some() {
+                            assert_eq!(sc256.ops, sc256f.ops, "{tag}: 256 vs 256f ops");
+                        }
+                        moved_f += usize::from(sc256f.x_sh > 0);
+                    }
                     if wide8 && r256.is_some() {
                         assert_eq!(sc256.ops, sc256z.ops, "{tag}: 256 vs 256z ops");
                     }
@@ -486,7 +528,196 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
             moved.iter().flatten().all(|&n| n > 0),
             "moved rows {moved:?}"
         );
+        assert!(moved_f > 0, "row frame: no moved rows");
     }
+}
+
+/// EXPERIMENT (LOSAT_X_FNFRAME): `q_fill` against `RowSeq::get` for every row form (bytes
+/// forward and backward, packed forward and reversed), at every start row near the ends of the
+/// data and at random ones, with residues at and above `ncols`.
+#[test]
+fn q_fill_matches_row_get() {
+    if !available() {
+        eprintln!("no AVX2: skipped");
+        return;
+    }
+    let mut rng = Rng(0x51A7_0E11_2C3D_9B47);
+    let (mut full, mut short, mut none) = (0usize, 0usize, 0usize);
+    for case in 0..3000 {
+        let len = 1 + rng.below(if case % 5 == 0 { 400 } else { 90 }) as usize;
+        let ncols = [4usize, 16, 28, 3, 1][rng.below(5) as usize];
+        let pad = rng.below(40) as usize;
+        let bytes: Vec<u8> = (0..len + 2 * pad + 8)
+            .map(|_| match rng.below(40) {
+                0 => ncols as u8,
+                1 => 200,
+                _ => rng.below(ncols.max(4) as u64) as u8,
+            })
+            .collect();
+        let packed: Vec<u8> = (0..len / 4 + pad + 3).map(|_| rng.below(256) as u8).collect();
+        let forms = [
+            RowSeq::Bytes {
+                data: &bytes,
+                base: pad as isize - 1,
+                step: 1,
+            },
+            RowSeq::Bytes {
+                data: &bytes,
+                base: (pad + len) as isize,
+                step: -1,
+            },
+            RowSeq::PackedFwd {
+                data: &packed,
+                byte_offset: rng.below(pad as u64 + 1) as isize - 1,
+            },
+            RowSeq::PackedRev {
+                data: &packed,
+                len,
+            },
+            // rows that start or end outside the data (`get` is None there)
+            RowSeq::Bytes {
+                data: &bytes,
+                base: -(rng.below(3) as isize) - 1,
+                step: 1,
+            },
+            RowSeq::Bytes {
+                data: &bytes,
+                base: bytes.len() as isize + rng.below(3) as isize - 40,
+                step: -1,
+            },
+        ];
+        for q in &forms {
+            let mut starts: Vec<usize> = (1..=len.min(40)).collect();
+            starts.extend((len.saturating_sub(40) + 1).max(1)..=len);
+            for _ in 0..8 {
+                starts.push(1 + rng.below(len as u64) as usize);
+            }
+            for &a in &starts {
+                let mut out = [0xEEu8; 32];
+                // SAFETY: AVX2 detected above; 32 bytes; 1 <= a <= len.
+                let n = unsafe { q_fill(q, a, len, ncols, out.as_mut_ptr()) };
+                let mut want = 0;
+                while want < 32 && a + want <= len {
+                    match q.get(a + want) {
+                        Some(r) if (r as usize) < ncols => want += 1,
+                        _ => break,
+                    }
+                }
+                if want == 32 || a + want <= len {
+                    // the vector step and the scalar loop agree up to the first bad row
+                    assert_eq!(n, want, "case {case} a {a} len {len}: count");
+                } else {
+                    // rows past len1: the vector step may count more, the scalar loop stops
+                    assert!(n >= want, "case {case} a {a} len {len}: count {n} < {want}");
+                    short += 1;
+                }
+                for (j, &r) in out.iter().enumerate().take(want) {
+                    assert_eq!(Some(r), q.get(a + j), "case {case} a {a} row {}", a + j);
+                }
+                full += usize::from(n == 32);
+                none += usize::from(n == 0);
+            }
+        }
+    }
+    eprintln!("q_fill: full windows {full}, empty {none}, ends past len1 {short}");
+    assert!(full > 0 && short > 0 && none > 0);
+}
+
+/// EXPERIMENT (LOSAT_X_FNFRAME): the `F` instances against the default ones on packed rows
+/// (forward and reversed, `blastn`'s score-only form), BLASTNA-like problems, with the rows over
+/// the band (`x_room`).
+#[test]
+fn row_frame_matches_on_packed_rows() {
+    if !available() {
+        eprintln!("no AVX2: skipped");
+        return;
+    }
+    let mut rng = Rng(0x7F4A_7C15_9E37_79B9);
+    let (mut sc, mut scf) = (XdropScratch::new(), XdropScratch::new());
+    let (mut handled, mut moved) = (0usize, 0usize);
+    for case in 0..1500 {
+        let lanes = [Some(128), Some(320), None][case % 3];
+        sc.x_test_rows(lanes);
+        scf.x_test_rows(lanes);
+        let len1 = 1 + rng.below(if case % 4 == 0 { 3000 } else { 300 }) as usize;
+        let len2 = 1 + rng.below(if case % 4 == 0 { 3000 } else { 300 }) as usize;
+        // rows: two-bit letters, mostly copied from the columns so that the band lives long
+        let s: Vec<u8> = (0..len2).map(|_| rng.below(4) as u8).collect();
+        let q: Vec<u8> = (0..len1)
+            .map(|i| {
+                if i < len2 && rng.below(10) != 0 {
+                    s[i]
+                } else {
+                    rng.below(4) as u8
+                }
+            })
+            .collect();
+        let n = 16usize;
+        let mut m = vec![-3i32; n * n];
+        for (i, v) in m.iter_mut().enumerate() {
+            if i / n == i % n {
+                *v = 1 + (case % 2) as i32;
+            }
+        }
+        let scores = Scores::Flat { data: &m, n };
+        let (go, ge, x) = match rng.below(3) {
+            0 => (5, 2, 30),
+            1 => (0, 1, 16),
+            _ => (2, 1, 10 + rng.below(40) as i32),
+        };
+        let Some(m8) = fits_8bit(&scores, go, ge, x) else {
+            continue;
+        };
+        // NCBI2NA packing, forward (`byte_offset` before the first row) and reversed
+        let off = rng.below(9) as usize;
+        let mut fwd = vec![0u8; (len1 + 4 * off) / 4 + 24];
+        for (i, &c) in q.iter().enumerate() {
+            let k = 4 * off + i;
+            fwd[k / 4] |= c << (2 * (3 - k % 4));
+        }
+        let mut rev = vec![0u8; len1 / 4 + 24];
+        for a in 1..=len1 {
+            rev[(len1 - a) / 4] |= q[a - 1] << (2 * ((a - 1) % 4));
+        }
+        for reverse in [false, true] {
+            let rows = if reverse {
+                RowSeq::PackedRev {
+                    data: &rev,
+                    len: len1,
+                }
+            } else {
+                RowSeq::PackedFwd {
+                    data: &fwd,
+                    byte_offset: off as isize - 1,
+                }
+            };
+            let cols = ColSeq {
+                data: &s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            for a in 1..=len1 {
+                assert_eq!(rows.get(a), Some(q[a - 1]), "case {case} packing row {a}");
+            }
+            // SAFETY: AVX2 detected above.
+            let (r0, rf) = unsafe {
+                (
+                    align8::<false, true, false, false>(
+                        &rows, &cols, &scores, m8, len1, len2, go, ge, x, false, &mut sc,
+                    ),
+                    align8::<false, true, false, true>(
+                        &rows, &cols, &scores, m8, len1, len2, go, ge, x, false, &mut scf,
+                    ),
+                )
+            };
+            assert_eq!(r0, rf, "case {case} reverse {reverse}");
+            handled += usize::from(r0.is_some());
+            moved += usize::from(scf.x_sh > 0);
+        }
+    }
+    eprintln!("packed rows: handled {handled}, moved {moved}");
+    assert!(handled > 1000 && moved > 0);
 }
 
 /// Replay of captured problems (`LOSAT_X_DPCAPTURE` output): every problem through the scalar
@@ -791,7 +1022,7 @@ fn replay_captured_problems() {
                         let sc = match k {
                             Kern::V128 => &mut sa,
                             Kern::W128 => &mut sw,
-                            Kern::V256 | Kern::V256Z => &mut sb,
+                            Kern::V256 | Kern::V256Z | Kern::V256F => &mut sb,
                         };
                         let total = if warm {
                             let mut ns = 0f64;

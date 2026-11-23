@@ -4673,6 +4673,11 @@ fn x_extra_switches() -> u8 {
                 if x_avx2::emask_on() {
                     on |= 16;
                 }
+                // EXPERIMENT (LOSAT_X_FNFRAME, on unless `=0`, probe only): the row tests in one
+                // comparison, the row residues 32 at a time, the survivors without a branch
+                if std::env::var_os("LOSAT_X_FNFRAME").is_none_or(|v| v != "0") {
+                    on |= 32;
+                }
             }
         }
         #[cfg(target_arch = "aarch64")]
@@ -4774,6 +4779,7 @@ fn x_extra_dispatch(
                     tb,
                     check_fence,
                     on & 16 != 0,
+                    on & 32 != 0,
                     sc,
                 )
             };

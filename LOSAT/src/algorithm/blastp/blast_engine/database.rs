@@ -1302,15 +1302,6 @@ impl ListedSubjects {
 // the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS` and the
 // sort into the redo's order).
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526-1576
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1720-1777
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1582-1586
-// BLASTP's `-ungapped` search fetches no subject (`perform_traceback` is the gapped mode), so
-// such a subject stays in its hit lists through the traceback's pipes (`-culling_limit`,
-// `-best_hit_*`, where its HSPs cull others) and the prune to the hit list size, where it takes
-// a place, and leaves at its Seq-align, as BLASTX's does (`ListedSubjects::x_list` without
-// `fetched`, `ListedSubjects::drop_unaligned`). psiblast is always gapped.
-//
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
 // The redo's loop reaches such a list in its stream: when the early termination test holds it
@@ -1322,6 +1313,16 @@ impl ListedSubjects {
 // are listed). Shown on ws with NCBI 2.17.0 (rows
 // `db.x4excl.*`: an excluded match after a failed Smith-Waterman redo ends the batch with
 // status 0).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526-1576
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1705-1777
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1582-1586
+// BLASTP's `-ungapped` search fetches no subject (`perform_traceback` is the gapped mode), so
+// such a subject stays in its hit list through the traceback's cut to the hit list size, where
+// it takes a place, its pipes (`-culling_limit`, `-best_hit_*`: its HSPs cull those of other
+// subjects) and the prune, and leaves at its Seq-align, as BLASTX's does
+// (`blastx::database::ReportedSubjects::drop_unaligned`); here `ListedSubjects::x_list` without
+// `fetched` and `ListedSubjects::drop_unaligned`. psiblast is always gapped.
 /// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
 /// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
 /// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a

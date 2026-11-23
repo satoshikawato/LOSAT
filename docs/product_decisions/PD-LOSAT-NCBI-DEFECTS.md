@@ -505,9 +505,10 @@
   item T5d's 1.90);
   1.92 2026-11-24 (BLASTP `-ungapped` under a negative seqid list, line NP item O4b2-4: the
   sequence that the list keeps while removing all its lines, of 1.34, stays in its hit list
-  through the traceback's culling and best hit pipes and the prune to the hit list size and
-  leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; rule 2;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  through the traceback's cut to the hit list size, its culling and best hit pipes and the prune
+  and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
+  header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
+  there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1748,9 +1749,9 @@ file would differ, and NCBI's programs still could not open the database).
   search of a nucleotide database frees its HSPs before the preliminary hit list. A protein
   subject of an ungapped search (blastx and blastp `-ungapped`) is fetched by none of them and
   leaves at the Seq-aligns, as a positive list's does: it keeps its place in the hit list through
-  the traceback's culling and best hit pipes (its HSPs cull those of other subjects) and the prune
-  to the hit list size (`blast_traceback.c:1720-1777`, `blast_seqalign.cpp:1582-1586`; version
-  1.92 for BLASTP, rows `db.ll2.bp.ug.*`). Versions 1.6, 1.29 and 1.32 made this an explicit
+  the traceback's cut to the hit list size, its culling and best hit pipes (its HSPs cull those of
+  other subjects) and the prune (`blast_traceback.c:1705-1777`, `blast_seqalign.cpp:1582-1586`;
+  version 1.92 for BLASTP, rows `db.ll2.bp.ug.*`, `db.ll2.bx.ug.*`). Versions 1.6, 1.29 and 1.32 made this an explicit
   rejection; version 1.34 reproduces it in the six search programs, each of which removes such
   subjects where NCBI fetches them (`SeqDb::excludes_lineless_at_fetch`,
   `algorithm::common::database::FetchExcluded`; line DBID item lineless2). Under such a list
@@ -1759,7 +1760,8 @@ file would differ, and NCBI's programs still could not open the database).
   there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
   where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
   search of a protein database reads such a header at the Seq-aligns only, where the subject is
-  in the final hit list. The
+  in the final hit list: there NCBI's Seq-align fails (exit 255), and LOSAT's report gives the
+  same error (rule 2). The
   composition-based redo fetches only the matches that its early termination test leaves, and
   LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
   NCBI ends it without reading that header.

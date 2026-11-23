@@ -1388,6 +1388,13 @@ fn excluded_lists_leave_marks_of_their_places() {
     assert_eq!(listed.ordinals, [0, 1, 2, 3]);
     assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
     assert!(listed.fetch_excluded.is_empty());
+    // There it leaves at the Seq-aligns (ranks equal ordinals here); a gapped search's
+    // `drop_unaligned` leaves the lists as they are (its fetches have excluded it).
+    let mut kept = lists.clone();
+    listed.drop_unaligned(&database, &mut kept, true);
+    assert_eq!(oids(&kept), [vec![0, 1, 3], vec![3, 2]]);
+    listed.drop_unaligned(&database, &mut lists, false);
+    assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
     let database = BlastpDatabase::open(name, &settings, "BLASTP").unwrap();
     let mut lists = make();
     let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();

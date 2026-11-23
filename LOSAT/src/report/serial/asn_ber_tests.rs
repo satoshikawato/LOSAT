@@ -96,7 +96,7 @@ fn visible_strings_have_short_and_long_lengths() {
         bytes(|enc| enc.visible_str(&string)),
         [&[0x1a, 0x83, 0x01, 0x11, 0x70][..], &string].concat()
     );
-    // Above 0xffffff NCBI drops the leading zero bytes of the `sizeof(size_t)` bytes
+    // Above 0xffffff NCBI drops the leading zero bytes of the bytes of a `size_t`
     // (`WriteLongLength`): four bytes here.
     let string = vec![b'w'; 0x100_0000];
     let written = bytes(|enc| enc.visible_str(&string));
@@ -124,11 +124,9 @@ fn long_lengths_take_the_fewest_bytes() {
     assert_eq!(of(0xff_ffff), [0x83, 0xff, 0xff, 0xff]);
     assert_eq!(of(0x100_0000), [0x84, 0x01, 0x00, 0x00, 0x00]);
     assert_eq!(of(0x100_0025), [0x84, 0x01, 0x00, 0x00, 0x25]);
+    assert_eq!(of(0xffff_ffff), [0x84, 0xff, 0xff, 0xff, 0xff]);
     #[cfg(target_pointer_width = "64")]
-    {
-        assert_eq!(of(0xffff_ffff), [0x84, 0xff, 0xff, 0xff, 0xff]);
-        assert_eq!(of(0x1_0000_0000), [0x85, 0x01, 0x00, 0x00, 0x00, 0x00]);
-    }
+    assert_eq!(of(0x1_0000_0000), [0x85, 0x01, 0x00, 0x00, 0x00, 0x00]);
 }
 
 /// A byte outside 0x20..0x7E is `#` and an error, as in the ASN.1 text encoder (through

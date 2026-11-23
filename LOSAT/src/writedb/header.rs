@@ -17,6 +17,8 @@ const TAG_SEQUENCE: u8 = (1 << 5) | 16;
 const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 
+// The BER lengths and integer values are the ASN.1 binary encoder's, their one writer.
+use crate::report::serial::asn_ber::{write_int4_value, write_int8_value, write_length};
 use crate::seqid::model::{Date, ObjectId, ParsedSeqId, PatentNumber, TextseqId};
 use crate::seqid::DeflineSet;
 use crate::utils::byte_search::find_first;
@@ -52,14 +54,10 @@ fn close(out: &mut Vec<u8>) {
     out.extend_from_slice(&[0, 0]);
 }
 
-// The BER length and the Int4 value are those of the ASN.1 binary encoder (`report::serial::
-// asn_ber`), their one writer.
-use crate::report::serial::asn_ber::write_length;
-
 /// `WriteInt4`: the universal INTEGER tag and the value (`asn_ber::write_int4_value`).
 fn write_int4(out: &mut Vec<u8>, data: i32) {
     out.push(TAG_INTEGER);
-    crate::report::serial::asn_ber::write_int4_value(out, data);
+    write_int4_value(out, data);
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
@@ -147,19 +145,11 @@ pub struct BadChar {
     pub string: Vec<u8>,
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:556-597
 // `WriteInt8` writes the universal INTEGER tag first (objostrasnb.cpp:716-724; no
-// `m_CStyleBigInt` in makeblastdb's stream).
+// `m_CStyleBigInt` in makeblastdb's stream), then the value (`asn_ber::write_int8_value`).
 fn write_int8(out: &mut Vec<u8>, data: i64) {
     out.push(TAG_INTEGER);
-    let length = (1..8usize)
-        .find(|&bytes| {
-            let bits = 8 * bytes as u32 - 1;
-            (-(1i64 << bits)..(1i64 << bits)).contains(&data)
-        })
-        .unwrap_or(8);
-    out.push(length as u8);
-    out.extend_from_slice(&data.to_be_bytes()[8 - length..]);
+    write_int8_value(out, data);
 }
 
 /// The BER writer of a whole `Blast-def-line-set` (`*deflines` streamed to `oss` through

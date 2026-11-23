@@ -38,11 +38,11 @@ const REAL_DECIMAL: u8 = 0x00;
 
 /// `WriteLength`: one byte up to 127, else the long form: `0x80 + count` and the `count` bytes of
 /// the length, big-endian, `count` the fewest that hold it (`WriteLongLength` counts 1, 2 or 3
-/// up to 0xFFFFFF, and above that drops the leading zero bytes of the `sizeof(size_t)` bytes, so
+/// up to 0xFFFFFF, and above that drops the leading zero bytes of the bytes of a `size_t`, so
 /// 0x1000000 is `84 01 00 00 00`). The one writer of BER lengths: this encoder's and the database
 /// header records' (`writedb::header`).
 ///
-/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-425
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-424
 pub(crate) fn write_length(out: &mut Vec<u8>, length: usize) {
     if length <= 127 {
         out.push(length as u8);
@@ -71,6 +71,24 @@ pub(crate) fn write_int4_value(out: &mut Vec<u8>, value: i32) {
     };
     out.push(length as u8);
     out.extend_from_slice(&value.to_be_bytes()[4 - length..]);
+}
+
+/// `WriteNumberValue` of an `Int8`: the length (1 to 8) and the fewest big-endian two's-complement
+/// bytes of the value. The one writer of them: this encoder's and the database header records'
+/// (`writedb::header`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:556-597
+pub(crate) fn write_int8_value(out: &mut Vec<u8>, value: i64) {
+    let bytes = value.to_be_bytes();
+    let mut start = 0;
+    while start < 7
+        && ((bytes[start] == 0x00 && bytes[start + 1] & 0x80 == 0)
+            || (bytes[start] == 0xff && bytes[start + 1] & 0x80 != 0))
+    {
+        start += 1;
+    }
+    out.push((8 - start) as u8);
+    out.extend_from_slice(&bytes[start..]);
 }
 
 /// The ASN.1 binary encoder, appending one document to `out`.
@@ -211,19 +229,10 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.number(value);
     }
 
-    /// `WriteInt8`: INTEGER in the fewest big-endian two's-complement bytes of the value.
+    /// `WriteInt8`: INTEGER (`write_int8_value`).
     fn big_int(&mut self, value: i64) {
-        let bytes = value.to_be_bytes();
-        let mut start = 0;
-        while start < 7
-            && ((bytes[start] == 0x00 && bytes[start + 1] & 0x80 == 0)
-                || (bytes[start] == 0xff && bytes[start + 1] & 0x80 != 0))
-        {
-            start += 1;
-        }
         self.out.push(TAG_INTEGER);
-        self.out.push((8 - start) as u8);
-        self.out.extend_from_slice(&bytes[start..]);
+        write_int8_value(self.out, value);
     }
 
     /// `WriteEnum`: ENUMERATED with the number of the value.

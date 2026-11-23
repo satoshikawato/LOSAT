@@ -538,8 +538,9 @@ impl<'a> XTwoHit<'a> {
         // The cells are taken out for the loop over them and put back (a move of the vector).
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        let around = self.x_around.is_some();
         match &mut entries {
-            XDiagCells::Packed(cells) => self.pairs_on(
+            XDiagCells::Packed(cells) if around => self.pairs_on::<_, _, true>(
                 walks,
                 cells,
                 frame,
@@ -548,7 +549,25 @@ impl<'a> XTwoHit<'a> {
                 pairs,
                 hits,
             ),
-            XDiagCells::Pair(cells) => self.pairs_on(
+            XDiagCells::Packed(cells) => self.pairs_on::<_, _, false>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) if around => self.pairs_on::<_, _, true>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.pairs_on::<_, _, false>(
                 walks,
                 cells,
                 frame,
@@ -562,10 +581,11 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `pairs` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the walks
-    /// `walks`.
+    /// `walks`; `AROUND`: the unit has the letters around its chunk (`x_set_around`), the only
+    /// unit whose hits can lie before its chunk, so only its loop tests for them.
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    fn pairs_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
+    fn pairs_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks, const AROUND: bool>(
         &self,
         walks: W,
         cells: &mut [C],
@@ -630,7 +650,11 @@ impl<'a> XTwoHit<'a> {
             // (`tblastx::blast_engine::word_finder::two_hit_one_hit` gives the reasons).
             // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
             // extension outside the table's range, which runs the reference.
-            let result = if s_left_off < 0 {
+            debug_assert!(
+                AROUND || s_left_off >= 0,
+                "a hit before a unit without letters before it"
+            );
+            let result = if AROUND && s_left_off < 0 {
                 self.x_two_hit_around(walks, s_left_off, s, q, self.x_dropoffs[context])
             } else if self.x_ungap_fast {
                 walks
@@ -837,10 +861,46 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `x_pairs_bf` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the
-    /// walks `walks`.
+    /// walks `walks` (`pairs_on`'s `AROUND` chosen once for the call).
     #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     fn x_pairs_bf_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
+        &self,
+        walks: W,
+        cells: &mut [C],
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        if self.x_around.is_some() {
+            self.x_pairs_bf_as::<C, W, true>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            );
+        } else {
+            self.x_pairs_bf_as::<C, W, false>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            );
+        }
+    }
+
+    /// `x_pairs_bf_on` with `pairs_on`'s `AROUND`.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn x_pairs_bf_as<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks, const AROUND: bool>(
         &self,
         walks: W,
         cells: &mut [C],
@@ -861,7 +921,7 @@ impl<'a> XTwoHit<'a> {
                 &pairs[done..],
             );
             if let Some(pair) = pairs.get(done) {
-                self.pairs_on(
+                self.pairs_on::<C, W, AROUND>(
                     walks,
                     cells,
                     frame,
@@ -901,8 +961,9 @@ impl<'a> XTwoHit<'a> {
         // The cells are taken out for the loop over them and put back (a move of the vector).
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        let around = self.x_around.is_some();
         let done = match &mut entries {
-            XDiagCells::Packed(cells) => self.one_hit_on(
+            XDiagCells::Packed(cells) if around => self.one_hit_on::<_, _, true>(
                 score,
                 cells,
                 frame,
@@ -911,7 +972,25 @@ impl<'a> XTwoHit<'a> {
                 pairs,
                 hits,
             ),
-            XDiagCells::Pair(cells) => self.one_hit_on(
+            XDiagCells::Packed(cells) => self.one_hit_on::<_, _, false>(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) if around => self.one_hit_on::<_, _, true>(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.one_hit_on::<_, _, false>(
                 score,
                 cells,
                 frame,
@@ -925,9 +1004,14 @@ impl<'a> XTwoHit<'a> {
         done
     }
 
-    /// `x_pairs_one_hit` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    /// `x_pairs_one_hit` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`);
+    /// `AROUND` as in `pairs_on`.
     #[allow(clippy::too_many_arguments)]
-    fn one_hit_on<S: super::score::TbnScore, C: super::x_tbn_hitbf::XDiagCell>(
+    fn one_hit_on<
+        S: super::score::TbnScore,
+        C: super::x_tbn_hitbf::XDiagCell,
+        const AROUND: bool,
+    >(
         &self,
         score: S,
         cells: &mut [C],
@@ -956,7 +1040,11 @@ impl<'a> XTwoHit<'a> {
             // The scanner gives words inside the unit or, for masks stored out of order, before
             // its chunk (the extension on the letters around it), so the extension always runs
             // (`None` is a word past the slices, which NCBI's scan does not give).
-            let result = if s < 0 {
+            debug_assert!(
+                AROUND || s >= 0,
+                "a word before a unit without letters before it"
+            );
+            let result = if AROUND && s < 0 {
                 self.x_one_hit_around(score, q, s, self.x_dropoffs[context])
             } else {
                 score.one_hit(

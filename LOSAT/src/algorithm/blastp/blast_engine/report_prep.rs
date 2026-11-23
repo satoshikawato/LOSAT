@@ -12,7 +12,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReport`, `BlastpReports`, `BlastpRanges`, `blastp_pairwise_view_of`,
-//! `blastp_hit_list_hsp_count`) and its sibling modules `database`,
+//! `blastp_seq_aligns`) and its sibling modules `database`,
 //! `psi_round` and `pssm_hooks`.
 //!
 //! Before the rows of the reports, `run_call` calls the functions after those three, also once
@@ -31,8 +31,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    blastp_hit_list_hsp_count, blastp_pairwise_view_of, database, psi_round, pssm_hooks,
-    BlastpRanges, BlastpReport, BlastpReports,
+    blastp_pairwise_view_of, blastp_seq_aligns, database, psi_round, pssm_hooks, BlastpRanges,
+    BlastpReport, BlastpReports,
 };
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::hsp::{collect_hits_and_methods_from_hit_lists, BlastpHitList};
@@ -457,13 +457,15 @@ pub(super) fn prefetch_reported_subjects(
         }
         _ => crate::report::tabular::SubjectFetch::Every,
     };
-    // The Seq-aligns of the batch of the searched queries `span`, one for each HSP of its results
-    // (psiblast's before the cut, `psiblast_hits_found`), which `PRE_FETCH_SEQS_LIMIT` counts
-    // (`shared::prefetch_off`; as `batch_prefetch` counts them).
+    // The Seq-aligns of the batch of the searched queries `span`, which `PRE_FETCH_SEQS_LIMIT`
+    // counts (`shared::prefetch_off`; as `batch_prefetch` counts them): one for each HSP of its
+    // results, one for each subject of an `-ungapped` search (`blastp_seq_aligns`); psiblast's
+    // and rpsblast's before the cut (`psiblast_hits_found`, their searches gapped).
+    let gapped = !args.ungapped;
     let batch_seq_aligns = |span: std::ops::Range<usize>| -> usize {
         match psiblast_hits_found.as_ref() {
             Some(found) => found[span].iter().sum(),
-            None => blastp_hit_list_hsp_count(&hit_lists[span]),
+            None => blastp_seq_aligns(&hit_lists[span], gapped),
         }
     };
     // Outfmt 5 first: whether NCBI's XML stream cuts a query's report before its hits
@@ -1360,7 +1362,8 @@ pub(super) fn report_values(
     // (`refuse_unreportable` in `run_call`) or a report write error drops them: no PSSM file has
     // changed (`PssmFiles`).
     // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the Seq-aligns of its
-    // results, one for each HSP (psiblast's before the cut, as `psiblast_hits_found` below): a
+    // results, one for each HSP or, `-ungapped`, for each subject (`blastp_seq_aligns`;
+    // psiblast's and rpsblast's before the cut, as `psiblast_hits_found` below): a
     // batch whose prefetch is off reads its subjects one by one, for the PSSM too. The rounds of
     // one psiblast query share NCBI's scope, but every subject that a round whose prefetch is off
     // reads one by one is refused there (its reports and its PSSM, below), so no weak match
@@ -1374,7 +1377,7 @@ pub(super) fn report_values(
         0,
         &batch_ranges,
         |span| {
-            blastp_hit_list_hsp_count(&hit_lists[span.clone()])
+            blastp_seq_aligns(&hit_lists[span.clone()], !args.ungapped)
                 + setup
                     .unlisted
                     .get(span)
@@ -1470,7 +1473,8 @@ pub(super) fn report_values(
             .iter_mut()
             .enumerate()
             .map(|(query, hit_list_opt)| {
-                let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt))
+                // psiblast and rpsblast are gapped: outfmt 7's count is the prefetch's.
+                let found = blastp_seq_aligns(std::slice::from_ref(hit_list_opt), true)
                     + setup.unlisted.get(query).copied().unwrap_or(0);
                 if let Some(hit_list) = hit_list_opt {
                     hit_list.prune_by_size(

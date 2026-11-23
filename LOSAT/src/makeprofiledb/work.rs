@@ -14,6 +14,7 @@ use crate::seqid::{BlastDefline, DeflineSet};
 use crate::utils::os_bytes::path_from_bytes;
 use crate::writedb::bioseq::{self, Bioseq, ParsedIds};
 use crate::writedb::build_db::{create_directories, delete_blast_db};
+use crate::writedb::convert::{short_nucleotide_data, ShortNucleotideData};
 use crate::writedb::deflines::{bioseq_deflines, first_org_taxid, BioseqDeflinesError};
 use crate::writedb::files::{make_short_name, DbVersion};
 use crate::writedb::taxid_set::{TaxIdMapError, TaxIdSet};
@@ -97,7 +98,8 @@ impl From<ProfileError> for RunError {
             ProfileError::Input(message) => RunError::Input(message),
             ProfileError::Rps(error) => error.into(),
             ProfileError::Blast(message) => RunError::Blast(message.into_bytes()),
-            ProfileError::Exception(message) => RunError::Exception(message.into_bytes()),
+            ProfileError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
+            ProfileError::Unknown => RunError::Unknown,
         }
     }
 }
@@ -145,8 +147,11 @@ impl From<WriteDbError> for RunError {
 
 /// The parameters of `x_InitProgramParameters` that the build reads.
 struct Params<'a> {
-    /// `m_LogFile`: the file of `-logfile`, or the standard output.
-    log: OutputFile<'a>,
+    /// The standard output (`cout`): the database writer's lines (`WriteDb::take_stdout`), and
+    /// `m_LogFile` without a file of `-logfile`.
+    stdout: &'a mut dyn Write,
+    /// `m_LogFile` when `-logfile` names a file (`None`: the standard output).
+    log_file: Option<std::fs::File>,
     /// The list of profile files (`m_InPssmList`), read whole.
     in_list: Vec<u8>,
     title: String,
@@ -164,6 +169,16 @@ struct Params<'a> {
     user_taxids: bool,
 }
 
+impl Params<'_> {
+    /// `m_LogFile`: the file of `-logfile`, or the standard output.
+    fn log(&mut self) -> &mut dyn Write {
+        match &mut self.log_file {
+            Some(file) => file,
+            None => &mut *self.stdout,
+        }
+    }
+}
+
 /// What `Init` ends with instead of the parameters: an exit status, its report written.
 type InitEnd = i32;
 
@@ -178,11 +193,14 @@ fn init<'a>(
     out: &'a mut dyn Write,
     diag: &mut Diag,
 ) -> Result<Params<'a>, InitEnd> {
-    let log = if args.given("logfile") {
-        args.output_file("logfile", out)
-            .map_err(|error| diag.init_arg_exception(error))?
+    let log_file = if args.given("logfile") {
+        match args.output_file("logfile", &mut *out) {
+            Ok(OutputFile::File(file)) => Some(file),
+            Ok(OutputFile::Stdout(_)) => None,
+            Err(error) => return Err(diag.init_arg_exception(error)),
+        }
     } else {
-        OutputFile::Stdout(out)
+        None
     };
     let in_name = args
         .as_string("in")
@@ -258,7 +276,8 @@ fn init<'a>(
         (TaxIdSet::default(), false)
     };
     Ok(Params {
-        log,
+        stdout: out,
+        log_file,
         in_list,
         title,
         word_default_score_threshold,
@@ -316,7 +335,7 @@ pub(super) fn run(
         Ok(()) => 0,
         Err(error) => report(error, diag),
     };
-    let _ = params.log.flush();
+    let _ = params.log().flush();
     destroy(&built, &params.out_db_name);
     status
 }
@@ -333,7 +352,7 @@ pub(super) fn dry_run(
 ) -> i32 {
     match init(args, input, out, diag) {
         Ok(mut params) => {
-            let _ = params.log.flush();
+            let _ = params.log().flush();
             0
         }
         Err(status) => status,
@@ -456,9 +475,9 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
     create_directories(&params.out_db_name)?;
     if delete_makeprofile_db(&params.out_db_name)? {
         let _ = params
-            .log
+            .log()
             .write_all(b"Deleted existing BLAST database with identical name.\n");
-        let _ = params.log.flush();
+        let _ = params.log().flush();
     }
     let list = std::mem::take(&mut params.in_list);
     let smps = smp_filenames(&list)?;
@@ -620,11 +639,20 @@ fn read_profile(
     }
 }
 
-/// The writer's diagnostics since the last call, posted.
-fn post_writer(diag: &mut Diag, output_db: &mut WriteDb) {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:464-466
+// The writer's line on `cout` is written with `endl`: at once, before what the run writes after
+// it.
+/// The writer's diagnostics since the last call, posted, and its text on the standard output
+/// written there.
+fn post_writer(diag: &mut Diag, stdout: &mut dyn Write, output_db: &mut WriteDb) {
     let text = output_db.take_diagnostics();
     if !text.is_empty() {
         diag.write_text(&text);
+    }
+    let text = output_db.take_stdout();
+    if !text.is_empty() {
+        let _ = stdout.write_all(&text);
+        let _ = stdout.flush();
     }
 }
 
@@ -688,9 +716,10 @@ fn make_vol(
         // LOSAT's refusal: NCBI's run has no defined result there, and nothing after it is
         // reported.
         drop(output_db.take_diagnostics());
+        drop(output_db.take_stdout());
         return result;
     }
-    post_writer(diag, &mut output_db);
+    post_writer(diag, params.stdout, &mut output_db);
     match (result, closed) {
         (Ok(()), Ok(())) => {}
         // The `Close` after the loop threw: its error leaves `x_MakeVol`, the destructor's
@@ -698,7 +727,7 @@ fn make_vol(
         // name, the LMDB files).
         (Ok(()), Err(close_error)) => {
             let destroyed = output_db.destroy_after_failed_close();
-            post_writer(diag, &mut output_db);
+            post_writer(diag, params.stdout, &mut output_db);
             let error = RunError::from(close_error);
             return Err(match destroyed {
                 Ok(()) => error,
@@ -718,7 +747,7 @@ fn make_vol(
             }
             diag.err_post_bytes(&close_error.message());
             let destroyed = output_db.destroy_after_failed_close();
-            post_writer(diag, &mut output_db);
+            post_writer(diag, params.stdout, &mut output_db);
             return Err(match destroyed {
                 Ok(()) => error,
                 Err(destructor) => aborts(error, &destructor),
@@ -726,7 +755,7 @@ fn make_vol(
         }
         (Err(error), Ok(())) => {
             let destroyed = output_db.destroy_after_close();
-            post_writer(diag, &mut output_db);
+            post_writer(diag, params.stdout, &mut output_db);
             return Err(match destroyed {
                 Ok(()) => error,
                 Err(destructor) => aborts(error, &destructor),
@@ -868,7 +897,7 @@ fn add_to_database(
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
             if !extracted.binary {
                 output_db.post_extracted_deflines(&extracted.set);
-                post_writer(diag, output_db);
+                post_writer(diag, params.stdout, output_db);
             }
             extracted.set
         }
@@ -897,16 +926,23 @@ fn add_to_database(
     params.taxids.fix_tax_id(&mut deflines);
     let inst = &query.inst;
     let seq_data = inst.seq_data.as_ref().map(|data| match data {
-        SeqData::Ncbieaa(letters) => bioseq::SeqData::Ncbieaa(letters.clone()),
+        SeqData::Iupacna(letters) => bioseq::SeqData::Iupacna(letters.clone()),
         SeqData::Iupacaa(letters) => bioseq::SeqData::Iupacaa(letters.clone()),
+        SeqData::Ncbi2na(bases) => bioseq::SeqData::Ncbi2na(bases.clone()),
+        SeqData::Ncbi4na(bases) => bioseq::SeqData::Ncbi4na(bases.clone()),
+        SeqData::Ncbieaa(letters) => bioseq::SeqData::Ncbieaa(letters.clone()),
         SeqData::Ncbistdaa(codes) => bioseq::SeqData::Ncbistdaa(codes.clone()),
         SeqData::Other(_) => bioseq::SeqData::Other,
     });
+    let length = inst.length.unwrap_or(0);
+    let short = seq_data
+        .as_ref()
+        .and_then(|data| short_nucleotide_data(data, length));
     let bioseq = Bioseq {
         local_id: String::new(),
         title: Vec::new(),
         is_aa: inst.mol.1 == 3,
-        length: u64::from(inst.length.unwrap_or(0)),
+        length: u64::from(length),
         seq_data,
         parsed: Some(ParsedIds {
             ids: query.ids.clone(),
@@ -917,8 +953,38 @@ fn add_to_database(
         past_seq_pos: None,
     };
     let added = output_db.add_sequence(bioseq);
-    post_writer(diag, output_db);
+    post_writer(diag, params.stdout, output_db);
     added?;
     output_db.set_deflines(deflines);
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108,324-331
+    // A sequence that the writer keeps (its molecule checked) is published at the next
+    // `AddSequence`, at `Close`, or at the destructor's `Close` after an error: NCBI's
+    // conversion of short nucleotide data then reads past it (`short_nucleotide_data`), whatever
+    // the profile and whatever follows.
+    if let Some(short) = short {
+        let ShortNucleotideData {
+            coding,
+            text,
+            held,
+            read,
+        } = short;
+        let count = |n: usize, unit: &str| match n {
+            1 => format!("1 {unit}"),
+            _ => format!("{n} {unit}s"),
+        };
+        let (held, read) = if text {
+            (
+                count(held, "letter"),
+                format!("{} of their ncbi4na form", count(read, "byte")),
+            )
+        } else {
+            (count(held, "byte"), count(read, "byte"))
+        };
+        return Err(RunError::Refused(format!(
+            "a profile whose query has {held} of {coding} data for a length of {length} (NCBI's \
+             makeprofiledb reads {read} there, past the data)"
+        )));
+    }
     Ok(())
 }

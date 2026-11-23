@@ -1,10 +1,11 @@
 //! The options of a program, from the engine's own argument definitions.
 //!
 //! NCBI builds each program's options once, as `CArgDescriptions` (`SetArgumentDescriptions`),
-//! and prints them from there (`PrintUsage`); LOSAT's clap definitions are that table, and
-//! `describe` reads it, so a caller shows exactly the options, defaults and allowed values of the
-//! command line and holds no table of its own (LOSAT Web ABI v2 *describe*, docs/web/abi_v2.md
-//! §9, reads the same definitions).
+//! and prints them from there (`PrintUsage`); LOSAT's argument tables are NCBI's (generated from
+//! each program's `-xmlhelp` XML, `ncbi_app::args`), and `describe` takes the defaults and the
+//! allowed values from them, the options, their help and value kinds from the clap definitions
+//! that convert them, so a caller shows exactly what the command line reads and holds no table
+//! of its own (LOSAT Web ABI v2 *describe*, docs/web/abi_v2.md §9, reads the same).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
 #![warn(missing_docs, unused)]
@@ -46,12 +47,13 @@ pub struct Parameter {
     pub takes_value: bool,
     /// What the value is.
     pub value_kind: ValueKind,
-    /// The default value that the parser fills in when the flag is absent, if it has one. An
-    /// option without a parser default (an `Option` of the arguments, "given or not" to NCBI)
-    /// has none here even when its help text names NCBI's default.
+    /// The default of NCBI's argument reader (`AddDefaultKey`, the XML's `<default>`), if the
+    /// option has one. An option without one (a flag, or a key whose default NCBI's option
+    /// handlers set, "given or not" to the reader) has none here even when its help text names
+    /// NCBI's default.
     pub default: Option<String>,
-    /// The values the parser accepts, when it lists them (`-task` of every program that has
-    /// one); empty otherwise.
+    /// The values that NCBI's argument reader accepts, when its constraint is a set (`-task`,
+    /// `-strand`, `-template_type`, `-template_length`); empty otherwise, a flag's included.
     pub choices: Vec<String>,
 }
 
@@ -129,22 +131,16 @@ pub fn describe(program: Program) -> Description {
         {
             continue;
         }
-        let defaults: Vec<String> = arg
-            .get_default_values()
-            .iter()
-            .map(|value| value.to_string_lossy().into_owned())
-            .collect();
+        // The default and the values that NCBI's argument reader allows (its tables, line RG
+        // DECISIONS K4i-2b-1): none for a flag.
+        let name = program.name();
         parameters.push(Parameter {
             flag: format!("-{long}"),
             help: arg.get_help().map(ToString::to_string).unwrap_or_default(),
             takes_value: arg.get_action().takes_values(),
             value_kind: value_kind(arg),
-            default: (!defaults.is_empty()).then(|| defaults.join(" ")),
-            choices: arg
-                .get_possible_values()
-                .iter()
-                .map(|value| value.get_name().to_string())
-                .collect(),
+            default: crate::ncbi_app::args::default_value(name, long).map(str::to_string),
+            choices: crate::ncbi_app::args::choices(name, long).unwrap_or_default(),
         });
     }
     let has = |long: &str| {

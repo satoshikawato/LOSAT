@@ -156,7 +156,7 @@ fn the_option_is_read_as_ncbi_reads_it() {
     }
     for bad in ["-1", "1.5", "abc", "2147483648"] {
         let run = subject_search(&["-culling_limit", bad], &[]);
-        assert_eq!(run.code, Some(2), "{bad}: {}", run.stderr);
+        assert_eq!(run.code, Some(1), "{bad}: {}", run.stderr);
         assert!(
             !run.stderr.contains("is not supported by"),
             "{bad}: {}",

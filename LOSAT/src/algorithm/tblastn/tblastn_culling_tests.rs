@@ -1,17 +1,17 @@
 //! The `-culling_limit` option of TBLASTN as the parser reads it (the integration test
 //! `tests/tblastn_culling.rs` runs the binary with the option).
 
-use crate::cli::{try_parse_from, Cli, Commands};
+use crate::cli::{try_parse_from, Commands};
 
 fn limit(words: &[&str]) -> Result<i32, String> {
     let mut argv = vec!["losat", "tblastn", "-query", "q.fa", "-subject", "s.fa"];
     argv.extend(words);
-    match try_parse_from::<Cli, _, _>(argv) {
+    match try_parse_from(argv) {
         Ok(cli) => match cli.command {
             Commands::Tblastn(args) => Ok(args.culling_limit_value()),
             _ => unreachable!("tblastn"),
         },
-        Err(error) => Err(crate::cli::render_message(&error)),
+        Err(error) => Err(error.to_string()),
     }
 }
 

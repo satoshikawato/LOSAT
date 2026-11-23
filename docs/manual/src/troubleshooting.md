@@ -7,16 +7,16 @@ Questions and answers for the problems people meet most. Each answer is based on
 **What does it look like?**
 
 ```text
-error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
+Error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
 ```
 
-The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses `-outfmt`](#psiblast-refuses--outfmt-such-as-xml-or-asn1).
+The command exits with status 1 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses some `-outfmt` values](#psiblast-refuses-some--outfmt-values).
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 
 **What can I do?** Look the option up in [What LOSAT refuses](refusals.md) and on the page of your program. Options that need NCBI's servers or its GI and IPG databases (`-remote`, `-entrez_query`, `-gilist`, `-ipglist`) are not available. For an option that is refused, use NCBI BLAST+ for that run. The [Introduction](introduction.md) lists the programs and options planned for a later release.
 
-A different message, `error: unknown option or argument '-xyz'; use -help to list the options`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
+A different message, NCBI's short usage followed by `Error: Unknown argument: "xyz"` (exit status 1), means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
 
 ## `losat --install-shims` stops with "nothing was installed"
 
@@ -101,19 +101,19 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 First check [Differences from NCBI BLAST+](differences.md). A few differences are on purpose, for example a local `tblastx` or `tblastn` subject translated with `-db_gencode`, the last digit of some full-precision values on macOS, and the `CL:` tag of SAM output. If your case is not covered there, it is a bug: please report it.
 
-## `psiblast` refuses `-outfmt` such as XML or ASN.1
+## `psiblast` refuses some `-outfmt` values
 
-`psiblast` supports `-outfmt 0`, `6`, `7`, `10` and `20` from a FASTA query, and `0`, `6` and `7` with `-in_pssm` or `-in_msa`.
+`psiblast` writes `-outfmt 0`, `5` to `11` and `20` from a FASTA query, `-in_pssm` or `-in_msa`, at any `-num_iterations`. `tblastn -in_pssm` writes `0` to `10` and `20`.
 
-- A format outside `0`, `6`, `7`, `10` and `20` (such as XML `-outfmt 5` or archive `-outfmt 11`) stops before any input is read, with any query: `Error: output format N is not supported by LOSAT's PSIBLAST`.
-- With `-in_pssm` or `-in_msa`, `-outfmt 10` and `20` stop after the PSSM or alignment is read: `Error: output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (`-in_msa` when that is given).
-- Both exit with status 1.
+- A `psiblast` format `1` to `4`, `12` to `16` or `18` stops before the search: `Error: output format N is not supported by LOSAT's PSIBLAST yet` with a FASTA query, and `Error: output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (`with -in_msa` for an alignment) with `-in_pssm` or `-in_msa`. The `-in_pssm` and `-in_msa` refusals come after the file is read, so a file that NCBI BLAST+ cannot read gets NCBI's error for it first.
+- A `tblastn -in_pssm` format `12` to `16` or `18` stops after the PSSM is read: `Error: output format N with -in_pssm is not supported by LOSAT's TBLASTN yet`. `-outfmt 11` stops there too, because NCBI's own run of it stops with a C++ exception whose report changes from run to run.
+- Each exits with status 1.
 
-Use NCBI BLAST+ `psiblast` if your workflow requires those formats.
+Use NCBI BLAST+ if your workflow requires those formats.
 
 ## `rpsblast` or `rpstblastn` rejects `-subject`
 
-Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) only and have no `-subject` option, matching NCBI BLAST+ 2.17.0. Passing `-subject` exits with status 2 at argument parsing.
+Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) only and have no `-subject` option, matching NCBI BLAST+ 2.17.0. Passing `-subject` prints NCBI's usage and `Unknown argument: "subject"`, and exits with status 1, as NCBI BLAST+ does.
 
 ## `blastn -use_index true` stops with an error
 

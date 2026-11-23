@@ -90,11 +90,11 @@ For every option: `losat psiblast -help`.
 
 | Search | Supported `-outfmt` |
 | --- | --- |
-| FASTA query (`-query`) | 0, 6, 7, 10, 20 |
-| PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0, 6, 7 |
+| FASTA query (`-query`) | 0, 5 to 11, 20 |
+| PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0, 5 to 11, 20 |
 | Pattern search (`-phi_pattern`) | 0, 6, 7, 10, 20 |
 
-Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. As in NCBI's `psiblast`, `delim=` is read and checked but the columns keep their tab or comma. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
+Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. As in NCBI's `psiblast`, `delim=` is read and checked but the columns keep their tab or comma. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. With `-outfmt 5`, one XML document holds every round, one `Iteration` per round. With `-outfmt 8` and `9`, each round writes its own Seq-annot. With `-outfmt 11`, each round writes its own archive, and the archive of a later round holds the PSSM that the round searched. With `-subject`, `-outfmt 11` stops at the first round that searches a PSSM (round 2 for a FASTA query, round 1 for `-in_pssm` or `-in_msa`), after the archives of the rounds before it, with NCBI's error `Empty reference for CSearchDatabase.` and exit status 3, as NCBI BLAST+ does. See [Output formats](../output-formats.md).
 
 ## Differences from NCBI BLAST+
 
@@ -104,8 +104,8 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 
 Not yet supported:
 
-- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm` or `-in_msa`, other than 0, 6 and 7). `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors; with `-phi_pattern`, so do 8, 9 and 12.
-- With `-phi_pattern`: more than one round, `-sum_stats true` and a subject longer than 5,000,000 residues. The library and pylosat do not take `phi_pattern`.
+- `-outfmt` 1 to 4, 12 to 16 and 18. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
+- With `-phi_pattern`: more than one round, `-outfmt` other than 0, 6, 7, 10 and 20 (8, 9 and 12 get NCBI's own error), `-sum_stats true` and a subject longer than 5,000,000 residues. The library and pylosat do not take `phi_pattern`.
 
 Also refused:
 

@@ -202,12 +202,14 @@ fn a_copied_database_is_the_database_written_from_its_fasta() {
     );
 }
 
-/// The probes' head of the log of `dir`'s database `db` titled `X`.
+/// The probes' head of the log of `dir`'s database `db` titled `X` (the name as `-out` gives it,
+/// `TempDir::base`: the separator of the platform before `db`).
 fn log_head(dir: &str) -> String {
     format!(
-        "\n\nBuilding a new DB, current time: 11/21/2026 09:00:00\nNew DB name:   {dir}/db\n\
+        "\n\nBuilding a new DB, current time: 11/21/2026 09:00:00\nNew DB name:   {}\n\
          New DB title:  X\nSequence type: Nucleotide\nKeep MBits: T\n\
-         Maximum file size: 3000000000B\n"
+         Maximum file size: 3000000000B\n",
+        Path::new(dir).join("db").display()
     )
 }
 
@@ -215,10 +217,12 @@ fn log_head(dir: &str) -> String {
 /// directories start with the current one (LOSAT's text of it).
 fn not_found(name: &str) -> String {
     let cwd = std::env::current_dir().unwrap();
+    // NCBI splits the search path at `;` on Windows, at `:` elsewhere.
+    let splitter = if cfg!(windows) { ';' } else { ':' };
     let ncbi = format!(
         "BLAST Database error: No alias or index file found for nucleotide database [{name}] in \
-         search path [{}::]. Please verify the spelling of the BLAST database and its molecule \
-         type.\n",
+         search path [{}{splitter}{splitter}]. Please verify the spelling of the BLAST database \
+         and its molecule type.\n",
         cwd.display()
     );
     String::from_utf8(crate::wording::losat_bytes(ncbi.as_bytes()).into_owned()).unwrap()

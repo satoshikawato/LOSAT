@@ -4,12 +4,12 @@ use crate::cli::{Cli, Commands};
 fn parse(extra: &[&str]) -> Result<PsiblastArgs, String> {
     let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-subject", "s.faa"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(Cli {
             command: Commands::Psiblast(args),
         }) => Ok(args),
         Ok(other) => panic!("not psiblast: {other:?}"),
-        Err(error) => Err(crate::cli::render_message(&error)),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -104,7 +104,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
         argv.extend_from_slice(extra);
         let Ok(Cli {
             command: Commands::Psiblast(args),
-        }) = crate::cli::try_parse_from::<Cli, _, _>(argv)
+        }) = crate::cli::try_parse_from(argv)
         else {
             panic!("psiblast -in_pssm {extra:?}");
         };
@@ -147,7 +147,18 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    for format in ["1", "3", "5", "8", "11", "15", "16", "18"] {
+    // Item PS15b-1: BLAST XML, the Seq-annots and the archive run; the formats of PS15b-2 are
+    // refused.
+    for format in ["5", "8", "9", "11"] {
+        assert!(
+            parse(&["-outfmt", format])
+                .unwrap()
+                .into_blastp_args()
+                .is_ok(),
+            "outfmt {format}"
+        );
+    }
+    for format in ["1", "3", "4", "12", "15", "16", "18"] {
         let error = parse(&["-outfmt", format])
             .unwrap()
             .into_blastp_args()
@@ -155,7 +166,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .to_string();
         assert_eq!(
             error,
-            format!("output format {format} is not supported by LOSAT's PSIBLAST")
+            format!("output format {format} is not supported by LOSAT's PSIBLAST yet")
         );
     }
     // Outfmt 13 and 14 to a file are refused here; to standard output they go on to NCBI's
@@ -169,7 +180,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .to_string();
         assert_eq!(
             error,
-            format!("output format {format} is not supported by LOSAT's PSIBLAST")
+            format!("output format {format} is not supported by LOSAT's PSIBLAST yet")
         );
         assert!(parse(&["-outfmt", format])
             .unwrap()
@@ -206,12 +217,12 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
     let db = |extra: &[&str]| {
         let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-db", "d"];
         argv.extend_from_slice(extra);
-        match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+        match crate::cli::try_parse_from(argv) {
             Ok(Cli {
                 command: Commands::Psiblast(args),
             }) => Ok(args.into_blastp_args().unwrap()),
             Ok(other) => panic!("not psiblast: {other:?}"),
-            Err(error) => Err(crate::cli::render_message(&error)),
+            Err(error) => Err(error.to_string()),
         }
     };
     let blastp = db(&[
@@ -243,9 +254,9 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
     ] {
         let mut argv = vec!["losat", "psiblast", "-query", "q.faa"];
         argv.extend_from_slice(extra);
-        let error = crate::cli::try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        let error = crate::cli::try_parse_from(argv).unwrap_err();
         assert!(
-            crate::cli::render_message(&error).contains("cannot be used with"),
+            error.to_string().contains("Incompatible with argument:  `"),
             "{extra:?}"
         );
     }
@@ -299,10 +310,10 @@ fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
         "-html: {error}"
     );
-    // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
+    // `-in_pssm` (PS4a) is an argument: with `-query` it is NCBI's reader's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();
-    assert!(error.contains("cannot be used with"), "{error}");
+    assert!(error.contains("Incompatible with argument:  `"), "{error}");
     // `-phi_pattern` (PS8a) is an argument; `-in_msa` excludes it (blast_args.cpp:1173-1192).
     let args = parse(&["-phi_pattern", "p.pat"]).unwrap();
     assert_eq!(
@@ -310,12 +321,12 @@ fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         Some(std::path::Path::new("p.pat"))
     );
     let error = parse(&["-phi_pattern", "p.pat", "-in_msa", "a.aln"]).unwrap_err();
-    assert!(error.contains("cannot be used with"), "{error}");
-    // Arguments that psiblast does not have are unknown, as in NCBI's parser.
+    assert!(error.contains("Incompatible with argument:  `"), "{error}");
+    // Arguments that psiblast does not have are unknown, as in NCBI's reader.
     for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {
         let error = parse(&[option, "1"]).unwrap_err();
         assert!(
-            error.contains("unknown option or argument"),
+            error.contains(&format!("Unknown argument: \"{}\"", &option[1..])),
             "{option}: {error}"
         );
     }

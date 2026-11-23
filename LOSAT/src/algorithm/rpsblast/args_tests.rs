@@ -4,7 +4,7 @@ use crate::cli::{Cli, Commands};
 fn parse(extra: &[&str]) -> Result<RpsblastArgs, String> {
     let mut argv = vec!["losat", "rpsblast", "-query", "q.faa", "-db", "cdd"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(Cli {
             command: Commands::Rpsblast(args),
             ..
@@ -84,7 +84,7 @@ fn options_of_later_items_are_refused() {
             .into_blastp_args()
             .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
     }
-    let error = parse(&["-html", "1"]).unwrap_err();
+    let error = parse(&["-html"]).unwrap_err();
     assert!(
         error.contains("-html is not supported by LOSAT's RPSBLAST"),
         "{error}"

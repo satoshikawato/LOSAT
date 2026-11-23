@@ -41,6 +41,7 @@ pub mod bioseq;
 pub mod build_db;
 pub(crate) mod column;
 pub mod convert;
+pub(crate) mod cout;
 pub mod data_size;
 pub mod deflines;
 pub(crate) mod dir_entry;

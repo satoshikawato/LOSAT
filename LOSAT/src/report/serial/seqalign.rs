@@ -581,21 +581,32 @@ pub fn query_coverage(q_offset: i32, q_end: i32, query_length: i32) -> f64 {
 }
 
 /// The "Blast Type" of the run's program: `EProgramToTaskName` of `ProgramNameToEnum` of the
-/// program name and the `EProgram` value. The program name of every BLASTN task is "blastn"
-/// (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task "blastp"; the RPS
-/// search of BLASTP is "rpsblast" (`eRPSBlast`), of BLASTX "rpstblastn" (`eRPSTblastn`).
+/// program name and the `EProgram` value (`RunRecord::program_type` where the program does not
+/// name it: psiblast, PSI-TBLASTN, rpsblast, rpstblastn). The program name of every BLASTN task
+/// is "blastn" (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task
+/// "blastp".
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-64
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-688
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-68
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-694
 fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
-    match (run.program, run.rps) {
-        (Program::Blastp, true) => ("rpsblast", 6),
-        (Program::Blastx, true) => ("rpstblastn", 7),
-        (Program::Blastn, _) => ("blastn", 1),
-        (Program::Blastp, _) => ("blastp", 2),
-        (Program::Blastx, _) => ("blastx", 3),
-        (Program::Tblastn, _) => ("tblastn", 4),
-        (Program::Tblastx, _) => ("tblastx", 5),
+    use crate::report::record::ProgramType;
+    match run.program_type {
+        Some(program_type) => (
+            program_type.name(),
+            match program_type {
+                ProgramType::RpsBlast => 6,
+                ProgramType::RpsTblastn => 7,
+                ProgramType::PsiBlast => 10,
+                ProgramType::PsiTblastn => 11,
+            },
+        ),
+        None => match run.program {
+            Program::Blastn => ("blastn", 1),
+            Program::Blastp => ("blastp", 2),
+            Program::Blastx => ("blastx", 3),
+            Program::Tblastn => ("tblastn", 4),
+            Program::Tblastx => ("tblastx", 5),
+        },
     }
 }
 
@@ -1545,6 +1556,18 @@ fn write_seq_align_gapped<E: Encoder>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1252-1260
     enc.member("score", 2);
     enc.begin_list(true);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1490-1496
+    // psiblast's Seq-aligns (`eBlastTypePsiBlast`, every round) leave out a `num_ident` of 0.
+    let psiblast_no_identity = HspRecord {
+        num_ident: -1,
+        ..*hsp
+    };
+    let hsp = match run.program_type {
+        Some(crate::report::record::ProgramType::PsiBlast) if hsp.num_ident == 0 => {
+            &psiblast_no_identity
+        }
+        _ => hsp,
+    };
     write_score_list(enc, hsp, coverage_query_length(run, query.searched_length));
     enc.end_list();
     enc.end_member();

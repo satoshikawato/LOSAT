@@ -51,7 +51,7 @@ fn task_choices_are_the_tasks_the_parser_accepts() {
             "-task",
             task,
         ];
-        crate::cli::try_parse_from::<Cli, _, _>(argv).is_ok()
+        crate::cli::try_parse_from(argv).is_ok()
     };
     // Every -task lists its tasks: the default among them, each one accepted.
     for program in Program::ALL {
@@ -112,9 +112,9 @@ fn genetic_codes_are_listed_for_the_translated_programs_only() {
     }
 }
 
-// Until the programs on clap move onto NCBI's reader (line RG item K4i-2b), clap's parser decides
-// which genetic codes a run takes: describe's codes, which come from the argument tables, must be
-// those that the parser takes (the probe of every code below 64 that describe ran before K4i-2a).
+// NCBI's reader decides which genetic codes a run takes (line RG item K4i-2b): describe's codes,
+// which come from the same argument tables, are those that the command line takes (the probe of
+// every code below 64 that describe ran before K4i-2a).
 #[test]
 fn the_genetic_codes_are_those_that_the_parser_takes() {
     for program in Program::ALL {
@@ -136,7 +136,7 @@ fn the_genetic_codes_are_those_that_the_parser_takes() {
                         name,
                         &code,
                     ];
-                    crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_ok()
+                    crate::cli::try_parse_from(argv).is_ok()
                 })
                 .collect();
             assert_eq!(listed, &taken, "{program} {name}");

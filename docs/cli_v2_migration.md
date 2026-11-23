@@ -106,8 +106,9 @@ Machine-readable final fields: [`acceptance.json`](../artifacts/cli-v2-20260911/
 At v0.1.0, `-query` and `-subject` required file paths, and stdin (`-`) and `-db` were not
 implemented. Since v0.2.0 every search program reads its query from the standard input (`-query -`)
 and searches BLAST databases (`-db`); README.md lists what each program takes. Values are consumed as values, including negative numbers and
-paths beginning with a dash. `-help`/`--help` display canonical names; top-level
-`--version` remains available.
+paths beginning with a dash. `-help` displays NCBI's help text with the canonical names
+(since 2026-11-23 `--help` after a program name is not an option, as in NCBI); top-level
+`losat --help` and `--version` remain available.
 
 | Setting | CLI v2 behavior |
 | --- | --- |

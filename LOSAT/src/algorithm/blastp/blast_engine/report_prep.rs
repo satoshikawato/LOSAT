@@ -1199,6 +1199,9 @@ pub(super) struct ReportSetup<'a> {
     pub(super) query_batches: &'a [RangedBatch],
     pub(super) database: Option<&'a database::BlastpDatabase>,
     pub(super) requested_formats: &'a [BlastpReport],
+    /// How the formatters cut the hit lists: the first format's (`BlastpApp::list_cut`; the
+    /// library searches formats of other cuts apart, `api::run::search_groups`).
+    pub(super) list_cut: crate::algorithm::blastp::args::ListCut,
     pub(super) contexts: &'a [QueryContext],
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) subject_source: BlastpSubjectSource<'a>,
@@ -1426,6 +1429,7 @@ pub(super) fn report_values(
         query_batches,
         database,
         requested_formats,
+        list_cut,
         contexts,
         gapped_params,
         ..
@@ -1444,11 +1448,14 @@ pub(super) fn report_values(
     // subject (`PruneSeqalign`, cited at `joined_cut`): a copy of one record that follows
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
-    // rpsblast's archive holds the merged results of its volumes as the search made them: no
-    // formatter cuts them before `WriteArchive` (the other formats' formatters cut them).
-    let prunes_lists = args.app.prunes_after_traceback()
-        && !(args.app == crate::algorithm::blastp::args::BlastpApp::Rpsblast
-            && matches!(requested_formats.first(), Some(BlastpReport::Archive)));
+    // The archive holds the results as the search made them: no formatter cuts rpsblast's merged
+    // volumes or psiblast's lists before `WriteArchive` (the other formats' formatters cut them).
+    // psiblast's XML formatter cuts the round's results themselves (`TrimSeqAlign`, the subjects
+    // that `PruneSeqalign` keeps) before the round's PSSM and inclusion set are made from them
+    // (psiblast_app.cpp:273-309); the other formats cut a copy after them (`BlastpApp::list_cut`).
+    use crate::algorithm::blastp::args::ListCut;
+    let prunes_lists = list_cut != ListCut::Uncut;
+    let cuts_before_pssm = list_cut == ListCut::BeforePssm;
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
         (_, Some(titles)) if prunes_lists => {
             Some(titles.joined_cut(hit_lists, args.max_target_seqs)?)
@@ -1518,6 +1525,33 @@ pub(super) fn report_values(
                     .map_or(0, |counts| counts.iter().sum())
         },
     );
+    // The numbers of HSPs of psiblast's lists before the formatter's cut (`# N hits found` of
+    // outfmt 7), and the cut: here for psiblast's XML report, after the PSSMs otherwise.
+    let mut psiblast_hits_found: Option<Vec<usize>> = None;
+    let mut cut_lists = |hit_lists: &mut [Option<BlastpHitList>]| {
+        psiblast_hits_found = Some(
+            hit_lists
+                .iter_mut()
+                .enumerate()
+                .map(|(query, hit_list_opt)| {
+                    // psiblast and rpsblast are gapped: outfmt 7's count is the prefetch's.
+                    let found = blastp_seq_aligns(std::slice::from_ref(hit_list_opt), true)
+                        + setup.unlisted.get(query).copied().unwrap_or(0);
+                    if let Some(hit_list) = hit_list_opt {
+                        hit_list.prune_by_size(
+                            psiblast_kept
+                                .as_ref()
+                                .map_or(args.max_target_seqs, |kept| kept[query]),
+                        );
+                    }
+                    found
+                })
+                .collect(),
+        );
+    };
+    if cuts_before_pssm {
+        cut_lists(hit_lists);
+    }
     // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
     // the files, review 2 of line DBID weakbatch H2).
     // What the PSSMs read by the subjects' Seq-align ids (`-out_pssm`'s and each round's next
@@ -1536,7 +1570,7 @@ pub(super) fn report_values(
             args.inclusion_ethresh,
             prefetch_taxids,
             &|query| match psiblast_kept.as_ref() {
-                _ if !args.app.prunes_after_traceback() => usize::MAX,
+                _ if !prunes_lists => usize::MAX,
                 Some(kept) => kept[query],
                 None => args.max_target_seqs,
             },
@@ -1602,25 +1636,9 @@ pub(super) fn report_values(
     }
     // Whether this call makes a PSSM: `-out_pssm`'s, or a round's for the next round.
     let pssm_made = args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next());
-    let psiblast_hits_found: Option<Vec<usize>> = prunes_lists.then(|| {
-        hit_lists
-            .iter_mut()
-            .enumerate()
-            .map(|(query, hit_list_opt)| {
-                // psiblast and rpsblast are gapped: outfmt 7's count is the prefetch's.
-                let found = blastp_seq_aligns(std::slice::from_ref(hit_list_opt), true)
-                    + setup.unlisted.get(query).copied().unwrap_or(0);
-                if let Some(hit_list) = hit_list_opt {
-                    hit_list.prune_by_size(
-                        psiblast_kept
-                            .as_ref()
-                            .map_or(args.max_target_seqs, |kept| kept[query]),
-                    );
-                }
-                found
-            })
-            .collect()
-    });
+    if prunes_lists && !cuts_before_pssm {
+        cut_lists(hit_lists);
+    }
     let mut engine_counts = EngineCounts::default();
     recount_shown_identities(
         hit_lists,

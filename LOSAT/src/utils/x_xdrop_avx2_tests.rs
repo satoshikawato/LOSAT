@@ -17,8 +17,9 @@ enum Kern {
     V256,
     /// LOSAT_X_DPEMASK=0: the 8-bit lanes' row end of before (16-bit lanes: the same kernel)
     V256Z,
-    /// EXPERIMENT (LOSAT_X_FNFRAME): the default instances with the lighter row frame
-    V256F,
+    /// EXPERIMENT (LOSAT_X_FNFRAME): the `EM` instances of one item mask (`fn_mask`; the traceback
+    /// instances with four-bit codes keep mask 0)
+    V256F(u8),
     W128,
 }
 
@@ -56,43 +57,69 @@ unsafe fn run(
         }
         (Kern::V256, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, true, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, false, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256, false, Some(m)) => {
-            align8::<false, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, true, false, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
-        (Kern::V256F, true, Some(m)) => {
+        (Kern::V256F(fm), true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, true, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8_fm!(
+                    true,
+                    fn_mask(fm, scores.ncols()),
+                    q,
+                    s,
+                    scores,
+                    m,
+                    len1,
+                    len2,
+                    go,
+                    ge,
+                    x,
+                    cf,
+                    sc
+                )
             }
         }
-        (Kern::V256F, false, Some(m)) => {
-            align8::<false, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
-        }
-        (Kern::V256 | Kern::V256Z | Kern::V256F, true, None) => {
+        (Kern::V256F(fm), false, Some(m)) => align8_fm!(
+            false,
+            fn_mask(fm, scores.ncols()),
+            q,
+            s,
+            scores,
+            m,
+            len1,
+            len2,
+            go,
+            ge,
+            x,
+            cf,
+            sc
+        ),
+        (Kern::V256 | Kern::V256Z | Kern::V256F(_), true, None) => {
             if sc.x_nib {
                 align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             } else {
                 align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
         }
-        (Kern::V256 | Kern::V256Z | Kern::V256F, false, None) => {
+        (Kern::V256 | Kern::V256Z | Kern::V256F(_), false, None) => {
             align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::V256Z, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, true, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, false, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256Z, false, Some(m)) => {
-            align8::<false, false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, false, false, 0>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::W128, true, Some(m)) => {
             w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -236,8 +263,10 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         XdropScratch::new(),
     );
     let mut sc256f = XdropScratch::new();
-    // calls of the `F` instances whose rows were moved
+    // calls of the V256F instances whose rows were moved
     let mut moved_f = 0usize;
+    // calls answered per item mask (`FNMASKS`): [so / tb][mask]
+    let mut fm_seen = [[0usize; FNMASKS.len()]; 2];
     // [width 8 / 16][tb][reverse]
     let mut handled = [[[0usize; 2]; 2]; 2];
     let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
@@ -254,6 +283,8 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         let nib = case % 2 == 0;
         (sc128.x_nib, sc256.x_nib, sc256z.x_nib) = (nib, nib, nib);
         sc256f.x_nib = nib;
+        // EXPERIMENT (LOSAT_X_FNFRAME): the item mask of the V256F call, every mask in turn
+        let fm = FNMASKS[case % FNMASKS.len()];
         let n = if rng.below(2) == 0 { 16 } else { 28 };
         let scale = if rng.below(3) == 0 { 32 } else { 1 };
         let long = rng.below(6) == 0;
@@ -446,7 +477,7 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
                         // SAFETY: AVX2 detected above.
                         let r256f = unsafe {
                             run(
-                                Kern::V256F,
+                                Kern::V256F(fm),
                                 m,
                                 tb,
                                 &rows,
@@ -461,9 +492,10 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
                                 &mut sc256f,
                             )
                         };
-                        assert_eq!(r256, r256f, "{tag}: 256 vs 256 with the lighter row frame");
+                        assert_eq!(r256, r256f, "{tag}: 256 vs 256 with row frame mask {fm}");
                         if r256.is_some() {
-                            assert_eq!(sc256.ops, sc256f.ops, "{tag}: 256 vs 256f ops");
+                            assert_eq!(sc256.ops, sc256f.ops, "{tag}: 256 vs 256f {fm} ops");
+                            fm_seen[usize::from(tb)][case % FNMASKS.len()] += 1;
                         }
                         moved_f += usize::from(sc256f.x_sh > 0);
                     }
@@ -510,7 +542,8 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
     }
     eprintln!(
         "avx2 fuzz: cases={cases} handled[w8/w16][so/tb][fwd/rev]={handled:?} fences={fences} \
-             wide={wide} declined={declined} moved[w8/w16][128/256/256z]={moved:?}"
+             wide={wide} declined={declined} moved[w8/w16][128/256/256z]={moved:?} \
+             row frame masks [so/tb]={fm_seen:?}"
     );
     if cases >= 200 {
         for (w, by_tb) in handled.iter().enumerate() {
@@ -529,6 +562,10 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
             "moved rows {moved:?}"
         );
         assert!(moved_f > 0, "row frame: no moved rows");
+        assert!(
+            fm_seen.iter().flatten().all(|&n| n > 0),
+            "row frame masks {fm_seen:?}"
+        );
     }
 }
 
@@ -623,9 +660,9 @@ fn q_fill_matches_row_get() {
     assert!(full > 0 && short > 0 && none > 0);
 }
 
-/// EXPERIMENT (LOSAT_X_FNFRAME): the `F` instances against the default ones on packed rows
-/// (forward and reversed, `blastn`'s score-only form), BLASTNA-like problems, with the rows over
-/// the band (`x_room`).
+/// EXPERIMENT (LOSAT_X_FNFRAME): the instances of every item mask against mask 0 on packed rows
+/// (forward and reversed, `blastn`'s score-only form, and traceback on the same rows),
+/// BLASTNA-like problems, with the rows over the band (`x_room`).
 #[test]
 fn row_frame_matches_on_packed_rows() {
     if !available() {
@@ -634,7 +671,7 @@ fn row_frame_matches_on_packed_rows() {
     }
     let mut rng = Rng(0x7F4A_7C15_9E37_79B9);
     let (mut sc, mut scf) = (XdropScratch::new(), XdropScratch::new());
-    let (mut handled, mut moved) = (0usize, 0usize);
+    let (mut handled, mut moved, mut moved_tb) = (0usize, 0usize, 0usize);
     for case in 0..1500 {
         let lanes = [Some(128), Some(320), None][case % 3];
         sc.x_test_rows(lanes);
@@ -700,24 +737,65 @@ fn row_frame_matches_on_packed_rows() {
             for a in 1..=len1 {
                 assert_eq!(rows.get(a), Some(q[a - 1]), "case {case} packing row {a}");
             }
+            // EXPERIMENT (LOSAT_X_FNFRAME): every item mask in turn, score-only and traceback
+            let fm = FNMASKS[case % FNMASKS.len()];
             // SAFETY: AVX2 detected above.
             let (r0, rf) = unsafe {
                 (
-                    align8::<false, true, false, false>(
+                    align8::<false, true, false, 0>(
                         &rows, &cols, &scores, m8, len1, len2, go, ge, x, false, &mut sc,
                     ),
-                    align8::<false, true, false, true>(
-                        &rows, &cols, &scores, m8, len1, len2, go, ge, x, false, &mut scf,
+                    align8_fm!(
+                        false,
+                        fn_mask(fm, scores.ncols()),
+                        &rows,
+                        &cols,
+                        &scores,
+                        m8,
+                        len1,
+                        len2,
+                        go,
+                        ge,
+                        x,
+                        false,
+                        &mut scf
                     ),
                 )
             };
-            assert_eq!(r0, rf, "case {case} reverse {reverse}");
+            assert_eq!(r0, rf, "case {case} reverse {reverse} mask {fm}");
             handled += usize::from(r0.is_some());
             moved += usize::from(scf.x_sh > 0);
+            // SAFETY: AVX2 detected above.
+            let (t0, tf) = unsafe {
+                let t0 = align8::<true, true, false, 0>(
+                    &rows, &cols, &scores, m8, len1, len2, go, ge, x, false, &mut sc,
+                );
+                let tf = align8_fm!(
+                    true,
+                    fn_mask(fm, scores.ncols()),
+                    &rows,
+                    &cols,
+                    &scores,
+                    m8,
+                    len1,
+                    len2,
+                    go,
+                    ge,
+                    x,
+                    false,
+                    &mut scf
+                );
+                (t0, tf)
+            };
+            assert_eq!(t0, tf, "case {case} reverse {reverse} mask {fm} traceback");
+            if t0.is_some() {
+                assert_eq!(sc.ops, scf.ops, "case {case} reverse {reverse} mask {fm} ops");
+            }
+            moved_tb += usize::from(scf.x_sh > 0);
         }
     }
-    eprintln!("packed rows: handled {handled}, moved {moved}");
-    assert!(handled > 1000 && moved > 0);
+    eprintln!("packed rows: handled {handled}, moved {moved}, moved traceback {moved_tb}");
+    assert!(handled > 1000 && moved > 0 && moved_tb > 0);
 }
 
 /// Replay of captured problems (`LOSAT_X_DPCAPTURE` output): every problem through the scalar
@@ -1022,7 +1100,7 @@ fn replay_captured_problems() {
                         let sc = match k {
                             Kern::V128 => &mut sa,
                             Kern::W128 => &mut sw,
-                            Kern::V256 | Kern::V256Z | Kern::V256F => &mut sb,
+                            Kern::V256 | Kern::V256Z | Kern::V256F(_) => &mut sb,
                         };
                         let total = if warm {
                             let mut ns = 0f64;

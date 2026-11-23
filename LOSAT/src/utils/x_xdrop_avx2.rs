@@ -121,7 +121,9 @@ pub(super) fn available() -> bool {
 /// Dispatch point of the 256-bit kernels: `tb == false` is the score-only recurrence
 /// (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` is `ALIGN_EX`. The lane width
 /// is the one the 128-bit dispatch would choose (`fits_8bit`). `em`: the `EM` instances of
-/// `align8` (LOSAT_X_DPEMASK). None: not handled here; the caller runs the 128-bit dispatch.
+/// `align8` (LOSAT_X_DPEMASK). `fm`: EXPERIMENT (LOSAT_X_FNFRAME, probe r3 of line FN) the item
+/// masks of the `EM` instances of `align8`, traceback then score-only (see `FNMASKS`). None: not
+/// handled here; the caller runs the 128-bit dispatch.
 ///
 /// # Safety
 /// `available()` must be true.
@@ -137,11 +139,11 @@ pub(super) unsafe fn align(
     tb: bool,
     check_fence: bool,
     em: bool,
-    fr: bool,
+    fm: (u8, u8),
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if em && fr {
-        dispatch::<true, true>(
+    if em {
+        dispatch::<true>(
             q,
             s,
             scores,
@@ -152,24 +154,11 @@ pub(super) unsafe fn align(
             x_drop,
             tb,
             check_fence,
-            sc,
-        )
-    } else if em {
-        dispatch::<true, false>(
-            q,
-            s,
-            scores,
-            len1,
-            len2,
-            gap_open,
-            gap_extend,
-            x_drop,
-            tb,
-            check_fence,
+            fm,
             sc,
         )
     } else {
-        dispatch::<false, false>(
+        dispatch::<false>(
             q,
             s,
             scores,
@@ -180,9 +169,60 @@ pub(super) unsafe fn align(
             x_drop,
             tb,
             check_fence,
+            (0, 0),
             sc,
         )
     }
+}
+
+// No NCBI counterpart: EXPERIMENT (LOSAT_X_FNFRAME, probe r3 of line FN) the items of the row
+// frame of `align8`, one bit each in its const `FM`. None of them changes a value the kernel
+// computes; each one only changes how the row is set up.
+/// A: the four tests at the head of a row in one comparison with `row_ok`.
+pub(super) const FA: u8 = 1;
+/// B: the row pointers kept from row to row (`pa` / `pb` swapped at the row end).
+pub(super) const FB: u8 = 2;
+/// C: the row residues 32 at a time (`q_fill`).
+pub(super) const FC: u8 = 4;
+/// D: the row tables broadcast after the row's other set-up; t1 only for alphabets over 16.
+pub(super) const FD: u8 = 8;
+/// E: the survivors as the first and last block with one, without a branch.
+pub(super) const FE: u8 = 16;
+/// F: the alphabet size as a constant (16 letters or fewer; dropped for larger alphabets).
+pub(super) const FF: u8 = 32;
+/// G: the lane mask only on the last block of a row (32 and 16 lanes).
+pub(super) const FG: u8 = 64;
+/// The masks with instances: none, all, all but one item (A..G).
+pub(super) const FNMASKS: [u8; 9] = [0, 127, 126, 125, 123, 119, 111, 95, 63];
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_FNFRAME) the mask for a call: F is dropped for an
+/// alphabet of more than 16 letters; a mask without instances is 0.
+#[inline(always)]
+pub(super) fn fn_mask(fm: u8, ncols: usize) -> u8 {
+    let fm = if ncols > 16 { fm & !FF } else { fm };
+    if FNMASKS.contains(&fm) {
+        fm
+    } else {
+        0
+    }
+}
+
+// No NCBI counterpart: EXPERIMENT (LOSAT_X_FNFRAME) `align8` (`EM`, not `NIB`) of one item mask;
+// `$tb` the traceback flag, `$fm` a mask from `fn_mask`.
+macro_rules! align8_fm {
+    ($tb:literal, $fm:expr, $($arg:expr),* $(,)?) => {
+        match $fm {
+            127 => align8::<$tb, true, false, 127>($($arg),*),
+            126 => align8::<$tb, true, false, 126>($($arg),*),
+            125 => align8::<$tb, true, false, 125>($($arg),*),
+            123 => align8::<$tb, true, false, 123>($($arg),*),
+            119 => align8::<$tb, true, false, 119>($($arg),*),
+            111 => align8::<$tb, true, false, 111>($($arg),*),
+            95 => align8::<$tb, true, false, 95>($($arg),*),
+            63 => align8::<$tb, true, false, 63>($($arg),*),
+            _ => align8::<$tb, true, false, 0>($($arg),*),
+        }
+    };
 }
 
 /// No NCBI counterpart: `align` for one choice of `EM`.
@@ -190,7 +230,7 @@ pub(super) unsafe fn align(
 /// # Safety
 /// `available()` must be true.
 #[inline(always)]
-unsafe fn dispatch<const EM: bool, const F: bool>(
+unsafe fn dispatch<const EM: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -201,11 +241,12 @@ unsafe fn dispatch<const EM: bool, const F: bool>(
     x_drop: i32,
     tb: bool,
     check_fence: bool,
+    fm: (u8, u8),
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) if sc.x_nib => align8::<true, EM, true, F>(
+        (true, Some(m)) if sc.x_nib => align8::<true, EM, true, 0>(
             q,
             s,
             scores,
@@ -218,7 +259,9 @@ unsafe fn dispatch<const EM: bool, const F: bool>(
             check_fence,
             sc,
         ),
-        (true, Some(m)) => align8::<true, EM, false, F>(
+        (true, Some(m)) if EM => align8_fm!(
+            true,
+            fn_mask(fm.0, scores.ncols()),
             q,
             s,
             scores,
@@ -231,7 +274,35 @@ unsafe fn dispatch<const EM: bool, const F: bool>(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false, EM, false, F>(
+        (true, Some(m)) => align8::<true, false, false, 0>(
+            q,
+            s,
+            scores,
+            m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (false, Some(m)) if EM => align8_fm!(
+            false,
+            fn_mask(fm.1, scores.ncols()),
+            q,
+            s,
+            scores,
+            m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (false, Some(m)) => align8::<false, false, false, 0>(
             q,
             s,
             scores,
@@ -1270,7 +1341,7 @@ unsafe fn block8x<const TB: bool, const EM: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>(
+unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const FM: u8>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1372,7 +1443,10 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
         Scores::Tables { t, .. } => Some(t.data.as_ptr()),
         _ => None,
     };
-    let small_alphabet = ncols <= 16;
+    // EXPERIMENT (LOSAT_X_FNFRAME, item F): the alphabet size as a constant (`fn_mask` drops F
+    // for alphabets of more than 16 letters)
+    let small_alphabet = FM & FF != 0 || ncols <= 16;
+    debug_assert!(FM & FF == 0 || ncols <= 16);
     let mut cells: u64 = 0;
 
     let mut base: i32 = 0;
@@ -1383,12 +1457,13 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
     let mut fence_hit = false;
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
-    // EXPERIMENT (LOSAT_X_FNFRAME, `F`): the four tests at the head of a row (room, columns
+    // EXPERIMENT (LOSAT_X_FNFRAME): item A, the four tests at the head of a row (room, columns
     // filled, bad residue, fence) run only when `b_size` passes `row_ok`, the largest `b_size`
-    // for which all four are false (their inputs change only inside them); the row pointers are
-    // kept from row to row (`pa` the row read, `pb` the row written, swapped at the row end) and
-    // taken again after the tests, which may move or grow the rows; the row residues come 32 at
-    // a time from `q_fill` (rows `qlo..qhi` of `qwin`, each one `q.get` reads below `ncols`).
+    // for which all four are false (their inputs change only inside them); item B, the row
+    // pointers are kept from row to row (`pa` the row read, `pb` the row written, swapped at the
+    // row end) and taken again after the tests, which may move or grow the rows; item C, the row
+    // residues come 32 at a time from `q_fill` (rows `qlo..qhi` of `qwin`, each one `q.get`
+    // reads below `ncols`).
     let mut row_ok = 0usize;
     let mut qwin = [0u8; 32];
     let (mut qlo, mut qhi) = (1usize, 1usize);
@@ -1399,7 +1474,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
     // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
     for a in 1..=len1 {
-        let tests = !F || b_size > row_ok;
+        let tests = FM & FA == 0 || b_size > row_ok;
         if tests {
             if !sc.fits(b_size + num_extra + 64) {
                 let d = sc.x_room(first, b_size + num_extra + 64, false);
@@ -1429,7 +1504,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
                     break;
                 }
             }
-            if F {
+            if FM & FA != 0 {
                 row_ok = sc
                     .ha
                     .len()
@@ -1437,13 +1512,15 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
                     .min(sc.sb_filled)
                     .min(sc.bad_k)
                     .min(sc.fence_k);
+            }
+            if FM & FB != 0 {
                 let (h0, h1) = (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD));
                 (pa, pb) = if cur == 0 { (h0, h1) } else { (h1, h0) };
                 pe = sc.e8.as_mut_ptr().add(PAD);
                 ps = sc.sb.as_ptr().add(PAD);
             }
         }
-        let qa = if F {
+        let qa = if FM & FC != 0 {
             if a >= qhi {
                 let n = q_fill(q, a, len1, ncols, qwin.as_mut_ptr());
                 if n == 0 {
@@ -1471,17 +1548,25 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
             }
             sc.tabs.as_ptr().add(qa * TAB)
         };
-        let (hr, hw) = if F {
+        let (hr, hw) = if FM & FB != 0 {
             (pa, pb)
         } else if cur == 0 {
             (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD))
         } else {
             (sc.h8b.as_mut_ptr().add(PAD), sc.h8a.as_mut_ptr().add(PAD))
         };
-        let e = if F { pe } else { sc.e8.as_mut_ptr().add(PAD) };
-        let sb = if F { ps } else { sc.sb.as_ptr().add(PAD) };
-        // `F`: the tables are read after the row's other set-up (below)
-        let (t0, t1) = if F {
+        let e = if FM & FB != 0 {
+            pe
+        } else {
+            sc.e8.as_mut_ptr().add(PAD)
+        };
+        let sb = if FM & FB != 0 {
+            ps
+        } else {
+            sc.sb.as_ptr().add(PAD)
+        };
+        // item D: the tables are read after the row's other set-up (below)
+        let (t0, t1) = if FM & FD != 0 {
             (zero, zero)
         } else {
             (bcast128(t.add(64)), bcast128(t.add(80)))
@@ -1517,10 +1602,10 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
         };
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
-        // `F`: the survivors as the first block with one (`lo_b`, its lanes `lo_m`) and the last
-        // (`hi_b`, `hi_m`), without a branch; their columns are taken at the row end
+        // item E: the survivors as the first block with one (`lo_b`, its lanes `lo_m`) and the
+        // last (`hi_b`, `hi_m`), without a branch; their columns are taken at the row end
         let (mut lo_b, mut lo_m, mut hi_b, mut hi_m) = (0usize, 0u32, 0usize, 0u32);
-        let (t0, t1) = if F {
+        let (t0, t1) = if FM & FD != 0 {
             let t1 = if small_alphabet {
                 zero
             } else {
@@ -1531,44 +1616,69 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
             (t0, t1)
         };
         let mut b0 = first;
+        debug_assert!(bend <= limit);
+        // the survivors of the block at `b0` (lanes `live`)
+        macro_rules! surv {
+            ($live:expr) => {{
+                let live: u32 = $live;
+                if FM & FE != 0 {
+                    if lo_m == 0 {
+                        lo_b = b0;
+                        lo_m = live;
+                    }
+                    if live != 0 {
+                        hi_b = b0;
+                        hi_m = live;
+                    }
+                } else if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + live.trailing_zeros() as usize;
+                    }
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+            }};
+        }
+        // one 32-lane block at `b0` with the lane mask `$mask`
+        macro_rules! blk32 {
+            ($mask:expr) => {{
+                let idx = ld(sb.add(b0));
+                let sv = if small_alphabet {
+                    _mm256_shuffle_epi8(t0, idx)
+                } else {
+                    lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
+                };
+                let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, $mask, hpm);
+                hpm = zero;
+                if TB && NIB {
+                    stx(tr.add((b0 - first) >> 1), nibs32(r0));
+                } else if TB {
+                    st(tr.add(b0 - first), r0);
+                }
+                surv!(!(_mm256_movemask_epi8(d0) as u32));
+                b0 += 32;
+            }};
+        }
         // 32-lane blocks while more than 16 lanes of the band are left, then 16-lane blocks for the
         // rest of the band and the row-gap extension (stop test as in `align16`).
-        while b0 + 16 < bend {
-            let idx = ld(sb.add(b0));
-            let sv = if small_alphabet {
-                _mm256_shuffle_epi8(t0, idx)
-            } else {
-                lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
-            };
-            let mask = if b0 + 32 <= limit {
-                None
-            } else {
-                Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
-            };
-            let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
-            hpm = zero;
-            if TB && NIB {
-                stx(tr.add((b0 - first) >> 1), nibs32(r0));
-            } else if TB {
-                st(tr.add(b0 - first), r0);
+        if FM & FG != 0 {
+            // item G: the blocks that end at or below `limit` without the lane mask, then the one
+            // block that crosses it (it is the last 32-lane block: `bend <= limit`)
+            let stop = bend.min(limit.saturating_sub(15));
+            while b0 + 16 < stop {
+                blk32!(None);
             }
-            let live = !(_mm256_movemask_epi8(d0) as u32);
-            if F {
-                if lo_m == 0 {
-                    lo_b = b0;
-                    lo_m = live;
-                }
-                if live != 0 {
-                    hi_b = b0;
-                    hi_m = live;
-                }
-            } else if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
-                }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
+            if b0 + 16 < bend {
+                blk32!(Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0)))));
             }
-            b0 += 32;
+        } else {
+            while b0 + 16 < bend {
+                let mask = if b0 + 32 <= limit {
+                    None
+                } else {
+                    Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
+                };
+                blk32!(mask);
+            }
         }
         let mut rx = RowX {
             carry: _mm256_castsi256_si128(rs.carry),
@@ -1578,6 +1688,38 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
         let (mut rec_b, mut slow) = (rs.rec_b, rs.slow);
         let t0x = _mm256_castsi256_si128(t0);
         let t1x = _mm256_castsi256_si128(t1);
+        // one 16-lane block at `b0` with the lane mask `$mask`
+        macro_rules! blk16 {
+            ($mask:expr) => {{
+                let idx = ldx(sb.add(b0));
+                let sv = if small_alphabet {
+                    _mm_shuffle_epi8(t0x, idx)
+                } else {
+                    lut32x(t0x, t1x, idx)
+                };
+                let (d0, r0) = block8x::<TB, EM>(
+                    &c,
+                    &mut rx,
+                    &mut rec_b,
+                    &mut slow,
+                    hr,
+                    hw,
+                    e,
+                    b0,
+                    sv,
+                    $mask,
+                    _mm256_castsi256_si128(hpm),
+                );
+                hpm = zero;
+                if TB && NIB {
+                    stl(tr.add((b0 - first) >> 1), nibs16(r0));
+                } else if TB {
+                    stx(tr.add(b0 - first), r0);
+                }
+                surv!((!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF);
+                b0 += 16;
+            }};
+        }
         loop {
             if b0 >= bend {
                 if b0 >= limit {
@@ -1587,55 +1729,23 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
                     break;
                 }
             }
-            let idx = ldx(sb.add(b0));
-            let sv = if small_alphabet {
-                _mm_shuffle_epi8(t0x, idx)
+            if FM & FG != 0 {
+                // item G: the block that crosses `limit` is the row's last
+                if b0 + 16 > limit {
+                    blk16!(Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0)))));
+                    break;
+                }
+                blk16!(None);
             } else {
-                lut32x(t0x, t1x, idx)
-            };
-            let mask = if b0 + 16 <= limit {
-                None
-            } else {
-                Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
-            };
-            let (d0, r0) = block8x::<TB, EM>(
-                &c,
-                &mut rx,
-                &mut rec_b,
-                &mut slow,
-                hr,
-                hw,
-                e,
-                b0,
-                sv,
-                mask,
-                _mm256_castsi256_si128(hpm),
-            );
-            hpm = zero;
-            if TB && NIB {
-                stl(tr.add((b0 - first) >> 1), nibs16(r0));
-            } else if TB {
-                stx(tr.add(b0 - first), r0);
+                let mask = if b0 + 16 <= limit {
+                    None
+                } else {
+                    Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
+                };
+                blk16!(mask);
             }
-            let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
-            if F {
-                if lo_m == 0 {
-                    lo_b = b0;
-                    lo_m = live;
-                }
-                if live != 0 {
-                    hi_b = b0;
-                    hi_m = live;
-                }
-            } else if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
-                }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
-            }
-            b0 += 16;
         }
-        if F && lo_m != 0 {
+        if FM & FE != 0 && lo_m != 0 {
             lo_surv = lo_b + lo_m.trailing_zeros() as usize;
             hi_surv = hi_b + (31 - hi_m.leading_zeros() as usize);
         }
@@ -1654,7 +1764,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const F: bool>
         }
         wend[wi] = proc_end;
         cur = wi;
-        if F {
+        if FM & FB != 0 {
             core::mem::swap(&mut pa, &mut pb);
         }
         let rec = if TB {

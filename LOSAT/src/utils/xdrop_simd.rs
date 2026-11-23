@@ -4661,11 +4661,13 @@ mod x_capture;
 /// aarch64). Bit 3 (LOSAT_X_DPNEON2, on unless `=0`, aarch64 only): try the two-register NEON
 /// kernels of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
 /// the 8-bit 256-bit kernel's `EM` instances (no E clearing at the row end, see `x_xdrop_avx2.rs`).
-fn x_extra_switches() -> u8 {
+/// Bits 8-15 and 16-23 (EXPERIMENT, LOSAT_X_FNFRAME=<traceback mask>:<score-only mask>, probe r3
+/// of line FN, both 127 when unset): the item masks of those instances (`x_avx2::FNMASKS`).
+fn x_extra_switches() -> u32 {
     use std::sync::OnceLock;
-    static ON: OnceLock<u8> = OnceLock::new();
+    static ON: OnceLock<u32> = OnceLock::new();
     *ON.get_or_init(|| {
-        let mut on = 0u8;
+        let mut on = 0u32;
         #[cfg(target_arch = "x86_64")]
         {
             if x_avx2::available() {
@@ -4673,11 +4675,20 @@ fn x_extra_switches() -> u8 {
                 if x_avx2::emask_on() {
                     on |= 16;
                 }
-                // EXPERIMENT (LOSAT_X_FNFRAME, on unless `=0`, probe only): the row tests in one
-                // comparison, the row residues 32 at a time, the survivors without a branch
-                if std::env::var_os("LOSAT_X_FNFRAME").is_none_or(|v| v != "0") {
-                    on |= 32;
-                }
+                // EXPERIMENT (LOSAT_X_FNFRAME, probe only): the item masks of the row frame,
+                // decimal, traceback then score-only, split by `,` or `:` (one value: both);
+                // unset: all items
+                let (fm_tb, fm_so) = match std::env::var("LOSAT_X_FNFRAME") {
+                    Err(_) => (127u8, 127u8),
+                    Ok(v) => {
+                        let mut it = v
+                            .split([',', ':'])
+                            .map(|p| p.trim().parse::<u8>().unwrap_or(0));
+                        let t = it.next().unwrap_or(0);
+                        (t, it.next().unwrap_or(t))
+                    }
+                };
+                on |= u32::from(fm_tb) << 8 | u32::from(fm_so) << 16;
             }
         }
         #[cfg(target_arch = "aarch64")]
@@ -4728,7 +4739,7 @@ fn x_extra_dispatch(
     tb: bool,
     check_fence: bool,
     sc: &mut XdropScratch,
-    on: u8,
+    on: u32,
 ) -> Option<Option<XdropResult>> {
     if on & 2 != 0 && x_capture::take_sample() {
         let r = x_capture::without_capture(|| {
@@ -4779,7 +4790,7 @@ fn x_extra_dispatch(
                     tb,
                     check_fence,
                     on & 16 != 0,
-                    on & 32 != 0,
+                    ((on >> 8) as u8, (on >> 16) as u8),
                     sc,
                 )
             };

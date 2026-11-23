@@ -534,7 +534,7 @@ const LIMIT_ROOTS: u64 = 16 * 1024 * 1024;
 
 /// The query ranges of a search's round for each thread of its pool (at most one per query
 /// position of the round): the roots of the ranges are collected at once (each range's within its
-/// share of `LIMIT_ROOTS`), and then the seeds of each local id from them.
+/// share of half of `LIMIT_ROOTS`), and then the seeds of each local id from them.
 const PARTS_PER_THREAD: usize = 4;
 
 /// The search's threads: the pool's when it runs tasks in parallel, else one.
@@ -587,7 +587,7 @@ fn each<T: Send>(
 /// and at the end; what a local id's seeds are does not depend on when they are computed, nor on
 /// another local id. LOSAT does the same in rounds on `pool`: the roots of consecutive query ranges
 /// are collected at once, each range's into its own lists, and then the seeds of each local id
-/// from its roots of the ranges in order; a range that would pass its share of `LIMIT_ROOTS` ends
+/// from its roots of the ranges in order; a range that would pass its share of the round ends
 /// the round before the Nmer that passes it, and the next round starts there (`search_rounds`).
 /// The seeds are NCBI's at every thread count.
 pub(crate) fn search(
@@ -683,25 +683,30 @@ fn search_with_limit(
     })
 }
 
-/// One query range of a round: its query positions `[from, to)`, its roots by local id, and the
-/// query position after the last one read (`to`, or less where the range passed its share of
-/// `LIMIT_ROOTS`; `from` for a range that a range before it ended the round without it).
+/// One query range of a round: its query positions `[from, to)`, its roots by local id, the query
+/// position after the last one read (`to`, or less where the range stopped at its share; `from`
+/// for a range that a range before it ended the round without it), the roots that it counted (those
+/// of the local id after the last too), and the memory of its lists after its last round, in roots.
 struct Part {
     from: SeqPos,
     to: SeqPos,
     next: SeqPos,
     roots: Vec<Vec<SeedRoot>>,
+    kept: u64,
+    capacity: u64,
 }
 
 /// The rounds of [`search`] with `limit` roots (`LIMIT_ROOTS`): the roots of the query's lookup
 /// segments by query range, and after each round the seeds of each local id (`lids`) from its
-/// roots of the round's ranges in order. The first round covers the whole query; each round after
-/// it, the query positions that held about half of `limit` at the density of the round before (the
-/// rest of the query after a round without roots). A round's ranges (at most one per query
-/// position) share `limit`: a range stops before the Nmer that takes it past its share, but for the
-/// first Nmer of the round's first range, which it keeps whole (as NCBI keeps the Nmer that passes
-/// `LIMIT_ROOTS`). So a round holds at most about `limit` roots and that one list, and every round
-/// reads at least one Nmer.
+/// roots of the round's ranges in order. A round's ranges (at most one per query position) share
+/// half of `limit`: a range stops before the Nmer that takes it past its share, but for the first
+/// Nmer with roots of the round's first range, which it keeps whole (as NCBI keeps the Nmer that
+/// passes `LIMIT_ROOTS`). So a round holds at most about half of `limit` roots and that one list,
+/// and every round reads at least one Nmer. The first round covers the whole query; each round
+/// after it, the query positions that held a quarter of `limit` at the density of the round before
+/// (the rest of the query after a round without roots), half of what its ranges may hold, so that
+/// a range ends the round only where the roots are denser than that. The lists keep their memory
+/// from round to round while it is not above `limit` roots in all.
 fn search_rounds(
     shared: &Shared<'_>,
     lids: &mut [TrackedSeeds],
@@ -719,20 +724,24 @@ fn search_rounds(
             to: 0,
             next: 0,
             roots: (0..shared.num_lids).map(|_| Vec::new()).collect(),
+            kept: 0,
+            capacity: 0,
         })
         .collect();
+    let half = (limit / 2).max(1);
     let mut from = first;
     let mut window = u64::from(end.saturating_sub(first));
     while from < end {
         let to = (u64::from(from) + window).min(u64::from(end)) as SeqPos;
         let span = u64::from(to - from);
         let used = (n_parts as u64).min(span) as usize;
-        let budget = (limit / used as u64).max(1);
+        let budget = (half / used as u64).max(1);
         let round = &mut parts[..used];
         for (k, part) in round.iter_mut().enumerate() {
             part.from = from + (span * k as u64 / used as u64) as SeqPos;
             part.to = from + (span * (k as u64 + 1) / used as u64) as SeqPos;
             part.next = part.from;
+            part.kept = 0;
         }
         // A range after one that ended the round is not read (the next round reads it).
         let ended = std::sync::atomic::AtomicUsize::new(used);
@@ -740,7 +749,8 @@ fn search_rounds(
             if ended.load(std::sync::atomic::Ordering::Relaxed) < k {
                 return Ok(());
             }
-            part.next = collect_roots(shared, part.from, part.to, budget, k == 0, &mut part.roots)?;
+            (part.next, part.kept) =
+                collect_roots(shared, part.from, part.to, budget, k == 0, &mut part.roots)?;
             if part.next < part.to {
                 ended.fetch_min(k, std::sync::atomic::Ordering::Relaxed);
             }
@@ -760,32 +770,32 @@ fn search_rounds(
             search.tracked.it = 0;
             Ok(())
         })?;
-        let roots: u64 = round
-            .iter()
-            .flat_map(|part| part.roots.iter())
-            .map(|roots| roots.len() as u64)
-            .sum();
+        let roots: u64 = round.iter().map(|part| part.kept).sum();
         window = match roots {
             0 => u64::from(end - next),
-            _ => ((limit / 2).saturating_mul(u64::from(next - from)) / roots).max(1),
+            _ => ((half / 2).saturating_mul(u64::from(next - from)) / roots).max(1),
         };
         // The lists of the round emptied; the memory of all the ranges' lists kept for the next
         // round while it is not above `limit` roots.
-        let capacity: u64 = parts
-            .iter()
-            .flat_map(|part| part.roots.iter())
-            .map(|roots| roots.capacity() as u64)
-            .sum();
-        let emptied = if capacity > limit {
+        for part in &mut parts[..used] {
+            part.capacity = part.roots.iter().map(|roots| roots.capacity() as u64).sum();
+        }
+        let free = parts.iter().map(|part| part.capacity).sum::<u64>() > limit;
+        let emptied = if free {
             &mut parts[..]
         } else {
             &mut parts[..used]
         };
-        for roots in emptied.iter_mut().flat_map(|part| part.roots.iter_mut()) {
-            if capacity > limit {
-                *roots = Vec::new();
-            } else {
-                roots.clear();
+        for part in emptied {
+            for roots in &mut part.roots {
+                if free {
+                    *roots = Vec::new();
+                } else {
+                    roots.clear();
+                }
+            }
+            if free {
+                part.capacity = 0;
             }
         }
         from = next;
@@ -970,10 +980,11 @@ impl ListRoots {
 /// `budget` (the roots of the local id after the last, which NCBI keeps and never reads, are
 /// counted and not kept): an Nmer whose roots would pass it is not read, unless it is the range's
 /// first with roots and `first` (the round's first range), which keeps it whole. Returns the
-/// query position after the last one read: `to`, or the position of the Nmer not read, or the one
-/// after the first Nmer kept whole past `budget`. The Nmers go by blocks: a block's hash table
-/// words are asked of the memory, then read (the Nmers without a list dropped and the others'
-/// lists asked of the memory) a block later, and their lists read a block after that.
+/// query position after the last one read (`to`, or the position of the Nmer not read, or the one
+/// after the first Nmer kept whole past `budget`) and the roots counted. The Nmers go by blocks:
+/// a block's hash table words are asked of the memory, then read (the Nmers without a list dropped
+/// and the others' lists asked of the memory) a block later, and their lists read a block after
+/// that.
 fn collect_roots(
     shared: &Shared<'_>,
     from: SeqPos,
@@ -981,7 +992,7 @@ fn collect_roots(
     budget: u64,
     first: bool,
     roots: &mut [Vec<SeedRoot>],
-) -> Result<SeqPos, Corrupt> {
+) -> Result<(SeqPos, u64), Corrupt> {
     let mut nmers = Nmers::new(shared, from, to);
     let mut keys = [(0, 0); BLOCK];
     let mut lists = [(0, 0); BLOCK];
@@ -1002,11 +1013,11 @@ fn collect_roots(
                 kept += 1 + u64::from(second.is_some());
                 if kept > budget && !whole {
                     unkeep(shared, qoff, cache, kept - before, roots)?;
-                    return Ok(qoff);
+                    return Ok((qoff, before));
                 }
             }
             if kept > budget {
-                return Ok(qoff + 1);
+                return Ok((qoff + 1, kept));
             }
         }
         n_lists = 0;
@@ -1020,7 +1031,7 @@ fn collect_roots(
         }
         n_keys = nmers.fill(&mut keys, shared.hash_table);
         if n_keys == 0 && n_lists == 0 {
-            return Ok(to);
+            return Ok((to, kept));
         }
     }
 }

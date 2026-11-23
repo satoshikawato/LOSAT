@@ -456,7 +456,7 @@ pub(super) fn write_structured_xml(
                 cbs: 0,
                 query_gencode: None,
                 db_gencode: None,
-                iterative: false,
+                program_type: None,
             };
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);

@@ -154,7 +154,7 @@ fn params(target: Xml2Target) -> Xml2Run {
         cbs: 2,
         query_gencode: None,
         db_gencode: None,
-        iterative: false,
+        program_type: None,
     }
 }
 
@@ -254,7 +254,7 @@ fn an_iterative_database_report_is_held_and_lists_its_round() {
         ),
     ] {
         let iterative = Xml2Run {
-            iterative: true,
+            program_type: Some(crate::report::record::ProgramType::PsiTblastn),
             ..params(Xml2Target::Database)
         };
         assert!(iterative.holds_back() && !params(Xml2Target::Database).holds_back());
@@ -1526,4 +1526,25 @@ fn a_failed_report_keeps_its_separator_and_fails_where_it_is_written() {
         (3, &b"E\n"[..])
     );
     assert_eq!(posts.place_caught(b"F\n".to_vec()), Some(b"F\n".to_vec()));
+}
+
+// Line PS, PS15b-2 fix 1 (S1): the run's program type is the one owner of an iterative search
+// (`ProgramType::is_iterative`, NCBI's `IsIterativeSearch`): psiblast and PSI-TBLASTN.
+#[test]
+fn the_program_type_decides_an_iterative_search() {
+    use crate::report::record::ProgramType;
+    for (program_type, iterative) in [
+        (None, false),
+        (Some(ProgramType::PsiBlast), true),
+        (Some(ProgramType::PsiTblastn), true),
+        (Some(ProgramType::RpsBlast), false),
+        (Some(ProgramType::RpsTblastn), false),
+    ] {
+        let run = Xml2Run {
+            program_type,
+            ..params(Xml2Target::Database)
+        };
+        assert_eq!(run.iterative(), iterative, "{program_type:?}");
+        assert_eq!(run.holds_back(), iterative, "{program_type:?}");
+    }
 }

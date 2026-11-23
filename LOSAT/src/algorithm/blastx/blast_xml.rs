@@ -1205,7 +1205,7 @@ pub(super) fn xml2_writer(
         cbs: i32::from(options.composition),
         query_gencode: Some(i32::from(options.query_gencode)),
         db_gencode: None,
-        iterative: false,
+        program_type: options.program_type(),
     };
     let delayed = params.holds_back();
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)

@@ -14,6 +14,7 @@ use crate::report::blast_xml::writer::{
     count_hsp, int_member, real_member, replaced_posts, string_member, DocumentPost, HitSink,
     HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
 };
+use crate::report::record::ProgramType;
 use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
@@ -218,7 +219,7 @@ where
     // A `-subject` search's results are `bl2seq`, an iterative database search's its rounds
     // (`iterations`, numbered from 1), any other database search's one `search`.
     match params.target {
-        Xml2Target::Database if params.iterative => {
+        Xml2Target::Database if params.iterative() => {
             enc.variant("Results", "iterations", 0);
             enc.begin_list(false);
             enc.element();
@@ -342,6 +343,7 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
             let mut writer = Xml2Hsps {
                 enc: &mut *enc,
                 run: self.run,
+                program_type: self.params.program_type,
                 masks: self.masks,
                 scratch: &mut *self.scratch,
                 hsps: 0,
@@ -359,6 +361,8 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
 struct Xml2Hsps<'a, E> {
     enc: &'a mut E,
     run: &'a XmlRun<'a>,
+    /// `Xml2Run::program_type`.
+    program_type: Option<ProgramType>,
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hsps: i32,
@@ -372,10 +376,13 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:159-170
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:247-259
         // A frame is written for a nucleotide sequence of a Std-seg (translated) Seq-align: the
-        // query of blastx, tblastx and rpstblastn (whose profiles are proteins), the subject of
-        // tblastn, psitblastn (tblastn's `-in_pssm`) and tblastx.
-        let query_translated = matches!(program, "blastx" | "tblastx" | "rpstblastn");
-        let subject_translated = matches!(program, "tblastn" | "psitblastn" | "tblastx");
+        // query of blastx, tblastx and RPSTBLASTN (whose profiles are proteins), the subject of
+        // tblastn, PSI-TBLASTN (tblastn's `-in_pssm`) and tblastx. The program types that the
+        // program name does not name are read as types (`Xml2Run::program_type`).
+        let query_translated = matches!(program, "blastx" | "tblastx")
+            || self.program_type == Some(ProgramType::RpsTblastn);
+        let subject_translated = matches!(program, "tblastn" | "tblastx")
+            || self.program_type == Some(ProgramType::PsiTblastn);
         // The query's regions are applied by the frame of a translated query, else frame 0
         // (blastxml2_format.cpp:211, :253): a nucleotide query's regions of frame 0 are
         // applied too, which outfmt 5 does not do.

@@ -161,6 +161,16 @@ impl ProgramType {
             ProgramType::RpsTblastn => "rpstblastn",
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:861-871
+    /// Whether a search of the program is an iterative one (`IsIterativeSearch`, the formatter's
+    /// `m_IsIterative`): psiblast and PSI-TBLASTN (tblastn `-in_pssm`); NCBI's third, DELTA-BLAST,
+    /// is not a LOSAT program. The one owner of this fact for every report: the XML2 and JSON
+    /// documents of such a search are held (`blast_xml2::reports_held`) and list a database
+    /// search's results as its rounds.
+    pub fn is_iterative(self) -> bool {
+        matches!(self, ProgramType::PsiBlast | ProgramType::PsiTblastn)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294

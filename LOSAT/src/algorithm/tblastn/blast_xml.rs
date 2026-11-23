@@ -327,8 +327,8 @@ pub(super) fn prepare(
         cbs: values.cbs,
         query_gencode: None,
         db_gencode: Some(values.db_gencode),
-        // PSI-TBLASTN is an iterative search (`IsIterativeSearch`): one round.
-        iterative: values.pssm,
+        // PSI-TBLASTN is an iterative search (`ProgramType::is_iterative`): one round.
+        program_type: super::in_pssm::program_type(values.pssm),
     };
     Ok(PreparedXml {
         values,

@@ -686,9 +686,9 @@ pub(super) fn write_xml(
                 },
                 query_gencode: None,
                 db_gencode: None,
-                // psiblast is an iterative search (`IsIterativeSearch`; its XML2 and JSON
-                // documents are refused, `psiblast::args::writes_outfmt`).
-                iterative: args.app == crate::algorithm::blastp::args::BlastpApp::Psiblast,
+                // psiblast is an iterative search (`ProgramType::is_iterative`; its XML2 and
+                // JSON documents are refused, `psiblast::args::writes_outfmt`).
+                program_type: args.app.program_type(),
             };
             let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
                 kind,

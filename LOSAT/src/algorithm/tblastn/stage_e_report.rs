@@ -231,7 +231,8 @@ pub(super) fn xml_matrix_failure(
         formats.iter().map(|format| format.outfmt),
         matrix_name,
         !database,
-        pssm,
+        super::in_pssm::program_type(pssm)
+            .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
 }
 

@@ -68,20 +68,29 @@ pub struct Xml2Run {
     /// (TBLASTN, TBLASTX); none otherwise.
     pub query_gencode: Option<i32>,
     pub db_gencode: Option<i32>,
-    /// An iterative program's search (NCBI's `m_IsIterative`, `IsIterativeSearch`: psiblast,
-    /// tblastn `-in_pssm`): its reports are held (`holds_back`), and the results of a database
-    /// search are its rounds, `iterations` (`s_FillBlastOutput`; a `-subject` search's are
-    /// `bl2seq` all the same).
-    pub iterative: bool,
+    /// The program type of the search where its program does not name it
+    /// (`report::record::RunRecord::program_type`; `None`: the program's own): an iterative
+    /// one's reports are held (`holds_back`, `iterative`), and the frames written are the
+    /// sequences' that the type translates.
+    pub program_type: Option<crate::report::record::ProgramType>,
 }
 
 impl Xml2Run {
+    /// Whether the search is an iterative program's (NCBI's `m_IsIterative`,
+    /// `ProgramType::is_iterative`: psiblast, tblastn `-in_pssm`): its reports are held
+    /// (`holds_back`), and the results of a database search are its rounds, `iterations`
+    /// (`s_FillBlastOutput`; a `-subject` search's are `bl2seq` all the same).
+    pub fn iterative(&self) -> bool {
+        self.program_type
+            .is_some_and(crate::report::record::ProgramType::is_iterative)
+    }
+
     /// Whether the documents of the search hold each query's report back until the next query's
     /// arrives (`reports_held`; `Xml2Document`): a `-subject` search, or an iterative one.
     pub fn holds_back(&self) -> bool {
         reports_held(
             matches!(self.target, Xml2Target::Subjects(_)),
-            self.iterative,
+            self.iterative(),
         )
     }
 }

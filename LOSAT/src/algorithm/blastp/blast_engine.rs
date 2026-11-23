@@ -6004,7 +6004,9 @@ fn blastp_xml_matrix_failure(
         outputs.formats.iter().map(|format| format.outfmt),
         &args.matrix_name,
         !database,
-        args.app == BlastpApp::Psiblast,
+        args.app
+            .program_type()
+            .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
 }
 

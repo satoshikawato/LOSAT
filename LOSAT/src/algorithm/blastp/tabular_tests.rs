@@ -82,6 +82,7 @@ fn report(
         query_titles: &[Arc::from(&b"q1 first"[..]), Arc::from(&b"q2"[..])],
         searched_lengths: &[100, 50],
         range_length: None,
+        ungapped: false,
         database: "User specified sequence set (Input: s.faa)",
         subjects: TabularSubjects::Records {
             records: &[],

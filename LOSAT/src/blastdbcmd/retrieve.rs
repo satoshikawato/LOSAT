@@ -496,13 +496,11 @@ impl Formatter {
 /// `CSeqDB::kOidNotFound` (seqdb.cpp:53).
 pub(super) const OID_NOT_FOUND: &str = "OID not found";
 
-// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:965-975
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1013
-/// The exception of NCBI's `CRef` read of no object (`CObject::ThrowNullPointerException`), whose
+/// The exception of NCBI's `CRef` read of no object (`ncbi_exception::NULL_POINTER`), whose
 /// message `x_ProcessSearchRequest` posts: a read of the null set of a stored header of no bytes
 /// ([`Source::null_set`], `GetBioseq` of a target).
 pub(super) fn null_pointer() -> Stop {
-    Stop::Ncbi("Attempt to access NULL pointer.".to_string())
+    Stop::Ncbi(crate::ncbi_exception::NULL_POINTER.to_string())
 }
 
 /// `NStr::StringToNumeric<Int8>` of `text` with `fConvErr_NoThrow` and `errno` clear: the number of

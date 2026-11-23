@@ -5771,13 +5771,15 @@ fn psiblast_stop_at_invalid_query(
     batches
 }
 
-/// The stop of the query batch of LOSAT's refusal of two queries of one scope with one id
-/// (`QueryBatches::scope_refusal`), in the one form of every program
+/// The stops of the query batches of LOSAT's refusals of two queries of one scope with one id
+/// (`QueryBatches::resolve_refusals`), in the one form of every program
 /// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
 /// `-export_search_strategy` the refusal (no request of the batch is written: `stop_batch` stays
 /// `None`), else NCBI's error of the set-up of the batch's records that are first in the scope
-/// (`refused_batch_setup_error`), else the refusal. NCBI's errors of the batches before come
-/// first: their searches fail before the stop is acted on.
+/// (`refused_batch_setup_error`), else, where that set-up passes and the run's XML failure for its
+/// matrix name takes the refusal (`ScopeRefusal::xml_takes`), the batch's search, else the refusal.
+/// NCBI's errors of the batches before come first: their searches fail before the stop is acted
+/// on.
 fn refused_batch_stop(
     args: &ResolvedBlastpArgs,
     database: Option<&database::BlastpDatabase>,
@@ -5786,24 +5788,17 @@ fn refused_batch_stop(
     input: &seq_range::QueryInput,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
-    if !batches.scope_refusal {
-        return batches;
-    }
-    let Some((warnings, refusal)) = batches.stop.take() else {
-        return batches;
-    };
-    let (input_done, searched_done) = (batches.input_done, batches.searched_done);
-    let error = crate::blastinput::query_batch::refused_batch_error(
-        refusal,
+    use crate::blastinput::query_batch::BatchSetUp;
+    batches.resolve_refusals(
         args.strategy.is_some(),
-        |first| {
+        |(input_start, searched_start), first| {
             // psiblast's batch holds the repeated query alone; rpsblast's set-up reads its
             // database's files first (`rps_hooks::RpsEngineError`): both refuse.
             if args.app != BlastpApp::Blastp {
-                return None;
+                return BatchSetUp::Unknown;
             }
-            let batch: Vec<usize> = (searched_done..searched.len())
-                .take_while(|&query| input.ordinal(query) < input_done + first.len())
+            let batch: Vec<usize> = (searched_start..searched.len())
+                .take_while(|&query| input.ordinal(query) < input_start + first.len())
                 .collect();
             let lengths: Vec<usize> = batch
                 .iter()
@@ -5811,14 +5806,12 @@ fn refused_batch_stop(
                 .collect();
             let queries: Vec<FastaRecord> = batch
                 .iter()
-                .filter(|&&query| first[input.ordinal(query) - input_done])
+                .filter(|&&query| first[input.ordinal(query) - input_start])
                 .map(|&query| searched[query].clone())
                 .collect();
             refused_batch_setup_error(args, database, subject_records, &lengths, &queries)
         },
     );
-    batches.scope_refusal = !error.is::<crate::cli::NativeError>();
-    batches.stop = Some((warnings, error));
     batches
 }
 
@@ -5828,22 +5821,23 @@ fn refused_batch_stop(
 /// without sequences, `Database memory map file error`; the average subject length against
 /// `-searchsp` or `OLD_FSC`), or where the search's first read of the database then fails (a
 /// sequence file that cannot be opened, `BlastpDatabase::sequence_file_read_error`: `Database
-/// memory map file error`; line WQA D10 round 6, review 4 M2); `None` where it passes, where no
-/// context is valid, and for a batch that NCBI splits into chunks (each chunk is set up apart,
-/// `search_split_query_batches`), which is refused.
+/// memory map file error`; line WQA D10 round 6, review 4 M2); `Searched` where it passes with a
+/// valid context; `Unknown` where no context is valid, and for a batch that NCBI splits into
+/// chunks (each chunk is set up apart, `search_split_query_batches`), which is refused.
 fn refused_batch_setup_error(
     args: &ResolvedBlastpArgs,
     database: Option<&database::BlastpDatabase>,
     subject_records: &[FastaRecord],
     batch_lengths: &[usize],
     queries: &[FastaRecord],
-) -> Option<anyhow::Error> {
+) -> crate::blastinput::query_batch::BatchSetUp {
+    use crate::blastinput::query_batch::BatchSetUp;
     let split = protein_query_split_sizes(10000).map_or(true, |sizes| {
         crate::algorithm::blastp::protein_query_split::split_protein_batch(batch_lengths, sizes)
             .is_some()
     });
     if split {
-        return None;
+        return BatchSetUp::Unknown;
     }
     // `call_setup::call_lookup`'s validity: a context without letters is invalid.
     let contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, queries));
@@ -5851,10 +5845,10 @@ fn refused_batch_setup_error(
         .iter()
         .any(|context| context.is_valid && context.aa_len > 0)
     {
-        return None;
+        return BatchSetUp::Unknown;
     }
     if database.is_some_and(database::BlastpDatabase::first_oid_read_fails) {
-        return Some(crate::blastinput::app::engine_error(
+        return BatchSetUp::Fails(crate::blastinput::app::engine_error(
             "Database memory map file error",
         ));
     }
@@ -5865,7 +5859,9 @@ fn refused_batch_setup_error(
             .map(|record| encode_protein_sequence(record.seq()))
             .collect(),
     };
-    let extent = call_setup::db_extent(args, database, &encoded).ok()?;
+    let Ok(extent) = call_setup::db_extent(args, database, &encoded) else {
+        return BatchSetUp::Unknown;
+    };
     if crate::stats::setup::setup_subject_length(
         extent.total_db_len,
         extent.num_subjects,
@@ -5873,12 +5869,16 @@ fn refused_batch_setup_error(
     )
     .is_none()
     {
-        return Some(crate::blastinput::app::engine_error(
+        return BatchSetUp::Fails(crate::blastinput::app::engine_error(
             "The average subject length is too short",
         ));
     }
-    let read_error = database?.sequence_file_read_error("BLASTP")?;
-    Some(
+    let Some(read_error) =
+        database.and_then(|database| database.sequence_file_read_error("BLASTP"))
+    else {
+        return BatchSetUp::Searched;
+    };
+    BatchSetUp::Fails(
         match read_error.downcast::<database::PreliminaryReadError>() {
             Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
             Err(error) => error,
@@ -5992,7 +5992,7 @@ fn psiblast_stop_at_pssm_query(
 /// NCBI's BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with
 /// the facts of the search: no database (`-subject`, `m_IsBl2Seq`) and psiblast (`m_IsIterative`).
 /// The one decision behind the search strategy's last request (`search`) and the formats' error
-/// (`run_call`).
+/// (`run_call`, at the run's query of `blastp_xml_failing_query`).
 fn blastp_xml_matrix_failure(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
@@ -6004,6 +6004,20 @@ fn blastp_xml_matrix_failure(
         !database,
         args.app == BlastpApp::Psiblast,
     )
+}
+
+/// The run's query at which blastp's formats of `outputs` fail for the matrix name
+/// (`blastp_xml_matrix_failure`), of the run's scopes of the batches added (`scopes`, under
+/// `-parse_deflines`): `QueryScopes::xml_failing_query`.
+fn blastp_xml_failing_query(
+    args: &ResolvedBlastpArgs,
+    outputs: &ReportOutputs<'_>,
+    database: bool,
+    scopes: Option<&crate::blastinput::query_batch::QueryScopes>,
+) -> Option<crate::blastinput::query_batch::XmlFailingQuery> {
+    blastp_xml_matrix_failure(args, outputs, database).map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(scopes, failure)
+    })
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
@@ -6156,7 +6170,15 @@ fn search(
             ),
         args.app.name(),
     )
-    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
+    .map(|scopes| {
+        scopes
+            .with_refusal(args.scope_refusal.clone())
+            .with_xml_matrix_failure(blastp_xml_matrix_failure(
+                &args,
+                outputs,
+                database.is_some(),
+            ))
+    });
     let batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
@@ -6426,9 +6448,9 @@ fn search(
     // found by the name as typed)
     // NCBI fails when it formats a batch's results in BLAST XML with a matrix name that its XML
     // data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format loop): the
-    // batch of the run's first searched query, or of its second where the report is held
-    // (`blastp_xml_matrix_failure`; `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of
-    // another Seq-id, the second as LOSAT refuses two queries of one id before any output); the
+    // batch of the run's first searched query, or where the report is held
+    // (`blastp_xml_matrix_failure`; `XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of
+    // another Seq-id (`QueryScopes::xml_failing_query` of the batches' scopes); the
     // search strategy's file then holds the requests up to that
     // batch's (probe 7 of RG-F1, probe K4f of line RG), whichever call writes them. A held report
     // that fails at the run's end, or a run that stops before, writes every request it makes.
@@ -6878,7 +6900,16 @@ fn search(
         // without letters) has its search strategy request: NCBI made its query factory before
         // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+            // NCBI's stream that throws while it writes the request (an empty descriptor of a
+            // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
+            // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
+            if let Err(error) = write_alone(span) {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
@@ -9991,6 +10022,7 @@ fn run_call(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
+            !args.ungapped,
         )?),
         None => None,
     };
@@ -10253,12 +10285,12 @@ fn run_call(
         rps_multi_volume,
         sorts_results,
     );
-    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
-    // subject that the seqid list keeps without a definition line (line DBID item lineless).
-    // psiblast's lists are cut to the preliminary size here; the formatter's cut to
-    // `-max_target_seqs` below takes the Seq-aligns, so such a subject takes no place there.
+    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a subject
+    // that the seqid list keeps without a definition line (line DBID item lineless; `-ungapped`:
+    // also under a negative list). psiblast's lists are cut to the preliminary size here; the
+    // formatter's cut to `-max_target_seqs` below takes the Seq-aligns: no place for it there.
     if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
-        listed.drop_unaligned(database, &mut hit_lists);
+        listed.drop_unaligned(database, &mut hit_lists, !args.ungapped);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
     // A database: the definition lines of the final hit lists are read first, where NCBI
@@ -10666,9 +10698,9 @@ fn run_call(
             query_records.len(),
         )
     };
-    // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
-    // know (`blastp_xml_matrix_failure`; `None` for a name it knows).
-    let xml_matrix_failure = blastp_xml_matrix_failure(&args, outputs, database.is_some());
+    // Where the run's XML formats fail for the matrix name (`blastp_xml_failing_query`).
+    let scopes = reports.query_scopes.map(|scopes| scopes.run());
+    let xml_matrix_failure = blastp_xml_failing_query(&args, outputs, database.is_some(), scopes);
     let observer = &mut outputs.observer;
     if let Some(observer) = observer.as_deref_mut() {
         for (q_idx, stats) in query_stats().into_iter().enumerate() {

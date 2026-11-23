@@ -3387,6 +3387,7 @@ fn run_batch_loop(
             scopes
         }
         .with_refusal(args.scope_refusal.clone())
+        .with_xml_matrix_failure(reports.xml_matrix_failure(outputs))
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
@@ -3588,9 +3589,11 @@ fn run_batch_loop(
         // batch's request.)
         let mut scope_refusal = None;
         if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) =
-                scopes.add_batch(&query_runs.input_records[input_start..input_end], start)
-            {
+            if let Err(refusal) = scopes.add_batch(
+                &query_runs.input_records[input_start..input_end],
+                &input.skipped[input_start..input_end],
+                start,
+            ) {
                 scope_refusal = Some(refusal);
             }
         }
@@ -3686,30 +3689,44 @@ fn run_batch_loop(
         // The batch of LOSAT's refusal (`scope_refusal` above): NCBI's error of the set-up of its
         // records that are first in the scope (`set_up`, which ends before the search; the
         // database's kept read error where its sequences could not be read, as `take` fails such a
-        // batch below), or the refusal.
+        // batch below), else the batch's search where that set-up passes and the run's XML failure
+        // for its matrix name takes the refusal (`ScopeRefusal::xml_takes`; the failure comes
+        // below), else the refusal.
         if let Some(refusal) = scope_refusal.take() {
-            let error =
-                crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
+            use crate::blastinput::query_batch::BatchSetUp;
+            let refused = crate::blastinput::query_batch::refused_batch_error(
+                refusal,
+                false,
+                |first| {
                     let records: Vec<FastaRecord> = (start..end)
                         .filter(|&query| first[input.ordinal(query) - input_start])
                         .map(|query| query_records[query].clone())
                         .collect();
                     match set_up(&records) {
-                        Ok(_) => None,
+                        Ok(batch) if batch.searched => BatchSetUp::Searched,
+                        Ok(_) => BatchSetUp::Unknown,
                         Err(error) if error.is::<SubjectsUnreadable>() => stores_error
-                            .take()?
-                            .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
-                            .ok()
-                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0)),
+                            .take()
+                            .and_then(|error| {
+                                error
+                                    .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
+                                    .ok()
+                            })
+                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0))
+                            .into(),
                         Err(error) => error
                             .downcast::<ErrorAfterBatchReports>()
                             .ok()
-                            .map(|ErrorAfterBatchReports(error)| error),
+                            .map(|ErrorAfterBatchReports(error)| error)
+                            .into(),
                     }
-                });
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
-            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            return Err(error);
+                },
+            );
+            if let Err(error) = refused {
+                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                return Err(error);
+            }
         }
         warnings[start].append(&batch_warnings);
         let mut batch = match take(start..end) {
@@ -4136,21 +4153,30 @@ fn run_batch_loop(
         // found by the name as typed with `strcmp`)
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205 (cited above: the
         // batch's prefetch, then `PrintOneResultSet` of each of its results)
-        // NCBI fails where it formats the batch of the run's first searched query, or of its
-        // second where the report is held (`BatchReports::xml_matrix_failure`;
-        // `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
-        // LOSAT refuses two queries of one id first, above): after the batch's
+        // NCBI fails where it formats the batch of the run's first searched query, or where the
+        // report is held of NCBI's next query of another Seq-id (`BatchReports::xml_matrix_failure`;
+        // `XmlMatrixFailure::SecondQueryOrEnd`, of the batches' scopes so far:
+        // `QueryScopes::xml_failing_query`): after the batch's
         // search, the read of its titles (and LOSAT's refusal of two queries of one id, above) and
         // its prefetch, whose errors come first. It writes nothing of the batch's reports or of
         // the batches' before (the XML2 and JSON documents only their start, `PrintProlog`): the
         // reader messages and posts of the batches before (`write_before_failed_batch`), then
-        // those of this batch up to the failing query, with its prefetch's messages. A run of one
-        // searched query whose report is held fails after the loop. TBLASTX writes each batch's
+        // those of this batch up to the failing query, with its prefetch's messages. A run whose
+        // held report has no such query fails after the loop. TBLASTX writes each batch's
         // search strategy request at the batch's start (above), so no request follows the
         // failing batch's.
-        if let Some(failure) = xml_matrix_failure.filter(|failure| failure.fails_in(start..end)) {
+        let failing = xml_matrix_failure
+            .and_then(|failure| {
+                crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+                    query_scopes.as_ref(),
+                    failure,
+                )
+                .query()
+            })
+            .filter(|query| (start..end).contains(query));
+        if let Some(failing) = failing {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            for posts in &warnings[start..=failure.query()] {
+            for posts in &warnings[start..=failing] {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
             return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
@@ -4239,10 +4265,16 @@ fn run_batch_loop(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`: `PrintEpilog` makes the held report of the run's one
     // query)
-    // A run of one searched query whose report is held fails at its end, instead of the epilog,
-    // after what the batch loop wrote before a failing batch (the prologs, the batches' reader
-    // messages and posts).
-    if xml_matrix_failure.is_some_and(|failure| failure.fails_at_end(done.searched.len())) {
+    // A run whose held report has no query of another Seq-id fails at its end, instead of the
+    // epilog, after what the batch loop wrote before a failing batch (the prologs, the batches'
+    // reader messages and posts).
+    if xml_matrix_failure.is_some_and(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            query_scopes.as_ref(),
+            failure,
+        )
+        .fails_at_end(done.searched.len())
+    }) {
         reports.write_before_failed_batch(outputs, done, &warnings)?;
         return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
@@ -4683,8 +4715,9 @@ fn search_query_batch<S: TbxScore>(
     // (tblastx/x_work_board.rs).
     x_board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
     // The set-up of the batch alone, up to its checks of the subjects (`context_cutoffs`): a batch
-    // that passes them returns unsearched. The set-up of a batch that LOSAT refuses
-    // (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+    // that passes them with a valid context returns without hits, `searched` (NCBI searches it).
+    // The set-up of a batch that LOSAT refuses (`query_batch::refused_batch_error`; line WQA D10
+    // round 5, 2026-11-20).
     setup_only: bool,
 ) -> Result<TblastxBatch> {
     // The search's flags, threads, genetic codes, window and word size, and the ungapped block of
@@ -4988,10 +5021,11 @@ fn search_query_batch<S: TbxScore>(
         debug_cutoffs_all,
         query_frames: &query_frames,
     })?;
+    // The set-up passed with a valid context: NCBI searches the batch (`searched`).
     if setup_only {
         return Ok(TblastxBatch {
             hits: Vec::new(),
-            searched: false,
+            searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
             fetched_utf8: None,

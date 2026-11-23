@@ -1459,10 +1459,8 @@ entries that reach another sequence)". Line NP item M4b-3b.
       LOSAT 3 more BLASTP rows (AT1G47340.1 and AT1G50880.1 against AT2G17310.1 from its first letters,
       E 0.012 and 0.001; AT2G27380.1 against itself at 750-761, E 1.1) and 1 more BLASTX row (the first
       of these), whose one-hit seeds NCBI skips at entries of the protein searched before; no row of
-      NCBI's is missing. (Measured before fix rounds 2 and 3 of M4b-3b, whose start at NCBI's
-      one-thread offset and NCBI's tables of each query batch can change only a sequence that NCBI's
-      walk starts within reach of the entries that no sequence wrote, or, in a BLASTP search of
-      several query batches, one whose walk reads back.)
+      NCBI's is missing. (Measured before fix rounds 2 and 3 of M4b-3b and again after fix round 7,
+      on 0c6e07281 with `q5b/ws/q5b_threads2.sh`, 2026-11-23: the same rows and bytes.)
     Fixture rows `db.pmask.{bp,bx}.hard.ov_lk.*` (NCBI's bytes at the default and at
     `-window_size 0`; with `ncbi-near:` those of NCBI's run of the near input, rows
     `db.pmask.{bp,bx}.hard.near.ov_lkn.*`, otherwise), `db.pmask.{bp,bx}.hard.near.ov_lkx.21.w0.6`,

@@ -208,7 +208,7 @@ describe('WasmEngine', () => {
     expect(worker.init.builds.threads).toBe('losat-web-threads.wasm sha256:cccccccccccccccc (shared-memory guard)');
     const command = worker.runs[0]!;
     expect(command).toMatchObject({ generation: 1, runId: 'r1', program: 'blastn', threads: 4 });
-    expect(command.subject.key).toBe(JSON.stringify(['blastn', 'f'.repeat(64), ['r1']]));
+    expect(command.subject!.key).toBe(JSON.stringify(['blastn', 'f'.repeat(64), ['r1']]));
     worker.send({ type: 'phase', generation: 1, runId: 'r1', phase: 'running' });
     worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...RESULT, subjectRetained: true } });
     await expect(run).resolves.toEqual<RuntimeInfo>({

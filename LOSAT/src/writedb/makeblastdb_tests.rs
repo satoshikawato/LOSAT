@@ -98,11 +98,193 @@ fn registry_and_argument_rules_of_parse_seqids() {
     map.parse_seqids = true;
     assert!(check_arguments(&map).is_ok());
     map.taxid = Some(1);
+    // NCBI's multimap meets `taxid` (excludes `taxid_map`) first.
     assert_eq!(
         check_arguments(&map).unwrap_err().to_string(),
-        "Command line argument error: Argument \"taxid\". Incompatible with argument:  \
-             `taxid_map'"
+        "Command line argument error: Argument \"taxid_map\". Incompatible with argument:  \
+         `taxid'"
     );
+}
+
+/// The dependencies of `-gi_mask` and `-gi_mask_name` among the others, in the order and
+/// with the words of NCBI's argument reader (makeblastdb 2.17.0, survey M4c probes b5/o01-o08:
+/// `Error:  (CArgException::eConstraint) <message>` after the usage, status 1).
+#[test]
+fn argument_dependencies_follow_ncbis_order() {
+    let base = || {
+        let mut args = parse_makedb_words_for_test();
+        args.dbtype = "nucl".to_string();
+        args
+    };
+    let mut cases: Vec<(MakedbArgs, &str)> = Vec::new();
+    // o01: -mask_data -gi_mask -mask_id
+    let mut a = base();
+    a.mask_data = Some("m".into());
+    a.gi_mask = true;
+    a.mask_id = Some("foo".into());
+    cases.push((
+        a,
+        "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
+    ));
+    // o02: -gi_mask -gi_mask_name
+    let mut a = base();
+    a.gi_mask = true;
+    a.gi_mask_name = Some("x".into());
+    cases.push((
+        a,
+        "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+         `gi_mask'",
+    ));
+    // o03: -gi_mask_name -taxid_map
+    let mut a = base();
+    a.gi_mask_name = Some("x".into());
+    a.taxid_map = Some("tm.txt".into());
+    cases.push((
+        a,
+        "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+         `taxid_map'",
+    ));
+    // o04: -gi_mask -taxid_map -mask_data
+    let mut a = base();
+    a.gi_mask = true;
+    a.taxid_map = Some("tm.txt".into());
+    a.mask_data = Some("m".into());
+    cases.push((
+        a,
+        "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+         `gi_mask'",
+    ));
+    // o05: -parse_seqids -mask_desc -gi_mask_name -gi_mask
+    let mut a = base();
+    a.parse_seqids = true;
+    a.mask_desc = Some("d".into());
+    a.gi_mask_name = Some("x".into());
+    a.gi_mask = true;
+    cases.push((
+        a,
+        "Argument \"mask_data\". Must be specified, as it is required by argument:  \
+         `gi_mask_name'",
+    ));
+    // o06: -gi_mask_name
+    let mut a = base();
+    a.gi_mask_name = Some("x".into());
+    cases.push((
+        a,
+        "Argument \"mask_data\". Must be specified, as it is required by argument:  \
+         `gi_mask_name'",
+    ));
+    // o07: -parse_seqids -gi_mask -mask_id
+    let mut a = base();
+    a.parse_seqids = true;
+    a.gi_mask = true;
+    a.mask_id = Some("foo".into());
+    cases.push((
+        a,
+        "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
+    ));
+    // o08: -gi_mask -mask_id -taxid -taxid_map -mask_data
+    let mut a = base();
+    a.gi_mask = true;
+    a.mask_id = Some("foo".into());
+    a.taxid = Some(9606);
+    a.taxid_map = Some("tm.txt".into());
+    a.mask_data = Some("m".into());
+    cases.push((
+        a,
+        "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
+    ));
+    for (args, message) in cases {
+        let error = check_arguments(&args).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert_eq!(
+            error.to_string(),
+            format!("Command line argument error: {message}")
+        );
+    }
+    let mut a = base();
+    a.parse_seqids = true;
+    a.gi_mask = true;
+    a.mask_data = Some("m".into());
+    a.gi_mask_name = Some("x".into());
+    assert!(check_arguments(&a).is_ok());
+}
+
+/// The order of `x_PostCheck`'s second walk names every argument of `MakedbArgs` (under NCBI's
+/// name), every argument of a dependency, and only the arguments of NCBI's `Init` that LOSAT
+/// does not register besides; its one mandatory argument is the one clap requires.
+#[test]
+fn the_declaration_order_holds_every_argument() {
+    // The subcommand as LOSAT registers it.
+    let cli = <crate::cli::Cli as clap::CommandFactory>::command();
+    let command = cli.find_subcommand("makeblastdb").unwrap();
+    let mut registered: Vec<String> = command
+        .get_arguments()
+        .map(|arg| match arg.get_id().as_str() {
+            "input" => "in".to_string(),
+            id => id.to_string(),
+        })
+        .collect();
+    registered.sort();
+    let mut listed: Vec<String> = MAKEBLASTDB_ARGUMENTS
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .filter(|name| !["verbose", "limit_defline"].contains(&name.as_str()))
+        .collect();
+    listed.sort();
+    assert_eq!(registered, listed);
+    for (first, _, second) in makeblastdb_dependencies() {
+        for name in [first, second] {
+            assert!(
+                MAKEBLASTDB_ARGUMENTS
+                    .iter()
+                    .any(|&(listed, _)| listed == name),
+                "{name}"
+            );
+        }
+    }
+    let required: Vec<&str> = command
+        .get_arguments()
+        .filter(|arg| arg.is_required_set())
+        .map(|arg| arg.get_id().as_str())
+        .collect();
+    let mandatory: Vec<&str> = MAKEBLASTDB_ARGUMENTS
+        .iter()
+        .filter(|(_, mandatory)| *mandatory)
+        .map(|&(name, _)| name)
+        .collect();
+    assert_eq!(required, mandatory);
+}
+
+/// Without the mandatory molecule type, NCBI's walk reports an exclusion (its first walk) and
+/// stops at the molecule type before any required argument, which it declares later.
+#[test]
+fn a_missing_molecule_type_leaves_only_exclusions() {
+    let given = |words: &'static [&'static str]| move |name: &str| words.contains(&name);
+    assert_eq!(
+        dependency_error(&given(&["taxid", "taxid_map", "parse_seqids"])).as_deref(),
+        Some("Argument \"taxid_map\". Incompatible with argument:  `taxid'")
+    );
+    assert_eq!(dependency_error(&given(&["gi_mask", "mask_data"])), None);
+    assert_eq!(
+        dependency_error(&given(&["dbtype", "gi_mask", "mask_data"])).as_deref(),
+        Some(
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'"
+        )
+    );
+}
+
+/// `MakedbArgs` with makeblastdb's defaults and `-dbtype prot`, without the parser's checks.
+fn parse_makedb_words_for_test() -> MakedbArgs {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct Wrap {
+        #[command(flatten)]
+        args: MakedbArgs,
+    }
+    Wrap::try_parse_from(["makeblastdb", "--dbtype", "prot"])
+        .unwrap()
+        .args
 }
 
 #[test]

@@ -41,6 +41,7 @@ export { ReactorInputChecker } from './infra/reactor/checker.js';
 export { reactorControl, toProgramDescription, type EngineControl } from './infra/reactor/control.js';
 export { ReactorInflater } from './infra/reactor/inflater.js';
 export { compileReactor, instantiateSerial, loadReactor, type CompiledReactor, type ReactorInstance } from './infra/reactor/instance.js';
+export { fileReaderSync, RunDirectory, TABLE_BYTES, type BlobReader } from './infra/reactor/run-directory.js';
 export { ReactorScanner, reopening } from './infra/reactor/scanner.js';
 export { ENGINE_ENDED, ENGINE_NOT_STARTED, WasmEngine, type RuntimeEnd, type WasmEngineOptions } from './infra/engine-worker/gateway.js';
 export { DEFAULT_RENEWAL, type RenewalLimits } from './infra/engine-worker/policy.js';

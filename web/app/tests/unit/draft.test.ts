@@ -48,7 +48,7 @@ function setup(
   const engine = {
     describe: fake.describe.bind(fake),
     start: async (argv: readonly string[]): Promise<StartResult> =>
-      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } },
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } },
     validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
       registries.push(registry);
@@ -444,7 +444,7 @@ describe('SearchDraft inputs', () => {
   // The validation says which; the draft reads a refused source again, and checks the others again, with that reader.
   it("reads and checks the sources with the data loaders of the argv's registry, as the CLI reads them", async () => {
     const { draft, data } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
     });
     const readers: string[] = [];
@@ -490,7 +490,7 @@ describe('SearchDraft inputs', () => {
   // DATA_LOADERS=none that the chosen file already sets while the argv is invalid.
   it('reads the sources with the data loaders of the registry while another option is refused', async () => {
     const { draft, data } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => {
         const dataLoaders = !(argv.includes('-conffile') && registry !== undefined);
         return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders } : { ok: true, dataLoaders };
@@ -525,7 +525,7 @@ describe('SearchDraft inputs', () => {
 
     it('-conffile turns the data loaders off while a refused first line is read with them on', async () => {
       const { draft, data } = setup({
-        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
         validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
       });
       const readers: string[] = [];
@@ -575,7 +575,7 @@ describe('SearchDraft inputs', () => {
 
     it('records read with the loaders off, ending after they turned on again, are read again (and refused)', async () => {
       const { draft, data } = setup({
-        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
         validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
       });
       draft.setExtra('-conffile nol.ini');
@@ -1220,12 +1220,152 @@ describe('SearchDraft submit', () => {
     expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [['-query_loc', '2-10']] });
   });
 
-  it('opens a file named .gz under its plain name and inflated size', async () => {
-    const { draft } = setup();
+  // Line WQA's D21, 2026-11-23 (S3-3, and F1/F2 of the review of D20): the card shows the plain name and the inflated size, but the
+  // run's argv names the file as the user gave it, where the command line writes the name (outfmt 0 and 7's `Input:` line, SAM's
+  // command line) and the command shown can be typed.
+  it("opens a file named .gz under its plain name and inflated size, and names it in the argv as the user gave it", async () => {
+    const { draft, requests } = setup();
     draft.addFiles('subject', [new File([gzipSync('>a\nACGT\n')], 'x.fa.gz')]);
+    draft.addFiles('query', [new File([zstdCompressSync('>q\nACGT\n')], 'Q.FA.ZST')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
-    expect(draft.inputName('subject')).toBe('x.fa');
+    expect(draft.inputName('subject')).toBe('x.fa.gz');
+    expect(draft.inputName('query')).toBe('Q.FA.ZST');
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'subject').name).toBe('x.fa.gz');
+    expect(datasetOf(request!, 'query').name).toBe('Q.FA.ZST');
+  });
+
+  it('names several files searched together, or pasted text, as before', async () => {
+    const { draft, requests } = setup();
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('subject', [file('a.fa', '>a\nACGT\n'), new File([gzipSync('>b\nACGT\n')], 'b.fa.gz')]);
+    await draft.idle();
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'query').name).toBe('query.fa');
+    expect(datasetOf(request!, 'subject').name).toBe('combined_subject.fa');
+  });
+
+  // Line WQA's D20, S3-2, 2026-11-23: the button's count is the number of runs that Run LOSAT starts (one `inputGroups`).
+  it("counts one run for every help or version word whatever the inputs, as Run LOSAT starts one", async () => {
+    const kinds = {
+      '-h': 'help',
+      '-help': 'help',
+      '-help-full': 'help',
+      '--help': 'help',
+      '-xmlhelp': 'help',
+      '-version': 'version',
+      '-version-full': 'version',
+      '-version-full-xml': 'version',
+      '-version-full-json': 'version',
+    } as const;
+    const { draft, requests, coordinator } = setup({
+      useCoordinator: true,
+      start: (argv) => {
+        const word = argv.find((w) => w in kinds) as keyof typeof kinds | undefined;
+        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: word === undefined ? null : kinds[word], database: false } };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    expect(draft.runCount()).toBe(2);
+    expect(draft.printsKind()).toBeNull();
+    for (const [word, kind] of Object.entries(kinds)) {
+      draft.setExtra(word);
+      await draft.idle();
+      expect(draft.runCount(), word).toBe(1);
+      expect(draft.printsKind(), word).toBe(kind);
+      const before = requests.length;
+      const result = await draft.submit();
+      expect(result, word).toMatchObject({ ok: true });
+      expect(requests.length, word).toBe(before + 1);
+      expect(requests.at(-1), word).toHaveLength(1);
+      const runId = (result as { runIds: readonly string[] }).runIds[0]!;
+      expect(coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!.snapshot.prints, word).toBe(kind);
+    }
+    draft.setExtra('');
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    expect(draft.printsKind()).toBeNull();
+  });
+
+  // Line WQA's D20 round 4: the page reads the engine's latest answer; an edit that leaves the print word (a file added, another
+  // option edited) does not set it aside, so the line and the run count do not flip to a search and back.
+  it('keeps the print of the last answer across an edit that leaves the print word', async () => {
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.printsKind()).toBe('version');
+    expect(draft.runCount()).toBe(1);
+    // An edit that leaves the word: nothing flips before the engine answers.
+    draft.setExtra('-version -outfmt 17');
+    draft.addFiles('query', [file('c.fa', '>c\nACGT\n')]);
+    expect(draft.printsKind()).toBe('version');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.printsKind()).toBe('version');
+    expect(draft.runCount()).toBe(1);
+    // The word goes: the answer changes with the engine's.
+    draft.setExtra('');
+    await draft.idle();
+    expect(draft.printsKind()).toBeNull();
+    expect(draft.runCount()).toBe(3);
+  });
+
+  // Line WQA's D20 round 4: Run LOSAT reads whether the argv prints after the validation is idle, so a word typed just before
+  // the press (a pasted accession is not refused with the accession message) or taken out (the accession check is not
+  // skipped) decides as the engine's answer for the argv says.
+  it('reads whether the argv prints after the validation has answered, for the accession check', async () => {
+    const { draft, requests } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.setPaste('query', 'NC_000913.3');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    // Not answered yet for the word just typed: the accession box would be refused if the older answer were read.
+    draft.setExtra('-version');
+    const typed = await draft.submit();
+    expect(typed).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+    // And the word taken out just before the press: the accession box is refused again.
+    draft.setExtra('');
+    const removed = await draft.submit();
+    expect(removed.ok).toBe(false);
+    expect((removed as { message: string }).message).toMatch(/accession/i);
+  });
+
+  // A pin of the current behaviour, not a regression test: runCount() and submit() both read `inputGroups()`, which leaves out a
+  // query file whose records are all excluded, so the label and the runs agreed before line WQA's D20 too (the Open case of
+  // sweep 3, Firefox seed 31 walk 1).
+  it('pins that the count and the runs agree when a query file has no record left in separate mode', async () => {
+    const { draft, requests } = setup();
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    expect(draft.runCount()).toBe(2);
+    const second = sourceOf(draft, 'query', 1);
+    draft.setIncluded('query', second.key, [0], false);
+    expect(draft.runCount()).toBe(1);
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+    expect(datasetOf(requests.at(-1)![0]!, 'query').name).toBe('a.fa');
   });
 
   it('runs an empty query, also from an empty .gz or .zst file, as the command line does', async () => {
@@ -1245,7 +1385,7 @@ describe('SearchDraft submit', () => {
     draft.addFiles('subject', [new File([zstdCompressSync('>a\nACGT\n')], 'x.fa.zst')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
-    expect(draft.inputName('subject')).toBe('x.fa');
+    expect(draft.inputName('subject')).toBe('x.fa.zst');
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {
@@ -1456,6 +1596,8 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
     draft.setProgram('tblastn');
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
+    draft.setProgram('blastx');
+    expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
   // WA-FM-04: the CLI's messages for these name -subject and -num_threads, which the browser sets itself. The CLI's help
@@ -1541,13 +1683,13 @@ describe('SearchDraft submit', () => {
   it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
     const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
     const { draft, registries, requests } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true, dataLoaders: true }),
     });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
     await draft.idle();
-    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null });
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false });
     draft.setExtra('-conffile settings.ini');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
@@ -1600,7 +1742,7 @@ describe('SearchDraft submit', () => {
       start: (argv) => {
         const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
         const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
-        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false, prints: null } };
+        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1671,7 +1813,7 @@ describe('SearchDraft submit', () => {
   // -conffile, the argv's name and the file, and says what to do.
   it('says that the file chosen for -conffile could not be read, and asks to choose it again', async () => {
     const { draft } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (_argv, registry) => {
         if (registry === undefined) return { ok: true, dataLoaders: true };
         // As the Data worker's error arrives: its name and message (rpc.ts).
@@ -1697,7 +1839,7 @@ describe('SearchDraft submit', () => {
       useCoordinator: true,
       start: (argv) => ({
         ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-h') ? 'help' : argv.includes('-version') ? 'version' : null },
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-h') ? 'help' : argv.includes('-version') ? 'version' : null, database: false },
       }),
     });
     await draft.idle();
@@ -1720,7 +1862,7 @@ describe('SearchDraft submit', () => {
 
   it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
     const { draft, validated } = setup({
-      start: (argv) => (argv.includes('-unstartable') ? { ok: false, message: 'the engine cannot start this argv' } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+      start: (argv) => (argv.includes('-unstartable') ? { ok: false, message: 'the engine cannot start this argv' } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
     });
     await draft.idle();
     const before = validated.length;

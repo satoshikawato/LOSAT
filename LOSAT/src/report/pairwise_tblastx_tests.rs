@@ -78,6 +78,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         subject,
         [&[], &[]],
         Default::default(),
+        None,
         &config,
     )
     .unwrap();
@@ -717,6 +718,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
         gapped_karlin: Default::default(),
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     };
@@ -1152,6 +1154,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         gapped_karlin: karlin,
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: 500,
         num_alignments: 250,
     };
@@ -1329,6 +1332,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
         gapped_karlin: karlin,
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: 500,
         num_alignments: 250,
     };

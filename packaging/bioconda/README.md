@@ -8,7 +8,7 @@ LOSAT is officially available on [Bioconda](https://anaconda.org/bioconda/losat)
 ```bash
 conda install -c bioconda -c conda-forge losat
 # or
-mamba install -c bioconda losat
+mamba install -c bioconda -c conda-forge losat
 ```
 
 This directory maintains the upstream packaging template and build script for `bioconda-recipes`.

@@ -13,7 +13,8 @@ use rayon::prelude::*;
 
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
-    postredo_engine_positives, reap_contained_postredo_hsps, ConvertedKappaHsp,
+    postredo_engine_positives, reap_contained_postredo_hsps, report_converted_stats,
+    ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::match_redo::{
@@ -27,14 +28,16 @@ use super::stage_d_kappa_params::{
     local_extension_final_xdrop, local_kappa_redo_params, use_matrix_workspace,
 };
 use super::stage_d_linking::{
-    compare_preliminary_lists_for_kappa, link_preliminary_hsps, link_preliminary_hsps_on,
-    reap_by_evalue, LinkedHsp, LinkedHspList,
+    compare_preliminary_lists_for_kappa, link_even_gap_translated, link_preliminary_hsps,
+    link_preliminary_hsps_on, reap_by_evalue, LinkedHsp, LinkedHspList,
 };
 use super::stage_d_results::{
     merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimBestHit,
     PrelimCulling,
 };
-use super::stage_d_stats::{LocalParameterCall, LocalParameterOptions, LocalSubjectParameters};
+use super::stage_d_stats::{
+    LocalParameterCall, LocalParameterOptions, LocalSubjectParameters, LocalUngappedSearch,
+};
 use super::x_subject_store::{SubjectLetters, XPrelimSubject, XSearchSubject};
 use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
@@ -111,6 +114,9 @@ pub(super) struct LocalStageDProfile<'a> {
     /// `None` without a database or where they exclude nothing): the subjects they exclude leave
     /// the preliminary hit lists before the redo or the traceback.
     pub fetch_excluded: Option<&'a crate::algorithm::common::database::FetchExcluded<'a>>,
+    /// `-qcov_hsp_perc` (0: none). An ungapped search (`-ungapped`) also reaps each subject's
+    /// list by it at the end of the preliminary stage (`ungapped_subject_steps`).
+    pub query_cov_hsp_perc: f64,
 }
 
 /// The numbers of a database (`-db`) as NCBI's setup reads them from its sequence source
@@ -135,6 +141,8 @@ pub(super) struct DatabaseNumbers {
     /// The number of sequences of the preliminary stage's option spaces
     /// (`DbStatistics::request_count`).
     pub request_count: i32,
+    /// `BlastSeqSrcGetAvgSeqLen` in nucleotides (`DbStatistics::average`).
+    pub average: i32,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -234,6 +242,17 @@ impl SubjectSetNumbers {
         lookup_protein_gumbel_params(spec, self.gumbel_db_length(total_nt))
     }
 
+    /// `BlastSeqSrcGetAvgSeqLen` in nucleotides: a database's (`DatabaseNumbers::average`), or the
+    /// FASTA subjects' (`stats::setup::fasta_average_length`).
+    pub(super) fn average_subject_length(&self, subjects: &SubjectLetters<'_>) -> i32 {
+        match self.database {
+            Some(database) => database.average,
+            None => {
+                crate::stats::setup::fasta_average_length(self.total_nt(subjects), subjects.count())
+            }
+        }
+    }
+
     /// The shortest subject length in nucleotides (`BlastSeqSrcGetMinSeqLen`, NCBI's `int`), which
     /// the Gumbel block's setup divides by 3 (`stats::setup::setup_subject_length`): a database
     /// answers `CSeqDB::GetMinLength` (`SeqDb::min_length`), a FASTA set its shortest record raised
@@ -270,6 +289,12 @@ pub(super) struct LocalStageDScoring {
     pub final_xdrop_bits: f64,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
     pub word_xdrop_bits: f64,
+    /// `!-ungapped` (`gapped_calculation`): a gapped search, else an ungapped one, which has no
+    /// gapped Karlin-Altschul blocks and no traceback.
+    pub gapped: bool,
+    /// An ungapped search's `-matrix` that NCBI's tables do not have (`matrix` is then BLOSUM62,
+    /// unused): the setup of each batch fails (`SetupEngineError::unknown_matrix`).
+    pub unknown_matrix: bool,
     /// `-use_sw_tback`: NCBI's traceback option set to Smith-Waterman (`eSmithWatermanTbck`), the
     /// Smith-Waterman redo of each match (`match_redo::SmithWatermanRedo`).
     pub smith_waterman: bool,
@@ -287,6 +312,8 @@ impl Default for LocalStageDScoring {
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
             word_xdrop_bits: 7.0,
+            gapped: true,
+            unknown_matrix: false,
             smith_waterman: false,
         }
     }
@@ -1038,31 +1065,55 @@ pub(super) fn set_up_batch(
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
 /// NCBI 2.17.0 tblastn writes the start of the outfmt 0 report (and the reports of the batches
 /// before), then `BLAST engine error: <text>`, exit status 3. `tblastn_app::batch_failure` fails
-/// the batch with it, as a read of the database that fails. The text is one of the constants.
+/// the batch with it, as a read of the database that fails. The text is one of the constants, or
+/// the score block's error of an unknown matrix (`unknown_matrix`).
 #[derive(Debug)]
-pub(crate) struct SetupEngineError(pub(crate) &'static str);
+pub(crate) struct SetupEngineError(pub(crate) std::borrow::Cow<'static, str>);
 
 impl SetupEngineError {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:433-437
     /// `BlastExtensionParametersNew` (blast_setup.c:960, before the subject length) finds no valid
     /// `sbp->kbp`: a PSSM query whose file's ungapped values make `kbp_psi` invalid
     /// (`query_set_setup`; probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review).
-    pub(crate) const NO_VALID_KARLIN_BLOCK: Self =
-        Self(crate::report::query_warnings::INVALID_QUERY_MESSAGE);
+    pub(crate) const NO_VALID_KARLIN_BLOCK: Self = Self(std::borrow::Cow::Borrowed(
+        crate::report::query_warnings::INVALID_QUERY_MESSAGE,
+    ));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
     /// `BLASTERR_SUBJECT_LENGTH_INVALID` (`run_local_search_with_pool`, blast_setup.c:969-980):
     /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
     /// (env parity probe f_probe of 2026-11-12).
-    pub(crate) const SUBJECT_LENGTH_INVALID: Self =
-        Self(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
+    pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self(std::borrow::Cow::Borrowed(
+        crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
+    ));
 
     /// `BlastHitSavingParametersNew`'s status 1 (`stats::setup::hit_saving_parameters_fail`):
     /// sum statistics with a setup subject length that is not positive, the average of a negative
     /// `NSEQ` without the Gumbel block (NCBI 2.17.0 `-searchsp` over `NSEQ 4294967295`, probe
     /// run1 of line RG D1a-3).
-    pub(crate) const HIT_SAVING_PARAMETERS: Self =
-        Self(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
+    pub(crate) const HIT_SAVING_PARAMETERS: Self = Self(std::borrow::Cow::Borrowed(
+        crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR,
+    ));
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-501
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1679-1680
+    /// The score block of an ungapped search whose `-matrix` NCBI's matrix loader does not know
+    /// (`LocalStageDScoring::unknown_matrix`) fails with -1, posted for every query of the batch
+    /// with the messages of the queries' set-up: the text of each of `queries`
+    /// (`common::unknown_matrix::unknown_matrix_message_of`), with its warnings of no letters and of O read
+    /// as X (`query_warnings::query_messages`; the score block's own come later; NCBI BLAST+
+    /// 2.17.0, `-matrix FOO -ungapped -comp_based_stats 0`, line O4c).
+    pub(crate) fn unknown_matrix(queries: &[Vec<u8>]) -> Self {
+        use crate::report::query_warnings::query_messages;
+        Self(std::borrow::Cow::Owned(
+            crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(
+                queries
+                    .iter()
+                    .map(|query| query_messages(query, true, false, false)),
+            ),
+        ))
+    }
 }
 
 impl std::fmt::Display for SetupEngineError {
@@ -1191,6 +1242,13 @@ fn run_local_search_with_redo<R: MatchRedo>(
         profile.max_target_seqs > 0,
         "TBLASTN hitlist size must be positive"
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-185
+    // The score block is made after the batch's queries and before the rest of its setup: an
+    // unknown matrix fails every batch there (`tblastn_app::search` fails the first searched one
+    // with NCBI's engine error).
+    if scoring.unknown_matrix {
+        return Err(SetupEngineError::unknown_matrix(queries).into());
+    }
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
     // The set's numbers: a database's, or those of the FASTA subjects (`SubjectSetNumbers`).
     let total_nt = profile.subject_set.total_nt(&subjects);
@@ -1208,16 +1266,28 @@ fn run_local_search_with_redo<R: MatchRedo>(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
     };
-    ensure!(
-        protein_scoring_supported(&spec),
-        "unsupported TBLASTN protein scoring scheme"
-    );
-    let gapped = lookup_protein_params(&spec);
     let ungapped = lookup_protein_params_ungapped(scoring.matrix);
+    // An ungapped search (`-ungapped`) has no gapped blocks and no Gumbel block
+    // (blast_setup.c:517-527, cited at `stage_d_stats::LocalUngappedSearch`), and NCBI does not
+    // check its gap costs (`BLAST_ValidateOptions` checks them only for a gapped search,
+    // blast_options.c:908-936): the matrix's ungapped values stand in for the gapped ones that the
+    // setup below reads.
+    let gapped = if scoring.gapped {
+        ensure!(
+            protein_scoring_supported(&spec),
+            "unsupported TBLASTN protein scoring scheme"
+        );
+        lookup_protein_params(&spec)
+    } else {
+        ungapped
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt);
+    let gumbel = scoring
+        .gapped
+        .then(|| profile.subject_set.gumbel_block(&spec, total_nt))
+        .flatten();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:226-240
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -1239,6 +1309,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
         )
     };
     let options_searchsp = profile.subject_set.searchsp;
+    let average_subject_length = profile.subject_set.average_subject_length(&subjects);
     let QuerySetSetup {
         working_frames,
         contexts,
@@ -1259,14 +1330,15 @@ fn run_local_search_with_redo<R: MatchRedo>(
             min_subject_length: min_subject_length.unwrap_or(0),
             compo_adjust_mode,
             do_sum_stats,
+            average_subject_length,
         },
         options_searchsp.as_ref().map(std::slice::from_ref),
         true,
         pool,
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // Without the Gumbel block (`-searchsp` or `OLD_FSC`; LOSAT's tblastn has no ungapped
-    // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
+    // Without the Gumbel block (`-searchsp`, `OLD_FSC` or an ungapped search, which has none
+    // either, blast_setup.c:517-527) a set of subjects whose average is
     // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
     // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
     // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`). A count of 0
@@ -1290,9 +1362,13 @@ fn run_local_search_with_redo<R: MatchRedo>(
         match min_subject_length {
             None => return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760
-            // (cited at `stats::setup::hit_saving_parameters_fail`); TBLASTN is gapped.
+            // (cited at `stats::setup::hit_saving_parameters_fail`).
             Some(length)
-                if crate::stats::setup::hit_saving_parameters_fail(do_sum_stats, true, length) =>
+                if crate::stats::setup::hit_saving_parameters_fail(
+                    do_sum_stats,
+                    scoring.gapped,
+                    length,
+                ) =>
             {
                 return Err(SetupEngineError::HIT_SAVING_PARAMETERS.into())
             }
@@ -1388,8 +1464,21 @@ fn run_local_search_with_redo<R: MatchRedo>(
         &cutoff_arrays,
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
-    let prelim_size = preliminary_hitlist_size(profile.max_target_seqs, compo_adjust_mode);
+    let prelim_size =
+        preliminary_hitlist_size(profile.max_target_seqs, compo_adjust_mode, scoring.gapped);
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
+    // An ungapped search's steps at the end of the preliminary search of each subject.
+    let ungapped_steps = (!scoring.gapped).then(|| {
+        UngappedSubjectSteps::new(
+            queries,
+            &query_lengths,
+            &contexts,
+            profile,
+            scoring.matrix,
+            &code,
+            total_nt,
+        )
+    });
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
     let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
@@ -1398,9 +1487,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // A PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's query through a
     // `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split; the sizes above are
     // still read, as NCBI's query splitter reads them first.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
+    // NCBI does not split the queries of an ungapped search either.
     let split = match profile.pssm {
-        Some(_) => None,
-        None => split_protein_batch(&batch_lengths, protein_split),
+        None if scoring.gapped => split_protein_batch(&batch_lengths, protein_split),
+        _ => None,
     };
     let preliminary_hitlists = match split {
         None => run_preliminary_subjects(
@@ -1425,6 +1516,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     dbsize_nt: profile.subject_set.dbsize_nt(),
                     min_length: scoring.word_size * 3 + 2,
                 }),
+                ungapped: ungapped_steps.as_ref(),
             },
             subjects,
             pool,
@@ -1447,6 +1539,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 min_subject_length: min_subject_length.unwrap_or(0),
                 compo_adjust_mode,
                 do_sum_stats,
+                average_subject_length,
             },
             subjects,
             prelim_size,
@@ -1479,6 +1572,13 @@ fn run_local_search_with_redo<R: MatchRedo>(
             })
         })
         .collect();
+    // `-use_sw_tback` with `-ungapped`: NCBI's traceback runs the Smith-Waterman redo's set-up for
+    // an ungapped search too, which reads the gapped Karlin-Altschul blocks that the search does
+    // not make, and crashes at every query batch it searches, with IDENTITY too, before the
+    // frequency ratios below (`match_redo::sw_ungapped_refusal`).
+    if R::SMITH_WATERMAN && ungapped_steps.is_some() {
+        return Err(super::match_redo::sw_ungapped_refusal());
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3346-3357
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660
     // The redo's set-up reads the frequency ratios of the matrix (`s_GetAlignParams`, its
@@ -1512,13 +1612,25 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
     let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
     let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1527
+    // An ungapped search has no traceback fetch: its re-evaluation's fetch excluded the subjects
+    // that the negative seqid list keeps without a line (`ungapped_subject_steps`).
+    if let Some(steps) = ungapped_steps.as_ref() {
+        return finish_local_ungapped(
+            subjects,
+            profile,
+            preliminary_lists,
+            &gapped_by_context,
+            steps,
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498 (cited at
     // `match_redo`): the Smith-Waterman redo runs without composition-based statistics too.
     if !compo_adjust_mode.is_enabled() && !R::SMITH_WATERMAN {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1577 (cited at
         // `blastp::blast_engine::database::exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
         // the negative seqid list keeps without a line; its lists leave here, after the trim of
-        // `ADAPTIVE_CBS` (tblastn is gapped: `-ungapped` is refused).
+        // `ADAPTIVE_CBS` (an ungapped search returned above).
         if let Some(excluded) = profile.fetch_excluded {
             excluded
                 .retain(&mut preliminary_lists, list_ordinal)
@@ -1778,19 +1890,17 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526 uses the masked working query;
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
-                let (report_ident, report_positives, _, report_mismatches, _, _) =
-                    postredo_converted_stats_with_matrix(
-                        &converted,
-                        &report_queries[context],
-                        &mut target,
-                        scoring.matrix,
-                    )?;
+                let (_, (report_ident, report_mismatches)) = report_converted_stats(
+                    &converted,
+                    &report_queries[context],
+                    &mut target,
+                    scoring.matrix,
+                )?;
                 Ok(KappaHspPayload {
                     bit_score: bits[index],
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
                     report_num_ident: report_ident,
-                    report_num_positives: report_positives,
                     report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
@@ -2375,6 +2485,7 @@ fn preliminary_profile<'a>(
         .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: scoring.gapped,
         subject_besthit: profile.subject_besthit,
     }
 }
@@ -2481,6 +2592,8 @@ fn split_preliminary_hitlists(
                     dbsize_nt: inputs.profile.subject_set.dbsize_nt(),
                     min_length: inputs.scoring.word_size * 3 + 2,
                 }),
+                // A split query set is gapped (an ungapped one is not split).
+                ungapped: None,
             },
             subjects,
             pool,
@@ -2521,6 +2634,9 @@ struct QuerySetInputs<'a> {
     min_subject_length: i32,
     compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
+    /// `BlastSeqSrcGetAvgSeqLen` in nucleotides (`SubjectSetNumbers::average_subject_length`),
+    /// which an ungapped search's word cutoffs read.
+    average_subject_length: i32,
 }
 
 struct QuerySetSetup<'a> {
@@ -2769,12 +2885,42 @@ fn query_set_setup<'a>(
         scale_factor: 1.0,
         gumbel: inputs.gumbel,
         eff_searchsp_override: None,
+        ungapped: (!inputs.scoring.gapped).then_some(LocalUngappedSearch {
+            average_subject_length: inputs.average_subject_length,
+        }),
     };
     let call = LocalParameterCall::Initial {
         min_subject_length: inputs.min_subject_length,
         composition_based_stats: inputs.compo_adjust_mode.ncbi_value(),
     };
     let recipe = match inputs.profile.pssm {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:766-768,814-819
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3128-3130
+        // An ungapped search (`-ungapped`) has no gapped blocks (blast_setup.c:517-527): the
+        // cutoffs, the linking, the e-values and the bit scores read each context's `kbp`
+        // (the ungapped blocks `sbp->kbp`, blast_parameters.c:859-864; link_hsps.c:1637-1641),
+        // and the effective lengths its `kbp` with the alpha and beta of the matrix's ungapped row
+        // (`lookup_protein_params_ungapped`; `compute_karlin_params_ungapped` gives BLOSUM62's).
+        // A PSSM query is refused with `-ungapped` (`args::check_search_limits`).
+        None if !inputs.scoring.gapped => {
+            let row = lookup_protein_params_ungapped(inputs.scoring.matrix);
+            LocalParameterRecipe {
+                query_contexts,
+                gapped: ungapped_by_context.clone(),
+                lengths: ungapped_by_context
+                    .iter()
+                    .map(|kbp| KarlinParams {
+                        alpha: row.alpha,
+                        beta: row.beta,
+                        ..*kbp
+                    })
+                    .collect(),
+                ungapped: ungapped_by_context.clone(),
+                x_dropoff: ungapped_by_context,
+                num_subjects: inputs.num_subjects,
+                options,
+            }
+        }
         None => LocalParameterRecipe {
             query_contexts,
             gapped: gapped_by_context.clone(),
@@ -2840,18 +2986,20 @@ fn query_set_setup<'a>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:592-607
-/// The preliminary hit list size of a search (`GetPrelimHitlistSize` of a gapped search): the
-/// size of the collector's lists, and of the best hit writer's and pipe's hit lists, which NCBI
-/// takes from the same options. Computed without NCBI's `int` overflow (`blastn/hsp.rs`
-/// `get_prelim_hitlist_size`, the approved exception for hit list sizes past `Int4`).
+/// The preliminary hit list size of a search (`GetPrelimHitlistSize`; an ungapped search's is the
+/// hit list size): the size of the collector's lists, and of the best hit writer's and pipe's hit
+/// lists, which NCBI takes from the same options. Computed without NCBI's `int` overflow
+/// (`blastn/hsp.rs` `get_prelim_hitlist_size`, the approved exception for hit list sizes past
+/// `Int4`).
 pub(super) fn preliminary_hitlist_size(
     max_target_seqs: usize,
     compo_adjust_mode: BlastCompoAdjustMode,
+    gapped: bool,
 ) -> usize {
     crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         max_target_seqs,
         compo_adjust_mode.is_enabled(),
-        true,
+        gapped,
     )
 }
 
@@ -2880,6 +3028,9 @@ struct PreliminaryInputs<'a> {
     /// The statistics of each subject (`SubjectSetNumbers::per_subject`), `None` for the query
     /// set's.
     update: Option<SubjectUpdate<'a>>,
+    /// An ungapped search's steps at the end of each subject's preliminary search; `None` for a
+    /// gapped search.
+    ungapped: Option<&'a UngappedSubjectSteps<'a>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1443
@@ -3162,33 +3313,74 @@ fn run_preliminary_subjects_into(
                 super::score::PssmScore(rows),
             )?,
         };
+        // How the subject's HSPs are linked (`SubjectLinking`), set for each subject before its
+        // search (an ungapped search's even gaps take cutoffs of the subject's length,
+        // `UngappedSubjectSteps::linking`).
+        let linking = match (inputs.link, inputs.ungapped) {
+            (None, _) => SubjectLinking::EValues,
+            (Some(link), None) => SubjectLinking::UnevenGaps(link),
+            (Some(link), Some(steps)) => steps.linking(&link, subject.len()),
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
         // Even an allocated empty subject list enters link/E-value. The query contexts of a
         // subject whose units ran on the pool are linked there side by side (LOSAT_X_TBNLINKCTX).
-        let mut linked = if let Some(link) = inputs.link {
-            link_preliminary_hsps_on(
-                x_pool,
-                &preliminary,
-                inputs.query_lengths,
-                inputs.lengths,
-                i32::try_from(subject.len())?,
-                inputs.gapped_by_context,
-                inputs.gumbel,
-                &link,
-            )?
-        } else {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-            let stat_length = initial_translated_stat_length(subject.len());
-            direct_local_evalues(
-                &preliminary,
-                inputs.query_lengths,
-                i32::try_from(stat_length)?,
-                inputs.gapped_by_context,
-                inputs.lengths,
-                inputs.gumbel,
-            )
-        };
+        // `stat_length` is the e-values' subject length without the linking.
+        let link_or_evalues =
+            |input: &[(usize, GappedHsp)], stat_length: usize| -> Result<LinkedHspList> {
+                let evalues = || -> Result<LinkedHspList> {
+                    Ok(direct_local_evalues(
+                        input,
+                        inputs.query_lengths,
+                        i32::try_from(stat_length)?,
+                        inputs.gapped_by_context,
+                        inputs.lengths,
+                        inputs.gumbel,
+                    ))
+                };
+                match &linking {
+                    SubjectLinking::EvenGaps(params) => link_even_gap_translated(
+                        input,
+                        inputs.query_lengths,
+                        inputs.lengths,
+                        i32::try_from(subject.len())?,
+                        inputs.gapped_by_context,
+                        params,
+                    ),
+                    SubjectLinking::UnevenGaps(link) => link_preliminary_hsps_on(
+                        x_pool,
+                        input,
+                        inputs.query_lengths,
+                        inputs.lengths,
+                        i32::try_from(subject.len())?,
+                        inputs.gapped_by_context,
+                        inputs.gumbel,
+                        link,
+                    ),
+                    SubjectLinking::EValues => evalues(),
+                    SubjectLinking::NoValidContext => {
+                        ensure!(
+                            input.is_empty(),
+                            "TBLASTN HSPs of a batch without a valid query context"
+                        );
+                        evalues()
+                    }
+                }
+            };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887
+        // The preliminary e-values take the subject's length as their statistical length when it
+        // is positive (`initial_translated_stat_length`).
+        let mut linked =
+            link_or_evalues(&preliminary, initial_translated_stat_length(subject.len()))?;
         reap_by_evalue(&mut linked, inputs.prelim_evalue);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1482
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1446,1466-1467
+        // In an ungapped search a subject whose list kept HSPs goes through the re-evaluation and
+        // the steps after it, whose e-values take the subject's length over the codon length.
+        if let (Some(steps), false) = (inputs.ungapped, linked.hsps.is_empty()) {
+            linked = ungapped_subject_steps(steps, inputs, x_oid, subject, &linked, |input| {
+                link_or_evalues(input, subject.len() / 3)
+            })?;
+        }
         Ok((preliminary, linked))
     };
     // Subject `x_oid` for its preliminary stage: the record's letters, or (EXPERIMENT,
@@ -3414,6 +3606,324 @@ fn direct_local_evalues(
     LinkedHspList { hsps, best_evalue }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1456
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1012-1026
+// NCBI computes the linking's cutoffs of each subject only in an ungapped search of protein
+// letters, from the context with the smallest positive Lambda and the queries' average length.
+/// What an ungapped search (`-ungapped`) reads at the end of the preliminary search of each
+/// subject (`ungapped_subject_steps`) and in its results (`finish_local_ungapped`): the linking's
+/// cutoffs of each subject (`CalculateLinkHSPCutoffs`), the re-evaluation and the queries' letters
+/// without masks.
+struct UngappedSubjectSteps<'a> {
+    /// The queries' letters without their masks (`query_blk->sequence_nomask`), NCBISTDAA.
+    query_nomask: Vec<Vec<u8>>,
+    /// The ungapped Karlin block with the smallest Lambda of the valid contexts
+    /// (`s_BlastFindSmallestLambda` of `sbp->kbp`); `None` without a valid context, where NCBI
+    /// sets no cutoffs (and searches no subject).
+    smallest_lambda: Option<KarlinParams>,
+    /// NCBI's average query length of the linking's cutoffs: the last context's offset and length
+    /// in the concatenated query, less 1, over the number of contexts (C's `Int4` division).
+    avg_query_length: i32,
+    /// `BlastSeqSrcGetTotLen` in nucleotides: a database's (`DatabaseNumbers::engine_db_length`),
+    /// or the sum of the FASTA subjects' lengths.
+    db_length: i64,
+    code: &'a GeneticCode,
+    matrix: ScoringMatrix,
+    /// `-qcov_hsp_perc` (0: none).
+    query_cov_hsp_perc: f64,
+    fetch_excluded: Option<&'a crate::algorithm::common::database::FetchExcluded<'a>>,
+}
+
+impl<'a> UngappedSubjectSteps<'a> {
+    fn new(
+        queries: &[Vec<u8>],
+        query_lengths: &[i32],
+        contexts: &[crate::algorithm::tblastx::lookup::QueryContext],
+        profile: LocalStageDProfile<'a>,
+        matrix: ScoringMatrix,
+        code: &'a GeneticCode,
+        total_nt: i64,
+    ) -> Self {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-112 (cited at
+        // `blastx::linking::link_cutoffs`): the first context of the smallest Lambda.
+        let mut smallest_lambda: Option<KarlinParams> = None;
+        for context in contexts.iter().filter(|context| context.is_valid) {
+            let kbp = context.karlin_params;
+            if smallest_lambda.map_or(f64::from(i32::MAX), |min| min.lambda) > kbp.lambda {
+                smallest_lambda = Some(kbp);
+            }
+        }
+        // The concatenated query: each query and the sentinel after it but the last's.
+        let concatenated: i64 = query_lengths.iter().map(|&l| i64::from(l) + 1).sum::<i64>() - 1;
+        let avg_query_length = ((concatenated - 1) / query_lengths.len().max(1) as i64) as i32;
+        Self {
+            query_nomask: queries
+                .iter()
+                .map(|query| {
+                    query
+                        .iter()
+                        .map(|&aa| aa_char_to_ncbistdaa(aa.to_ascii_uppercase()))
+                        .collect()
+                })
+                .collect(),
+            smallest_lambda,
+            avg_query_length,
+            db_length: profile
+                .subject_set
+                .database
+                .map_or(total_nt, |database| database.engine_db_length),
+            code,
+            matrix,
+            query_cov_hsp_perc: profile.query_cov_hsp_perc,
+            fetch_excluded: profile.fetch_excluded,
+        }
+    }
+
+    /// The linking of an ungapped search's HSPs with `link` on a subject of `subject_nt` bases:
+    /// uneven gaps for a `longest_intron` above 0, which read no cutoff; else even gaps with
+    /// `CalculateLinkHSPCutoffs` and the smallest cutoff of the initial words
+    /// (`word_params->cutoff_score_min`, the link parameters' `cutoff_small_gap` that
+    /// `BlastLinkHSPParametersUpdate` set), which reads the smallest Lambda of the valid
+    /// contexts. A batch without a valid context has none: NCBI searches no subject there
+    /// (`SubjectLinking::NoValidContext`).
+    fn linking(
+        &self,
+        link: &super::stage_d_stats::LocalLinkParameters,
+        subject_nt: usize,
+    ) -> SubjectLinking {
+        if link.longest_intron > 0 {
+            return SubjectLinking::UnevenGaps(*link);
+        }
+        let Some(smallest_lambda) = self.smallest_lambda.as_ref() else {
+            return SubjectLinking::NoValidContext;
+        };
+        let cutoffs = crate::core::link_hsps::calculate_link_hsp_cutoffs(
+            smallest_lambda,
+            self.avg_query_length,
+            subject_nt as i64,
+            self.db_length,
+            true,
+            || link.cutoff_small_gap,
+        );
+        SubjectLinking::EvenGaps(
+            crate::core::link_hsps::EvenGapLinkParams::ungapped_translated_subject(cutoffs),
+        )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1779-1800
+/// How a subject's HSPs get their e-values (`link_or_evalues` of `run_preliminary_subjects_into`),
+/// chosen once for the subject: NCBI links them with sum statistics (with even gaps for a
+/// `longest_intron` of 0, else with uneven gaps) or gives each its own e-value.
+enum SubjectLinking {
+    /// Without sum statistics: each HSP's own e-value (`direct_local_evalues`).
+    EValues,
+    /// Sum statistics with uneven gaps: a positive `longest_intron` (every gapped search that
+    /// links, an ungapped one with `-max_intron_length` above 4).
+    UnevenGaps(super::stage_d_stats::LocalLinkParameters),
+    /// An ungapped search's sum statistics with even gaps (a `longest_intron` of 0), with the
+    /// cutoffs of the subject (`UngappedSubjectSteps::linking`).
+    EvenGaps(crate::core::link_hsps::EvenGapLinkParams),
+    /// An ungapped search whose batch has no valid context: no smallest Lambda, so NCBI searches
+    /// no subject and the list has no HSP (e-values of no HSP).
+    NoValidContext,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1491-1541
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2648-2667
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2686-2734
+/// The steps of an ungapped search after the preliminary search of subject `oid` whose list
+/// `linked` kept HSPs: the re-evaluation (`Blast_HSPListReevaluateUngapped`: a subject that the
+/// fetch excludes loses its HSPs; each HSP is scored again on the working query, `frames`, and the
+/// translation of the subject's bases with their ambiguities, `TargetTranslation`, cut to its best
+/// part, and deleted below its context's word cutoff), the linking or the e-values again
+/// (`relink`, with the subject's length / 3 as the e-values' length), the reap by the preliminary
+/// e-value and the one by query coverage. The bit scores are the results' (`finish_local_ungapped`),
+/// as are the identities and positives, which NCBI counts here on the same letters
+/// (`Blast_HSPGetNumIdentitiesAndPositives`). `Blast_HSPTest` deletes nothing: tblastn has neither
+/// a percent identity nor a minimum hit length (both 0).
+fn ungapped_subject_steps(
+    steps: &UngappedSubjectSteps<'_>,
+    inputs: &PreliminaryInputs<'_>,
+    oid: usize,
+    subject: XPrelimSubject<'_>,
+    linked: &LinkedHspList,
+    relink: impl Fn(&[(usize, GappedHsp)]) -> Result<LinkedHspList>,
+) -> Result<LinkedHspList> {
+    if let Some(excluded) = steps.fetch_excluded {
+        let ordinal = u32::try_from(oid)?;
+        let excludes = excluded.excludes(ordinal).map_err(|error| {
+            crate::algorithm::common::database::FetchExcluded::refusal((ordinal, error), "TBLASTN")
+        })?;
+        if excludes {
+            return Ok(LinkedHspList {
+                hsps: Vec::new(),
+                best_evalue: linked.best_evalue,
+            });
+        }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
+    // A subject of fewer than 12 bases has no translation, which NCBI reads at NULL + 1
+    // (`TargetTranslation::get`).
+    if crate::core::blast_hits::target_translation_never_made(subject.len()) {
+        return Err(crate::core::blast_hits::x_untranslated_frame_refusal(
+            "TBLASTN",
+            "the ungapped re-evaluation",
+        ));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:322-370
+    // The re-evaluation's fetch is a stage's: with `-db_hard_mask` the masked bases read as `B`
+    // (`XDbStream::read_stage`), which the results' counts read again (`finish_local_ungapped`).
+    let x_store;
+    let subject_nt = match subject {
+        XPrelimSubject::Nt(subject) => subject,
+        XPrelimSubject::Stream(stream, oid, _) => {
+            x_store = stream.read_stage(oid)?;
+            crate::sequence::packed_subject::SubjectNt::Packed(&x_store)
+        }
+    };
+    let mut target = TargetTranslation::of(subject_nt, steps.code);
+    let mut kept: Vec<(usize, GappedHsp)> = Vec::with_capacity(linked.hsps.len());
+    for &LinkedHsp { context, hsp, .. } in &linked.hsps {
+        let length = hsp.q_end - hsp.q_start;
+        // An HSP without letters scores 0, below every word cutoff (at least 1); its translation
+        // window would end before it starts.
+        if length <= 0 {
+            continue;
+        }
+        let frame = &inputs.frames[context][0];
+        let query = &frame.aa_seq[1..1 + inputs.queries[context].len()];
+        let (translation, _, base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
+        let s_off = super::search_gapped::window_index(hsp.s_start, base)
+            .context("TBLASTN ungapped HSP before its translation window")?;
+        let Some((q_off, s_off, length, score)) =
+            crate::algorithm::tblastx::reevaluate::reevaluate_ungapped_hit_ncbi_translated_with(
+                steps.matrix,
+                query,
+                translation,
+                usize::try_from(hsp.q_start)?,
+                s_off,
+                length as usize,
+                inputs.search.word_cutoff[context],
+            )
+        else {
+            continue;
+        };
+        let s_start = i32::try_from(s_off as isize + base)?;
+        let (q_start, length) = (i32::try_from(q_off)?, i32::try_from(length)?);
+        kept.push((
+            context,
+            GappedHsp {
+                score,
+                q_start,
+                q_end: q_start + length,
+                s_start,
+                s_end: s_start + length,
+                ..hsp
+            },
+        ));
+    }
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
+    kept.sort_by(|a, b| super::stage_d_linking::score_compare(&a.1, &b.1));
+    let mut relinked = relink(&kept)?;
+    reap_by_evalue(&mut relinked, inputs.prelim_evalue);
+    crate::core::blast_hits::reap_by_query_coverage(
+        &mut relinked.hsps,
+        steps.query_cov_hsp_perc,
+        |linked| {
+            (
+                i64::from(linked.hsp.q_start),
+                i64::from(linked.hsp.q_end),
+                i64::from(inputs.query_lengths[linked.context]),
+            )
+        },
+    );
+    Ok(relinked)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1691-1706
+/// The results of an ungapped search, which has no traceback: each preliminary list in the order
+/// of the traceback's batches, with each HSP's bit score of its context's ungapped block `kbp` and
+/// its identities and positives, counted on the query without its masks and the translation of the
+/// subject (an alignment of one substitution run), inserted in its query's hit list; then sorted by
+/// e-value where NCBI's traceback sorts them.
+fn finish_local_ungapped(
+    subjects: SubjectLetters<'_>,
+    profile: LocalStageDProfile<'_>,
+    preliminary_lists: Vec<(usize, usize, LinkedHspList)>,
+    kbp: &[KarlinParams],
+    steps: &UngappedSubjectSteps<'_>,
+) -> Result<Vec<KappaResultHitList>> {
+    let mut results: Vec<_> = (0..steps.query_nomask.len())
+        .map(|_| KappaResultHitList::new(profile.max_target_seqs))
+        .collect::<Result<_>>()?;
+    let x_stage = super::x_db_stream::XStageSubjects::new(
+        subjects,
+        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+    );
+    for (context, oid, list) in preliminary_lists {
+        if list.hsps.is_empty() {
+            continue;
+        }
+        let _done = x_stage.x_match(oid);
+        let held = x_stage.held(oid)?;
+        let mut target = TargetTranslation::of(held.nt(), steps.code);
+        let payloads = list
+            .hsps
+            .iter()
+            .map(|linked| {
+                let hsp = linked.hsp;
+                let converted = ConvertedKappaHsp {
+                    context,
+                    hsp,
+                    edit_script: vec![crate::common::GapEditOp::Sub(u32::try_from(
+                        hsp.q_end - hsp.q_start,
+                    )?)],
+                    matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+                };
+                let (
+                    (ident, positives, length, mismatches, gap_opens, gap_letters),
+                    (report_ident, report_mismatches),
+                ) = report_converted_stats(
+                    &converted,
+                    &steps.query_nomask[context],
+                    &mut target,
+                    steps.matrix,
+                )?;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
+                // The bit score of the context's ungapped block: (score * Lambda - ln K) / ln 2.
+                Ok(KappaHspPayload {
+                    bit_score: (hsp.score as f64 * kbp[context].lambda - kbp[context].k.glibc_ln())
+                        / std::f64::consts::LN_2,
+                    num_ident: i32::try_from(ident)?,
+                    num_positives: positives,
+                    report_num_ident: report_ident,
+                    report_mismatches: i64::try_from(report_mismatches)?,
+                    align_length: length,
+                    mismatches,
+                    gap_opens,
+                    gap_letters,
+                    edit_script: converted.edit_script,
+                    matrix_adjust_rule: converted.matrix_adjust_rule,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        results[context].update(KappaResultList {
+            oid: i32::try_from(oid)?,
+            hsps: list,
+            payloads,
+        })?;
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776
+    // The results are sorted by e-value as in `finish_local_mode0_no_sum_stats`.
+    if profile.subject_set.sorts_results() {
+        for result in &mut results {
+            result.sort_by_evalue_for_positive_totlen();
+        }
+    }
+    Ok(results)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:200-251,675-721,
 // 1644-1707,1763-1776; core/blast_hits.c:1811-1935,3243-3297:
 fn finish_local_mode0_no_sum_stats(
@@ -3566,22 +4076,23 @@ fn finish_local_mode0_no_sum_stats(
                     edit_script: original.edit_script,
                     matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
                 };
-                let (ident, positives, length, mismatches, gap_opens, gap_letters) =
-                    postredo_converted_stats_with_matrix(
-                        &converted,
-                        &query_nomask[context],
-                        &mut target,
-                        scoring.matrix,
-                    )?;
+                let (
+                    (ident, positives, length, mismatches, gap_opens, gap_letters),
+                    (report_ident, report_mismatches),
+                ) = report_converted_stats(
+                    &converted,
+                    &query_nomask[context],
+                    &mut target,
+                    scoring.matrix,
+                )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda
                         - gapped_params[context].k.glibc_ln())
                         / std::f64::consts::LN_2,
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,
-                    report_num_ident: ident,
-                    report_num_positives: positives,
-                    report_mismatches: i64::try_from(mismatches)?,
+                    report_num_ident: report_ident,
+                    report_mismatches: i64::try_from(report_mismatches)?,
                     align_length: length,
                     mismatches,
                     gap_opens,

@@ -344,7 +344,6 @@ pub(super) fn render(
             subject_letters,
             hitlists,
             genetic_code,
-            scoring.matrix,
             hard_masked,
         )?;
     }
@@ -426,6 +425,7 @@ pub(super) fn render(
             shown,
             hitlists,
             parameters,
+            ungapped_karlin,
             query_validity,
             query_batch_skipped,
             scoring,
@@ -665,7 +665,8 @@ pub(super) fn render(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // The statistics of each query for the observer, the values of the XML reports.
     if let Some(observer) = observer.as_deref_mut() {
-        let stats = super::blast_xml::query_stats(parameters, query_validity, scoring);
+        let stats =
+            super::blast_xml::query_stats(parameters, query_validity, scoring, ungapped_karlin);
         for (q_idx, stats) in stats.into_iter().enumerate() {
             observer.query_stats(q_idx, stats);
         }
@@ -681,10 +682,12 @@ pub(super) fn render(
         ungapped_karlin,
         query_validity,
         query_batch_skipped,
-        gapped: lookup_protein_params(&ProteinScoringSpec {
-            matrix: scoring.matrix,
-            gap_open: scoring.gap_open,
-            gap_extend: scoring.gap_extend,
+        gapped: scoring.gapped.then(|| {
+            lookup_protein_params(&ProteinScoringSpec {
+                matrix: scoring.matrix,
+                gap_open: scoring.gap_open,
+                gap_extend: scoring.gap_extend,
+            })
         }),
         seg,
         mask_lowercase,
@@ -869,6 +872,7 @@ pub(super) fn render(
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
+                    scoring.gapped,
                 )?,
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-296
                 // One BLAST archive per query batch (`archive`).
@@ -1207,6 +1211,8 @@ fn pairwise_hits(
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
     let mut x_window = Vec::new();
+    // The rows' masks, kept from row to row (`query_row_masks`).
+    let mut row_masks = crate::report::query_anchored::HspMasks::default();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557:
@@ -1250,8 +1256,11 @@ fn pairwise_hits(
                     hsp.s_start,
                     hsp.s_end,
                     &payload.edit_script,
-                    &report_masks,
                 )?;
+                // The row holds its masks in lower case; the lists are left to the next row
+                // (`query_anchored::output_seq`).
+                let qseq =
+                    query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end, &mut row_masks)?;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
                 let report_positives = crate::report::row_letters::display_positives(
                     qseq.as_bytes(),
@@ -1417,9 +1426,14 @@ fn write_pairwise(
             (pairwise.num_sequences, pairwise.total_letters)
         }
     };
-    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = subject_set.gumbel_block(&spec, total_nt);
-    if gumbel.is_none() && !subject_set.old_fsc {
+    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`). An ungapped
+    // search has neither a Gumbel nor a gapped block (its gap costs need not be in the matrix's
+    // table, `args.rs`): the footers print the ungapped block only.
+    let gumbel = scoring
+        .gapped
+        .then(|| subject_set.gumbel_block(&spec, total_nt))
+        .flatten();
+    if scoring.gapped && gumbel.is_none() && !subject_set.old_fsc {
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {
@@ -1437,15 +1451,21 @@ fn write_pairwise(
         // `kbp_gap`: a PSSM query's `kbp_gap_psi` (the PSSM's gapped values; the Gumbel values
         // stay the matrix's).
         gapped_karlin: match pssm {
+            _ if !scoring.gapped => Default::default(),
             Some(psi) => psi.gapped_karlin(&lookup_protein_params(&spec)),
             None => lookup_protein_params(&spec),
         },
         gumbel,
+        gapped: scoring.gapped,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:165-167
+        // The formatter shows the size of each linked set (the `N` column) when the search is
+        // ungapped and uses sum statistics (the link parameters are made with sum statistics,
+        // `local_subject_parameters`).
+        show_linked_set_size: !scoring.gapped && parameters.link.is_some(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
         // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221);
         // `blastinput::report_counts` applies the -num_descriptions, -num_alignments and
         // -max_target_seqs values.
-        gapped: true,
         num_descriptions: report_counts.num_descriptions,
         num_alignments: report_counts.num_alignments,
     };
@@ -1520,6 +1540,53 @@ fn write_pairwise(
     Ok(())
 }
 
+/// The outfmt 0 query row `row` of an HSP, which holds the searched letters `q_start..q_end`
+/// (0-based, `q_end` excluded), with its masks in lower case, which it sets as row 0 of `masks`
+/// (`HspMasks`, the rows' builder's, which keeps its buffers from row to row): the query's masks
+/// `report_masks` (half-open in the searched letters, frame 0: the list `pairwise_hits` hands to
+/// the query-anchored sections, which show the same masks) at the row's columns
+/// (`HspMasks::set_row`, `x_FillLocList`), which `x_OutputSeq` puts in lower case when it writes
+/// the row; the row comes back so (`HspMasks::lower_row`), as the hit records of the library API
+/// and the Web adapter show it (and outfmt 0, which gets no lists, `query_anchored::output_seq`).
+/// A query with masks is a FASTA record, which holds no `-` (a PSSM query's search sets none).
+/// The subject row has no masks: it is a translation (width 3, a frame of ±1 to 3), and the
+/// subjects' masks have no frame (`anchored`), so NCBI shows none of them there.
+fn query_row_masks(
+    row: String,
+    report_masks: &[(usize, usize)],
+    q_start: i32,
+    q_end: i32,
+    masks: &mut crate::report::query_anchored::HspMasks,
+) -> Result<String> {
+    if report_masks.is_empty() {
+        return Ok(row);
+    }
+    let range = (
+        u32::try_from(q_start)?,
+        u32::try_from(q_end)?.saturating_sub(1),
+    );
+    let letters = row.as_bytes();
+    masks.set_row(
+        0,
+        0,
+        letters,
+        |column| letters[column] != b'-',
+        range,
+        true,
+        1,
+        report_masks
+            .iter()
+            .filter(|&&(left, right)| left < right)
+            .map(|&(left, right)| (left as u32, right as u32 - 1, 0)),
+    );
+    if masks.row(0).is_none() {
+        return Ok(row);
+    }
+    let mut row = row.into_bytes();
+    masks.lower_row(0, &mut row);
+    Ok(String::from_utf8(row)?)
+}
+
 /// Whether the reports read other letters than the search, so that they count its HSPs again
 /// from their rows (`recount_shown_counts`): the PSSM query `pssm` (`-in_pssm`) with
 /// `QueryLetters::shows_other_letters` (its Bioseq's letters in lower case, or its gap residue),
@@ -1538,7 +1605,7 @@ pub(super) fn recounts_shown_counts(
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (cited at
 // `blastp::blast_engine::build_pairwise_hits`) and c++/include/objtools/align_format/
 // tabular.hpp:543-547
-/// The report counts (`report_num_ident`, `report_num_positives`, `report_mismatches`) of the HSPs
+/// The report counts (`report_num_ident`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq
 /// letters `query_bioseq`, or its gap residue), and for every query of a search with
@@ -1554,7 +1621,6 @@ fn recount_shown_counts(
     subject_letters: SubjectLetters<'_>,
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
-    matrix: crate::config::ScoringMatrix,
     hard_masked: bool,
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
@@ -1581,7 +1647,6 @@ fn recount_shown_counts(
                     hsp.s_start,
                     hsp.s_end,
                     &payload.edit_script,
-                    &[],
                 )?;
                 let ident = qseq
                     .bytes()
@@ -1589,12 +1654,6 @@ fn recount_shown_counts(
                     .filter(|(q, s)| q == s)
                     .count();
                 payload.report_num_ident = ident;
-                payload.report_num_positives = crate::report::row_letters::display_positives(
-                    qseq.as_bytes(),
-                    sseq.as_bytes(),
-                    matrix,
-                    letters.case(),
-                );
                 payload.report_mismatches = i64::try_from(payload.align_length)?
                     - i64::try_from(ident + payload.gap_letters)?;
             }
@@ -1625,7 +1684,6 @@ fn aligned_sequences(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
-    report_masks: &[(usize, usize)],
 ) -> Result<(String, String)> {
     ensure!(!script.is_empty(), "TBLASTN report HSP has no edit script");
     let (translated, _, base) = target.get(frame, s_start, s_end)?;
@@ -1679,20 +1737,12 @@ fn aligned_sequences(
                     let &sa = translated
                         .get(s)
                         .context("TBLASTN report subject offset overflow")?;
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557 renders filter locations
-                    // as lowercase in the pairwise query sequence.
                     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
                     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:945-949
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
-                    let displayed = if report_masks
-                        .iter()
-                        .any(|&(left, right)| left <= q && q < right)
-                    {
-                        qa.to_ascii_lowercase()
-                    } else {
-                        qa
-                    };
-                    query_string.push(char::from(displayed));
+                    // The Bioseq's letters as the reports read them (`QueryLetters`: a
+                    // record's in upper case, a PSSM query's Bioseq letters as they are); the
+                    // masks' lower case is `x_OutputSeq`'s (`query_row_masks`).
+                    query_string.push(char::from(qa));
                     ensure!(
                         NCBISTDAA_TO_AA.get(sa as usize).is_some(),
                         "invalid TBLASTN subject amino acid"
@@ -1717,18 +1767,8 @@ fn aligned_sequences(
                     let qa = query
                         .get(q)
                         .context("TBLASTN report query offset overflow")?;
-                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
-                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:945-949
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
-                    let displayed = if report_masks
-                        .iter()
-                        .any(|&(left, right)| left <= q && q < right)
-                    {
-                        qa.to_ascii_lowercase()
-                    } else {
-                        qa
-                    };
-                    query_string.push(char::from(displayed));
+                    // The Bioseq's letters (`GapEditOp::Sub`).
+                    query_string.push(char::from(qa));
                     subject_string.push('-');
                     q += 1;
                 }
@@ -1754,7 +1794,6 @@ pub(super) fn aligned_sequences_into(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
-    report_masks: &[(usize, usize)],
     query_string: &mut String,
     subject_string: &mut String,
 ) -> Result<()> {
@@ -1769,7 +1808,6 @@ pub(super) fn aligned_sequences_into(
         s_start,
         s_end,
         script,
-        report_masks,
     )?;
     Ok(())
 }

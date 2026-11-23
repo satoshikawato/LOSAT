@@ -1,0 +1,26 @@
+Seq-entry ::= set {
+  class genbank,
+  seq-set {
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli", db { { db "taxon", tag id 562 } } } } },
+      seq-set {
+        seq {
+          id { genbank { accession "AB000001", version 1 } },
+          descr { title "nuc in nuc-prot", molinfo { biomol mRNA } },
+          inst { repr raw, mol rna, length 9, seq-data iupacna "ATGAAATAA" }
+        },
+        seq {
+          id { genbank { accession "BAA00001", version 1 } },
+          descr { title "prot in nuc-prot" },
+          inst { repr raw, mol aa, length 2, seq-data iupacaa "MK" }
+        }
+      }
+    },
+    seq {
+      id { local str "after" },
+      descr { title "after the set" },
+      inst { repr raw, mol dna, length 4, seq-data ncbi4na '1248'H }
+    }
+  }
+}

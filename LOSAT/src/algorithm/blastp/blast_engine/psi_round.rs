@@ -784,6 +784,7 @@ fn write_round_epilogs(
             gapped_karlin: crate::stats::lookup_protein_params(&args.scoring),
             gumbel: None,
             gapped: true,
+            show_linked_set_size: false,
             num_descriptions: args.num_descriptions,
             num_alignments: args.num_alignments,
         };

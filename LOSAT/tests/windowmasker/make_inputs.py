@@ -74,6 +74,19 @@ def main():
     write("ids_cr.txt", "rec1\rrec4\n".encode(), "wb")
     write("ids_none.txt", "nosuchid\n")
     write("ids_db.txt", "AB000001.1\nrec1\nNC_000099.1\n")
+    # Lists with lines that give an empty id (CIdSet_TextMatch::insert: NCBI posts its bad id error
+    # and crashes; LOSAT posts it and skips the id, PD-LOSAT-NCBI-DEFECTS approved exception 22):
+    # ids_a.txt with one such line after its second line, with all of them between its lines, and
+    # the lines alone (whose near input is the empty list ids_empty.txt).
+    near = ["rec1", ">rec4", "AB000001.1", "lcl|rec2 extra words"]
+    empty = [("gt", ">"), ("gtsp", "> y"), ("tab", "\tx"), ("sp", " x"), ("pipe", "|"), ("gtpipe", ">|"),
+             ("gtgt", ">>"), ("gtgtpipe", ">>|")]
+    for name, line in empty:
+        write(f"ids_e_{name}.txt", "\n".join(near[:2] + [line] + near[2:]) + "\n")
+    lines = [line for _, line in empty]
+    write("ids_e_all.txt", "".join(f"{n}\n{a}\n{b}\n" for n, a, b in zip(near, lines[0::2], lines[1::2])))
+    write("ids_e_only.txt", "".join(f"{line}\n" for line in lines))
+    write("ids_empty.txt", "")
     # -mk_counts: lists of files for -fa_list (names relative to this directory; an empty line, a
     # CRLF line), an all-N genome, and the records of -checkdup: a part of 2L:5,004-56,000, and
     # 3,000 letters of a fixed pseudo-random sequence before 2L:10,001-60,000 (sequences of 50,000

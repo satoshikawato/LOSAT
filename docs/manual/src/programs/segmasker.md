@@ -57,7 +57,7 @@ None that change the output of a normal run. When the reader of the output close
 
 - Everything that [`dustmasker`](dustmasker.md) refuses: a database title in an encoding NCBI cannot tell, a database sequence with a tax id from an empty or damaged `taxdb.btd`, a failed write of a `seqloc_*` or `maskinfo_*` output, and a FASTA record of 4,294,967,296 letters or more.
 - A protein database with residue bytes above 127. `makeblastdb` writes 0 to 27; NCBI's SEG reads larger bytes as negative numbers.
-- Some database errors are written without the place in NCBI's source that NCBI's message names (a missing database or volume, an alias file without `DBLIST`, an empty database name, an alias value that NCBI cannot convert).
+- Consistent with LOSAT's error wording ([Differences from NCBI BLAST+](../differences.md#wording-of-messages)), database errors keep NCBI's message and diagnostic codes without NCBI's C++ source paths and function headers.
 
 See [What LOSAT refuses](../refusals.md).
 

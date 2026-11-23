@@ -19,12 +19,12 @@
 //! `optional="true"` for an optional argument or a flag, then one line for each of its parts,
 //! and a `<constraint>` element of the usage text and the constraint's own lines.)
 //!
-//! Four things the XML cannot carry are taken on trust. Each holds for the 15 BLAST+ XMLs LOSAT
-//! embeds: checked against the 598d8ae6 source of the programs on 2026-11-21 (line RG K4i review
-//! L1), and to be checked again whenever an XML is replaced. rpsbproc's XML is RpsbProc 0.5.1's,
-//! whose source is not in that tree: (a) and (d) cannot apply to it (its XML has no real bound and
-//! no integer key with permissible values); (b) and (c) are to be checked against RpsbProc's source
-//! when rpsbproc moves onto this reader (line RG K4i-2).
+//! Four things the XML cannot carry are taken on trust. Each holds for the 16 XMLs LOSAT embeds,
+//! and is to be checked again whenever an XML is replaced: for the 15 BLAST+ XMLs against the
+//! 598d8ae6 source of the programs (2026-11-21, line RG K4i review L1), for rpsbproc's against
+//! RpsbProc 0.5.1's source (2026-11-22, line RG K4i-2a). (a) and (d) cannot apply to rpsbproc (its
+//! XML has no real bound and no integer key with permissible values); (b) and (c) hold for it as
+//! said below.
 //!
 //! (a) A real bound is read back from its text, `%g` with six significant digits: the `<min>` and
 //! `<max>` of `<Doubles>` and the numbers of BLAST's usage texts. A bound with more digits would
@@ -34,14 +34,23 @@
 //!
 //! (b) A constraint whose usage text is empty (an integer range from the least to the greatest
 //! `int`, say) has no `<constraint>` element, so its table has no constraint, though NCBI's reader
-//! checks it. No argument of these programs has one.
+//! checks it. No argument of these programs has one. rpsbproc constrains `-m` and `-t` alone, each
+//! to the names of an enumeration (a set of strings, whose usage text is not empty), and passes no
+//! constraint for its other arguments.
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1032-1043
+//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:211
+//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:227
 //!
 //! (c) `<default>` is the display value of a default, which is the default itself unless the
 //! program gives another (a display value, or a default read from the environment): the table
-//! takes it as the default. No argument of these programs gives one.
+//! takes it as the default. No argument of these programs gives one. rpsbproc's wrapper of
+//! `AddDefaultKey` passes the default as its display value, and none of the arguments it installs
+//! names an environment variable.
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1093-1095
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1368-1371
+//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/argwrapper.cpp:33-34
+//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:152-279
+//! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:395
 //!
 //! (d) A usage text of permissible values on an integer key is read as BLAST's set of integers,
 //! which compares numbers; BLAST's set of strings on such a key would write the same text and
@@ -97,6 +106,129 @@ const HELP_FLAGS: [&str; 4] = ["h", "help", "help-full", "xmlhelp"];
 /// `-conffile` before the reader (`ncbi_environment::preparse`).
 const FILE_ARGUMENTS: [(&str, &str); 2] = [("logfile", "OutputFile"), ("conffile", "InputFile")];
 
+/// How LOSAT refuses one of NCBI's arguments that it does not run (`ncbi_app::args::Refusal`).
+enum Refused {
+    /// By name, where its reader meets the argument: the refusal names the program and, if any,
+    /// says why in parentheses after it.
+    Read(Option<&'static str>),
+    /// Where NCBI starts the search, whatever the value: NCBI's reader reads the argument, so that
+    /// NCBI's own errors about it and the other arguments come first; the refusal says what the
+    /// argument is.
+    Run(&'static str),
+}
+
+/// The arguments of NCBI's programs that LOSAT refuses (AGENTS.md rule 2: explicit unsupported
+/// errors): the program, the name and how (`Refused`). The one list of them (line RG DECISIONS
+/// K4i-2): the readers' refusals and the run's (`cli::named_refusal`, `cli::run_refusal`) and
+/// `-xmlhelp`, which leaves them out of NCBI's XML (`cli::xml_help_text`), read it. Un-refusing an
+/// argument is deleting its row. The build checks that each row names an argument of its program's
+/// XML, once.
+const REFUSED: &[(&str, &str, Refused)] = &[
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
+    // `-db` and `-dbsize` are implemented (`blastn/args.rs`), as are the X-drops,
+    // `-window_size`, `-off_diagonal_range`, `-no_greedy` (DI-6), `-min_raw_gapped_score`
+    // (DI-6b), the database masks (`blastinput::db_mask`, series NP M4a-2), `-filtering_db`
+    // (`algorithm::blastn::repeat_filter`, line RG item D4) and `-best_hit_overhang` /
+    // `-best_hit_score_edge` (series NP O6a).
+    ("blastn", "entrez_query", Refused::Read(None)),
+    ("blastn", "gilist", Refused::Read(None)),
+    ("blastn", "html", Refused::Read(None)),
+    ("blastn", "import_search_strategy", Refused::Read(None)),
+    ("blastn", "negative_gilist", Refused::Read(None)),
+    ("blastn", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
+    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-2, psiblast's
+    // too).
+    ("blastp", "entrez_query", Refused::Read(None)),
+    ("blastp", "gilist", Refused::Read(None)),
+    ("blastp", "html", Refused::Read(None)),
+    ("blastp", "import_search_strategy", Refused::Read(None)),
+    ("blastp", "ipglist", Refused::Read(None)),
+    ("blastp", "negative_gilist", Refused::Read(None)),
+    ("blastp", "negative_ipglist", Refused::Read(None)),
+    ("blastp", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
+    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
+    // `-use_sw_tback` (line RG item X4b-2, #1500).
+    ("blastx", "html", Refused::Read(None)),
+    ("blastx", "gilist", Refused::Read(None)),
+    ("blastx", "negative_gilist", Refused::Read(None)),
+    ("blastx", "entrez_query", Refused::Read(None)),
+    ("blastx", "ipglist", Refused::Read(None)),
+    ("blastx", "negative_ipglist", Refused::Read(None)),
+    ("blastx", "import_search_strategy", Refused::Read(None)),
+    ("blastx", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
+    // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
+    // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
+    // inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
+    // not run either (blastp's rows; psiblast has no database masks, NCBI's unknown arguments of
+    // its parser, and no `-mt_mode`). The search strategy file is written, of a FASTA query and of
+    // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
+    ("psiblast", "phi_pattern", Refused::Read(None)),
+    ("psiblast", "entrez_query", Refused::Read(None)),
+    ("psiblast", "gilist", Refused::Read(None)),
+    ("psiblast", "html", Refused::Read(None)),
+    ("psiblast", "import_search_strategy", Refused::Read(None)),
+    ("psiblast", "ipglist", Refused::Read(None)),
+    ("psiblast", "negative_gilist", Refused::Read(None)),
+    ("psiblast", "negative_ipglist", Refused::Read(None)),
+    ("psiblast", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
+    // blastp's check, `validate_requested_blastp_support`)
+    (
+        "psiblast",
+        "use_sw_tback",
+        Refused::Run("the Smith-Waterman traceback"),
+    ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
+    // `algorithm::rpsblast::args`)
+    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program.
+    ("rpsblast", "entrez_query", Refused::Read(None)),
+    ("rpsblast", "html", Refused::Read(None)),
+    ("rpsblast", "import_search_strategy", Refused::Read(None)),
+    ("rpsblast", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
+    // at `algorithm::rpstblastn::args`)
+    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program. The
+    // composition-based statistics of a later item are refused once per run
+    // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
+    ("rpstblastn", "entrez_query", Refused::Read(None)),
+    ("rpstblastn", "html", Refused::Read(None)),
+    ("rpstblastn", "import_search_strategy", Refused::Read(None)),
+    ("rpstblastn", "remote", Refused::Read(None)),
+    (
+        "rpstblastn",
+        "ungapped",
+        Refused::Run("NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search"),
+    ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
+    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
+    // `-use_sw_tback` (line RG item X4b-1, #1481).
+    ("tblastn", "entrez_query", Refused::Read(None)),
+    ("tblastn", "gilist", Refused::Read(None)),
+    ("tblastn", "html", Refused::Read(None)),
+    ("tblastn", "import_search_strategy", Refused::Read(None)),
+    ("tblastn", "negative_gilist", Refused::Read(None)),
+    ("tblastn", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
+    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
+    ("tblastx", "entrez_query", Refused::Read(None)),
+    ("tblastx", "gilist", Refused::Read(None)),
+    ("tblastx", "html", Refused::Read(None)),
+    ("tblastx", "import_search_strategy", Refused::Read(None)),
+    ("tblastx", "negative_gilist", Refused::Read(None)),
+    ("tblastx", "remote", Refused::Read(None)),
+];
+
+// No NCBI counterpart: PD-TLOSAN-LOCAL-GENCODE-32. NCBI's constraint allows the codes of its usage
+// text (c++/src/algo/blast/blastinput/blast_args.cpp:998-1012, cited at `Constraint::GeneticCode`).
+/// The keys whose genetic codes LOSAT widens by code 32 (gc.prt ID 32), keeping NCBI's usage text:
+/// tblastn's `-db_gencode` (PD-TLOSAN-LOCAL-GENCODE-32, LOSAT's TBLASTN translates with it). The
+/// build checks that each is a key of `CArgAllowGeneticCodeInteger`.
+const GENETIC_CODE_32: [(&str, &str); 1] = [("tblastn", "db_gencode")];
+
 /// One dependency of the XML: the first name, the `Dep` variant of `ncbi_app::args`, the second
 /// name.
 type Dependency = (String, &'static str, String);
@@ -118,6 +250,10 @@ enum Spec {
     Strings(Vec<String>),
     StringSet(Vec<String>),
     IntegerSet(Vec<i32>),
+    /// `CArgAllowGeneticCodeInteger`, with code 32 or not (`GENETIC_CODE_32`).
+    GeneticCode {
+        with_32: bool,
+    },
     Rust(String),
 }
 
@@ -130,6 +266,7 @@ struct Tables {
     dependencies: Vec<String>,
     string_values: Vec<String>,
     integer_values: Vec<i32>,
+    refusals: Vec<String>,
     programs: Vec<String>,
 }
 
@@ -202,6 +339,9 @@ impl Tables {
                 let span = Self::span(first, self.integer_values.len());
                 format!("Constraint::IntegerSet({span})")
             }
+            Spec::GeneticCode { with_32 } => {
+                format!("Constraint::GeneticCode {{ with_32: {with_32} }}")
+            }
             Spec::Rust(rust) => rust.clone(),
         }
     }
@@ -238,10 +378,21 @@ impl Tables {
             self.dependencies.push(row);
         }
         let dependencies = Self::span(first, self.dependencies.len());
+        let first = self.refusals.len();
+        for (_, name, refused) in REFUSED.iter().filter(|row| row.0 == program) {
+            let refusal = match refused {
+                Refused::Read(None) => "Refused::Read(None)".to_string(),
+                Refused::Read(Some(why)) => format!("Refused::Read(Some({}))", self.text(why)),
+                Refused::Run(what) => format!("Refused::Run({})", self.text(what)),
+            };
+            let row = format!("({}, {refusal})", self.text(name));
+            self.refusals.push(row);
+        }
+        let refusals = Self::span(first, self.refusals.len());
         let program = self.text(program);
         self.programs.push(format!(
             "({program}, Arguments {{ descs: {descs}, aliases: {aliases}, dependencies: \
-             {dependencies} }})"
+             {dependencies}, refusals: {refusals} }})"
         ));
     }
 
@@ -275,6 +426,7 @@ impl Tables {
         array("STRING_VALUES", "Text", &self.string_values);
         let integers: Vec<String> = self.integer_values.iter().map(i32::to_string).collect();
         array("INTEGER_VALUES", "i32", &integers);
+        array("REFUSALS", "(Text, Refused)", &self.refusals);
         array("PROGRAMS", "(Text, Arguments)", &self.programs);
         out
     }
@@ -299,13 +451,51 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
         let path = dir.join(format!("{program}.xml"));
         let xml =
             fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let (arguments, dependencies) =
+        let (mut arguments, dependencies) =
             read_xml(&xml).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        check_refused(program, &arguments);
+        for (_, name) in GENETIC_CODE_32.iter().filter(|row| row.0 == program) {
+            let argument = arguments.iter_mut().find(|argument| argument.name == *name);
+            match argument.and_then(|argument| argument.constraint.as_mut()) {
+                Some(Spec::GeneticCode { with_32 }) => *with_32 = true,
+                _ => panic!("GENETIC_CODE_32: {program} -{name} is no key of a genetic code"),
+            }
+        }
         tables.program(program, &arguments, &dependencies);
+    }
+    let rows = REFUSED
+        .iter()
+        .map(|row| row.0)
+        .chain(GENETIC_CODE_32.iter().map(|row| row.0));
+    for program in rows {
+        assert!(
+            programs.iter().any(|known| known == program),
+            "a row of REFUSED or GENETIC_CODE_32 names {program}, whose XML LOSAT has not"
+        );
     }
     let target = out_dir.join("ncbi_args.rs");
     let out = tables.write();
     fs::write(&target, out).unwrap_or_else(|error| panic!("{}: {error}", target.display()));
+}
+
+/// Checks the rows of `REFUSED` of `program`: each names an argument of its XML (`arguments`),
+/// once.
+fn check_refused(program: &str, arguments: &[Argument]) {
+    let rows: Vec<&str> = REFUSED
+        .iter()
+        .filter(|row| row.0 == program)
+        .map(|row| row.1)
+        .collect();
+    for (at, name) in rows.iter().enumerate() {
+        assert!(
+            arguments.iter().any(|argument| argument.name == *name),
+            "REFUSED: {program} has no argument -{name} in its XML"
+        );
+        assert!(
+            !rows[..at].contains(name),
+            "REFUSED: {program} -{name} is refused twice"
+        );
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3899-3915
@@ -560,7 +750,7 @@ fn blast_constraint(kind: &str, usage: &str) -> Result<Spec, String> {
         };
     }
     if usage == "values between: 1-6, 9-16, 21-31, 33" {
-        return Ok(Spec::Rust("Constraint::GeneticCode".to_string()));
+        return Ok(Spec::GeneticCode { with_32: false });
     }
     if let Some(max) = usage.strip_prefix("file name length < ") {
         let max: u32 = max

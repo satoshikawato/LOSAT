@@ -1941,19 +1941,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
     // ungapped search, `prelim_kernel::BlastpPrelimKernel::ungapped_subject`).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
-    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
-    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
-    // and NCBI's blastp dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
-    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
-    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // smaller -evalue such as 1e308 runs.
-    if args.evalue >= f64::MAX {
-        bail!(
-            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s blastp crashes on some inputs, is not supported by LOSAT's {program}",
-            args.evalue
-        );
-    }
+    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
+    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    crate::blastinput::protein_options_check::check_evalue_limit(
+        args.evalue,
+        args.comp_based_stats.is_enabled(),
+        program,
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
@@ -2707,50 +2701,79 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4318
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2518-2521
-/// The outfmt 0 rows `hits` with the columns of their query rows that a SEG mask of
-/// `masks` (`query_record_masks`) covers in lowercase. A mask that covers the whole query is
-/// not shown; a mask position outside the aligned range is the first or last column
-/// (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
-fn mask_query_rows(hits: &mut [PairwiseHit], masks: &[Vec<(i32, i32)>]) {
+/// The outfmt 0 rows `hits` (the report's copies; the library API's records keep their letters)
+/// with their masks in lower case (`HspMasks::lower_row`): a query row's SEG masks of
+/// `query_masks` (`query_record_masks`), a subject row's runs of each list of `subject_masks`
+/// (the record's lower-case runs with `-lcase_masking`, `x_soft_subject::x_subject_masks`; a
+/// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
+/// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
+/// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
+fn set_row_masks(
+    hits: &mut [PairwiseHit],
+    query_masks: Option<&[Vec<(i32, i32)>]>,
+    subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+) {
+    let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
-        let query_masks = &masks[hit.hit.q_idx as usize];
-        if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
-            let mut bytes = std::mem::take(row).into_bytes();
-            // The 0-based query position of each column that holds a residue.
-            let first = hit.hit.q_start as i32 - 1;
-            let last = hit.hit.q_end as i32 - 1;
-            // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap residue).
-            let mut columns = Vec::with_capacity(bytes.len());
-            for (column, &residue) in bytes.iter().enumerate() {
-                if residue != b'-'
-                    || hit
-                        .query_stored_gaps
-                        .binary_search(&(column as u32))
-                        .is_ok()
-                {
-                    columns.push(column);
-                }
-            }
-            let width = bytes.len();
-            let column_of = |position: i32| -> usize {
-                if position < first {
-                    0
-                } else if position > last {
-                    width - 1
-                } else {
-                    columns[(position - first) as usize]
-                }
-            };
-            for &(from, to) in query_masks {
-                if to < first || from > last {
-                    continue;
-                }
-                let (start, stop) = (column_of(from), column_of(to));
-                for residue in &mut bytes[start..=stop] {
-                    *residue = residue.to_ascii_lowercase();
-                }
-            }
-            *row = String::from_utf8(bytes).expect("ASCII alignment row");
+        let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
+        // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
+        // starts) has no mask.
+        if let Some(shown) = hit
+            .query_seq
+            .as_mut()
+            .filter(|row| !query.is_empty() && !row.is_empty())
+        {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
+            masks.set_row(
+                0,
+                0,
+                row,
+                // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap
+                // residue).
+                |column| {
+                    row[column] != b'-'
+                        || hit
+                            .query_stored_gaps
+                            .binary_search(&(column as u32))
+                            .is_ok()
+                },
+                (hit.hit.q_start as u32 - 1, hit.hit.q_end as u32 - 1),
+                true,
+                1,
+                query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+            masks.lower_row(0, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
+        }
+        let key = (hit.hit.q_idx, hit.hit.s_idx);
+        let mut runs = subject_masks
+            .iter()
+            .filter_map(|masks| masks.get(&key))
+            .flatten()
+            .peekable();
+        if let Some(shown) = hit
+            .subject_seq
+            .as_mut()
+            .filter(|row| !row.is_empty() && runs.peek().is_some())
+        {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
+            // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
+            let stored = &hit.subject_stored_gaps;
+            masks.set_row(
+                1,
+                0,
+                row,
+                |column| row[column] != b'-' || stored.contains(&(column as u32)),
+                (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+                true,
+                1,
+                runs.map(|&(from, to)| (from as u32, to as u32, 0)),
+            );
+            masks.lower_row(1, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
         }
     }
 }
@@ -4523,10 +4546,8 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it
@@ -7639,6 +7660,7 @@ fn write_reports_without_queries(
                         None
                     },
                     gapped: !args.ungapped,
+                    show_linked_set_size: false,
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };

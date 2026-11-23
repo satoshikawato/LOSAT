@@ -5859,6 +5859,30 @@ Scheduling (each value computed by one thread with the original function; order 
   proteins x yeast x0.859; one protein x the human genome (99.9 % of 1.23 G candidates of up to 3 hits) x0.999
   (0.993-1.020), one BUSCO protein x yeast, nf-core and Galaxy tblastn rows x1.000. None of the six BLASTX rows of the
   downstream-tool set takes the direct loop (`LOSAT_X_REACH`: no `LOSAT_X_BXSCANBYTE` side), so they are unchanged.
+- `LOSAT_X_LISTSTEP=1` tblastn, tblastx, blastx (speed; in the strict set from the pull request that added it, 2026-11-23;
+  `=0` turns it off; `tblastx/x_scan_byte.rs` `list_steps`, `opaque_entry`, `X_LIST_STEP`): the AVX2 candidate stage of the
+  scan on presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, `LOSAT_X_TBXSCANBYTE`'s tables, BLASTX's direct loop under
+  `LOSAT_X_BXSCANBYTE`) lists a block's candidate words eight at a time: the eight presence bytes are read first, then
+  each word's position is written at the entry pointer and the pointer moved on by its byte, passed through an empty
+  `asm!` (no instruction) so that every store keeps the pointer alone as its address; the words after the last whole
+  step one by one; the plain loops (WebAssembly, x86-64 without AVX2) and other CPUs list as before (`list`). Cause
+  removed: listed one word a step, the loop's counter, test and pointer cost as much as the word, and unrolled, LLVM
+  folds the pointer adds into the next stores' addresses (pointer + index), which the workstation's Ice Lake cores issue
+  as two µops instead of one (one protein x the human genome, line FX s2: a four-word count form ran 5.75 instructions
+  per word instead of 7 but issued 7.55 µops per word instead of 6.97 and took x1.075 of the stage's cycles; its stores
+  still used the store address ports, 1.10 against 1.08 µops per word). The candidates and their order are those of
+  `list` (unit tests `indexes_and_presence_equal_the_rolled_index_and_pv` and
+  `x_scan_byte_equals_ncbi_scan_on_random_subjects` with both forms against NCBI's scan; `tests/tblastn_scan_byte.rs`
+  `the_list_steps_change_no_report`: the report of `=0` at one and four threads, and `steps=` in the
+  `[X_STATS] TBNSCANBYTE` line counts the scan calls that listed in steps; `tests/blastx_scan_byte.rs`: the direct loop
+  with `=0` gives the same reports). Where: the AVX2 candidate stage (platform).
+  Measured 2026-11-23 on the workstation (2x Xeon Gold 6338, node 1, one core, `-num_threads 1`, against dev f06115840
+  built in a tree path of the same length, a warm-up and 5 rounds, arm order rotated; every output the same bytes;
+  `v4-FX/results/s2/s2h_*`): one protein x the human genome (`-db`) cycles x0.957 (37.31 -> 35.71 G, 12.13 -> 11.62 s,
+  instructions x0.925, max RSS x1.000; `=0` x1.004); 40 BUSCO proteins x yeast x0.997 (wall x1.000); TBLASTX AP027131 x
+  AP027133 (gencode 4) x1.000; BLASTX of 5 cDNAs and of a 50 kb genomic query x dmel proteins x1.000 and x1.004 with the
+  instructions of dev (neither takes the AVX2 candidate stage; the same binary with `=0` x1.001 and x1.001, so the 0.4 %
+  is the spread of the rounds, not the stage).
 - `LOSAT_X_TBNSCANRESUME=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-29;
   `=0` turns it off; `tblastx/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
   `x_scan_unit`, `OFFSET_ARRAY_SIZE`): a unit scanned on presence bytes (`LOSAT_X_TBNSCANBYTE`) keeps the block of

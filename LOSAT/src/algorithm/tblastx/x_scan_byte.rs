@@ -877,6 +877,8 @@ const X_LIST_STEP: usize = 8;
 /// that made it stays an add and is not folded into the next store's address (module text).
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+// The block reads and writes no memory: the pointer only passes through a register (`nomem` holds).
+#[allow(clippy::pointers_in_nomem_asm_block)]
 fn opaque_entry(mut entry: *mut u16) -> *mut u16 {
     // SAFETY: no instruction (an assembler comment that names the register): the register keeps
     // the pointer; no memory, stack or flags are touched.

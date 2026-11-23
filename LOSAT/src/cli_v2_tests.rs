@@ -309,6 +309,31 @@ fn makedb_takes_makeblastdb_s_option_names() {
             "{words:?}: {err}"
         );
     }
+    // Without the mandatory `-dbtype`, NCBI's reader reports an exclusion first (the first walk
+    // of `x_PostCheck`), and a missing required argument only after the mandatory one, whose
+    // error is the parser's.
+    let err = makedb(&[
+        "-in",
+        "x.fa",
+        "-taxid",
+        "1",
+        "-taxid_map",
+        "m",
+        "-parse_seqids",
+    ])
+    .unwrap_err();
+    assert_eq!(err.exit_code(), 2, "{err}");
+    assert!(
+        err.to_string()
+            .contains("Argument \"taxid_map\". Incompatible with argument:  `taxid'"),
+        "{err}"
+    );
+    let err = makedb(&["-in", "x.fa", "-taxid_map", "m"]).unwrap_err();
+    assert_eq!(
+        err.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument,
+        "{err}"
+    );
 
     // `-mask_data` takes a list of files, `-mask_id` needs `-mask_data` and `-mask_desc` needs
     // `-mask_id` (makeblastdb.cpp:259-277); the parser's errors end with exit status 2 as those of
@@ -345,16 +370,111 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // The options of makeblastdb that LOSAT does not implement are named (`-h` and
-    // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-gi_mask", "-gi_mask_name"] {
-        let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
+    // `-gi_mask` needs `-parse_seqids` and excludes `-mask_id`; `-gi_mask_name` needs
+    // `-mask_data` and `-gi_mask` (makeblastdb.cpp:279-288): the parser's errors, exit status 2.
+    assert!(!defaults.gi_mask);
+    assert_eq!(defaults.gi_mask_name, None);
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            "a.asnb,b.asnb",
+            "-gi_mask",
+            "-gi_mask_name",
+            "x,y",
+        ])
+        .unwrap(),
+    );
+    assert!(given.gi_mask);
+    assert_eq!(given.gi_mask_name.as_deref(), Some("x,y"));
+    for words in [
+        &["-dbtype", "nucl", "-gi_mask"][..],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-gi_mask",
+            "-mask_data",
+            "a",
+            "-mask_id",
+            "x",
+        ],
+        &["-dbtype", "nucl", "-gi_mask_name", "x"],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-gi_mask",
+            "-gi_mask_name",
+            "x",
+        ],
+        &["-dbtype", "nucl", "-mask_data", "a", "-gi_mask_name", "x"],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            "a",
+            "-gi_mask",
+            "-gi_mask_name",
+        ],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
         assert!(
-            err.to_string().contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's makeblastdb"
-            )),
-            "{option}: {err}"
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
         );
+    }
+    // The parser checks the dependencies after the parse and names the first that NCBI's
+    // `x_PostCheck` meets, in its words, also where an argument that one requires is excluded
+    // by another (NCBI BLAST+ 2.17.0: `tests/seqdb/gi_mask/expected/e03.stderr`, `e04.stderr`).
+    for (words, sentence) in [
+        (
+            &[
+                "-dbtype",
+                "nucl",
+                "-parse_seqids",
+                "-mask_data",
+                "a",
+                "-gi_mask",
+                "-mask_desc",
+                "d",
+            ][..],
+            "Argument \"mask_id\". Must be specified, as it is required by argument:  `mask_desc'",
+        ),
+        (
+            &[
+                "-dbtype",
+                "nucl",
+                "-mask_data",
+                "a",
+                "-mask_id",
+                "y",
+                "-gi_mask_name",
+                "x",
+            ],
+            "Argument \"gi_mask\". Must be specified, as it is required by argument:  \
+             `gi_mask_name'",
+        ),
+        (
+            &[
+                "-dbtype",
+                "prot",
+                "-taxid",
+                "1",
+                "-taxid_map",
+                "m",
+                "-parse_seqids",
+            ],
+            "Argument \"taxid_map\". Incompatible with argument:  `taxid'",
+        ),
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(err.to_string().contains(sentence), "{words:?}: {err}");
     }
 
     // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
@@ -1638,7 +1758,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
 // PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
 // `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
-// of the M4a-2 survey); neither is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
+// of the M4a-2 survey); neither is refused (`ncbi_app::args::refusal`, series NP, M4a-2b).
 #[test]
 fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     let masks = |program: &str, words: &[&str]| {
@@ -1673,10 +1793,10 @@ fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
                 "{program} {words:?}"
             );
         }
-        assert!(!crate::cli::RUN_REFUSALS
-            .iter()
-            .any(|&(refused, name, _)| refused == program
-                && (name == "db_hard_mask" || name == "db_soft_mask")));
+        for name in ["db_hard_mask", "db_soft_mask"] {
+            let refusal = crate::ncbi_app::args::refusal(program, name);
+            assert_eq!(refusal, None, "{program} -{name}");
+        }
     }
 }
 
@@ -2374,10 +2494,13 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         (args.input.as_str(), args.out.as_deref()),
         ("x.faa", Some("db"))
     );
-    // The checks that name the command apply.
+    // The checks that name the command apply: makeblastdb's dependencies.
     let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
     assert!(
-        error.contains("the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb"),
+        error.contains(
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'"
+        ),
         "{error}"
     );
     assert!(makedb(&["-parse_seqids"]).is_ok());

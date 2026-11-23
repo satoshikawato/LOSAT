@@ -76,12 +76,20 @@ impl ColumnDates {
         if let Some(date) = self.dates.get(&index) {
             return Ok(date.clone());
         }
+        self.now()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:197-197
+    /// The current local time in NCBI's `CTime` text form, the date of the build when the clock
+    /// cannot be read: the date of a column made now, and of the index files of a GI mask
+    /// (`super::gi_mask`), which no test sets.
+    pub(crate) fn now(&self) -> Result<Vec<u8>, WriteDbError> {
         if let Some(now) = super::time::LocalTime::now() {
             return Ok(now.log_time().into_bytes());
         }
         self.fallback.clone().ok_or_else(|| {
             WriteDbError::Other(
-                "the system has no clock for the date of the column files".to_string(),
+                "the system has no clock for the dates of the database files".to_string(),
             )
         })
     }
@@ -106,14 +114,15 @@ fn write_var_int(out: &mut Vec<u8>, x: u64) {
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:393-403
 /// `WriteString` with `eSizeVar`.
-fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
+pub(crate) fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
     write_var_int(out, text.len() as u64);
     out.extend_from_slice(text);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:562-585
-/// `WritePadBytes` to a multiple of 8 bytes with `eString`: 1 to 8 bytes, `#` and a NUL at the end.
-fn write_pad_bytes_string(out: &mut Vec<u8>, align: usize) {
+/// `WritePadBytes` with `eString` to a multiple of `align` bytes: 1 to `align` bytes, `#` and a
+/// NUL at the end.
+pub(crate) fn write_pad_bytes_string(out: &mut Vec<u8>, align: usize) {
     let pads = align - out.len() % align;
     out.extend(std::iter::repeat_n(b'#', pads - 1));
     out.push(0);

@@ -28,12 +28,13 @@ async function run(search: StrategySearch): Promise<StrategySearchResult> {
   }
   const streams = new Map<number, Uint8Array[]>();
   try {
-    abi.run(argv, together.query.handle, together.subject.handle, (stream, bytes) =>
+    // A strategy of a database is a run of -db: no subject, subject handle 0 (ABI v2 §4).
+    abi.run(argv, together.query.handle, together.subject?.handle ?? 0, (stream, bytes) =>
       streams.set(stream, [...(streams.get(stream) ?? []), bytes.slice()]),
     );
   } finally {
     abi.release(together.query.handle);
-    abi.release(together.subject.handle);
+    if (together.subject !== undefined) abi.release(together.subject.handle);
   }
   const sha256: Record<number, string> = {};
   const bytes: Record<number, number> = {};
@@ -52,7 +53,7 @@ async function run(search: StrategySearch): Promise<StrategySearchResult> {
     argv,
     registerInputs,
     queryRecords: together.query.records.length,
-    subjectRecords: together.subject.records.length,
+    subjectRecords: together.subject?.records.length ?? 0,
     sha256,
     bytes,
   };

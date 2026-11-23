@@ -3984,7 +3984,7 @@ fn run_batch_loop(
                     if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
                         read.as_ref(),
                         &database.db,
-                        "tblastx",
+                        args.app().ncbi_name(),
                     ) {
                         warnings[start].append(&posts);
                         batch_warnings.append(&posts);
@@ -4000,7 +4000,7 @@ fn run_batch_loop(
                                 crate::algorithm::common::database::Utf8Read::post_of(
                                     failure.utf8.as_ref(),
                                     &database.db,
-                                    "tblastx",
+                                    args.app().ncbi_name(),
                                 )
                             {
                                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;

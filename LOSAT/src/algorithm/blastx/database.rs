@@ -128,6 +128,11 @@ impl BlastxDatabase {
         })
     }
 
+    /// The prefix of the run's posts (`shared::TaxdbRun::prefix`): the running application's name.
+    pub(crate) fn post_prefix(&self) -> String {
+        self.taxdb.prefix(self.program)
+    }
+
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(crate) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()

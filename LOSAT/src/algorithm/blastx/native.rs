@@ -1248,7 +1248,7 @@ pub(super) fn batch_titles(
     if let Some(posts) = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
         &database.db,
-        &database.program.to_ascii_lowercase(),
+        &database.post_prefix(),
     ) {
         posts.write(diagnostics, None)?;
     }
@@ -1623,13 +1623,10 @@ fn failed_batch_reads(
         Ok(header) => return Ok(header.into()),
         Err(error) => return Ok(error),
     };
+    // The post's prefix is the running application's (`app_name`: BLASTX's own run names its
+    // program, RPSTBLASTN's too).
     if let (Some(read), Some(db)) = (&header.utf8, subjects.seqdb()) {
-        let program = if options.rpstblastn.is_some() {
-            "rpstblastn"
-        } else {
-            "blastx"
-        };
-        if let Some(posts) = read.post(db, program) {
+        if let Some(posts) = read.post(db, options.app_name) {
             posts.write(diagnostics, None)?;
         }
     }

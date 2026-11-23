@@ -4650,7 +4650,7 @@ impl TaxdbRun {
 
     /// The prefix of the run's posts: the running application's name, else `program`'s in lower
     /// case.
-    fn prefix(&self, program: &str) -> String {
+    pub(crate) fn prefix(&self, program: &str) -> String {
         self.app
             .map_or_else(|| program.to_ascii_lowercase(), str::to_owned)
     }

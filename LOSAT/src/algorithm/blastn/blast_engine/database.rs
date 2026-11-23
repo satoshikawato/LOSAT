@@ -1654,7 +1654,9 @@ impl BlastnDatabase {
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
         let read = read_titles(self, hit_lists, earlier, titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
-        if let Some(warning) = shared::Utf8Read::post_of(first, &self.db, "blastn") {
+        if let Some(warning) =
+            shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"))
+        {
             posts.append(&warning);
         }
         read.map(|_| ())

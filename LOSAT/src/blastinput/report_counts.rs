@@ -130,7 +130,7 @@ impl Default for ReportCounts {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 /// (`BLAST_HITLIST_SIZE` is 500, `m_DfltNumDescriptions` 500, `m_DfltNumAlignments` 250; the
-/// branch at 2900-2908 of a hit list size above 500 in the options is [`kept_hitlist_counts`],
+/// branch at 2900-2908 of a hit list size above 500 in the options is `kept_hitlist_counts`,
 /// which the default start never reaches)
 /// Note that `args[kArgNumDescriptions]` is false for an absent option, not for the value 0.
 pub fn report_counts(

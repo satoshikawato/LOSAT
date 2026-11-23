@@ -60,7 +60,7 @@ pub fn import_name(command: &Commands) -> Option<&Path> {
 /// (`-outfmt`, `-num_threads`, `-query_loc` ...) are those that the strategy's import takes from
 /// them, as there. A strategy of another program is that program's arguments where the command
 /// line runs it so (blastn and blastx running a TBLASTX strategy, tblastx a BLASTX or BLASTN one).
-/// The strategy's queries and subjects move out of the arguments into [`Applied`]: the search
+/// The strategy's queries and subjects move out of the arguments into `Applied`: the search
 /// reads them as records and the arguments keep no copy.
 ///
 /// Errors are the command line's messages (after the warnings it posts before them): a file
@@ -97,7 +97,7 @@ pub fn apply(command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
 }
 
 /// The program whose arguments `command` holds: after an import, the strategy's program
-/// ([`Applied::command`]).
+/// (`Applied::command`).
 pub fn program_of(command: &Commands) -> Option<Program> {
     Some(match command {
         Commands::Blastp(_) => Program::Blastp,

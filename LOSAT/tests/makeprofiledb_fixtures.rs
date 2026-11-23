@@ -107,11 +107,12 @@ fn masked(name: &str, bytes: &[u8]) -> Option<Vec<u8>> {
 /// The bytes `bytes` of the file `name` that a run wrote, as LOSAT writes them on Linux, the
 /// platform of NCBI's frozen files. On Windows LOSAT writes what NCBI's code writes there
 /// (`writedb::platform`; not checked against a makeprofiledb.exe): an LMDB file (`.pdb`, `.ptf`)
-/// is as long as its map, of 500000 bytes, which its two meta pages record, and the LMDB name of
-/// a version 5 index file (`.pin`) is the database's name after its last `\`. The bytes are read
-/// back to Linux's after the check that the file is as long as its map: the file ends after the
-/// last page of its newer meta page, and the map size is Linux's (700000000 bytes for `.pdb`,
-/// 300000000 for `.ptf`); the LMDB name is the database's name after its last `/`.
+/// is as long as its map (500000 bytes, grown where the data needs more), which its meta pages
+/// record, and the LMDB name of a version 5 index file (`.pin`) is the database's name after its
+/// last `\`. The bytes are read back to Linux's after the check that the file is as long as the
+/// map of its newer meta page: the file ends after that meta page's last page, and the map size
+/// of both meta pages is Linux's (700000000 bytes for `.pdb`, 300000000 for `.ptf`); the LMDB name
+/// is the database's name after its last `/`.
 fn as_on_linux(name: &str, bytes: Vec<u8>) -> Vec<u8> {
     if !cfg!(windows) {
         return bytes;
@@ -157,8 +158,8 @@ fn as_on_linux(name: &str, bytes: Vec<u8>) -> Vec<u8> {
     }
     let newer = usize::from(field(1, TXNID) > field(0, TXNID));
     assert_eq!(
-        (bytes.len() as u64, field(0, MAP_SIZE), field(1, MAP_SIZE)),
-        (500_000, 500_000, 500_000),
+        bytes.len() as u64,
+        field(newer, MAP_SIZE),
         "{name}: an LMDB file on Windows is as long as its map"
     );
     let end = (field(newer, LAST_PAGE) as usize + 1) * PAGE;

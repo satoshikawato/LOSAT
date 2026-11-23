@@ -1470,9 +1470,9 @@ fn v5_markers(bytes: &[u8], dir: &str) -> Vec<u8> {
 /// value that starts with `/`, as NCBI's code writes it on Windows in the form of `v5_markers`
 /// (`\` written as `/`): a value starting with `/` is not absolute there, so NCBI joins it with
 /// `\` (`SeqDB_CombinePath` changes no separator of the value) to the alias file's directory and,
-/// where that names no file and the first name of `DBLIST` is a volume, to that volume's directory
-/// (`seqdb::alias::compute_masks`; the volumes of these rows are beside their alias files' names),
-/// where on Linux the text quotes the value alone.
+/// where that names no file and `DBLIST` names a volume, to the directory of the first volume it
+/// names (`seqdb::alias::compute_masks`: `vol_names`; the volumes of these rows are beside their
+/// alias files' names), where on Linux the text quotes the value alone.
 fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
     let input = words
         .iter()
@@ -1499,21 +1499,26 @@ fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
     if !list.starts_with('/') {
         return stderr.to_vec();
     }
-    let first = alias
-        .parent()
-        .unwrap()
-        .join(volumes.split_whitespace().next().unwrap());
-    let volume = ["pin", "nin"]
-        .iter()
-        .any(|ext| PathBuf::from(format!("{}.{ext}", first.display())).is_file());
-    let directory = if volume {
-        first.parent().unwrap()
-    } else {
-        alias.parent().unwrap()
+    let names: Vec<PathBuf> = volumes
+        .split_whitespace()
+        .map(|name| alias.parent().unwrap().join(name))
+        .collect();
+    let volume = names.iter().find(|name| {
+        ["pin", "nin"]
+            .iter()
+            .any(|ext| PathBuf::from(format!("{}.{ext}", name.display())).is_file())
+    });
+    let directory = match volume {
+        Some(volume) => volume.parent().unwrap(),
+        None => alias.parent().unwrap(),
     };
     let directory = std::fs::canonicalize(directory).unwrap();
     let directory = directory.to_string_lossy();
-    let directory = directory.strip_prefix(r"\\?\").unwrap_or(&directory);
+    // Without the `\\?\` of a drive's path that Windows puts on `canonicalize`'s result.
+    let directory = directory
+        .strip_prefix(r"\\?\")
+        .filter(|plain| plain.as_bytes().get(1) == Some(&b':'))
+        .unwrap_or(&directory);
     replace_bytes(
         stderr,
         format!("'{list}'").as_bytes(),

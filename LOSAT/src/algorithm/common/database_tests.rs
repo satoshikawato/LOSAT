@@ -711,7 +711,7 @@ fn the_check_accepts_what_the_check_before_it_accepted() {
 fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     use crate::blastinput::app::Program;
     let path = std::path::PathBuf::from("/d/taxdb.bti");
-    // The exception that `SeqDbError::memory_file_exception` makes on Linux for this file. It is
+    // The exception that `SeqDbError::memory_file_exception` makes on Unix for this file. It is
     // written out here because `memory_file_exception` makes none on Windows, where LOSAT does not
     // have NCBI's system text (`ncbi_strerror`).
     let exception = crate::ncbi_exception::NcbiException::new(
@@ -723,7 +723,7 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
         },
         "CMemoryFile: Cannot memory map file '/d/taxdb.bti':Permission denied",
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     assert_eq!(
         Some(&exception),
         SeqDbError::Open {

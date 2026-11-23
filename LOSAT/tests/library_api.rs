@@ -3191,15 +3191,21 @@ fn cli_output(program: &str, words: &[&str]) -> std::process::Output {
 /// The rule of `Error` by which the command line's standard error `stderr` is the library's
 /// `diagnostics` (what the search wrote before the failure) and then the message of `error`:
 /// NCBI's message as it is (`"ncbi"`), LOSAT's refusal after `Error: ` and before a newline
-/// (`"losat"`), or a reader's error (`Error::Input`) without its last newlines (`"reader"`:
-/// `read_input_file`'s message of a file that does not open); `None` when none gives it.
+/// (`"losat"`), or the reader's error of a file that does not open (`read_input_file`: an
+/// `Error::Input` of NCBI's `Command line argument error: `) without its last newlines
+/// (`"reader"`); `None` when none gives it.
 fn failure_rule(stderr: &[u8], diagnostics: &[u8], error: &Error) -> Option<&'static str> {
     let tail = stderr.strip_prefix(diagnostics)?;
     if tail == error.message() {
         Some("ncbi")
     } else if tail == [b"Error: ", error.message(), b"\n"].concat() {
         Some("losat")
-    } else if matches!(error, Error::Input(_)) && without_last_newlines(tail) == error.message() {
+    } else if matches!(error, Error::Input(_))
+        && error
+            .message()
+            .starts_with(b"Command line argument error: ")
+        && without_last_newlines(tail) == error.message()
+    {
         Some("reader")
     } else {
         None
@@ -3390,11 +3396,11 @@ fn a_long_organism_report_that_cannot_be_written_fails_as_the_command_lines_out(
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
 /// A directory named as the query or the subject is read as the command line reads it (line LIB
 /// E1, fix 2): it opens and its first read fails, which ends the input, so it holds no record
-/// (`read_input_file`: blastp's query of a directory is NCBI's `Query is Empty!`); on Windows a
-/// directory does not open, so it is a file that is not accessible, as NCBI's `ifstream` there
-/// opens no directory; a directory named `.gz`, `.bz2` or `.zst` is refused as not of that
-/// format, as the command line refuses it. Every program, both sides, against the command line
-/// in the same test.
+/// (`read_input_file`: blastp's query of a directory is NCBI's `Query is Empty!`); a directory
+/// named `.gz`, `.bz2` or `.zst` is refused as not of that format, as the command line refuses
+/// it. On Windows a directory does not open, whatever its name (NCBI's `ifstream` there opens
+/// none, and the open comes before the format): it is a file that is not accessible. Every
+/// program, both sides, against the command line in the same test.
 #[test]
 fn a_directory_input_is_read_as_the_command_line_reads_it() {
     let directory = TempPath::new(temp_path("directories"));
@@ -3444,7 +3450,7 @@ fn a_directory_input_is_read_as_the_command_line_reads_it() {
                         }
                     }
                 }
-                if cfg!(windows) && name == "records" {
+                if cfg!(windows) {
                     let not_accessible = format!(
                         "Command line argument error: Argument \"{}\". File is not \
                          accessible:  `{}'\n",

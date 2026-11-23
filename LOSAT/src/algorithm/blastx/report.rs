@@ -864,7 +864,7 @@ fn write_pairwise(
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
             qinfo.push(BlastpPairwiseQuery {
-                // The footer's Karlin blocks (`write_blastx_query_footer`).
+                // The footer's Karlin blocks (`write_translated_query_footer`).
                 valid: first.is_some(),
                 batch_skipped: batch.search_skipped,
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
@@ -1410,8 +1410,9 @@ fn pairwise_metadata(
             lookup_protein_gumbel_params(&scoring, total)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
+        gapped: options.gapped,
+        show_linked_set_size: !options.gapped && options.sum_stats,
         // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).
-        gapped: true,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     }

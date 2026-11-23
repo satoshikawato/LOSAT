@@ -616,10 +616,6 @@ impl import::StrategyArgs for BlastnArgs {
         }
     }
 
-    fn one_thread(&mut self) {
-        self.num_threads = 1;
-    }
-
     fn set_task(&mut self, task: &str) {
         self.task = task.to_string();
     }
@@ -627,7 +623,11 @@ impl import::StrategyArgs for BlastnArgs {
     fn set(&mut self, setter: &Setter) -> Result<bool> {
         match setter {
             Setter::EvalueThreshold(v) => self.evalue = Some(*v),
-            Setter::WordSize(n) => self.word_size = usize::try_from(*n).ok(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3832-3835
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1313-1319
+            // A size below 1 is 0 in the unsigned field, which the options' check after the
+            // import (`scoring.rs`) refuses as NCBI's refuses every size below 1.
+            Setter::WordSize(n) => self.word_size = Some(usize::try_from(*n).unwrap_or(0)),
             Setter::WindowSize(n) => self.window_size = Some(*n),
             Setter::MatchReward(n) => self.reward = Some(*n),
             Setter::MismatchPenalty(n) => self.penalty = Some(*n),

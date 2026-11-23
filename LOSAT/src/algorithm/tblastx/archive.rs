@@ -477,10 +477,6 @@ impl import::StrategyArgs for TblastxArgs {
         }
     }
 
-    fn one_thread(&mut self) {
-        self.num_threads = 1;
-    }
-
     fn set_task(&mut self, _task: &str) {}
 
     fn set(&mut self, setter: &Setter) -> Result<bool> {

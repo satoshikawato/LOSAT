@@ -334,3 +334,45 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
     }
     assert!(checked >= 60, "{checked} cases");
 }
+
+/// F2-Q1 (Owner 2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception 26): the import keeps the
+/// command line's `-num_threads` for the strategy's subjects, which the run searches once with
+/// them (`tests/import_search_strategy.rs` checks that the bytes are the `-num_threads 1` ones),
+/// also where blastn runs a TBLASTX strategy.
+#[test]
+fn a_strategys_subjects_keep_the_threads_of_the_command_line() {
+    use crate::cli::Commands;
+    let dir = fixtures("strategy/import/ss");
+    for (program, file) in [
+        ("blastn", "blastn.sub.ss"),
+        ("blastp", "blastp.sub.ss"),
+        ("blastx", "blastx.sub.ss"),
+        ("tblastn", "tblastn.sub.ss"),
+        ("tblastx", "tblastx.sub.ss"),
+        ("blastn", "tblastx.sub.ss"),
+    ] {
+        let path = dir.join(file);
+        let argv = [
+            "losat",
+            program,
+            "-import_search_strategy",
+            path.to_str().unwrap(),
+            "-num_threads",
+            "4",
+        ];
+        let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)
+            .unwrap_or_else(|error| panic!("{program} {file}: {error}"));
+        let mut posted = Vec::new();
+        let command = super::import::apply(cli.command, None, &mut posted)
+            .unwrap_or_else(|error| panic!("{program} {file}: {error:#}"));
+        let threads = match &command {
+            Commands::Blastn(args) => args.num_threads,
+            Commands::Blastp(args) => args.num_threads,
+            Commands::Blastx(args) => usize::try_from(args.num_threads).unwrap(),
+            Commands::Tblastn(args) => args.num_threads,
+            Commands::Tblastx(args) => args.num_threads,
+            _ => panic!("{program} {file}: not a search"),
+        };
+        assert_eq!(threads, 4, "{program} {file}");
+    }
+}

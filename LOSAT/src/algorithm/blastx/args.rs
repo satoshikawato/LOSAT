@@ -755,9 +755,7 @@ impl BlastxArgs {
         // (`blastinput::report_counts`). A `-max_target_seqs` below 1 (a caller of `run_local`
         // sets it; the command line's is at least 1) is NCBI's hit list size below 1.
         let counts = crate::blastinput::report_counts::report_counts_from(
-            self.formatting
-                .hitlist_start
-                .unwrap_or(crate::blastinput::report_counts::BLAST_HITLIST_SIZE),
+            self.formatting.hitlist_start_count(),
             i32::from(outfmt),
             max_target_seqs_count(self.max_target_seqs),
             self.num_descriptions,

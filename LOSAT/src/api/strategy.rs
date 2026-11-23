@@ -250,8 +250,9 @@ impl Search {
     /// `-query_loc`, `-parse_deflines`, `-lcase_masking`, `-strand` ...), and the others are
     /// ignored with NCBI's warnings, which the search writes to its diagnostics first. The
     /// strategy's queries and subjects (or its database) are the inputs of
-    /// [`Inputs::strategy`](super::Inputs::strategy); a strategy with subjects is searched with
-    /// one thread whatever `-num_threads` says, as on the command line.
+    /// [`Inputs::strategy`](super::Inputs::strategy); a strategy's subjects are searched once
+    /// with the argv's `-num_threads`, and the output is that of `-num_threads 1`, as on the
+    /// command line.
     ///
     /// A strategy of another program runs as that program where the command line runs it so
     /// (blastn and blastx with a TBLASTX strategy, tblastx with a BLASTX or BLASTN one): the

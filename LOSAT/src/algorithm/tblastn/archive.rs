@@ -513,10 +513,6 @@ impl import::StrategyArgs for TblastnArgs {
         }
     }
 
-    fn one_thread(&mut self) {
-        self.num_threads = 1;
-    }
-
     fn set_task(&mut self, task: &str) {
         self.task = task.to_string();
     }

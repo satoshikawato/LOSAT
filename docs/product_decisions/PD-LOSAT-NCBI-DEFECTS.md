@@ -3221,11 +3221,13 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     and 8 stop with `malloc(): invalid size (unsorted)` and a core dump (SIGABRT; `I.blastn.sub.nt4`,
     `I.blastn.sub.nt8.*`, `I.tblastx.sub.nt2.*` to `I.tblastx.sub.nt8.*`). The copies are rule 2's deterministic NCBI output, which this exception
     replaces by the Owner's decision; the aborts are rule 1. LOSAT searches a strategy's subjects
-    once, whatever `-num_threads` says: one place sets the search's thread count to 1 when the
-    strategy carries subjects (the engine's import, `import::apply`, which the command line, the
-    library API and LOSAT Web share, also where one program runs another's strategy), with no
-    warning and no refusal, and
-    the output is NCBI's `-num_threads 1` output, frozen. `-mt_mode 1` gives the same bytes (its
+    once, with the command line's `-num_threads`, as it searches the records of `-subject` (its
+    output is the same at every thread count, the Owner's rule of 2026-10-13): the engine's import
+    (`import::apply`, which the command line, the library API and LOSAT Web share, also where one
+    program runs another's strategy) keeps the threads, with no warning and no refusal, and
+    the output is NCBI's `-num_threads 1` output, frozen. On a terminal, `losat blastn` draws its
+    progress bar for them as for the records of `-subject` (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    exception 11). `-mt_mode 1` gives the same bytes (its
     output is that of one thread, as for every search). NCBI's warning `Number of threads was reduced
     to N to match the number of available CPUs` is not printed, as for every search (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). A strategy whose subject is a
     database, and the command line's `-subject` or `-db` over a strategy, keep their usual threads.
@@ -3234,7 +3236,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     rows `I.<program>.sub.alone`; the test
     `a_strategys_subjects_are_searched_once_at_any_thread_count`
     (`LOSAT/tests/import_search_strategy.rs`) runs them at 2, 4 and 8 threads against those bytes for
-    the five programs.
+    the five programs (a search of the subjects once per thread fails it), and
+    `a_strategys_subjects_keep_the_threads_of_the_command_line`
+    (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

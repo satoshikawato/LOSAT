@@ -1504,15 +1504,24 @@ impl NativeError {
         if e.kind().starts_with("CBlastException::")
             || e.kind().starts_with("CRemoteBlastException::")
         {
+            let msg = e.get_msg();
+            let has = |text: &[u8]| msg.windows(text.len()).any(|part| part == text);
             return if e.kind() == "CBlastException::eInvalidOptions" {
                 NativeError {
                     exit: 1,
-                    message: [OPTIONS_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
+                    message: [OPTIONS_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
+                }
+            } else if has(b"Out of memory") || has(b"Failed to allocate") {
+                // The message names an allocation that failed: exit status 4
+                // (`BLAST_OUT_OF_MEMORY`), the report of `out_of_memory` with the message.
+                NativeError {
+                    exit: 4,
+                    message: [crate::wording::OUT_OF_MEMORY.as_bytes(), b": ", msg, b"\n"].concat(),
                 }
             } else {
                 NativeError {
                     exit: 3,
-                    message: [ENGINE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
+                    message: [ENGINE_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
                 }
             };
         }

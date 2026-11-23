@@ -841,11 +841,6 @@ impl Start {
         unported(what, program)
     }
 
-    /// Whether the strategy's subject is sequences the command line does not override.
-    pub(crate) fn has_subjects(&self) -> bool {
-        matches!(self.imported.subject, Some(ImportedSubject::Sequences(_)))
-    }
-
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:594-598
     /// The query range of the strategy (`GetQueryRange`, which `s_ImportSearchStrategy` sets
     /// unless it is empty), as the closed range
@@ -957,18 +952,15 @@ pub(crate) fn formatting_early_return(
     num_alignments_given: bool,
     outfmt: &str,
 ) {
-    let kept = match (
-        formatting.hitlist_start,
-        crate::blastinput::app::parse_formatting_string(outfmt),
-    ) {
-        (Some(start), Ok(format)) => crate::blastinput::report_counts::kept_hitlist_counts(
-            start,
+    let kept = match crate::blastinput::app::parse_formatting_string(outfmt) {
+        Ok(format) => crate::blastinput::report_counts::kept_hitlist_counts(
+            formatting.hitlist_start_count(),
             format.number,
             num_descriptions_given,
             num_alignments_given,
         )
         .is_some(),
-        _ => false,
+        Err(_) => false,
     };
     if kept {
         formatting.line_length = None;
@@ -1164,8 +1156,6 @@ pub(crate) trait StrategyArgs: Sized {
     fn keep(&mut self, kept: Kept) -> Result<()>;
     /// The arguments that the import sets in the same way in every program.
     fn fields(&mut self) -> Fields<'_>;
-    /// One search thread.
-    fn one_thread(&mut self);
     /// `-task`.
     fn set_task(&mut self, task: &str);
     /// The program's table: `setter` set on the option of the command line that it stands for,
@@ -1536,7 +1526,6 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
     // `-dbsize` is set after the strategy's options, unless the strategy's search space trumps
     // it.
     let mut cli_dbsize = None;
-    let mut one_thread = false;
     match database {
         Some(given) => {
             *fields.db = given.db;
@@ -1566,18 +1555,14 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                         }
                     }
                 }
-            } else if start.has_subjects() {
-                // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception
-                // 26): a strategy's subjects are searched once, as with `-num_threads 1`, whatever
-                // `-num_threads` says (NCBI searches them once per thread or aborts: its thread
-                // check reads only the command line's `-subject`). The one place of the rule, for
-                // every program and caller.
-                one_thread = true;
             }
+            // Else the strategy's subjects. The Owner's decision F2-Q1 (2026-11-20 「Q1=C」,
+            // PD-LOSAT-NCBI-DEFECTS exception 26): they are searched once with the command line's
+            // `-num_threads`, as `-subject`'s records are, and the output is the `-num_threads 1`
+            // output (NCBI searches them once per thread or aborts: its thread check reads only
+            // the command line's `-subject`). The run keeps the threads: nothing here changes them
+            // (`a_strategys_subjects_keep_the_threads_of_the_command_line`).
         }
-    }
-    if one_thread {
-        out.one_thread();
     }
     out.set_task(start.imported.program().task_name());
     let mut collected = Collected::default();
@@ -1592,7 +1577,10 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                 run.searchsp_from_strategy = true;
             }
             Setter::DbLength(n) => *fields.dbsize = Some(*n),
-            Setter::HitlistSize(n) => fields.formatting.hitlist_start = usize::try_from(*n).ok(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3832-3835
+            // The value as the file gives it: one below 1 meets the options' check after the
+            // import (`FormattingArgs::hitlist_start_count`).
+            Setter::HitlistSize(n) => fields.formatting.hitlist_start = Some(*n),
             other => {
                 if !out.set(other)? {
                     return Err(Start::unported_setter(other, program));

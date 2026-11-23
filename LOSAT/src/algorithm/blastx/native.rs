@@ -2829,9 +2829,7 @@ fn x_flow(
 /// (`ReportCounts::warnings`).
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
     crate::blastinput::report_counts::report_counts_from(
-        args.formatting
-            .hitlist_start
-            .unwrap_or(crate::blastinput::report_counts::BLAST_HITLIST_SIZE),
+        args.formatting.hitlist_start_count(),
         outfmt,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,

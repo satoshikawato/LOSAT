@@ -791,12 +791,68 @@ async function customOutput(page: Page): Promise<Buffer | undefined> {
   return readFileSync((await download.path())!);
 }
 
-/** The input of a role that the run searched, by the name its details give ("name: n records, size"). */
-function inputOf(candidates: readonly ExpectedInput[], shown: string): ExpectedInput | undefined {
+/**
+ * The input of a role that the run searched, by the name its details give ("name: n records, size"), where the input is the
+ * user's file as given or pasted text, which the model names (a file of the user's by its own name, `query.fa`, `combined_*.fa`):
+ * undefined when no input of the model has that name, 'ambiguous' when inputs of that name have other bytes (two files of one name
+ * with other records left out).
+ */
+function inputOf(candidates: readonly ExpectedInput[], shown: string): ExpectedInput | undefined | 'ambiguous' {
   const named = candidates.filter((input) => shown.startsWith(`${input.name}: `));
   if (named.length === 0) return undefined;
   const distinct = new Set(named.map((input) => Buffer.from(input.bytes).toString('base64')));
-  return distinct.size === 1 ? named[0] : undefined;
+  return distinct.size === 1 ? named[0] : 'ambiguous';
+}
+
+/**
+ * The file that the page offers for a role of the run chosen (Download All: the query or subject that is a file of LOSAT's, line
+ * WQA's D22), saved as the user gets it: its name and bytes. Undefined where the input is the user's file as given.
+ */
+async function offeredInput(page: Page, role: Role): Promise<{ name: string; bytes: Buffer } | undefined> {
+  await page.getByTestId('results-download-all').click();
+  const item = page.getByTestId('results-download-menu').getByTestId(`results-download-${role}`);
+  if ((await item.count()) === 0) {
+    await page.keyboard.press('Escape');
+    return undefined;
+  }
+  const [download] = await Promise.all([page.waitForEvent('download'), item.click()]);
+  return { name: download.suggestedFilename(), bytes: readFileSync((await download.path())!) };
+}
+
+/**
+ * The file of each role that the command line names, for the native CLI: the file that the page offers where the input is not
+ * the user's file as given (records left out, several files, pasted text), which must hold exactly the bytes that the model says
+ * the run searched and be named as the run's details name it; else the model's input of the name that the details give. The
+ * names of the offered files are not modelled here: the CLI runs the command that the page shows on the files that the page offers,
+ * as the user would. A made input that is not told apart or has no such bytes fails the step.
+ */
+async function filesOf(walker: Walker, run: number, before: Submitted, shown: Record<Role, string>): Promise<Record<Role, ExpectedInput> | undefined> {
+  const files = {} as Record<Role, ExpectedInput>;
+  let ambiguous = false;
+  for (const role of ROLES) {
+    const offered = await offeredInput(walker.page, role);
+    if (offered !== undefined) {
+      if (!shown[role].startsWith(`${offered.name}: `)) {
+        throw new StepFailure('offered-name', `run ${run}: the page offers ${offered.name} as the ${role} file, but the run's details say "${shown[role]}"`);
+      }
+      if (!before.inputs[role].some((input) => Buffer.compare(Buffer.from(input.bytes), offered.bytes) === 0)) {
+        throw new StepFailure('offered-bytes', `run ${run}: the ${role} file ${offered.name} that the page offers (${offered.bytes.length} bytes) is none of the inputs that the walk's form holds (${before.inputs[role].map((input) => `${input.name} ${input.bytes.length} bytes`).join(', ') || 'none'})`);
+      }
+      files[role] = { name: offered.name, bytes: offered.bytes };
+      continue;
+    }
+    const input = inputOf(before.inputs[role], shown[role]);
+    if (input === undefined) throw new StepFailure('input-unmatched', `run ${run}: the ${role} "${shown[role]}" is no input of the walk's form (${before.inputs[role].map((i) => i.name).join(', ') || 'none'}) and the page offers no file for it`);
+    if (input === 'ambiguous') ambiguous = true;
+    else files[role] = input;
+  }
+  if (ambiguous) {
+    // Two of the user's own files of one name with different records left out: the details cannot tell which.
+    walker.notes.push(`run ${run}: inputs not told apart by name (${shown.query} / ${shown.subject}); native check skipped`);
+    walker.counts.unmatched += 1;
+    return undefined;
+  }
+  return files;
 }
 
 /**
@@ -846,14 +902,9 @@ async function verifyRun(walker: Walker, run: number, before: Submitted): Promis
     stored.set('custom', custom);
   }
   if (NATIVE === undefined) return stored;
-  const query = inputOf(before.inputs.query, details.inputs.query);
-  const subject = inputOf(before.inputs.subject, details.inputs.subject);
-  if (query === undefined || subject === undefined) {
-    // Two inputs of one name with different records left out: the details cannot tell which.
-    walker.notes.push(`run ${run}: inputs not told apart by name (${details.inputs.query} / ${details.inputs.subject}); native check skipped`);
-    walker.counts.unmatched += 1;
-    return stored;
-  }
+  const files = await filesOf(walker, run, before, details.inputs);
+  if (files === undefined) return stored;
+  const { query, subject } = files;
   if (query.name === subject.name && Buffer.compare(Buffer.from(query.bytes), Buffer.from(subject.bytes)) !== 0) {
     throw new StepFailure('command-names', `run ${run}: the command line names ${query.name} for both inputs, which differ`);
   }

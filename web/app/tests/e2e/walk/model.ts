@@ -14,7 +14,11 @@ export type InputMode = 'combined' | 'separate';
 
 export interface ModelSource {
   readonly origin: 'paste' | 'file';
-  /** The name that the command line gives it when it is the role's only input. */
+  /**
+   * The name of the user's file, or of the pasted text: what the command line names when the source is the role's only input
+   * with every record in. With records left out the page names a file of its own (`included_q.fa`, line WQA's D22); the walk
+   * does not model that name: it takes the file that the page offers and checks its bytes against `includedBytes`.
+   */
   readonly name: string;
   readonly bytes: Uint8Array;
   /** The records left out, by index, for each reading. */
@@ -119,7 +123,8 @@ export interface ExpectedInput {
  * The inputs that the role's runs search in a mode that reads the role as `reading`, given the
  * role's sources that the page read (`ready`, by index; a source it could not read is no input):
  * one when searched together, one per source when apart, but a source whose records are all left
- * out, which has nothing to search alone (src/application/draft.ts `inputGroups`).
+ * out, which has nothing to search alone (src/application/draft.ts `inputGroups`). The names are those of the user's files and
+ * of `query.fa` and `combined_*.fa`; a file of LOSAT's with records left out has a name that the page makes (steps.ts `filesOf`).
  */
 export function expectedInputs(role: RoleModel, roleName: Role, reading: Reading, ready: readonly number[]): ExpectedInput[] {
   const sources = role.sources.filter((_, index) => ready.includes(index));

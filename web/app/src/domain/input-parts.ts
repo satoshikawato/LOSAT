@@ -2,18 +2,18 @@
 // 2026-11-23): the run's Run details, its header and its Outputs say which records a file left out.
 import type { InputPart } from './run';
 
-/** The most IDs a sentence names; the rest are counted. */
-const MOST_IDS = 3;
+/** The most IDs a sentence names, and a part keeps; the rest are counted. */
+export const MOST_LEFT_OUT_IDS = 3;
 
 /** "a", "a and b", "a, b and c". */
 function listOf(words: readonly string[]): string {
   return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
-/** "r2", "r2 and r5", "r2, r5, r7 and 4 more". */
-export function leftOutIds(ids: readonly string[]): string {
-  const named = ids.slice(0, MOST_IDS);
-  const more = ids.length - named.length;
+/** "r2", "r2 and r5", "r2, r5, r7 and 4 more": the first IDs of `count` records. */
+export function leftOutIds(ids: readonly string[], count: number = ids.length): string {
+  const named = ids.slice(0, MOST_LEFT_OUT_IDS);
+  const more = count - named.length;
   return more > 0 ? `${named.join(', ')} and ${more} more` : listOf(named);
 }
 
@@ -21,8 +21,8 @@ const records = (count: number): string => `${count} ${count === 1 ? 'record' : 
 
 /** "q.fa without r2 (2 of 3 records)"; "b.fa (3 records)" where nothing is left out. */
 export function partText(part: InputPart): string {
-  if (part.leftOut.length === 0) return `${part.name} (${records(part.records)})`;
-  return `${part.name} without ${leftOutIds(part.leftOut)} (${part.records} of ${records(part.records + part.leftOut.length)})`;
+  if (part.leftOutCount === 0) return `${part.name} (${records(part.records)})`;
+  return `${part.name} without ${leftOutIds(part.leftOut, part.leftOutCount)} (${part.records} of ${records(part.records + part.leftOutCount)})`;
 }
 
 /** What the input is made of, as `partText` says each part: "a.fa (2 records) and b.fa without b2 (1 of 2 records)". */
@@ -32,7 +32,7 @@ export function fromText(parts: readonly InputPart[]): string {
 
 /** Whether a part leaves records out. */
 export function leavesOut(parts: readonly InputPart[] | undefined): boolean {
-  return (parts ?? []).some((part) => part.leftOut.length > 0);
+  return (parts ?? []).some((part) => part.leftOutCount > 0);
 }
 
 /**

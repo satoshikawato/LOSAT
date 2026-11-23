@@ -45,6 +45,7 @@ import {
   type FetchGroup,
   type FetchSourceId,
 } from '../domain/accession';
+import { MOST_LEFT_OUT_IDS } from '../domain/input-parts';
 import type { InputPart } from '../domain/run';
 import { buildArgv, COMBINED_NAMES, INCLUDED_PREFIX, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
@@ -1838,15 +1839,20 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
  * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
  */
 function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
-  const read: DraftSource[] = [];
-  for (const source of sources) {
-    if (source.status !== 'ready') continue;
-    const stops = source.base?.readerError !== undefined;
-    if (includedOf(source).length === 0 && !stops) continue;
-    read.push(source);
-    if (stops) break;
-  }
-  return read;
+  return readSources(sources.filter((source) => source.status === 'ready')).filter(
+    (source) => includedOf(source).length > 0 || source.base?.readerError !== undefined,
+  );
+}
+
+/**
+ * The sources that a run's input reads, in order: up to and with the first whose reading ends with the reader's error, which
+ * ends the input, the engine reading no record after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one
+ * place of that rule in the draft: the readiness of a source after it (combinedSources) and the words that say what the input
+ * is made of (fromOf, line WQA's D22) take their sources from it, so that the words name what the bytes hold.
+ */
+function readSources(sources: readonly DraftSource[]): readonly DraftSource[] {
+  const stop = sources.findIndex((source) => source.base?.readerError !== undefined);
+  return stop < 0 ? sources : sources.slice(0, stop + 1);
 }
 
 /** Whether what a run reads of a source starts without a defline (review M2, 2026-11-20). */
@@ -1939,18 +1945,16 @@ export interface NamedInput {
  * The names of the two inputs of one run (line WQA's D22, review M1, 2026-11-23): a command that names two inputs by one name
  * cannot be run on the files that the page offers, which then hold other bytes under one name. A file that LOSAT made takes
  * its role into its name (`included_query_q.fa`) where the other input has the same name: both made (the same file in both
- * roles with other records left out), or the other the user's own file of that name. The user's own names stay as they are.
+ * roles with other records left out), or the other the user's own file of that name (the role makes the name longer than the
+ * other's). The user's own names stay as they are.
  */
 export function runNames(query: NamedInput, subject: NamedInput): Record<InputRole, string> {
   if (query.name !== subject.name) return { query: query.name, subject: subject.name };
-  // The same name: a file of LOSAT's takes its role; the user's own stays (a made name may not become theirs).
-  const apart = (input: NamedInput, role: InputRole, other: NamedInput): string => {
-    if (!input.made) return input.name;
-    let name = withRole(input.name, role);
-    while (!other.made && name === other.name) name = withRole(name, role);
-    return name;
+  // The same name: a file of LOSAT's takes its role, which makes it differ from the other's name; the user's own stays.
+  return {
+    query: query.made ? withRole(query.name, 'query') : query.name,
+    subject: subject.made ? withRole(subject.name, 'subject') : subject.name,
   };
-  return { query: apart(query, 'query', subject), subject: apart(subject, 'subject', query) };
 }
 
 /** `included_q.fa` -> `included_query_q.fa`; `query.fa` -> `query_query.fa`. */
@@ -1958,27 +1962,36 @@ function withRole(name: string, role: InputRole): string {
   return name.startsWith(INCLUDED_PREFIX) ? `${INCLUDED_PREFIX}${role}_${name.slice(INCLUDED_PREFIX.length)}` : `${role}_${name}`;
 }
 
-/** What an input made of `sources` is made of, for the run's snapshot; undefined where it is the user's file as given. */
+/**
+ * What an input made of `sources` is made of, for the run's snapshot; undefined where it is the user's file as given. Only the
+ * sources that the run reads (readSources), and of the records left out the first few IDs and their number: a file with a
+ * million records and ten kept has a million left out, which the page names three of.
+ */
 function fromOf(sources: readonly DraftSource[]): readonly InputPart[] | undefined {
   if (isFileAsGiven(sources)) return undefined;
-  return sources.map((source) => ({
+  return readSources(sources).map((source) => ({
     // The user's file by its own name (a compressed file by the name that the user gave), pasted text as such.
     name: source.origin === 'paste' ? 'pasted text' : source.file.name,
     records: includedOf(source).length,
     leftOut: leftOutIdsOf(source),
+    leftOutCount: source.excluded.length,
   }));
 }
 
 /**
- * The IDs of the records that a source leaves out, as the page names them: a record without a title by its place in the file
- * (`record 3`), a record whose ID another record has too by its place (`r1 (#2)`, the number of the card's list).
+ * The IDs of the first records that a source leaves out, as the page names them: a record without a title by its place in the
+ * file (`record 3`), a record whose ID another record has too by its place (`r1 (#2)`, the number of the card's list).
  */
 function leftOutIdsOf(source: DraftSource): readonly string[] {
   const table = source.base?.records ?? [];
-  if (source.excluded.length === 0) return [];
-  const counts = new Map<string, number>();
-  for (const record of table) counts.set(record.id, (counts.get(record.id) ?? 0) + 1);
-  return source.excluded.map((index) => {
+  const named = source.excluded.slice(0, MOST_LEFT_OUT_IDS);
+  // How many records have the ID of each, in one pass over the table.
+  const counts = new Map<string, number>(named.map((index) => [table[index]?.id ?? '', 0]));
+  for (const record of table) {
+    const count = counts.get(record.id);
+    if (count !== undefined) counts.set(record.id, count + 1);
+  }
+  return named.map((index) => {
     const id = table[index]?.id ?? '';
     if (id === '') return `record ${index + 1}`;
     return (counts.get(id) ?? 0) > 1 ? `${id} (#${index + 1})` : id;

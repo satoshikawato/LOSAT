@@ -472,7 +472,7 @@ export class Coordinator {
       }
       const { bytes, sha256, records } = await runInput;
       // Pasted text is a file that LOSAT made (`query.fa`): the page offers it with the run (line WQA's D22, 2026-11-23).
-      const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [] }] : undefined;
+      const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [], leftOutCount: 0 }] : undefined;
       return Object.freeze({ name, bytes, sha256, revisionIds, records, ...(from === undefined ? {} : { from: Object.freeze(from) }) });
     } catch (error) {
       // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).

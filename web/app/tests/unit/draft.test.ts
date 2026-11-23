@@ -1402,11 +1402,11 @@ describe('SearchDraft submit', () => {
       name: 'combined_subject.fa',
       revisionIds: [sourceOf(draft, 'subject', 0).base!.revisionId, sourceOf(draft, 'subject', 1).base!.revisionId],
       from: [
-        { name: 'a.fa', records: 1, leftOut: [] },
-        { name: 'b.fa', records: 1, leftOut: [] },
+        { name: 'a.fa', records: 1, leftOut: [], leftOutCount: 0 },
+        { name: 'b.fa', records: 1, leftOut: [], leftOutCount: 0 },
       ],
     });
-    expect(datasetOf(request!, 'query').from).toEqual([{ name: 'pasted text', records: 1, leftOut: [] }]);
+    expect(datasetOf(request!, 'query').from).toEqual([{ name: 'pasted text', records: 1, leftOut: [], leftOutCount: 0 }]);
     expect(draft.state.get().message).toBeUndefined();
   });
 
@@ -1427,8 +1427,8 @@ describe('SearchDraft submit', () => {
     expect(draft.inputName('subject')).toBe('included_s.fa');
     expect(await draft.submit()).toMatchObject({ ok: true });
     const [request] = requests[0]!;
-    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'] }] });
-    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_s.fa', from: [{ name: 's.fa.zst', records: 1, leftOut: ['s1'] }] });
+    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'], leftOutCount: 1 }] });
+    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_s.fa', from: [{ name: 's.fa.zst', records: 1, leftOut: ['s1'], leftOutCount: 1 }] });
     // Included again: the user's file as given.
     draft.setIncluded('query', sourceOf(draft, 'query').key, [1], true);
     await draft.idle();
@@ -1453,8 +1453,8 @@ describe('SearchDraft submit', () => {
     expect([draft.inputName('query'), draft.inputName('subject')]).toEqual(['included_query_q.fa', 'included_subject_q.fa']);
     expect(await draft.submit()).toMatchObject({ ok: true });
     const [request] = requests[0]!;
-    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_query_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'] }] });
-    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_subject_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r1'] }] });
+    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'included_query_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r2'], leftOutCount: 1 }] });
+    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_subject_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r1'], leftOutCount: 1 }] });
   });
 
   it('does not give a made name that the user gave to the other input', async () => {
@@ -1482,7 +1482,7 @@ describe('SearchDraft submit', () => {
     draft.setIncluded('query', sourceOf(draft, 'query').key, [1, 2], false);
     await draft.idle();
     await draft.submit();
-    expect(datasetOf(requests[0]![0]!, 'query').from).toEqual([{ name: 'q.fa', records: 1, leftOut: ['r1 (#2)', 'r2'] }]);
+    expect(datasetOf(requests[0]![0]!, 'query').from).toEqual([{ name: 'q.fa', records: 1, leftOut: ['r1 (#2)', 'r2'], leftOutCount: 2 }]);
   });
 
   it('names the input of a separate search by its own file: as given, or with its records left out', async () => {
@@ -1495,7 +1495,7 @@ describe('SearchDraft submit', () => {
     await draft.submit();
     const subjects = requests[0]!.map((r) => datasetOf(r, 'subject'));
     expect(subjects.map((subject) => subject.name)).toEqual(['included_a.fa', 'b.fa']);
-    expect(subjects.map((subject) => subject.from)).toEqual([[{ name: 'a.fa', records: 1, leftOut: ['a1'] }], undefined]);
+    expect(subjects.map((subject) => subject.from)).toEqual([[{ name: 'a.fa', records: 1, leftOut: ['a1'], leftOutCount: 1 }], undefined]);
   });
 
   it('queues separate searches as every query input against every subject input', async () => {
@@ -2061,6 +2061,43 @@ describe('SearchDraft submit', () => {
     draft.removeSource('query', 'paste');
     await draft.idle();
     expect(bad().check).toMatchObject({ readerError: expect.stringContaining('Near line 4,') });
+  });
+
+  // Line WQA's D22, review round 2 (M1): the words say what the bytes hold, which ends with the reader's error (D10).
+  it('names in what a Combined input is made of only the sources that the run reads', async () => {
+    const { draft, requests } = setup();
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('query', [new File(['>a\nACGT\n>b\n$$$$\n'], 'bad.fa'), new File(['>c\nACGT\n'], 'after.fa')]);
+    await draft.idle();
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(datasetOf(requests[0]![0]!, 'query')).toMatchObject({
+      name: 'combined_query.fa',
+      from: [
+        { name: 'pasted text', records: 1, leftOut: [], leftOutCount: 0 },
+        { name: 'bad.fa', records: 1, leftOut: [], leftOutCount: 0 },
+      ],
+    });
+    // A source before the error with all its records left out is a part still: the user left them out.
+    draft.setIncluded('query', 'paste', [0], false);
+    await draft.idle();
+    await draft.submit();
+    expect(datasetOf(requests[1]![0]!, 'query').from).toEqual([
+      { name: 'pasted text', records: 0, leftOut: ['q'], leftOutCount: 1 },
+      { name: 'bad.fa', records: 1, leftOut: [], leftOutCount: 0 },
+    ]);
+  });
+
+  it('keeps the first IDs of the records left out, and their number', async () => {
+    const { draft, requests } = setup();
+    const records = Array.from({ length: 8 }, (_, i) => `>r${i + 1}\nACGT\n`).join('');
+    draft.addFiles('query', [file('q.fa', records)]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1, 2, 3, 4, 5, 6], false);
+    await draft.idle();
+    await draft.submit();
+    expect(datasetOf(requests[0]![0]!, 'query').from).toEqual([{ name: 'q.fa', records: 2, leftOut: ['r2', 'r3', 'r4'], leftOutCount: 6 }]);
   });
 
   // The run passes the inputs of a Combined query as they are, one of comment and blank lines only

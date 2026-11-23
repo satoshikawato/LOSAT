@@ -16,14 +16,16 @@ export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', '
 
 /**
  * What a file of the user's gave to an input that is not that file as given (line WQA's D22, 2026-11-23): its name (`pasted text`
- * for pasted text), the records of it that the input holds, and the IDs of those it leaves out.
+ * for pasted text), the records of it that the input holds, and the first IDs of those it leaves out with their number.
  */
 export interface InputPart {
   readonly name: string;
   /** The records of the part that the input holds. */
   readonly records: number;
-  /** The IDs of the records that the input leaves out, in the order of the file. */
+  /** The IDs of the first records that the input leaves out, in the order of the file (at most MOST_LEFT_OUT_IDS). */
   readonly leftOut: readonly string[];
+  /** The number of records that the input leaves out. */
+  readonly leftOutCount: number;
 }
 
 export interface InputSnapshot {

@@ -1020,6 +1020,28 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
     .into()
 }
 
+/// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at the traceback of
+/// every query batch it searches, with hits or without (`smith_waterman_match::sw_ungapped_error`,
+/// BLASTX's and TBLASTN's too; NCBI BLAST+ 2.17.0 on ws, line NP item O4b2-2, 2026-11-23). The
+/// batch whose first query is `batch_start` is the call's first with a valid context (the search
+/// of all queries: an ungapped search plans no blocks and splits no query); the batches before it
+/// have none, and NCBI reports them with their warnings and does not search them. As
+/// [`sw_batch_failed`], the error follows their reports (`database::HeaderReadError`), and a run
+/// without a searched batch ends as NCBI's does. Exit status 1, its message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+#[cold]
+#[inline(never)]
+pub(super) fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
+    super::database::HeaderReadError {
+        query: batch_start,
+        error: crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(
+            "blastp",
+        ),
+    }
+    .into()
+}
+
 /// NCBI's Smith-Waterman redo at a list whose subject its fetch excludes (`mark`, a list that
 /// `database::exclude_fetched` removed; `batch_heaps`, the heaps of the list's query batch): the
 /// list is freed without a change of the status when the early termination test holds, and

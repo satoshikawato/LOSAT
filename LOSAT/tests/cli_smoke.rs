@@ -207,41 +207,70 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074 (cited at the
-// refusal in `blastp::blast_engine`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074 (cited at
+// `blastp::blast_engine::redo_run::sw_ungapped_refusal`)
 // NCBI BLAST+ 2.17.0's `blastp -ungapped -comp_based_stats 0 -use_sw_tback` reads the gapped
-// Karlin blocks that an ungapped search does not have and ends with a segmentation fault: LOSAT
-// refuses the combination by name, before (and apart from) the refusal of `-use_sw_tback` without
-// composition-based statistics above, and writes nothing.
+// Karlin blocks that an ungapped search does not have and crashes at the traceback of each query
+// batch it searches (line NP, items O4b and O4b2-2): LOSAT refuses there, with the text that
+// BLASTX and TBLASTN refuse it with, not before the search (and not with the refusal of
+// `-use_sw_tback` without composition-based statistics above, which an ungapped search, running
+// no redo, never meets). A query without a valid context (only `X`) is not searched, and its run
+// is the run without `-use_sw_tback`. The NCBI bytes are the fixture rows `db.ung.sw.*`.
 #[test]
-fn blastp_ungapped_smith_waterman_traceback_is_refused_by_name() {
+fn blastp_ungapped_smith_waterman_traceback_is_refused_at_a_searched_batch() {
     let query = temp_path("ungapped_swtback_query", "faa");
+    let invalid = temp_path("ungapped_swtback_invalid", "faa");
     let subject = temp_path("ungapped_swtback_subject", "faa");
     std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    std::fs::write(&invalid, ">x\nXXXXXXXXXXXXXXXXXXXXXX\n").unwrap();
     std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
-    let output = clean_losat_command()
-        .args(["blastp", "-query"])
-        .arg(&query)
-        .arg("-subject")
-        .arg(&subject)
-        .args(["-ungapped", "-comp_based_stats", "0", "-use_sw_tback"])
-        .output()
-        .expect("run blastp -ungapped -use_sw_tback");
+    let run = |query: &PathBuf, sw: bool| {
+        let mut command = clean_losat_command();
+        command
+            .args(["blastp", "-query"])
+            .arg(query)
+            .arg("-subject")
+            .arg(&subject)
+            .args(["-ungapped", "-comp_based_stats", "0", "-outfmt", "6"]);
+        if sw {
+            command.arg("-use_sw_tback");
+        }
+        command.output().expect("run blastp -ungapped")
+    };
+    let refused = run(&query, true);
+    let invalid_sw = run(&invalid, true);
+    let invalid_plain = run(&invalid, false);
     let _ = std::fs::remove_file(&query);
+    let _ = std::fs::remove_file(&invalid);
     let _ = std::fs::remove_file(&subject);
-    assert!(!output.status.success(), "the combination is refused");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        refused.status.code(),
+        Some(1),
+        "the searched batch is refused"
+    );
+    let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(
         stderr.contains(
-            "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's BLASTP"
+            "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's blastp crashes at every query batch it searches, is not supported by LOSAT's BLASTP"
         ),
         "the refusal names both options and NCBI's crash: {stderr}"
     );
     assert!(
         !stderr.contains("without composition-based statistics"),
-        "this refusal comes first: {stderr}"
+        "an ungapped search runs no redo: {stderr}"
     );
-    assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
+    assert!(refused.stdout.is_empty(), "nothing is written: {stderr}");
+    assert!(
+        invalid_sw.status.success(),
+        "a run without a searched batch ends"
+    );
+    assert_eq!(invalid_sw.stdout, invalid_plain.stdout);
+    assert_eq!(invalid_sw.stderr, invalid_plain.stderr);
+    assert!(
+        String::from_utf8_lossy(&invalid_sw.stderr).contains("Karlin-Altschul"),
+        "the query's warning: {}",
+        String::from_utf8_lossy(&invalid_sw.stderr)
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1285-1294

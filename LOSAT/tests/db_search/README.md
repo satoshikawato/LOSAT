@@ -1357,7 +1357,9 @@ the key, two siblings over one volume). `neg.txt` and `pos.txt` are the seqid li
 `tests/fasta/rps/q40.faa` whose first subject is another profile, rows `db.om.rps.x3vc.*` with `-max_target_seqs 1`).
 `omb` (`make_oidmask.sh`) holds the byte 0x80 in the titles of two predicted lines, patched into its `.phr` after a
 build with `#` there, behind `ombx.pal` (`OID_MASK_TYPE 1`): row `db.om.bp.rej.omb.6` and A271. `ompart.pal` (`nol.msk`:
-OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`. The rows are
+OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`; `ompartn.nal`
+(`noln.msk`: local OIDs 0 and 3 of each volume of `omn`, global 0, 3, 4 and 7), its nucleotide twin, that of `B_al_omn`;
+`t0.pal`, `t2.pal`, `j2.pal` and `j5.pal` are copied in cases `B_al_t0`, `B_al_t2`, `B_al_j2` and `B_al_j5`. The rows are
 `db.om.*` (every search program); `segmasker`, `dustmasker`, `windowmasker`, `makembindex` and `blastdbcmd` read the
 databases in their rows `db_oidmask_*`, `oidmask_*` and A242 on.
 
@@ -2449,6 +2451,16 @@ chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
 `(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
 (with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+- `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
+  and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
+  the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,
+  written by hand without repeats so that SEG keeps them and the alignments run through them, with an I, an L, a J and
+  an X against an `MTT` codon (I or L) and an A and an X against `NNN`. TBLASTN's search reads the ambiguous codons as
+  X, its reports as B, Z and J (`NNN` stays X in both): the identities and positives of the reports differ from the
+  Seq-aligns'.
+- `tn_ac_q.faa` (rows `db.tn.rej.ungapped.sw.ac.b1.*` and `db.tn.ungapped.ac.b1.nosw.7`, line O4c): a protein of W, C
+  and H alone, from which NCBI computes no ungapped Karlin-Altschul parameters (a query batch without a valid
+  context, which NCBI reports with a warning and does not search), then the five G of `nohit.faa`.
 
 ## Where some inputs come from (provenance)
 

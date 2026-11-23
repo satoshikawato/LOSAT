@@ -1,45 +1,67 @@
-//! The generic reader of ASN.1 text under the type table: NCBI's `CObjectIStreamAsn` with its
-//! object stack, for any type of `table` (`read_document`), over the lexical layer of
-//! `report::serial::asn_text_reader`.
+//! The generic reader under the type table: NCBI's object stack (`CObjectIStream`: its frames,
+//! `ReadClassSequential`, `ReadChoiceSimple`, `ReadContainer`, `HandleEOF`) for any type of
+//! `table`, over the primitives of either encoding (`report::serial::asn_input::Input`): ASN.1
+//! text (`read_document`, `CObjectIStreamAsn`) and ASN.1 binary (`read_ber_document`,
+//! `CObjectIStreamAsnBinary`), one object or objects one after another from one stream
+//! (`ObjectStream`).
 //!
 //! It reads as NCBI's reader reads:
-//! - the members of a SEQUENCE in module order, named, or by their tag in brackets (`[3]`); an
-//!   unknown or repeated member, an unknown variant and a missing mandatory member are NCBI's
+//! - the members of a SEQUENCE in module order (named or by their tag `[3]` in text, by their
+//!   context tag `a3` in binary: NCBI's automatic tags, which `scripts/asn_spec_gen.py` checks);
+//!   an unknown or repeated member, an unknown variant and a missing mandatory member are NCBI's
 //!   `CSerialException`;
-//! - INTEGER by the C++ storage of its member (`GetInt4`, `GetUint4` without `-`, `GetInt8`,
-//!   `ReadInt2`); ENUMERATED by name or by a number that has a name, INTEGER with named values by
-//!   name or any number;
-//! - a VisibleString (and StringStore) byte outside 0x20..0x7E as `#`, with NCBI's
-//!   `ERR_POST_X` with subcode 7 (`Post::BadChar`), a UTF8String as it is;
-//! - the delayed member (`Auth-list.names`) with the skip functions, kept as its text;
-//! - the hooks of NCBI's hand-written classes that change what is read (`super::hooks` of this
-//!   file: `CSeq_descr::PostRead`, `CVariation_ref::PostRead`), and the Seq-id into LOSAT's
-//!   Seq-id model.
+//! - INTEGER by the C++ storage of its member (`ReadInt4`, `ReadUint4`, `ReadInt8`, `ReadInt2`);
+//!   ENUMERATED by name (text) or by a number that has a name, INTEGER with named values by name or
+//!   any number;
+//! - a VisibleString byte outside 0x20..0x7E as `#`, with NCBI's post 803.7
+//!   (`Post::BadChar`), a UTF8String as it is; a StringStore as a VisibleString in text and as it
+//!   is in binary; a UTF8String tag for a VisibleString in binary with NCBI's warning
+//!   (`Post::Utf8Tag`, once per process);
+//! - the delayed member (`Auth-list.names`) with the skip functions, kept as its bytes
+//!   (`Value::Delayed`);
+//! - the hooks of NCBI's hand-written classes that change what is read (`super::hooks`:
+//!   `CSeq_descr::PostRead`, `CVariation_ref::PostRead`, the reserve hooks), and the Seq-id into
+//!   LOSAT's Seq-id model.
 //!
-//! Its errors are NCBI's classes (`ReadError`): a `CSerialException` (and an end of the text
-//! inside an object, which NCBI's stack turns into one), which its callers report as theirs; a
-//! `CUtilException` of a number (`BadNumber`, `NumberOverflow`) or a `CStringException` of a tag,
-//! with the line NCBI's stack adds for each frame it leaves (`NCBI_RETHROW_SAME`, the report of
-//! `CATCH_ALL`); and an end of the text directly in the root object, a `CEofException` that NCBI's
-//! stack passes on.
+//! Its errors are NCBI's classes (`ReadError`): a `CSerialException` (and an end of the input
+//! inside an object, which NCBI's stack turns into one, `HandleEOF`), with the frames it leaves
+//! (`AddFrameInfo`); a `CUtilException` of a number or a `CStringException` of a tag (text), with
+//! the line NCBI's stack adds for each frame it leaves (`NCBI_RETHROW_SAME`, the report of
+//! `CATCH_ALL`); an end of the input directly in the root object, a `CEofException` that NCBI's
+//! stack passes on; the `std::exception`s of a reserve; and LOSAT's refusals of what its readers do
+//! not take.
 
-use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
-use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_text_reader::{
-    real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
-    BAD_NUMBER, NUMBER_OVERFLOW,
+use super::{resolved, EnumValue, Kind, Member, Storage, Value};
+use crate::ncbi_exception::{NcbiException, Severity};
+use crate::report::serial::asn_ber_reader::BerReader;
+use crate::report::serial::asn_input::{
+    throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, Names, StringKind, StringPost,
+    TextInput, Utf8TagOnce, R,
 };
-use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
-use crate::report::serial::object_frame::{frame_info, text_frame_site, FrameKind};
+use crate::report::serial::asn_text_reader::{AsnSource, SliceSource};
+use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
+use crate::report::serial::object_frame::{
+    frame_info, frame_name, text_frame_site, FrameKind, EXPECTED_MEMBER, HANDLE_EOF, READ_INT2,
+    SKIP_FILE_HEADER,
+};
+
+/// The text of the byte block's post ([`Post::UnendedByteBlock`]).
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1554-1565
+const UNENDED_BYTE_BLOCK: &str = "unended byte block";
 
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Post {
-    /// `ReplaceVisibleChar`'s `ERR_POST_X` of subcode 7 with a message, for a byte read as `#`.
+    /// `ReplaceVisibleChar`'s post (803.7) of a byte read as `#`.
     BadChar(ReplacedChar),
-    /// `ERR_POST` of an `Error` with a text, from a class's `PostRead`
-    /// (`CVariation_ref::PostRead`).
+    /// The error that a class's `PostRead` posts with its text (`CVariation_ref::PostRead`).
     Error(&'static str),
+    /// The warning (803.10, once per run: `asn_input::Utf8TagOnce`) of a UTF8String tag for the
+    /// VisibleString member at the stack trace (binary; `asn_input::utf8_tag_message`).
+    Utf8Tag(String),
+    /// The error post 803.4 of a byte block that a `std::exception` left with the stream in a
+    /// good state (`TypedReader::octets`).
+    UnendedByteBlock,
 }
 
 impl Post {
@@ -52,6 +74,26 @@ impl Post {
             Post::Error(text) => {
                 crate::ncbi_exception::error_post_line(None, Some(program), text.as_bytes())
             }
+            Post::Utf8Tag(trace) => crate::ncbi_exception::post_line(
+                Severity::Warning,
+                Some("803.10"),
+                Some(program),
+                utf8_tag_message(trace).as_bytes(),
+            ),
+            Post::UnendedByteBlock => crate::ncbi_exception::post_line(
+                Severity::Error,
+                Some("803.4"),
+                Some(program),
+                UNENDED_BYTE_BLOCK.as_bytes(),
+            ),
+        }
+    }
+
+    /// The post's severity: a warning for the UTF8String tag, an error for the others.
+    pub(crate) fn severity(&self) -> Severity {
+        match self {
+            Post::Utf8Tag(_) => Severity::Warning,
+            Post::BadChar(_) | Post::Error(_) | Post::UnendedByteBlock => Severity::Error,
         }
     }
 }
@@ -59,34 +101,71 @@ impl Post {
 /// Why NCBI's reader stops: the class of what it throws.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ReadError {
-    /// A `CSerialException` (with its message, for LOSAT's tests; NCBI's callers print their own
-    /// line for it).
-    Serial(String),
+    /// A `CSerialException`, with the frames it left (`AddFrameInfo`). NCBI's callers of the
+    /// PSSM reader print their own line for it.
+    Serial(NcbiException),
     /// Another `CException` that leaves the reader (`CUtilException`, `CStringException`), with
     /// the lines of NCBI's object stack.
     Exception(NcbiException),
-    /// A `CEofException` that leaves the reader: the text ends directly in the root object.
+    /// A `CEofException` that leaves the reader: the input ends directly in the root object.
     Eof,
     /// A `std::exception` that leaves the reader (its `what()`): `std::length_error` of a reserve
-    /// hook (`hooks::pre_read_member`).
+    /// hook (`hooks::pre_read_member`) or of the reserve of a string or byte block.
     Std(&'static str),
-    /// A form of the text that LOSAT's lexical reader does not take (`AsnTextErrorKind::Unsupported`,
-    /// LOSAT's own limit, not an NCBI error): the caller refuses the input with this text.
+    /// `std::bad_alloc` of a string or byte block whose length passes every allocation
+    /// (`asn_input::reserve`).
+    OutOfMemory,
+    /// What LOSAT's readers do not take (LOSAT's own limit, not an NCBI error): the caller refuses
+    /// the input with this text.
     Unsupported(String),
+}
+
+impl From<Fail> for ReadError {
+    fn from(fail: Fail) -> Self {
+        match fail {
+            Fail::Eof => ReadError::Eof,
+            Fail::Serial(e) => ReadError::Serial(*e),
+            Fail::Exception(e) => ReadError::Exception(*e),
+            Fail::OutOfMemory => ReadError::OutOfMemory,
+            Fail::Std(what) => ReadError::Std(what),
+            Fail::Unsupported(what) => ReadError::Unsupported(what.0),
+        }
+    }
 }
 
 /// What the reader read, and the messages it posted before it stopped or finished.
 pub(crate) type Read<T> = (std::result::Result<T, ReadError>, Vec<Post>);
 
-type R<T> = std::result::Result<T, ReadError>;
+impl Items for [Member] {
+    fn count(&self) -> usize {
+        self.len()
+    }
 
-impl From<AsnTextError> for ReadError {
-    fn from(error: AsnTextError) -> Self {
-        match error.kind {
-            AsnTextErrorKind::Eof => ReadError::Eof,
-            AsnTextErrorKind::Format => ReadError::Serial(error.message),
-            AsnTextErrorKind::Unsupported => ReadError::Unsupported(error.message),
-        }
+    fn name(&self, index: usize) -> &'static str {
+        self[index].name()
+    }
+}
+
+/// The named values of an ENUMERATED (`integer` false) or an INTEGER with named values.
+struct EnumType {
+    integer: bool,
+    values: &'static [EnumValue],
+}
+
+impl EnumItems for EnumType {
+    fn integer(&self) -> bool {
+        self.integer
+    }
+
+    fn value_of(&self, name: &[u8]) -> Option<i32> {
+        self.values
+            .iter()
+            .find(|value| value.name().as_bytes() == name)
+            .map(|value| value.value)
+    }
+
+    fn has_value(&self, value: i32) -> bool {
+        self.values.iter().any(|named| named.value == value)
     }
 }
 
@@ -121,16 +200,14 @@ impl Frame {
     pub(super) fn num_rows(&self) -> Option<i64> {
         self.num_rows
     }
-}
 
-impl Frame {
     /// `GetFrameInfo()` (`object_frame::frame_info`).
     fn info(&self) -> String {
         frame_info(self.kind, self.type_name, self.member)
     }
 
     /// The source file, line and function of the `END_OBJECT_FRAME` that leaves this frame
-    /// (`object_frame::text_frame_site`).
+    /// (`object_frame::text_frame_site`; a binary stream's frames see no other `CException`).
     fn site(&self) -> (&'static str, u32, &'static str) {
         text_frame_site(self.kind, self.skip)
     }
@@ -139,24 +216,91 @@ impl Frame {
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
 /// the messages posted.
-pub(crate) fn read_document(text: &[u8], root: u16) -> Read<Value> {
-    let mut reader = TypedReader {
-        r: Reader::new(SliceSource::new(text), "PSSM", "PSSM reader"),
-        frames: Vec::new(),
-        posts: Vec::new(),
-        open: Vec::new(),
-    };
-    let value = reader.document(root);
+pub(crate) fn read_document(text: &[u8], root: u16, names: Names) -> Read<Value> {
+    ObjectStream::text(SliceSource::new(text), names).read_object(root)
+}
+
+/// [`read_document`] of the ASN.1 binary object at the start of `bytes` (the stream read as `MSerial_AsnBinary`
+/// into the object: no file header).
+pub(crate) fn read_ber_document(bytes: &[u8], root: u16, names: Names) -> Read<Value> {
+    ObjectStream::binary(SliceSource::new(bytes), names).read_object(root)
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// The value of the type `ty` that a delayed member read from ASN.1 binary holds
+/// (`CDelayBuffer::Update`: a new binary stream over the bytes kept, `Value::Delayed`), which a
+/// writer reads before it writes it (`write`).
+pub(super) fn read_ber_value(bytes: &[u8], ty: u16) -> Read<Value> {
+    let mut reader = TypedReader::new(BerReader::new(SliceSource::new(bytes), Names::DELAYED));
+    // The read that kept the bytes met their UTF8String tags (and posted for the first).
+    reader.utf8_once = Utf8TagOnce::POSTED;
+    let value = reader.value(ty, false).map_err(ReadError::from);
     (value, reader.posts)
 }
 
-struct TypedReader<'a> {
-    r: Reader<SliceSource<'a>>,
+/// Objects one after another from one input (`ObjectStream::read_object`), each read by a new
+/// state of NCBI's stream at the byte after the last one the object before it took (NCBI gives the
+/// bytes its stream did not use back when an object ends, `CIStreamBuffer::Close`,
+/// strbuffer.cpp:125-139): its line count or its byte count and data limits start again, and its
+/// frames and posts are its own.
+pub(crate) struct ObjectStream<I: Input> {
+    reader: TypedReader<I>,
+}
+
+impl<S: AsnSource> ObjectStream<TextInput<S>> {
+    /// Objects in ASN.1 text from `src`, which LOSAT's messages call by `names`.
+    pub(crate) fn text(src: S, names: Names) -> Self {
+        ObjectStream {
+            reader: TypedReader::new(TextInput::new(src, names)),
+        }
+    }
+}
+
+impl<S: AsnSource> ObjectStream<BerReader<S>> {
+    /// Objects in ASN.1 binary from `src`, which LOSAT's messages call by `names`.
+    pub(crate) fn binary(src: S, names: Names) -> Self {
+        ObjectStream {
+            reader: TypedReader::new(BerReader::new(src, names)),
+        }
+    }
+}
+
+impl<I: Input> ObjectStream<I> {
+    /// The next object, as the root type `root`, with the messages posted while it was read.
+    pub(crate) fn read_object(&mut self, root: u16) -> Read<Value> {
+        let reader = &mut self.reader;
+        reader.inp.new_object();
+        reader.frames.clear();
+        reader.open.clear();
+        let value = reader.document(root).map_err(ReadError::from);
+        (value, std::mem::take(&mut reader.posts))
+    }
+
+    /// `EndOfData()`: whether no object follows (`Input::end_of_data`), which a reader of objects
+    /// one after another asks before each (a binary object that is not a SEQUENCE ends inside its
+    /// frames, where the end of the input is NCBI's `CSerialException`).
+    #[cfg(test)]
+    pub(crate) fn end_of_data(&mut self) -> bool {
+        self.reader.inp.end_of_data()
+    }
+
+    /// The primitives of the stream (where it stands: `Input::position`).
+    #[cfg(test)]
+    pub(crate) fn input(&self) -> &I {
+        &self.reader.inp
+    }
+}
+
+struct TypedReader<I: Input> {
+    inp: I,
     frames: Vec<Frame>,
     posts: Vec<Post>,
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
     /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
     open: Vec<Open>,
+    /// Whether the warning of a UTF8String tag was posted (`Utf8TagOnce`; one stream is all a
+    /// run of LOSAT reads with it).
+    utf8_once: Utf8TagOnce,
 }
 
 /// A value being read that waits for a value inside it (`TypedReader::value`).
@@ -170,7 +314,6 @@ enum Open {
         skip: bool,
         values: Vec<(u16, Value)>,
         reading: usize,
-        block_start: bool,
     },
     /// A CHOICE reading its variant.
     Choice { index: u16 },
@@ -179,7 +322,6 @@ enum Open {
         element: u16,
         skip: bool,
         values: Vec<Value>,
-        block_start: bool,
     },
     /// A delayed member (`delayed`) from `start`.
     Delayed { start: usize },
@@ -192,7 +334,18 @@ enum Step {
     Done(Value),
 }
 
-impl TypedReader<'_> {
+impl<I: Input> TypedReader<I> {
+    fn new(inp: I) -> Self {
+        TypedReader {
+            inp,
+            frames: Vec::new(),
+            posts: Vec::new(),
+            open: Vec::new(),
+            utf8_once: Utf8TagOnce::default(),
+        }
+    }
+
+    /// `BEGIN_OBJECT_FRAME` of a frame of `kind`.
     fn push(&mut self, kind: FrameKind, type_name: Option<&'static str>, skip: bool) {
         self.frames.push(Frame {
             kind,
@@ -202,6 +355,7 @@ impl TypedReader<'_> {
             ty: None,
             num_rows: None,
         });
+        self.inp.set_stack_depth(self.frames.len());
     }
 
     /// `push` of a class or choice frame of the type `ty`.
@@ -212,22 +366,47 @@ impl TypedReader<'_> {
         }
     }
 
-    /// `END_OBJECT_FRAME`: the frame is left, and an error that leaves it gets NCBI's handling
-    /// (`Frame::site`): a `CException` other than a `CSerialException` takes the frame's line; an
-    /// end of the text (`CEofException`, `HandleEOF`, objistr.cpp:599-608) becomes a
-    /// `CSerialException` unless fewer than 2 frames stay.
-    fn pop<T>(&mut self, result: R<T>) -> R<T> {
+    /// `END_OBJECT_FRAME` of the top frame after what it holds was read.
+    fn pop_frame(&mut self) -> Frame {
         let frame = self.frames.pop().expect("a frame to leave");
-        result.map_err(|error| match error {
-            ReadError::Exception(e) => {
-                let (file, line, function) = frame.site();
-                ReadError::Exception(e.rethrow_same(file, line, function, frame.info()))
+        self.inp.set_stack_depth(self.frames.len());
+        frame
+    }
+
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-214 (cited at
+    // `report::serial::object_frame::text_frame_site`)
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608 (`HandleEOF`, cited at
+    // `object_frame::HANDLE_EOF`)
+    /// `END_OBJECT_FRAME`: the frame is left, and an error that leaves it gets NCBI's handling. A
+    /// `CSerialException` takes the frame's name (`AddFrameInfo` of `GetFrameName()`); a
+    /// `CEofException` is `HandleEOF`, which passes it on when fewer than 2 frames stay and throws
+    /// its own `CSerialException` (with the frame's information, and without the frame's name)
+    /// otherwise; another `CException` takes the frame's line (`NCBI_RETHROW_SAME` with
+    /// `GetFrameInfo()`).
+    fn pop<T>(&mut self, result: R<T>) -> R<T> {
+        let frame = self.pop_frame();
+        result.map_err(|fail| self.leave(frame, fail))
+    }
+
+    /// What leaving `frame` (the stack is below it now) adds to `fail`.
+    #[cold]
+    #[inline(never)]
+    fn leave(&self, frame: Frame, fail: Fail) -> Fail {
+        match fail {
+            Fail::Serial(mut e) => {
+                e.add_frame_info(frame_name(frame.kind, frame.type_name, frame.member));
+                Fail::Serial(e)
             }
-            ReadError::Eof if self.frames.len() >= 2 => {
-                ReadError::Serial(format!("unexpected end of the text:{}", frame.info()))
+            Fail::Eof if self.frames.len() >= 2 => Fail::serial(NcbiException::new(
+                HANDLE_EOF,
+                format!("{}: {}", self.inp.position(), frame.info()),
+            )),
+            Fail::Exception(e) => {
+                let (file, line, function) = frame.site();
+                Fail::exception(e.rethrow_same(file, line, function, frame.info()))
             }
             other => other,
-        })
+        }
     }
 
     fn set_member(&mut self, name: &'static str) {
@@ -257,28 +436,36 @@ impl TypedReader<'_> {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-959 and 959-969
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
+    /// `stream >> object` of the root type `root`: `SkipFileHeader`, then `Read`, each in a named
+    /// frame of its own.
     fn document(&mut self, root: u16) -> R<Value> {
         let name = super::type_info(root).name();
         self.push(FrameKind::Named, Some(name), false);
-        let header = self
-            .r
-            .file_header()
-            .map_err(ReadError::from)
-            .and_then(|id| {
-                let id = self.r.bytes(id);
-                if !id.is_empty() && id != name.as_bytes() {
-                    return Err(ReadError::Serial(format!(
-                        "incompatible type {}<>{name}",
-                        String::from_utf8_lossy(id)
-                    )));
-                }
-                Ok(())
-            });
+        let header = self.file_header(name);
         self.pop(header)?;
         self.push(FrameKind::Named, Some(name), false);
         let value = self.value(root, false);
         self.pop(value)
+    }
+
+    /// `SkipFileHeader` of the type: the type name of a text document must be the root's.
+    fn file_header(&mut self, name: &'static str) -> R<()> {
+        match self.inp.read_file_header()? {
+            Some(id) if !id.is_empty() && id != name.as_bytes() => Err(throw_error(
+                SKIP_FILE_HEADER,
+                self.inp.position(),
+                [
+                    b"incompatible type ".as_slice(),
+                    &id,
+                    b"<>",
+                    name.as_bytes(),
+                ]
+                .concat(),
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the hooks
@@ -299,10 +486,8 @@ impl TypedReader<'_> {
                 Err(mut error) => {
                     self.open.truncate(open);
                     while self.frames.len() > frames {
-                        error = match self.pop::<()>(Err(error)) {
-                            Err(error) => error,
-                            Ok(()) => unreachable!("an error stays one"),
-                        };
+                        let frame = self.pop_frame();
+                        error = self.leave(frame, error);
                     }
                     return Err(error);
                 }
@@ -319,22 +504,23 @@ impl TypedReader<'_> {
         let value = match info.kind {
             Kind::Sequence(members) => {
                 self.push_object(FrameKind::Class, target, info.name(), skip);
-                self.r.start_block()?;
+                self.inp.begin_class()?;
                 self.push(FrameKind::ClassMember, None, skip);
-                return self.next_member(target, members.members(), skip, Vec::new(), 0, true);
+                return self.next_member(target, members.members(), skip, Vec::new(), 0);
             }
             Kind::Choice(variants) => {
                 return self.start_choice(target, info.name(), variants.members(), skip)
             }
-            Kind::List { element, .. } => return self.start_list(element, skip),
+            Kind::List { element, set } => return self.start_list(element, set, skip),
             Kind::Alias(_) => unreachable!("resolved"),
             Kind::Integer(storage) => self.integer(storage, skip)?,
             Kind::Enumerated { integer, values } => {
                 self.enumerated(values.values(), integer, skip)?
             }
-            Kind::Boolean => Value::Bool(self.r.boolean()?),
+            // `SkipBool` and `SkipNull` read what `ReadBool` and `ReadNull` read.
+            Kind::Boolean => Value::Bool(self.inp.read_bool()?),
             Kind::Null => {
-                self.r.null()?;
+                self.inp.read_null()?;
                 Value::Null
             }
             Kind::Real => self.real(skip)?,
@@ -359,8 +545,9 @@ impl TypedReader<'_> {
                 skip,
                 mut values,
                 reading,
-                block_start,
             } => {
+                // `EndClassMember`, in the member's frame.
+                self.inp.end_member()?;
                 if !skip {
                     // The `num-rows` of a Seq-table, which the reserve hook of its columns' data
                     // reads from the object being read (`hooks::pre_read_variant`).
@@ -373,36 +560,40 @@ impl TypedReader<'_> {
                     }
                     values.push((reading as u16, value));
                 }
-                self.next_member(ty, members, skip, values, reading + 1, block_start)
+                self.next_member(ty, members, skip, values, reading + 1)
             }
             Open::Choice { index } => {
-                self.frames.pop();
-                self.frames.pop();
+                self.inp.end_variant()?;
+                self.pop_frame();
+                self.inp.end_choice()?;
+                self.pop_frame();
                 Ok(Step::Done(Value::Choice(index, Box::new(value))))
             }
             Open::List {
                 element,
                 skip,
                 mut values,
-                block_start,
             } => {
                 if !skip {
                     values.push(value);
                 }
-                self.next_element(element, skip, values, block_start)
+                self.next_element(element, skip, values)
             }
-            Open::Delayed { start } => Ok(Step::Done(Value::Delayed(
-                self.r.bytes(start..self.r.pos).to_vec(),
-            ))),
+            Open::Delayed { start } => Ok(Step::Done(Value::Delayed {
+                encoding: I::ENCODING,
+                bytes: self.inp.delayed(start),
+            })),
         }
     }
 
-    /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `{`, the member
-    /// frame): the next member in module order (`BeginClassMember` of `classType` at `pos`) with
-    /// the mandatory members before it checked, and a read's (not a skip's) member hooks before its
-    /// value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
-    /// members after it checked, `}`, the class frame left.
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:86-111
+    /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `BeginClass`, the
+    /// member frame): the next member in module order (`BeginClassMember` of the class type and `pos`) with
+    /// the mandatory members before it checked, and a read's (not a skip's) member hooks before
+    /// its value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
+    /// members after it checked, `EndClass`, the class frame left.
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-109
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (the binary stream's,
+    // objistrasnb.cpp:1210-1233, is the same with its own `BeginClass`)
     fn next_member(
         &mut self,
         ty: u16,
@@ -410,21 +601,19 @@ impl TypedReader<'_> {
         skip: bool,
         values: Vec<(u16, Value)>,
         pos: usize,
-        mut block_start: bool,
     ) -> R<Step> {
-        if self.r.next_element(&mut block_start)? {
-            let index = self.item_index(members, pos, true)?;
+        if let Some(index) = self.inp.begin_member(members, pos)? {
             let member = &members[index];
             self.set_member(member.name());
             for missing in &members[pos..index] {
-                expected_member(missing)?;
+                self.expected_member(missing)?;
             }
             if !skip {
                 super::hooks::pre_read_member(ty, index, &values)?;
             }
             let delayed = member.flags & super::DELAYED != 0 && !skip;
             let start = if delayed {
-                Some(self.delay_start()?)
+                Some(self.inp.delay_start()?)
             } else {
                 None
             };
@@ -434,7 +623,6 @@ impl TypedReader<'_> {
                 skip,
                 values,
                 reading: index,
-                block_start,
             });
             if let Some(start) = start {
                 self.open.push(Open::Delayed { start });
@@ -442,65 +630,32 @@ impl TypedReader<'_> {
             }
             return Ok(Step::Read(member.ty, skip));
         }
-        self.frames.pop();
+        self.pop_frame();
         for member in &members[pos..] {
-            expected_member(member)?;
+            self.expected_member(member)?;
         }
-        self.r.end_block()?;
-        self.frames.pop();
+        self.inp.end_class()?;
+        self.pop_frame();
         Ok(Step::Done(Value::Sequence(values)))
     }
 
-    /// `ReadMemberId` after `SkipWhiteSpace` and `GetMemberIndex` of `classType`, `id` and `pos`
-    /// (from `pos`, `in_class`) or `GetChoiceIndex` of `choiceType` and `id`: the member or variant
-    /// named or tagged.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:407-424
-    // `GetAltItemIndex` (366-387) tries the name with its first letter in upper case and takes it
-    // only for an item without a prefix, which no member of an ASN.1 module is (its names start
-    // with a lower-case letter): an upper-case first letter is never a member here (c21 of
-    // SURVEY_D3: `Biomol`).
-    fn item_index(&mut self, items: &'static [Member], pos: usize, in_class: bool) -> R<usize> {
-        let found = match self.r.member_or_tag()? {
-            MemberId::Name(range) => {
-                let id = self.r.bytes(range);
-                if id.is_empty() && !in_class {
-                    return Err(ReadError::Serial("choice variant id expected".into()));
-                }
-                items[pos..]
-                    .iter()
-                    .position(|item| item.name().as_bytes() == id)
-                    .map(|at| at + pos)
-            }
-            MemberId::Tag(range) => {
-                // Parse the tag with `NStr::StringToInt` using default flags: its `CStringException` leaves
-                // the reader (NCBI 2.17.0: `[3x]`, `[99999999999]`, probe e03, e07).
-                let tag = crate::ncbi_str::string_to_int(self.r.bytes(range), 0)
-                    .map_err(ReadError::Exception)?;
-                items[pos..]
-                    .iter()
-                    .position(|item| i32::from(item.tag) == tag)
-                    .map(|at| at + pos)
-            }
-        };
-        found.ok_or_else(|| ReadError::Serial("unexpected member or variant".into()))
-    }
-
-    /// The delayed member: `StartDelayBuffer` (white space skipped), then the value skipped
-    /// (`Open::Delayed`), the text kept (`Value::Delayed`).
-    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1648-1652
-    // (psiblast and tblastn set no hook on their stream: `ShouldParseDelayBuffer` is false,
-    // objistr.cpp:745-760.)
-    fn delay_start(&mut self) -> R<usize> {
-        self.r.skip_white_space()?;
-        Ok(self.r.pos)
+    /// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
+    /// (`CSerialException`, NCBI's default verification).
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+    fn expected_member(&self, member: &Member) -> R<()> {
+        if member.optional() {
+            return Ok(());
+        }
+        Err(throw_error(
+            EXPECTED_MEMBER,
+            self.inp.position(),
+            format!("member {} expected", member.name()),
+        ))
     }
 
     /// `ReadChoiceSimple` / `SkipChoiceSimple`: the variant of the CHOICE `ty`; a read (not a skip)
     /// runs the class's variant hooks before its value (`hooks::pre_read_variant`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1501
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1453-1475 (`BeginChoiceVariant`,
-    // cited at `Reader::choice`: `NextElement` at the choice's start, then the variant's id)
     fn start_choice(
         &mut self,
         ty: u16,
@@ -509,12 +664,9 @@ impl TypedReader<'_> {
         skip: bool,
     ) -> R<Step> {
         self.push_object(FrameKind::Choice, ty, name, skip);
+        self.inp.begin_choice()?;
         self.push(FrameKind::ChoiceVariant, None, skip);
-        let mut block_start = true;
-        if !self.r.next_element(&mut block_start)? {
-            return Err(ReadError::Serial("choice variant id expected".into()));
-        }
-        let index = self.item_index(variants, 0, false)?;
+        let index = self.inp.begin_variant(variants)?;
         let variant = &variants[index];
         self.set_member(variant.name());
         if !skip {
@@ -526,14 +678,14 @@ impl TypedReader<'_> {
         Ok(Step::Read(variant.ty, skip))
     }
 
-    /// `ReadContainer` / `SkipContainer`.
+    /// `ReadContainer` / `SkipContainer` of a SEQUENCE OF or (`set`) SET OF.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1245-1274
     // The container's type information is anonymous (an implicit class such as `Seq-descr` has
     // no frame of its own, `ReadImplicitMember`, classinfo.cpp:289-306): `Object type= ` names
     // nothing (c07 of SURVEY_D3).
-    fn start_list(&mut self, element: u16, skip: bool) -> R<Step> {
+    fn start_list(&mut self, element: u16, set: bool, skip: bool) -> R<Step> {
         self.push(FrameKind::Array, Some(""), skip);
-        self.r.start_block()?;
+        self.inp.begin_container(set)?;
         self.push(FrameKind::ArrayElement, None, skip);
         let numbers = match resolved(element).kind {
             // The elements of an INTEGER or REAL list are read as the numbers themselves (no
@@ -544,43 +696,35 @@ impl TypedReader<'_> {
             }
             Kind::Integer(storage) => Value::Ints(self.integers(storage, skip, |value| value)?),
             Kind::Real => Value::Reals(self.reals(skip)?),
-            _ => return self.next_element(element, skip, Vec::new(), true),
+            _ => return self.next_element(element, skip, Vec::new()),
         };
-        self.frames.pop();
-        self.r.end_block()?;
-        self.frames.pop();
+        self.pop_frame();
+        self.inp.end_container()?;
+        self.pop_frame();
         Ok(Step::Done(numbers))
     }
 
     /// The next element of a SEQUENCE OF or SET OF of values; after the last, the element frame
-    /// left, `}`, the array frame left.
-    fn next_element(
-        &mut self,
-        element: u16,
-        skip: bool,
-        values: Vec<Value>,
-        mut block_start: bool,
-    ) -> R<Step> {
-        if self.r.next_element(&mut block_start)? {
+    /// left, the container's end, the array frame left.
+    fn next_element(&mut self, element: u16, skip: bool, values: Vec<Value>) -> R<Step> {
+        if self.inp.begin_element()? {
             self.open.push(Open::List {
                 element,
                 skip,
                 values,
-                block_start,
             });
             return Ok(Step::Read(element, skip));
         }
-        self.frames.pop();
-        self.r.end_block()?;
-        self.frames.pop();
+        self.pop_frame();
+        self.inp.end_container()?;
+        self.pop_frame();
         Ok(Step::Done(Value::List(values)))
     }
 
-    /// `elements` of an INTEGER list, each `store`d as the list keeps it.
+    /// The elements of an INTEGER list, each `store`d as the list keeps it.
     fn integers<T>(&mut self, storage: Storage, skip: bool, store: impl Fn(i64) -> T) -> R<Vec<T>> {
         let mut values = Vec::new();
-        let mut block_start = true;
-        while self.r.next_element(&mut block_start)? {
+        while self.inp.begin_element()? {
             if let Some(value) = self.integer_number(storage, skip)? {
                 values.push(store(value));
             }
@@ -588,85 +732,15 @@ impl TypedReader<'_> {
         Ok(values)
     }
 
-    /// `elements` of a REAL list.
+    /// The elements of a REAL list.
     fn reals(&mut self, skip: bool) -> R<Vec<f64>> {
         let mut values = Vec::new();
-        let mut block_start = true;
-        while self.r.next_element(&mut block_start)? {
+        while self.inp.begin_element()? {
             if let Some(value) = self.real_number(skip)? {
                 values.push(value);
             }
         }
         Ok(values)
-    }
-
-    fn util_error(&self, site: ThrowSite, what: &str) -> ReadError {
-        ReadError::Exception(NcbiException::new(
-            site,
-            format!("{what} in line {}", self.r.line),
-        ))
-    }
-
-    /// `GetInt4`, `GetUint4` (`signed` false: no `-`) and `GetInt8` after `SkipWhiteSpace`, the
-    /// digits checked against `max` as NCBI checks them.
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
-    fn get_number(&mut self, max: u64, signed: bool) -> R<i64> {
-        // The position is kept in a local and written once (`Reader::white_space_at`).
-        let r = &mut self.r;
-        let (pos, c) = r.white_space_at(r.pos)?;
-        // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
-        let (pos, mut c) = r.ws_at(pos, c)?;
-        let mut pos = pos + 1;
-        let mut negative = false;
-        if signed && c == b'-' {
-            negative = true;
-            c = r.char_at(pos)?;
-            pos += 1;
-        } else if c == b'+' {
-            c = r.char_at(pos)?;
-            pos += 1;
-        }
-        if !c.is_ascii_digit() {
-            r.pos = pos;
-            return Err(self.util_error(BAD_NUMBER, "bad number"));
-        }
-        let mut n = u64::from(c - b'0');
-        let before_mul = max / 10;
-        let limit_add = max % 10 + u64::from(negative);
-        let mut overflow = false;
-        let (end, _) = r.src.scan(pos, |d| {
-            if !d.is_ascii_digit() {
-                return false;
-            }
-            let d = u64::from(d - b'0');
-            if n > before_mul || (n == before_mul && d > limit_add) {
-                overflow = true;
-                return false;
-            }
-            n = n * 10 + d;
-            true
-        });
-        if overflow {
-            // `GetInt4` takes the digit before it checks the overflow.
-            r.pos = end + 1;
-            return Err(self.util_error(NUMBER_OVERFLOW, "number overflow"));
-        }
-        r.pos = end;
-        // `-Int4(n)` of n = 2^31 is the least Int4 (and likewise in 64 bits).
-        Ok(if negative {
-            (n as i64).wrapping_neg()
-        } else {
-            n as i64
-        })
-    }
-
-    fn int4(&mut self) -> R<i32> {
-        Ok(self.get_number(i32::MAX as u64, true)? as i32)
-    }
-
-    fn uint4(&mut self) -> R<u32> {
-        Ok(self.get_number(u64::from(u32::MAX), false)? as u32)
     }
 
     /// An INTEGER of storage `storage` (`ReadStd`), or its skip (`SkipSNumber`, `SkipUNumber`).
@@ -683,17 +757,21 @@ impl TypedReader<'_> {
     /// to make and drop for each element).
     fn integer_number(&mut self, storage: Storage, skip: bool) -> R<Option<i64>> {
         if skip {
-            self.skip_number(storage != Storage::Uint4)?;
+            self.inp.skip_number(storage != Storage::Uint4)?;
             return Ok(None);
         }
         let value = match storage {
-            Storage::Int4 => i64::from(self.int4()?),
-            Storage::Uint4 => i64::from(self.uint4()?),
-            Storage::Int8 => self.get_number(i64::MAX as u64, true)?,
+            Storage::Int4 => i64::from(self.inp.read_i32()?),
+            Storage::Uint4 => i64::from(self.inp.read_u32()?),
+            Storage::Int8 => self.inp.read_i64()?,
             Storage::Int2 => {
-                let value = self.int4()?;
+                let value = self.inp.read_i32()?;
                 if i16::try_from(value).is_err() {
-                    return Err(ReadError::Serial("integer overflow".into()));
+                    return Err(throw_error(
+                        READ_INT2,
+                        self.inp.position(),
+                        "integer overflow",
+                    ));
                 }
                 i64::from(value)
             }
@@ -701,95 +779,36 @@ impl TypedReader<'_> {
         Ok(Some(value))
     }
 
-    /// `SkipSNumber` (`signed`) and `SkipUNumber`: an optional sign (`+` only for the unsigned)
-    /// right before a digit, then digits, with no range.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1024-1048
-    // (`SkipUNumber`, 1050-1074, takes only `+` and peeks past the digits with `PeekCharNoEOF`.)
-    fn skip_number(&mut self, signed: bool) -> R<()> {
-        // The position is kept in a local and written once (`Reader::white_space_at`).
-        let r = &mut self.r;
-        let (start, mut c) = r.white_space_at(r.pos)?;
-        let mut i = 1;
-        if c == b'+' || (signed && c == b'-') {
-            c = match r.src.byte_at(start + 1) {
-                Some(c) => c,
-                None => return Err(Self::end_of_number(r, start)),
-            };
-            i = 2;
-        }
-        if !c.is_ascii_digit() {
-            r.pos = start;
-            return Err(ReadError::Serial(format!(
-                "bad {} integer in line {}",
-                if signed { "signed" } else { "unsigned" },
-                r.line
-            )));
-        }
-        let (end, c) = r.src.scan(start + i, |c| c.is_ascii_digit());
-        // `SkipSNumber` peeks past the digits with `PeekChar`, which fails at the end of the
-        // text; `SkipUNumber` with `PeekCharNoEOF`.
-        if signed && c.is_none() {
-            return Err(Self::end_of_number(r, start));
-        }
-        r.pos = end;
-        Ok(())
-    }
-
-    /// The end of the text inside a number that starts at `start`: `PeekChar`'s, at `start`.
-    #[cold]
-    fn end_of_number(r: &mut Reader<SliceSource<'_>>, start: usize) -> ReadError {
-        r.pos = start;
-        r.end_of_text().into()
-    }
-
-    /// `CEnumeratedTypeInfo::ReadEnum` / `SkipEnum` over `ReadEnum` of the stream: a lower-case
-    /// name of the list, or a number (one of the list for an ENUMERATED); an exception that is not
-    /// a `CSerialException` gets the line of the type's `NCBI_RETHROW_SAME`.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
+    /// `CEnumeratedTypeInfo::ReadEnum` / `SkipEnum` over `ReadEnum` of the stream: an exception
+    /// gets the line of the type's `NCBI_RETHROW_SAME` (an end of the input stays one).
     // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:416-432
     // (`SkipEnum`, 468-484, reads the value the same way and rethrows at 478.)
     fn enumerated(&mut self, values: &'static [EnumValue], integer: bool, skip: bool) -> R<Value> {
-        let result = self.enum_value(values, integer);
-        result.map(Value::Enum).map_err(|error| match error {
-            ReadError::Exception(e) => {
-                let (line, function) = if skip {
-                    (478, "ncbi::CEnumeratedTypeInfo::SkipEnum")
-                } else {
-                    (428, "ncbi::CEnumeratedTypeInfo::ReadEnum")
-                };
-                ReadError::Exception(e.rethrow_same(
+        let items = EnumType { integer, values };
+        let result = self.inp.read_enum(&items);
+        result.map(Value::Enum).map_err(|fail| {
+            let (line, function) = if skip {
+                (478, "ncbi::CEnumeratedTypeInfo::SkipEnum")
+            } else {
+                (428, "ncbi::CEnumeratedTypeInfo::ReadEnum")
+            };
+            let rethrow = |e: Box<NcbiException>| {
+                e.rethrow_same(
                     "src/serial/enumerated.cpp",
                     line,
                     function,
                     "invalid enum value",
-                ))
+                )
+            };
+            match fail {
+                Fail::Serial(e) => Fail::serial(rethrow(e)),
+                Fail::Exception(e) => Fail::exception(rethrow(e)),
+                other => other,
             }
-            other => other,
         })
     }
 
-    fn enum_value(&mut self, values: &'static [EnumValue], integer: bool) -> R<i32> {
-        let c = self.r.skip_white_space()?;
-        let id = self.r.scan_end_of_id(c.is_ascii_lowercase())?;
-        if !id.is_empty() {
-            let id = self.r.bytes(id);
-            return values
-                .iter()
-                .find(|value| value.name().as_bytes() == id)
-                .map(|value| value.value)
-                .ok_or_else(|| ReadError::Serial("invalid value of enumerated type".into()));
-        }
-        let value = self.int4()?;
-        if !integer && !values.iter().any(|named| named.value == value) {
-            return Err(ReadError::Serial("invalid value of enumerated type".into()));
-        }
-        Ok(value)
-    }
-
-    /// `ReadDouble` / `SkipFNumber`: a word, or `{ mantissa, base, exponent }` whose base is read
-    /// with `ReadUint4` (a `CUtilException` for a `-`) and exponent with `ReadInt4`.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (cited at `Reader::real`)
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1076-1091
+    /// `ReadDouble` / `SkipFNumber`.
     fn real(&mut self, skip: bool) -> R<Value> {
         Ok(self.real_number(skip)?.map_or(Value::Null, Value::Real))
     }
@@ -797,51 +816,23 @@ impl TypedReader<'_> {
     /// `real`'s number (`None` when skipped), for the lists that keep the numbers.
     fn real_number(&mut self, skip: bool) -> R<Option<f64>> {
         if skip {
-            if self.r.skip_white_space()? != b'{' {
-                self.r.scan_end_of_id(true)?;
-                return Ok(None);
-            }
-            self.r.pos += 1;
-            self.skip_number(true)?;
-            self.r.expect(b',')?;
-            let base = self.uint4()?;
-            self.r.expect(b',')?;
-            self.skip_number(true)?;
-            self.r.expect(b'}')?;
-            if base != 2 && base != 10 {
-                return Err(ReadError::Serial(
-                    "illegal REAL base (must be 2 or 10)".into(),
-                ));
-            }
+            self.inp.skip_real()?;
             return Ok(None);
         }
-        if let Some(word) = self.r.real_word()? {
-            return Ok(Some(word));
-        }
-        let (mantissa, is_negative) = self.r.real_mantissa()?;
-        self.r.expect(b',')?;
-        let base = self.uint4()?;
-        self.r.expect(b',')?;
-        let exp = self.int4()?;
-        self.r.expect(b'}')?;
-        real_of_parts(mantissa, is_negative, base, exp)
-            .map(Some)
-            .ok_or_else(|| ReadError::Serial("illegal REAL base (must be 2 or 10)".into()))
+        Ok(Some(self.inp.read_real()?))
     }
 
-    /// `ReadStringValue` with the fix of `kind` / `SkipString` (`Reader::visible_string`): for a
-    /// VisibleString each byte outside 0x20..0x7E read as `#`, with NCBI's message.
+    /// `ReadString` (`ReadStringStore`) / `SkipString` of a string of `kind`, with NCBI's posts.
     fn string(&mut self, kind: StringKind, skip: bool) -> R<Vec<u8>> {
         let mut out = Vec::new();
-        let mut replaced = Vec::new();
-        let result = self.r.visible_string(
-            &mut out,
-            kind != StringKind::Utf8,
-            skip,
-            &mut |line, byte, piece| replaced.push((line, byte, piece.to_vec())),
-        );
-        for (line, byte, piece) in replaced {
-            self.post_bad_char(line, byte, &piece);
+        let mut posts = Vec::new();
+        let result = if skip {
+            self.inp.skip_string(kind, &mut posts)
+        } else {
+            self.inp.read_string(kind, &mut out, &mut posts)
+        };
+        for post in posts {
+            self.post(post);
         }
         result?;
         Ok(out)
@@ -849,62 +840,48 @@ impl TypedReader<'_> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
     // `report::serial::encoder::ReplacedChar`)
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:807-810
-    // (`CObjectIStreamAsn` keeps `GetPosition` of its base; `CIStreamBuffer::GetLine` is the line
-    // of the reader.)
-    fn post_bad_char(&mut self, line: usize, byte: u8, string: &[u8]) {
-        self.posts.push(Post::BadChar(ReplacedChar {
-            trace: self.stack_trace(),
-            byte,
-            position: StreamPosition::Line(line as u64),
-            string: string.into(),
-        }));
-    }
-
-    /// `ReadBytes` / `SkipByteBlock` (the skip takes `H` or `B` after white space).
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1170-1197
-    fn octets(&mut self, skip: bool) -> R<Value> {
-        if !skip {
-            return Ok(Value::Octets(self.r.octets()?));
-        }
-        self.r.expect(b'\'')?;
-        loop {
-            let c = self.r.peek_char(0)?;
-            self.r.pos += 1;
-            match c {
-                b'0'..=b'9' | b'A'..=b'F' | b'a'..=b'f' => {}
-                b'\'' => break,
-                b'\r' | b'\n' => self.r.skip_end_of_line(c),
-                _ => {
-                    self.r.pos -= 1;
-                    return Err(ReadError::Serial(format!(
-                        "bad char in octet string: #{}",
-                        c as i8
-                    )));
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310 (cited at
+    // `asn_input::utf8_tag_message`)
+    /// What reading a string posted, with the stack trace (`GetStackTrace()`) that NCBI's message
+    /// names.
+    fn post(&mut self, post: StringPost) {
+        match post {
+            StringPost::BadChar {
+                position,
+                byte,
+                string,
+            } => self.posts.push(Post::BadChar(ReplacedChar {
+                trace: self.stack_trace(),
+                byte,
+                position,
+                string: string.into(),
+            })),
+            StringPost::Utf8Tag => {
+                if self.utf8_once.first() {
+                    self.posts.push(Post::Utf8Tag(self.stack_trace()));
                 }
             }
         }
-        match self.r.skip_white_space()? {
-            b'H' | b'B' => {
-                self.r.pos += 1;
-                Ok(Value::Null)
-            }
-            _ => Err(ReadError::Serial("'H' or 'B' expected".into())),
-        }
     }
-}
 
-/// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
-/// (`CSerialException`, NCBI's default verification).
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
-fn expected_member(member: &Member) -> R<()> {
-    if member.optional() {
-        return Ok(());
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:610-614
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1554-1565
+    // (A `std::exception` changes no state of the stream; the end of the data inside the bytes
+    // and the stream's own errors leave it failed, and the block then posts nothing.)
+    /// `ReadBytes` / `SkipByteBlock` of an OCTET STRING. A `std::exception` that leaves the byte
+    /// block (its reserve, `asn_input::reserve`) passes its destructor with the stream in a good
+    /// state, which posts that the block was not ended before the exception goes on.
+    fn octets(&mut self, skip: bool) -> R<Value> {
+        if skip {
+            self.inp.skip_octets()?;
+            return Ok(Value::Null);
+        }
+        let value = self.inp.read_octets();
+        if matches!(value, Err(Fail::OutOfMemory | Fail::Std(_))) {
+            self.posts.push(Post::UnendedByteBlock);
+        }
+        Ok(Value::Octets(value?))
     }
-    Err(ReadError::Serial(format!(
-        "member {} expected",
-        member.name()
-    )))
 }
 
 /// The type `ty` refers to after its aliases (the index of `resolved(ty)`), for the hooks.

@@ -125,7 +125,7 @@ Strategy files:
 
 ## tblastn
 
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation) makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
 - In practice this happens with `-window_size 0`: no frame of such a subject, three letters at most, holds two words that do not overlap.
 - With `-window_size 0` (the one-hit word finder) and a low `-threshold`, LOSAT refuses the cases below.
 - Two gapped starts of one-hit alignments of negative length that lie at the end of their 5,000,000-letter part of a frame, or past it. NCBI never finishes on them.
@@ -137,7 +137,8 @@ Strategy files:
 - Where that part, from the frame's first letter, ends before the frame's last letter instead (masks at or near either end of a sequence), LOSAT searches the part alone; see [Differences](differences.md).
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
 - With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`.
-- For both `tblastn` cases, LOSAT writes the results of the query batches before and then stops with the error.
+- With `-use_sw_tback` and `-ungapped`, NCBI's traceback still sets up the Smith-Waterman alignment, reads gapped statistics that an ungapped search never computes, and crashes at every query batch it searches, with hits or without. LOSAT refuses at the first query batch that it searches, as `blastx` does.
+- For these `tblastn` cases, LOSAT writes the results of the query batches before and then stops with the error.
 
 ## tblastx
 
@@ -167,6 +168,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A PSSM of frequency ratios only, written by row. NCBI reads the scores it computes for it in the wrong order.
 - A PSSM whose position-based scaling gives score frequencies but no Karlin-Altschul parameters. NCBI goes on with a Lambda of -1.
 - A PSSM with a negative gapped Karlin-Altschul value (`lambda`, `kappa` or `h`). NCBI goes on with a block it holds invalid. A negative ungapped value (`lambdaUngapped`, `kappaUngapped` or `hUngapped`) gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI.
+- A PSSM whose gapped `lambda` is infinite (`PLUS-INFINITY`), whose gapped `lambda`, `kappa` or `h` is not a number (`NOT-A-NUMBER`), or, with psiblast, whose `lambdaUngapped` is infinite, in ASN.1 text or binary. NCBI goes on with these values; LOSAT does not yet compute the hits, E-values and bit scores that NCBI computes from them. `MINUS-INFINITY` is a negative value (above); an ungapped value that is not a number gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI.
 - A PSSM of frequency ratios only from which NCBI's PSSM engine makes no scaled scores. NCBI does not finish or stops with an error.
 - A query without a Seq-id, with a Geninfo import id (`gim|`, which NCBI cannot resolve), or with a database ordinal (`gnl|BL_ORD_ID|n`).
 - A query with a local Seq-id among other Seq-ids (NCBI's reports then show it as no FASTA query is shown), with an empty local id, or with a Seq-id that has neither an accession nor a name.
@@ -176,6 +178,8 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A PSSM whose columns' largest scores add up to 2^30 or more. Every PSSM of fewer than 19,800 columns passes.
 - A query whose letters give no Karlin-Altschul parameters. NCBI crashes.
 - A PSSM without a query, and query Seq-data other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
+- A query without letters, or whose number of letters is not the `length` of its Seq-inst. For most such lengths NCBI crashes or writes past its buffer (seen with 0, 1, 2, 10, 28, 31, 60, 255 and 4,294,967,295 for 30 letters). With a `length` one less than the letters (29 for 30), NCBI searches that many letters; LOSAT does not yet give this answer.
+- A PSSM in ASN.1 binary form that ends inside a string or a byte block (OCTET STRING or BIT STRING) whose length asks for 1 GiB or more and less than 2^47 bytes. Whether NCBI's allocation succeeds depends on the host's memory; at 2^47 bytes or more, NCBI's `BLAST ran out of memory` (exit status 4) is written, as in NCBI.
 - A query whose annotations (`annot`) give a case of NCBI's object manager whose output names a memory address or depends on the machine. These cases are an empty location (`Empty region in 0x...`), a NULL-pointer report, a Dense-seg that NCBI divides by zero, malformed BitMagic data of a Seq-table, reads past a Packed-seg's vectors, and integer overflows. BitMagic data is decoded as NCBI decodes it; refused are the data that NCBI reads past (such as empty or cut data), decodes with undefined behaviour (such as an XOR block or a write past BitMagic's blocks) or from memory it did not write, and a GAP block that is not one where NCBI's scalar, SSE2 and SSE4.2 builds decode it or answer a row of it differently.
 - Also two Seq-ids of one location (a feature's, a Seq-table's or a Seq-table row's) with different messages that NCBI orders by address; a Seq-table of more than 10,000,000 rows; a Std-seg of more than 1,000,000 rows; and XML and JSON reports of an untitled query whose annotations hold features.
 - An error about the query's annotations, or a Seq-id twice in the entry. Two Seq-ids count as one when NCBI's object manager takes them as one: equal ones, and ones that differ only where NCBI does not look, such as the case of letters, GenBank, EMBL or DDBJ for an accession alone, or PDB's `chain` and `chain-id`.
@@ -185,7 +189,8 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-out_pssm`, a PSSM of frequency ratios only without `rpsdbparams`. NCBI cannot write its matrix name.
 - With `-out_ascii_pssm`, a PSSM whose information content comes without the other columns of NCBI's long ASCII form.
 - With `-out_ascii_pssm`, a PSSM query with a residue that its coding does not have. NCBI prints its letter from memory it never set.
-- A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text is read as NCBI reads it.
+- With `-out_pssm`, a PSSM in ASN.1 binary form whose author names (`Auth-list` `names`, which NCBI reads again only when it writes them) give a message or an error when they are read again. The warning of a UTF8String tag is not one of them: NCBI gives it once, when it first reads the file, and writes the names.
+- A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text and ASN.1 binary are read as NCBI reads them.
 
 ## tblastn with `-in_pssm`
 

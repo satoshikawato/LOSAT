@@ -4,6 +4,7 @@
 //! application's parts: the configuration, the input files and their readers, the output that
 //! NCBI's writers open by name (silently, also when they cannot), and the messages.
 
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
@@ -84,7 +85,7 @@ impl Write for SinkStream<'_, '_> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:69-77
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_bin.cpp:55-67
-fn open_sink(name: &str, format: CountsFormat, stdout: &mut Ostream<'_>) -> Sink {
+fn open_sink(name: &OsStr, format: CountsFormat, stdout: &mut Ostream<'_>) -> Sink {
     if name == "-" || (name.is_empty() && format == CountsFormat::Ascii) {
         if name == "-" {
             let _ = stdout.write_all(format.stream_prefix());
@@ -361,7 +362,7 @@ fn make_counts(
             "-infmt blastdb with a -fa_list line (a database name) that is not UTF-8 text",
         )));
     }
-    let output = args.value("out").expect("-out has a default");
+    let output = args.os_value("out").expect("-out has a default");
     let format = counts_format(args);
     let mut sink = open_sink(output, format, stdout);
     let mut writer = CountsWriter::new(format, args.value("meta").unwrap_or_default().as_bytes());
@@ -449,7 +450,7 @@ fn convert_failure(file: &str, error: WinMaskError) -> Failure {
 /// `CWinMaskCountsConverter` of `-in` to `-out`.
 fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
     let input = args.value("in").expect("-in has a default");
-    let output = args.value("out").expect("-out has a default");
+    let output = args.os_value("out").expect("-out has a default");
     if input == "-" {
         let line = if output == "-" { 77 } else { 55 };
         return Err(Failure::Ncbi(input_name_exception(line)));

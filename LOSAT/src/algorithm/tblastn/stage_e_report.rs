@@ -344,7 +344,6 @@ pub(super) fn render(
             subject_letters,
             hitlists,
             genetic_code,
-            scoring.matrix,
             hard_masked,
         )?;
     }
@@ -426,6 +425,7 @@ pub(super) fn render(
             shown,
             hitlists,
             parameters,
+            ungapped_karlin,
             query_validity,
             query_batch_skipped,
             scoring,
@@ -665,7 +665,8 @@ pub(super) fn render(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // The statistics of each query for the observer, the values of the XML reports.
     if let Some(observer) = observer.as_deref_mut() {
-        let stats = super::blast_xml::query_stats(parameters, query_validity, scoring);
+        let stats =
+            super::blast_xml::query_stats(parameters, query_validity, scoring, ungapped_karlin);
         for (q_idx, stats) in stats.into_iter().enumerate() {
             observer.query_stats(q_idx, stats);
         }
@@ -681,10 +682,12 @@ pub(super) fn render(
         ungapped_karlin,
         query_validity,
         query_batch_skipped,
-        gapped: lookup_protein_params(&ProteinScoringSpec {
-            matrix: scoring.matrix,
-            gap_open: scoring.gap_open,
-            gap_extend: scoring.gap_extend,
+        gapped: scoring.gapped.then(|| {
+            lookup_protein_params(&ProteinScoringSpec {
+                matrix: scoring.matrix,
+                gap_open: scoring.gap_open,
+                gap_extend: scoring.gap_extend,
+            })
         }),
         seg,
         mask_lowercase,
@@ -869,6 +872,7 @@ pub(super) fn render(
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
+                    scoring.gapped,
                 )?,
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-296
                 // One BLAST archive per query batch (`archive`).
@@ -1422,9 +1426,14 @@ fn write_pairwise(
             (pairwise.num_sequences, pairwise.total_letters)
         }
     };
-    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = subject_set.gumbel_block(&spec, total_nt);
-    if gumbel.is_none() && !subject_set.old_fsc {
+    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`). An ungapped
+    // search has neither a Gumbel nor a gapped block (its gap costs need not be in the matrix's
+    // table, `args.rs`): the footers print the ungapped block only.
+    let gumbel = scoring
+        .gapped
+        .then(|| subject_set.gumbel_block(&spec, total_nt))
+        .flatten();
+    if scoring.gapped && gumbel.is_none() && !subject_set.old_fsc {
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {
@@ -1443,15 +1452,21 @@ fn write_pairwise(
         // `kbp_gap`: a PSSM query's `kbp_gap_psi` (the PSSM's gapped values; the Gumbel values
         // stay the matrix's).
         gapped_karlin: match pssm {
+            _ if !scoring.gapped => Default::default(),
             Some(psi) => psi.gapped_karlin(&lookup_protein_params(&spec)),
             None => lookup_protein_params(&spec),
         },
         gumbel,
+        gapped: scoring.gapped,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:165-167
+        // The formatter shows the size of each linked set (the `N` column) when the search is
+        // ungapped and uses sum statistics (the link parameters are made with sum statistics,
+        // `local_subject_parameters`).
+        show_linked_set_size: !scoring.gapped && parameters.link.is_some(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
         // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221);
         // `blastinput::report_counts` applies the -num_descriptions, -num_alignments and
         // -max_target_seqs values.
-        gapped: true,
         num_descriptions: report_counts.num_descriptions,
         num_alignments: report_counts.num_alignments,
     };
@@ -1591,7 +1606,7 @@ pub(super) fn recounts_shown_counts(
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (cited at
 // `blastp::blast_engine::build_pairwise_hits`) and c++/include/objtools/align_format/
 // tabular.hpp:543-547
-/// The report counts (`report_num_ident`, `report_num_positives`, `report_mismatches`) of the HSPs
+/// The report counts (`report_num_ident`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq
 /// letters `query_bioseq`, or its gap residue), and for every query of a search with
@@ -1607,7 +1622,6 @@ fn recount_shown_counts(
     subject_letters: SubjectLetters<'_>,
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
-    matrix: crate::config::ScoringMatrix,
     hard_masked: bool,
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
@@ -1641,12 +1655,6 @@ fn recount_shown_counts(
                     .filter(|(q, s)| q == s)
                     .count();
                 payload.report_num_ident = ident;
-                payload.report_num_positives = crate::report::row_letters::display_positives(
-                    qseq.as_bytes(),
-                    sseq.as_bytes(),
-                    matrix,
-                    letters.case(),
-                );
                 payload.report_mismatches = i64::try_from(payload.align_length)?
                     - i64::try_from(ident + payload.gap_letters)?;
             }

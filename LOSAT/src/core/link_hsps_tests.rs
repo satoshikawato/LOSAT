@@ -94,6 +94,7 @@ fn linked(
 fn hsp(q: (i32, i32), s: (i32, i32), score: i32) -> LinkHsp {
     LinkHsp {
         context: 0,
+        subject_frame: 0,
         query_offset: q.0,
         query_end: q.1,
         subject_offset: s.0,
@@ -134,6 +135,74 @@ fn hsps_in_opposite_orders_on_the_sequences_stay_apart() {
     assert_eq!(out.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:528-531
+// A new query frame of the linking starts where the context's query frame or the sign of the
+// subject frame changes.
+#[test]
+fn hsps_on_subject_frames_of_opposite_signs_link_apart() {
+    // The pair of `two_hsps_in_order_on_both_sequences_link_into_one_set`, on subject frames
+    // of the same sign and of opposite signs.
+    let params = EvenGapLinkParams::ungapped_translated_subject(LinkCutoffs {
+        cutoff_small_gap: 0,
+        cutoff_big_gap: 1,
+        gap_prob: 0.0,
+    });
+    let pair = |f1: i8, f2: i8| {
+        [
+            LinkHsp {
+                subject_frame: f1,
+                ..hsp((200, 260), (500, 560), 60)
+            },
+            LinkHsp {
+                subject_frame: f2,
+                ..hsp((10, 60), (20, 70), 80)
+            },
+        ]
+    };
+    let same = linked(&pair(1, 3), context(), 3000, &params);
+    assert!(same.iter().all(|l| l.num == 2), "{same:?}");
+    let apart = linked(&pair(-1, 3), context(), 3000, &params);
+    assert!(apart.iter().all(|l| l.num == 1), "{apart:?}");
+    // The final list is in the order of the query starts whatever the frames.
+    assert_eq!(
+        apart.iter().map(|l| l.index).collect::<Vec<_>>(),
+        vec![1, 0]
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:563-571
+// A translated subject's length and the length adjustment, both in nucleotides, are divided
+// by the codon length before the adjustment is subtracted (at least 1 letter is left).
+#[test]
+fn a_translated_subject_divides_its_length_and_the_adjustment_by_three() {
+    // A set of two takes the subject length into its e-value: 3,001 nucleotides and the
+    // adjustment 40 give 1,000 - 13 = 987 letters, the length 1,027 of an untranslated subject
+    // with the whole adjustment subtracted.
+    let cutoffs = LinkCutoffs {
+        cutoff_small_gap: 0,
+        cutoff_big_gap: 1,
+        gap_prob: 0.0,
+    };
+    let hsps = [hsp((200, 260), (500, 560), 60), hsp((10, 60), (20, 70), 80)];
+    let translated = linked(
+        &hsps,
+        context(),
+        3001,
+        &EvenGapLinkParams::ungapped_translated_subject(cutoffs),
+    );
+    let protein = |subject_length| {
+        linked(
+            &hsps,
+            context(),
+            subject_length,
+            &EvenGapLinkParams::ungapped(cutoffs, false),
+        )
+    };
+    assert!(translated.iter().all(|l| l.num == 2), "{translated:?}");
+    assert_eq!(translated, protein(1027));
+    assert_ne!(translated, protein(1000));
+}
+
 #[test]
 fn the_preliminary_cutoff_keeps_hsps_at_or_below_it_out_of_small_gap_sets() {
     // Close HSPs (a gap of 10 letters on both sequences) with scores at the small-gap cutoff:
@@ -164,6 +233,7 @@ fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
         cutoff_small_gap: 0,
         cutoff_big_gap: 1,
         query_translated: false,
+        subject_translated: false,
     };
     let out = linked(&hsps, ctx, 100 * n + 100, &params);
     assert_eq!(out.len(), n as usize);

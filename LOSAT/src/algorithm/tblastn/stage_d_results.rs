@@ -42,7 +42,6 @@ pub(super) struct KappaHspPayload {
     // increment both `num_ident` and `num_positives`.
     // Report-time counts use sequence strings, after the core HSP counts above.
     pub report_num_ident: usize,
-    pub report_num_positives: usize,
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
     // The columns less the identities and the gap letters: fewer than none where a PSSM query's
     // gap residue faces a gap, a column that is an identity and a gap

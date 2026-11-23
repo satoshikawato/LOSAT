@@ -206,8 +206,7 @@ fn conffile_and_dryrun_run_as_on_the_command_line() {
 // `-window 0x10` runs, probe `big_win_0x10`); `-window 0x` is 0.
 #[test]
 fn integer_keys_take_hexadecimal_values() {
-    let words =
-        |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+    let words = |line: &[&str]| -> Vec<OsString> { line.iter().map(OsString::from).collect() };
     let args = crate::ncbi_app::args::parse(&TOOL, &words(&["-window", "0x10"])).unwrap();
     assert_eq!(args.integer("window"), Some(16));
     assert_eq!(args.integer("level"), Some(20));

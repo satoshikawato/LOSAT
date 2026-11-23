@@ -51,7 +51,10 @@ fn a_strategy_is_imported_once_for_all_the_calls_of_its_search() {
     let collected = run_collect(&search, Inputs::strategy(&strategy), &["0"]).unwrap();
     assert!(!collected.reports[0].bytes.is_empty());
     // `run_to_file`'s `-out` is the only word of the call that its arguments take.
-    let path = std::env::temp_dir().join(format!("losat-n3-{}.txt", std::process::id()));
+    let path = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-n3-{}.txt",
+        crate::utils::test_dir::process_id()
+    ));
     let mut diagnostics = Vec::new();
     run_to_file(
         &search,

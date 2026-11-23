@@ -165,6 +165,14 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // write yet (line NP, item M4c); `-mask_data` itself works.
     ("makeblastdb", "gi_mask", Refused::Read(Some(GI_MASK))),
     ("makeblastdb", "gi_mask_name", Refused::Read(Some(GI_MASK))),
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:398-400,503
+    // The PSSM files in ASN.1 binary (psiblast line item PS10b) are refused where the run starts,
+    // after makeprofiledb's `Init` (`makeprofiledb::work::run`).
+    (
+        "makeprofiledb",
+        "binary",
+        Refused::Run("PSSM files in ASN.1 binary"),
+    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
     // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
     // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA

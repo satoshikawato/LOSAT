@@ -172,7 +172,6 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                 | "windowmasker"
                 | "convert2blastmask"
                 | "makembindex"
-                | "makeprofiledb"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {
@@ -211,7 +210,12 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                 let refused = run_in(&dir, program, &words);
                 let mut message = String::from_utf8_lossy(&refused.stderr).into_owned();
                 let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
-                if refused.status.code() == Some(0) && program != "rpstblastn" {
+                if refused.status.code() == Some(0) && program == "makeprofiledb" {
+                    // makeprofiledb's `-binary`, refused where its run starts (after `Init`).
+                    let words = ["-in", "p.fa", "-out", "db", &word];
+                    message =
+                        String::from_utf8_lossy(&run_in(&dir, program, &words).stderr).into_owned();
+                } else if refused.status.code() == Some(0) && program != "rpstblastn" {
                     let search = ["-query", "p.fa", "-subject", subject, &word];
                     let cbs = ["-comp_based_stats", "0"];
                     let words = [&search[..], if name == "ungapped" { &cbs } else { &[] }].concat();

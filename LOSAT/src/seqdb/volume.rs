@@ -650,9 +650,11 @@ impl Volume {
         self.alias_lines.is_some()
     }
 
-    /// Whether the reads of this volume remove definition lines: a list's rule, the alias files'
-    /// id lists or the erasure of model lines.
-    fn filters_lines(&self) -> bool {
+    /// Whether the reads of this volume remove definition lines: a list's rule (any list erases
+    /// the lines without a Seq-id, a taxid list those of other taxids), the alias files' id lists
+    /// or the erasure of model lines. Each may leave a sequence without a line
+    /// (`SeqDb::drops_lineless_hits`).
+    pub(super) fn filters_lines(&self) -> bool {
         self.defline_rule.is_some() || self.alias_lines.is_some() || self.exclude_model
     }
 
@@ -687,9 +689,9 @@ impl Volume {
             (None, Some(lines)) => lines.volume_start,
             (None, None) => return Ok(Some(vec![true; set.deflines.len()])),
         };
-        let reads_seqids = alias.is_some() || user.is_some_and(|rule| rule.rule.reads_seqids());
+        let tests_ids = alias.is_some() || user.is_some_and(|rule| rule.rule.tests_ids());
         let adjusted;
-        let set = if volume_start > 0 && reads_seqids && super::has_ordinal_tag(set) {
+        let set = if volume_start > 0 && tests_ids && super::has_ordinal_tag(set) {
             let mut copy = set.clone();
             super::adjust_ordinal_tags(&mut copy, volume_start)
                 .map_err(|error| error.error(&self.base, volume_start + oid))?;
@@ -785,18 +787,6 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the reads of the volume may leave a sequence without a line: its rule is a seqid
-    /// list's, positive or negative, an alias file's id list reaches it, or its `OID_MASK_TYPE`
-    /// erases model lines (`SeqDb::drops_lineless_hits`).
-    pub(super) fn may_drop_every_line(&self) -> bool {
-        self.exclude_model
-            || self.alias_lines.is_some()
-            || self
-                .defline_rule
-                .as_ref()
-                .is_some_and(|line_rule| line_rule.rule.reads_seqids())
-    }
-
     /// Whether the volume's rule is a negative seqid list's with at least one id
     /// (`SeqDb::excludes_lineless_at_fetch`).
     pub(super) fn has_negative_seqid_ids(&self) -> bool {
@@ -806,11 +796,11 @@ impl Volume {
     }
 
     /// Whether the volume's reads keep a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none or the erasure of model
-    /// lines leaves none; the reader's error for a tag that NCBI's read cannot adjust (NCBI's
+    /// `SeqDb::keeps_line`): false only where the list's rule or the alias files' lists keep none
+    /// or the erasure of model lines leaves none; the reader's error for a tag that NCBI's read cannot adjust (NCBI's
     /// `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
     pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
-        if !self.may_drop_every_line() {
+        if !self.filters_lines() {
             return Ok(true);
         }
         let (record, path) = self.header_record(oid)?;

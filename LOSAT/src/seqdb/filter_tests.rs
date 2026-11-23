@@ -220,6 +220,10 @@ fn restricted_oids_are_ncbis_on_the_tx_fixture() {
             matches!(&list, TaxidList::Negative(set) if set.iter().all(|t| *t == 999)),
             "{line}"
         );
+        // Every list is the volumes' list, that one too: its lines without a Seq-id are erased
+        // and a sequence left without a line gets no Seq-align.
+        assert!(db.drops_lineless_hits(), "{line}");
+        assert!(!db.excludes_lineless_at_fetch(), "{line}");
         // The sequences read through the ordinal ids are those of the OIDs.
         let mut whole_db = SeqDb::open(name.to_str().unwrap(), SeqType::Protein).unwrap();
         whole_db.filter = None;
@@ -661,16 +665,20 @@ fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
         .unwrap();
     assert!(positive.drops_lineless_hits());
     assert!(!positive.excludes_lineless_at_fetch());
-    // A negative list of gis only is empty on a version 5 database once the gis are dropped
-    // (`s_ProcessSeqIDsForV5`): no line rule, no id set.
-    let mut gis = ids_db("prot_v5", SeqType::Protein);
-    gis.restrict(
-        &DbList::Seqids(list_of(b"gi|1414\n", true)),
-        &mut Vec::new(),
-    )
-    .unwrap();
-    assert!(!gis.drops_lineless_hits());
-    assert!(!gis.excludes_lineless_at_fetch());
+    // A list of gis only is empty on a version 5 database once the gis are dropped
+    // (`s_ProcessSeqIDsForV5`): no id set, but still the volumes' list, which erases the lines
+    // without a Seq-id (review 2 of line RG D1c, R2). prot_v5's lines all have one.
+    for negative in [true, false] {
+        let mut gis = ids_db("prot_v5", SeqType::Protein);
+        gis.restrict(
+            &DbList::Seqids(list_of(b"gi|1414\n", negative)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(gis.drops_lineless_hits());
+        assert!(!gis.excludes_lineless_at_fetch());
+        assert!((0..gis.num_seqs() as u32).all(|ordinal| gis.keeps_line(ordinal).unwrap()));
+    }
 }
 
 #[test]
@@ -729,6 +737,15 @@ fn definition_lines_follow_ncbis_rules() {
     assert!(negative.keeps(&defline(Some(0), None)));
     // No taxid at all: an empty set is a subset of every list.
     assert!(!negative.keeps(&defline(None, None)));
+    // A list without taxids tests none (`GetNumTaxIds` 0): a negative list of taxids the
+    // database does not hold.
+    for empty in [
+        DeflineRule::NegativeTaxids(set(&[])),
+        DeflineRule::Taxids(set(&[])),
+    ] {
+        assert!(empty.keeps(&defline(None, None)));
+        assert!(empty.keeps(&defline(Some(9606), None)));
+    }
 }
 
 /// A line of the taxid `taxid` with one Seq-id.
@@ -740,7 +757,7 @@ fn line_with_id(taxid: i32) -> BlastDefline {
 }
 
 #[test]
-fn a_rule_that_keeps_no_line_keeps_every_line() {
+fn every_list_tests_each_line_as_ncbis() {
     let rule = DeflineRule::Taxids([5].into_iter().collect());
     let set = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(5)],
@@ -749,21 +766,50 @@ fn a_rule_that_keeps_no_line_keeps_every_line() {
         line_mask(Some(&rule), &[], &set),
         Ok(Some(vec![false, true]))
     );
+    // A taxid test that passes no line erases every line, as NCBI's read does (a header whose
+    // taxids are not those of the lookup files): the sequence gets no Seq-align.
     let none = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(2)],
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &none),
-        Ok(Some(vec![true, true]))
+        Ok(Some(vec![false, false]))
     );
     // NCBI's id test runs under any list (`x_HaveIdFilter`): a line without a Seq-id passes
-    // none of it.
+    // none of it, also under a list without ids or taxids (a version 5 seqid list of gis only,
+    // a negative taxid list of none the database holds; review 2 of line RG D1c, R2).
     let bare = DeflineSet {
         deflines: vec![defline(Some(5), None), line_with_id(5)],
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &bare),
         Ok(Some(vec![false, true]))
+    );
+    for empty in [
+        DeflineRule::NegativeTaxids(BTreeSet::new()),
+        DeflineRule::Seqids(Vec::new()),
+        DeflineRule::NegativeSeqids(Vec::new()),
+    ] {
+        assert_eq!(
+            line_mask(Some(&empty), &[], &bare),
+            Ok(Some(vec![false, true])),
+            "{empty:?}"
+        );
+        assert!(!empty.tests_ids());
+    }
+    assert_eq!(line_mask(None, &[], &bare), Ok(Some(vec![true, true])));
+    // A sequence of lines without Seq-ids keeps none: a seqid list's reads refuse it, a taxid
+    // list's give no line (both drop its hits, `SeqDb::keeps_line`).
+    let lineless = DeflineSet {
+        deflines: vec![defline(Some(5), None)],
+    };
+    assert_eq!(
+        line_mask(Some(&DeflineRule::Seqids(Vec::new())), &[], &lineless),
+        Ok(None)
+    );
+    assert_eq!(
+        line_mask(Some(&rule), &[], &lineless),
+        Ok(Some(vec![false]))
     );
     let mut lines = vec![1, 2, 3];
     lines.retain_lines(&[true, false, true]);

@@ -1021,7 +1021,7 @@ impl ReportedHeader {
     }
 }
 
-/// Whether the sequences of a database search keep a definition line under its seqid list
+/// Whether the sequences of a database search keep a definition line under its list
 /// (`SeqDb::keeps_line`), each read once: the one check of NCBI's two places that drop a
 /// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
 /// Seq-aligns (`SeqAligned`). A header that cannot be read as NCBI's header read adjusts it is
@@ -1219,7 +1219,7 @@ impl std::fmt::Display for FetchRefusal {
 impl std::error::Error for FetchRefusal {}
 
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
-/// a hit on a sequence that the database's seqid list keeps without any of its definition
+/// a hit on a sequence that the database's list keeps without any of its definition
 /// lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
@@ -1231,7 +1231,7 @@ impl std::error::Error for FetchRefusal {}
 pub(crate) struct SeqAligned<'a>(LineCheck<'a>);
 
 impl<'a> SeqAligned<'a> {
-    /// The check of `db`'s hits; `None` where no hit is dropped here: no seqid list removes
+    /// The check of `db`'s hits; `None` where no hit is dropped here: no list removes
     /// lines, or the search's fetches have excluded the sequences without a line before
     /// (`fetched`, the caller's: the search fetches its subjects with `check_oid_exclusion`, a
     /// gapped search or an ungapped one of a nucleotide database; and the database's list is

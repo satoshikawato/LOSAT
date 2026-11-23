@@ -360,6 +360,11 @@ impl OidWalk {
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:997-1010
 // A list of seqids holds no gi and no ti (`HasIdFilters` is its `GetNumSis()` above 0). The
 // lists of the alias files attached to a volume are tested beside this rule ([`line_mask`]).
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:918-922
+// Every list the search opens the database with is a rule, also one left with no id and no taxid
+// that NCBI holds (a version 5 seqid list of gis only, a negative taxid list of none the database
+// holds): its volumes still run the id test (`x_HaveIdFilter` asks only for the list object), so
+// a line without a Seq-id is erased under it (review 2 of line RG D1c, R2).
 /// Which definition lines of an included OID a restricted database keeps.
 #[derive(Debug)]
 pub(crate) enum DeflineRule {
@@ -384,6 +389,15 @@ impl DeflineRule {
         )
     }
 
+    /// Whether the rule compares the Seq-ids of a line with ids (`HasIdFilters`): a seqid list
+    /// with at least one id ([`DeflineRule::includes_id`]).
+    pub(crate) fn tests_ids(&self) -> bool {
+        matches!(
+            self,
+            DeflineRule::Seqids(list) | DeflineRule::NegativeSeqids(list) if !list.is_empty()
+        )
+    }
+
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:946-954
     /// The search list's test of one Seq-id `id` of a line (`x_ListIncludesId`): `None` for a
     /// list without ids (`HasIdFilters` false: every line passes), else whether the list includes
@@ -404,9 +418,13 @@ impl DeflineRule {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2036-2049
     /// The taxid test of a line whose ids passed (`s_IncludeDefline_Taxid`,
-    /// `s_IncludeDefline_NegativeTaxid`): true for a seqid list.
+    /// `s_IncludeDefline_NegativeTaxid`): true for a seqid list and for a list without taxids
+    /// (NCBI tests the taxids only where `GetNumTaxIds` is above 0).
     fn keeps(&self, defline: &BlastDefline) -> bool {
         match self {
+            DeflineRule::Taxids(found) | DeflineRule::NegativeTaxids(found) if found.is_empty() => {
+                true
+            }
             DeflineRule::Taxids(found) => defline
                 .taxid
                 .into_iter()
@@ -434,10 +452,10 @@ impl DeflineRule {
 // without a word, in every format (dropin-survey-20261029/DI8 probe R01-R07, R14, R21:
 // a seqid list naming a PDB molecule without its chain, a local id in other letters, or
 // a Swiss-Prot name on a version 4 database selects the OID through the lookup table
-// but matches none of its lines). makeblastdb writes the taxid lookup files from the
-// same lines, so an OID of a taxid list has a line of the list; LOSAT keeps every line
-// of such an OID that would have none (its taxid test passes every line), and refuses a
-// seqid list that leaves an OID without a line (DI-8b DECISIONS 17).
+// but matches none of its lines). Under a taxid list it happens to an OID whose lines lack
+// Seq-ids or whose taxids in the header are not those of the lookup files (makeblastdb writes
+// both from the same lines and gives each line a taxid, 0 where none is known; review 2 of line
+// RG D1c, R2): the hits leave the reports the same way (`SeqDb::drops_lineless_hits`).
 /// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, under
 /// the search's list rule `rule` and the alias files' lists `lists` attached to the volume
 /// (none: empty): `None` when a seqid rule passes no line; NCBI's exception of a lookup.
@@ -446,8 +464,6 @@ pub(crate) fn line_mask(
     lists: &[Arc<super::id_list::AliasIdList>],
     set: &DeflineSet,
 ) -> Result<Option<Vec<bool>>, NcbiException> {
-    let taxids_pass_all =
-        rule.is_some_and(|rule| !set.deflines.iter().any(|defline| rule.keeps(defline)));
     let mut user_passed_any = false;
     let mut mask = Vec::with_capacity(set.deflines.len());
     for defline in &set.deflines {
@@ -467,9 +483,7 @@ pub(crate) fn line_mask(
             }
         }
         user_passed_any |= have_user;
-        let keep = have_user
-            && have_vol
-            && (taxids_pass_all || rule.is_none_or(|rule| rule.keeps(defline)));
+        let keep = have_user && have_vol && rule.is_none_or(|rule| rule.keeps(defline));
         mask.push(keep);
     }
     if rule.is_some_and(DeflineRule::reads_seqids) && !user_passed_any {
@@ -1648,12 +1662,14 @@ impl SeqDb {
         } else {
             super::alias::UserList::Positive { ids: found.len() }
         };
+        // A negative list of taxids the database does not hold excludes no OID and tests no
+        // taxid, but it is still the volumes' list (`DeflineRule`).
         let rule = if negative {
-            (!found.is_empty()).then_some(DeflineRule::NegativeTaxids(found))
+            DeflineRule::NegativeTaxids(found)
         } else {
-            Some(DeflineRule::Taxids(found))
+            DeflineRule::Taxids(found)
         };
-        self.apply_filter(Some(words), num_oids, rule, user)?;
+        self.apply_filter(Some(words), num_oids, Some(rule), user)?;
         Ok(warning)
     }
 
@@ -1733,6 +1749,8 @@ impl SeqDb {
                 SeqDbError::NotFound(invalid.message())
             })?;
             if ids.is_empty() {
+                // The emptied list is still the volumes' list (`DeflineRule`): no OID is
+                // excluded by its ids, and its lines without a Seq-id are erased.
                 warnings.push(ListWarning::Posted(EMPTY_LIST_WARNING.to_string()));
                 let num_oids = self.volume_starts[self.volumes.len()];
                 if list.negative {
@@ -1740,14 +1758,14 @@ impl SeqDb {
                     return self.apply_filter(
                         Some(words),
                         num_oids,
-                        None,
+                        Some(DeflineRule::NegativeSeqids(Vec::new())),
                         super::alias::UserList::None,
                     );
                 }
                 return self.apply_filter(
                     None,
                     num_oids,
-                    None,
+                    Some(DeflineRule::Seqids(Vec::new())),
                     super::alias::UserList::Positive { ids: 0 },
                 );
             }
@@ -1787,15 +1805,14 @@ impl SeqDb {
     // files' `OID_MASK_TYPE` erases the lines of model sequences in the same read (line RG D1b-2):
     // a sequence that the OID list keeps with only such lines is searched, counts, and its hits
     // leave the reports the same way (probes A5, A6 of line RG D1b); it fills no id set, so the
-    // fetches exclude nothing for it.
-    /// Whether the database's reads may keep a sequence without any of its lines (a seqid list,
-    /// positive or negative, or the alias files' erasure of model lines): such a sequence is
+    // fetches exclude nothing for it. A taxid list fills no id set either (`x_InitIdSet`): a
+    // sequence whose lines it erases leaves at the Seq-align alone (review 2 of line RG D1c, R2).
+    /// Whether the database's reads may keep a sequence without any of its lines (a list of any
+    /// kind, or the alias files' erasure of model lines): such a sequence is
     /// searched and counts in the statistics, and its hits that reach NCBI's Seq-aligns leave the
     /// reports there (`keeps_line`, `algorithm::common::database::SeqAligned`).
     pub fn drops_lineless_hits(&self) -> bool {
-        self.volumes
-            .iter()
-            .any(|volume| volume.may_drop_every_line())
+        self.volumes.iter().any(|volume| volume.filters_lines())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:302-313
@@ -1825,11 +1842,10 @@ impl SeqDb {
             .any(|volume| volume.has_negative_seqid_ids())
     }
 
-    /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's seqid
-    /// list or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but none of its
+    /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's list
+    /// or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but none of its
     /// definition lines; the reader's error where a tag cannot be read as NCBI's header read
-    /// adjusts it. True without either (a taxid list keeps at least one line of each sequence it
-    /// keeps).
+    /// adjusts it. True without either.
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
         if self.filter.is_none() {
             return Ok(true);

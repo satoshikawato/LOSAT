@@ -299,8 +299,8 @@ impl Encoder for AsnBinaryEncoder<'_> {
     fn unread_delayed(&mut self) {
         if self.error.is_none() {
             self.error = Some(SerialError::Unwritten(
-                "a member read into a delay buffer of another format whose value NCBI reads with a \
-                 message or an error",
+                "a member read into a delay buffer of another format whose value NCBI reads with an \
+                 error or with a message other than a replaced character",
             ));
         }
     }

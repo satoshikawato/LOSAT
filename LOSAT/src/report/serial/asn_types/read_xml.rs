@@ -1098,8 +1098,10 @@ impl<S: AsnSource> Input for XmlInput<S> {
     }
 
     /// `BeginChoiceVariant` of a CHOICE of an ASN.1 module: the variant whose tag,
-    /// `Choice_variant`, follows. A self-closed choice element is the "choice variant id
-    /// expected" of `ReadChoiceSimple`; an element whose closing tag follows holds the variant
+    /// `Choice_variant`, follows. A choice element that the stream already ended self-closed is
+    /// the "choice variant id expected" of `ReadChoiceSimple` (one whose opening tag is still open
+    /// is the "'>' expected" of `EndTag`, which `NextTagIsClosing` calls, since `/` is no
+    /// attribute); an element whose closing tag follows holds the variant
     /// that `FindEmpty` finds (`find_empty`: `Seqdesc.modif` among them), read without a tag of
     /// its own (`SetNotag`) as an empty list, or, without one, is that error too.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2411-2507

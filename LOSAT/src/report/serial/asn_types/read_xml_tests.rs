@@ -205,23 +205,31 @@ fn tags_are_checked_as_ncbi_checks_them() {
 #[test]
 fn enumerated_values_and_numbers() {
     let interval = xml(named::SEQ_INTERVAL, "NCBI-Seqloc", INTERVAL);
-    assert_eq!(
-        outcome(
-            &replace(&interval, "value=\"other\"", "value=\"up\""),
-            named::SEQ_INTERVAL
-        ),
-        serial("invalid value of enumerated type: up")
+    // `strand` is OPTIONAL: `ReadWithSetFlagMember` rethrows the error of its value.
+    let strand = |bytes: &str, thrown: &str| {
+        assert_eq!(
+            outcome(bytes, named::SEQ_INTERVAL),
+            serial("error while reading strand")
+        );
+        match read(bytes.as_bytes(), named::SEQ_INTERVAL).0 {
+            Err(ReadError::Serial(e)) => {
+                let report = String::from_utf8_lossy(&e.ncbi_what()).into_owned();
+                assert!(report.contains(thrown), "{report}");
+            }
+            other => panic!("{other:?}"),
+        }
+    };
+    strand(
+        &replace(&interval, "value=\"other\"", "value=\"up\""),
+        "invalid value of enumerated type: up",
     );
-    assert_eq!(
-        outcome(
-            &replace(
-                &interval,
-                "<Na-strand value=\"other\"/>",
-                "<Na-strand>255</Na-strand>"
-            ),
-            named::SEQ_INTERVAL
+    strand(
+        &replace(
+            &interval,
+            "<Na-strand value=\"other\"/>",
+            "<Na-strand>255</Na-strand>",
         ),
-        serial("attribute 'value' expected")
+        "attribute 'value' expected",
     );
     let line = |marker: &str| {
         interval[..interval.find(marker).expect("marker")]
@@ -269,17 +277,19 @@ fn enumerated_values_and_numbers() {
 }
 
 /// The end of the input: in the root's own frame the end of the data (`CEofException`), below
-/// it the stack's `CSerialException` (`HandleEOF`).
+/// it the stack's `CSerialException` (`HandleEOF`: the stream's position and the information of
+/// the frame it leaves, here the member `db` whose string the input cuts).
 #[test]
 fn the_end_of_the_input_is_an_error_below_the_root() {
     let document = xml(named::DBTAG, "NCBI-General", DBTAG);
     assert_eq!(read(b"", named::DBTAG).0, Err(ReadError::Eof));
     let cut = document.find("abc").expect("the string");
+    let line = document[..cut].matches('\n').count() + 1;
     match read(&document.as_bytes()[..cut], named::DBTAG).0 {
-        Err(ReadError::Serial(e)) => {
-            let message = String::from_utf8_lossy(e.get_msg()).into_owned();
-            assert!(message.contains("unexpected end of"), "{message}")
-        }
+        Err(ReadError::Serial(e)) => assert_eq!(
+            String::from_utf8_lossy(e.get_msg()),
+            format!("line {line}: Frame type= eFrameClassMember, Member name= db")
+        ),
         other => panic!("{other:?}"),
     }
 }
@@ -320,7 +330,7 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
     assert_eq!(
         posts[0].line("blast_formatter"),
         format!(
-            "blast_formatter: Error: (803.7) Dbtag.db\nBad char [0x1] in string at line {line}\n"
+            "Error: (803.7) [blast_formatter] Dbtag.db\nBad char [0x1] in string at line {line}\n"
         )
         .into_bytes()
     );
@@ -412,8 +422,12 @@ fn after_a_missing_value_the_stream_reads_on_where_it_stopped() {
 }
 
 /// A CHOICE element with nothing in it holds the first variant that is an anonymous list
-/// (`FindEmpty`), empty, without a tag (`SetNotag`); a self-closed one is "choice variant id
-/// expected" (NCBI 2.17.0 probes x1 and x1b of review D of line RG-F3).
+/// (`FindEmpty`), empty, without a tag (`SetNotag`); a self-closed one, whose opening tag
+/// `OpenTag` left open, is the "'>' expected" of `EndTag` (`NextTagIsClosing` ends the opening
+/// tag, where `/` is no attribute), and one whose variant `FindEmpty` does not find is "choice
+/// variant id expected" (NCBI 2.17.0 probes x1 and x1b of review D of line RG-F3: rc 0, rc 1).
+// NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:308-340 (`EndTag`)
+// NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1666-1670 (`NextTagIsClosing`)
 // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2411-2440
 // NCBI reference (598d8ae6): c++/src/serial/memberlist.cpp:406-430
 #[test]
@@ -433,7 +447,7 @@ fn an_empty_choice_element_holds_its_first_list_variant() {
     );
     assert_eq!(
         outcome("<?xml version=\"1.0\"?>\n<Seqdesc/>\n", named::SEQDESC),
-        serial("choice variant id expected")
+        serial("'>' expected")
     );
     // Its variant is an INTEGER: none.
     assert_eq!(
@@ -494,8 +508,8 @@ const AUTH: &str =
 /// object is read: a number past its storage or a control byte inside it is no error and no post
 /// (NCBI 2.17.0's blast_formatter, probes x4, x5 of review D of line RG-F3: rc 0, nothing on
 /// standard error). A stream of the XML format copies the bytes; another one reads them first
-/// under the member's frames (`read_delayed`, `CDelayBuffer::Update`), whose posts and errors
-/// keep LOSAT from writing the member.
+/// under the member's frames (`read_delayed`, `CDelayBuffer::Update`): their replaced bytes are
+/// posted, and an error keeps LOSAT from writing the member.
 #[test]
 fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     let document = xml(named::AUTH_LIST, "NCBI-Biblio", AUTH);
@@ -517,8 +531,18 @@ fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     assert!(bytes.ends_with("</Auth-list_names_std>"), "{bytes}");
     // Written in ASN.1 text: read again, written by its values.
     assert_eq!(text_of(&value, named::AUTH_LIST), AUTH);
-    // Written in XML: copied.
-    assert_eq!(xml_of(&value, named::AUTH_LIST, "NCBI-Biblio"), document);
+    // Written in XML: copied, the member's closing tag right after the bytes (the last tag that
+    // NCBI's writer wrote is the member's opening tag, so `CloseTagStart` puts no end of line).
+    // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1541-1555
+    // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1069-1079
+    assert_eq!(
+        xml_of(&value, named::AUTH_LIST, "NCBI-Biblio"),
+        replace(
+            &document,
+            "</Auth-list_names_std>\n  </Auth-list_names>",
+            "</Auth-list_names_std></Auth-list_names>"
+        )
+    );
     // A control byte and a number past an Int4 inside it: no error, no post while it is read.
     let ctrl = replace(&document, ">Smith<", ">S\u{1}mith<");
     let (value, posts) = read(ctrl.as_bytes(), named::AUTH_LIST);

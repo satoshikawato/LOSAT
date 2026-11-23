@@ -192,7 +192,13 @@ fn a_delayed_member_read_from_binary_is_written_by_its_values() {
     ];
     let write = |bytes: &[u8]| {
         let (value, posts) = super::read::read_ber_value(bytes, named::AUTH_LIST);
-        assert!(posts.is_empty(), "{posts:?}");
+        // (The UTF8String tag below is posted by this read, which keeps the bytes.)
+        assert!(
+            posts
+                .iter()
+                .all(|post| matches!(post, super::read::Post::Utf8Tag(_))),
+            "{posts:?}"
+        );
         let value = value.expect("read");
         assert!(matches!(
             &value,

@@ -60,7 +60,7 @@ pub(crate) fn read_pssm_binary(bytes: &[u8]) -> PssmRead {
 }
 
 /// [`read_pssm`] of the `PssmWithParameters` object in NCBI's XML at the start of `bytes`
-/// (`CObjectIStream::Open(eSerial_Xml, ...)`, the ASN.1 style).
+/// (the stream read as `MSerial_Xml`, in the ASN.1 style).
 pub(crate) fn read_pssm_xml(bytes: &[u8]) -> PssmRead {
     pssm_read(
         ObjectStream::xml(SliceSource::new(bytes), XmlStyle::Asn, Names::PSSM)

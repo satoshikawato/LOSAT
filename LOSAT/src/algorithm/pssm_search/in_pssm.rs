@@ -45,7 +45,7 @@ enum PssmFileFormat {
     TextAsn { start: usize },
     /// `eBinaryASN`: the binary reader reads the stream from `start` (the stream read as `MSerial_AsnBinary`).
     BinaryAsn { start: usize },
-    /// `eXml`: the XML reader reads the stream from `start` (`CObjectIStream::Open(eSerial_Xml, ...)`).
+    /// `eXml`: the XML reader reads the stream from `start` (the stream read as `MSerial_Xml`).
     Xml { start: usize },
     /// A format that the `switch` sends to "Unsupported format for PSSM" (`eUnknown` and every format but the
     /// three).

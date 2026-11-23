@@ -6874,7 +6874,11 @@ Scheduling (each value computed by one thread with the original function; order 
   (`XUnit::sent_frame`), not in every unit: run in each unit's `x_unit_sent` (twice, the dispatch
   and its assertion), it cost ViPTreeGen's Autographivirales.40 the gain (cycles x1.003 of dev
   against x0.97 without it).
-  TODO-AB2
+  On dev 92e2a3044 (one booked core of workstation node 1, `-num_threads 1`, outputs identical):
+  ViPTreeGen's Autographivirales.40 (`-matrix BLOSUM45`) 45.01 -> 43.72 s wall (x0.971; cycles x0.971,
+  instructions x0.911), max RSS the same (25,976 -> 25,968 KiB); the other TBLASTX cases x0.990 to
+  x1.002 in cycles; blastp and BLASTX, which run the moved walks, the same instructions (cycles
+  x0.983 to x1.005). Numbers: `tool-speed-20261115/results/dt19/ab4`.
 - `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of the unit path (`scan_unit`, the
   batched scan of `LOSAT_X_TBXEXTBATCH`, and, from the next pull request (2026-10-19), the scan in slices

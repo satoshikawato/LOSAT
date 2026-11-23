@@ -1,1 +1,1 @@
-- TBLASTX: the two-hit ungapped extension takes the same walks as BLASTP and BLASTX, which keep the score and the step in one value. TODO-AB2 Reports do not change.
+- TBLASTX: a search with many seeds per pair of frames, such as ViPTreeGen's comparison of viral genomes (`-matrix BLOSUM45`), is about 3 % faster at one thread with the same memory: the two-hit ungapped extension takes the same walks as BLASTP and BLASTX, which keep the score and the step in one value. Reports do not change.

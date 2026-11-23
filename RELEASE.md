@@ -1,7 +1,8 @@
 # Release Procedure
 
-This file is the short entry point for publishing LOSAT releases. The detailed
-v0.1.0 gate lives in:
+> **Active release (v0.2.0):** Release criteria, platform scope, and execution order for v0.2.0 live in [docs/release/v0.2.0.md](docs/release/v0.2.0.md) and the [v0.2.0 release test plan](docs/release/v0.2.0_certification_plan.md). The v0.1.0 gate and tag instructions below are retained as historical v0.1.0 reference only.
+
+This file is the short entry point for publishing LOSAT releases. Historical v0.1.0 gate references:
 
 - [docs/archive/v0.1.0_release_readiness_plan.md](docs/archive/v0.1.0_release_readiness_plan.md)
 - [docs/release/v0.1.0.md](docs/release/v0.1.0.md)

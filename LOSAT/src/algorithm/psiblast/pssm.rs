@@ -531,6 +531,10 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
         PsiError::NoUngappedKarlinBlock => {
             "The ungapped Karlin-Altschul block of the query is not available"
         }
+        // `x_ErrorCodeToString(1)`: `_IMPALAScaleMatrix`'s status (makeprofiledb).
+        PsiError::ImpalaScoreRange => "Unknown error code returned from PSSM engine: 1",
+        // makeprofiledb refuses the PSSM before this text is written.
+        PsiError::ScalingUndefined => "The scaling of the PSSM leaves defined behaviour",
     }
 }
 

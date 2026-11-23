@@ -1,0 +1,24 @@
+Seq-entry ::= seq {
+  id { local str "m1" },
+  descr { title "first obj" },
+  inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+}
+Seq-entry ::= set {
+  seq-set {
+    seq {
+      id { local str "m2" },
+      descr { title "second obj" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "GGCC" }
+    }
+  }
+}
+
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { local str "m3" },
+      descr { title "third obj" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "TTAA" }
+    }
+  }
+}

@@ -121,6 +121,7 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
         gapped_karlin: Default::default(),
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: 500,
         num_alignments: 250,
     };
@@ -154,6 +155,7 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
             None,
             None,
             0,
+            None,
             None,
             None,
             &crate::report::db_subject::HitLoads::default(),

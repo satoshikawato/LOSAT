@@ -366,6 +366,8 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::named_refusal`).
+            html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,
@@ -378,7 +380,7 @@ impl PsiblastArgs {
             threshold: self.threshold,
             word_size: self.word_size,
             num_threads: self.num_threads,
-            // psiblast has no `-mt_mode` (`cli.rs` `is_unported_psiblast_arg`).
+            // psiblast has no `-mt_mode` (its rows of `ncbi_app::args::refusal`).
             mt_mode: None,
             out: self.out,
             max_target_seqs: self.max_target_seqs,

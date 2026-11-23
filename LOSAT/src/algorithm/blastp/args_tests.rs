@@ -54,6 +54,8 @@ struct TestCli {
     command: TestCommand,
 }
 
+impl crate::cli::ProgramParser for TestCli {}
+
 #[derive(clap::Subcommand, Debug)]
 enum TestCommand {
     Blastp(BlastpArgs),

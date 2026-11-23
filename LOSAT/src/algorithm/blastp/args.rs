@@ -199,6 +199,11 @@ pub struct BlastpArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -493,6 +498,12 @@ pub struct ResolvedBlastpArgs {
     pub parse_deflines: bool,
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
+    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
+    /// `-html` or outfmt 0, and for psiblast and rpsblast, which have no `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// outfmt 0 and 18 reports (the organism report takes no links).
+    pub is_html: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
     /// `-db_soft_mask` or `-db_hard_mask` as the command line keeps it (`DbMaskArgs::option`;
@@ -858,6 +869,17 @@ impl BlastpArgs {
             &choice,
             crate::blastinput::app::Program::Blastp,
         )?;
+        crate::blastinput::app::html_format_check(
+            choice.number,
+            crate::blastinput::app::Program::Blastp,
+            self.html,
+        )?;
+        let html = crate::blastinput::app::html_links(
+            self.html,
+            crate::blastinput::app::Program::Blastp,
+            self.db.as_deref().map(crate::seqdb::db_argument_name),
+            &[choice.number],
+        )?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings.
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -1083,6 +1105,8 @@ impl BlastpArgs {
             subject: self.subject.clone().unwrap_or_default(),
             parse_deflines: self.parse_deflines,
             show_gis: self.show_gis,
+            html,
+            is_html: self.html,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // The name without the white space at its ends: what the reader resolves and
             // what the reports show.

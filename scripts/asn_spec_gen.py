@@ -21,8 +21,12 @@ What the table holds, per type (named, or anonymous at its place of use):
     VisibleString, UTF8String, StringStore, OCTET STRING;
   - its ASN.1 name ("" for an anonymous type, as NCBI's internal type information reports it) and
     module;
-  - per member or variant: its name, its tag (position from 0, NCBI's automatic tags), OPTIONAL,
-    DEFAULT (with the default value as written in the module) and the delayed flag (`_delay`).
+  - per member or variant: its name (its tag is its position from 0, NCBI's automatic tags: a
+    member with a tag of its own in the module stops the generator), OPTIONAL,
+    DEFAULT (with the default value as written in the module) and the delayed flag (`_delay`);
+    per SEQUENCE member, whether the generated class keeps a set flag for it (`SET_FLAG`,
+    `->SetSetFlag(`): every member but a class held by reference (`ADD_NAMED_REF_MEMBER`, a
+    SEQUENCE, a CHOICE or a named SEQUENCE OF / SET OF, unless `.def` sets `_pointer` to false).
 
 The storage of an INTEGER is NCBI's C++ type, from the `.def` files: `TSeqPos` and `unsigned` are
 Uint4, `TSignedSeqPos` and `int` Int4, `TGi`, `TEntrezId`, `TIntId` and `Int8` Int8 (NCBI_INT8_GI,
@@ -445,6 +449,7 @@ class Entry:
     values: list[tuple[str, int]] = field(default_factory=list)
     integer: bool = False
     alias: bool = False  # a named type that is another named type (`A ::= B`)
+    by_value: set[str] = field(default_factory=set)  # members of `.def` `_pointer = false`
 
 
 class Table:
@@ -515,6 +520,8 @@ class Table:
             element = self.place(module, spec.type, owner, owner + "." + sub,
                                  storage_of(attrs))
             delayed = attrs.get("_delay") == "1"
+            if attrs.get("_pointer") == "false":
+                entry.by_value.add(spec.name)
             entry.members.append((spec, element, delayed))
         return entry
 
@@ -568,6 +575,28 @@ class Names:
         return f"Name({self.at[name]}, {len(name.encode())})"
 
 
+def held_by_reference(table: Table, index: int) -> bool:
+    """Whether a member of the type `index` is a class that the generated code holds by reference
+    (`CRef<>`): a SEQUENCE, a CHOICE, a named SEQUENCE OF or SET OF (an implicit class), or a
+    named type that is one of these under another name."""
+    e = table.entries[index]
+    if e.kind in ("Sequence", "Choice"):
+        return True
+    if e.kind == "List":
+        return bool(e.name)
+    if e.kind == "Alias":
+        return held_by_reference(table, e.element)
+    return False
+
+
+def has_set_flag(table: Table, owner: Entry, name: str, index: int) -> bool:
+    """Whether the generated class of the SEQUENCE `owner` keeps a set flag for its member `name`
+    of the type `index` (`->SetSetFlag(`): every member but a class held by reference
+    (`ADD_NAMED_REF_MEMBER`); `.def` with `_pointer` set to false holds the class by value
+    (`ADD_NAMED_MEMBER` with `CLASS`, `Score.value`)."""
+    return not held_by_reference(table, index) or name in owner.by_value
+
+
 def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     names = Names()
     types: list[str] = []
@@ -587,10 +616,25 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
                     flags.append("DEFAULT")
                 if delayed:
                     flags.append("DELAYED")
+                if e.kind == "Sequence" and has_set_flag(table, e, spec.name, element):
+                    flags.append("SET_FLAG")
                 flag_text = " | ".join(flags) if flags else "0"
                 default = "None" if spec.default is None else f"Some({names(spec.default)})"
-                tag = spec.tag if spec.tag is not None else position
-                members.append(f"    Member {{ name: {names(spec.name)}, tag: {tag}, ty: {element}, "
+                # NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1138-1145 (and the
+                # variants', 1386-1392)
+                # The readers take a member's or variant's tag for its position (`[n]` in text,
+                # `a0 | n` in binary): NCBI's automatic tags, which hold when the module gives
+                # the item no tag of its own (the binary stream's branch for another tag type is
+                # then never taken). An explicit tag stops the generator.
+                if spec.tag is not None:
+                    raise SystemExit(f"{e.name or e.path}.{spec.name}: the explicit tag "
+                                     f"[{spec.tag}] is not an automatic tag; the readers "
+                                     f"(asn_input::Items) and the writer take the tag for the "
+                                     f"position")
+                if position > 255:
+                    raise SystemExit(f"{e.name or e.path}.{spec.name}: the position {position} "
+                                     f"is no tag of one byte, which the writer's encoders take")
+                members.append(f"    Member {{ name: {names(spec.name)}, ty: {element}, "
                                f"flags: {flag_text}, default: {default} }}, // {len(members)}: "
                                f"{e.name or e.path}.{spec.name}")
             kind = f"Kind::{e.kind}(Span({first}, {len(e.members)}))"
@@ -627,7 +671,7 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     w(f"// {len(members)} members and variants, {len(values)} named values.) The names are offsets into")
     w("// `NAMES` and the members and values spans of `MEMBERS` and `VALUES`: the table holds no pointer.")
     w("")
-    w("use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL};")
+    w("use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL, SET_FLAG};")
     w("")
     w("/// The index in `TYPES` of each named type (the reader's hooks and the PSSM's typed boundary")
     w("/// name some of them).")

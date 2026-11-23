@@ -4,6 +4,7 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp
 
+use super::html_ids::HtmlHeading;
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi};
 use super::serial::asn_text::itoa_i32;
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -47,6 +48,10 @@ pub struct PairwiseConfig {
     /// The alignment section: outfmt 0's alignments, or the query-anchored section of outfmt 1
     /// to 4. The rest of the report is the same.
     pub view: PairwiseView,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// report, with the run's links and the report's OIDs (`html_ids::HtmlReport`, made only with
+    /// `-html`); `None`: the plain report.
+    pub html: Option<super::html_ids::HtmlReport>,
     /// A query whose sequence NCBI's alignment display cannot read (psiblast's PSSM query of the
     /// molecule `other`): the alignments of outfmt 0 are one line each. `None` for every other
     /// report.
@@ -62,6 +67,7 @@ impl Default for PairwiseConfig {
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
             view: PairwiseView::Pairwise,
+            html: None,
             unreadable_query: None,
         }
     }
@@ -231,6 +237,31 @@ impl PairwiseView {
 pub struct PairwiseReading {
     pub sort: super::hit_sort::ReportSort,
     pub shown: crate::report::db_subject::Shown,
+}
+
+impl PairwiseConfig {
+    /// The run's `-html` data of the report's prolog (`write_prolog`), `None` for the plain report.
+    pub(crate) fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.html.as_ref().map(|report| &*report.links)
+    }
+}
+
+/// `write_prolog`'s `html` of a report of `-html` links `links` (`None`: the plain report): the
+/// links and the sink of the report's posts (`QueryWarnings::html_posts_sink`: the run's
+/// diagnostics), which a `-html` pairwise report gets at any place among the run's formats
+/// (`query_warnings::report_posts`). One without them is LOSAT's internal error (its posts would
+/// be lost).
+pub(crate) fn html_with_diagnostics<'w>(
+    links: Option<&'w super::html_ids::HtmlLinks>,
+    warnings: Option<&'w mut super::query_warnings::QueryWarnings<'_>>,
+) -> io::Result<Option<(&'w super::html_ids::HtmlLinks, &'w mut dyn Write)>> {
+    match (links, warnings) {
+        (None, _) => Ok(None),
+        (Some(links), Some(warnings)) => Ok(Some((links, warnings.html_posts_sink()))),
+        (Some(_), None) => Err(io::Error::other(
+            super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
+        )),
+    }
 }
 
 impl PairwiseConfig {
@@ -497,9 +528,12 @@ pub struct BlastpPairwiseReport {
     pub gapped_karlin: KarlinParams,
     /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
     pub gumbel: Option<BlastGumbelBlk>,
-    /// A gapped search (`options.GetGappedMode()`); BLASTP's `-ungapped` search has no `Gapped`
-    /// Karlin block in a query's footer and no `Gap Penalties:` line in the epilog.
+    /// The options' gapped mode: an ungapped search's footers print the ungapped Karlin block
+    /// only and its epilog no `Gap Penalties` line (`gapped_karlin` is then unused).
     pub gapped: bool,
+    /// NCBI's `m_ShowLinkedSetSize` (sum statistics in an ungapped search): the description
+    /// table's `N` column.
+    pub show_linked_set_size: bool,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -626,8 +660,8 @@ pub fn write_subject_header<W: Write>(
 /// The alignments of one subject in outfmt 0: NCBI's `x_DisplayAlnvecInfo` for each HSP,
 /// the first one with the subject's heading (`GenerateDefline` of its title with flags 0,
 /// `defline.rs`). `write_hsp` writes the rest of one call (the score lines, the alignment
-/// and what follows it). `probe` marks the heading and each HSP without changing the
-/// written bytes.
+/// and what follows it) of an HSP and its index in the report's hits (`HspIndex`). `probe`
+/// marks the heading and each HSP without changing the written bytes.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
@@ -641,6 +675,12 @@ pub fn write_subject_header<W: Write>(
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1981
 /// The alignments of the HSPs `part` of the subject's (the heading with the first); the parts of
 /// `0..hits.len()` in order write its bytes (`x_pairwise_par`'s pieces).
+///
+/// With `-html` (`html`) the heading is `>`, the link of `lcl|Subject_N` (the registry's `[LOCAL_ID]
+/// TOOL_URL`, if any) and `</a>` after one, `<a name=Subject_N></a>`, a space and the
+/// HTML-encoded title wrapped (`HtmlHeading::unparsed_start`; the link precedes the title,
+/// `x_FillAlnDispParams` with the Bioseq's handle), and where the registry throws NCBI's line is
+/// written in place of each alignment too (`HtmlHeading::skips`).
 #[allow(clippy::too_many_arguments)]
 fn write_subject_alignments_part<W: Write>(
     writer: &mut W,
@@ -652,33 +692,276 @@ fn write_subject_alignments_part<W: Write>(
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
-    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    html: Option<HtmlHeading<'_>>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let heading = super::defline::generate_defline(title, protein, false);
-    if part.start == 0 {
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.subject_begin(first_index);
+    let attempt = |html: HtmlHeading<'_>| -> io::Result<Result<Vec<u8>, Vec<u8>>> {
+        let mut lines = Vec::new();
+        if let Err(error) = html.unparsed_start(&mut lines) {
+            return HtmlHeading::skips(error, || html.unparsed_skipped_id()).map(Err);
         }
-        if let Ok(heading) = &heading {
-            write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
+        Ok(match &heading {
+            Ok(heading) => {
+                super::db_subject::wrap_title(&super::html::html_encode(&heading.text), &mut lines);
+                lines.push(b'\n');
+                Ok(lines)
+            }
+            Err(super::defline::UnknownEncoding) => Err(subject_skipped_id(parsed, None, s_idx)),
+        })
+    };
+    let skipped = match html {
+        Some(html) if part.start == 0 => {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
+            let attempted = attempt(html);
+            place_heading_posts(html, true, writer, &mut *place)?;
+            let skipped = match attempted? {
+                Ok(lines) => {
+                    write_heading_lines(writer, &lines, hits[0].subject_length)?;
+                    None
+                }
+                Err(id) => Some(id),
+            };
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
+            skipped
         }
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.subject_end(first_index);
+        Some(html) => {
+            let skipped = attempt(html).map(Result::err);
+            later_part_posts(html, &skipped, writer, &mut *place)?;
+            skipped?
+        }
+        None => {
+            if part.start == 0 {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.subject_begin(first_index);
+                }
+                if let Ok(heading) = &heading {
+                    write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
+                }
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.subject_end(first_index);
+                }
+            }
+            heading
+                .as_ref()
+                .err()
+                .map(|_| subject_skipped_id(parsed, None, s_idx))
+        }
+    };
+    let retry = html.map(|html| {
+        let retry = move || -> io::Result<Option<Vec<u8>>> { Ok(attempt(html)?.err()) };
+        (retry, html)
+    });
+    write_hsps_or_skips(
+        writer,
+        probe,
+        hits,
+        hsp_indices,
+        part,
+        skipped,
+        retry,
+        place,
+        write_hsp,
+    )
+}
+
+/// Writes at `place` the reads of NCBI's formatter registries that the heading links of `html`
+/// made (`HtmlHeading::take_posts`, `ReportPlace::Html`), before the heading's bytes or NCBI's
+/// line in place of its alignment; `made` false drops them (a heading made by a later piece of
+/// the subject's alignments only to tell whether they are skipped, `later_part_posts`).
+fn place_heading_posts<W: Write>(
+    html: HtmlHeading<'_>,
+    made: bool,
+    writer: &mut W,
+    place: super::query_warnings::ReportHook<'_, W>,
+) -> io::Result<()> {
+    for post in html.take_posts() {
+        if made {
+            place(super::query_warnings::ReportPlace::Html(post), writer)?;
         }
     }
-    for (hit, &hsp_index) in hits[part.clone()].iter().zip(&hsp_indices[part]) {
+    Ok(())
+}
+
+/// The reads of the registries of the heading that a later part of a subject's alignments
+/// (EXPERIMENT LOSAT_X_PAIRWISEPAR's pieces) makes to tell whether they are skipped (`skipped`,
+/// or its error): the serial writer makes that heading again only for a skipped subject
+/// (`write_hsps_or_skips`' retry of the part's first HSP), so its reads are written only then, or
+/// before an error that ends the report.
+fn later_part_posts<W: Write>(
+    html: HtmlHeading<'_>,
+    skipped: &io::Result<Option<Vec<u8>>>,
+    writer: &mut W,
+    place: super::query_warnings::ReportHook<'_, W>,
+) -> io::Result<()> {
+    let made = !matches!(skipped, Ok(None));
+    place_heading_posts(html, made, writer, place)
+}
+
+/// The alignment heading of one subject of a report: a database sequence's or a `-subject`
+/// record's with parsed Seq-ids (`DatabaseHeading`), or a `-subject` record's without them, with
+/// its title (`write_subject_alignments_part`).
+#[derive(Clone, Copy)]
+enum SubjectHeading<'a> {
+    Database(DatabaseHeading<'a>),
+    Record(&'a [u8]),
+}
+
+impl SubjectHeading<'_> {
+    /// How many headings NCBI starts for the subject (`QueryGroup::heading_rank`): none where its
+    /// load throws (`DatabaseHeading::Skipped`), one for each alignment where the heading's title
+    /// cannot be made (NCBI's line in place of each alignment), else one.
+    fn starts(self, protein: bool) -> super::x_pairwise_par::HeadingStarts {
+        use super::x_pairwise_par::HeadingStarts;
+        let throws = match self {
+            SubjectHeading::Database(DatabaseHeading::Skipped(_)) => return HeadingStarts::Never,
+            SubjectHeading::Database(heading) => {
+                matches!(heading.skipped_id(protein, None), Ok(Some(_)))
+            }
+            SubjectHeading::Record(title) => {
+                super::defline::generate_defline(title, protein, false).is_err()
+            }
+        };
+        if throws {
+            HeadingStarts::EachAlignment
+        } else {
+            HeadingStarts::Once
+        }
+    }
+}
+
+/// The heading of subject `s_idx` of `group` in a report whose subjects' parsed Seq-ids are
+/// `parsed` (by subject index): the definition lines of one with them (`DatabaseHeading::loaded`
+/// with `gapped`, `Skipped` where its load throws: `thrown`, `QuerySections::thrown`), else a
+/// database sequence's stored title (`database`, the sources `sources`) or a `-subject` record's
+/// title.
+fn group_heading<'g>(
+    group: &'g super::x_pairwise_par::QueryGroup<'_>,
+    parsed: &'g [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    sources: &'g [super::defline::SourceTaxname],
+    database: bool,
+    gapped: bool,
+    thrown: bool,
+    s_idx: u32,
+) -> SubjectHeading<'g> {
+    let title = &group.subject_titles[&s_idx];
+    match parsed_subject(parsed, s_idx) {
+        Some(subject) => SubjectHeading::Database(DatabaseHeading::loaded(
+            subject,
+            gapped,
+            group.own_hsps(s_idx),
+            thrown,
+        )),
+        None if database => {
+            SubjectHeading::Database(DatabaseHeading::Title(title, stored_source(sources, s_idx)))
+        }
+        None => SubjectHeading::Record(title),
+    }
+}
+
+/// The alignments of the HSPs `part` of subject `s_idx` of `group` (its heading with the first):
+/// the subject's heading is `heading_of(s_idx)` (a database heading or a `-subject` record's,
+/// `write_database_subject_alignments_part`, `write_subject_alignments_part`; `records`: the
+/// `-subject` records' parsed Seq-ids), each HSP by `write_hsp`. With `-html` (`html`, the
+/// report's links) the heading's rank counts the headings of the subjects before it
+/// (`QueryGroup::heading_rank` with `heading_of`), made only then.
+#[allow(clippy::too_many_arguments)]
+fn write_subject_part<'h, W: Write>(
+    writer: &mut W,
+    probe: Option<&mut FormatProbe<'_>>,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    s_idx: u32,
+    part: std::ops::Range<usize>,
+    protein: bool,
+    html: Option<&super::html_ids::HtmlReport>,
+    records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    heading_of: impl Fn(u32) -> SubjectHeading<'h>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
+) -> io::Result<()> {
+    let posts = std::cell::RefCell::new(Vec::new());
+    let html = html.map(|report| HtmlHeading {
+        report,
+        s_idx,
+        rank: group.heading_rank(s_idx, |subject| heading_of(subject).starts(protein)),
+        posts: &posts,
+    });
+    let (hits, indices) = (
+        &group.subject_hits[&s_idx],
+        &group.subject_hit_indices[&s_idx],
+    );
+    match heading_of(s_idx) {
+        SubjectHeading::Database(heading) => write_database_subject_alignments_part(
+            writer, probe, heading, protein, hits, indices, part, html, place, write_hsp,
+        ),
+        SubjectHeading::Record(title) => write_subject_alignments_part(
+            writer, probe, s_idx, records, title, protein, hits, indices, part, html, place,
+            write_hsp,
+        ),
+    }
+}
+
+/// The heading `lines` of a subject (each line ending with a newline), `Length=` when the length
+/// is known, and one blank line.
+fn write_heading_lines<W: Write>(
+    writer: &mut W,
+    lines: &[u8],
+    length: Option<usize>,
+) -> io::Result<()> {
+    writer.write_all(lines)?;
+    if let Some(length) = length {
+        writeln!(writer, "Length={length}")?;
+    }
+    writeln!(writer)
+}
+
+/// The HSPs `part` of a subject (`hits`, `hsp_indices`) after its heading: each by `write_hsp`,
+/// or NCBI's line in place of each where the heading was not made (`skipped`, the Seq-id text of
+/// the line; showalign.cpp:1976-1981, cited at `write_subject_alignments_part`). NCBI sets
+/// `previousId` only after a heading, so each alignment of a skipped subject makes its heading
+/// again: with `-html` the next one's attempt is `retry` with the heading's `-html` data (its id
+/// links, whose reads of the registries `place` writes before the line, `place_heading_posts`).
+#[allow(clippy::too_many_arguments)]
+fn write_hsps_or_skips<W: Write>(
+    writer: &mut W,
+    mut probe: Option<&mut FormatProbe<'_>>,
+    hits: &[&PairwiseHit],
+    hsp_indices: &[HspIndex],
+    part: std::ops::Range<usize>,
+    mut skipped: Option<Vec<u8>>,
+    mut retry: Option<(impl FnMut() -> io::Result<Option<Vec<u8>>>, HtmlHeading<'_>)>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
+) -> io::Result<()> {
+    for (at, (hit, &hsp_index)) in hits[part.clone()]
+        .iter()
+        .zip(&hsp_indices[part])
+        .enumerate()
+    {
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.begin(hsp_index);
         }
-        match heading {
-            Ok(_) => write_hsp(writer, hit)?,
-            Err(super::defline::UnknownEncoding) => {
-                write_skipped_alignment(writer, &subject_skipped_id(parsed, None, s_idx))?
+        if at > 0 && skipped.is_some() {
+            if let Some((retry, html)) = retry.as_mut() {
+                let retried = retry();
+                place_heading_posts(*html, true, writer, &mut *place)?;
+                skipped = retried?;
             }
+        }
+        match &skipped {
+            None => write_hsp(writer, hit, hsp_index)?,
+            Some(id) => write_skipped_alignment(writer, id)?,
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -720,7 +1003,9 @@ fn write_database_subject_alignments_part<W: Write>(
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
-    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    html: Option<HtmlHeading<'_>>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let skipped = if part.start == 0 {
@@ -728,31 +1013,38 @@ fn write_database_subject_alignments_part<W: Write>(
             writer.flush()?;
             probe.subject_begin(first_index);
         }
-        let skipped =
-            write_database_subject_heading(writer, title, protein, hits[0].subject_length)?;
+        let skipped = write_database_subject_heading(
+            writer,
+            title,
+            protein,
+            hits[0].subject_length,
+            html,
+            &mut *place,
+        )?;
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.subject_end(first_index);
         }
         skipped
     } else {
-        title.skipped_id(protein)
+        let skipped = title.skipped_id(protein, html);
+        if let Some(html) = html {
+            later_part_posts(html, &skipped, writer, &mut *place)?;
+        }
+        skipped?
     };
-    for (hit, &hsp_index) in hits[part.clone()].iter().zip(&hsp_indices[part]) {
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.begin(hsp_index);
-        }
-        match &skipped {
-            None => write_hsp(writer, hit)?,
-            Some(id) => write_skipped_alignment(writer, id)?,
-        }
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.end(hsp_index);
-        }
-    }
-    Ok(())
+    let retry = html.map(|html| (move || title.skipped_id(protein, Some(html)), html));
+    write_hsps_or_skips(
+        writer,
+        probe,
+        hits,
+        hsp_indices,
+        part,
+        skipped,
+        retry,
+        place,
+        write_hsp,
+    )
 }
 
 /// NCBI's line in place of an alignment whose heading it cannot make (c++/src/objtools/align_format/showalign.cpp:1976-1981,
@@ -785,16 +1077,56 @@ impl<'a> DatabaseHeading<'a> {
     /// id <id> no longer exists in database...alignment skipped`, showalign.cpp:1976-1981, quoted
     /// at `ParsedSubject::heading_skipped_id`) where the heading's generated title throws: an empty
     /// stored title made from a name that NCBI cannot decode (`SourceTaxname::undecodable_id`), or
-    /// the generated title of a sequence with parsed Seq-ids (`heading_skipped_id`).
-    fn skipped_id(self, protein: bool) -> Option<Vec<u8>> {
-        match self {
+    /// the generated title of a sequence with parsed Seq-ids (`heading_skipped_id`). With `-html`
+    /// (`html`) the heading is made (`html_lines`: its id links come first and the registry can
+    /// throw), as NCBI makes it for each alignment until it succeeds.
+    fn skipped_id(
+        self,
+        protein: bool,
+        html: Option<HtmlHeading<'_>>,
+    ) -> io::Result<Option<Vec<u8>>> {
+        if let Some(html) = html {
+            return Ok(self.html_lines(protein, html)?.err());
+        }
+        Ok(match self {
             DatabaseHeading::Title([], source) => source.undecodable_id().map(<[u8]>::to_vec),
             DatabaseHeading::Title(..) => None,
             DatabaseHeading::Parsed(subject, every_line) => {
                 subject.heading_skipped_id(protein, every_line)
             }
             DatabaseHeading::Skipped(id) => Some(id.to_vec()),
+        })
+    }
+
+    /// The `-html` heading's lines (`write_lines`' with links, anchors and HTML-encoded titles),
+    /// or the Seq-id text of NCBI's line in place of each alignment: the definition lines of a
+    /// sequence with parsed Seq-ids (`ParsedSubject::heading`), else `>`, `<a name=BL_ORD_ID:N></a>`,
+    /// a space and the stored title (`HtmlHeading::unparsed_start`; `bp.dp.f0.h`).
+    fn html_lines(
+        self,
+        protein: bool,
+        html: HtmlHeading<'_>,
+    ) -> io::Result<Result<Vec<u8>, Vec<u8>>> {
+        let (title, source) = match self {
+            DatabaseHeading::Parsed(subject, every_line) => {
+                return subject.heading(protein, every_line, Some(html));
+            }
+            // The heading is not made (`UnreadableQuery`), so neither are its links.
+            DatabaseHeading::Skipped(id) => return Ok(Err(id.to_vec())),
+            DatabaseHeading::Title(title, source) => (title, source),
+        };
+        let mut lines = Vec::new();
+        if let Err(error) = html.unparsed_start(&mut lines) {
+            return HtmlHeading::skips(error, || html.unparsed_skipped_id()).map(Err);
         }
+        Ok(match stored_heading_title(title, source, protein) {
+            Ok(title) => {
+                super::db_subject::wrap_title(&super::html::html_encode(&title), &mut lines);
+                lines.push(b'\n');
+                Ok(lines)
+            }
+            Err(id) => Err(id.to_vec()),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:340-359
@@ -804,37 +1136,39 @@ impl<'a> DatabaseHeading<'a> {
     /// parsed Seq-ids the line of each definition line (`ParsedSubject::heading`). Where the title
     /// made for the heading throws it writes nothing and gives the Seq-id text of NCBI's line in
     /// place of each alignment (`skipped_id`). The title is made once.
-    fn write_lines<W: Write>(self, writer: &mut W, protein: bool) -> io::Result<Option<Vec<u8>>> {
-        let (title, source) = match self {
-            DatabaseHeading::Title(title, source) => (title, source),
-            DatabaseHeading::Parsed(subject, every_line) => {
-                return match subject.heading(protein, every_line) {
-                    Ok(lines) => writer.write_all(&lines).map(|()| None),
-                    Err(id) => Ok(Some(id)),
+    /// With `-html` (`html`) the lines are `html_lines`.
+    fn write_lines<W: Write>(
+        self,
+        writer: &mut W,
+        protein: bool,
+        html: Option<HtmlHeading<'_>>,
+        place: super::query_warnings::ReportHook<'_, W>,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let lines = match (self, html) {
+            (_, Some(html)) => {
+                let lines = self.html_lines(protein, html);
+                place_heading_posts(html, true, writer, place)?;
+                lines?
+            }
+            (DatabaseHeading::Parsed(subject, every_line), None) => {
+                subject.heading(protein, every_line, None)?
+            }
+            (DatabaseHeading::Title(title, source), None) => {
+                return match stored_heading_title(title, source, protein) {
+                    Ok(heading) => {
+                        writer.write_all(b">")?;
+                        write_wrapped(writer, &heading)?;
+                        writer.write_all(b"\n").map(|()| None)
+                    }
+                    Err(id) => Ok(Some(id.to_vec())),
                 };
             }
-            DatabaseHeading::Skipped(id) => return Ok(Some(id.to_vec())),
+            (DatabaseHeading::Skipped(id), None) => return Ok(Some(id.to_vec())),
         };
-        let generated;
-        let heading: &[u8] = if title.is_empty() {
-            if let Some(id) = source.undecodable_id() {
-                return Ok(Some(id.to_vec()));
-            }
-            // NCBI makes an empty title from the Bioseq's source (`c++/src/objtools/align_format/showalign.cpp:2250-2255`,
-            // cited at `ParsedSubject::generated_title_fetched`; LOSAT refuses a source that it
-            // refuses before the report, `StoredTitle::check_shown_source`).
-            let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
-            generated = super::defline::generate_bioseq_defline(title, protein, false, &facts)
-                .map(|defline| defline.text)
-                .unwrap_or_default();
-            &generated
-        } else {
-            title
-        };
-        writer.write_all(b">")?;
-        write_wrapped(writer, heading)?;
-        writer.write_all(b"\n")?;
-        Ok(None)
+        match lines {
+            Ok(lines) => writer.write_all(&lines).map(|()| None),
+            Err(id) => Ok(Some(id)),
+        }
     }
 
     /// The heading of a subject with parsed Seq-ids and `hsps` HSPs in a search that is
@@ -874,11 +1208,46 @@ fn thrown_load<'l>(
     s_idx: u32,
 ) -> Option<(&'l crate::ncbi_exception::NcbiException, bool)> {
     let exception = loads.thrown(s_idx as usize)?;
-    let local = parsed
+    Some((exception, alignment_id_local(parsed, s_idx)))
+}
+
+/// Whether subject `s_idx` of a report whose subjects with parsed Seq-ids are `parsed` (by subject
+/// index) has a local Seq-align id (`ParsedSubject::alignment_id_is_local`; one without parsed
+/// Seq-ids has `gnl|BL_ORD_ID|n` or, a `-subject` record, no load to order).
+fn alignment_id_local(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> bool {
+    parsed
         .get(s_idx as usize)
         .and_then(Option::as_deref)
-        .is_some_and(crate::report::db_subject::ParsedSubject::alignment_id_is_local);
-    Some((exception, local))
+        .is_some_and(crate::report::db_subject::ParsedSubject::alignment_id_is_local)
+}
+
+/// The title of the heading of a database sequence without parsed Seq-ids: its stored `title`, or
+/// of an empty one the title that NCBI makes from the Bioseq's `source`
+/// (`c++/src/objtools/align_format/showalign.cpp:2250-2255`, cited at
+/// `ParsedSubject::generated_title_fetched`; LOSAT refuses a source that it refuses
+/// before the report, `StoredTitle::check_shown_source`); `Err` with the Seq-id text of NCBI's
+/// line in place of each alignment where that throws (`SourceTaxname::undecodable_id`).
+fn stored_heading_title<'t>(
+    title: &'t [u8],
+    source: &'t super::defline::SourceTaxname,
+    protein: bool,
+) -> Result<std::borrow::Cow<'t, [u8]>, &'t [u8]> {
+    if !title.is_empty() {
+        return Ok(title.into());
+    }
+    if let Some(id) = source.undecodable_id() {
+        return Err(id);
+    }
+    let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
+    Ok(
+        super::defline::generate_bioseq_defline(title, protein, false, &facts)
+            .map(|defline| defline.text)
+            .unwrap_or_default()
+            .into(),
+    )
 }
 
 /// The source of the subject `s_idx` without parsed Seq-ids among `sources`, the sources of a
@@ -902,8 +1271,10 @@ fn write_database_subject_heading<W: Write>(
     heading: DatabaseHeading<'_>,
     protein: bool,
     length: Option<usize>,
+    html: Option<HtmlHeading<'_>>,
+    place: super::query_warnings::ReportHook<'_, W>,
 ) -> io::Result<Option<Vec<u8>>> {
-    if let Some(id) = heading.write_lines(writer, protein)? {
+    if let Some(id) = heading.write_lines(writer, protein, html, place)? {
         return Ok(Some(id));
     }
     if let Some(length) = length {
@@ -1109,18 +1480,22 @@ fn write_hsp_identities<W: Write>(
 ///             MVLSPADKTN VKAAWGKVGA HAGEYGAEAL ERMFLSFPTT KTYFPHFDLS H
 /// Sbjct  1    MVLSPADKTN VKAAWGKVGA HAGEYGAEAL ERMFLSFPTT KTYFPHFDLS H  60
 /// ```
+///
+/// `masks`: the rows' masks under `-html` (`HtmlRowMasks`), `None` without.
 pub fn write_alignment<W: Write>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
-    write_decorated_alignment(writer, hit, config, &PlainRows)
+    write_decorated_alignment(writer, hit, masks, config, &PlainRows)
 }
 
 /// `write_alignment` with the query feature of `decoration` (`write_hsp_rows`).
 pub(crate) fn write_decorated_alignment<W: Write, D: RowDecoration>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
     decoration: &D,
 ) -> io::Result<()> {
@@ -1135,6 +1510,7 @@ pub(crate) fn write_decorated_alignment<W: Write, D: RowDecoration>(
             sseq,
             [&hit.query_stored_gaps, &hit.subject_stored_gaps],
             hit.query_case,
+            masks,
             config,
             decoration,
         )?;
@@ -1163,7 +1539,8 @@ pub(crate) fn write_decorated_alignment<W: Write, D: RowDecoration>(
 /// from high to low), rows of letters (`write_hsp_rows`). `stored_gaps` are the columns of the
 /// query's and the subject's rows whose `-` is a residue (`PairwiseHit::query_stored_gaps`,
 /// `PairwiseHit::subject_stored_gaps`), `query_case` how the query row's letters compare
-/// (`PairwiseHit::query_case`).
+/// (`PairwiseHit::query_case`), `masks` the rows' masks under `-html` (`write_hsp_rows`),
+/// `decoration` the query's feature (`RowDecoration`).
 #[allow(clippy::too_many_arguments)]
 fn write_alignment_with_sequences<W: Write, D: RowDecoration>(
     writer: &mut W,
@@ -1172,6 +1549,7 @@ fn write_alignment_with_sequences<W: Write, D: RowDecoration>(
     subject_seq: &str,
     stored_gaps: [&[u32]; 2],
     query_case: super::row_letters::QueryCase,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
     decoration: &D,
 ) -> io::Result<()> {
@@ -1223,7 +1601,7 @@ fn write_alignment_with_sequences<W: Write, D: RowDecoration>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1579
     // A row is written on a line that meets its columns between its end gaps
     // (`rowRng` is set from `m_AV->GetSeqAlnRange` of the row, showalign.cpp:1272; `write_hsp_rows`), the middle
-    // line with the query's; its end gaps are NCBI's end character (`write_row_chars`).
+    // line with the query's; its end gaps are NCBI's end character (`row_string`).
     write_hsp_rows(
         writer,
         |segments| {
@@ -1235,18 +1613,46 @@ fn write_alignment_with_sequences<W: Write, D: RowDecoration>(
         },
         [1, 1],
         line_len,
-        q_chars.len(),
+        [
+            &row_string(query_seq, &q_chars, query_span),
+            &row_string(subject_seq, &s_chars, subject_span),
+        ],
+        masks,
         max_start_len,
-        |writer, row, columns| {
-            if row == 0 {
-                write_row_chars(writer, &q_chars, columns, query_span)
-            } else {
-                write_row_chars(writer, &s_chars, columns, subject_span)
-            }
-        },
         write_middle,
         decoration,
     )
+}
+
+/// The rows' masks of a report's HSPs under `-html` (`HspMasks` by HSP, the masked regions of
+/// NCBI's row information of each HSP): `query_anchored::output_seq` puts each mask
+/// of a row's line in NCBI's span. The rows' builders keep them only then (the rows hold the
+/// masks' letters in lower case in every report, and `PairwiseHit` holds no list: the plain
+/// report reads none). `masks[i]` is that of HSP `first + i` of the run's hits (`HspIndex`);
+/// without `-html` the table is empty.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct HtmlRowMasks<'a> {
+    masks: &'a [super::query_anchored::HspMasks],
+    first: HspIndex,
+}
+
+impl<'a> HtmlRowMasks<'a> {
+    /// The table of the masks `masks` (`None` without `-html`) of the hits from HSP `first` on.
+    pub(crate) fn new(
+        masks: Option<&'a [super::query_anchored::HspMasks]>,
+        first: HspIndex,
+    ) -> Self {
+        Self {
+            masks: masks.unwrap_or_default(),
+            first,
+        }
+    }
+
+    /// The masks of the rows of HSP `hsp_index`; `None` without `-html`.
+    #[inline]
+    pub(crate) fn of(self, hsp_index: HspIndex) -> Option<&'a super::query_anchored::HspMasks> {
+        self.masks.get(hsp_index.checked_sub(self.first)?)
+    }
 }
 
 thread_local! {
@@ -1256,6 +1662,7 @@ thread_local! {
     static HSP_ROWS: std::cell::RefCell<(
         super::serial::seqalign::Segments,
         super::query_anchored::HspAlnVec,
+        Vec<u8>,
     )> = std::cell::RefCell::default();
 }
 
@@ -1266,9 +1673,12 @@ const ROW_LABELS: [&str; 2] = ["Query", "Sbjct"];
 /// middle line, the subject row and a blank line. The rows' coordinates come from the HSP's
 /// `CAlnVec` (`query_anchored::HspAlnVec`) of its Seq-align's segments, which `segments_of` makes
 /// (the producer of the program, `report::serial::seqalign`, as the query-anchored reports'
-/// `section_hsps`), of row widths `widths` (`HspStrands::no_widths`: none); `columns` is the
-/// number of columns of the rows' letters, `write_letters(writer, row, columns)` writes a row's
-/// letters of a line and `write_middle(writer, columns)` the middle line's. `width` is the width
+/// `section_hsps`), of row widths `widths` (`HspStrands::no_widths`: none); `letters` are the rows'
+/// letters (NCBI's row strings: an end gap is the end character, a space; a mask's letters in
+/// lower case), a line of a row written through `x_OutputSeq` (`query_anchored::write_output_seq`):
+/// under `-html` with the row's masks of `masks` (`HtmlRowMasks`), each in NCBI's span, else as
+/// the letters are (`masks` is `None`), and `write_middle(writer, columns)` writes the middle
+/// line's. `width` is the width
 /// of the coordinates (`maxStartLen`, `coordinate_width`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1435-1438,1452-1453
@@ -1292,13 +1702,14 @@ fn write_hsp_rows<W: Write, D: RowDecoration>(
     ) -> super::query_anchored::HspStrands,
     widths: [u32; 2],
     line_length: usize,
-    columns: usize,
+    letters: [&[u8]; 2],
+    masks: Option<&super::query_anchored::HspMasks>,
     width: usize,
-    mut write_letters: impl FnMut(&mut W, usize, std::ops::Range<usize>) -> io::Result<()>,
     mut write_middle: impl FnMut(&mut W, std::ops::Range<usize>) -> io::Result<()>,
     decoration: &D,
 ) -> io::Result<()> {
-    HSP_ROWS.with_borrow_mut(|(segments, rows)| {
+    let columns = letters[0].len();
+    HSP_ROWS.with_borrow_mut(|(segments, rows, buffer)| {
         let strands = segments_of(segments);
         let widths = if strands.no_widths { [1, 1] } else { widths };
         rows.set(
@@ -1355,7 +1766,17 @@ fn write_hsp_rows<W: Write, D: RowDecoration>(
                     aln_start,
                     prev_stop[row],
                     width,
-                    |writer| write_letters(writer, row, line.clone()),
+                    |writer| {
+                        super::query_anchored::write_output_seq(
+                            writer,
+                            buffer,
+                            letters[row],
+                            aln_start,
+                            line.len(),
+                            masks.and_then(|masks| masks.row(row)),
+                            masks.is_some(),
+                        )
+                    },
                 )?;
                 if row == 0 {
                     write_spaces(writer, label.len() + 2 + width + 2)?;
@@ -1514,7 +1935,7 @@ impl RowLetter for u8 {
     }
 }
 
-/// Writes `letters` (a chunk of a row kept as `char`s, `write_row_chars`, or a middle line,
+/// Writes `letters` (a middle line,
 /// `write_alignment_with_sequences` and `write_protein_middle`) a buffer of 256 bytes at a time
 /// (written when a letter of the most bytes might not fit), in its caller's loop.
 #[inline(always)]
@@ -1597,27 +2018,26 @@ fn write_wrapped<W: Write>(writer: &mut W, text: &[u8]) -> io::Result<()> {
     writer.write_all(&text[from..])
 }
 
-/// Writes the columns `columns` of the row `row` kept as `char`s, its end gaps (the columns
-/// outside `span`, `end_gap_span`) as NCBI's end character, a space.
-fn write_row_chars<W: Write>(
-    writer: &mut W,
-    row: &[char],
-    columns: std::ops::Range<usize>,
+/// The row `row` (`text`, its `char`s `chars`) as NCBI's row string (`GetWholeAlnSeqString`):
+/// its end gaps (the columns outside `span`, `end_gap_span`) the end character, a space. A row
+/// of ASCII letters without end gaps is its text as it is.
+fn row_string<'a>(
+    text: &'a str,
+    chars: &[char],
     span: (usize, usize),
-) -> io::Result<()> {
-    if span.0 <= columns.start && columns.end <= span.1 {
-        return write_buffered(writer, row[columns].iter().copied());
+) -> std::borrow::Cow<'a, [u8]> {
+    if text.is_ascii() && span == (0, chars.len()) {
+        return std::borrow::Cow::Borrowed(text.as_bytes());
     }
-    write_buffered(
-        writer,
-        columns.map(|column| {
-            if column < span.0 || column >= span.1 {
-                ' '
-            } else {
-                row[column]
-            }
-        }),
-    )
+    let mut row = String::with_capacity(text.len());
+    for (column, &letter) in chars.iter().enumerate() {
+        row.push(if column < span.0 || column >= span.1 {
+            ' '
+        } else {
+            letter
+        });
+    }
+    std::borrow::Cow::Owned(row.into_bytes())
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
@@ -1691,7 +2111,14 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_labels: &[DescriptionLabel],
     show_sum_n: bool,
     columns: Option<SortColumns>,
-    read: super::query_warnings::SubjectReadHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    // `-html`: the rows' links, the subjects with parsed Seq-ids by subject index and what the
+    // report's loads do at each subject (`HtmlRows`).
+    html: Option<(
+        &super::html_ids::HtmlReport,
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        &crate::report::db_subject::HitLoads,
+    )>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -1706,7 +2133,12 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
                 DescriptionLabel::clone,
             )
         },
-        read,
+        place,
+        html.map(|(report, parsed, loads)| HtmlRows {
+            report,
+            parsed,
+            loads,
+        }),
     )
 }
 
@@ -1804,34 +2236,119 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-395
-/// The prolog of blastp's, psiblast's and rpsblast's pairwise reports before the database: the
-/// version line (`reference::write_version_line`), two newlines and the references of
-/// `PrintProlog` (`reference::write_prolog_references`: the Gapped BLAST reference, psiblast's
-/// compositionally adjusted matrices and the composition-based statistics of psiblast and
-/// blastp). `program` is `psiblast`, `rpsblast`, `phiblastp`, or blastp's for any other.
-fn write_blastp_pairwise_intro<W: Write>(
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:396-441
+/// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
+/// `html`, the report is `-html`; `own_buffer`, the writer is a buffer that its sink opened for
+/// the prolog alone (`OutputSink::open` of a library call's `Stdout` or `File` sink), flushed so
+/// that its write errors show. A plain report keeps dev's flush points (the writers of blastn,
+/// blastx and tblastx flush there; blastp and tblastn write the prolog with the first report). An
+/// `-html` report does not flush there: NCBI's `PrintProlog` flushes `cout` with the `NcbiEndl`
+/// pair after the version line and writes the references and the database lines after it without
+/// a flush, so its `cout` keeps those bytes until a post on `cerr` (tied to `cout`:
+/// `query_warnings::write_html_post`) or its buffer writes them, and `GETURL_DEBUG`'s `REGISTRY:`
+/// line, which is not a post (`QueryWarnings::html_stderr_line`), comes before them where both
+/// streams go to one pipe (line RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 after the
+/// version line's 159 bytes in every program, probes `T/t4/fix2/out/c4.*`). A write failure still
+/// shows before the search, at the version line (`write_prolog`). NCBI's later flush points of the
+/// report (the `NcbiEndl` that starts each query's footer, its buffer's size) are the report
+/// stream's of line RG T6a (PR #1508), which takes this rule with it (decision T4a2-14).
+pub(crate) fn flushes_after_prolog(html: bool, own_buffer: bool) -> bool {
+    !html || own_buffer
+}
+
+/// `CBlastFormat::PrintProlog` of the reports of formats 0-4 of every program (the one place of
+/// the start of their output): the version line (`reference::write_version_line`), the `NcbiEndl`
+/// pair and the references (`reference::write_prolog_references`: the Gapped BLAST or, for
+/// `megablast`, the megablast reference and, with `indexed_megablast`, the database indexing one
+/// after it, psiblast's compositionally adjusted matrices and the composition-based statistics of
+/// psiblast and blastp). `program` is NCBI's `m_Program` (any
+/// case; `blastp_family_program` for blastp's driver).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-395
+/// NCBI writes no prolog for the XML formats and those after them (they write their own
+/// headers); an HTML report starts with the HTML prefix line; then comes the version line, and,
+/// unless a bl2seq search without a database scan ends there, the two `NcbiEndl`. (The callers
+/// are those of formats 0-4 that write the references.) `disable_ka_stats` is
+/// NCBI's `m_DisableKAStats` (blastn's matrix-only scoring, `BlastnIntro::matrix_only`): a
+/// blastn search then names `rmblastn` in the version line and writes RMBlast's reference, three
+/// lines with no line end after the last, before the `NcbiEndl` pair; the references after it
+/// are blastn's. `NcbiEndl` is `std::endl`, which flushes in every NCBI program. `endl_flushes`
+/// keeps each program's flushes of dev for the plain report: the reports that share the
+/// translated programs' prolog (blastx, rpstblastn, tblastn, tblastx, the blastn tasks other than
+/// megablast and matrix-only scoring) flush there, blastp's driver (blastp, psiblast, rpsblast)
+/// and megablast do not and flush later. A flush moves the point where these bytes reach the
+/// output and where a write failure shows, so the difference stays data here, not a change of
+/// this groundwork. An `-html` prolog flushes at both in every program, as NCBI's: its references
+/// post on the diagnostics (below), which a failed write of the output must not precede (line RG
+/// T4a2 review B4: `-out /dev/full` with `GETURL_DEBUG`).
+/// `html`: the run's `-html` data (`html_ids::HtmlLinks`; `None`: the plain report) and the run's
+/// diagnostics: the HTML head and `<PRE>` (`HTML_PREFIX`) first, the version line in bold, and the
+/// references with their links, each with its own read of `./.ncbirc`, whose posts go to the
+/// diagnostics (`HtmlLinks::ncbirc`); a malformed file ends the prolog after the version line and
+/// its two newlines with NCBI's exception (line RG T4 probes `bp.di.f0.rc_bad.h`,
+/// `rc_bad_dontuse.h`: exit status 255). After the prolog, `flushes_after_prolog`.
+pub(crate) fn write_prolog<W: Write + ?Sized>(
     writer: &mut W,
-    version: &str,
     program: &str,
+    version: &str,
+    megablast: bool,
+    indexed_megablast: bool,
+    endl_flushes: bool,
+    disable_ka_stats: bool,
+    html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
-    // (PHI-BLAST's formatter is `phiblastp`'s: its version line and the Gapped BLAST reference.)
-    let program = match program {
-        "psiblast" | "rpsblast" | "phiblastp" => program,
-        _ => "blastp",
-    };
-    super::reference::write_version_line(writer, false, program, version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    let endl_flushes = endl_flushes || html.is_some();
+    if html.is_some() {
+        writer.write_all(HTML_PREFIX)?;
+    }
+    if disable_ka_stats && program.eq_ignore_ascii_case("blastn") {
+        super::reference::write_version_line(writer, html.is_some(), "rmblastn", version)?;
+        writer.write_all(
+            b"\n\nReference: Robert M. Hubley, Arian Smit\nRMBlast - RepeatMasker Search Engine\n2010 <http://www.repeatmasker.org>",
+        )?;
+    } else {
+        super::reference::write_version_line(writer, html.is_some(), program, version)?;
+    }
+    for _ in 0..2 {
+        writeln!(writer)?;
+        if endl_flushes {
+            writer.flush()?;
+        }
+    }
     super::reference::write_prolog_references(
         writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
+        html.map(|(links, diagnostics)| (&links.ncbirc, diagnostics)),
         program,
-        false,
-        false,
+        megablast,
+        indexed_megablast,
     )
+}
+
+/// The start of an HTML report of formats 0-4 (`kHTML_Prefix`, its four lines, and the newline
+/// that `PrintProlog` writes after it), before the version line.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:326-330
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:371-373
+const HTML_PREFIX: &[u8] = b"<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>\n<BODY BGCOLOR=\"#FFFFFF\" LINK=\"#0000FF\" VLINK=\"#660099\" ALINK=\"#660099\">\n<PRE>\n\n";
+
+/// The end of an HTML report of formats 0-4 (`kHTML_Suffix`, its three lines, and the newline that
+/// `PrintEpilog` writes after it), after the epilog's last line.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:332-335
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2290-2292
+const HTML_SUFFIX: &[u8] = b"</PRE>\n</BODY>\n</HTML>\n";
+
+/// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, `phiblastp`
+/// (PHI-BLAST's formatter: its version line and the Gapped BLAST reference), or `blastp` for any
+/// other name (its tasks).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
+pub(crate) fn blastp_family_program(program: &str) -> &str {
+    match program {
+        "psiblast" | "rpsblast" | "phiblastp" => program,
+        _ => "blastp",
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:125-138
@@ -2009,8 +2526,18 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_blastp_pairwise_intro(writer, version, program)?;
+    write_prolog(
+        writer,
+        blastp_family_program(program),
+        version,
+        false,
+        false,
+        false,
+        false,
+        html,
+    )?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -2128,13 +2655,22 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     writer: &mut W,
     query_title: &[u8],
     query_length: usize,
+    html: bool,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
     // The ID of a local query is not shown (`believe_query` false), so the line is the
     // title, raw (no decoding), without the white space at its ends.
-    crate::cli::insert(writer, b"Query")?;
-    crate::cli::insert(writer, b"= ")?;
-    write_flatfile_wrapped(writer, truncate_spaces(query_title), 68)?;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:724-731
+    // `-html` (D4 of the T4 survey): the label in bold and the line HTML-encoded and wrapped
+    // with `fWrap_HTMLPre` (`x_WrapOutputLine`, `report::html::write_html_wrapped`).
+    if html {
+        crate::cli::insert(writer, b"<b>Query=</b> ")?;
+        super::html::write_html_wrapped(writer, truncate_spaces(query_title), 68)?;
+    } else {
+        crate::cli::insert(writer, b"Query")?;
+        crate::cli::insert(writer, b"= ")?;
+        write_flatfile_wrapped(writer, truncate_spaces(query_title), 68)?;
+    }
     crate::cli::insert(writer, b"\nLength=")?;
     crate::cli::insert(writer, query_length.to_string().as_bytes())?;
     crate::cli::insert(writer, b"\n")
@@ -2270,6 +2806,7 @@ fn write_blastp_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    html: bool,
 ) -> io::Result<()> {
     match database {
         Some(database) => write_final_database_block(writer, database)?,
@@ -2290,16 +2827,41 @@ fn write_blastp_final_footer<W: Write>(
             report.gap_open, report.gap_extend
         )?;
     }
-    if report.word_threshold != 0.0 {
-        // `GetWordThreshold()` is a double, written with the stream's default format.
+    write_epilog_end(
+        writer,
+        report.word_threshold,
+        report.window_size as i64,
+        html,
+    )
+}
+
+/// The end of `CBlastFormat::PrintEpilog` of formats 0-4, the one place of the end of their output
+/// for every program: the word threshold's and the window's lines, each when it is not 0
+/// (BLASTN's threshold is 0 for every task, BLAST_WORD_THRESHOLD_BLASTN and
+/// BLAST_WORD_THRESHOLD_MEGABLAST, blast_options.h). `GetWordThreshold()` is a double, written
+/// with the stream's default format (`cpp_default_double`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2281-2292
+/// The two lines, then, for an HTML report (`html`, `-html`), the end of its `<PRE>`, body and
+/// document (`HTML_SUFFIX`).
+fn write_epilog_end<W: Write + ?Sized>(
+    writer: &mut W,
+    word_threshold: f64,
+    window_size: i64,
+    html: bool,
+) -> io::Result<()> {
+    if word_threshold != 0.0 {
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            cpp_default_double(report.word_threshold)
+            cpp_default_double(word_threshold)
         )?;
     }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
+    if window_size != 0 {
+        writeln!(writer, "Window for multiple hits: {window_size}")?;
+    }
+    if html {
+        writer.write_all(HTML_SUFFIX)?;
     }
     Ok(())
 }
@@ -2378,6 +2940,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
         epilog,
         x_pool,
         None,
+        None,
         loads,
     )
 }
@@ -2407,13 +2970,24 @@ pub fn write_blastp_pairwise_window<W: Write>(
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
     if prolog && query_range.start == 0 {
-        write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
+        write_prolog(
+            writer,
+            blastp_family_program(&config.program),
+            &report.version,
+            false,
+            false,
+            false,
+            false,
+            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
+        )?;
         // The prolog ends with one blank line; each query's preamble starts with two
         // (blast_format.cpp:1491), after the query's warnings.
         match database {
@@ -2454,6 +3028,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
             parsed_subjects,
             subject_sources,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
             loads,
         },
         query_range.start,
@@ -2481,7 +3056,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
 
     writeln!(writer)?;
 
-    write_blastp_final_footer(writer, report, database)?;
+    write_blastp_final_footer(writer, report, database, config.html.is_some())?;
     writer.flush()
 }
 
@@ -2500,6 +3075,8 @@ struct BlastpSections<'a> {
     subject_sources: &'a [super::defline::SourceTaxname],
     /// The sequences of the query-anchored sections (outfmt 1 to 4).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
     /// What the reports' loads do at each subject, by subject (`thrown_load`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
@@ -2903,7 +3480,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        read: super::query_warnings::SubjectReadHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
@@ -2921,7 +3498,12 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
-        write_blastp_query_header(writer, query_title, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            query_title,
+            query.query_length,
+            self.config.html.is_some(),
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
@@ -2973,7 +3555,12 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                     self.thrown(s_idx).is_some(),
                 )
             },
-            read,
+            place,
+            self.config.html.as_ref().map(|report| HtmlRows {
+                report,
+                parsed: self.parsed_subjects,
+                loads: self.loads,
+            }),
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
         writeln!(writer)
@@ -2986,6 +3573,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
@@ -2997,50 +3585,37 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
                 part,
-                |_, _| unreachable!("a skipped alignment is written by its line"),
+                None,
+                place,
+                |_, _, _| unreachable!("a skipped alignment is written by its line"),
             );
         }
-        let parsed = parsed_subject(self.parsed_subjects, s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::loaded(
-                    subject,
-                    true,
-                    group.own_hsps(s_idx),
-                    self.thrown(s_idx).is_some(),
-                ),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(self.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                true,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                |writer, hit| {
-                    write_hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
-                },
-            );
-        }
-        write_subject_alignments_part(
+        let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
+        let database = self.database.is_some();
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            self.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            true,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
-            |writer, hit| {
+            true,
+            config.html.as_ref(),
+            parsed,
+            |subject| {
+                group_heading(
+                    group,
+                    parsed,
+                    sources,
+                    database,
+                    true,
+                    self.thrown(subject).is_some(),
+                    subject,
+                )
+            },
+            place,
+            |writer, hit, hsp_index| {
                 write_hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, config)
+                write_alignment(writer, hit, self.row_masks.of(hsp_index), config)
             },
         )
     }
@@ -3051,6 +3626,14 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
 
     fn view(&self) -> PairwiseView {
         self.config.view
+    }
+
+    fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.config.html_links()
+    }
+
+    fn alignment_id_is_local(&self, s_idx: u32) -> bool {
+        alignment_id_local(self.parsed_subjects, s_idx)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -3137,7 +3720,7 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
-    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// A gapped search (the options' gapped mode); an ungapped (`-ungapped`) search has no
     /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
     pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
@@ -3199,8 +3782,20 @@ fn write_description_table<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     mut label_of: impl FnMut(u32) -> DescriptionLabel,
-    read: super::query_warnings::SubjectReadHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
+    html: Option<HtmlRows<'_>>,
 ) -> io::Result<()> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1070
+    // An `-html` table reads `./.ncbirc` first (`x_InitDeflineTable`), also one without rows
+    // (`-num_descriptions 0`): its posts come before the table's bytes (line RG T4a2 probes
+    // `bp_nd0`, `bx`: after the query's `Length=` line).
+    if html.is_some() {
+        place(
+            super::query_warnings::ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc),
+            writer,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:513-514
     // c++/src/objtools/align_format/showdefline.cpp:757,848: with `-num_descriptions 0`
     // the header block (the two header lines and the blank line) and the rows are not written;
@@ -3291,17 +3886,32 @@ fn write_description_table<W: Write>(
     }
     writeln!(writer)?;
     writeln!(writer)?;
-    for (s_idx, best, total, sum_n, values) in &rows {
+    for (index, (s_idx, best, total, sum_n, values)) in rows.iter().enumerate() {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
-        read(*s_idx, writer)?;
-        label_of(*s_idx).write_cut(writer)?;
-        write!(
-            writer,
-            "  {:<max_score$}",
-            format_bitscore_ncbi(best.hit.bit_score)
-        )?;
+        place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
+        if let Some(html) = html {
+            html.end_at_thrown(*s_idx)?;
+        }
+        let bits = format_bitscore_ncbi(best.hit.bit_score);
+        match html {
+            None => {
+                label_of(*s_idx).write_cut(writer)?;
+                write!(writer, "  {bits:<max_score$}")?;
+            }
+            Some(html) => {
+                let rank = (*s_idx, index + 1);
+                html.write_start(
+                    writer,
+                    &label_of(*s_idx),
+                    rank,
+                    &bits,
+                    max_score,
+                    &mut *place,
+                )?;
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-956
         if let Some(values) = values {
             write!(
@@ -3453,14 +4063,19 @@ pub struct DescriptionLabel {
     pub id: Vec<u8>,
     /// The title.
     pub title: Vec<u8>,
+    /// Whether the line is that of NCBI's `catch` (`x_GetDeflineInfo`: the subject's title or its
+    /// load throws; the id text is the Seq-align id's and the title `Unknown`): its `-html` row
+    /// has no score link and links the Seq-align id (`HtmlReport::description_links`).
+    pub caught: bool,
 }
 
 impl DescriptionLabel {
-    /// A label of a title alone (a generated defline, `Unknown`).
+    /// A label of a title alone (a generated defline).
     pub fn title_only(title: Vec<u8>) -> Self {
         DescriptionLabel {
             id: Vec::new(),
             title,
+            caught: false,
         }
     }
 
@@ -3474,29 +4089,122 @@ impl DescriptionLabel {
     /// whole label below never cuts the id.)
     fn write_cut<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         // A label of a title alone is written as the joined label was: one write of its letters.
-        let len = self.id.len() + self.title.len();
-        if len > 68 {
-            let id = self.id.len().min(65);
-            if id > 0 {
-                writer.write_all(&self.id[..id])?;
-            }
-            writer.write_all(&self.title[..65 - id])?;
+        let (id, title, cut) = self.cut();
+        if id > 0 {
+            writer.write_all(&self.id[..id])?;
+        }
+        writer.write_all(&self.title[..title])?;
+        if cut {
             writer.write_all(b"...")
         } else {
-            if !self.id.is_empty() {
-                writer.write_all(&self.id)?;
-            }
-            writer.write_all(&self.title)?;
-            write_spaces(writer, 68 - len)
+            write_spaces(writer, 68 - id - title)
+        }
+    }
+
+    /// The bytes of the id text and of the title that the line keeps and whether `...` follows
+    /// (`write_cut`): a label longer than 68 columns keeps 65 bytes.
+    fn cut(&self) -> (usize, usize, bool) {
+        if self.id.len() + self.title.len() > 68 {
+            let id = self.id.len().min(65);
+            (id, 65 - id, true)
+        } else {
+            (self.id.len(), self.title.len(), false)
+        }
+    }
+
+    /// The `-html` label (`write_cut` with `eHtml`): the link `link` (the line's id URL), the id
+    /// text, `</a>` after a link, then the cut title `HTMLEncode`d; the cut and the padding count
+    /// the raw bytes (`line_length`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:883-885, 909-931
+    fn write_html<W: Write>(&self, writer: &mut W, link: &[u8]) -> io::Result<()> {
+        let (id, title, cut) = self.cut();
+        writer.write_all(link)?;
+        writer.write_all(&self.id[..id])?;
+        if !link.is_empty() {
+            writer.write_all(b"</a>")?;
+        }
+        let mut encoded = Vec::new();
+        super::html::html_encode_into(&self.title[..title], &mut encoded);
+        writer.write_all(&encoded)?;
+        if cut {
+            writer.write_all(b"...")
+        } else {
+            write_spaces(writer, 68 - id - title)
         }
     }
 }
 
-/// The description-table label of a database sequence (before the cut to the line): the title
-/// that `GenerateDefline` makes of the stored title `title` and the source `source` of the
-/// Bioseq, which an empty title is made from (`Unknown` where NCBI's `HtmlDecode` throws), or for
-/// a sequence with parsed Seq-ids its id and title (`ParsedSubject::description`; where its load
-/// throws, `thrown`, the `catch`'s Seq-align id and `Unknown`, `ParsedSubject::thrown_description`).
+/// The `-html` inputs of a description table (`write_description_table`): the report's links and
+/// OIDs (`PairwiseConfig::html`) and the subjects with parsed Seq-ids by subject index (those of
+/// the labels).
+#[derive(Clone, Copy)]
+struct HtmlRows<'a> {
+    report: &'a super::html_ids::HtmlReport,
+    parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    /// What the report's loads do at each subject, by subject (`HitLoads::thrown`).
+    loads: &'a crate::report::db_subject::HitLoads,
+}
+
+impl HtmlRows<'_> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3904-3907
+    /// The end of the run at the `-html` row of subject `s_idx` where its load throws
+    /// (`HitLoads::thrown`): the `catch` of the row's load makes the row's link, whose
+    /// `GetIDUrl` loads the subject again with the scope, and that throw leaves the report. The
+    /// writer's error is the load's exception (as `x_pairwise_par::end_here`), after the rows
+    /// before it and the row's own read; the plain row is the `catch`'s `Unknown`.
+    fn end_at_thrown(self, s_idx: u32) -> io::Result<()> {
+        match self.loads.thrown(s_idx as usize) {
+            Some(exception) => Err(exception.clone().into_io_error()),
+            None => Ok(()),
+        }
+    }
+
+    /// The start of the `-html` description row of rank `rank` (from 1) for the subject `s_idx`
+    /// with the label `label` and the bit score `bits` (in a column of `max_score`): the label
+    /// (`DescriptionLabel::write_html`), two spaces, then the bit score inside the score link (none
+    /// on the row of NCBI's `catch`, `DescriptionLabel::caught`). The row's links read NCBI's
+    /// formatter registry (`HtmlPost`), which `place` writes before the row's bytes, also before
+    /// the registry's exception.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:932-939
+    fn write_start<W: Write>(
+        self,
+        writer: &mut W,
+        label: &DescriptionLabel,
+        (s_idx, rank): (u32, usize),
+        bits: &str,
+        max_score: usize,
+        place: super::query_warnings::ReportHook<'_, W>,
+    ) -> io::Result<()> {
+        let parsed = self.parsed.get(s_idx as usize).and_then(Option::as_deref);
+        let mut posts = Vec::new();
+        let links = self
+            .report
+            .description_links(parsed, s_idx, rank, label.caught, &mut posts);
+        for post in posts {
+            place(super::query_warnings::ReportPlace::Html(post), writer)?;
+        }
+        let (link, score) = links?;
+        label.write_html(writer, &link)?;
+        writer.write_all(b"  ")?;
+        writer.write_all(&score)?;
+        writer.write_all(bits.as_bytes())?;
+        if !score.is_empty() {
+            writer.write_all(b"</a>")?;
+        }
+        write_spaces(writer, max_score.saturating_sub(bits.len()))
+    }
+}
+
+/// The description-table label of a database sequence or a `-subject` record (before the cut to
+/// the line): the title that `GenerateDefline` makes of the stored title `title` and the source
+/// `source` of the Bioseq, which an empty title is made from, or for a sequence with parsed
+/// Seq-ids its id and title (`ParsedSubject::description_line`); where the title throws
+/// (`Unknown`: NCBI's `HtmlDecode` cannot decode it) or the load does (`thrown`), the line of
+/// NCBI's `catch` (`DescriptionLabel::caught`; the Seq-align id of a sequence with parsed Seq-ids,
+/// `ParsedSubject::thrown_description`; none is shown of one without).
 pub fn database_description_label(
     title: &[u8],
     source: &super::defline::SourceTaxname,
@@ -3505,23 +4213,27 @@ pub fn database_description_label(
     thrown: bool,
 ) -> DescriptionLabel {
     if let Some(subject) = parsed {
-        let (id, title) = if thrown {
-            subject.thrown_description()
+        let (id, title, caught) = if thrown {
+            let (id, title) = subject.thrown_description();
+            (id, title, true)
         } else {
-            subject.description(protein)
+            subject.description_line(protein)
         };
         return DescriptionLabel {
             id,
             title: title.text,
+            caught,
         };
     }
     let facts = super::defline::BioseqFacts::of_source(source.name().ok().flatten());
-    DescriptionLabel::title_only(
-        match super::defline::generate_bioseq_defline(title, protein, true, &facts) {
-            Ok(defline) => defline.text,
-            Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
+    match super::defline::generate_bioseq_defline(title, protein, true, &facts) {
+        Ok(defline) => DescriptionLabel::title_only(defline.text),
+        Err(super::defline::UnknownEncoding) => DescriptionLabel {
+            id: Vec::new(),
+            title: b"Unknown".to_vec(),
+            caught: true,
         },
-    )
+    }
 }
 
 // The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
@@ -3537,7 +4249,9 @@ fn write_blastn_description_table<W: Write>(
     show_sum_n: bool,
     protein: bool,
     columns: Option<SortColumns>,
-    read: super::query_warnings::SubjectReadHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    // `-html`: the report's links and OIDs (`PairwiseConfig::html`).
+    html: Option<&super::html_ids::HtmlReport>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     write_description_table(
@@ -3563,58 +4277,12 @@ fn write_blastn_description_table<W: Write>(
                 loads.thrown(s_idx as usize).is_some(),
             )
         },
-        read,
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
-// The prolog of a megablast search: the reference is the megablast one, with the database
-// indexing one after it for a search with an index (`reference::write_prolog_references`); the
-// layout is that of `write_translated_pairwise_intro`.
-fn write_megablast_pairwise_intro(
-    writer: &mut impl Write,
-    version: &str,
-    indexed_megablast: bool,
-) -> io::Result<()> {
-    super::reference::write_version_line(writer, false, "blastn", version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    super::reference::write_prolog_references(
-        writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
-        "blastn",
-        true,
-        indexed_megablast,
-    )
-}
-
-/// The prolog of a search under matrix-only scoring (`BlastnIntro::matrix_only`): the program
-/// line of rmblastn, NCBI's three lines of the RMBlast reference (the last without its line end),
-/// two line ends, then the references of the task (the megablast one for `-task megablast`).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:376-395
-fn write_matrix_only_pairwise_intro(
-    writer: &mut impl Write,
-    version: &str,
-    intro: BlastnIntro,
-) -> io::Result<()> {
-    super::reference::write_version_line(writer, false, "rmblastn", version)?;
-    writer.write_all(
-        b"\n\nReference: Robert M. Hubley, Arian Smit\nRMBlast - RepeatMasker Search Engine\n2010 <http://www.repeatmasker.org>",
-    )?;
-    // `NcbiEndl` writes a line end and flushes.
-    writeln!(writer)?;
-    writer.flush()?;
-    writeln!(writer)?;
-    writer.flush()?;
-    super::reference::write_prolog_references(
-        writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
-        "blastn",
-        intro.megablast,
-        intro.indexed_megablast,
+        place,
+        html.map(|report| HtmlRows {
+            report,
+            parsed,
+            loads,
+        }),
     )
 }
 
@@ -3673,6 +4341,7 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
 fn write_blastn_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastnPairwiseReport,
+    html: bool,
 ) -> io::Result<()> {
     match report.database.as_ref() {
         Some(database) => write_final_database_block(writer, database)?,
@@ -3689,8 +4358,6 @@ fn write_blastn_final_footer<W: Write>(
         report.reward, report.penalty
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2270-2288
-    // BLASTN's word threshold is 0 for every task (BLAST_WORD_THRESHOLD_BLASTN and
-    // BLAST_WORD_THRESHOLD_MEGABLAST, blast_options.h).
     let gap_extension = if report.zero_gap_extension_formula && report.gap_extend == 0 {
         f64::from(-2 * report.penalty + report.reward) / 2.0
     } else {
@@ -3703,10 +4370,7 @@ fn write_blastn_final_footer<W: Write>(
             report.gap_open, gap_extension
         )?;
     }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
-    }
-    Ok(())
+    write_epilog_end(writer, 0.0, report.window_size as i64, html)
 }
 
 /// The start of the BLASTN report, which NCBI writes before it searches: the program
@@ -3722,13 +4386,32 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
     if intro.matrix_only {
-        write_matrix_only_pairwise_intro(writer, version, intro)?;
+        write_prolog(
+            writer,
+            "blastn",
+            version,
+            intro.megablast,
+            intro.indexed_megablast,
+            true,
+            true,
+            html,
+        )?;
     } else if intro.megablast {
-        write_megablast_pairwise_intro(writer, version, intro.indexed_megablast)?;
+        write_prolog(
+            writer,
+            "blastn",
+            version,
+            true,
+            intro.indexed_megablast,
+            false,
+            false,
+            html,
+        )?;
     } else {
-        write_translated_pairwise_intro(writer, "BLASTN", version)?;
+        write_prolog(writer, "blastn", version, false, false, true, false, html)?;
     }
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
@@ -3763,9 +4446,11 @@ pub fn write_blastn_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
@@ -3783,6 +4468,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             report.database_num_sequences,
             report.database_total_letters,
             report.database.as_ref(),
+            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
         )?;
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
@@ -3802,6 +4488,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             queries,
             report,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
             loads,
         },
         query_range.start,
@@ -3817,7 +4504,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
     if report.epilog && query_range.end == queries.len() {
         writer.write_all(b"\n\n")?;
-        write_blastn_final_footer(writer, report)?;
+        write_blastn_final_footer(writer, report, config.html.is_some())?;
     }
     writer.flush()
 }
@@ -3829,6 +4516,8 @@ struct BlastnSections<'a> {
     report: &'a BlastnPairwiseReport,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
     /// What the reports' loads do at each subject, by subject (`thrown_load`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
@@ -3861,12 +4550,17 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        read: super::query_warnings::SubjectReadHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
         writer.write_all(b"\n\n")?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &query.query_name,
+            query.query_length,
+            self.config.html.is_some(),
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-449
@@ -3903,7 +4597,8 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             false,
             self.config.sort_columns(query.query_length),
-            read,
+            place,
+            self.config.html.as_ref(),
             self.loads,
         )?;
         writeln!(writer)
@@ -3916,6 +4611,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // The HSP header: the raw score alone under matrix-only scoring
@@ -3928,47 +4624,33 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
         // id is not shown), as BLASTP's (`write_database_subject_alignments_part`), or the lines
         // of the definition lines of one with parsed Seq-ids.
-        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
-        if self.report.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::loaded(
-                    subject,
-                    self.report.gapped,
-                    group.own_hsps(s_idx),
-                    self.thrown(s_idx).is_some(),
-                ),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(&self.report.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                false,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                |writer, hit| {
-                    hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
-                },
-            );
-        }
-        write_subject_alignments_part(
+        let report = self.report;
+        let (parsed, sources) = (&report.parsed_subjects[..], &report.subject_sources[..]);
+        let (database, gapped) = (report.database.is_some(), report.gapped);
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            &self.report.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            false,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
-            |writer, hit| {
+            false,
+            config.html.as_ref(),
+            parsed,
+            |subject| {
+                group_heading(
+                    group,
+                    parsed,
+                    sources,
+                    database,
+                    gapped,
+                    self.thrown(subject).is_some(),
+                    subject,
+                )
+            },
+            place,
+            |writer, hit, hsp_index| {
                 hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, config)
+                write_alignment(writer, hit, self.row_masks.of(hsp_index), config)
             },
         )
     }
@@ -3979,6 +4661,14 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
 
     fn view(&self) -> PairwiseView {
         self.config.view
+    }
+
+    fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.config.html_links()
+    }
+
+    fn alignment_id_is_local(&self, s_idx: u32) -> bool {
+        alignment_id_local(&self.report.parsed_subjects, s_idx)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -4101,8 +4791,9 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, "TBLASTX", version)?;
+    write_prolog(writer, "tblastx", version, false, false, true, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -4172,6 +4863,7 @@ fn write_tblastx_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
 fn write_tblastx_alignment<W: Write>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     query_length: usize,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
@@ -4195,9 +4887,9 @@ fn write_tblastx_alignment<W: Write>(
         |segments| tblastx_row_segments(hit, query_length, segments),
         [3, 3],
         config.line_length,
-        q.len(),
+        [q, s],
+        masks,
         width,
-        |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| {
             write_protein_middle(
                 writer,
@@ -4250,6 +4942,7 @@ fn write_tblastx_epilog<W: Write>(
     writer: &mut W,
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    html: bool,
 ) -> io::Result<()> {
     writer.write_all(b"\n\n")?;
     match database {
@@ -4262,18 +4955,12 @@ fn write_tblastx_epilog<W: Write>(
         )?,
     }
     write_matrix_line(writer, Some(&report.matrix_name))?;
-    if report.word_threshold != 0.0 {
-        // `GetWordThreshold()` is a double, written with the stream's default format.
-        writeln!(
-            writer,
-            "Neighboring words threshold: {}",
-            cpp_default_double(report.word_threshold)
-        )?;
-    }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
-    }
-    Ok(())
+    write_epilog_end(
+        writer,
+        report.word_threshold,
+        report.window_size as i64,
+        html,
+    )
 }
 
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
@@ -4335,11 +5022,13 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
     // outfmt 0).
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
@@ -4355,6 +5044,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report.database_num_sequences,
             report.database_total_letters,
             database,
+            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
         )?;
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
@@ -4375,6 +5065,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report,
             database,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
             loads,
         },
         query_range.start,
@@ -4389,7 +5080,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer.
     if report.epilog && query_range.end == queries.len() {
-        write_tblastx_epilog(writer, report, database)?;
+        write_tblastx_epilog(writer, report, database, config.html.is_some())?;
     }
     writer.flush()
 }
@@ -4402,6 +5093,8 @@ struct TblastxSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
     /// What the reports' loads do at each subject, by subject (`thrown_load`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
@@ -4434,12 +5127,17 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        read: super::query_warnings::SubjectReadHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
         writer.write_all(b"\n\n")?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &query.query_name,
+            query.query_length,
+            self.config.html.is_some(),
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
@@ -4466,7 +5164,8 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             report.sum_stats,
             false,
             self.config.sort_columns(query.query_length),
-            read,
+            place,
+            self.config.html.as_ref(),
             self.loads,
         )?;
         writeln!(writer)
@@ -4479,55 +5178,48 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
         // The query's record length (`Length=`), also with `-query_loc`: the hits of the query's
         // group are its hits (`x_pairwise_par::write` groups them by `Hit::q_idx`).
-        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {
             let query_length = self.queries[hit.hit.q_idx as usize].query_length;
             write_tblastx_hsp_info(writer, hit)?;
-            write_tblastx_alignment(writer, hit, query_length, config)?;
+            let masks = self.row_masks.of(hsp_index);
+            write_tblastx_alignment(writer, hit, masks, query_length, config)?;
             writeln!(writer)
         };
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
         // BLASTN's and TBLASTN's `-db` reports), or the lines of the definition lines of one
         // with parsed Seq-ids.
-        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::loaded(
-                    subject,
-                    false,
-                    group.own_hsps(s_idx),
-                    self.thrown(s_idx).is_some(),
-                ),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(&self.report.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                false,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                write_hsp,
-            );
-        }
-        write_subject_alignments_part(
+        let (parsed, sources) = (
+            &self.report.parsed_subjects[..],
+            &self.report.subject_sources[..],
+        );
+        let database = self.database.is_some();
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            &self.report.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            false,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
+            false,
+            config.html.as_ref(),
+            parsed,
+            |subject| {
+                group_heading(
+                    group,
+                    parsed,
+                    sources,
+                    database,
+                    false,
+                    self.thrown(subject).is_some(),
+                    subject,
+                )
+            },
+            place,
             write_hsp,
         )
     }
@@ -4538,6 +5230,14 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 
     fn view(&self) -> PairwiseView {
         self.config.view
+    }
+
+    fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.config.html_links()
+    }
+
+    fn alignment_id_is_local(&self, s_idx: u32) -> bool {
+        alignment_id_local(&self.report.parsed_subjects, s_idx)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -4591,8 +5291,9 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, program, version)?;
+    write_prolog(writer, program, version, false, false, true, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -4625,9 +5326,11 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
@@ -4644,7 +5347,16 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     }
     let mut writer = io::BufWriter::new(writer);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
-    write_translated_pairwise_intro(&mut writer, program, &report.version)?;
+    write_prolog(
+        &mut writer,
+        program,
+        &report.version,
+        false,
+        false,
+        true,
+        false,
+        html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
+    )?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
     match database {
@@ -4682,6 +5394,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             report,
             database,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
             loads,
         },
         0,
@@ -4700,7 +5413,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // The blank lines before the epilog (blast_format.cpp:2249).
     writeln!(&mut writer)?;
     writeln!(&mut writer)?;
-    write_blastp_final_footer(&mut writer, report, database)?;
+    write_blastp_final_footer(&mut writer, report, database, config.html.is_some())?;
     writer.flush()
 }
 
@@ -4719,6 +5432,8 @@ struct TblastnSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
     /// What the reports' loads do at each subject, by subject (`thrown_load`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
@@ -4755,13 +5470,18 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        read: super::query_warnings::SubjectReadHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(writer, &self.query_titles[q_idx], query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &self.query_titles[q_idx],
+            query.query_length,
+            self.config.html.is_some(),
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-97 leaves both Karlin blocks null
@@ -4778,14 +5498,12 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
             } else {
-                write_blastp_query_footer_spacing(
+                write_translated_query_footer(
                     writer,
-                    query.ungapped_karlin,
+                    query,
+                    self.report,
                     self.report.gapped_karlin,
-                    self.report.gumbel,
                     self.report.gapped,
-                    query.effective_search_space,
-                    false,
                 )?;
             }
             return Ok(());
@@ -4804,10 +5522,11 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             &group.subject_titles,
             self.parsed_subjects,
             self.subject_sources,
-            false,
+            self.report.show_linked_set_size,
             false,
             self.config.sort_columns(query.query_length),
-            read,
+            place,
+            self.config.html.as_ref(),
             self.loads,
         )?;
         writeln!(writer)
@@ -4822,53 +5541,42 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
-        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {
             write_tblastn_hsp_info(writer, hit)?;
-            write_tblastn_alignment(writer, hit, config)?;
+            write_tblastn_alignment(writer, hit, self.row_masks.of(hsp_index), config)?;
             writeln!(writer)
         };
         // A database sequence's heading is its stored title after `>` (as BLASTP's
         // and BLASTN's `-db` reports), or the lines of the definition lines of one with
         // parsed Seq-ids.
-        let parsed = parsed_subject(self.parsed_subjects, s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::loaded(
-                    subject,
-                    true,
-                    group.own_hsps(s_idx),
-                    self.thrown(s_idx).is_some(),
-                ),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    stored_source(self.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                false,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                write_hsp,
-            );
-        }
-        write_subject_alignments_part(
+        let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
+        let database = self.database.is_some();
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            self.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            false,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
             part,
+            false,
+            config.html.as_ref(),
+            parsed,
+            |subject| {
+                group_heading(
+                    group,
+                    parsed,
+                    sources,
+                    database,
+                    self.report.gapped,
+                    self.thrown(subject).is_some(),
+                    subject,
+                )
+            },
+            place,
             write_hsp,
         )
     }
@@ -4879,6 +5587,14 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
 
     fn view(&self) -> PairwiseView {
         self.config.view
+    }
+
+    fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.config.html_links()
+    }
+
+    fn alignment_id_is_local(&self, s_idx: u32) -> bool {
+        alignment_id_local(self.parsed_subjects, s_idx)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -4902,15 +5618,14 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
     }
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
-        let query = &self.queries[q_idx];
-        write_blastp_query_footer_spacing(
+        // An ungapped search's footer has the ungapped Karlin block only (`x_PrintOneQueryFooter`,
+        // cited at `write_translated_query_footer`).
+        write_translated_query_footer(
             writer,
-            query.ungapped_karlin,
+            &self.queries[q_idx],
+            self.report,
             self.report.gapped_karlin,
-            self.report.gumbel,
             self.report.gapped,
-            query.effective_search_space,
-            false,
         )
     }
 }
@@ -4981,6 +5696,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
 fn write_tblastn_alignment<W: Write>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let (Some(qseq), Some(sseq)) = (&hit.query_seq, &hit.subject_seq) else {
@@ -5003,9 +5719,9 @@ fn write_tblastn_alignment<W: Write>(
         |segments| tblastn_row_segments(hit, segments),
         [1, 3],
         config.line_length,
-        q.len(),
+        [q, s],
+        masks,
         width,
-        |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| {
             write_protein_middle(
                 writer,
@@ -5018,30 +5734,6 @@ fn write_tblastn_alignment<W: Write>(
             )
         },
         &PlainRows,
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
-fn write_translated_pairwise_intro(
-    writer: &mut impl Write,
-    program: &str,
-    version: &str,
-) -> io::Result<()> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:66-73
-    super::reference::write_version_line(writer, false, program, version)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
-    writeln!(writer)?;
-    writer.flush()?;
-    writeln!(writer)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
-    writer.flush()?;
-    super::reference::write_prolog_references(
-        writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
-        program,
-        false,
-        false,
     )
 }
 
@@ -5095,6 +5787,8 @@ pub fn write_blastx_pairwise_report<W: Write>(
     // outfmt 0).
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     let sections = BlastxSections {
@@ -5108,6 +5802,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         records_parsed,
         record_titles,
         anchored,
+        row_masks: HtmlRowMasks::new(row_masks, first_hsp),
         loads,
     };
     // `hits[i]` is HSP `first_hsp + i` of the run's hit list (LOSAT Web's `run_local` writes a run
@@ -5177,6 +5872,8 @@ struct BlastxSections<'a> {
     record_titles: &'a [&'a [u8]],
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
     /// What the reports' loads do at each database subject, by subject (`thrown_load`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
@@ -5203,57 +5900,51 @@ impl BlastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
-        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {
             write_tblastn_hsp_info(writer, hit)?;
-            write_blastx_alignment(writer, hit, config)?;
+            write_blastx_alignment(writer, hit, self.row_masks.of(hsp_index), config)?;
             writeln!(writer)
         };
-        let (hits, indices) = (
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
-        );
-        let parsed = match self.database {
-            Some((_, _, parsed, _)) => parsed_subject(parsed, s_idx),
-            None => parsed_subject(self.records_parsed, s_idx),
+        let heading_of = |s_idx: u32| {
+            let parsed = match self.database {
+                Some((_, _, parsed, _)) => parsed_subject(parsed, s_idx),
+                None => parsed_subject(self.records_parsed, s_idx),
+            };
+            match (parsed, self.database) {
+                (Some(subject), _) => SubjectHeading::Database(DatabaseHeading::loaded(
+                    subject,
+                    self.options.gapped,
+                    group.own_hsps(s_idx),
+                    super::x_pairwise_par::QuerySections::thrown(self, s_idx).is_some(),
+                )),
+                (None, Some((_, titles, _, sources))) => SubjectHeading::Database(
+                    DatabaseHeading::Title(&titles[s_idx as usize], stored_source(sources, s_idx)),
+                ),
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
+                (None, None) => SubjectHeading::Record(
+                    self.record_titles
+                        .get(s_idx as usize)
+                        .copied()
+                        .unwrap_or_default(),
+                ),
+            }
         };
-        let heading = match (parsed, self.database) {
-            (Some(subject), _) => Some(DatabaseHeading::loaded(
-                subject,
-                self.options.gapped,
-                group.own_hsps(s_idx),
-                super::x_pairwise_par::QuerySections::thrown(self, s_idx).is_some(),
-            )),
-            (None, Some((_, titles, _, sources))) => Some(DatabaseHeading::Title(
-                &titles[s_idx as usize],
-                stored_source(sources, s_idx),
-            )),
-            (None, None) => None,
-        };
-        if let Some(heading) = heading {
-            return write_database_subject_alignments_part(
-                writer, probe, heading, true, hits, indices, part, write_hsp,
-            );
-        }
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
-        let title = self
-            .record_titles
-            .get(s_idx as usize)
-            .copied()
-            .unwrap_or_default();
-        write_subject_alignments_part(
+        write_subject_part(
             writer,
             probe,
+            group,
             s_idx,
-            self.records_parsed,
-            title,
-            true,
-            hits,
-            indices,
             part,
+            true,
+            config.html.as_ref(),
+            self.records_parsed,
+            heading_of,
+            place,
             write_hsp,
         )
     }
@@ -5288,13 +5979,18 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        read: super::query_warnings::SubjectReadHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1492
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        write_blastp_query_header(
+            writer,
+            &query.query_name,
+            query.query_length,
+            self.config.html.is_some(),
+        )?;
         let Some(group) = group else {
             write_no_hits_found(writer)?;
             return self.foot(writer, q_idx);
@@ -5324,7 +6020,14 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             self.subject_labels,
             !self.options.gapped && self.options.sum_stats,
             self.config.sort_columns(query.query_length),
-            read,
+            place,
+            self.config.html.as_ref().map(|report| {
+                let parsed = match self.database {
+                    Some((_, _, parsed, _)) => parsed,
+                    None => self.records_parsed,
+                };
+                (report, parsed, self.loads)
+            }),
         )?;
         writeln!(writer)
     }
@@ -5340,6 +6043,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let hits = &group.subject_hits[&s_idx];
         let stop = mapper_rewrites(self.remaps(), hits)
@@ -5347,7 +6051,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             .flatten();
         let written = part.start..stop.unwrap_or(part.end);
         if !written.is_empty() {
-            self.write_part(writer, probe, group, s_idx, written)?;
+            self.write_part(writer, probe, group, s_idx, written, place)?;
         }
         if stop.is_some() {
             writer.flush()?;
@@ -5363,6 +6067,18 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
 
     fn view(&self) -> PairwiseView {
         self.config.view
+    }
+
+    fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.config.html_links()
+    }
+
+    fn alignment_id_is_local(&self, s_idx: u32) -> bool {
+        let parsed = match self.database {
+            Some((_, _, parsed, _)) => parsed,
+            None => self.records_parsed,
+        };
+        alignment_id_local(parsed, s_idx)
     }
 
     // Each HSP's Dense-seg is made after its subject's read, before the section's first byte and
@@ -5395,7 +6111,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     }
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
-        write_blastx_query_footer(
+        write_translated_query_footer(
             writer,
             &self.queries[q_idx],
             self.report,
@@ -5409,14 +6125,24 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-388
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:406-407
 /// `program` is the program line's name: `BLASTX`, or `RPSTBLASTN`, whose prolog is BLASTX's (the
-/// Gapped BLAST reference only, blast_format.cpp:416-426 cited at `write_translated_pairwise_intro`).
+/// Gapped BLAST reference only, blast_format.cpp:416-426, `write_prolog`).
 pub fn write_blastx_prolog(
     writer: &mut impl Write,
     program: &str,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, program, &report.version)?;
+    write_prolog(
+        writer,
+        program,
+        &report.version,
+        false,
+        false,
+        true,
+        false,
+        html,
+    )?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -5434,6 +6160,7 @@ pub fn write_blastx_epilog(
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<&PairwiseDatabase>,
+    html: bool,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249-2249
@@ -5467,24 +6194,18 @@ pub fn write_blastx_epilog(
             report.gap_open, report.gap_extend
         )?;
     }
-    if options.word_threshold != 0.0 {
-        // `GetWordThreshold()` is a double, written with the stream's default format.
-        writeln!(
-            writer,
-            "Neighboring words threshold: {}",
-            cpp_default_double(options.word_threshold)
-        )?;
-    }
-    if report.window_size != 0 {
-        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
-    }
-    Ok(())
+    write_epilog_end(
+        writer,
+        options.word_threshold,
+        report.window_size as i64,
+        html,
+    )
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:583-613
-/// The footer of a BLASTX query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its Karlin
-/// blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
-fn write_blastx_query_footer(
+/// The footer of a BLASTX or TBLASTN query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its
+/// Karlin blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
+fn write_translated_query_footer(
     writer: &mut impl Write,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,
@@ -5536,6 +6257,7 @@ fn write_blastx_query_footer(
 fn write_blastx_alignment(
     writer: &mut impl Write,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let (Some(qseq), Some(sseq)) = (&hit.query_seq, &hit.subject_seq) else {
@@ -5569,9 +6291,9 @@ fn write_blastx_alignment(
         |segments| blastx_row_segments(hit, segments),
         [3, 1],
         config.line_length,
-        q.len(),
+        [q, s],
+        masks,
         width,
-        |writer, row, columns| writer.write_all(&[q, s][row][columns]),
         |writer, columns| {
             write_protein_middle(
                 writer,

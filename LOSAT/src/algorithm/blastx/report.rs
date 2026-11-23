@@ -8,6 +8,7 @@ use crate::{common::GapEditOp, report::query_warnings::EMPTY_DATABASE_MESSAGE};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 use super::empty_rows::SubjectLoc;
 use crate::cli::NativeError;
+use crate::report::query_anchored::MaskSeek;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
 use std::{io::Write, path::Path};
@@ -16,7 +17,6 @@ use std::{io::Write, path::Path};
 pub(crate) struct DisplayAlignment {
     pub qseq: String,
     pub sseq: String,
-    pub masked_qseq: String,
     pub gaps: usize,
     pub gap_opens: usize,
     pub qstart: i32,
@@ -186,28 +186,25 @@ pub(super) fn display_query_residue(
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:200-244
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1028
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2494-2529
 pub(crate) fn alignment(
-    batch: &BatchResults,
     hsp: &Hsp,
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
 ) -> Result<DisplayAlignment> {
-    Ok(display_alignment(batch, hsp, subject, query_record, code, None)?.0)
+    Ok(display_alignment(hsp, subject, query_record, code, None)?.0)
 }
 
 /// `alignment` and the counts of its rows (`RowCounts`), the positives by `matrix` (the
 /// formatter's matrix of the search): outfmt 0's hits (`pairwise_hits`).
 pub(crate) fn counted_alignment(
-    batch: &BatchResults,
     hsp: &Hsp,
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
     matrix: crate::config::ScoringMatrix,
 ) -> Result<(DisplayAlignment, RowCounts)> {
-    display_alignment(batch, hsp, subject, query_record, code, Some(matrix))
+    display_alignment(hsp, subject, query_record, code, Some(matrix))
 }
 
 /// The display alignment of `alignment`, with the counts of its rows where `counts` gives the
@@ -216,7 +213,6 @@ pub(crate) fn counted_alignment(
 /// only).
 #[inline(never)]
 fn display_alignment(
-    batch: &BatchResults,
     hsp: &Hsp,
     subject: &FastaRecord,
     query_record: &FastaRecord,
@@ -225,14 +221,11 @@ fn display_alignment(
 ) -> Result<(DisplayAlignment, RowCounts)> {
     let raw = &hsp.hsp;
     let (q_end, s_end) = hsp.seqalign_ends();
-    let context = &batch.prepared.contexts[raw.context];
     let query_length = query_record.sequence.len();
     let mut qi = usize::try_from(raw.q_start)?;
     let mut si = usize::try_from(raw.s_start)?;
     let mut qseq = Vec::new();
     let mut sseq = Vec::new();
-    let mut masked = Vec::new();
-    let mut query_columns = Vec::new();
     let mut gap_opens = 0;
     // The gaps of the Dense-seg (`GetAlignLengths`): the columns of a gap op, not the `-` letters
     // of the rows (a stored gap character of the subject is one).
@@ -261,15 +254,11 @@ fn display_alignment(
             } else {
                 b'-'
             };
-            if consume_q {
-                query_columns.push(qseq.len());
-            }
             if consume_s && sc == b'-' {
                 subject_stored_gaps.push(u32::try_from(sseq.len())?);
             }
             qseq.push(qc);
             sseq.push(sc);
-            masked.push(qc);
             qi += usize::from(consume_q);
             si += usize::from(consume_s);
         }
@@ -278,14 +267,6 @@ fn display_alignment(
         qi == q_end as usize && si == s_end as usize,
         "BLASTX edit script does not reach final endpoints"
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:930-959
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4326
-    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:551-558
-    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:593-595
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4303-4306
-    // Every consumed query residue has width three; query gaps retain columns
-    // between the mapped mask endpoints. The masks here are the returned DNA
-    // intervals, after the core protein-to-DNA conversion, not lookup AA masks.
     let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, q_end);
     // A record cut to `-query_loc`: the reports read the frame from the record
     // (NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-422,
@@ -300,54 +281,6 @@ fn display_alignment(
             query_place.length,
         ) as i8
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2503
-    // The masks a row shows are those labelled with the row's frame in the record; a mask keeps
-    // the frame of the context it was found in, which counts from the ends of the searched
-    // letters. With `-query_loc` the two can differ, and NCBI then shows the masks of another
-    // frame's context on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
-    // `Map` moves each mask into the record, cut at the interval's end, and drops one that
-    // covers the whole interval; here the masks stay in the searched letters' coordinates.
-    // An ungapped HSP of length 0 (`-window_size 0`, `Blast_HSPTest` keeps it) has no letters to
-    // lower: its rows are empty (`query_columns` too), whatever masks its ends touch.
-    let shown_masks: &[(i32, i32)] = if query_columns.is_empty() {
-        &[]
-    } else if frame == raw.frame {
-        &context.dna_masks
-    } else {
-        batch
-            .prepared
-            .contexts
-            .iter()
-            .find(|shown| shown.query_index == context.query_index && shown.frame == frame)
-            .map_or(&[], |shown| &shown.dna_masks)
-    };
-    let last = query_length as i32 - 1;
-    for &(from, to) in shown_masks {
-        if from > to || from > last {
-            continue;
-        }
-        let to = to.min(last);
-        if (from == 0 && to == last) || to < qstart.min(qend) - 1 || from > qstart.max(qend) - 1 {
-            continue;
-        }
-        let map_nt = |nt: i32| {
-            let aa = if raw.frame > 0 {
-                (nt - i32::from(raw.frame) + 1).div_euclid(3)
-            } else {
-                (query_length as i32 + i32::from(raw.frame) - nt).div_euclid(3)
-            };
-            query_columns[(aa.clamp(raw.q_start, q_end - 1) - raw.q_start) as usize]
-        };
-        let (first, last) = if raw.frame > 0 {
-            (map_nt(from), map_nt(to))
-        } else {
-            (map_nt(to), map_nt(from))
-        };
-        for c in &mut masked[first..=last] {
-            *c = c.to_ascii_lowercase();
-        }
-    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1022 (its
     // positives cited at `report::tabular::TabularWriter::new`): the tabular writer counts its
@@ -375,7 +308,6 @@ fn display_alignment(
         DisplayAlignment {
             qseq: String::from_utf8(qseq)?,
             sseq: String::from_utf8(sseq)?,
-            masked_qseq: String::from_utf8(masked)?,
             gaps,
             gap_opens,
             qstart: qstart + query_offset,
@@ -649,6 +581,13 @@ pub(super) struct LocalReport<'a, 'p> {
     /// What a refusal of the format's checks does (`FormatRefusal::check`); without a local
     /// report it fails the call.
     pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
+    /// The format's place among the search's formats (`QueryWarnings::for_report`); 0 without a
+    /// local report (the command line's one format).
+    pub report: usize,
+    /// Where the format's `-html` posts go apart from its standard error
+    /// (`QueryWarnings::with_html_posts`: the diagnostics of a later format, the call's receiver
+    /// of a later search's, `local::write_run`).
+    pub html_posts: Option<&'a mut dyn Write>,
 }
 
 /// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
@@ -736,14 +675,15 @@ pub(super) fn render_queries_with(
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
-    let (probe, first_hsp, made_hits, mut refusal) = match local {
+    let (probe, first_hsp, made_hits, mut refusal, html_posts) = match local {
         Some(local) => (
             local.probe,
             local.first_hsp,
             local.hits,
             Some(local.refusal),
+            (local.report, local.html_posts),
         ),
-        None => (None, 0, None, None),
+        None => (None, 0, None, None, (0, None)),
     };
     // A check of the format's report before its rows: `false` where the format fails alone
     // (`FormatRefusal::check`), and writes nothing of the batch.
@@ -793,7 +733,7 @@ pub(super) fn render_queries_with(
     if options.pairwise_view().is_some() {
         return write_pairwise(
             writer, stderr, options, queries, subjects, shown, batches, made_hits, probe,
-            first_hsp, pool,
+            first_hsp, pool, html_posts,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
@@ -915,6 +855,7 @@ fn write_pairwise(
     probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    (report_index, html_posts): (usize, Option<&mut dyn Write>),
 ) -> Result<()> {
     use crate::report::pairwise::{
         write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
@@ -932,7 +873,7 @@ fn write_pairwise(
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
             qinfo.push(BlastpPairwiseQuery {
-                // The footer's Karlin blocks (`write_blastx_query_footer`).
+                // The footer's Karlin blocks (`write_translated_query_footer`).
                 valid: first.is_some(),
                 batch_skipped: batch.search_skipped,
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
@@ -949,11 +890,21 @@ fn write_pairwise(
             reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
         }
     }
+    // Under `-html` the rows' masks of each hit (`HtmlRowMasks`, the spans of outfmt 0), made with
+    // the rows: the hits made for the caller (`made_hits`, the same rows) are made again with them.
+    let mut html_masks = options.html.is_some().then(Vec::new);
     let made;
     let hits = match made_hits {
-        Some(hits) => hits,
-        None => {
-            made = pairwise_hits(options, queries, subjects, shown, batches)?;
+        Some(hits) if html_masks.is_none() => hits,
+        _ => {
+            made = pairwise_hits(
+                options,
+                queries,
+                subjects,
+                shown,
+                batches,
+                html_masks.as_mut(),
+            )?;
             &made
         }
     };
@@ -1078,6 +1029,13 @@ fn write_pairwise(
         // `PairwiseView::report_sort`).
         sort: view.report_sort(options.report_sort()),
         view,
+        html: options.html.as_ref().map(|links| {
+            let oids: &[crate::seqdb::Oid] = match shown {
+                ShownSubjects::Database { reported, .. } => reported.oids(),
+                ShownSubjects::Fasta { .. } => &[],
+            };
+            crate::report::html_ids::HtmlReport::new(links, oids.iter().copied())
+        }),
         ..PairwiseConfig::default()
     };
     // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3c), made once.
@@ -1123,7 +1081,9 @@ fn write_pairwise(
     // (`QueryWarnings::before_query`, `subject_read`).
     let mut warnings =
         crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
-            .with_subject_reads(&reads);
+            .with_subject_reads(&reads)
+            .for_report(report_index)
+            .with_html_posts(html_posts.map(|posts| posts as &mut dyn Write));
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     write_blastx_pairwise_report(
@@ -1151,6 +1111,7 @@ fn write_pairwise(
             .as_ref()
             .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         pool.and_then(crate::report::x_pairwise_par::pool),
+        html_masks.as_deref(),
         match shown {
             ShownSubjects::Fasta { .. } => &every_loaded,
             ShownSubjects::Database { reported, .. } => reported.loads(),
@@ -1190,22 +1151,33 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
 /// reports (the lists sorted by e-value, `sort_lists`); `q_idx` is the query's index in `queries`.
 /// Outfmt 0 writes them (`write_pairwise`), and LOSAT Web's `run_local` hands them to its caller.
+/// Under `-html` (`html_masks`) each hit's rows' masks are added to `html_masks` in the same order
+/// (`report::pairwise::HtmlRowMasks`).
 pub(super) fn pairwise_hits(
     options: &ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Result<Vec<crate::report::pairwise::PairwiseHit>> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     use crate::common::Hit;
     use crate::report::pairwise::PairwiseHit;
     let mut hits = Vec::new();
+    // The rows' masks, kept from row to row (`query_row_masks`).
+    let mut row_masks = crate::report::query_anchored::HspMasks::default();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let absolute = batch.query_ordinal + qidx;
             let query = &queries[absolute];
+            // The query's masks (as the query-anchored reports read them), by frame.
+            let query_masks = if lists.is_empty() {
+                Vec::new()
+            } else {
+                masks_by_frame(&super::anchored::query_record_masks(batch, qidx, query))
+            };
             for list in lists {
                 let subject = &subjects[list.oid];
                 for hsp in &list.hsps {
@@ -1213,7 +1185,7 @@ pub(super) fn pairwise_hits(
                         continue;
                     }
                     let (a, counts) =
-                        counted_alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                        counted_alignment(hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
                     // The report's hit is the HSP's Seq-align, so its offsets end where the
                     // Seq-align does (`Hsp::seqalign_ends`); their one reader here is
@@ -1245,9 +1217,24 @@ pub(super) fn pairwise_hits(
                         gap_info: Some(hsp.edit_script.clone()),
                         num_positives: counts.positive,
                     };
+                    // The row holds its masks in lower case; the lists are left to the next
+                    // row (`query_anchored::output_seq`), or copied under `-html`.
+                    if html_masks.is_some() {
+                        row_masks.clear();
+                    }
+                    let query_seq = query_row_masks(
+                        a.qseq,
+                        (a.qstart, a.qend),
+                        a.frame,
+                        &query_masks,
+                        &mut row_masks,
+                    );
+                    if let Some(table) = html_masks.as_deref_mut() {
+                        table.push(row_masks.copy_rows());
+                    }
                     hits.push(PairwiseHit {
                         hit,
-                        query_seq: Some(a.masked_qseq),
+                        query_seq: Some(query_seq),
                         subject_seq: Some(a.sseq),
                         query_frame: Some(a.frame),
                         subject_frame: None,
@@ -1309,11 +1296,92 @@ pub(super) fn pairwise_hits(
     // (`FastaRecord::archive_lowercase_runs`). `-db_soft_mask` and `-db_hard_mask`: the stored
     // masks by NCBI's Seq-id (`ReportedSubjects::shown_db_masks`).
     if let Some(masks) = db_subject_masks(shown, &hits) {
-        super::x_soft_subject::x_kept_subject_rows(&mut hits, &masks);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks, html_masks);
     } else if subjects.iter().any(FastaRecord::has_lowercase_runs) {
-        super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
+        let kept = super::x_soft_subject::x_subject_masks(&hits, subjects);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept, html_masks);
     }
     Ok(hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2503
+// The masks a row shows are those labelled with the row's frame in the record; a mask keeps
+// the frame of the context it was found in, which counts from the ends of the searched letters.
+// With `-query_loc` the two can differ, and NCBI then shows the masks of another frame's context
+// on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:593-595
+// A position's column in its segment is its distance from the segment's first position divided
+// by the row's width (three nucleotides a residue here), counted from the segment's end on the
+// minus strand.
+/// The outfmt 0 query row `row` of a display alignment (`DisplayAlignment::qseq`, of the 1-based
+/// record positions `ends`, `qstart` and `qend`, on the frame `frame`) with its masks in lower
+/// case, which it sets as row 0 of `masks` (`HspMasks`, the rows' builder's, which keeps its
+/// buffers from row to row): the query's masks of the row's frame (`query_masks`,
+/// `masks_by_frame`; record positions) at the row's columns of `x_FillLocList`
+/// (`query_anchored::fill_row_loc_list`: the row's nucleotides from its first to its last, three
+/// a residue, on the frame's strand), in the masks' order, which `x_OutputSeq` puts in lower
+/// case. A mask of another frame never shows on the row (`x_OutputSeq` passes over it), so the
+/// row does not hold it. The row comes back so, as the hit records that the library API and
+/// LOSAT Web hand out show it. An HSP without query letters (an ungapped HSP of length 0,
+/// `-window_size 0`) has no mask.
+fn query_row_masks(
+    row: String,
+    ends: (i32, i32),
+    frame: i8,
+    query_masks: &[(i8, MaskSeek<u32>)],
+    masks: &mut crate::report::query_anchored::HspMasks,
+) -> String {
+    let Some((_, seek)) = query_masks
+        .iter()
+        .find(|(masks_frame, _)| *masks_frame == frame)
+    else {
+        return row;
+    };
+    if row.is_empty() {
+        return row;
+    }
+    let (first, last) = (ends.0.min(ends.1), ends.0.max(ends.1));
+    let range = ((first - 1) as u32, (last - 1) as u32);
+    masks.add_meeting(seek, range.0, range.1, |from, to| (from, to, frame));
+    let letters = row.as_bytes();
+    masks.set_row_met(
+        0,
+        frame,
+        letters,
+        |column| letters[column] != b'-',
+        range,
+        frame > 0,
+        3,
+    );
+    if masks.row(0).is_none() {
+        return row;
+    }
+    let mut row = row.into_bytes();
+    masks.lower_row(0, &mut row);
+    String::from_utf8(row).expect("ASCII alignment row")
+}
+
+/// The masks `masks` of a query (every frame's, `anchored::query_record_masks`) by frame, each
+/// frame's in their order, arranged for the scans of the rows (`MaskSeek`): a row reads only its
+/// frame's masks (`query_row_masks`).
+fn masks_by_frame(masks: &[crate::report::query_anchored::Mask]) -> Vec<(i8, MaskSeek<u32>)> {
+    let mut frames: Vec<i8> = Vec::new();
+    for &(_, _, frame) in masks {
+        if !frames.contains(&frame) {
+            frames.push(frame);
+        }
+    }
+    frames
+        .into_iter()
+        .map(|frame| {
+            let of_frame = masks
+                .iter()
+                .filter(|mask| mask.2 == frame)
+                .map(|&(from, to, _)| (from, to));
+            (frame, MaskSeek::new(of_frame))
+        })
+        .collect()
 }
 
 /// The subject masks of a search with `-db_soft_mask` or `-db_hard_mask` that the rows `hits`
@@ -1380,16 +1448,21 @@ fn pairwise_metadata(
             lookup_protein_gumbel_params(&scoring, total)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
+        gapped: options.gapped,
+        show_linked_set_size: !options.gapped && options.sum_stats,
         // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).
-        gapped: true,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
+/// The prolog of a format (`options`), whose warnings go to `diagnostics` and the posts of its
+/// `-html` references where `query_warnings::html_posts_sink` sends them: `html_posts`, else
+/// `diagnostics`.
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
+    html_posts: Option<&mut dyn Write>,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
@@ -1400,6 +1473,13 @@ pub(crate) fn write_prolog(
             options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
+            options.html.as_deref().map(|links| {
+                let posts = crate::report::query_warnings::html_posts_sink(
+                    html_posts.map(|posts| posts as &mut dyn Write),
+                    &mut *diagnostics,
+                );
+                (links, posts)
+            }),
         )?;
     }
     // Outfmt 20's line of the field names, after its formatter's warning
@@ -1457,6 +1537,7 @@ pub(crate) fn write_epilog(
                 num_alignments: options.num_alignments as usize,
             },
             shown.pairwise_database(),
+            options.html.is_some(),
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243

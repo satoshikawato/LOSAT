@@ -346,8 +346,6 @@ fn sum_statistics_and_an_ungapped_search_are_refused_before_the_reports() {
     let mut search = TranslatedRpsSearch {
         search: RpsSearch::default(),
         ungapped: false,
-        use_sw_tback: false,
-        comp_based_stats: "0".to_string(),
         several_volumes: false,
         costs: None,
         strategy_db_length: None,
@@ -570,8 +568,6 @@ fn a_volumes_refusal_leaves_the_earlier_batches_to_meet_later_volumes() {
     let mut search = TranslatedRpsSearch {
         search: RpsSearch::default(),
         ungapped: false,
-        use_sw_tback: false,
-        comp_based_stats: "0".to_string(),
         several_volumes: true,
         costs: None,
         strategy_db_length: None,
@@ -742,8 +738,6 @@ fn a_batchs_cutoff_refusal_comes_before_an_earlier_querys_search_error() {
     let mut search = TranslatedRpsSearch {
         search: RpsSearch::default(),
         ungapped: false,
-        use_sw_tback: false,
-        comp_based_stats: "0".to_string(),
         several_volumes: false,
         costs: None,
         strategy_db_length: None,

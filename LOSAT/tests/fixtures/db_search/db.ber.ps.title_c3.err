@@ -1,0 +1,3 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xC3] in string at byte 84
+rnd Ãrandom

@@ -1,6 +1,6 @@
 # LOSAT
 
-LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ command lines and matches NCBI BLAST+ 2.17.0 on its [release test set](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/release/v0.2.0.md) (apart from the version line, which names LOSAT). This crate builds the `losat` command line and the library `losat::api`.
+LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ command lines and matches NCBI BLAST+ 2.17.0 on its [release test set](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/release/v0.2.0.md) (apart from the version line and error prefixes, which name LOSAT). This crate builds the `losat` command line and the library `losat::api`.
 
 - **User manual:** [satoshikawato.github.io/LOSAT](https://satoshikawato.github.io/LOSAT/)
 - **Repository:** [github.com/satoshikawato/LOSAT](https://github.com/satoshikawato/LOSAT)
@@ -10,12 +10,12 @@ LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ comm
 
 | Program | What it does |
 |:---|:---|
-| `blastn` | Nucleotide search; tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` |
+| `blastn` | Nucleotide search; tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short`, `rmblastn` |
 | `blastp` | Protein search; tasks `blastp` (default), `blastp-fast`, `blastp-short` |
 | `blastx` | Translated nucleotide query against proteins; tasks `blastx` (default), `blastx-fast` |
 | `tblastn` | Protein query against translated nucleotides; tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm` |
 | `tblastx` | Translated nucleotide query against translated nucleotides |
-| `psiblast` | Iterative protein search from a FASTA query or a PSSM (`-in_pssm`); writes PSSMs (`-out_pssm`, `-out_ascii_pssm`) |
+| `psiblast` | Iterative protein search from a FASTA query, an alignment (`-in_msa`), or a PSSM (`-in_pssm`); writes PSSMs (`-out_pssm`, `-out_ascii_pssm`) |
 | `rpsblast` | Protein queries against a profile database such as CDD |
 | `rpstblastn` | Translated nucleotide queries against a profile database |
 | `rpsbproc` | Conserved-domain annotation of RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 |
@@ -26,6 +26,7 @@ LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ comm
 | `windowmasker` | Masks repeats of nucleotide sequences with a unit counts file (`-ustat`) |
 | `convert2blastmask` | Turns lower-case masking in FASTA into masking information for `makeblastdb -mask_data` |
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database |
+| `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files |
 
 Options that need NCBI's servers (`-remote`, `-entrez_query`) or GI lists (`-gilist`), and the few that LOSAT does not run, stop with an error instead of changing the results. See [What LOSAT refuses](https://satoshikawato.github.io/LOSAT/refusals.html).
 
@@ -91,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 - `validate(program, &argv)` checks the options and returns a reusable `Search`; `describe(program)` lists the options.
-- `Inputs::database(&query, "swissprot")` searches a BLAST database, found as the command line finds `-db`. `Inputs::pssm` and `Inputs::pssm_database` take the PSSM of `-in_pssm` (`psiblast`, `tblastn`).
+- `Inputs::database(&query, "swissprot")` searches a BLAST database, found as the command line finds `-db`. `Inputs::pssm` and `Inputs::pssm_database` take the PSSM of `-in_pssm` (`psiblast`, `tblastn`). `Inputs::msa` and `Inputs::msa_database` take a multiple sequence alignment for `psiblast` (`-in_msa`).
 - `run_collect` returns the reports, the HSP records, the statistics and the diagnostics. `run_batches` gives them one of NCBI's query batches at a time. `run` writes the reports to your writers, and `run_to_file` is `-out` (and the way to `-outfmt 13` and `14`).
 - `run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and `run_makembindex` run the tools with your reader and writers as their standard streams.
 - The library writes nothing to standard output or standard error, and its errors carry the command line's messages.

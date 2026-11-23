@@ -9,7 +9,8 @@
 //! (module `double`: the real arguments, the SEG locut and hicut, rpsbproc's bit score
 //! thresholds, the constraints of the arguments and the REAL values of the ASN.1 text and XML
 //! readers). Also the string functions that more than one port calls: `NStr::ParseEscapes`
-//! (makeblastdb's titles and the registry reader), `NStr::TruncateSpaces` (each `ETrunc`: the
+//! (makeblastdb's titles and the registry reader), `NStr::Replace` and `NStr::ReplaceInPlace`
+//! (makeblastdb's titles and the report's titles), `NStr::TruncateSpaces` (each `ETrunc`: the
 //! FASTA readers, the argument readers, the format guess), `NStr::IsBlank`, `NStr::StringToBool`
 //! and C's `isspace`.
 //!
@@ -35,6 +36,7 @@ pub(crate) use double::{
 use std::borrow::Cow;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::utils::byte_search::{find, find_byte, find_first};
 
 /// `NStr::TStringToNumFlags`, of the flags LOSAT's callers pass.
 pub(crate) type Flags = u32;
@@ -138,11 +140,22 @@ const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
 /// `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are not
 /// ported). `isprint` is the C locale's (0x20 to 0x7E), so every byte of the result is printable
 /// ASCII; it borrows `str_` when nothing is escaped (NCBI returns a copy of it).
+///
+/// NCBI's loop looks at each byte; the bytes it passes over at once (`continue`: the printable
+/// ones but the backslash, the quotes and `?`) are skipped here by [`find_first`], a block at a
+/// time, and the loop looks at the others.
 pub(crate) fn printable_string(str_: &[u8]) -> Cow<'_, [u8]> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3736-3742
     let mut out: Option<Vec<u8>> = None;
     let mut j = 0;
-    for (i, &byte) in str_.iter().enumerate() {
+    let looked_at = |b: u8| {
+        !(0x20..=0x7e).contains(&b) | (b == b'\\') | (b == b'\'') | (b == b'"') | (b == b'?')
+    };
+    let mut from = 0;
+    while let Some(offset) = find_first(&str_[from..], looked_at) {
+        let i = from + offset;
+        from = i + 1;
+        let byte = str_[i];
         let mut octal = false;
         let mut c = byte;
         match byte {
@@ -475,7 +488,7 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
     let mut out = Vec::with_capacity(str.len());
     let mut pos = 0;
     loop {
-        let Some(found) = str[pos..].iter().position(|&byte| byte == b'\\') else {
+        let Some(found) = find_byte(&str[pos..], b'\\') else {
             out.extend_from_slice(&str[pos..]);
             break;
         };
@@ -531,6 +544,51 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
         pos = pos2 + 1;
     }
     Ok(out)
+}
+
+/// `NStr::Replace` and `NStr::ReplaceInPlace` of `src`, `search` and `replace` with their defaults
+/// (from the start, every occurrence): the occurrences of `search` from the left,
+/// each search starting after the text just put in, so that a replacement is never searched and
+/// occurrences do not overlap. Both NCBI functions give this text (the copy loops of
+/// `NStr::Replace` for a long `src` and a longer `replace` find the same occurrences); `src` is
+/// borrowed where it holds none, or `search` is `replace` (NCBI returns a copy). `search` is not
+/// empty (NCBI's loops do not end for an empty one; no caller passes it).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3310-3398
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
+pub(crate) fn replace<'a>(src: &'a [u8], search: &[u8], replace: &[u8]) -> Cow<'a, [u8]> {
+    assert!(!search.is_empty(), "NStr::Replace of an empty search");
+    if search == replace {
+        return Cow::Borrowed(src);
+    }
+    let Some(mut found) = find(src, search) else {
+        return Cow::Borrowed(src);
+    };
+    let mut dst = Vec::with_capacity(src.len());
+    let mut pos = 0;
+    loop {
+        dst.extend_from_slice(&src[pos..found]);
+        dst.extend_from_slice(replace);
+        pos = found + search.len();
+        match find(&src[pos..], search) {
+            Some(offset) => found = pos + offset,
+            None => break,
+        }
+    }
+    dst.extend_from_slice(&src[pos..]);
+    Cow::Owned(dst)
+}
+
+/// [`replace`] of the string `src` in place (`NStr::ReplaceInPlace`): `src` is left as it is
+/// where nothing is replaced.
+pub(crate) fn replace_in_place(src: &mut Vec<u8>, search: &[u8], replacement: &[u8]) {
+    let replaced = match replace(src, search, replacement) {
+        Cow::Owned(dst) => Some(dst),
+        Cow::Borrowed(_) => None,
+    };
+    if let Some(dst) = replaced {
+        *src = dst;
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180

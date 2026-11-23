@@ -111,3 +111,35 @@ fn genetic_codes_are_listed_for_the_translated_programs_only() {
         assert!(description.subject_gencodes.is_empty(), "{program}");
     }
 }
+
+// Until the programs on clap move onto NCBI's reader (line RG item K4i-2b), clap's parser decides
+// which genetic codes a run takes: describe's codes, which come from the argument tables, must be
+// those that the parser takes (the probe of every code below 64 that describe ran before K4i-2a).
+#[test]
+fn the_genetic_codes_are_those_that_the_parser_takes() {
+    for program in Program::ALL {
+        let description = describe(program);
+        for (name, listed) in [
+            ("-query_gencode", &description.query_gencodes),
+            ("-db_gencode", &description.subject_gencodes),
+        ] {
+            let taken: Vec<u32> = (0..64)
+                .filter(|code| {
+                    let code = code.to_string();
+                    let argv = [
+                        "losat",
+                        program.name(),
+                        "-query",
+                        "q",
+                        "-subject",
+                        "s",
+                        name,
+                        &code,
+                    ];
+                    crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_ok()
+                })
+                .collect();
+            assert_eq!(listed, &taken, "{program} {name}");
+        }
+    }
+}

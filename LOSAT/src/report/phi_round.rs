@@ -11,10 +11,10 @@
 //! (`RoundSections`), so that no default report's instance is shared.
 
 use super::super::{
-    cpp_default_double, write_blast_database_header, write_blastp_database_header_spacing,
-    write_blastp_pairwise_intro, write_blastp_query_header, write_description_table,
-    write_no_hits_found, write_spaces, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
-    PairwiseDatabase, PairwiseHit, RowDecoration,
+    blastp_family_program, cpp_default_double, write_blast_database_header,
+    write_blastp_database_header_spacing, write_blastp_query_header, write_description_table,
+    write_no_hits_found, write_prolog, write_spaces, BlastpPairwiseQuery, BlastpPairwiseReport,
+    PairwiseConfig, PairwiseDatabase, PairwiseHit, RowDecoration,
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -61,7 +61,17 @@ pub(crate) fn write_phi_prolog(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
+    // psiblast refuses `-html` (`ncbi_app::args::refusal`): the plain prolog.
+    write_prolog(
+        writer,
+        blastp_family_program(&config.program),
+        &report.version,
+        false,
+        false,
+        false,
+        false,
+        None,
+    )?;
     match database {
         Some(database) => write_blast_database_header(writer, database)?,
         None => write_blastp_database_header_spacing(
@@ -219,8 +229,8 @@ pub(crate) fn write_phi_round_report(
 }
 
 /// `PrintPhiInfo`: the number of occurrences, the pattern, their 1-based positions and the
-/// pattern's probability (a `double` on a C++ stream, `cpp_default_double`). The pattern is a C
-/// string (`string(phi_query_info->pattern)`): it ends at a NUL byte.
+/// pattern's probability (a `double` on a C++ stream, `cpp_default_double`). The pattern is read
+/// as a C string (the info's `pattern` member made a `std::string`): it ends at a NUL byte.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:757-779
 fn write_phi_info<W: Write>(writer: &mut W, info: &PhiQueryInfo<'_>) -> io::Result<()> {

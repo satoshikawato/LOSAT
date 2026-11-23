@@ -978,6 +978,329 @@ fn fill_loc_list(
     list
 }
 
+/// The masks of an outfmt 0 HSP's two rows, the query's and the subject's
+/// (`alnRoInfo->masked_regions[row]`): each row's `x_FillLocList` list (`fill_row_loc_list`, in
+/// the masks' order, not merged, each with its frame) and the row's frame (`x_OutputSeq`'s
+/// `frame`), which `output_seq` reads. A translated query's row (BLASTX, TBLASTX) holds only the
+/// masks of its frame: `x_OutputSeq` passes over a mask of another frame, so the list without
+/// them writes the same row. The rows' builder keeps one for all its rows (a loop's, a worker's)
+/// and, for each row, sets the row's list, puts the row's masked letters in lower case
+/// (`lower_row`) and leaves the list to the next row: no `PairwiseHit` holds one (`output_seq`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HspMasks {
+    lists: [Vec<(i64, i64, i8)>; 2],
+    frames: [i8; 2],
+    // No NCBI counterpart: the buffers of the rows' work, kept from row to row with the lists, so
+    // that a masked row allocates nothing once they have grown (callgrind of TBLASTX with
+    // `-lcase_masking`, line RG item T4a1 F1): the masks that `add_meeting` found for the next
+    // `set_row_met`, each with its place in its list, and the gap runs of the row that
+    // `fill_row_loc_list` places masks on.
+    met: Vec<(u32, Mask)>,
+    gaps: Vec<(u32, u32)>,
+}
+
+impl HspMasks {
+    /// Row `row`'s list and frame for `output_seq`; `None` when no mask meets the row.
+    #[inline(always)]
+    pub(crate) fn row(&self, row: usize) -> Option<(&[(i64, i64, i8)], i8)> {
+        let list = &self.lists[row];
+        (!list.is_empty()).then_some((&list[..], self.frames[row]))
+    }
+
+    /// The rows' lists and frames alone, without the buffers: the entry of the HSP in the table
+    /// of `-html`'s spans (`report::pairwise::HtmlRowMasks`), which the rows' builder copies once
+    /// it has set the HSP's rows (after `clear`, so that a row it does not set has no list).
+    pub(crate) fn copy_rows(&self) -> HspMasks {
+        HspMasks {
+            lists: self.lists.clone(),
+            frames: self.frames,
+            ..HspMasks::default()
+        }
+    }
+
+    /// Sets row `row`'s list and frame to those of `other`'s row `row`: the entry of the HSP in
+    /// the table of `-html`'s spans (`copy_rows`) for a row that a later pass of the builder sets
+    /// (BLASTX's subject rows, `x_soft_subject::x_set_subject_row_masks`).
+    pub(crate) fn copy_row_from(&mut self, row: usize, other: &HspMasks) {
+        self.lists[row].clone_from(&other.lists[row]);
+        self.frames[row] = other.frames[row];
+    }
+
+    /// Empties both rows' lists (and the masks of `add_meeting`), for an HSP whose rows may not
+    /// both be set (`set_row`).
+    pub(crate) fn clear(&mut self) {
+        for list in &mut self.lists {
+            list.clear();
+        }
+        self.met.clear();
+    }
+
+    /// Sets row `row`'s list to the masks `masks` (`fill_row_loc_list` of the row `letters`) and
+    /// its frame to `frame`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn set_row(
+        &mut self,
+        row: usize,
+        frame: i8,
+        letters: &[u8],
+        residue: impl Fn(usize) -> bool,
+        seq_range: (u32, u32),
+        plus: bool,
+        width: u32,
+        masks: impl IntoIterator<Item = Mask>,
+    ) {
+        let list = &mut self.lists[row];
+        list.clear();
+        fill_row_loc_list(
+            letters,
+            residue,
+            seq_range,
+            plus,
+            width,
+            masks,
+            &mut self.gaps,
+            list,
+        );
+        self.frames[row] = frame;
+    }
+
+    /// Adds the masks of `seek` that meet `low..=high`, as `mask(from, to)`, to the masks of the
+    /// next `set_row_met`, after those added before, in the order of `seek`'s list.
+    pub(crate) fn add_meeting<P: Copy + Ord>(
+        &mut self,
+        seek: &MaskSeek<P>,
+        low: P,
+        high: P,
+        mask: impl Fn(P, P) -> Mask,
+    ) {
+        let start = self.met.len();
+        seek.for_each_meeting(low, high, |from, to, index| {
+            self.met.push((index, mask(from, to)));
+        });
+        self.met[start..].sort_unstable_by_key(|&(index, _)| index);
+    }
+
+    /// `set_row` of the masks added by `add_meeting` since the last `set_row_met`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn set_row_met(
+        &mut self,
+        row: usize,
+        frame: i8,
+        letters: &[u8],
+        residue: impl Fn(usize) -> bool,
+        seq_range: (u32, u32),
+        plus: bool,
+        width: u32,
+    ) {
+        let list = &mut self.lists[row];
+        list.clear();
+        fill_row_loc_list(
+            letters,
+            residue,
+            seq_range,
+            plus,
+            width,
+            self.met.iter().map(|&(_, mask)| mask),
+            &mut self.gaps,
+            list,
+        );
+        self.met.clear();
+        self.frames[row] = frame;
+    }
+
+    /// Puts row `row`'s masked letters of the whole row `letters` in lower case (`output_seq`
+    /// of every column, without `html`): the rows of the hit records that the library API and
+    /// the Web adapter hand out show their masks so.
+    pub(crate) fn lower_row(&self, row: usize, letters: &mut [u8]) {
+        if let Some((list, frame)) = self.row(row) {
+            lower_masked(letters, 0, list, frame);
+        }
+    }
+}
+
+// No NCBI counterpart: the masks of one list (a frame of a query, a subject's shown masks)
+// arranged for the scans of outfmt 0's rows. The masks are sorted by start, and the running
+// maximum of their ends lets a row's scan start at the first mask that can reach the row and stop
+// at the first that starts after it. A scan of the whole list for every row costs masks × HSPs:
+// in TBLASTX of two ~650 kb genomes it was most of the rows' time (`LOSAT_X_TBXMASKSEEK`,
+// graduated 2026-10-27). Each mask keeps its place in the list, the order of the masks a row
+// hands to `x_FillLocList` (`HspMasks::set_row`).
+/// The masks of one list, sorted by start, for the rows that take the masks that meet them.
+#[derive(Debug, Clone)]
+pub(crate) struct MaskSeek<P> {
+    /// The masks `(from, to, index)` (`from..=to`), `index` the mask's place in the list.
+    ranges: Vec<(P, P, u32)>,
+    /// `ends_max[i]`: the largest end of `ranges[..=i]` (non-decreasing).
+    ends_max: Vec<P>,
+}
+
+impl<P: Copy + Ord> MaskSeek<P> {
+    /// The masks `masks` (`from..=to` each), in the list's order.
+    pub(crate) fn new(masks: impl IntoIterator<Item = (P, P)>) -> Self {
+        let mut ranges: Vec<(P, P, u32)> = masks
+            .into_iter()
+            .zip(0..)
+            .map(|((from, to), index)| (from, to, index))
+            .collect();
+        ranges.sort_unstable();
+        let mut ends_max: Vec<P> = Vec::with_capacity(ranges.len());
+        for &(_, to, _) in &ranges {
+            let max = ends_max.last().map_or(to, |&last| last.max(to));
+            ends_max.push(max);
+        }
+        Self { ranges, ends_max }
+    }
+
+    /// Calls `found(from, to, index)` for each mask that meets `low..=high`, by start: the masks
+    /// a scan of the whole list keeps (unit test `tests_t4a1::mask_seek_keeps_the_full_scan`).
+    /// The caller puts them back into the list's order (by `index`).
+    #[inline(always)]
+    pub(crate) fn for_each_meeting(&self, low: P, high: P, mut found: impl FnMut(P, P, u32)) {
+        let first = self.ends_max.partition_point(|&end| end < low);
+        for &(from, to, index) in &self.ranges[first..] {
+            if from > high {
+                break;
+            }
+            if to < low {
+                continue;
+            }
+            found(from, to, index);
+        }
+    }
+
+    /// The masks `(from, to, index)`, by start.
+    #[cfg(test)]
+    pub(crate) fn ranges(&self) -> &[(P, P, u32)] {
+        &self.ranges
+    }
+}
+
+/// `x_FillLocList` (`fill_loc_list`) of one row of an HSP's own alignment of two rows (outfmt 0,
+/// `HspAlnVec`), from the row's letters: `letters` are its columns, `residue(column)` says
+/// whether a column holds a residue (not a gap), `seq_range` is its first and last position
+/// (`GetSeqStart`, `GetSeqStop`: 0-based, in the masks' coordinates; nucleotides for a row of
+/// width 3, three a residue), `plus` its strand. A mask that meets the range goes to the
+/// columns of its two ends (`GetAlnPosFromSeqPos` with `eBackwards` and `try_reverse_dir`: the
+/// column of the residue that holds the position, or of the row's first or last residue for a
+/// position outside the row); masks that miss the row are left out. The same columns as
+/// `fill_loc_list` gives over the HSP's `CAlnMap` (unit test
+/// `tests_t4a1::row_loc_list_matches_fill_loc_list`), without making the map: a row of a pairwise
+/// alignment holds its positions without a break, so a position's residue is its count from the
+/// row's first position, and the residue's column that count plus the gap columns before it
+/// (`gap_runs`, in `gaps`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fill_row_loc_list(
+    letters: &[u8],
+    residue: impl Fn(usize) -> bool,
+    seq_range: (u32, u32),
+    plus: bool,
+    width: u32,
+    masks: impl IntoIterator<Item = Mask>,
+    gaps: &mut Vec<(u32, u32)>,
+    out: &mut Vec<(i64, i64, i8)>,
+) {
+    let (lo, hi) = seq_range;
+    // The index of the row's last residue, found when the first mask meets the row.
+    let mut last_residue: Option<u32> = None;
+    for (from, to, frame) in masks {
+        if to < lo || from > hi {
+            continue;
+        }
+        let last = match last_residue {
+            Some(last) => last,
+            None => {
+                let Some(last) = gap_runs(letters.len(), &residue, gaps).checked_sub(1) else {
+                    return;
+                };
+                last_residue = Some(last);
+                last
+            }
+        };
+        let column = |pos: u32| -> i64 {
+            let index = if plus {
+                if pos < lo {
+                    0
+                } else {
+                    (pos - lo) / width
+                }
+            } else if pos > hi {
+                0
+            } else {
+                (hi - pos) / width
+            };
+            let index = index.min(last);
+            // The gap columns before the residue: those of the runs after `index` residues or
+            // fewer.
+            let runs = gaps.partition_point(|&(residues, _)| residues <= index);
+            let gap_columns = runs.checked_sub(1).map_or(0, |run| gaps[run].1);
+            i64::from(index + gap_columns)
+        };
+        let (first, end) = if plus { (from, to) } else { (to, from) };
+        out.push((column(first), column(end), frame));
+    }
+}
+
+// No NCBI counterpart: the gap runs of a row (`fill_row_loc_list`), which place a residue at its
+// column without a column for every residue. A row without gaps has none, and a builder whose
+// rows hold none (`residue` always true: TBLASTX) compiles to no scan.
+/// The runs of the columns `0..columns` that hold no residue (`residue(column)` false) in
+/// `gaps`, which it empties first: each as the count of the residues before the run and the
+/// count of the gap columns up to the run's end. Returns the count of the residues.
+fn gap_runs(columns: usize, residue: impl Fn(usize) -> bool, gaps: &mut Vec<(u32, u32)>) -> u32 {
+    gaps.clear();
+    let mut gap_columns = 0u32;
+    let mut in_run = false;
+    for column in 0..columns {
+        if residue(column) {
+            in_run = false;
+            continue;
+        }
+        gap_columns += 1;
+        match gaps.last_mut() {
+            Some(run) if in_run => run.1 = gap_columns,
+            _ => gaps.push((column as u32 + 1 - gap_columns, gap_columns)),
+        }
+        in_run = true;
+    }
+    columns as u32 - gap_columns
+}
+
+/// `x_OutputSeq`'s lower case (cited at `output_seq`) of the letters `letters` of the columns
+/// from `start` on: the columns of the masks of `masks` with the row's frame `row_frame`.
+#[inline]
+fn lower_masked(letters: &mut [u8], start: i64, masks: &[(i64, i64, i8)], row_frame: i8) {
+    let end = start + letters.len() as i64 - 1;
+    for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
+        let (lo, hi) = (from.max(start), to.min(end));
+        if lo <= hi {
+            letters[(lo - start) as usize..=(hi - start) as usize].make_ascii_lowercase();
+        }
+    }
+}
+
+/// `x_OutputSeq` of an outfmt 0 row's line (`report::pairwise::write_hsp_rows`) written to
+/// `writer`: `output_seq` in `buffer`, or, without masks (`masks` `None`: a row that no mask
+/// meets, or one that holds its masks in lower case), its letters as they are, what
+/// `output_seq` makes of them.
+#[inline(always)]
+pub(crate) fn write_output_seq<W: io::Write + ?Sized>(
+    writer: &mut W,
+    buffer: &mut Vec<u8>,
+    sequence: &[u8],
+    start: usize,
+    len: usize,
+    masks: Option<(&[(i64, i64, i8)], i8)>,
+    html: bool,
+) -> io::Result<()> {
+    if masks.is_none() {
+        let end = (start + len).min(sequence.len());
+        return writer.write_all(&sequence[start.min(end)..end]);
+    }
+    buffer.clear();
+    output_seq(buffer, sequence, start, len, masks, html);
+    writer.write_all(buffer)
+}
+
 /// `x_DisplayRowData`: the lines of `line_length` columns.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1428-1468
@@ -1145,6 +1468,9 @@ fn display_sequence_line(
 /// (The row's masks are those of its own sequence with its frame, `prepare_rows`. The
 /// mismatch colours of the first branch need `eColorDifferentBases`, which no BLAST program
 /// sets: blast_format.cpp, survey T4 §1.1.)
+///
+/// Outfmt 0 rows come without masks (their builders lowercase the letters, `HspMasks::lower_row`);
+/// `-html` (T4a2) keeps the lists in a side table indexed like the hits, only under `-html`.
 fn output_seq(
     out: &mut Vec<u8>,
     sequence: &[u8],
@@ -1159,18 +1485,10 @@ fn output_seq(
     let Some((masks, row_frame)) = masks else {
         return;
     };
+    lower_masked(&mut out[first..], start as i64, masks, row_frame);
     let mut spans = Vec::new();
-    for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
-        let lo = from.max(start as i64);
-        let hi = to.min(start as i64 + len as i64 - 1);
-        let mut column = lo;
-        while column <= hi {
-            if let Some(letter) = out.get_mut(first + (column - start as i64) as usize) {
-                letter.make_ascii_lowercase();
-            }
-            column += 1;
-        }
-        if html {
+    if html {
+        for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
             if let Some(span) = mask_span(from, to, start as i64, len as i64) {
                 spans.push(span);
             }
@@ -1432,5 +1750,7 @@ mod tests_t3c;
 mod tests_t3c_self;
 #[cfg(test)]
 mod tests_t4a0;
+#[cfg(test)]
+mod tests_t4a1;
 #[cfg(test)]
 mod tests_x2g;

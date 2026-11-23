@@ -474,6 +474,7 @@ pub(crate) fn link_hsp_list<H: LinkedHspValues>(
             let (q_start, q_end, s_start, s_end) = hsp.offsets();
             crate::core::link_hsps::LinkHsp {
                 context: 0,
+                subject_frame: 0,
                 query_offset: q_start as i32 - 1,
                 query_end: q_end as i32,
                 subject_offset: subject_offset_end(s_start, s_end).0 as i32,

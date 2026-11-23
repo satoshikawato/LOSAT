@@ -303,6 +303,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
         &code,
         &placements,
         &placements,
+        None,
     );
     let titles = DatabaseTitles::new();
     for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {

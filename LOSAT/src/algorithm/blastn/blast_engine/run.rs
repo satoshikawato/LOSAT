@@ -4866,6 +4866,12 @@ struct BlastnReportInputs<'a> {
     epilog: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
+    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
+    /// `-html` or outfmt 0.
+    html: Option<Arc<crate::report::html_ids::HtmlLinks>>,
+    /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
+    /// reports (the organism report takes no links).
+    is_html: bool,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
     prolog: bool,
@@ -5550,12 +5556,20 @@ fn post_process_hits_and_write(
             },
         )
     });
-    // The rendered hits of the queries `queries`.
-    let rows_of = |queries: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
+    // The rendered hits of the queries `queries`, under `-html` with their rows' masks in
+    // `html_masks` (`pairwise_hits`).
+    let rows_of = |queries: std::ops::Range<usize>,
+                   html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>|
+     -> Result<Vec<PairwiseHit>> {
         let rows = rows
             .as_ref()
             .expect("the rows' inputs are made for outfmt 0");
-        let mut hits = pairwise_hits(&hit_lists[queries], rows, report.x_pairwise_pool)?;
+        let mut hits = pairwise_hits(
+            &hit_lists[queries],
+            rows,
+            report.x_pairwise_pool,
+            html_masks,
+        )?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2479
         // The length of the subject's record, also where `-subject_loc` searches part
         // of it.
@@ -5575,10 +5589,12 @@ fn post_process_hits_and_write(
     // run's output. The caller's hit records and a format observer (whose HSP numbers count
     // over the whole report) read every query's rows: those are made once, before any format
     // is written.
+    // Under `-html` the rows' masks of those hits (`HtmlRowMasks`, the spans of outfmt 0).
+    let mut html_masks = report.html.is_some().then(Vec::new);
     let pairwise_hits = if outputs.hits.is_some()
         || (outputs.observer.is_some() && output_formats.iter().any(|format| format.is_pairwise()))
     {
-        Some(Arc::new(rows_of(0..hit_lists.len())?))
+        Some(Arc::new(rows_of(0..hit_lists.len(), html_masks.as_mut())?))
     } else {
         None
     };
@@ -5654,7 +5670,8 @@ fn post_process_hits_and_write(
         &hit_lists,
         pairwise_hits.as_deref().map(Vec::as_slice),
         &subject_titles,
-        &rows_of,
+        // The query-anchored formats show no `-html` spans (they refuse `-html`).
+        &|queries| rows_of(queries, None),
     )?;
     // The queries' result warnings that a structured first format does not write are each later
     // format's that writes them, to the caller's receiver of that format's
@@ -5704,7 +5721,10 @@ fn post_process_hits_and_write(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut format_warnings = (warning_lines.is_some()
             || later.is_some()
-            || crate::report::query_warnings::report_posts(format.report_format())
+            || crate::report::query_warnings::report_posts(
+                format.report_format(),
+                report.html.is_some(),
+            )
             || output_format
                 .tabular_spec()
                 .is_some_and(|spec| spec.looks_up_every_taxid()))
@@ -5715,7 +5735,14 @@ fn post_process_hits_and_write(
                 report.archive,
                 &mut *outputs.diagnostics,
             )
-            .with_later(query_warnings, later);
+            .with_later(query_warnings, later)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`BlastnReportInputs::query_reads`).
             match first {
@@ -5742,6 +5769,18 @@ fn post_process_hits_and_write(
                     // others, `PairwiseView::report_sort`).
                     sort: view.report_sort(report.formatting.report_sort()),
                     view,
+                    html: report.html.as_ref().map(|links| {
+                        crate::report::html_ids::HtmlReport::new(
+                            links,
+                            report
+                                .database_ordinals
+                                .zip(report.database_reader)
+                                .into_iter()
+                                .flat_map(|(ordinals, reader)| {
+                                    ordinals.iter().map(move |&o| reader.oid_map().oid(o))
+                                }),
+                        )
+                    }),
                     ..PairwiseConfig::default()
                 };
                 // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b).
@@ -5763,7 +5802,9 @@ fn post_process_hits_and_write(
                             hit_lists: &hit_lists,
                         }
                     });
-                let mut write = |hits: &[PairwiseHit], range: std::ops::Range<usize>| {
+                let mut write = |hits: &[PairwiseHit],
+                                 masks: Option<&[crate::report::query_anchored::HspMasks]>,
+                                 range: std::ops::Range<usize>| {
                     write_blastn_pairwise_report(
                         hits,
                         &mut writer,
@@ -5778,6 +5819,7 @@ fn post_process_hits_and_write(
                         anchored.as_ref().map(|sequences| {
                             sequences as &dyn crate::report::query_anchored::ReportSequences
                         }),
+                        masks,
                         report.database_loads,
                     )
                     // A subject whose load throws may end the run there
@@ -5785,7 +5827,7 @@ fn post_process_hits_and_write(
                     .map_err(crate::cli::NativeError::of_writer)
                 };
                 match pairwise_hits.as_deref() {
-                    Some(hits) => write(hits, 0..queries.len())?,
+                    Some(hits) => write(hits, html_masks.as_deref(), 0..queries.len())?,
                     None => {
                         // The windows of the parallel writer (`x_pairwise_par`).
                         let windows = pairwise_windows(
@@ -5796,13 +5838,14 @@ fn post_process_hits_and_write(
                         );
                         if windows.is_empty() {
                             // No query: the prolog and the epilog alone.
-                            write(&[], 0..0)?;
+                            write(&[], None, 0..0)?;
                         }
                         for range in windows {
                             let lists =
                                 range.start.min(hit_lists.len())..range.end.min(hit_lists.len());
-                            let hits = rows_of(lists)?;
-                            write(&hits, range)?;
+                            let mut masks = report.html.is_some().then(Vec::new);
+                            let hits = rows_of(lists, masks.as_mut())?;
+                            write(&hits, masks.as_deref(), range)?;
                         }
                     }
                 }
@@ -6068,6 +6111,7 @@ fn write_custom_tabular(
             &queries,
             writer,
             warnings,
+            report.is_html,
         );
     }
     let tab = BlastnTabular {
@@ -6824,8 +6868,10 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
+        app::html_format_check(choice.number, Program::Blastn, args.html)?;
         outfmts.push(choice.number);
     }
+    args.html_links = app::html_links(args.html, Program::Blastn, args.database_name(), &outfmts)?;
     // The hit list size and the counts of the pairwise report, with the formatting
     // handler's warnings (`ExtractAlgorithmOptions`), once for the run.
     let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
@@ -6914,10 +6960,12 @@ fn run_local_formats(
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
-    // them, `api::run`); LOSAT Web has no databases.
+    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
+    // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
+    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+            "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -7081,6 +7129,7 @@ pub(crate) fn repeat_search_hits(
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![crate::api::local_blast::FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -7269,7 +7318,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    args.megablast_index_loaded = megablast_index.check(&args)?;
+    args.megablast_index_loaded = megablast_index.check()?;
     if args.megablast_index_loaded.is_some() {
         mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
     }
@@ -7766,6 +7815,9 @@ struct ShownSubjects {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
     tabular_taxdb_found: bool,
+    /// The run's `-html` data for the outfmt 0 prolog (`BlastnArgs::html_links`,
+    /// `write_blastn_pairwise_prolog`); `None`: the plain prolog.
+    html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
 }
 
 impl ShownSubjects {
@@ -7781,6 +7833,7 @@ impl ShownSubjects {
                 total_letters: metadata.db_len_total,
                 database: None,
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                html_links: args.html_links.clone(),
             },
             SubjectSource::Database(database) => ShownSubjects {
                 name: database.name().to_string(),
@@ -7788,6 +7841,7 @@ impl ShownSubjects {
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                html_links: args.html_links.clone(),
             },
         }
     }
@@ -9388,21 +9442,31 @@ fn write_pairwise_prologs(
             _ => false,
         };
         if writes_prolog {
-            write_format_prolog(format, output_format, intro, shown)?;
+            let posts = crate::report::query_warnings::html_posts_sink(
+                outputs.html_posts.as_deref_mut(),
+                &mut *outputs.diagnostics,
+            );
+            write_format_prolog(format, output_format, intro, shown, posts)?;
         }
     }
     Ok(())
 }
 
 /// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16,
-/// 20).
+/// 20); `diagnostics` takes the posts of a `-html` prolog's references
+/// (`query_warnings::html_posts_sink`).
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,
     intro: BlastnIntro,
     shown: &ShownSubjects,
+    diagnostics: &mut dyn std::io::Write,
 ) -> Result<()> {
     if output_format.is_pairwise() {
+        let flush = crate::report::pairwise::flushes_after_prolog(
+            shown.html_links.is_some(),
+            !format.sink.is_writer(),
+        );
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
@@ -9413,8 +9477,14 @@ fn write_format_prolog(
             i64::from(shown.num_seqs),
             shown.total_letters,
             shown.database.as_ref(),
+            shown
+                .html_links
+                .as_deref()
+                .map(|links| (links, diagnostics)),
         )?;
-        writer.flush()?;
+        if flush {
+            writer.flush()?;
+        }
     } else if let Some(kind) = output_format.xml2_kind() {
         let mut writer = format.sink.open()?;
         writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
@@ -9836,6 +9906,8 @@ fn write_reports_untimed(
         finished_hit_lists: reported.is_some(),
         epilog,
         show_gis: args.show_gis,
+        html: args.html_links.clone(),
+        is_html: args.html,
         prolog: outputs
             .formats
             .iter()
@@ -10586,8 +10658,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
 
     // Whether the batch is searched with a MegaBLAST database index (`index_seeds` below; only a
-    // database search keeps one, `mb_index::MegablastIndex::check`).
+    // database search keeps one, `mb_index::MegablastIndex::check`), and whether the index leaves
+    // database volumes to the scan (a mixed search).
     let index_search = args.megablast_index_loaded.is_some() && split_prelim_lists.is_none();
+    let index_mixed = args
+        .megablast_index_loaded
+        .as_deref()
+        .is_some_and(crate::dbindex::search::LoadedIndex::mixed);
     // Build lookup tables
     let (lookup_tables, scan_step, offset_array_size) =
         batch_setup::batch_lookup_tables(&batch_setup::LookupInputs {
@@ -10601,9 +10678,13 @@ fn search_query_batch<const UNGAPPED: bool>(
             approx_table_entries,
             x_keep,
             subjects,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-114
-            // A search with a MegaBLAST database index has no lookup table.
-            split: split_prelim_lists.is_some() || index_search,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-163
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:460-462
+            // A search with a MegaBLAST database index has no lookup table, except a mixed
+            // one (`eMixedMBLookupTable`: the table without an index). (NCBI also builds the
+            // table for an old-style index found after the new style left a database volume
+            // without an index, `partial`, and never reads it: every OID is the index's.)
+            split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -10763,7 +10844,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                 encoded_query_concat_blastna,
                 &query_contexts,
                 &context_valid,
-                effective_word_size,
+                crate::dbindex::search::SearchOptions {
+                    word_size: effective_word_size as u64,
+                    two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
+                        as u64,
+                },
+                db_hard_mask.map(|algo_id| (database, algo_id)),
             ))
         }
         _ => None,
@@ -10857,7 +10943,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        // A batch split into query chunks traces what its chunks' indexed searches kept.
+        // A batch split into query chunks traces what its chunks' indexed searches kept. (With
+        // an index of only some volumes this is 1 for every subject: the traceback sees only
+        // subjects with kept HSPs, and a scanned subject shorter than a word has none.)
         shortest_subject: prelim_subject::shortest_subject(
             effective_word_size,
             args.megablast_index_loaded.is_some(),

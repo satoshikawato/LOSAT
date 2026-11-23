@@ -29,6 +29,15 @@ export interface DatasetRevision {
   readonly readerError?: { readonly offset: number; readonly defline: boolean; readonly message: string };
 }
 
+/**
+ * Whether the reading of the revision ends with the reader's error (`DatasetRevision.readerError`): a run reads no record after
+ * it, and a Combined input reads no source after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one test of
+ * that: the draft's `readSources`, `sourcesBefore` and `queryEndBefore` use it.
+ */
+export function endsInput(revision: DatasetRevision | undefined): boolean {
+  return revision?.readerError !== undefined;
+}
+
 export function includedRecords(revision: DatasetRevision): readonly DatasetRecord[] {
   const excluded = new Set(revision.excluded);
   return revision.records.filter((record) => !excluded.has(record.index));

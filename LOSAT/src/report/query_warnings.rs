@@ -119,11 +119,12 @@ impl SubjectRead {
 /// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
 /// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
 /// (`TaxDb::offset_error_taxid`; on a database with a volume whose cache can ask again,
-/// `TaxdbRun::cache_collision`, every read is refused and only a batch's prefetch asks, again
-/// where NCBI's order of its loads gives that, so no load is left out there), nothing else. The model of the reads gives each text to the load
-/// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
-/// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
-/// to NCBI's next load that makes the same ask (`LoadTexts`).
+/// `TaxdbRun::cache_collision`, at each lookup that misses the slot of that taxid), nothing else.
+/// The model of the reads gives each text to the load that makes the ask, assuming every load it
+/// models happens; a load that NCBI does not make (a BLAST XML `Iteration` or `Hit` that the stream
+/// leaves out, `ReadCursor::cut`) leaves its texts to NCBI's next load that makes the same ask
+/// (`LoadTexts`), and is LOSAT's refusal where it takes that slot on such a database
+/// (`cut_refusal`: the model followed the slot through it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadLoad {
     /// The run's texts of the loads left out (shared by every read of the run).
@@ -144,6 +145,11 @@ pub struct ReadLoad {
     /// Whether the lookup of the load's Seq-align id reads such a header: the load takes the
     /// warning that a load NCBI does not make left (`left_out`).
     pub scope_utf8: bool,
+    /// LOSAT's refusal where NCBI does not make this load (`left_out`), whose lookups take the
+    /// slot of the offset error's taxid on a database whose volume holds that taxid and another of
+    /// its slot (`common::database::TaxdbRun::cache_collision`): the model of the later loads
+    /// followed the slot through this one. `None` for any other load.
+    pub cut_refusal: Option<std::sync::Arc<str>>,
 }
 
 impl ReadLoad {
@@ -159,6 +165,7 @@ impl ReadLoad {
             lead: 0,
             opening: 0,
             scope_utf8: true,
+            cut_refusal: None,
         }
     }
 
@@ -231,8 +238,13 @@ impl ReadLoad {
 
     /// NCBI does not make this load, whose text in the model is `text`: its warning of a
     /// UTF8String header goes to the next load whose lookup reads such a header, its texts of
-    /// opening and its offset error to the next load that makes those asks (`placed`).
-    pub fn left_out(&self, text: &[u8]) {
+    /// opening and its offset error to the next load that makes those asks (`placed`). `Err`:
+    /// LOSAT's refusal where the model followed the taxonomy cache's slot through this load
+    /// (`cut_refusal`).
+    pub fn left_out(&self, text: &[u8]) -> io::Result<()> {
+        if let Some(refusal) = &self.cut_refusal {
+            return Err(io::Error::other(refusal.to_string()));
+        }
         let (lead, text) = text.split_at(self.lead.min(text.len()));
         let (opening, offset) = text.split_at(self.opening.min(text.len()));
         let mut pending = self.texts.pending.lock().expect("the texts of the loads");
@@ -250,6 +262,7 @@ impl ReadLoad {
                 None => pending.offsets.push((self.volume, offset.to_vec())),
             }
         }
+        Ok(())
     }
 }
 
@@ -309,7 +322,7 @@ impl LoadTexts {
         cut: &dyn Fn(usize) -> bool,
         prefetched: &dyn Fn(usize) -> Option<&'p Posts>,
         query: usize,
-    ) -> std::sync::Arc<LoadTexts> {
+    ) -> io::Result<std::sync::Arc<LoadTexts>> {
         let left = std::sync::Arc::new(LoadTexts::default());
         let mut cursor = ReadCursor::in_ledger(reads, &left);
         // Nothing is written: the model keeps the ledger only.
@@ -325,15 +338,14 @@ impl LoadTexts {
             )
             .expect("a model writes to no stream");
             if cut(before) {
-                cursor
-                    .cut(before, &mut report, &mut sink)
-                    .expect("a model writes to no stream");
+                // The only error of a model: LOSAT's refusal of a load left out (`left_out`).
+                cursor.cut(before, &mut report, &mut sink)?;
             }
         }
         cursor
             .before_query(query, &mut report, &mut sink)
             .expect("a model writes to no stream");
-        left
+        Ok(left)
     }
 }
 
@@ -531,8 +543,8 @@ impl<'a> ReadCursor<'a> {
         let reads = reads_of(self.reads, query);
         for read in &reads[self.next.min(reads.len())..] {
             match (&read.load, &self.ledger) {
-                (Some(load), Some(ledger)) => load.in_ledger(ledger).left_out(&read.text),
-                (Some(load), None) => load.left_out(&read.text),
+                (Some(load), Some(ledger)) => load.in_ledger(ledger).left_out(&read.text)?,
+                (Some(load), None) => load.left_out(&read.text)?,
                 (None, _) => {}
             }
         }

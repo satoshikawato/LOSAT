@@ -115,7 +115,8 @@
 //!   below `MATRIX_LETTERS`: the letters (NCBISTDAA 0..=27) and the sentinel 0, the only bytes a
 //!   frame or a context holds (`translation.rs`), as `MatrixWalkTable` takes them; a context or a
 //!   frame takes the path only if every byte of its buffer is below it (`letters` in
-//!   `sent_contexts` and `sent_subject`), so every step reads a key of the table. A walk takes
+//!   `sent_contexts` and `sent_frame`, once for each batch and each frame's chunk), so every step
+//!   reads a key of the table. A walk takes
 //!   fewer than `MAX_SENT_LEN` steps, inside the keys' step part (`2^32 - 1`), and the scores stay
 //!   as in the item above.
 //! * Other matrices and word lengths (`TbxScore::sent_two_hit`, `two_hit_sent_in::<W>`): the same
@@ -805,23 +806,32 @@ pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) ->
     ok
 }
 
+/// LOSAT_X_TBXUNGAPSENT: whether a subject frame whose buffer is `frame` may take the sentinel
+/// walks: the batch does (`batch`, from [`sent_contexts`]) and every byte of `frame` is below
+/// `MATRIX_LETTERS` (the bytes of the walks' keys, `KeyTable`). It reads the whole buffer, so the
+/// callers find it once for each chunk (`XPairPar::x_unit`, the reference frame loop), not for
+/// each extension or unit; [`sent_subject`] adds the chunk's checks.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+pub(crate) fn sent_frame(batch: bool, frame: &[u8]) -> bool {
+    batch && letters(frame)
+}
+
 /// LOSAT_X_TBXUNGAPSENT: whether the extensions of the chunk `offset..offset + len` of
 /// `frame[1..frame.len() - 1]` (`frame`: a subject frame's buffer, `[0, residues.., 0]`) take the
-/// sentinel walks: the batch does (`batch`, from [`sent_contexts`]), the chunk is the whole frame
-/// and the buffer has its sentinels, at most `MAX_SENT_LEN` bytes and every byte below
-/// `MATRIX_LETTERS` (the bytes of the walks' keys, `KeyTable`). Otherwise they take [`two_hit`].
+/// sentinel walks: the frame may (`frame_ok`, from [`sent_frame`]), the chunk is the whole frame
+/// and the buffer has its sentinels and at most `MAX_SENT_LEN` bytes. Otherwise they take
+/// [`two_hit`].
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 #[inline]
-pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize) -> bool {
-    if !batch {
+pub(crate) fn sent_subject(frame_ok: bool, frame: &[u8], offset: usize, len: usize) -> bool {
+    if !frame_ok {
         return false;
     }
     let whole = offset == 0
         && len.checked_add(2) == Some(frame.len())
         && frame.len() <= MAX_SENT_LEN
         && frame[0] == 0
-        && frame[len + 1] == 0
-        && letters(frame);
+        && frame[len + 1] == 0;
     crate::utils::xreach::x_reach!("LOSAT_X_TBXUNGAPSENT", whole);
     whole
 }

@@ -27,9 +27,10 @@ use super::{
     extend_hit_two_hit_with, get_ungapped_hsp_list, get_ungapped_hsp_list_int4,
     sort_init_hsps_by_score_ncbi, tblastx_scan_interiors, trace_hsp_target,
     trace_init_hsp_if_match, trace_match_target, x_soft_chunk, x_soft_scan_letters,
-    x_tbx_sent_subject, AtomicOrdering, AtomicU64, DiagStruct, DiagnosticCounters, HashSet,
-    InitHSP, Instant, OffsetPair, QueryBatch, QueryContext, QueryFrame, SubjectChunk,
-    TblastxChunkScanResult, TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
+    x_tbx_sent_frame, x_tbx_sent_subject, AtomicOrdering, AtomicU64, DiagStruct,
+    DiagnosticCounters, HashSet, InitHSP, Instant, OffsetPair, QueryBatch, QueryContext,
+    QueryFrame, SubjectChunk, TblastxChunkScanResult, TblastxChunkScanStats, TbxScore,
+    TranslatedChunk, UngappedHit,
 };
 use crate::algorithm::tblastx::extension::OneHitAlone;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
@@ -181,7 +182,12 @@ pub(super) fn begin_chunk_scan<'s>(
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the chunk's extensions take the walks the
     // sentinels stop where it is the whole frame; never on wasm32.
     let subject_sent = cfg!(not(target_arch = "wasm32"))
-        && x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
+        && x_tbx_sent_subject(
+            x_tbx_sent_frame(tbx_sent, subject_full),
+            subject_full,
+            chunk.offset,
+            chunk.length,
+        );
 
     if subject.len() < wordsize as usize {
         // NCBI still advances the diagonal table offset even when no hits can be found.

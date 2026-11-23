@@ -6803,7 +6803,11 @@ Scheduling (each value computed by one thread with the original function; order 
   keys (`KeyTable`, `(t << 32) - 1` at `q << 5 | s`, beside BLOSUM62's table and each
   `MatrixWalkTable`). The keys hold the scores of the bytes below 32, so a batch or a frame takes the
   path only if every byte of its buffers is below 32 (`letters` in `sent_contexts` and
-  `sent_subject`); a frame's letters (NCBISTDAA 0..=27) and the sentinel always are.
+  `sent_frame`); a frame's letters (NCBISTDAA 0..=27) and the sentinel always are. The frame's
+  check reads the whole buffer, so it runs once for each chunk where the units are listed
+  (`XUnit::sent_frame`), not in every unit: run in each unit's `x_unit_sent` (twice, the dispatch
+  and its assertion), it cost ViPTreeGen's Autographivirales.40 the gain (cycles x1.003 of dev
+  against x0.97 without it).
   TODO-AB2
 - `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of the unit path (`scan_unit`, the

@@ -687,12 +687,9 @@ fn sentinel_walks_equal_the_reference_at_ties_inner_sentinels_and_odd_codes() {
     let mut rng = Rng(0x9E6C_63D0_676A_9A99);
     for (a, b) in [(5u8, 40u8), (27, 255), (31, 32)] {
         let frame = [0u8, a, b, a, b, 0];
-        assert!(!sent_subject(true, &frame, 0, 4), "{a} {b}");
+        assert!(!sent_frame(true, &frame), "{a} {b}");
         assert!(!sent_contexts(std::iter::once(&frame[..])), "{a} {b}");
-        assert!(
-            sent_subject(true, &[0u8, a, a, a, 0], 0, 3) == (a < 32),
-            "{a}"
-        );
+        assert!(sent_frame(true, &[0u8, a, a, a, 0]) == (a < 32), "{a}");
     }
     for (a, b) in [
         (1u8, 2u8),
@@ -759,8 +756,9 @@ fn sentinel_walks_refuse_what_the_table_cannot_do() {
     }
 }
 
-// No NCBI counterpart. A chunk takes the sentinel walks only when the batch does, the chunk
-// is the whole frame and the buffer has its two sentinels; otherwise the walks of `two_hit`.
+// No NCBI counterpart. A chunk takes the sentinel walks only when its frame may (`sent_frame`),
+// the chunk is the whole frame and the buffer has its two sentinels; otherwise the walks of
+// `two_hit`.
 #[test]
 fn only_a_whole_frame_with_its_sentinels_takes_the_sentinel_walks() {
     let frame = [0u8, 4, 5, 6, 7, 0];

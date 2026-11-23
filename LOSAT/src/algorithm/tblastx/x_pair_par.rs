@@ -1544,13 +1544,19 @@ impl XGroup {
     }
 }
 
-/// One unit: subject frame `f`, its chunk number `k`, context group `g`.
+/// One unit: subject frame `f`, its chunk number `k`, context group `g` (`XPairPar::x_unit`).
 #[derive(Clone, Copy)]
 pub(super) struct XUnit {
     f: usize,
     k: usize,
     chunk: SubjectChunk,
     g: usize,
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): whether the frame `f` may take the walks the sentinels
+    /// stop (`x_tbx_sent_frame`: the batch's contexts allow them and every byte of the frame's
+    /// buffer is a key's). That check reads the whole buffer, so `x_unit` finds it once for each
+    /// chunk where the units are listed (`run_subject_units`), not in every unit's
+    /// `x_unit_sent`.
+    sent_frame: bool,
 }
 
 /// Per-thread scratch of the units: the offset pairs and the unit diagonal table.
@@ -2265,14 +2271,10 @@ impl<M: TbxScore> XPairPar<M> {
                 if chunk.length < inp.wordsize as usize {
                     continue;
                 }
+                let first = self.x_unit(inp, f, k, *chunk, 0);
                 for g in 0..self.x_group_count() {
                     if self.x_group_has_entries(g) {
-                        units.push(XUnit {
-                            f,
-                            k,
-                            chunk: *chunk,
-                            g,
-                        });
+                        units.push(XUnit { g, ..first });
                     }
                 }
             }
@@ -3038,14 +3040,33 @@ impl<M: TbxScore> XPairPar<M> {
         );
     }
 
+    /// The unit of the context group `g` on the chunk `k` (`chunk`) of the subject frame `f`.
+    pub(super) fn x_unit(
+        &self,
+        inp: &XSubject<'_>,
+        f: usize,
+        k: usize,
+        chunk: SubjectChunk,
+        g: usize,
+    ) -> XUnit {
+        let sent_frame = x_tbx_sent_frame(self.sent, &inp.s_frames_preliminary[f].aa_seq);
+        XUnit {
+            f,
+            k,
+            chunk,
+            g,
+            sent_frame,
+        }
+    }
+
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): never on wasm32 (line W keeps its walks there).
-    /// Whether the extensions of `unit` take the walks the sentinels stop: the batch's contexts
-    /// allow them (`sent`) and the unit's chunk is its whole subject frame.
+    /// Whether the extensions of `unit` take the walks the sentinels stop: its frame may
+    /// (`XUnit::sent_frame`) and the unit's chunk is its whole subject frame.
     #[inline(always)]
     pub(super) fn x_unit_sent(&self, unit: &XUnit, inp: &XSubject<'_>) -> bool {
         cfg!(not(target_arch = "wasm32"))
             && x_tbx_sent_subject(
-                self.sent,
+                unit.sent_frame,
                 &inp.s_frames_preliminary[unit.f].aa_seq,
                 unit.chunk.offset,
                 unit.chunk.length,

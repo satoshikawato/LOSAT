@@ -97,7 +97,8 @@ enum Device {
     /// Descriptor 1 (`STD_OUTPUT_HANDLE` on Windows) viewed as a file and never closed.
     Raw(std::mem::ManuallyDrop<std::fs::File>),
     /// A Windows console, through Rust's `Stdout` (which writes UTF-8 to it as UTF-16), flushed
-    /// at each write: a console's writes do not fail and pass.
+    /// at each write (a console has no failure that passes: what its buffer keeps of a failed
+    /// write is never written later).
     #[cfg(windows)]
     Console(std::io::Stdout),
     /// No standard output (a Windows process started without the handle): the writes succeed and
@@ -151,8 +152,6 @@ fn is_closed_descriptor(error: &std::io::Error) -> bool {
     let closed = 8;
     #[cfg(windows)]
     let closed = windows_sys::Win32::Foundation::ERROR_INVALID_HANDLE as i32;
-    #[cfg(not(any(unix, windows, target_os = "wasi")))]
-    let closed = i32::MIN;
     error.raw_os_error() == Some(closed)
 }
 

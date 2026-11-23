@@ -119,6 +119,53 @@ fn the_organism_reports_standard_output_writes_where_glibc_writes() {
     assert_eq!(run(&[8000, 300]), (vec![4096, 8192], 8300));
 }
 
+/// A device whose first write fails (`EAGAIN` on a non-blocking standard output) and whose later
+/// writes pass, keeping what they took.
+struct FailsOnce {
+    failed: bool,
+    taken: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+impl std::io::Write for FailsOnce {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if !std::mem::replace(&mut self.failed, true) {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        lock(&self.taken).extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_failed_write_of_the_organism_reports_standard_output_is_not_written_later() {
+    // glibc's buffer of `cout` holds nothing after a failed write (`writedb::cout`): the block
+    // that failed and the rest of the insertion are lost, and a failure that has passed by the
+    // next write or the exit writes none of them (line RG item KC-11b-2).
+    use std::io::Write;
+    let taken = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut buffer = NcbiReportBuffer::new(
+        Box::new(FailsOnce {
+            failed: false,
+            taken: taken.clone(),
+        }),
+        NcbiBuffer::new(NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        }),
+    );
+    buffer.write_all(&[b'a'; 4000]).unwrap();
+    assert!(
+        buffer.write_all(&[b'b'; 200]).is_err(),
+        "the write of 4,096 bytes failed"
+    );
+    drop(buffer);
+    assert!(lock(&taken).is_empty(), "nothing written at the end");
+}
+
 /// The bytes that `buffer` has written to its device after each step of `steps`
 /// (`Ok(bytes)`: one insertion; `Err(())`: a flush, as before a write to `cerr`), and in all.
 fn written_after(stream: NcbiStdio, steps: &[Result<Vec<u8>, ()>]) -> (Vec<usize>, usize, usize) {

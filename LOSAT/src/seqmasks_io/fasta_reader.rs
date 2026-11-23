@@ -46,8 +46,8 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::writedb::bioseq::SeqData;
 use crate::writedb::fasta_source::pack::{self, Coding};
 use crate::writedb::fasta_source::reader::{
-    out_of_range_what, DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags, ReaderWarn,
-    Record, SeqInst,
+    out_of_range_what, DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags, ReaderWarn, Record,
+    SeqInst,
 };
 
 // The text is observed, not taken from a library's source: NCBI's line reader reads through
@@ -138,7 +138,9 @@ impl<R: Read> MaskFastaReader<R> {
     /// (`FastaReader::with_seq_pos_modulus`).
     #[cfg(test)]
     pub(crate) fn with_seq_pos_modulus(mut self, modulus: u64) -> Self {
-        self.reader = self.reader.map(|reader| reader.with_seq_pos_modulus(modulus));
+        self.reader = self
+            .reader
+            .map(|reader| reader.with_seq_pos_modulus(modulus));
         self
     }
 
@@ -178,8 +180,7 @@ impl<R: Read> MaskFastaReader<R> {
                 // `fParseGaps` only where their sum wraps NCBI's `TSeqPos` to 0 past 2^32
                 // letters, `RecordState::assemble_seq`), meet the map's errors.
                 if let Some(error) = seq_map_error(&record.inst) {
-                    let (SeqInst::Delta { length, .. } | SeqInst::Raw { length, .. }) =
-                        record.inst
+                    let (SeqInst::Delta { length, .. } | SeqInst::Raw { length, .. }) = record.inst
                     else {
                         unreachable!("only a raw sequence or a delta meets a map error")
                     };
@@ -253,9 +254,7 @@ pub(crate) fn seq_map_error(inst: &SeqInst) -> Option<SeqMapError> {
         SeqInst::Raw { length, .. } if *length == INVALID_SEQ_POS => {
             return Some(SeqMapError::InvalidRawLength);
         }
-        SeqInst::Delta {
-            length, pieces, ..
-        } => (length, pieces),
+        SeqInst::Delta { length, pieces, .. } => (length, pieces),
         _ => return None,
     };
     let mut start = 0u64;

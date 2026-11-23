@@ -1154,8 +1154,7 @@ impl RecordState {
         let l = seq_data_length as u64 % self.seq_pos_modulus;
         let pos_wrapped = pos as u64 % self.seq_pos_modulus;
         if len == 1
-            && (l == pos_wrapped
-                || (l == pos_wrapped + line_length as u64 && at_start_of_line))
+            && (l == pos_wrapped || (l == pos_wrapped + line_length as u64 && at_start_of_line))
         {
             len = 0;
         }
@@ -1368,7 +1367,11 @@ impl RecordState {
         let gap_pos = |gap: &Gap| gap.position as u64 % modulus;
         let n = self.gaps.len();
         if n == 0 || gap_pos(&self.gaps[0]) > 0 {
-            let len = if n > 0 { gap_pos(&self.gaps[0]) } else { length };
+            let len = if n > 0 {
+                gap_pos(&self.gaps[0])
+            } else {
+                length
+            };
             add(&mut pieces, &self.seq_data, span(0, len));
         }
         for i in 0..n {

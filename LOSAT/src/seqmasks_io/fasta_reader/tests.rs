@@ -400,7 +400,11 @@ fn a_record_past_32_bits() {
     assert!(read.error.is_none(), "{:?}", read.error);
     assert_eq!(letters(&read), ["ACGT", ""]);
     // Cut to 1 (the protein's `X` after it are not read).
-    let read = run(b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n", true, false);
+    let read = run(
+        b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n",
+        true,
+        false,
+    );
     assert!(read.error.is_none(), "{:?}", read.error);
     assert_eq!(letters(&read), ["MKV", "M"]);
     // Gaps that sum to 2^32: pieces, read as N or X (dustmasker -outfmt fasta:
@@ -508,23 +512,43 @@ fn residues_past_32_bits() {
         (records, error)
     };
     let mut input = b">a\n".to_vec();
-    input.extend(b"A".repeat(60).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend(
+        b"A".repeat(60)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
     input.extend_from_slice(b"ACGTAC\nGGGG\n>b\nAC\n");
     let (records, error) = read(&input);
     assert!(error.is_none());
     assert_eq!(records, ["ACGGGG", "AC"]);
     // A gap at 20, past the 12 kept, and one at 71 (7): the runs after the residues.
     let mut input = b">a\n".to_vec();
-    input.extend(b"A".repeat(20).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend(
+        b"A".repeat(20)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
     input.extend_from_slice(b">?3\n");
-    input.extend(b"C".repeat(51).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend(
+        b"C".repeat(51)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
     input.extend_from_slice(b">?2\nGGGGG\n");
     assert_eq!(read(&input).0, ["CCCCCCCGGGGGNNNNN"]);
     // Gaps at 20 and 30, past the 6 kept.
     let mut input = b">a\n".to_vec();
-    input.extend(b"A".repeat(20).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend(
+        b"A".repeat(20)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
     input.extend_from_slice(b">?3\nCCCCCCCCCC\n>?4\n");
-    input.extend(b"G".repeat(40).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+    input.extend(
+        b"G".repeat(40)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
     let (records, error) = read(&input);
     assert!(records.is_empty());
     let Some(MaskReadError::Std(what)) = error else {

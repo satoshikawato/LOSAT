@@ -27,9 +27,7 @@ pub(crate) use title::fasta_reader_fasta;
 use std::io::Read;
 
 use super::bioseq::{Bioseq, DeltaFix, ParsedIds, SeqData};
-use reader::{
-    DeltaSeq, FastaReader, ReadError, ReaderFlags, ReaderWarning, SeqInst,
-};
+use reader::{DeltaSeq, FastaReader, ReadError, ReaderFlags, ReaderWarning, SeqInst};
 
 /// An error that ends the reading: its message and how makeblastdb reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +94,9 @@ impl<R: Read> FastaBioseqSource<R> {
     /// (`FastaReader::with_seq_pos_modulus`).
     #[cfg(test)]
     pub(crate) fn with_seq_pos_modulus(mut self, modulus: u64) -> Self {
-        self.reader = self.reader.map(|reader| reader.with_seq_pos_modulus(modulus));
+        self.reader = self
+            .reader
+            .map(|reader| reader.with_seq_pos_modulus(modulus));
         self
     }
 
@@ -200,9 +200,7 @@ impl<R: Read> FastaBioseqSource<R> {
         };
         // `s_FixBioseqDeltas` throws for a protein delta (gaps that wrapped to 0 past 2^32).
         let (length, seq_data, delta_fix) = match record.inst {
-            SeqInst::Delta { length, .. } if is_aa => {
-                (length, None, Some(DeltaFix::ProteinDelta))
-            }
+            SeqInst::Delta { length, .. } if is_aa => (length, None, Some(DeltaFix::ProteinDelta)),
             inst => {
                 let Ok(fixed) = fix_bioseq_deltas(inst) else {
                     self.reader = None;

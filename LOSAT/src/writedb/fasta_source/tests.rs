@@ -750,7 +750,11 @@ fn residues_past_32_bits() {
             if part.starts_with(b">?") {
                 input.extend_from_slice(part);
             } else {
-                input.extend(part.repeat(count).chunks(10).flat_map(|line| [line, b"\n"].concat()));
+                input.extend(
+                    part.repeat(count)
+                        .chunks(10)
+                        .flat_map(|line| [line, b"\n"].concat()),
+                );
             }
             if part.starts_with(b">?") {
                 input.push(b'\n');
@@ -790,12 +794,22 @@ fn residues_past_32_bits() {
     let bioseq = read(&input, true).unwrap().unwrap();
     assert_eq!(
         (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
-        (17, Some(SeqData::Ncbieaa(b"KKKKKKKWWWWWXXXXX".to_vec())), None)
+        (
+            17,
+            Some(SeqData::Ncbieaa(b"KKKKKKKWWWWWXXXXX".to_vec())),
+            None
+        )
     );
     // Gaps at 20 and 30, both past the 6 residues kept: a nucleotide's pieces skip them, a
     // protein's second append starts past the residues.
     let shape = |letter: &'static [u8]| {
-        record(&[(letter, 20), (b">?3", 1), (letter, 10), (b">?4", 1), (b"G", 40)])
+        record(&[
+            (letter, 20),
+            (b">?3", 1),
+            (letter, 10),
+            (b">?4", 1),
+            (b"G", 40),
+        ])
     };
     let bioseq = read(&shape(b"A"), false).unwrap().unwrap();
     assert_eq!(

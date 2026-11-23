@@ -713,11 +713,28 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
-    fn utf8_str(&mut self, _: &[u8]) {}
+    /// NCBI's XML stream checks a UTF8String's bytes as a VisibleString's
+    /// (`XmlEncoder::utf8_str`); ASN.1 text writes them as they are.
+    fn utf8_str(&mut self, value: &[u8]) {
+        if self.encoding == ArchiveEncoding::Xml {
+            self.as_is &= self.encoding.writes_text(value);
+        }
+    }
     fn delayed(&mut self, _: &[u8]) {}
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
         None
     }
+}
+
+/// Whether `encoding` writes the strings of the PSSM `pssm` (a request's `queries pssm`) as they
+/// are: its VisibleStrings, and in XML its UTF8Strings.
+pub(crate) fn pssm_written_as_is(
+    encoding: ArchiveEncoding,
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> bool {
+    let mut check = StringsAsIs::new(encoding);
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.as_is
 }
 
 /// Whether `encoding` writes the strings of the Seq-id `id` as they are.

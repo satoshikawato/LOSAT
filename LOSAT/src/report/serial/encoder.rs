@@ -35,9 +35,6 @@ pub enum SerialError {
     /// is the writer's error. (The XML streams of outfmt 5 / 14 / 16 replace and post it
     /// themselves, `xml::XmlPost`.)
     NonVisibleChar(u8),
-    /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
-    /// byte and LOSAT does not write (no BLAST report has one).
-    NonFiniteReal,
     /// The exception of NCBI's US-ASCII XML stream of outfmt 5 / 14 / 16 at a byte >= 0x80 that it
     /// cannot write (`CUtf8::DecodeFirst`, `DecodeNext` or `SymbolToChar`): the encoder keeps the
     /// rest of what NCBI reports (`xml::XmlThrow`: where the document is cut, the frames of the
@@ -62,9 +59,6 @@ impl std::fmt::Display for SerialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SerialError::JsonDouble(error) => f.write_str(error.message()),
-            SerialError::NonFiniteReal => f.write_str(
-                "a NaN or an infinite real number in an ASN.1 binary stream is not supported by LOSAT",
-            ),
             SerialError::NonVisibleChar(byte) => write!(
                 f,
                 "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"
@@ -275,6 +269,11 @@ pub trait Encoder {
     /// with `eFNP_Allow` (no byte is replaced or reported; in ASN.1 text a zero byte is left out, a
     /// `"` doubled and the line wrapped as a VisibleString's).
     fn utf8_str(&mut self, value: &[u8]);
+    /// `utf8_str` with `visible_str_replacing`'s replacement where the stream checks a
+    /// UTF8String's bytes (NCBI's XML stream); the default is `utf8_str`.
+    fn utf8_str_replacing(&mut self, value: &[u8]) {
+        self.utf8_str(value);
+    }
     /// `WriteClassMember` of an `id` and a `CDelayBuffer`, for a member that NCBI's reader kept in
     /// a delay buffer (`Auth-list.names`, `asn_types::DELAYED`): in ASN.1 text the bytes read,
     /// copied as they are (`COStreamBuffer::Write` from a `CByteSourceReader`, which leaves the line
@@ -749,7 +748,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         self.call(Piece::Bool, |inner| inner.null());
     }
     fn utf8_str(&mut self, value: &[u8]) {
-        self.string(value, |inner| inner.utf8_str(value));
+        self.string(value, |inner| inner.utf8_str_replacing(value));
     }
     fn delayed(&mut self, text: &[u8]) {
         self.call(Piece::Raw, |inner| inner.delayed(text));

@@ -70,7 +70,7 @@ fn run_main_entry() -> Result<()> {
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
     // `losat blastdbcmd` reads its command line with NCBI's argument reader
-    // (`ncbi_app::args`), not clap's: the words after `blastdbcmd` go to it as they are.
+    // (`ncbi_app::args`): the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
@@ -134,8 +134,8 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("makeprofiledb") {
         std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
     }
-    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
-    // top level has no options of its own.
+    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
+    // (`cli::top_level`), which has no options of its own.
     if argv
         .get(1)
         .is_some_and(|word| crate::cli::INSTALL_SHIMS_WORDS.iter().any(|w| word == w))
@@ -199,8 +199,8 @@ fn run_main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program) is
-    // clap's.
+    // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program):
+    // LOSAT's own (`cli::top_level`).
     let Some(start) = start else {
         let top_level = crate::cli::top_level(&argv);
         match top_level.error {

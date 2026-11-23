@@ -445,119 +445,6 @@ fn file_names_keep_their_bytes_in_both_spellings() {
     assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
 }
 
-// No NCBI counterpart: a run builds the clap command of its program only (`ProgramParser`).
-/// The programs of `Cli`, in the order of its subcommands.
-fn program_names() -> Vec<String> {
-    Cli::command()
-        .get_subcommands()
-        .map(|program| program.get_name().to_string())
-        .collect()
-}
-
-/// What clap writes where it stops at `words` with `command` (a help, or an error), or the
-/// program that it parsed.
-fn stopped_text(command: &clap::Command, words: &[&str]) -> String {
-    match command.clone().try_get_matches_from(words) {
-        Err(error) => format!("{:?} {error}", error.kind()),
-        Ok(matches) => format!("parsed {:?}", matches.subcommand_name()),
-    }
-}
-
-// The command that the parser reads a program's command line with has that program's arguments
-// and no other's: each option of another program costs a run nothing.
-#[test]
-fn a_command_line_builds_the_arguments_of_its_program_only() {
-    let names = program_names();
-    for name in &names {
-        for words in [
-            vec!["losat", name.as_str()],
-            vec!["losat", "-help", name.as_str(), "-h"],
-            vec!["losat", "--version", name.as_str()],
-        ] {
-            let words: Vec<OsString> = words.into_iter().map(OsString::from).collect();
-            let command = Cli::program_command(&words);
-            for program in command.get_subcommands() {
-                let built = program.get_arguments().next().is_some();
-                assert_eq!(built, program.get_name() == name, "{words:?}: {program:?}");
-            }
-        }
-    }
-    // A word that the reader rejects at the top level, before any program (`read_program`).
-    for words in [
-        &["losat"][..],
-        &["losat", "-help"],
-        &["losat", "nosuch", "blastp"],
-        &["losat", "-x", "blastn", "blastp"],
-        &["losat", "-help-full", "blastp"],
-        &["losat", "--", "blastp"],
-    ] {
-        let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-        let program = Cli::program_command(&words)
-            .get_subcommands()
-            .find(|program| program.get_arguments().next().is_some())
-            .map(|program| program.get_name().to_string());
-        assert_eq!(program, None, "{words:?}");
-    }
-}
-
-// The reader takes only its help and version flags before the program's name, so the program
-// it reads is the first word after them (`read_program`): the top level has no option of its
-// own, which another word there could be the value of.
-#[test]
-fn the_top_level_has_no_option_of_its_own() {
-    assert!(Cli::command().get_arguments().next().is_none());
-    for flag in TOP_LEVEL_FLAGS {
-        let words = [
-            OsString::from("losat"),
-            OsString::from(flag),
-            "blastn".into(),
-        ];
-        assert_eq!(
-            read_program(&words, |word| word == "blastn"),
-            Some("blastn")
-        );
-    }
-}
-
-// The program's command is the one that `Cli::command()` has, every byte (its arguments with the
-// description and help template), and clap
-// writes the same help and errors with it: the parser's texts do not depend on the other
-// programs' arguments.
-#[test]
-fn the_command_of_one_program_is_its_command_among_every_program() {
-    let every = Cli::command();
-    for name in program_names() {
-        let words = [OsString::from("losat"), OsString::from(&name)];
-        let one = Cli::program_command(&words);
-        assert_eq!(
-            format!("{:?}", one.find_subcommand(&name)),
-            format!("{:?}", every.find_subcommand(&name)),
-            "{name}"
-        );
-        for words in [
-            vec!["losat", name.as_str(), "-h"],
-            vec!["losat", name.as_str(), "--help"],
-            vec!["losat", "--help", name.as_str(), "-h"],
-            vec!["losat", name.as_str(), "--no_such_option"],
-            vec!["losat", name.as_str()],
-        ] {
-            assert_eq!(stopped_text(&one, &words), stopped_text(&every, &words));
-        }
-    }
-    let top = Cli::program_command(&[OsString::from("losat")]);
-    for words in [
-        &["losat"][..],
-        &["losat", "--help"],
-        &["losat", "-h"],
-        &["losat", "nosuch"],
-    ] {
-        assert_eq!(
-            stopped_text(&top, words),
-            stopped_text(&Cli::command(), words)
-        );
-    }
-}
-
 // `program_args` adds the arguments that clap's derive defers for each variant of `Commands`
 // (`PROGRAM_ARGS` is in the variants' order), and keeps the variant's description, which clap's
 // deferred `Args` replaces where a doc comment of an `Args` gives one.
@@ -663,7 +550,7 @@ fn a_deferred_program_is_built_with_its_arguments() {
     }
 }
 
-// The words of the top level (`losat` without a program: `top_level_error`, clap's): the reader
+// The words of the top level (`losat` without a program: `top_level`): the reader
 // gives what the command line prints there, `losat --version`'s version on the standard output
 // (exit status 0) and the error of a word that names no program on its standard error (exit status
 // 2), `help` too (the top level has no `help` subcommand). One case each of line RG item K4i-2b's
@@ -675,13 +562,13 @@ fn the_reader_reads_the_top_levels_words_as_the_command_line() {
             .chain(words.iter().copied())
             .collect();
         let error = try_parse_from(argv).map(|_| ()).unwrap_err();
-        let code = top_level_error(
+        let code = top_level(
             &std::iter::once("losat")
                 .chain(words.iter().copied())
                 .map(OsString::from)
                 .collect::<Vec<_>>(),
         )
-        .exit_code();
+        .status;
         (error, code)
     };
     assert_eq!(

@@ -306,7 +306,7 @@ pub enum ArgvError {
     Printed(String),
     /// NCBI's report of an argument error (the usage, the line of `=` and the posts), or the top
     /// level's error: the bytes that the command line writes to its standard error, as without a
-    /// `-logfile` (exit status 1; the top level's, clap's, 2).
+    /// `-logfile` (exit status 1; the top level's 2).
     Report(Vec<u8>),
     /// LOSAT's refusal: its text, which the command line writes after `Error: ` (exit status 1).
     Refused(String),

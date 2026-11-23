@@ -5,7 +5,7 @@ use crate::ncbi_app::args::Refusal;
 use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
-use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
@@ -160,14 +160,14 @@ fn entry_program_description(name: &str) -> &'static str {
 }
 
 /// The `after_help` of the top level: the programs that `losat NAME` runs and `Commands` does not
-/// list (derived from `ENTRY_NAMES` and the subcommands of `Commands`, so that a new name shows
-/// up), and the shims. No NCBI counterpart.
+/// list (derived from `ENTRY_NAMES` and `PROGRAMS`, so that a new name shows up), and the shims.
+/// No NCBI counterpart.
 fn top_level_after_help() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TEXT.get_or_init(|| {
         let others: Vec<&str> = ENTRY_NAMES
             .into_iter()
-            .filter(|name| !<Commands as clap::Subcommand>::has_subcommand(name))
+            .filter(|name| !is_program(name))
             .collect();
         let width = others.iter().map(|name| name.len()).max().unwrap_or(0);
         let mut text = String::new();
@@ -186,14 +186,12 @@ fn top_level_after_help() -> &'static str {
     })
 }
 
-// No NCBI counterpart: `losat <program>` names the program, and a run builds the clap command of
-// that program only (`ProgramParser`).
+// No NCBI counterpart: `losat <program>` names the program.
 // LOSAT's command line, `losat <program> <words>` (`Commands`). Its command (`CommandFactory`) is
 // `cli_command`'s: `Cli::command()` has every program's arguments (`api::describe`, which reads
-// NCBI's argument tables, has a test that its options are these, line RG item K4i-3a), and clap
-// converts a command line with only its program's arguments (`command_of`,
-// `ProgramParser::program_command`). A doc comment here would be clap's description of the top
-// level (`long_about`).
+// NCBI's argument tables, has a test that its options are these, line RG item K4i-3a), and the
+// command of one program has only its arguments (`command_of`). A doc comment here would be
+// clap's description of the top level (`long_about`).
 #[derive(clap::Args, Debug)]
 #[command(
     version,
@@ -232,46 +230,11 @@ impl Cli {
     }
 }
 
-/// The type that LOSAT's parser reads a command line into (`try_parse_from` and the readers
-/// beside it): a `Parser`, read with its whole command unless it builds less for one command line.
-pub trait ProgramParser: Parser {
-    /// The command that reads `words` (`losat <program> <words>`): `Self::command()`.
-    fn program_command(_words: &[OsString]) -> clap::Command {
-        Self::command()
-    }
-}
-
-/// `Cli` reads a command line with the arguments of its program only, the program that the reader
-/// reads (`read_program`), so that each option of another program costs a run nothing.
-impl ProgramParser for Cli {
-    fn program_command(words: &[OsString]) -> clap::Command {
-        let program = read_program(words, <Commands as Subcommand>::has_subcommand);
-        cli_command::<false>(|name| Some(name) == program)
-    }
-}
-
 /// `Cli`'s command with the arguments of `program` only (`cli_command`): LOSAT Web's ABI v1's
 /// (`web_v1_argv`) and the tests'.
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn command_of(program: &str) -> clap::Command {
     cli_command::<false>(|name| name == program)
-}
-
-/// The words that LOSAT's top level takes (`top_level_error`), before the program's name: its help
-/// and version flags. The top level has no option of its own
-/// (`Cli::command().get_arguments()` is empty before clap builds it).
-const TOP_LEVEL_FLAGS: [&str; 4] = ["-help", "--help", "-h", "--version"];
-
-/// The program whose arguments clap builds for `words` (`losat <words>`, `program_command`): the
-/// first word after the top level's flags (`TOP_LEVEL_FLAGS`), when `is_program` takes it. The
-/// top level stops at its first flag (`top_level_error`), so such a command line reads no
-/// program's arguments; the command has the arguments of this program only.
-fn read_program(words: &[OsString], is_program: impl Fn(&str) -> bool) -> Option<&str> {
-    let word = words
-        .iter()
-        .skip(1)
-        .find(|word| !TOP_LEVEL_FLAGS.iter().any(|flag| word.as_os_str() == *flag))?;
-    word.to_str().filter(|word| is_program(word))
 }
 
 /// `Cli`'s command (`augment_args`, or `augment_args_for_update` with `UPDATE`) where the programs
@@ -458,40 +421,6 @@ where
     reader::read_argv(&argv, caller, target).map(|command| Cli { command })
 }
 
-/// What clap's top level makes of `argv` (`losat <words>`) whose first word names no program on
-/// a reader (`ENTRY_NAMES`): its help and version flags (`TOP_LEVEL_FLAGS`; `-help` is clap's
-/// `--help`), clap's error without a program, or LOSAT's error of another word there (unknown to
-/// NCBI too: no program reads it). The top level stays clap's (line RG DECISIONS K4i-2).
-pub(crate) fn top_level_error(argv: &[OsString]) -> clap::Error {
-    let words = argv.get(1..).unwrap_or(&[]);
-    let flags = words
-        .iter()
-        .take_while(|word| TOP_LEVEL_FLAGS.iter().any(|flag| word.as_os_str() == *flag));
-    let translated: Vec<OsString> = flags
-        .map(|flag| match flag.to_str() {
-            Some("-help") => "--help".into(),
-            _ => flag.clone(),
-        })
-        .collect();
-    if translated.is_empty() {
-        if let Some(word) = words.first() {
-            return clap::Error::raw(
-                ErrorKind::UnknownArgument,
-                format!(
-                    "unknown option or argument '{}'; use -help to list the options",
-                    word.to_string_lossy()
-                ),
-            );
-        }
-    }
-    let argv0 = argv.first().cloned().unwrap_or_else(|| "losat".into());
-    match Cli::program_command(argv).try_get_matches_from(std::iter::once(argv0).chain(translated))
-    {
-        Err(error) => error,
-        Ok(_) => unreachable!("a top level without a program stops at its first flag"),
-    }
-}
-
 /// What LOSAT's top level writes for `argv` (`losat <words>`, whose first word names no program on
 /// a reader, `ENTRY_NAMES`): its help or version on the standard output (exit status 0), or its
 /// error on the standard error (exit status 2). The command line's entry (`main_entry`) writes it,
@@ -506,31 +435,109 @@ pub(crate) struct TopLevel {
     pub(crate) status: i32,
 }
 
-/// What the top level writes for `argv` (`TopLevel`).
+// No NCBI counterpart: NCBI has one executable per program. LOSAT's top level has no option of its
+// own: its first word is its help (`-h`, `-help`, `--help`), its version (`--version`), or an
+// error; the words after it are not read. Its texts are those of LOSAT 0.2.0, frozen
+// (`top_level_tests`, line RG DECISIONS K4i-3-1 Q5).
+/// What the top level writes for `argv` (`TopLevel`): without a word, its help as an error.
 pub(crate) fn top_level(argv: &[OsString]) -> TopLevel {
-    let error = top_level_error(argv);
+    let Some(first) = argv.get(1) else {
+        return TopLevel {
+            text: top_level_help(),
+            error: true,
+            status: 2,
+        };
+    };
+    let (text, error) = match first.to_str() {
+        Some("-h" | "-help" | "--help") => (top_level_help(), false),
+        Some("--version") => (format!("losat {}\n", env!("CARGO_PKG_VERSION")), false),
+        _ => (
+            format!(
+                "error: unknown option or argument '{}'; use -help to list the options\n",
+                first.to_string_lossy()
+            ),
+            true,
+        ),
+    };
     TopLevel {
-        text: top_level_message(&error),
-        error: error.use_stderr(),
-        status: error.exit_code(),
+        text,
+        error,
+        status: if error { 2 } else { 0 },
     }
 }
 
-/// The text of the top level's `error` (`top_level_error`) as the command line writes it, ending
-/// with a line end: clap's, with its help and version flags written as LOSAT's top level takes
-/// them (`-help`, `--version`).
-pub(crate) fn top_level_message(error: &clap::Error) -> String {
-    let mut message = error
-        .to_string()
-        .replace("-h, --help", "-help")
-        .replace("-V, --version", "--version")
-        .replace("'-h'", "'-help'")
-        .replace("see a summary with '-help'", "see a summary with '-h'")
-        .replace("see more with '--help'", "see more with '-help'");
-    if error.use_stderr() && !message.ends_with('\n') {
-        message.push('\n');
+/// The programs whose options are LOSAT's types (`Commands`), in the order of its variants, each
+/// with what the top level's help says of it.
+const PROGRAMS: [(&str, &str); 10] = [
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
+    (
+        "blastx",
+        "Translated nucleotide query vs protein subject (blastx)",
+    ),
+    (
+        "blastn",
+        "Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)",
+    ),
+    ("blastp", "Pairwise protein alignment (blastp)"),
+    (
+        "tblastx",
+        "Pairwise 6-frame translated nucleotide alignment (tblastx)",
+    ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52
+    (
+        "tblastn",
+        "Protein query vs translated nucleotide subject (tblastn)",
+    ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
+    ("psiblast", "Position-Specific Iterated BLAST (psiblast)"),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
+    ("rpsblast", "Reverse Position Specific BLAST (rpsblast)"),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
+    (
+        "rpstblastn",
+        "Translated Reverse Position Specific BLAST (rpstblastn)",
+    ),
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
+    (
+        "makeblastdb",
+        "makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 \
+         with -blastdb_version 4)",
+    ),
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
+    (
+        "rpsbproc",
+        "Process output from offline rpsblast to annotate sequence with conserved domain \
+         information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide \
+         queries)",
+    ),
+];
+
+/// Whether `name` is a program whose options are LOSAT's types (`PROGRAMS`, `Commands`).
+pub(crate) fn is_program(name: &str) -> bool {
+    PROGRAMS.iter().any(|(program, _)| *program == name)
+}
+
+/// The top level's help: its usage, its description, the programs (`PROGRAMS`, and a `help` that
+/// the top level of LOSAT 0.2.0 listed), its two flags, and the other programs and the shims
+/// (`top_level_after_help`).
+fn top_level_help() -> String {
+    const HELP: (&str, &str) = (
+        "help",
+        "Print this message or the help of the given subcommand(s)",
+    );
+    let listed = || PROGRAMS.iter().chain([&HELP]);
+    let width = listed().map(|(name, _)| name.len()).max().unwrap_or(0);
+    let mut text = String::from(
+        "USAGE\n  losat <COMMAND>\n\nDESCRIPTION\n   Pure-Rust pairwise alignment that matches NCBI \
+         BLAST+ on LOSAT's test fixtures, with genetic-code exceptions\n\nCommands:\n",
+    );
+    for (name, about) in listed() {
+        text += &format!("  {name:<width$}  {about}\n");
     }
-    message
+    text += "\nOptions:\n  -help     Print help\n  --version  Print version\n\n\n\n";
+    text += top_level_after_help();
+    text.push('\n');
+    text
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
@@ -573,7 +580,7 @@ pub(crate) fn run_refusal(program: &str, name: &str) -> String {
 /// date; LOSAT's names LOSAT and the BLAST+ release its output follows. The full versions are
 /// NCBI's forms with LOSAT's values (`ncbi_version::print`, line RG item E3). `makeblastdb` prints
 /// `makeblastdb`, as NCBI's program does. `main` prints the text on stdout and exits 0, before any
-/// argument is parsed. The top level `losat --version` is clap's and is not read here.
+/// argument is parsed. The top level's `losat --version` is not read here (`top_level`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
 pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
@@ -582,11 +589,8 @@ where
     S: Into<OsString>,
 {
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    // A program's name (`Commands`), with no command built.
-    let name = tokens
-        .get(1)?
-        .to_str()
-        .filter(|word| <Commands as Subcommand>::has_subcommand(word))?;
+    // A program's name (`PROGRAMS`).
+    let name = tokens.get(1)?.to_str().filter(|word| is_program(word))?;
     // NCBI's reading of the words before the arguments (`ncbi_environment::preparse`): not
     // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`
     // logs to the file `-version`).

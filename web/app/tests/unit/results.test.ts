@@ -46,6 +46,8 @@ interface Spec {
   readonly frames?: readonly [number | null, number | null];
   /** The outfmt 6 texts of the E value and the bit score, where they are not the numbers as JavaScript writes them. */
   readonly text?: { readonly e?: string; readonly bits?: string };
+  /** The outfmt 0 text of the subject's heading and of the HSP's section, where they are not the plain ones. */
+  readonly out0?: { readonly heading?: string; readonly section?: string };
 }
 
 const SPECS: readonly Spec[] = [
@@ -69,12 +71,12 @@ function makeRun(specs: readonly Spec[] = SPECS) {
     const shown = spec.shown ?? true;
     const key = `${spec.q}:${spec.s}`;
     if (shown && !headings.has(key)) {
-      const heading = `> s${spec.s} subject number ${spec.s}\nLength=500\n\n`;
+      const heading = spec.out0?.heading ?? `> s${spec.s} subject number ${spec.s}\nLength=500\n\n`;
       headings.set(key, [out0.length, out0.length + heading.length]);
       out0 += heading;
     }
     const sectionStart = out0.length;
-    if (shown) out0 += ` Score = ${spec.bits} bits\n\nQuery  ${qs}  ACGT  ${qe}\n`;
+    if (shown) out0 += spec.out0?.section ?? ` Score = ${spec.bits} bits\n\nQuery  ${qs}  ACGT  ${qe}\n`;
     const rank = ranks.get(spec.q) ?? 0;
     ranks.set(spec.q, rank + 1);
     records.push({
@@ -1042,6 +1044,42 @@ describe('ResultsBrowser', () => {
     results.selectHsp({ runId: 'r1', qIdx: 0, rank: 9 });
     results.selectHsp({ runId: 'r1', qIdx: 1, rank: 0 });
     expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
+  });
+
+  describe('outfmt 0 of a run made with -html', () => {
+    // NCBI's HTML: a report link and an anchor in the heading, a font tag on a masked row, and the title
+    // encoded with &quot; &amp; &lt; &gt; only.
+    const HEADING = '><a title="Show report for s1" href="https://www.ncbi.nlm.nih.gov/protein/s1?a=1&b=2" >s1</a><a name=s1></a> subject &lt;one&gt; &amp;lt; &quot;q&quot;\nLength=500\n\n';
+    const SECTION = ' Score = 90 bits\n\nQuery  1  <font color="#000000">acgt</font>  50\n';
+    const specs: readonly Spec[] = [{ q: 0, s: 1, bits: 90, e: 1e-20, coords: [1, 50, 101, 150], out0: { heading: HEADING, section: SECTION } }];
+    const PLAIN_HEADING = '>s1 subject <one> &lt; "q"\nLength=500\n\n';
+
+    it('shows the text that the HTML displays in the detail, the lists and the Range read, and keeps the stored bytes', async () => {
+      const { results } = setup({ specs, argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-html'] });
+      await results.open('r1');
+      // The first range read of such a run also loads the module that reads its HTML (domain/outfmt0-html.ts).
+      await expect.poll(() => results.state.get().detail?.state, { timeout: 10_000 }).toBe('ready');
+      const state = results.state.get();
+      expect(state.detail).toMatchObject({ state: 'ready', heading: PLAIN_HEADING });
+      expect(state.detail!.section).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
+      // The subject list's title and the readers of the Alignments: one decoding for all of them.
+      expect(headingTitle(state.detail!.heading!)).toBe('s1 subject <one> &lt; "q"');
+      expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
+      results.requestHeadings([1]);
+      await expect.poll(() => results.state.get().headings.get(1)).toBe(PLAIN_HEADING);
+    });
+
+    it('shows a run without -html as written, a plain title with a literal &lt; included', async () => {
+      const plain: readonly Spec[] = [
+        { q: 0, s: 1, bits: 90, e: 1e-20, coords: [1, 50, 101, 150], out0: { heading: '> s1 a &lt;b&gt; <i>\nLength=500\n\n', section: ' Score = 90 bits\n\nQuery  1  <b>  50\n' } },
+      ];
+      const { results } = setup({ specs: plain });
+      await results.open('r1');
+      await settle();
+      const state = results.state.get();
+      expect(state.detail).toMatchObject({ heading: '> s1 a &lt;b&gt; <i>\nLength=500\n\n' });
+      expect(state.detail!.section).toBe(' Score = 90 bits\n\nQuery  1  <b>  50\n');
+    });
   });
 
   it("names the task of a run: the argv's, else the engine's default", async () => {

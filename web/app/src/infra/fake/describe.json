@@ -88,6 +88,16 @@
     ]
    },
    {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
@@ -547,6 +557,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -1193,6 +1213,16 @@
     ]
    },
    {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-parse_deflines",
     "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
@@ -1763,6 +1793,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -2348,6 +2388,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
     "takes_value": false,
     "default": "false",
     "choices": [

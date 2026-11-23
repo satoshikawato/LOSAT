@@ -445,7 +445,9 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
             .chain(words.iter().map(AsRef::as_ref)),
     );
     // LOSAT Web's errors are text (its JSON): the start's messages are made from text
-    // (`ApplicationStart`'s `String`s), so `Display` replaces no byte of them.
+    // (`ApplicationStart`'s messages), so `Display` replaces no byte of them: the one message that
+    // can hold bytes that are not UTF-8, a `-conffile` name's, is made from a name that its host
+    // gives as text.
     let mut opened =
         open_with(start, words, files, diagnostics).map_err(|error| error.to_string())?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001

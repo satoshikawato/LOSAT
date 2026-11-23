@@ -281,8 +281,8 @@ fn display_counts_of_the_pairwise_report() {
 }
 
 /// The rows of `outfmt0_manifest.tsv` of BLASTX with outfmt 0, 6 or 7 (6 and 7 with custom fields
-/// too, W10) and without `-parse_deflines` (LOSAT Web refuses it): (fixture id, query, subject,
-/// extra arguments, outfmt).
+/// too, W10), without `-parse_deflines` (LOSAT Web refuses it) and without `-html`: (fixture id,
+/// query, subject, extra arguments, outfmt).
 fn manifest_rows() -> Vec<(String, String, String, Vec<String>, String)> {
     let text =
         std::fs::read_to_string(crate_dir().join("tests/outfmt0_manifest.tsv")).expect("manifest");
@@ -305,6 +305,9 @@ fn manifest_rows() -> Vec<(String, String, String, Vec<String>, String)> {
                 && matches!(row[outfmt].split(' ').next(), Some("0" | "6" | "7"))
         })
         .filter(|row| !row[extra].contains("-parse_deflines"))
+        // `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web checks
+        // keep to the plain rows.
+        .filter(|row| !row[extra].split_whitespace().any(|word| word == "-html"))
         .map(|row| {
             (
                 row[id].to_string(),

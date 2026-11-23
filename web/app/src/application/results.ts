@@ -15,6 +15,7 @@ import { programById, residueUnit } from '../domain/programs';
 import {
   buildResultIndex,
   filterQuery,
+  flagGiven,
   hitLimits,
   NO_FILTERS,
   orientation,
@@ -97,7 +98,7 @@ export interface Detail {
   readonly state: 'loading' | 'ready' | 'failed';
   /** The outfmt 6 row, as written. */
   readonly row?: string;
-  /** The subject heading of outfmt 0 (defline and Length=), as written. */
+  /** The subject heading of outfmt 0 (defline and Length=), as written (with -html: the text that the HTML shows). */
   readonly heading?: string;
   /** The HSP's section of outfmt 0 (score lines and alignment), as written. */
   readonly section?: string;
@@ -428,7 +429,8 @@ export class ResultsBrowser {
   }
 
   /**
-   * The outfmt 0 section of an HSP of the loaded run (its score lines and alignment), as written;
+   * The outfmt 0 section of an HSP of the loaded run (its score lines and alignment), as written (a run
+   * made with `-html`: the text that the HTML shows, `readOutfmt0`);
    * undefined for an HSP that outfmt 0 does not show, or of another run. Each section is read once
    * per run (the Alignments read the Ranges that come into view); a read that fails is tried again
    * at the next request.
@@ -446,7 +448,7 @@ export class ResultsBrowser {
       read =
         range === undefined
           ? Promise.resolve(undefined)
-          : this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => decoder.decode(bytes));
+          : this.readOutfmt0(loaded, range);
       sections.set(key, read);
       read.catch(() => {
         if (sections.get(key) === read) sections.delete(key);
@@ -516,6 +518,19 @@ export class ResultsBrowser {
   }
 
   /**
+   * The outfmt 0 bytes of a range of the loaded run as text. A run made with `-html` has NCBI's HTML there;
+   * the viewer shows the text that a browser displays (as its HTML tokenizer reads it: `htmlShownText`), the
+   * one place that reads outfmt 0 ranges. The stored bytes and the export stay as written. `htmlShownText`
+   * and its table of named character references are loaded here, while the range is read, so that only a
+   * run made with `-html` loads them (domain/outfmt0-html.ts).
+   */
+  private readOutfmt0(loaded: LoadedRun, range: readonly [number, number]): Promise<string> {
+    const read = this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => decoder.decode(bytes));
+    if (!flagGiven(loaded.run.snapshot.argv, '-html')) return read;
+    return Promise.all([read, import('../domain/outfmt0-html')]).then(([text, { htmlShownText }]) => htmlShownText(text));
+  }
+
+  /**
    * A subject's outfmt 0 heading (the same in every query), read once per run from the heading
    * before `row`'s section: the selected HSP's detail and the lists that show headings share it.
    * Undefined where outfmt 0 does not show the subject for that row's query.
@@ -528,7 +543,7 @@ export class ResultsBrowser {
     let read = this.headingReads.get(sIdx);
     if (read === undefined) {
       const reads = this.headingReads;
-      read = this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => decoder.decode(bytes));
+      read = this.readOutfmt0(loaded, range);
       reads.set(sIdx, read);
       // A read that fails is tried again at the next request.
       read.catch(() => {

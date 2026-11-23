@@ -57,6 +57,8 @@ mod function_size_limit;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_html_posts.rs"]
+mod library_html_posts;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]
@@ -75,6 +77,8 @@ mod makeblastdb_past_32_bits;
 mod makeblastdb_rename_lock;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
+#[path = "../makeprofiledb_fixtures.rs"]
+mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]

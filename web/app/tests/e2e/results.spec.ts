@@ -919,6 +919,32 @@ test('with -sorthits, outfmt 0 shows the alignments of the first subjects in its
   );
 });
 
+// With -html the engine writes outfmt 0 as NCBI's HTML (line RG T4a2): the stored output and its export stay
+// those bytes, and the lists show the text that the HTML displays (decision T4a2-5, 2026-11-23). The
+// FakeEngine writes no HTML, so the engine build checks it.
+test('with -html, outfmt 0 is stored as HTML and the subject list shows the plain title', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'The FakeEngine writes no HTML.');
+  await openParameters(page);
+  await program(page, 'blastp');
+  await paste(page, 'query', '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n');
+  await paste(page, 'subject', '>s1 protein <subject> & co\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n');
+  await page.getByTestId('param-extra').fill('-html');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await run(page, 1);
+  await openRun(page, 1);
+  const description = subjectRows(page).first().locator('[data-field="description"]');
+  await expect(description).toContainText('protein <subject> & co');
+  await expect(description).not.toContainText(/<a\b|&lt;|&amp;|<\/a>/);
+  // The stored outfmt 0 is the engine's HTML.
+  await showOutput(page, 1, 0, false);
+  const stored = await text(page.getByTestId('result-output'));
+  expect(stored.startsWith('<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>\n')).toBe(true);
+  expect(stored).toContain('protein &lt;subject&gt; &amp; co');
+  await page.getByTestId('results-download-all').click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId('results-download-0').click()]);
+  expect(readFileSync((await download.path())!, 'utf8')).toBe(stored);
+});
+
 test('an HSP that outfmt 0 does not show, and a hit list that may have reached its limit', async ({ page }) => {
   // many.blastn of the outfmt 0 manifest: 260 subjects with hits, outfmt 0 shows the alignments
   // of the first 250 (BLAST+'s -num_alignments). The FakeEngine leaves its third subject out.

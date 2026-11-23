@@ -58,6 +58,7 @@
     "losat-baselines/bench-buildpolicy-20261014/logs_ws/b3i.txt": "fe4c030a64f8089cdcd09921c11e8e440397173719cd90d00063cb2132e9fab3",
     "losat-baselines/bench-buildpolicy-20261014/logs_ws/recall_q100.txt": "3faf12bd35070936e585c85444e88edfda6a7c25db89d1fdd927bcb928c4ca77",
     "losat-baselines/bench-buildpolicy-20261014/logs_ws/recall_q1000.txt": "1b0aeb8c87b460615017d62c59949dc93280e9350f1737748e2184625d6b2061",
-    "losat-baselines/bench-silva-20261031/logs_ws/summary_timed.tsv": "64ee28fe705570a7504978aec83db095cf40225cd5b8d6f9166fcb56ce123047"
+    "losat-baselines/bench-silva-20261031/logs_ws/summary_timed.tsv": "64ee28fe705570a7504978aec83db095cf40225cd5b8d6f9166fcb56ce123047",
+    "losat-baselines/bench-silva-20261031/STATE.md": "5052877a4ad88e1dd48370a1e2476e75c48346705332e0aa40e06392fd66ca4e"
   }
 }

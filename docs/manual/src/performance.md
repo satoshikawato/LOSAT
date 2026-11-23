@@ -69,12 +69,13 @@ BLAST+ `tblastx`: one run), and of 5 LOSAT runs and one NCBI BLAST+ run at 1 thr
   of NCBI BLAST+ `-subject`, and LOSAT `-db` those of NCBI BLAST+ `-db`.
 - Each LOSAT search wrote the same bytes at 1 and at 16 threads.
 
-<img class="figure-for-light" src="images/fig1_suite_overview.png" alt="Speedup at 16 and 1 threads and peak memory reduction at 16 threads for LOSAT 93ca2f652 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities" width="100%">
-<img class="figure-for-dark" src="images/fig1_suite_overview_dark.png" alt="Speedup at 16 and 1 threads and peak memory reduction at 16 threads for LOSAT 93ca2f652 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities (dark theme)" width="100%">
+<img class="figure-for-light" src="images/fig1_suite_overview.png" alt="Wall-time speedup (16 and 1 threads) and remaining peak memory footprint (% of BLAST+) for LOSAT 93ca2f652 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities" width="100%">
+<img class="figure-for-dark" src="images/fig1_suite_overview_dark.png" alt="Wall-time speedup (16 and 1 threads) and remaining peak memory footprint (% of BLAST+) for LOSAT 93ca2f652 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities (dark theme)" width="100%">
 
 **Figure 1.** All 12 search modes and 3 single-threaded utilities (`makeblastdb`, `rpsbproc`), LOSAT
-`93ca2f652` vs. NCBI BLAST+ 2.17.0 and `rpsbproc` 0.5.1. **a**, 16-thread wall-time speedup; **b**,
-1-thread wall-time speedup; **c**, peak resident memory reduction.
+`93ca2f652` vs. NCBI BLAST+ 2.17.0 and `rpsbproc` 0.5.1. **a**, combined 16-thread (filled) and
+1-thread (open) wall-time speedup lollipops, plus 1-thread utilities; **b**, 16-thread peak resident
+memory footprint as `% of BLAST+` (shorter bars indicate smaller memory; 1 thread for utilities).
 
 ## Threads
 
@@ -106,16 +107,18 @@ From 1 to 16 threads, LOSAT's wall time fell `11.8×` in `blastn`, `14.9×` in `
 in `tblastn` (Figure 3d). At every thread count from 1 to 16, NCBI BLAST+ took `3.1×` to `4.9×` as
 long as LOSAT in these three searches.
 
-<img class="figure-for-light" src="images/fig3_scaling.png" alt="Scaling of peak memory and wall time with database size up to 319 GB core_nt, query volume up to 1M reads, and 1 to 16 threads" width="100%">
-<img class="figure-for-dark" src="images/fig3_scaling_dark.png" alt="Scaling of peak memory and wall time with database size up to 319 GB core_nt, query volume up to 1M reads, and 1 to 16 threads (dark theme)" width="100%">
+<img class="figure-for-light" src="images/fig3_scaling.png" alt="Scaling of peak memory and wall time with database size up to 319 GB core_nt, query volume up to 1M reads, 1 to 16 threads, and 1t to 16t peak memory across all 12 modes" width="100%">
+<img class="figure-for-dark" src="images/fig3_scaling_dark.png" alt="Scaling of peak memory and wall time with database size up to 319 GB core_nt, query volume up to 1M reads, 1 to 16 threads, and 1t to 16t peak memory across all 12 modes (dark theme)" width="100%">
 
-**Figure 3.** Scaling across database size, query volume, and threads (LOSAT circles, NCBI BLAST+
-2.17.0 diamonds). **a**, peak memory and **b**, warm-cache (filled) and cold-cache (open) wall time
-of `megablast` of 210 draft contigs against databases from 0.16 MB (`abr_genes`) to NCBI's `core_nt`
-(319.4 GB) at 16 threads. **c**, wall time and peak memory of `megablast` from 10,000 to 1,000,000
-reads of 150 nt against RefSeq 16S rRNA at 16 threads. **d**, thread scaling (1 to 16 cores) for
-`blastn`, `blastp`, and `tblastn` with ideal linear scaling dotted. In a–c both programs ran `-db`;
-LOSAT `93ca2f652`, except `core_nt` and cold-cache runs (`095ff0c16`).
+**Figure 3.** Scaling across database size, query volume, threads, and modes (LOSAT circles, NCBI
+BLAST+ 2.17.0 diamonds). **a**, peak memory and **b**, warm-cache (filled) and cold-cache (open)
+wall time of `megablast` of 210 draft contigs against databases from 0.16 MB (`abr_genes`) to NCBI's
+`core_nt` (319.4 GB) at 16 threads. **c**, wall time and peak memory of `megablast` from 10,000 to
+1,000,000 reads of 150 nt against RefSeq 16S rRNA at 16 threads. **d**, multi-core speed efficiency
+(1 to 16 cores vs. ideal linear diagonal) and **e**, peak memory curves (1 to 16 cores; solid =
+LOSAT, dashed = BLAST+) for `blastn`, `blastp`, and `tblastn`. **f**, 1-thread (open) to 16-thread
+(filled) peak memory shift across all 12 search modes. In a–c both programs ran `-db`; LOSAT
+`93ca2f652`, except `core_nt` and cold-cache runs (`095ff0c16`).
 
 ## Memory
 
@@ -178,16 +181,20 @@ Trinotate, Unicycler, and ViPTreeGen) plus 8 large reference workflows (`core_nt
   `snapshot/downstream_tools.tsv`). On large reference workflows (panel a), LOSAT ran `1.4×` to
   `40.5×` faster with `1.1×` to `647×` lower peak RSS. Across the `≥ 1 s/run` multi-thread tool runs
   (panel b), LOSAT ran `2.0×` (BUSCO) to `20×` (AMRFinderPlus) faster with `1.3×` to `8.3×` lower
-  peak RSS; across the `≥ 1 s/run` single-thread suites (panel c), `1.8×` to `3.4×` faster with
-  `1.3×` to `22.5×` lower peak RSS.
+  peak RSS; across the 7 `≥ 1 s/run` single-thread-only suites (panel c), `1.8×` to `3.4×` faster
+  with `1.3×` to `22.5×` lower peak RSS. Single-thread timings for the multi-thread tool rows (e.g.
+  AMRFinderPlus `4.88×`, BRIG `3.24×`, Prokka `2.77×`) remain in `snapshot/downstream_tools.tsv`.
 
-<img class="figure-for-light" src="images/fig2_real_pipelines.png" alt="Wall-time speedup and peak memory reduction for large reference workflows and published bioinformatics tools taking at least 1 second per run" width="100%">
-<img class="figure-for-dark" src="images/fig2_real_pipelines_dark.png" alt="Wall-time speedup and peak memory reduction for large reference workflows and published bioinformatics tools taking at least 1 second per run (dark theme)" width="100%">
+<img class="figure-for-light" src="images/fig2_real_pipelines.png" alt="Wall-time speedup and remaining peak memory footprint (% of BLAST+) for large reference workflows and published bioinformatics tools taking at least 1 second per run" width="100%">
+<img class="figure-for-dark" src="images/fig2_real_pipelines_dark.png" alt="Wall-time speedup and remaining peak memory footprint (% of BLAST+) for large reference workflows and published bioinformatics tools taking at least 1 second per run (dark theme)" width="100%">
 
-**Figure 2.** Drop-in speed and memory gains on real workloads taking ≥ 1 s per BLAST run. **a**,
-large reference workflows at 16 threads (LOSAT `095ff0c16`). **b**, multi-thread published tools
-(LOSAT `095ff0c16`). **c**, single-thread published tools (LOSAT `e04e79480`, `d9527a7da`,
-`1855cad86`). `†` marks runs where NCBI BLAST+ multi-thread output drifts from its 1-thread output.
+**Figure 2.** Drop-in speed and memory gains on real workloads taking ≥ 1 s per BLAST run (wall-time
+speedup alongside remaining memory footprint as `% of BLAST+ max RSS`, shorter = smaller). **a**,
+large reference workflows at 16 threads (earlier development build `095ff0c16`; warm
+`ref_prok_rep_genomes` on release candidate `93ca2f652` is shown in Figure 3a–b). **b**,
+multi-thread published tools (LOSAT `095ff0c16`). **c**, single-thread-only published tools (LOSAT
+`e04e79480`, `d9527a7da`, `1855cad86`). `†` marks runs where NCBI BLAST+ multi-thread output drifts
+from its 1-thread output.
 
 ## WebAssembly
 
@@ -201,18 +208,20 @@ because WebAssembly's vector instructions are narrower than those of current CPU
 In the benchmarks, the threaded build run by Node.js reached `63%` to `80%` of native LOSAT speed at
 1 thread (`1.25×` to `1.59×` overhead) and `42%` to `68%` at 16 threads (`1.47×` to `2.36×`
 overhead). Against native C++ NCBI BLAST+ 2.17.0 at 16 threads, the WebAssembly build was faster in
-all 8 measured modes (`1.02×` on `dc-megablast` to `12.3×` on `blastn-short`), and in 7 of 8 modes
-at 1 thread (`0.83×` on `blastn-short` to `3.08×` on `blastn`). Peak memory at 16 threads stayed
-below native BLAST+ in 5 of 8 modes. The serial build was not timed.
+all 8 measured modes (`1.02×` on `dc-megablast` to `12.3×` on `blastn-short`), and at 1 thread was
+faster in 7 of 8 modes (`1.34×` on `megablast` to `3.08×` on `blastn`) and slower on `blastn-short`
+(`0.83×`). Peak memory at 16 threads stayed below native BLAST+ in 4 of 8 modes. The serial build
+was not timed.
 
-<img class="figure-for-light" src="images/fig5_webassembly.png" alt="Speed vs native NCBI BLAST+ 2.17.0, Wasm-to-native efficiency, and 16-thread peak memory for native LOSAT and threaded WebAssembly" width="100%">
-<img class="figure-for-dark" src="images/fig5_webassembly_dark.png" alt="Speed vs native NCBI BLAST+ 2.17.0, Wasm-to-native efficiency, and 16-thread peak memory for native LOSAT and threaded WebAssembly (dark theme)" width="100%">
+<img class="figure-for-light" src="images/fig5_webassembly.png" alt="Physical-scale wall time (16 and 1 threads), Wasm-to-native efficiency, and 16-thread peak memory for native LOSAT, threaded WebAssembly, and native NCBI BLAST+ 2.17.0" width="100%">
+<img class="figure-for-dark" src="images/fig5_webassembly_dark.png" alt="Physical-scale wall time (16 and 1 threads), Wasm-to-native efficiency, and 16-thread peak memory for native LOSAT, threaded WebAssembly, and native NCBI BLAST+ 2.17.0 (dark theme)" width="100%">
 
-**Figure 5.** Native LOSAT vs. threaded WASI WebAssembly (`wasm32-wasip1-threads`, Node.js) vs.
-native NCBI BLAST+ 2.17.0 on the searches of the table above (development build `7f7db49c`, derived
-from measured build `6a0a8719` via a side-by-side ratio run). **a**, 16-thread speedup and `Wasm /
-native %`; **b**, 1-thread speedup and `Wasm / native %`; **c**, 16-thread peak memory. NCBI BLAST+
-`tblastx` was not measured in this set.
+**Figure 5.** Physical-scale comparison (left = faster / smaller) of native LOSAT, threaded WASI
+WebAssembly (`wasm32-wasip1-threads`, Node.js), and native NCBI BLAST+ 2.17.0 on the searches of the
+table above (development build `7f7db49c`, derived from measured build `6a0a8719` via a side-by-side
+ratio run). **a**, 16-thread wall time (s) and `Wasm / native %`; **b**, 1-thread wall time (s) and
+`Wasm / native %`; **c**, 16-thread peak memory (MiB). NCBI BLAST+ `tblastx` was not measured in
+this set.
 
 ## When to choose LOSAT vs. heuristic aligners
 
@@ -226,29 +235,33 @@ sets. Figure 4 compares these trade-offs directly on two large public databases 
 
 - **Protein search on UniRef50 (38.8M sequences, 32 threads; Figure 4a–b).** `LOSAT blastp` matched
   NCBI `blastp` byte-for-byte (`100%` hit recall) in `407 s` (100 queries) and `3,874 s` (1,000
-  queries) using `0.13–0.34 GiB` max RSS (`2.6×`–`2.8×` faster and `47×`–`106×` lower max RSS than
+  queries) using `0.11–0.33 GiB` max RSS (`2.6×`–`2.8×` faster and `49×`–`121×` lower max RSS than
   NCBI `blastp`). `LOSAT blastp-fast` matched NCBI `blastp-fast` byte-for-byte in `28 s` / `214 s`
-  (`0.15–0.36 GiB` RSS, `89.1%` / `86.2%` of full `blastp` hits) — faster than DIAMOND
+  (`0.14–0.35 GiB` RSS, `89.1%` / `86.2%` of full `blastp` hits) — faster than DIAMOND
   `--more-sensitive` (`163 s` / `221 s`, `7.6–9.0 GiB`) and unindexed MMseqs2 (`245–349 s`,
-  `95–117 GiB`) at comparable recall. When querying thousands of proteins without requiring BLAST+
-  equivalence, DIAMOND `default` (`52 s`, `59.2%` recall) or MMseqs2 with a prebuilt `101 GiB` index
-  (`30–171 s`, `103–200 GiB` RSS) scales to much larger query batches.
+  `95–117 GiB`) at comparable recall. Without requiring BLAST+ equivalence on the 1,000-query batch,
+  DIAMOND `default` ran in `52 s` (`59.2%` recall) and MMseqs2 with a prebuilt `101 GiB` index ran
+  in `30–171 s` (`103–200 GiB` RSS).
 - **16S rRNA search on SILVA 144 NR99 (905k sequences, 16 threads; Figure 4c).** On 1M shotgun reads
   (`megablast`), LOSAT ran in `23.3 s` / `600 MiB` vs. NCBI's `59.1 s` / `5.7 GiB` (`2.5×` faster,
   `9.7×` lower RSS). Under QIIME 2 amplicon settings, LOSAT ran 1k amplicons in `115 s` / `91 MiB`
-  vs. NCBI's `180 s` / `532 MiB` and vsearch's `349 s` / `15.1 GiB` (`--maxrejects 0`; 56% hit
-  overlap with BLAST+); on 10k amplicons, NCBI's 16-thread output drifted by 5 rows while LOSAT
-  matched 1-thread NCBI byte-for-byte in `1,173 s` / `100 MiB`.
+  max RSS vs. NCBI's `180 s` / `532 MiB` and vsearch's `349 s` / `15.1 GiB` (`--maxrejects 0`; 56%
+  hit overlap with BLAST+); on 10k amplicons, NCBI's 16-thread output drifted by 5 rows while LOSAT
+  matched 1-thread NCBI byte-for-byte in `1,173 s` / `100 MiB` max RSS. On those amplicon runs,
+  NCBI's max RSS is mostly memory-mapped database pages (`RssAnon` `20.8 MiB`), while LOSAT's
+  anonymous heap is larger (`90.9 MiB` at 1k, `98.8 MiB` at 10k; `15 MiB` total at 1 thread).
 
 <img class="figure-for-light" src="images/fig4_vs_heuristics.png" alt="Speed, sensitivity, and memory trade-offs of LOSAT vs NCBI BLAST+, DIAMOND, MMseqs2 on UniRef50, and vsearch on SILVA 144" width="100%">
 <img class="figure-for-dark" src="images/fig4_vs_heuristics_dark.png" alt="Speed, sensitivity, and memory trade-offs of LOSAT vs NCBI BLAST+, DIAMOND, MMseqs2 on UniRef50, and vsearch on SILVA 144 (dark theme)" width="100%">
 
 **Figure 4.** Exact NCBI BLAST+ parity vs. heuristic aligners. **a, b**, UniRef50 (38.8M proteins,
-32 threads; LOSAT `995281681`, NCBI BLAST+ 2.17.0, DIAMOND 2.2.8, MMseqs2 18.8cc5c) for 100 and
-1,000 queries. **c**, SILVA 144 NR99 (905k rRNAs, 16 threads; LOSAT `dde737f18`, NCBI BLAST+ 2.17.0,
-vsearch 2.32.0): wall time and stacked memory (`RssAnon` solid, total `max RSS` tinted).
+32 threads; one round per arm; LOSAT `995281681`, NCBI BLAST+ 2.17.0, DIAMOND 2.2.8, MMseqs2
+18.8cc5c) for 100 and 1,000 queries; bubble area encodes peak `max RSS`. **c**, SILVA 144 NR99
+(905k rRNAs, 16 threads; mean of 2 runs, `vsearch`: 1 run; LOSAT `dde737f18`, NCBI BLAST+ 2.17.0,
+vsearch 2.32.0): horizontal dumbbells for wall time (top) and memory (bottom; open marker = `max
+RSS`, solid marker = `RssAnon`).
 
-Choose **DIAMOND**, **MMseqs2**, or **minimap2** when clustering or mapping tens of millions of
-reads or massive protein catalogs without requiring BLAST+ output equivalence. Choose **LOSAT** when
-pipelines, downstream parsers, or scientific protocols expect NCBI BLAST+ 2.17.0 options, semantics,
-or output formats with lower runtime and memory.
+Choose **DIAMOND**, **MMseqs2**, or **vsearch** when heuristic alignment suffices and BLAST+ output
+equivalence is not required. Choose **LOSAT** when pipelines, downstream parsers, or scientific
+protocols expect NCBI BLAST+ 2.17.0 options, semantics, or output formats with lower runtime and
+memory.

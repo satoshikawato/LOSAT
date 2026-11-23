@@ -87,7 +87,7 @@ LARGE_WORKFLOW_SPECS = [
     ("M3_cnt", "BlobToolKit (core_nt, 319 GB)", "BlobToolKit", "blastn", "210 contigs vs NCBI core_nt (warm)"),
 ]
 
-RunRecord = tuple[float, float, str, float | None]
+RunRecord = tuple[float, float, str]
 
 
 def read_tsv(path: Path) -> list[dict[str, str]]:
@@ -195,14 +195,6 @@ def parse_disk_bytes(inputs_ext: dict[str, dict[str, str]], inp_key: str) -> int
     return val
 
 
-def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
-    if row.get("rss_anon_mib"):
-        return float(row["rss_anon_mib"])
-    if row.get("rss_anon_kb"):
-        return int(row["rss_anon_kb"]) / 1024.0
-    return None
-
-
 def make_standard_row(
     *,
     group: str,
@@ -285,12 +277,6 @@ def make_standard_row(
         "target": target,
         "options": opts,
     }
-    lo_anon = [x[3] for x in lo_list if x[3] is not None]
-    nc_anon = [x[3] for x in nc_list if x[3] is not None]
-    if lo_anon:
-        row_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon), 2)
-    if nc_anon:
-        row_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon), 2)
     return row_entry
 
 
@@ -500,6 +486,7 @@ def build_vs_heuristics_uniref50(
         return qs, ar, rd
 
     # 1. summary_main.tsv (no header: qset, arm, round, rc, wall_s, user_s, sys_s, maxrss_kb, anon_kb, file_kb, rows, sha16, ...)
+    # Uniform max RSS definition across all UniRef50 inputs: raw kernel maxrss_kb (column 7) in GiB.
     # Report convention: round 2 for q100 (round 1 NCBI had concurrent load), round 1 for q1000.
     main_by: dict[tuple[str, str], dict[int, tuple[float, float, float, str]]] = defaultdict(dict)
     for ln in ur50_main.read_text(encoding="utf-8").splitlines():
@@ -509,21 +496,24 @@ def build_vs_heuristics_uniref50(
         qset, arm, rnd = _ur50_head(p, ur50_main, ln)
         main_by[(qset, arm)][rnd] = (
             float(p[4]),
-            max(int(p[7]), int(p[8])) / (1024.0 * 1024.0),  # GiB max RSS (note p[7]=VmHWM/maxrss)
-            int(p[8]) / (1024.0 * 1024.0),                   # GiB RssAnon
+            int(p[7]) / (1024.0 * 1024.0),  # GiB max RSS (kernel maxrss_kb)
+            int(p[8]) / (1024.0 * 1024.0),  # GiB RssAnon
             p[11].strip(),
         )
 
-    # 2. bp16_summary.tsv (updated LOSAT dev 995281681: p[7]=maxrss_kb, p[8]=anon_kb, p[9]=file_kb)
+    # 2. bp16_summary.tsv (updated LOSAT dev 995281681: same schema p[7]=maxrss_kb, p[8]=anon_kb)
     bp16_by: dict[tuple[str, str], dict[int, tuple[float, float, float, str]]] = defaultdict(dict)
     for ln in bp16_summary.read_text(encoding="utf-8").splitlines():
         if not ln.strip():
             continue
         p = ln.split("\t")
         qset, arm, rnd = _ur50_head(p, bp16_summary, ln)
-        rss_gib = max(int(p[7]), int(p[8]) + int(p[9])) / (1024.0 * 1024.0)
-        anon_gib = int(p[8]) / (1024.0 * 1024.0)
-        bp16_by[(qset, arm)][rnd] = (float(p[4]), rss_gib, anon_gib, p[11].strip())
+        bp16_by[(qset, arm)][rnd] = (
+            float(p[4]),
+            int(p[7]) / (1024.0 * 1024.0),
+            int(p[8]) / (1024.0 * 1024.0),
+            p[11].strip(),
+        )
 
     # 3. MMseqs2 unindexed (summary.tsv)
     mm_noidx: dict[tuple[str, str], dict[int, tuple[float, float, float]]] = defaultdict(dict)
@@ -599,8 +589,29 @@ def build_vs_heuristics_uniref50(
     return out
 
 
-def build_vs_heuristics_silva(silva_tsv: Path, losat_commit: str) -> list[dict[str, object]]:
-    """Parse bench-silva-20261031/logs_ws/summary_timed.tsv (SILVA 144 NR99, 905,628 seqs, 16 threads)."""
+def _parse_silva_state(silva_state: Path) -> tuple[int, str, int, int]:
+    """Extract amp1e4 NCBI 1-thread reference (rows, sha16) and vsearch/NCBI pair overlap from STATE.md."""
+    text = silva_state.read_text(encoding="utf-8")
+    m_ref = re.search(r"NCBI amp1e4 n1\s+([\d,]+)\s+rows,\s+([0-9a-f]{16})", text)
+    if not m_ref:
+        sys.exit(f"missing NCBI amp1e4 n1 reference row count/sha16 in {silva_state}")
+    m_ov = re.search(r"vsearch vs NCBI pairs on amp1e3[^:]*:\s*([\d,]+)\s+of NCBI's\s+([\d,]+)", text)
+    if not m_ov:
+        sys.exit(f"missing vsearch vs NCBI amp1e3 overlap counts in {silva_state}")
+    n1_rows = int(m_ref.group(1).replace(",", ""))
+    n1_sha = m_ref.group(2)
+    ov_both = int(m_ov.group(1).replace(",", ""))
+    ov_ncbi = int(m_ov.group(2).replace(",", ""))
+    if n1_rows <= 0 or ov_ncbi <= 0 or ov_both <= 0 or ov_both > ov_ncbi:
+        sys.exit(f"invalid parsed SILVA provenance values in {silva_state}: {(n1_rows, n1_sha, ov_both, ov_ncbi)}")
+    return n1_rows, n1_sha, ov_both, ov_ncbi
+
+
+def build_vs_heuristics_silva(silva_tsv: Path, silva_state: Path, losat_commit: str) -> list[dict[str, object]]:
+    """Parse bench-silva-20261031/logs_ws/summary_timed.tsv and check hashes against NCBI / STATE.md."""
+    amp1e4_n1_rows, amp1e4_n1_sha, ov_both, ov_ncbi = _parse_silva_state(silva_state)
+    ov_pct = round(100.0 * ov_both / ov_ncbi)
+
     grouped: dict[tuple[str, str], list[tuple[float, float, float, int, str]]] = defaultdict(list)
     for ln in silva_tsv.read_text(encoding="utf-8").splitlines():
         if not ln.strip():
@@ -626,28 +637,57 @@ def build_vs_heuristics_silva(silva_tsv: Path, losat_commit: str) -> list[dict[s
     builds = {"losat": f"LOSAT {losat_commit}", "ncbi": "NCBI BLAST+ 2.17.0", "vsearch": "vsearch 2.32.0"}
     out: list[dict[str, object]] = []
     for cid, label, arms in order:
+        parsed_arms: dict[str, tuple[float, float, float, int, str, int]] = {}
         for arm in arms:
             recs = grouped.get((cid, arm))
             if not recs:
                 sys.exit(f"missing SILVA case {cid} arm {arm} in {silva_tsv}")
-            wall = statistics.mean(x[0] for x in recs)
-            rss = statistics.mean(x[1] for x in recs)
-            anon = statistics.mean(x[2] for x in recs)
-            rows_n = recs[0][3]
-            sha16 = require_single_sha16([x[4] for x in recs], f"SILVA {cid} {arm}")
-            if arm == "losat":
-                parity = "same_as_ncbi_n1" if cid == "amp1e4" else "same"
-            elif arm == "ncbi":
-                parity = "mt_drifts_5_rows" if cid == "amp1e4" else "baseline"
+            rows_set = {x[3] for x in recs}
+            if len(rows_set) != 1:
+                sys.exit(f"SILVA {cid} {arm} row count varies across rounds: {sorted(rows_set)}")
+            parsed_arms[arm] = (
+                statistics.mean(x[0] for x in recs),
+                statistics.mean(x[1] for x in recs),
+                statistics.mean(x[2] for x in recs),
+                recs[0][3],
+                require_single_sha16([x[4] for x in recs], f"SILVA {cid} {arm}"),
+                len(recs),
+            )
+
+        lo_rows, lo_sha = parsed_arms["losat"][3], parsed_arms["losat"][4]
+        nc_rows, nc_sha = parsed_arms["ncbi"][3], parsed_arms["ncbi"][4]
+        if cid in ("reads1e6", "amp1e3"):
+            if lo_sha != nc_sha or lo_rows != nc_rows:
+                sys.exit(f"SILVA {cid} parity mismatch: LOSAT {lo_sha} ({lo_rows}) vs NCBI {nc_sha} ({nc_rows})")
+            lo_parity, nc_parity = "same", "baseline"
+        else:
+            if lo_sha != amp1e4_n1_sha or lo_rows != amp1e4_n1_rows:
+                sys.exit(
+                    f"SILVA amp1e4 LOSAT mismatch vs NCBI 1-thread reference: "
+                    f"LOSAT {lo_sha} ({lo_rows}) vs NCBI n1 {amp1e4_n1_sha} ({amp1e4_n1_rows})"
+                )
+            lo_parity = "same_as_ncbi_n1"
+            if nc_sha == amp1e4_n1_sha:
+                nc_parity = "baseline"
             else:
-                parity = "heuristic_56pct_overlap"
+                drift = nc_rows - amp1e4_n1_rows
+                nc_parity = f"mt_drifts_{abs(drift)}_rows" if drift != 0 else "mt_drifts_sha"
+
+        for arm in arms:
+            wall, rss, anon, rows_n, sha16, n_runs = parsed_arms[arm]
+            if arm == "losat":
+                parity = lo_parity
+            elif arm == "ncbi":
+                parity = nc_parity
+            else:
+                parity = f"heuristic_{ov_pct}pct_overlap"
             out.append({
                 "case": cid,
                 "label": label,
                 "arm": arm,
                 "tool": tool_names[arm],
                 "threads": 16,
-                "runs": len(recs),
+                "runs": n_runs,
                 "wall_s": round(wall, 2),
                 "max_rss_mib": round(rss, 2),
                 "rss_anon_mib": round(anon, 2),
@@ -706,6 +746,7 @@ def main() -> int:
     ap.add_argument("--ur50-recall-q100", type=Path, default=base / "bench-buildpolicy-20261014/logs_ws/recall_q100.txt")
     ap.add_argument("--ur50-recall-q1000", type=Path, default=base / "bench-buildpolicy-20261014/logs_ws/recall_q1000.txt")
     ap.add_argument("--silva-tsv", type=Path, default=base / "bench-silva-20261031/logs_ws/summary_timed.tsv")
+    ap.add_argument("--silva-state", type=Path, default=base / "bench-silva-20261031/STATE.md")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "snapshot")
     ap.add_argument("--losat-commit", default="93ca2f652617acac09d416c28c293cc8a1a501d1")
     ap.add_argument("--uniref50-losat-commit", default="995281681")
@@ -736,6 +777,7 @@ def main() -> int:
         args.ur50_recall_q100,
         args.ur50_recall_q1000,
         args.silva_tsv,
+        args.silva_state,
     ]
 
     for req in (
@@ -760,10 +802,10 @@ def main() -> int:
         args.ur50_main, args.ur50_losat, args.ur50_mmseqs_noidx, args.ur50_mmseqs_idx,
         args.ur50_recall_q100, args.ur50_recall_q1000, args.uniref50_losat_commit,
     )
-    silva_rows = build_vs_heuristics_silva(args.silva_tsv, args.silva_losat_commit)
+    silva_rows = build_vs_heuristics_silva(args.silva_tsv, args.silva_state, args.silva_losat_commit)
 
     def _to_run_record(row: dict[str, str]) -> RunRecord:
-        return (float(row["wall_s"]), int(row["maxrss_kb"]) / 1024.0, row_sha16(row), parse_rss_anon_mib(row))
+        return (float(row["wall_s"]), int(row["maxrss_kb"]) / 1024.0, row_sha16(row))
 
     def _load_ext_bucket(path: Path, tag: str) -> dict[tuple[str, int, str], list[RunRecord]]:
         bucket: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
@@ -840,9 +882,6 @@ def main() -> int:
                     )
 
     std_fields = list(std_rows[0].keys())
-    for opt_col in ("losat_rss_anon_mib", "ncbi_rss_anon_mib"):
-        if any(opt_col in row for row in std_rows) and opt_col not in std_fields:
-            std_fields.append(opt_col)
 
     util_rows = []
     for cid, label, short_desc in (

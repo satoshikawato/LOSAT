@@ -340,6 +340,36 @@ fn a_split_batch_without_a_valid_chunk_meets_the_tracebacks_setup() {
             "n{threads}: {}",
             unread.stdout
         );
+        // psiblast: the first query's chunks read nothing and it is reported; the next query
+        // reads the missing sequence file (NCBI 2.17.0 probe `p6_gapvalid_nopsq2` of line RG item
+        // X-bpgap: the database's error, exit status 2, after the first query's report). The
+        // error names the file's absolute path, which no frozen row can hold.
+        let next = search_in(
+            "psiblast",
+            "tests/fasta/x4/chunk_gapvalid_first.faa",
+            &["-db", "tests/db_search/arch_sprot_nopsq"],
+            "7",
+            threads,
+            &GAP,
+        );
+        assert_eq!(next.code, Some(2), "n{threads}: {}", next.stderr);
+        assert_eq!(
+            next.stdout.matches("# Query: ").count(),
+            1,
+            "n{threads}: {}",
+            next.stdout
+        );
+        assert!(
+            next.stdout.contains("# 0 hits found"),
+            "n{threads}: {}",
+            next.stdout
+        );
+        assert!(
+            next.stderr.starts_with("LOSAT database error: Error: File (")
+                && next.stderr.ends_with("arch_sprot_nopsq.psq) not found.\n"),
+            "n{threads}: {}",
+            next.stderr
+        );
     }
 }
 

@@ -222,7 +222,11 @@ pub(super) fn prepare(
     let reports = written_queries(
         query_records.len(),
         !ranges.epilog,
-        only_xml2 && target.holds_back(),
+        only_xml2
+            && crate::report::blast_xml2::reports_held(
+                matches!(target, Xml2Target::Subjects(_)),
+                values.pssm,
+            ),
     );
     let texts = query_records[..reports]
         .iter()
@@ -323,6 +327,8 @@ pub(super) fn prepare(
         cbs: values.cbs,
         query_gencode: None,
         db_gencode: Some(values.db_gencode),
+        // PSI-TBLASTN is an iterative search (`IsIterativeSearch`): one round.
+        iterative: values.pssm,
     };
     Ok(PreparedXml {
         values,

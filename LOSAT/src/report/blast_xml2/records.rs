@@ -13,16 +13,6 @@ pub enum Xml2Target {
     Subjects(usize),
 }
 
-impl Xml2Target {
-    /// Whether the documents of the search hold each query's report back until the next query's
-    /// arrives (`reports_held`; `Xml2Document`): a `-subject` search. The writer is made for the
-    /// programs that do not iterate: psiblast's and tblastn `-in_pssm`'s XML formats are not
-    /// written yet (line PS, items PS15 and PS15b).
-    pub fn holds_back(self) -> bool {
-        reports_held(matches!(self, Self::Subjects(_)), false)
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-867
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2377, :2376-2377
@@ -78,4 +68,20 @@ pub struct Xml2Run {
     /// (TBLASTN, TBLASTX); none otherwise.
     pub query_gencode: Option<i32>,
     pub db_gencode: Option<i32>,
+    /// An iterative program's search (NCBI's `m_IsIterative`, `IsIterativeSearch`: psiblast,
+    /// tblastn `-in_pssm`): its reports are held (`holds_back`), and the results of a database
+    /// search are its rounds, `iterations` (`s_FillBlastOutput`; a `-subject` search's are
+    /// `bl2seq` all the same).
+    pub iterative: bool,
+}
+
+impl Xml2Run {
+    /// Whether the documents of the search hold each query's report back until the next query's
+    /// arrives (`reports_held`; `Xml2Document`): a `-subject` search, or an iterative one.
+    pub fn holds_back(&self) -> bool {
+        reports_held(
+            matches!(self.target, Xml2Target::Subjects(_)),
+            self.iterative,
+        )
+    }
 }

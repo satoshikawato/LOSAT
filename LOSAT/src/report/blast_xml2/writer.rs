@@ -214,7 +214,23 @@ where
     enc.end_member();
     write_parameters(enc, run, params);
     enc.member("results", 5);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:661-698
+    // A `-subject` search's results are `bl2seq`, an iterative database search's its rounds
+    // (`iterations`, numbered from 1), any other database search's one `search`.
     match params.target {
+        Xml2Target::Database if params.iterative => {
+            enc.variant("Results", "iterations", 0);
+            enc.begin_list(false);
+            enc.element();
+            enc.begin_sequence("Iteration");
+            int_member(enc, "iter-num", 0, 1);
+            enc.member("search", 1);
+            write_search(enc, run, params, query, scratch, start, hits)?;
+            enc.end_member();
+            enc.end_sequence();
+            enc.end_list();
+            enc.end_variant();
+        }
         Xml2Target::Database => {
             enc.variant("Results", "search", 1);
             write_search(enc, run, params, query, scratch, start, hits)?;
@@ -518,7 +534,7 @@ impl Xml2Writer<NoSideFiles> {
     /// way; a run uses `for_run` or `with_document`.
     #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
-        let delayed = params.target.holds_back();
+        let delayed = params.holds_back();
         Self::with_document(Xml2Document::new(kind, delayed), params)
     }
 }
@@ -533,7 +549,7 @@ impl Xml2Writer<RunSideFiles> {
         out: Option<&std::path::Path>,
         sink: Option<&super::SideFileSink>,
     ) -> Self {
-        let delayed = params.target.holds_back();
+        let delayed = params.holds_back();
         Self::with_document(Xml2Document::for_run(kind, delayed, out, sink), params)
     }
 }

@@ -154,6 +154,7 @@ fn params(target: Xml2Target) -> Xml2Run {
         cbs: 2,
         query_gencode: None,
         db_gencode: None,
+        iterative: false,
     }
 }
 
@@ -232,6 +233,42 @@ fn an_unsearched_query_lists_no_masks() {
             .unwrap();
         writer.finish(&mut out).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
+}
+
+// Line PS, PS15b-2: an iterative search (`Xml2Run::iterative`, tblastn `-in_pssm`) holds its
+// report until the epilog as a `-subject` search does, and a database search's results are its
+// rounds (`iterations`: one round, `iter-num` 1, then the `Search`).
+#[test]
+fn an_iterative_database_report_is_held_and_lists_its_round() {
+    let message = invalid_message();
+    let run = run(None, "");
+    for (kind, round) in [
+        (
+            Xml2Kind::Single16,
+            "<iterations>\n            <Iteration>\n              <iter-num>1</iter-num>\n              <search>\n                <Search>",
+        ),
+        (
+            Xml2Kind::Single15,
+            "\"iterations\": [\n          {\n            \"iter_num\": 1,\n            \"search\": {",
+        ),
+    ] {
+        let iterative = Xml2Run {
+            iterative: true,
+            ..params(Xml2Target::Database)
+        };
+        assert!(iterative.holds_back() && !params(Xml2Target::Database).holds_back());
+        let mut writer = Xml2Writer::new(kind, iterative);
+        let mut out = Vec::new();
+        writer
+            .query(&run, &invalid_query(&message), &mut out, |_| {
+                panic!("a query of an unsearched batch has no hits")
+            })
+            .unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(round), "{kind:?}: {text}");
     }
 }
 

@@ -324,7 +324,7 @@ fn search_program_help_says_what_outfmt_writes() {
         ),
         (
             "tblastn",
-            "Written: 0 to 16, 18 and 20; with -in_pssm: 0 to 10 and 20.",
+            "Written: 0 to 16, 18 and 20; with -in_pssm: 0 to 10, 12 to 16, 18 and 20.",
             "Formats 6, 7, 10 and 20 take",
         ),
         (
@@ -334,7 +334,7 @@ fn search_program_help_says_what_outfmt_writes() {
         ),
         (
             "psiblast",
-            "Written: 0, 5 to 11 and 20.",
+            "Written: 0 to 12, 18 and 20.",
             "Formats 6, 7, 10 and 20 take",
         ),
         (

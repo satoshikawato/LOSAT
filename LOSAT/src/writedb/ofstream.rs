@@ -70,13 +70,13 @@
 //!   model records the throw ([`Stream::take_thrown`]); an operation that throws ends there, as
 //!   each operation here ends with its state change. makeblastdb sets no mask.
 //!
-//! blast_formatter's standard output (`cout`, synchronized with the C library's `stdout`) follows
-//! the same rules for `write` and `flush` with a put area one byte longer than the block size of
-//! the standard output (`fstat`'s `st_blksize`: a write is held while the bytes held stay within
-//! that size), which [`Stream::with_put_area`] sets: observed with blast_formatter 2.17.0 on
-//! `/dev/full` and on a pipe (block size 4096: a Seq-annot of 2390 bytes fails at its close, one of
-//! 4845 bytes in its write; line RG item F3, agent C6, 2026-11-23,
-//! `remaining-gaps-20261112/F/f3/tmp/c6/pc`). That stream is never closed.
+//! blast_formatter's standard output (`cout`, synchronized with the C library's `stdout`) is a
+//! stream of the same rules whose buffer is the C library's `stdout` ([`Stream::cout`]): what
+//! reaches the device at each insertion, `put` and `flush` is `cli::NcbiBuffer`'s, the one model of
+//! NCBI's standard output (`NcbiStdio::cout`: its block size, line-buffered on a terminal; line
+//! LIB-O O1b). Observed with blast_formatter 2.17.0 on `/dev/full` and on a pipe (block size 4096:
+//! a Seq-annot of 2390 bytes fails at its close, one of 4845 bytes in its write; line RG item F3,
+//! agent C6, 2026-11-23, `remaining-gaps-20261112/F/f3/tmp/c6/pc`). That stream is never closed.
 //!
 //! `close(2)` is reported on Unix (rustix's `try_close`); other targets close by dropping the
 //! file and never see a close error.
@@ -179,13 +179,21 @@ impl RawFile for DiskFile {
     }
 }
 
+/// What the buffer holds of the bytes it takes, and when it writes them.
+#[derive(Clone, Copy, Debug)]
+enum Buffering {
+    /// `basic_filebuf`'s put area of `PUT_AREA` bytes: a file.
+    File,
+    /// The C library's `stdout` under `cout` (`cli::NcbiBuffer`): standard output.
+    Cout(crate::cli::NcbiBuffer),
+}
+
 /// The file buffer: the held bytes and the file.
 struct FileBuf<F: RawFile> {
     file: Option<F>,
     /// The bytes held; `len()` is `b` of the rules.
     held: Vec<u8>,
-    /// The size of the put area: `PUT_AREA`, or the standard output's (`Stream::with_put_area`).
-    put_area: usize,
+    buffering: Buffering,
 }
 
 impl<F: RawFile> FileBuf<F> {
@@ -220,34 +228,90 @@ impl<F: RawFile> FileBuf<F> {
 
     /// `sputn`: whether all `data` was taken (held or written).
     fn put_bytes(&mut self, data: &[u8]) -> bool {
-        let Some(file) = self.file.as_mut() else {
+        let FileBuf {
+            file,
+            held,
+            buffering,
+        } = self;
+        let Some(file) = file.as_mut() else {
             return data.is_empty();
         };
-        if data.len() < self.put_area - self.held.len().min(self.put_area) {
-            self.held.extend_from_slice(data);
-            return true;
-        }
-        if FileBuf::write_all(file, &mut [&self.held, data]) {
-            self.held.clear();
-            true
-        } else {
-            // The held bytes stay; a call of no bytes takes all of them.
-            data.is_empty()
+        match buffering {
+            Buffering::File => {
+                if data.len() < PUT_AREA - held.len().min(PUT_AREA) {
+                    held.extend_from_slice(data);
+                    return true;
+                }
+                if FileBuf::write_all(file, &mut [&held[..], data]) {
+                    held.clear();
+                    true
+                } else {
+                    // The held bytes stay; a call of no bytes takes all of them.
+                    data.is_empty()
+                }
+            }
+            Buffering::Cout(buffer) => {
+                held.extend_from_slice(data);
+                let mut next = *buffer;
+                next.sputn(data.len(), held);
+                if FileBuf::write_out(file, held, next.held()) {
+                    *buffer = next;
+                    true
+                } else {
+                    // The held bytes stay, as in a file's buffer.
+                    held.truncate(held.len() - data.len());
+                    data.is_empty()
+                }
+            }
         }
     }
 
     /// `sputc`.
     fn put_byte(&mut self, byte: u8) -> bool {
-        let Some(file) = self.file.as_mut() else {
+        let FileBuf {
+            file,
+            held,
+            buffering,
+        } = self;
+        let Some(file) = file.as_mut() else {
             return false;
         };
-        let overflow = self.held.len() >= self.put_area;
-        self.held.push(byte);
+        let overflow = match buffering {
+            Buffering::File => held.len() >= PUT_AREA,
+            Buffering::Cout(buffer) => {
+                held.push(byte);
+                let mut next = *buffer;
+                next.sputc(held);
+                return if FileBuf::write_out(file, held, next.held()) {
+                    *buffer = next;
+                    true
+                } else {
+                    held.pop();
+                    false
+                };
+            }
+        };
+        held.push(byte);
         if !overflow {
             return true;
         }
-        if FileBuf::write_all(file, &mut [&self.held]) {
-            self.held.clear();
+        if FileBuf::write_all(file, &mut [&held[..]]) {
+            held.clear();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Standard output's write of what its buffer no longer holds: all of `held` but its last
+    /// `keep` bytes, which stay; `false` when the write fails (nothing is dropped then).
+    fn write_out(file: &mut F, held: &mut Vec<u8>, keep: usize) -> bool {
+        let written = held.len() - keep;
+        if written == 0 {
+            return true;
+        }
+        if FileBuf::write_all(file, &mut [&held[..written]]) {
+            held.drain(..written);
             true
         } else {
             false
@@ -264,6 +328,9 @@ impl<F: RawFile> FileBuf<F> {
         }
         if FileBuf::write_all(file, &mut [&self.held]) {
             self.held.clear();
+            if let Buffering::Cout(buffer) = &mut self.buffering {
+                buffer.flush();
+            }
             true
         } else {
             false
@@ -308,20 +375,30 @@ pub(crate) type OfStream = Stream<DiskFile>;
 impl<F: RawFile> Stream<F> {
     /// A stream with no file.
     pub(crate) fn new() -> Self {
-        Self::with_put_area(PUT_AREA)
+        Self::with_buffering(Buffering::File)
     }
 
-    /// A stream with no file whose put area holds `put_area` bytes (the rules with that size in
-    /// place of 8191: blast_formatter's standard output).
-    pub(crate) fn with_put_area(put_area: usize) -> Self {
+    /// A stream with no file whose buffer is the C library's `stdout` of this process
+    /// (`cli::NcbiStdio::cout`): blast_formatter's standard output, whose file is the process's
+    /// standard output (the library API's writer in its place).
+    pub(crate) fn cout() -> Self {
+        Self::cout_of(crate::cli::NcbiStdio::cout())
+    }
+
+    /// A stream with no file whose buffer is a `stdout` of `stdio` (`cli::NcbiStdio::Cout`).
+    pub(crate) fn cout_of(stdio: crate::cli::NcbiStdio) -> Self {
+        Self::with_buffering(Buffering::Cout(crate::cli::NcbiBuffer::new(stdio)))
+    }
+
+    fn with_buffering(buffering: Buffering) -> Self {
         Stream {
             state: IoState::GOOD,
             exceptions: IoState::GOOD,
             thrown: false,
             buf: FileBuf {
                 file: None,
-                held: Vec::with_capacity(put_area.min(1 << 16)),
-                put_area,
+                held: Vec::with_capacity(BUFSIZ),
+                buffering,
             },
         }
     }

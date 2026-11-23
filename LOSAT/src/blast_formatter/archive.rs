@@ -178,24 +178,6 @@ impl RawFile for OutFile<'_> {
     }
 }
 
-/// The block size of the process's standard output (`fstat`'s `st_blksize`), whose size the C
-/// library's `stdout` buffers (`writedb::ofstream`'s rule for `cout`); 4096 where it cannot be
-/// read (LOSAT's choice: the size observed on `/dev/full` and on a pipe).
-fn stdout_block_size() -> usize {
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsFd;
-        let size = rustix::fs::fstat(std::io::stdout().as_fd())
-            .ok()
-            .and_then(|stat| usize::try_from(stat.st_blksize).ok())
-            .filter(|&size| size > 0);
-        if let Some(size) = size {
-            return size;
-        }
-    }
-    4096
-}
-
 impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:335
     /// `args[kArgOutput].AsOutputFile()` of `-out` `value`: opened the first time (NCBI's
@@ -211,11 +193,7 @@ impl<'o> Output<'o> {
         let file = files::open_output_file("out", value, stdout)
             .map_err(|error| command_line_argument_error(error.message()))?;
         let (mut stream, file, is_stdout) = match file {
-            OutputFile::Stdout(out) => (
-                Stream::with_put_area(stdout_block_size() + 1),
-                OutFile::Stdout(out, Vec::new()),
-                true,
-            ),
+            OutputFile::Stdout(out) => (Stream::cout(), OutFile::Stdout(out, Vec::new()), true),
             OutputFile::File(file) => (Stream::new(), OutFile::Disk(DiskFile::from(file)), false),
         };
         stream.open_with(move || Ok(file));

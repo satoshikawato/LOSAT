@@ -355,17 +355,17 @@ pub(crate) enum Caller {
 /// error logs when the target is not `cerr`), then, unless the argv is a dry run, LOSAT's refusals
 /// (`refusal_after_read`), then clap's conversion (`convert`). A caller without a start
 /// (`Caller::NoStart`) gives `cerr` (`DiagTarget::Stderr`): the posts are then the report's. An
-/// argv that names no program on this reader is read by the top level (`top_level_error`).
+/// argv that names no program on this reader is read by the top level (`top_level`).
 pub(crate) fn read_argv(
     argv: &[OsString],
     caller: Caller,
     target: &DiagTarget,
 ) -> Result<Commands, ArgvError> {
     let Some(tool) = argv.get(1).and_then(|word| word.to_str()).and_then(tool) else {
-        let error = super::top_level_error(argv);
-        return Err(match error.use_stderr() {
-            true => ArgvError::Report(super::top_level_message(&error).into_bytes()),
-            false => ArgvError::Printed(super::top_level_message(&error)),
+        let top_level = super::top_level(argv);
+        return Err(match top_level.error {
+            true => ArgvError::Report(top_level.text.into_bytes()),
+            false => ArgvError::Printed(top_level.text),
         });
     };
     let words = &argv[2..];

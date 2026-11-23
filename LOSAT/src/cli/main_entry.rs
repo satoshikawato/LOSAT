@@ -198,13 +198,12 @@ fn run_main_entry() -> Result<()> {
     // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program) is
     // clap's.
     let Some(start) = start else {
-        let error = crate::cli::top_level_error(&argv);
-        let message = crate::cli::top_level_message(&error);
-        match error.use_stderr() {
-            true => write_dropping_errors(&mut std::io::stderr(), &message),
-            false => write_dropping_errors(&mut std::io::stdout(), &message),
+        let top_level = crate::cli::top_level(&argv);
+        match top_level.error {
+            true => write_dropping_errors(&mut std::io::stderr(), &top_level.text),
+            false => write_dropping_errors(&mut std::io::stdout(), &top_level.text),
         }
-        std::process::exit(error.exit_code());
+        std::process::exit(top_level.status);
     };
     let tool = crate::cli::reader::tool(start.program())
         .expect("a program of ENTRY_NAMES that is not on `ncbi_app` is on the reader");

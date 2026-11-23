@@ -490,6 +490,30 @@ pub(crate) fn top_level_error(argv: &[OsString]) -> clap::Error {
     }
 }
 
+/// What LOSAT's top level writes for `argv` (`losat <words>`, whose first word names no program on
+/// a reader, `ENTRY_NAMES`): its help or version on the standard output (exit status 0), or its
+/// error on the standard error (exit status 2). The command line's entry (`main_entry`) writes it,
+/// and the readers of an argv give it (`reader::read_argv`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TopLevel {
+    /// The text, which ends with a line end.
+    pub(crate) text: String,
+    /// Whether it is an error, for the standard error.
+    pub(crate) error: bool,
+    /// The exit status.
+    pub(crate) status: i32,
+}
+
+/// What the top level writes for `argv` (`TopLevel`).
+pub(crate) fn top_level(argv: &[OsString]) -> TopLevel {
+    let error = top_level_error(argv);
+    TopLevel {
+        text: top_level_message(&error),
+        error: error.use_stderr(),
+        status: error.exit_code(),
+    }
+}
+
 /// The text of the top level's `error` (`top_level_error`) as the command line writes it, ending
 /// with a line end: clap's, with its help and version flags written as LOSAT's top level takes
 /// them (`-help`, `--version`).
@@ -1501,6 +1525,9 @@ pub fn post_native_error(error: &anyhow::Error) {
 
 #[cfg(test)]
 mod manual_refusals_tests;
+
+#[cfg(test)]
+mod top_level_tests;
 
 #[cfg(test)]
 mod syntax_cases_tests;

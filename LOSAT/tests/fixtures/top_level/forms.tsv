@@ -1,0 +1,34 @@
+# LOSAT's top level before line RG item K4i-3c (clap's), frozen by src/cli/top_level_tests.rs: name, exit
+# status, stream, text (@help for help.txt, @version, or the text with \n), words ('' empty, \xff a byte).
+none	2	stderr	@help	
+h	0	stdout	@help	-h
+help	0	stdout	@help	-help
+dashdash_help	0	stdout	@help	--help
+version	0	stdout	@version	--version
+capital_v	2	stderr	error: unknown option or argument '-V'; use -help to list the options\n	-V
+dash_version	2	stderr	error: unknown option or argument '-version'; use -help to list the options\n	-version
+help_word	2	stderr	error: unknown option or argument 'help'; use -help to list the options\n	help
+help_word_blastn	2	stderr	error: unknown option or argument 'help'; use -help to list the options\n	help blastn
+unknown_word	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	nosuch
+unknown_flag	2	stderr	error: unknown option or argument '-x'; use -help to list the options\n	-x
+unknown_long	2	stderr	error: unknown option or argument '--nosuch'; use -help to list the options\n	--nosuch
+h_blastn	0	stdout	@help	-h blastn
+help_blastn_h	0	stdout	@help	-help blastn -h
+dashdash_help_blastn	0	stdout	@help	--help blastn
+version_blastn	0	stdout	@version	--version blastn
+help_version	0	stdout	@help	-help --version
+version_h	0	stdout	@version	--version -h
+version_version	0	stdout	@version	--version --version
+h_h	0	stdout	@help	-h -h
+h_help	0	stdout	@help	-h --help
+help_unknown	0	stdout	@help	--help nosuch
+h_unknown_flag	0	stdout	@help	-h -x
+dashdash	2	stderr	error: unknown option or argument '--'; use -help to list the options\n	-- blastn
+dash	2	stderr	error: unknown option or argument '-'; use -help to list the options\n	-
+empty	2	stderr	error: unknown option or argument ''; use -help to list the options\n	''
+help_full	2	stderr	error: unknown option or argument '-help-full'; use -help to list the options\n	-help-full
+help_eq	2	stderr	error: unknown option or argument '--help=x'; use -help to list the options\n	--help=x
+version_eq	2	stderr	error: unknown option or argument '--version=1'; use -help to list the options\n	--version=1
+upper_blastn	2	stderr	error: unknown option or argument 'BLASTN'; use -help to list the options\n	BLASTN
+not_utf8	2	stderr	error: unknown option or argument 'a�b'; use -help to list the options\n	a\xffb
+not_utf8_after_h	0	stdout	@help	-h a\xffb

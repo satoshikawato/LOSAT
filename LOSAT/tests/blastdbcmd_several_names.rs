@@ -9,18 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `fs::canonicalize` without the `\\\\?\\` prefix that Windows puts on its result (as
-/// `blastdbcmd_retrieve.rs`).
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::{blastdbcmd_bytes_on_platform, canonical};
 
 fn run_dir() -> PathBuf {
     canonical(
@@ -98,10 +87,6 @@ fn placed(text: &[u8]) -> Vec<u8> {
     losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
-fn holds_root(text: &[u8]) -> bool {
-    text.windows(3).any(|window| window == b"{R}")
-}
-
 /// The probe's cases: id, words, exit status. The shapes of the list (quotes, spaces, one name
 /// three times), a name not found, another molecule, versions 4 and 5 together, each output on
 /// a list. `db/palias` is an alias of `p5` and `pm5`; `j/lst` holds the taxonomy files that `db/p5`
@@ -153,17 +138,12 @@ const CASES: &[(&str, &[&str], i32)] = &[
 fn several_names_are_ncbi_s_bytes() {
     let config = TestDir::new("cases");
     for &(id, words, status) in CASES {
-        let (want_out, want_err) = (
-            frozen(&format!("{id}.stdout")),
-            frozen(&format!("{id}.stderr")),
-        );
         // A path in the lines is written with the platform's separators, and `-metadata` cuts
-        // a name at the platform's separator alone.
-        if cfg!(windows)
-            && (words.contains(&"-metadata") || holds_root(&want_out) || holds_root(&want_err))
-        {
-            continue;
-        }
+        // a name at the platform's separator alone (`blastdbcmd_bytes_on_platform`).
+        let (want_out, want_err) = (
+            blastdbcmd_bytes_on_platform(&frozen(&format!("{id}.stdout")), &["{R}"], words),
+            blastdbcmd_bytes_on_platform(&frozen(&format!("{id}.stderr")), &["{R}"], words),
+        );
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);
         assert_eq!(
             String::from_utf8_lossy(&stdout),

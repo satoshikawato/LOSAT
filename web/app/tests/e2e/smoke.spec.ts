@@ -2,7 +2,7 @@ import { expect } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { navigate } from './support/navigate';
-import { chooseRun, openSearch, paste, program, waitStatus } from './support/search';
+import { chooseRun, commandPattern, madeName, openSearch, paste, program, waitStatus } from './support/search';
 
 test('the page is cross-origin isolated, so the threaded engine can use shared memory', async ({ page }) => {
   await navigate(page, '/');
@@ -32,11 +32,11 @@ test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the 
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
   await expect(page.getByTestId('result-command')).toHaveText(
-    'losat tblastx -query query.fa -subject subject.fa -outfmt 6',
+    commandPattern('losat tblastx -query ', { source: madeName(1, 'tblastx', 'query') }, ' -subject ', { source: madeName(1, 'tblastx', 'subject') }, ' -outfmt 6'),
   );
   await page.getByTestId('format-0').click();
   await expect(page.getByTestId('result-command')).toHaveText(
-    'losat tblastx -query query.fa -subject subject.fa -outfmt 0',
+    commandPattern('losat tblastx -query ', { source: madeName(1, 'tblastx', 'query') }, ' -subject ', { source: madeName(1, 'tblastx', 'subject') }, ' -outfmt 0'),
   );
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
   await expect(page.getByTestId('result-output')).toContainText(BUILD_HAS_ENGINE ? 'TBLASTX (LOSAT ' : 'FAKE ENGINE OUTPUT');

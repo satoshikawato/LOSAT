@@ -699,7 +699,8 @@ fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
             .into_io_error(),
         )
     };
-    let native = crate::cli::native_error_of(&exception()).expect("NCBI's error");
+    let error = exception();
+    let native = crate::cli::native_error_of(&error).expect("NCBI's error");
     assert_eq!(native.exit, 255);
     for (error, kept) in [
         (exception(), &b"<HTML>prolog\n"[..]),

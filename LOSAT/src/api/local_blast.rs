@@ -765,7 +765,7 @@ impl<'a> ReportOutputs<'a> {
             formats,
             &mut **diagnostics,
             ViewParts {
-                other_outfmts: *other_outfmts,
+                other_outfmts,
                 later_warnings,
                 hits,
                 observer,

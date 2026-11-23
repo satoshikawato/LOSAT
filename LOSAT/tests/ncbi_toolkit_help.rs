@@ -45,7 +45,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 14] = [
+const PROGRAMS: [(&str, &str); 15] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -60,6 +60,7 @@ const PROGRAMS: [(&str, &str); 14] = [
     ("dustmasker", "-out"),
     ("segmasker", "-out"),
     ("windowmasker", "-out"),
+    ("makeprofiledb", "-out"),
 ];
 
 #[test]
@@ -197,8 +198,9 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
             // Each argument left out is refused by name: after NCBI's reader took the command
             // line (a search's words with `-db x`, line RG item K4i-2b; `-entrez_query` with the
-            // `-remote` it requires), or by the run of a search (psiblast's `-use_sw_tback`, with
-            // `-subject`; rpstblastn's `-ungapped`, which needs a database, is a run refusal of
+            // `-remote` it requires), or by the run (psiblast's `-use_sw_tback`, with `-subject`;
+            // makeprofiledb's `-binary`, where its run starts; rpstblastn's `-ungapped`, which
+            // needs a database, is a run refusal of
             // LOSAT's table of refusals with it, `REFUSED` of `build/ncbi_args.rs`). The arguments
             // left in are read (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with
             // composition-based statistics, line RG item X4, tblastn's in every mode, item X4b,
@@ -218,14 +220,23 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                     option.push("-remote");
                 }
                 let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
+                let contexts: Vec<Vec<&str>> = if program == "makeprofiledb" {
+                    // makeprofiledb's `-binary`, refused where its run starts (after `Init`).
+                    vec![vec!["-in", "p.fa", "-out", "db"]]
+                } else {
+                    vec![
+                        vec!["-query", "p.fa", "-db", "x"],
+                        vec!["-query", "p.fa", "-subject", subject],
+                    ]
+                };
                 let refusal = |message: &str| {
                     message.contains(&format!("-{name} is not supported by LOSAT's"))
                         || message.contains(&format!("-{name} ("))
                             && message.contains("is not supported by LOSAT's")
                 };
                 let mut message = String::new();
-                for search in [["-db", "x"], ["-subject", subject]] {
-                    let words = [&["-query", "p.fa"][..], &search[..], &option[..]].concat();
+                for context in &contexts {
+                    let words = [&context[..], &option[..]].concat();
                     let run = run_in(&dir, program, &words);
                     message = String::from_utf8_lossy(&run.stderr).into_owned();
                     if refusal(&message) {

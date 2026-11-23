@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 16] = [
+const PROGRAMS: [&str; 17] = [
     "blastn",
     "blastp",
     "blastx",
@@ -62,6 +62,7 @@ const PROGRAMS: [&str; 16] = [
     "windowmasker",
     "convert2blastmask",
     "makembindex",
+    "makeprofiledb",
     "rpsbproc",
 ];
 
@@ -290,6 +291,7 @@ fn top_level_help_names_every_program() {
             "windowmasker",
             "convert2blastmask",
             "makembindex",
+            "makeprofiledb",
         ] {
             let line = text
                 .lines()

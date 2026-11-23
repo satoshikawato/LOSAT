@@ -36,6 +36,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     write_failure: None,
+    dry_run: None,
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263

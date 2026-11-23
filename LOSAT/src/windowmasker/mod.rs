@@ -45,6 +45,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     write_failure: None,
+    dry_run: None,
 };
 
 /// The components that `CWinMaskApplication`'s constructor adds: the algorithm, the counts

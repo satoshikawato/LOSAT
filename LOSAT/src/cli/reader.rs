@@ -31,6 +31,7 @@ macro_rules! tool {
             help_full: None,
             short_description: None,
             write_failure: None,
+            dry_run: None,
         }
     };
 }

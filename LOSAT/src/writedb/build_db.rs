@@ -328,7 +328,7 @@ const fn create_directories_site(line: u32) -> ThrowSite {
 }
 
 /// `CBuildDatabase::CreateDirectories`.
-fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
+pub(crate) fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
     let Some(at) = dir_entry.rfind(is_any_separator) else {
         return Ok(());
@@ -406,7 +406,7 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //   replaced.
 /// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
 /// of one of their names, with its contents); `true` when one was removed.
-fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
+pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
         SeqType::Protein
@@ -1026,9 +1026,11 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         if let Some(error) = error {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
             messages.push(match error {
-                WriteDbError::Creation(_) | WriteDbError::CreationBytes(_) => {
+                WriteDbError::Creation(_)
+                | WriteDbError::CreationBytes(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. } => {
                     [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
                 }
                 other => other.message(),
@@ -1138,7 +1140,7 @@ impl<'a> BuildDatabase<'a> {
             return Err(refusal);
         }
         if close_error.is_some() {
-            self.output_db.destroy_after_failed_close();
+            let _ = self.output_db.destroy_after_failed_close();
         }
         // `NCBI_RETHROW` of the close exception as a `CWriteDBException` of `eArgErr` with the
         // message of the close exception: an exception of the close becomes a creation error with

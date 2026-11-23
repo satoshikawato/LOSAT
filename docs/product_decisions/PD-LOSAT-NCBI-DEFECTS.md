@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.86
+- Version: 1.88
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -457,7 +457,28 @@
   NCBIpna and NCBIpaa; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   numbered after 1.85; first 1.80, then 1.84 at the merge of psiblast line item PS10c, which brought
   dev's 1.80 to 1.82 and PS10c's 1.83, then 1.85 at the merge of dev that brought line NP item
-  M4b-AX's 1.83 and PS10c's 1.84, then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85)
+  M4b-AX's 1.83 and PS10c's 1.84, then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85);
+  1.87 2026-11-23 (BLASTP `-ungapped -comp_based_stats 0 -use_sw_tback`, line NP item O4b2-2: the explicit
+  rejection of decision D3 comes at the traceback of the first query batch that NCBI searches, after the
+  reports of the batches before, the form of 1.76 and 1.79, instead of before the first byte; a run that
+  searches no batch ends as NCBI's does; no new exception, rule 3; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.86; first 1.83, then 1.84 at the merge of dev that brought line NP
+  item M4b-AX's 1.83, then 1.86 at the merge of dev that brought 1.84 and 1.85, then 1.87 at the merge of dev
+  that brought psiblast line item PS10d's 1.86);
+  1.88 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
+  of line NP's M4b (question Q6 of that day's batch, 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
+  Q10=A Q11=A Q12=A Q13=OK」): with `-db_hard_mask`, TBLASTN and TBLASTX search a reading frame whose
+  masks leave it an empty first part (a mask within the first 2 bases of a sequence or within the 1
+  or 2 bases after its last whole codon, or an empty mask at 0 before a tail mask), on which NCBI
+  crashes in every run, as 「mask されていないものとして普通に探す」; the refusal of that shape
+  removed; how the 1 or 2 masked bases are read (masked in every frame): the Owner's answer
+  「推奨通り」 of 2026-11-23 13:49 JST, on the board, to the report of line NP's session ad-M4b-8 that
+  asked Q-ALIGNEX and M4b-3c's question Q6 (recommended A and B), which is Q6 = B; line NP item
+  M4b-3c; numbered after 1.87 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c, 1.85 line RG
+  item D1c-1, 1.86 psiblast line item PS10d, 1.87 line NP item O4b2-2); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to
+  1.82 (the branch had assumed 1.76 for line NP item M4b-3b; dev's 1.76 and 1.77 are line RG's X4b-2 and
+  D3c-3a), then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85, then 1.87 at the merge of dev
+  that brought PS10d's 1.86, then 1.88 at the merge of dev that brought O4b2-2's 1.87; the exception numbered 24 at first, then 27 after dev's 24 to 26)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -667,7 +688,7 @@ Explicit rejections (rule 3):
   of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
-  `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
+  `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
@@ -1279,12 +1300,13 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     two bases at an end of the sequence leaves the frame no part after its first part (no near
     input keeps that part), the result is the part's alone, which NCBI's own run gives in the
     fixtures (its scan reads the masked letter, the extensions stop at the part's end). A mask that
-    leaves a frame an empty first part (`FrameStartMask`: an empty first part of a frame, then a part
-    that NCBI searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0
-    before a tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13)
-    stays refused (rule 3) until the Owner's question Q4 of M4b is answered, as do masks out of
+    leaves a frame an empty first part (an empty first part of a frame, then a part that NCBI
+    searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0 before a
+    tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13), refused
+    (rule 3) until version 1.88, is searched under approved exception 27 (a translated mask that
+    leaves a frame an empty first part). Masks out of
     order, overlapping masks, a mask that ends past its sequence, and in BLASTP and BLASTX a range
-    longer than 5,000,000 letters. `blastinput::db_mask::HardScan`,
+    longer than 5,000,000 letters stay refused (rule 3). `blastinput::db_mask::HardScan`,
     `HardMaskShape::of_scan`, `algorithm::common::translated_chunks::translated_db_mask_chunks`,
     `algorithm::blastp::blast_engine::db_masked::hard_chunks`.
     Evidence (NCBI BLAST+ 2.17.0, each run capped; line NP's task folder `M/m4b` (SURVEY.md §4.1,
@@ -1324,10 +1346,104 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     row `db.tmask.tn.hard.th2.13.ung.6`);
     BLASTP with `-window_size 0` on `pe_tail` (`db.pmask.bp.hard.tail.pe_tail.w0.6`): the near
     input's. Unit tests `protein_shapes_of_the_hard_masks` and
-    `translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start`
+    `translated_hard_masks_in_order_are_searched_also_where_a_frame_restarts_at_its_start`
     (`LOSAT/src/blastinput/db_mask_tests.rs`),
     `a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk`
     (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
+
+## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.88)
+
+The Owner decided on 2026-11-22 at 22:34 JST (words 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
+Q10=A Q11=A Q12=A Q13=OK」; question Q6 of that batch is question Q4 of line NP's M4b,
+`M/m4b/OWNER_QUESTIONS.md`) option B, which the batch worded 「B（推奨）. その frame は mask されて
+いないものとして普通に探す（その短い mask を除いた時の NCBI の結果と同じ規則）」 (the frame is
+searched as a frame without a mask, by the rule of NCBI's result with that short mask removed): in
+TBLASTN and TBLASTX with `-db_hard_mask`, a mask within the first 2 bases of a sequence, or within the
+1 or 2 bases after its last whole codon, on which NCBI BLAST+ 2.17.0 crashes in every run, is no
+longer refused. Not taken: option A, refusing such databases (what LOSAT did from M4b PR 2 until
+this version), which leaves every database with a short mask at a sequence end unsearchable. With
+Q1 = B (approved exception 21) the same NCBI mechanism, an empty mask at 0 before a tail mask, is
+already searched in BLASTP and BLASTX, so the four programs now agree.
+
+The words of option B can be read two ways for the 1 or 2 masked bases themselves, which are also
+letters of the frames of the other strand (e3's [0, 1) is the first residue of frame +1 and the last
+of frame -1). Read literally, 「その短い mask を除いた」 is a database with the mask removed and the
+real bases kept (the near input of a reading A); read as the Owner's earlier answers Q1 = B and
+Q2 = B (exception 21) read masked letters, the bases stay masked in every frame and only the
+crashing frame's search is the unmasked one (reading B; a reading C would give the real bases to the
+crashing frame alone). The Owner answered that follow-up question (§ Q6 of
+`M/m4b/OWNER_QUESTIONS.md`, whose option B was "the crashing frame is searched as without the mask
+(the whole frame), and the 1 or 2 masked bases are read as masked in every frame") on 2026-11-23 at
+13:49 JST on the board (`tools/session-board/sent.jsonl`, uuid
+ed3e0671-abb5-4c21-b3bd-eb22f24af44f) with 「推奨通り」, to the report of line NP's session ad-M4b-8,
+which asked Q-ALIGNEX and M4b-3c's question Q6 (recommended A and B and gave the answer forms
+「Q-ALIGNEX=A Q6=B」 and 「すべて推奨通り」): Q6 = B, which is what this version implements. Its version
+is in the list at the top; elsewhere it is cited by its number and name, "approved exception 27 (a
+translated mask that leaves a frame an empty first part)". Line NP item M4b-3c.
+
+27. **`-db_hard_mask` in TBLASTN and TBLASTX: a frame whose masks leave it an empty first part.**
+    NCBI maps each stretch between a sequence's masks to every reading frame by its positions divided
+    by 3, the minus frames from frame -1's length (`blast_engine.c:805-830`), and cuts each frame as a
+    protein subject (`s_GetNextSubjectChunk`, `blast_engine.c:221-311`). A mask within the first 2
+    bases of a sequence maps to an empty first part [0, 0) in all three plus frames, a mask
+    within the 1 or 2 bases after the last whole codon to an empty first part in all three minus frames
+    (the mapping has no frame offset: [1, 2) of 1,200 bases gives an empty first part, (0, 0), in frames
+    +1, +2 and +3), and an empty mask at 0 to one in the plus frames. The empty part takes the branch that
+    allocates the subject's ranges (`s_AllocateSeqRange`, `blast_engine.c:184-199`); the next part,
+    from 0, then takes the "no chunking" branch (`blast_engine.c:264-269`), which points the ranges at
+    the backed-up full range, and NCBI searches the frame whole (or, where a mask runs to the end of
+    the frame after it, as in exception 21). Its restore then frees that pointer, which it did not
+    allocate (`s_RestoreSubject`, `blast_engine.c:200-215`): SIGABRT `free(): invalid pointer` (exit
+    134) or SIGSEGV (139), in every run, at 1 and 4 threads. The empty part adds nothing: its scan
+    reads at most one word at 0, and the diagonal offset that the word leaves (`Blast_ExtendWordExit`,
+    `blast_extend.c:162-173`) is a window or more behind every hit of the next part on that diagonal
+    (`aa_ungapped.c:495-500, 525-545`). LOSAT searches the frame as its parts come, the whole frame
+    after the empty part, as every other hard chunk, and the masked bases stay masked: the traceback,
+    the composition-based statistics and the re-scoring of TBLASTX read them as any base, in every
+    frame, as for every other mask (a fourfold-degenerate codon keeps its letter). So LOSAT gives what
+    NCBI computes before its free(). That is what NCBI's own runs give where another mask of the
+    sequence avoids the crash: in 12 of 12 probes (6 forms, TBLASTN and TBLASTX), the rows that the
+    short mask moves in NCBI's own run with a far mask added are the rows that storing its bases as
+    `N` moves in the near input, and nothing outside the form's sequence moves. The near input of
+    this reading (B) is the database with that short mask's bases stored as `N` and the mask dropped;
+    the near input of reading A is the literal database with the mask removed and the real bases
+    kept, which gives other rows: each alignment through such a residue is one residue longer
+    (TBLASTN on e3 with [0, 1): `2 60 4 180` with the mask, `1 60 1 180` with the real base; TBLASTX
+    on e2 with [1200, 1202): frame -1's alignment starts at base 1199 with the mask, at 1202 with
+    the real bases). In the 32 fixture rows LOSAT gives the `N`-stored near input's bytes, and CI
+    passes at 1 and 4 threads, but the two are equal only as long as NCBI's preliminary stage does not
+    read a masked residue: that stage translates the stored 2-bit bases (`blast_engine.c:760, 772`),
+    makeblastdb stores an `N` as a random base (`writedb_convert.cpp:361-392`; in the fixtures the
+    stand-in differs from the real base at every masked position), so in the near input the seed scan
+    and the early extensions read that stand-in, where LOSAT, like NCBI's own computation and its
+    far-mask runs, reads the real base (`X` appears only in the traceback). Any preliminary step that
+    reads such a residue (the seed scan, the ungapped extension, the preliminary gapped score)
+    decides which HSPs reach the traceback and from where, so LOSAT could differ from the near input
+    in a case that no probe showed: in the crashing frame itself (its masked residue lies inside the
+    chunk from 0) as well as in a frame that the empty part does not touch. A second item is the
+    end-sentinel word of a frame one residue shorter than its strand's first (frames -2 and -3 of
+    1,200 bases), which LOSAT scans as NCBI's own chunks do. Masks out of order,
+    overlapping masks and a mask that ends past its sequence stay refused (rule 3).
+    `blastinput::db_mask::HardScan`, `HardMaskShape::of_frames`,
+    `algorithm::common::translated_chunks::translated_db_mask_chunks`.
+    Evidence (NCBI BLAST+ 2.17.0, each run capped; line NP's task folder `M/m4b3c`, `Q4B_PROGRESS.md`,
+    `Q4B_BLOCKED`, `probe/`):
+    - The 7 forms (e3 [0, 1), [1, 2), [0, 2); e2 [1200, 1202), [1201, 1202); e4 [0, 3) with [1200,
+      1201); e3's empty mask at 0 with [1100, 1200)) crash in both programs at 1 and 4 threads (28 of
+      28 runs: exit 134 or 139); the near inputs, the proxies with a far mask and the controls end
+      normally, and each of the 50 probe inputs gives the same bytes at 1 and 4 threads.
+    - Fixture rows `db.tmask.{tn,tx}.hard.te.{13,14,15,31}.6`, `db.tmask.tn.hard.te.{13,14,15,31}.q4.6`,
+      `db.tmask.tx.hard.te.31.q4.6`, `db.tmask.{tn,tx}.hard.tq4.11.6` and `db.tmask.tn.hard.tq4.11.q4.6`
+      of `LOSAT/tests/db_search_manifest/{tblastn,tblastx}.tmask.tsv` (LOSAT on the database with the
+      mask; the refusal rows `db.tmask.*.hard.rej.te.{13,14,15,31}.6` before), with `ncbi-near:` the
+      bytes of NCBI's run of the near input (the rows `db.tmask.*.hard.near.te{13,14,15,31}n.*` and
+      `db.tmask.*.hard.near.tq4n.*`; databases `te13n`, `te14n`, `te15n`, `te31n` and `tq4n`, and
+      `tq4` with the empty mask, built by `LOSAT/tests/db_search/make_dbmaskt_q4.py` from copies of
+      `edge.fna` with the bases stored as `N`; `tq4n`'s tail is also shortened to [1100, 1196) as
+      exception 21's near input; the queries `qneq4.faa` and `qxeq4.fna` align through the masked
+      residues). Unit tests `translated_hard_masks_in_order_are_searched_also_where_a_frame_restarts_at_its_start`
+      (`LOSAT/src/blastinput/db_mask_tests.rs`) and `a_frame_after_an_empty_first_part_scans_the_whole_frame`
+      (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
 
 ## Approved difference (`losat rpsbproc`, the order of tied hits, version 1.67)
 
@@ -2321,7 +2437,10 @@ file would differ, and NCBI's programs still could not open the database).
   does (exit 1, "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's tblastn crashes at every
   query batch it searches, is not supported by LOSAT's TBLASTN"; one producer of the text,
   `smith_waterman_match::sw_ungapped_error`; rows `db.tn.rej.ungapped.sw.*`, anchor
-  `db.tn.ungapped.ac.b1.nosw.7`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
+  `db.tn.ungapped.ac.b1.nosw.7`). BLASTP refuses it in the same way since version 1.87 (line NP item
+  O4b2-2; before, before the first byte: decision D3 above), with the same text for `blastp`: NCBI BLAST+
+  2.17.0 from Bioconda, 2026-11-23, crashes at the first query batch it searches and reports the batches
+  before it, whose queries give no Karlin-Altschul parameters (rows `db.ung.sw.*`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
   of NCBI's reader as one unit (the batch's status, its first query's heap and the contexts that
   index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.
   Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs `LOSAT/tests/fasta/x4b2` and

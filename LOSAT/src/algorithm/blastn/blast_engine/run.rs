@@ -3284,9 +3284,9 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:540-557
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2535
-    // Preliminary BLASTN HSPs use purge=TRUE, so common-start/common-end
+    // Preliminary BLASTN HSPs run with `purge` enabled, so common-start/common-end
     // duplicates are deleted, not trimmed. The full traceback stage still uses
-    // the later purge=FALSE/TRUE passes over final HSPs with edit scripts.
+    // the later trim (`purge` disabled) then delete (`purge` enabled) passes over final HSPs with edit scripts.
     qsort_prelim_hits_by(&mut hsps, query_offset_compare_prelim_hits);
     // In place: `dedup_by` drops an HSP that matches the last one kept, as the copy into a
     // second vector did.
@@ -7953,6 +7953,10 @@ struct QueryBatch {
     /// `run_in_pool` writes to standard error when it takes the batch, where the search wrote
     /// them before.
     timing: String,
+    /// The first of the batch's fetches with `check_oid_exclusion` (the traceback's, or the
+    /// ungapped re-evaluation's) that read a header with a UTF8String where a VisibleString is
+    /// expected: NCBI's warning comes there, before its Seq-aligns' reads (`read_titles`).
+    fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
 /// Which of NCBI's stages `search_query_batch` runs for its queries.
@@ -8778,8 +8782,10 @@ fn run_in_pool(
                     );
                 }
             }
-            database::drop_unaligned(database, &mut batch_hit_lists);
-            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+            let read = (&mut titles, &mut warnings[start]);
+            if let Err(error) =
+                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
+            {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
@@ -8977,8 +8983,8 @@ fn run_in_pool(
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !taxdb_found {
-                        // No prefetch, and the reports' fetches look nothing up.
+                    if !taxdb_found && !database.db.scope_utf8_seen() {
+                        // No prefetch, and the reports' fetches look nothing up nor post a warning.
                         Ok(Posts::new())
                     } else {
                         fetches
@@ -9052,22 +9058,18 @@ fn run_in_pool(
             {
                 // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the
                 // batch's prefetch (where it is on and loads a sequence) only its stop
-                // (`BlastnDatabase::batch_prefetch_stop`).
-                let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
-                (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
-                    .then(|| {
-                        database
-                            .batch_prefetch_stop(
-                                &titles,
-                                &hit_lists,
-                                &batch_spans,
-                                run_loads.answer(),
-                                &batch_hit_lists,
-                                !args.ungapped,
-                                &prefetch_queries,
-                            )
-                            .map(|()| Posts::new())
-                    })
+                // (`BlastnDatabase::xml2_prefetch`, with NCBI's scope at the batch's prefetch as
+                // above).
+                database.xml2_prefetch(
+                    &titles,
+                    &hit_lists,
+                    &batch_spans,
+                    run_loads.answer(),
+                    &batch_hit_lists,
+                    !args.ungapped,
+                    &prefetch_queries,
+                    &mut query_reads[start..],
+                )
             } else {
                 None
             };
@@ -11000,6 +11002,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                 subject_statistics: &subject_statistics,
                 subject_space_overflow: &subject_space_overflow,
             });
+    // The batch's first fetch that read a UTF8String header (`SubjectPasses::fetched_utf8`).
+    let fetched_utf8 = crate::seqdb::Utf8Reads::default();
     // The passes over the batch's subjects (`subject_passes::SubjectPasses`), built once.
     let passes = subject_passes::SubjectPasses {
         args,
@@ -11011,6 +11015,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         prelim_hitlist_size,
         hitlist_size,
         db_hard_mask,
+        fetched_utf8: &fetched_utf8,
     };
 
     // The batch's results, read after its subjects are searched.
@@ -11024,6 +11029,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         context_karlin: context_karlin.clone(),
         query_eff_searchsp: query_eff_searchsp.clone(),
         timing: String::new(),
+        fetched_utf8: fetched_utf8.first().map(|note| note.at),
     };
     // The preliminary pass over the subjects (`SubjectPasses::prelim_pass`); its error is the database's
     // read error as it is, reported before the masks' read errors below.

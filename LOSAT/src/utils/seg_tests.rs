@@ -453,7 +453,7 @@ fn test_mask_sequence_matches_ncbi_segmasker_yp_009220574_1() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1140-1157
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2125-2149
-// Independent SeqBufferSeg API output with this actual caller's overlaps=TRUE.
+// Independent `SeqBufferSeg` API output with this actual caller's `overlaps` enabled.
 // The former assertion combined adjacent locations, unlike this core caller.
 #[test]
 fn test_mask_sequence_matches_ncbi_core_bdv02435_1_query_defaults() {

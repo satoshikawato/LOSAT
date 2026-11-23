@@ -10,7 +10,7 @@ import subprocess
 
 
 # NCBI c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94:
-# kArgQuery("query"), kArgSubject("subject"), kArgNumThreads("num_threads").
+# CLI flag names for query (`kArgQuery`), subject (`kArgSubject`), and threads (`kArgNumThreads`).
 # Frozen before CLI v2 from e2abf5848b09309c761c44a373d3bd188daafd80
 # plus the existing working tree. All four outputs also matched NCBI 2.17.0+.
 CASES = [
@@ -66,7 +66,7 @@ def main():
     common = ["blastp", "-query", "LOSAT/tests/fasta/SicyWSV.faa",
               "-subject", "LOSAT/tests/fasta/PajaWSV.faa", "-outfmt", "6",
               "-num_threads", "1", "-max_hsps", "1"]
-    # NCBI api/blast_options_handle.cpp:381-400: Create(eBlastp, locality).
+    # NCBI api/blast_options_handle.cpp:381-400 (`Create` for `eBlastp` and locality).
     # v0.1.0 exposes only the ordinary, comparison-supported task.
     command = common + ["-task", "blastp"]
     result = subprocess.run([str(args.losat_bin.resolve()), *command], cwd=root,

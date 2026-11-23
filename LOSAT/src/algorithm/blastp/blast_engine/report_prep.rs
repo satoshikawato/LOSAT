@@ -161,6 +161,59 @@ pub(super) fn query_warning_lines(
     (lines, later.then_some(later_lines))
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-772 (cited at
+// `shared::prefetch_off`)
+/// The XML2 and JSON formats (whose prefetch LOSAT models only where it stops,
+/// `shared::batch_prefetch_stop`): NCBI's warning of a UTF8String header that the prefetch of a
+/// batch whose prefetch is on reads at a load (`shared::scope_utf8_prefetch_post`), with the
+/// batch's prefetch posts (`prefetch_posts`, after its reader messages), or where its prefetch is
+/// off, a `Hit` of a query's report (`shared::scope_utf8_hit_reads` of its final hit list, in
+/// `subject_reads`), the batches in their order; none after the call's first such read among the
+/// batches' own (`shared::Utf8Read::reach`).
+fn xml2_scope_utf8(
+    titles: &database::ListedTitles<'_>,
+    database: &database::BlastpDatabase,
+    query_batches: &[RangedBatch],
+    after: Option<crate::report::db_subject::RunThrow>,
+    (prefetch_posts, subject_reads, hit_lists): (
+        &mut Vec<(usize, crate::report::diag_log::Posts)>,
+        &mut SubjectReads,
+        &[Option<BlastpHitList>],
+    ),
+    seq_aligns: &dyn Fn(std::ops::Range<usize>) -> usize,
+    prefetched_ranks: &dyn Fn(std::ops::Range<usize>) -> Vec<usize>,
+) -> Result<()> {
+    let db = database.seqdb();
+    for batch in query_batches {
+        crate::algorithm::common::database::Utf8Read::reach(
+            titles.utf8.as_ref(),
+            &batch.searched,
+            db,
+        );
+        let span = batch.searched.clone();
+        if crate::algorithm::common::database::prefetch_off(seq_aligns(span.clone())) {
+            for query in span {
+                let shown = std::slice::from_ref(&hit_lists[query]);
+                let reads = titles.scope_utf8_hit_reads(
+                    database,
+                    after,
+                    database::ListedTitles::reported_ranks(shown),
+                );
+                subject_reads.set(query, reads);
+            }
+            continue;
+        }
+        let warning = titles.scope_utf8_prefetch(database, prefetched_ranks(span.clone()))?;
+        if !warning.is_empty() {
+            prefetch_posts.push((
+                span.start,
+                crate::report::diag_log::Posts::of_lines(warning),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// What query `query`'s pairwise report (outfmt 0 to 4) of its hit list `shown` reads, by rank
 /// (`QueryGroup::read_order` of the rows' hits as the writer reads them, `reading`; psiblast's
 /// later round's two-part table, `found_before`).
@@ -314,36 +367,32 @@ pub(super) fn prefetch_reported_subjects(
     // refusals, the stop's record of the loads before it, the names and the taxonomy reads take
     // (review 1 of line DBID pfoff-1, H1 and M1; psiblast writes none of these formats,
     // `psiblast::args::PsiblastArgs::check_outfmt`).
+    let after_throw = crate::report::db_subject::FormatThrow::of_outfmts(
+        outputs.formats.iter().map(|format| format.outfmt),
+        crate::blastinput::app::Program::Blastp,
+        args.app.request_kind(),
+    )
+    // The call's refusal, over the formats of its other searches too.
+    .of_search(
+        outputs.other_outfmts,
+        crate::blastinput::app::Program::Blastp,
+        args.app.request_kind(),
+    );
     let hit_loads = listed_titles
         .as_ref()
         .map_or_else(Default::default, |titles| {
-            titles.hit_loads(
-                reported_lists,
-                batch_prefetch,
-                crate::report::db_subject::FormatThrow::of_outfmts(
-                    outputs.formats.iter().map(|format| format.outfmt),
-                    crate::blastinput::app::Program::Blastp,
-                    args.app.request_kind(),
-                )
-                // The call's refusal, over the formats of its other searches too.
-                .of_search(
-                    outputs.other_outfmts,
-                    crate::blastinput::app::Program::Blastp,
-                    args.app.request_kind(),
-                ),
-                |query| {
-                    pairwise_reading.map_or_else(Default::default, |reading| {
-                        pairwise_read_order(
-                            titles,
-                            std::slice::from_ref(&reported_lists[query]),
-                            query,
-                            engine_counts,
-                            reading,
-                            found_before,
-                        )
-                    })
-                },
-            )
+            titles.hit_loads(reported_lists, batch_prefetch, after_throw, |query| {
+                pairwise_reading.map_or_else(Default::default, |reading| {
+                    pairwise_read_order(
+                        titles,
+                        std::slice::from_ref(&reported_lists[query]),
+                        query,
+                        engine_counts,
+                        reading,
+                        found_before,
+                    )
+                })
+            })
         });
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at
     // `db_subject::RunLoads`)
@@ -533,6 +582,18 @@ pub(super) fn prefetch_reported_subjects(
         )
     };
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
+        // The call's first read of a UTF8String header among its batches' own reads
+        // (`Utf8Read::reach`): no load of its batch or a later one posts NCBI's warning.
+        let utf8_read = titles.utf8.as_ref();
+        let db = database.seqdb();
+        // A load whose Seq-align id's lookup reads such a header posts the warning where NCBI's
+        // scope resolves the id (`shared::load_read_texts`), also without `taxdb.bti`: the batches'
+        // prefetches and the reports of those whose prefetch is off (the XML2 and JSON formats'
+        // apart, `xml2_scope_utf8`).
+        let scope_loads = batches_prefetch && db.scope_utf8_seen();
+        if let Some(span) = prefetch_stop.as_ref() {
+            crate::algorithm::common::database::Utf8Read::reach(utf8_read, span, db);
+        }
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
         // The XML2 and JSON formats: the stop alone (`shared::held_batch_prefetch_stop`, after the
@@ -553,10 +614,9 @@ pub(super) fn prefetch_reported_subjects(
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
                     .after_unrecorded_calls(unrecorded_calls),
             )?;
-        } else if let Some(span) = prefetch_stop
-            .as_ref()
-            .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))
-        {
+        } else if let Some(span) = prefetch_stop.as_ref().filter(|_| {
+            !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only || scope_loads)
+        }) {
             let scope = || batch_scope(span);
             // No report's reads are modelled before it (`prefetch_taxids` is off).
             titles.batch_prefetch(
@@ -568,7 +628,18 @@ pub(super) fn prefetch_reported_subjects(
                     .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws),
             )?;
         }
-        if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
+        if xml2_prefetch && db.scope_utf8_seen() && prefetch_stop.is_none() {
+            xml2_scope_utf8(
+                titles,
+                database,
+                query_batches,
+                after_throw.run(),
+                (&mut prefetch_posts, &mut subject_reads, hit_lists),
+                &|span| batch_seq_aligns(span),
+                &prefetched_ranks,
+            )?;
+        }
+        if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only || scope_loads {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -591,10 +662,11 @@ pub(super) fn prefetch_reported_subjects(
                 if !hit_loads.reaches(batch.searched.start) {
                     break;
                 }
+                crate::algorithm::common::database::Utf8Read::reach(utf8_read, &batch.searched, db);
                 let lists = &hit_lists[batch.searched.clone()];
                 let seq_aligns = batch_seq_aligns(batch.searched.clone());
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !prefetch_taxids {
+                    if !prefetch_taxids && !scope_loads {
                         continue;
                     }
                     for query in batch.searched.clone() {
@@ -605,11 +677,12 @@ pub(super) fn prefetch_reported_subjects(
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
                             // read none of a query whose HSPs have none, which looks no taxid up.
-                            // A subject whose load throws loads nothing, nor does one that no
-                            // report reaches after it (`HitLoads::loaded`).
-                            let loaded = |rank: &usize| hit_loads.loaded(*rank);
+                            // Not a subject that no report reaches after one whose load throws
+                            // (`HitLoads::reached`: a load that throws has read the candidates'
+                            // headers, `common::database::load_read_texts`).
+                            let reached = |rank: &usize| hit_loads.reached(*rank);
                             let mut fetched = database::ListedTitles::fetched_ranks(shown, rows)
-                                .filter(loaded)
+                                .filter(reached)
                                 .peekable();
                             if rows == crate::report::tabular::SubjectFetch::Every
                                 || fetched.peek().is_some()
@@ -633,7 +706,7 @@ pub(super) fn prefetch_reported_subjects(
                                             )
                                             .subjects()
                                             .into_iter()
-                                            .filter(loaded)
+                                            .filter(reached)
                                             .collect(),
                                             None => fetched.collect(),
                                         };
@@ -646,7 +719,9 @@ pub(super) fn prefetch_reported_subjects(
                                     query_warning_lines[query].extend(messages);
                                 }
                             }
-                            open_for_rows(shown)?;
+                            if prefetch_taxids {
+                                open_for_rows(shown)?;
+                            }
                         }
                         // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
                         // the blobs it loads first look their taxids up then, and NCBI writes
@@ -708,7 +783,7 @@ pub(super) fn prefetch_reported_subjects(
                         )?
                     }
                     None => {
-                        if !prefetch_taxids {
+                        if !prefetch_taxids && prefetch_only {
                             titles.check_prefetched(
                                 database,
                                 database::ListedTitles::reported_ranks(lists),
@@ -722,7 +797,9 @@ pub(super) fn prefetch_reported_subjects(
                         )?
                     }
                 };
-                open_for_rows(lists)?;
+                if prefetch_taxids {
+                    open_for_rows(lists)?;
+                }
                 // After the reader's messages of the batch, in its first query
                 // (`query_warnings::query_posts`).
                 if !messages.is_empty() {
@@ -1166,12 +1243,15 @@ pub(super) fn read_shown_residues(
 pub(super) fn refuse_prefetch_environment(
     setup: &ReportSetup<'_>,
     outputs: &mut ReportOutputs<'_>,
+    utf8_read: Option<&crate::algorithm::common::database::Utf8Read>,
 ) -> Result<()> {
     let ReportSetup {
         args,
         reports,
         subject_source,
         subject_label,
+        query_batches,
+        database,
         ..
     } = *setup;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-285
@@ -1196,6 +1276,17 @@ pub(super) fn refuse_prefetch_environment(
         // The posts of the bytes replaced in that request follow the batch's reader messages
         // (`SaveSearchStrategy` after `GetNextSeqBatch`, blastp_app.cpp:259-262).
         write_request_posts(args, &mut *outputs.diagnostics)?;
+        // NCBI's warning of a UTF8String header that the batch's Seq-aligns read, before.
+        if let (Some(database), Some(batch)) = (database, query_batches.first()) {
+            if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_in(
+                utf8_read,
+                batch.searched.clone(),
+                database.seqdb(),
+                args.app.ncbi_name(),
+            ) {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
+        }
         return Err(error);
     }
     Ok(())

@@ -144,7 +144,7 @@ fn ambiguous_and_stop_codons_follow_ncbi4na_expansion() {
     let code32 = GeneticCode::try_from_id(32).unwrap();
     assert_eq!(code32.get(b"TAG"), b'W');
     assert_eq!(code32.get(b"TAR"), b'X');
-    // Stage A comparison-only C++ API oracle uses FindGeneticCode(32).
+    // Stage A comparison-only C++ API oracle looks up code 32 with `FindGeneticCode`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-600:
     let oracle =
         include_str!("../../../docs/evidence/tlosan_stage_a/api_20260923_verified/code32_fmt6.out");

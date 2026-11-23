@@ -1240,8 +1240,10 @@ object frames, 97 levels of `mix` and more, which NCBI reads at every start.
     a Seq-loc, the one type of a mask file that holds values of its own type (`mix` and `equiv`,
     and a value written as `:Seq-loc` in NCBI's pointer syntax), by recursion: each level opens the
     choice, its variant, the list and the list's element (`ReadChoiceSimple`,
-    `src/serial/objistr.cpp:1482-1500`; `ReadContainer`, `src/serial/objistrasn.cpp:1245-1274`),
-    about 1.3 KB of the main thread's stack for each level. With the default stack limit of 8 MiB
+    `src/serial/objistr.cpp:1482-1500`; `ReadContainer`, `src/serial/objistrasn.cpp:1245-1274` in
+    text and `src/serial/objistrasnb.cpp:955-1000` in binary), and an element written as `:Seq-loc`
+    the named frame of `ReadPointer` (`src/serial/objistr.cpp:1173-1198`), about 1.3 KB of the main
+    thread's stack for each level. With the default stack limit of 8 MiB
     NCBI BLAST+ 2.17.0 overflows its stack and ends with SIGSEGV (exit status 139; the log's first
     lines, nothing on standard error, no database): in a minimal environment, 5 runs at each
     depth, the bioconda build read every nest of up to 6,449 levels and crashed in every run from
@@ -1251,9 +1253,10 @@ object frames, 97 levels of `mix` and more, which NCBI reads at every start.
     `equiv`, the two alternating and the pointer syntax alike. As in
     exception 15 the depth is not the input's: the stack limit, the lengths of the command line and
     of the environment and the stack's random start at each run move it. With no stack limit
-    (`ulimit -s unlimited`) NCBI reads every depth tried, to 100,000 levels (205 MB of memory), and
-    writes its normal database, or for a file damaged deep inside its report, which names every
-    frame of the nest (at 100,000 levels about 25 s and 2 MB; a number too large for `int` in a text
+    (`ulimit -s unlimited`) NCBI reads every depth tried, to 100,000 levels (170 to 239 MB of
+    memory, by build and kind of nest), and writes its normal database, or for a file damaged deep
+    inside its report, which names every frame of the nest (at 100,000 levels about 25 s, for a
+    report of 2 MB; a number too large for `int` in a text
     file, whose report gives each frame a line of its own, took 245 s at 5,000 levels and 4,933 s
     and 253 MB at 20,000, for a report of 17 MB). LOSAT keeps the levels and the frames on the heap
     (`writedb::mask_info::reader`, `Rd::read_seq_loc_parts`), so it reads every depth as far as
@@ -1263,10 +1266,16 @@ object frames, 97 levels of `mix` and more, which NCBI reads at every start.
     Evidence: `docs/evidence/mask_nest_depth/` (for each kind of nest and depth, NCBI's runs with
     8 MiB and with no stack limit, LOSAT's runs and the generator of the inputs). Fixture rows
     `n_*` of `LOSAT/tests/seqdb/mask_parse/expected.tsv`, frozen from NCBI's run with no stack
-    limit (`LOSAT/tests/seqdb/make_mask_parse_fixtures.py`). Unit tests
-    `a_nest_of_a_million_levels_is_read_without_recursion`, `every_nesting_path_is_read_at_depth`,
-    `a_null_element_deep_inside_is_found_where_ncbi_dereferences_it` and
-    `an_error_deep_inside_leaves_every_frame_of_the_nest`
+    limit (`LOSAT/tests/seqdb/make_mask_parse_fixtures.py`): every kind of nest, damaged innermost
+    in `mix`, `equiv`, alternating and pointer nests, and at a middle level, at each step that
+    begins or ends a level. Unit tests `a_nest_of_a_million_levels_is_read_without_recursion`,
+    `every_nesting_path_is_read_at_depth`,
+    `a_null_element_deep_inside_is_found_where_ncbi_dereferences_it`,
+    `an_error_deep_inside_leaves_every_frame_of_the_nest`,
+    `an_error_deep_inside_other_nests_leaves_every_frame`,
+    `an_error_at_a_middle_level_leaves_the_frames_outside_it` (each fixture's damage at 1,000,001
+    levels gives its report with every level added) and
+    `a_number_too_large_takes_a_line_for_each_frame`
     (`LOSAT/src/writedb/mask_info/depth_tests.rs`).
 
 ## Approved exception 16 (BLASTP unified P-values, the last query of a query batch, version 1.54)

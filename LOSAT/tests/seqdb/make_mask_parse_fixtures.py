@@ -293,6 +293,11 @@ def hand_cases():
     c["bad_char_seq_id_strings"] = obj(
         'mix { int { from 5, to 14, id general { db "d\tb", tag str "t\tg" } }, packed-int { { from 1, to 2, '
         'id genbank { name "n\tm", accession "A\t1" } } } }')
+    # strings that post at several levels of a nest, their traces waiting together (line NP item M (b))
+    c["bad_char_nested_mix"] = obj(
+        'mix { int { from 5, to 14, id local str "a\tb" }, mix { int { from 20, to 29, id local str "c\td" }, '
+        'mix { int { from 30, to 39, id local str "e\tf" } }, int { from 40, to 49, id local str "g\th" } }, '
+        'int { from 50, to 59, id local str "i\tj" } }')
     c["bad_char_continuation"] = obj(f"packed-int {{ {iv(5, 14)} }}", more="TRUE") + (
         'Blast-mask-list ::= { masks { packed-int { { from 20, to 24, id local str "c\td" } } }, more FALSE }\n')
     c["bad_char_second_object_same_line"] = ok.replace("{ algo-id", "{\n algo-id").replace(
@@ -520,10 +525,18 @@ def damaged_binary(dust):
     return c
 
 
-# The nests: (kind, depth); every kind in text and binary. 401 levels pass the 400 object frames that
-# LOSAT refused before line NP item M (b); 20000 is deeper than NCBI's default stack of 8 MiB holds.
+# The nests: (kind, depth); every kind in text and binary but those of one format (gen_mask_nests.py's
+# TEXT_ONLY, BINARY_ONLY). 401 levels pass the 400 object frames that LOSAT refused before line NP item M (b);
+# 20000 is deeper than NCBI's default stack of 8 MiB holds. A number past `int` in text takes a line of the
+# report per frame (351 KB at 401 levels): those nests have 101.
 NESTS = [(kind, 401) for kind in ("mix", "equiv", "alt", "ptr", "wide", "wideid", "badvar", "badstrand", "cut")]
 NESTS += [("bignum", 101), ("mix", 20000)]
+# The damage in the other nests, and at the middle level (the steps that end a level), added in the review of
+# line NP item M (b).
+NESTS += [(f"{error}_{nest}", 401) for error in ("badvar", "cut") for nest in ("equiv", "alt", "ptr")]
+NESTS += [(f"bignum_{nest}", 101) for nest in ("alt", "ptr")]
+NESTS += [(f"mid_{damage}", 401) for damage in ("comma", "badvar", "cut", "open", "cend", "vend", "pend")]
+NESTS += [("mid_comma_ptr", 401)]
 
 
 def nest_cases():
@@ -534,8 +547,10 @@ def nest_cases():
     spec.loader.exec_module(gen)
     c = {}
     for kind, depth in NESTS:
-        c[f"n_{kind}_{depth}.asnt"] = gen.text(kind, depth)
-        c[f"n_{kind}_{depth}.asnb"] = gen.binary(kind, depth)
+        if kind not in gen.BINARY_ONLY:
+            c[f"n_{kind}_{depth}.asnt"] = gen.text(kind, depth)
+        if kind not in gen.TEXT_ONLY:
+            c[f"n_{kind}_{depth}.asnb"] = gen.binary(kind, depth)
     return c
 
 

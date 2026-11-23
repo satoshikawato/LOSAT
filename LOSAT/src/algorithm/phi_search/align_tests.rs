@@ -90,8 +90,18 @@ fn unequal_wildcard_runs_are_aligned_in_their_band() {
     let rows = rows_of(&query);
     let ops = align_patterns(&rows, &query, &subject, 1, 1, 3, 5, &pattern, 11, 1).unwrap();
     assert_eq!(consumed(&ops), (3, 5));
-    assert_eq!(ops.first(), Some(&GapEditOp::Sub(1)));
-    assert_eq!(ops.last(), Some(&GapEditOp::Sub(1)));
+    // G, then the run of one L against three (one substitution, two deletions; a substitution
+    // at either end of the run merges into G's or K's), then K.
+    let subs: u32 = ops
+        .iter()
+        .map(|op| match *op {
+            GapEditOp::Sub(n) => n,
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(subs, 3);
+    assert!(matches!(ops.first(), Some(GapEditOp::Sub(_))));
+    assert!(matches!(ops.last(), Some(GapEditOp::Sub(_))));
     // Equal runs are substitutions.
     let ops = align_patterns(&rows, &query, &query, 1, 1, 3, 3, &pattern, 11, 1).unwrap();
     assert_eq!(ops, vec![GapEditOp::Sub(3)]);

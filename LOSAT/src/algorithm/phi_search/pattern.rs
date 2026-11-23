@@ -405,7 +405,7 @@ impl PhiPattern {
                         break;
                     }
                     // A byte of 0x80 or more is a negative `char`: below `A`.
-                    if !(b'A'..=b'Z').contains(&byte) {
+                    if !byte.is_ascii_uppercase() {
                         return Err(PhiError::Ncbi(
                             "pattern description has a non-alphabeticcharacter inside a bracket"
                                 .to_string(),

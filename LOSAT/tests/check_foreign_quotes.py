@@ -218,17 +218,22 @@ C_CASE_LABEL_RE = re.compile(
 )
 C_CASE_TAIL_CODE_RE = re.compile(r"[;=]|->|\w\(")
 # A GNU-style quote: a backtick, a word without spaces, and a closing apostrophe (`` `String' ``).
-GNU_QUOTE_RE = re.compile(r"`([^`'\s]+)'(?![\w'])")
+GNU_QUOTE_RE = re.compile(r"`([^`'\s]+)'(?![\w'`])")
 THREE_PROSE_WORDS_RE = re.compile(r"\b[a-z]+ [a-z]+ [a-z]+\b")
 
 
-def _is_c_case_label(text: str) -> bool:
-    """Whether `text` starts with a C/C++ `case <label>:` statement rather than English prose."""
+def _is_c_case_label(text: str, cited: bool = True) -> bool:
+    """Whether `text` starts with a C/C++ `case <label>:` statement rather than English prose.
+    Outside a citation, a label of one lowercase word is C only when its tail ends with `;`, `{`
+    or `}` and has no three lowercase words in a row (not prose such as `case study: see hit(s)`)."""
     match = C_CASE_LABEL_RE.match(text)
     if match is None:
         return False
     tail = match.group("tail").strip()
     outside = re.sub(r"`[^`]*`|_BT_", " ", tail)
+    if not cited and re.fullmatch(r"[a-z]+", match.group("label")):
+        bare = re.sub(r"/\*.*?(?:\*/|$)|(?<!\S)//.*$", " ", outside).strip()
+        return bare[-1:] in (";", "{", "}") and THREE_PROSE_WORDS_RE.search(bare) is None
     if re.fullmatch(r"[a-z]+", match.group("label")) or "_BT_" in tail or "`" in tail:
         return C_CASE_TAIL_CODE_RE.search(outside) is not None
     return not tail or THREE_PROSE_WORDS_RE.search(tail) is None
@@ -273,7 +278,7 @@ def is_cited_code_line(text: str, prev_enum: bool = False) -> bool:
     prose = PROSE_RE.search(clean) is not None
     decl = CODE_LINE_C_TYPE_DECL_RE.search(clean)
     if decl:
-        rest = re.sub(r"/\*.*?(?:\*/|$)|//.*$", " ", clean[decl.end() :])
+        rest = re.sub(r"/\*.*?(?:\*/|$)|(?<!\S)//.*$", " ", clean[decl.end() :])
         if not (clean[decl.end() - 1] == "," and "(" not in clean and PROSE_RE.search(rest)):
             return True
     if not prose and (CODE_LINE_SEMI_RE.search(text) or CODE_LINE_BARE_TYPE_DECL_RE.search(clean)):
@@ -1747,7 +1752,7 @@ def unbackticked_c_code(
             return True
     if "::=" in clean and ASN1_DEF_RE.search(clean):
         return True
-    if "case " in clean and _is_c_case_label(clean):
+    if "case " in clean and _is_c_case_label(clean, cited=after_citation or had_prefix or cited_line):
         return True
     if (
         "{" in clean

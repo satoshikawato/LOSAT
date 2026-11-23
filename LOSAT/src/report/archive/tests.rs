@@ -422,11 +422,156 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
             search_space: 0,
             length_adjustment: 0,
             searched_space: None,
+            round: None,
         };
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();
         let text = String::from_utf8(sink).unwrap();
         assert!(text.contains(written), "{encoding:?}: {text}");
         assert!(!text.contains("-0\n") && !text.contains(">-0<"), "{text}");
+    }
+}
+
+/// psiblast's archive of a round (`ArchiveRound`, psiblast_app.cpp:259-271): `Web_StepNumber` is
+/// the round's number with `-db` (none with `-subject`), and a PSSM round records the
+/// composition-based statistics of its set-up in place of the handle's.
+#[test]
+fn a_psiblast_round_writes_its_step_and_composition_mode() {
+    struct NoAligns;
+    impl AlignSource for NoAligns {
+        fn write<E: crate::report::serial::encoder::Encoder>(
+            &mut self,
+            _out: &mut ArchiveOut<'_, E>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+    let mut inputs = options::OptionInputs::new(options::RequestKind::Psiblast, "psiblast");
+    inputs.num_iterations = Some(3);
+    let archive = |database: Option<&str>, round: Option<writer::ArchiveRound>| {
+        let handle = ArchiveHandle::new(
+            ArchiveEncoding::Text,
+            ArchiveRequest::for_inputs(&inputs, database),
+            OptionsHandle::default(),
+        );
+        let batch = BatchArchive {
+            request: writer::RequestInputs {
+                queries: writer::RequestQueries::Bioseqs(&[]),
+                subjects: &[],
+                required: None,
+                lcase_masks: &[],
+            },
+            masks: &[],
+            ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
+            search_space: 0,
+            length_adjustment: 0,
+            searched_space: None,
+            round,
+        };
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();
+        String::from_utf8(sink).unwrap()
+    };
+    let step =
+        |number: i32| format!("name \"Web_StepNumber\",\n          value integer {number}\n");
+    let cbs =
+        |mode: i32| format!("name \"CompositionBasedStats\",\n          value integer {mode}\n");
+    let fasta_round = writer::ArchiveRound {
+        number: 1,
+        comp_based_stats: None,
+    };
+    let pssm_round = writer::ArchiveRound {
+        number: 2,
+        comp_based_stats: Some(1),
+    };
+    let whole = archive(Some("in/db"), None);
+    assert!(whole.contains(&step(3)), "{whole}");
+    let first = archive(Some("in/db"), Some(fasta_round));
+    assert!(
+        first.contains(&step(1)) && !first.contains(&step(3)),
+        "{first}"
+    );
+    let second = archive(Some("in/db"), Some(pssm_round));
+    assert!(second.contains(&step(2)), "{second}");
+    assert!(
+        second.contains(&cbs(1)) && !second.contains(&cbs(2)),
+        "{second}"
+    );
+    let subject = archive(None, Some(pssm_round));
+    assert!(!subject.contains("Web_StepNumber"), "{subject}");
+}
+
+// Review fixes of line PS item PS15b-1, XA (2026-11-23): what LOSAT's XML and ASN.1 binary archives
+// do not write yet of a PSSM file's members, which NCBI BLAST+ 2.17.0's psiblast writes with
+// `-outfmt 11` (`pssm_unwritten`: the run is refused before any output). ASN.1 text writes them all.
+#[test]
+fn the_archive_streams_gaps_of_a_pssm_files_members() {
+    let read = |path: &str| {
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(path),
+        )
+        .unwrap();
+        let mut text = Vec::new();
+        if path.ends_with(".gz") {
+            std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut text)
+                .unwrap();
+        } else {
+            text = bytes;
+        }
+        crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap()
+    };
+    const ANONYMOUS: Option<&str> = Some("an anonymous SEQUENCE or CHOICE");
+    const DELAYED: Option<&str> = Some("a member read into a delay buffer");
+    for (path, xml, binary) in [
+        // A title only.
+        ("db_search/db.ps.asn.rnd.6.asn", None, None),
+        // A User-object (`User-field.data`, an anonymous CHOICE; a UTF8String).
+        ("pssm/d3a_c10_user.asn.gz", ANONYMOUS, Some("a UTF8String")),
+        // A Pubdesc whose `Auth-list.names` the reader keeps in a delay buffer.
+        ("pssm/d3a_c11_delay.asn.gz", DELAYED, DELAYED),
+        // Seq-annot `locs` (`Seq-annot.data`, an anonymous CHOICE) with a NULL Seq-loc.
+        ("pssm/d3a_c17_locs.asn.gz", ANONYMOUS, None),
+    ] {
+        let pssm = read(path);
+        assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pssm), xml, "{path}");
+        assert_eq!(
+            pssm_unwritten(ArchiveEncoding::Binary, &pssm),
+            binary,
+            "{path}"
+        );
+        assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pssm), None, "{path}");
+    }
+    // A frequency ratio of PLUS-INFINITY (a PSSM file in ASN.1 binary, whose REAL NCBI's reader
+    // takes): NCBI writes it in each stream, LOSAT's BER encoder does not (`NonFiniteReal`).
+    let bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pssm/ps9_ber_real_list_pinf.asnb"),
+    )
+    .unwrap();
+    let pinf = crate::blastinput::pssm_text::read_pssm_binary(&bytes)
+        .result
+        .unwrap();
+    assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pinf), None);
+    assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pinf), None);
+    assert_eq!(
+        pssm_unwritten(ArchiveEncoding::Binary, &pinf),
+        Some("a NaN or an infinite REAL")
+    );
+    // A member that the ASN.1 text stream re-reads with a message (a delay buffer of a binary
+    // file): the one arm of `unread_delayed` for every stream that fails on it.
+    for (encoding, gap) in [
+        (ArchiveEncoding::Xml, true),
+        (ArchiveEncoding::Binary, true),
+        (ArchiveEncoding::Text, true),
+        (ArchiveEncoding::Nothing, false),
+    ] {
+        let mut check = PssmGaps {
+            encoding,
+            gap: None,
+        };
+        crate::report::serial::encoder::Encoder::unread_delayed(&mut check);
+        assert_eq!(check.gap.is_some(), gap, "{encoding:?}");
     }
 }

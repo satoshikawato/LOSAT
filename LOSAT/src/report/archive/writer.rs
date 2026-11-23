@@ -122,6 +122,24 @@ pub struct BatchArchive<'a> {
     /// The batch's context 0 when the batch was searched, which its `EffectiveSearchSpace`
     /// option reads (`RequestLength::space`).
     pub searched_space: Option<SearchedContext0>,
+    /// psiblast's round (`ArchiveRound`); `None` for the other programs.
+    pub round: Option<ArchiveRound>,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-271
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
+/// What psiblast's archive of one round sets in its request beyond the run's (`WriteArchive` with
+/// the round's number, after the round's search): the `Web_StepNumber` format option is the round's
+/// number with `-db` (`BlastBuildArchive`'s `num_iters`; the bl2seq archive of `-subject` has
+/// none), and a PSSM search's set-up leaves its own composition-based mode in the options
+/// (`PsiBlastSetupScoreBlock` resets 2 and 3 to 1 for the query's later rounds;
+/// `algorithm::psiblast::in_pssm::position_based_mode`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArchiveRound {
+    /// `itr.GetIterationNumber()`, from 1.
+    pub number: i32,
+    /// The `CompositionBasedStats` option of a PSSM search (`None`: the command line's).
+    pub comp_based_stats: Option<i32>,
 }
 
 /// What the `EffectiveSearchSpace` option of a searched batch reads of the batch's context 0
@@ -658,8 +676,26 @@ pub fn write_archive<A: AlignSource>(
     sink: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    let sets = handle.request_sets(batch.searched_space);
-    let request = handle.request();
+    let mut sets = handle.request_sets(batch.searched_space);
+    let round_request;
+    let request = match batch.round {
+        Some(round) => {
+            if let Some(mode) = round.comp_based_stats {
+                sets.retain(|param| param.name != "CompositionBasedStats");
+                sets.push(Param {
+                    name: "CompositionBasedStats",
+                    value: ParamValue::Integer(mode),
+                });
+            }
+            let request = handle.request();
+            round_request = super::ArchiveRequest {
+                step_number: request.database.is_some().then_some(round.number),
+                ..request.clone()
+            };
+            &round_request
+        }
+        None => handle.request(),
+    };
     let encoding = handle.encoding();
     // A big integer of -2^63 (`-dbsize`), which NCBI's ASN.1 text and XML writers print as `-0` (a
     // signed overflow of `COStreamBuffer::PutInt8`), is written as its digits: PD-LOSAT-NCBI-DEFECTS

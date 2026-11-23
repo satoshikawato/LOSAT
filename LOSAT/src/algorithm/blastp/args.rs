@@ -18,6 +18,18 @@ pub enum BlastpCompositionMode {
     ForceFullMatrixAdjust,
 }
 
+/// How a format's formatter cuts an app's traceback hit lists to the hit list size
+/// (`BlastpApp::list_cut`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListCut {
+    /// The lists as the search made them.
+    Uncut,
+    /// A copy of the lists cut after the round's PSSM and inclusion set are made from them.
+    AfterPssm,
+    /// The round's lists cut in place before its PSSM and inclusion set are made (psiblast's XML).
+    BeforePssm,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:877-886
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:44-56
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:418-421
@@ -44,6 +56,17 @@ impl BlastpApp {
         self.request_kind().application()
     }
 
+    /// The program type of the app's Seq-aligns where BLASTP does not name it
+    /// (`RunRecord::program_type`): psiblast's (every round) and rpsblast's.
+    pub fn program_type(self) -> Option<crate::report::record::ProgramType> {
+        use crate::report::record::ProgramType;
+        match self {
+            BlastpApp::Blastp => None,
+            BlastpApp::Psiblast => Some(ProgramType::PsiBlast),
+            BlastpApp::Rpsblast => Some(ProgramType::RpsBlast),
+        }
+    }
+
     /// The app's NCBI application (`options::RequestKind`).
     pub fn request_kind(self) -> crate::report::archive::options::RequestKind {
         use crate::report::archive::options::RequestKind;
@@ -59,6 +82,25 @@ impl BlastpApp {
     /// merged volumes. `# N hits found` of outfmt 7 counts before the cut.
     pub fn prunes_after_traceback(self) -> bool {
         matches!(self, BlastpApp::Psiblast | BlastpApp::Rpsblast)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:707-711
+    /// How the formatter of the output format `outfmt` cuts the app's hit lists: the one owner of
+    /// this rule for the search (`report_prep::report_values` reads it of the first format) and
+    /// for the library's grouping of formats into searches (`api::run::search_groups`), since a
+    /// search's lists are cut once for all its reports. `WriteArchive` cuts nothing; psiblast's
+    /// XML formatter cuts the round's results themselves before the round's PSSM and inclusion set
+    /// are made (`TrimSeqAlign`); the other formats of psiblast and rpsblast cut a copy after them
+    /// (`PruneSeqalign`); the lists of the other apps are never longer than the formats show.
+    pub fn list_cut(self, outfmt: i32) -> ListCut {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, XML};
+        match (self, outfmt) {
+            _ if !self.prunes_after_traceback() => ListCut::Uncut,
+            (_, ARCHIVE_FORMAT) => ListCut::Uncut,
+            (BlastpApp::Psiblast, XML) => ListCut::BeforePssm,
+            _ => ListCut::AfterPssm,
+        }
     }
 
     /// The name in LOSAT's rejections ("... is not supported by LOSAT's PSIBLAST").
@@ -967,6 +1009,15 @@ impl BlastpArgs {
         };
         let psi_search = match pssm_read {
             Some((mut search, file)) => {
+                // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-270
+                // psiblast's archive of each round of the PSSM holds the object that the search
+                // holds (the `CPsiBlast` constructor keeps the application's reference to it): after the
+                // constructor's scores, with the round's K/A written back
+                // (`blastp::archive::PsiArchive`).
+                if self.app == BlastpApp::Psiblast && self.archive.is_some() && file.valid {
+                    search.archive_pssm = Some(std::sync::Arc::new(file.object.clone()));
+                    search.archive_matrix_name_unwritable = file.matrix_name_unwritable();
+                }
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,

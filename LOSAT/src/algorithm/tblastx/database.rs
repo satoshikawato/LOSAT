@@ -160,10 +160,10 @@ impl TblastxDatabase {
         self.parsed && self.db.num_oids() > max_sequences
     }
 
-    /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::prefetch_refused`), which turns the report stream off.
-    pub(crate) fn prefetch_refused(&self) -> bool {
-        self.taxdb.prefetch_refused(&self.db)
+    /// Whether a fetch of the run may be refused because of NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::cache_may_refuse`), which turns the report stream off.
+    pub(crate) fn cache_may_refuse(&self) -> bool {
+        self.taxdb.cache_may_refuse(&self.db)
     }
 
     /// Whether a report that names any sequence of the database could be refused by LOSAT

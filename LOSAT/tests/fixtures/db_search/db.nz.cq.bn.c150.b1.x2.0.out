@@ -1,0 +1,108 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nz nc
+           4 sequences; 978 total letters
+
+
+
+Query= qx random qx
+
+Length=213
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 186930
+
+
+Query= q2
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sI_nz_nc subject sI                                                   154     1e-41
+sM_nz_nc subject sM                                                   114     1e-29
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 154 bits (170),  Expect = 1e-41
+ Identities = 142/180 (79%), Gaps = 0/180 (0%)
+ Strand=Plus/Plus
+
+Query  241  TTCTTCTACGAACAGTACGGGCAATTGGGCCGTTATATGGGCGGTGCACTAAAGATGTGC  300
+            || ||||| ||||||||||| ||  | || || || ||||| |||||| | |||||||||
+Sbjct  4    TTTTTCTATGAACAGTACGGACAGCTTGGGCGATACATGGGGGGTGCATTGAAGATGTGC  63
+
+Query  301  TCGGACTCGTGGGGATCCGGCGTGCCTGAGTCCAAGGTTCAGTGCACCTGGTCTTGTTCA  360
+            || |||   |||||   |||||| || ||||| ||||| |||||||| ||||| || |||
+Sbjct  64   TCCGACAGTTGGGGGAGCGGCGTACCCGAGTCGAAGGTGCAGTGCACGTGGTCATGCTCA  123
+
+Query  361  CGTCAGTATAACTACTTCATTGAGATAGCCTACACGTGCCACACCGACCCACTTCCTTGT  420
+            || |||||||| || || ||||| ||||| || || ||||| |||||||| || || |||
+Sbjct  124  CGCCAGTATAATTATTTTATTGAAATAGCGTATACCTGCCATACCGACCCCCTCCCATGT  183
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 114 bits (126),  Expect = 1e-29
+ Identities = 143/195 (73%), Gaps = 1/195 (1%)
+ Strand=Plus/Plus
+
+Query  216  TGATGATGATGATGACGATGATGATTTCTTCTACGAACAGTACGGGCAATTGGGCCGTTA  275
+            || || || || ||  | || || ||| ||||| || || || || ||  | ||| | ||
+Sbjct  220  TGGTGGTGGTGGTGGTGGTGGTGGTTT-TTCTATGAGCAATATGGCCAGCTAGGCAGATA  278
+
+Query  276  TATGGGCGGTGCACTAAAGATGTGCTCGGACTCGTGGGGATCCGGCGTGCCTGAGTCCAA  335
+            |||||| || ||||| || ||||| || ||||| ||||| || || || || ||||||||
+Sbjct  279  TATGGGTGGGGCACTCAAAATGTGTTCCGACTCCTGGGGTTCGGGGGTCCCCGAGTCCAA  338
+
+Query  336  GGTTCAGTGCACCTGGTCTTGTTCACGTCAGTATAACTACTTCATTGAGATAGCCTACAC  395
+            ||| || || || |||  |||    || || ||||| || |||||||| || || |||||
+Sbjct  339  GGTCCAATGTACTTGGAGTTGCAGCCGCCAATATAATTATTTCATTGAAATCGCGTACAC  398
+
+Query  396  GTGCCACACCGACCC  410
+            ||| || || |||||
+Sbjct  399  GTGTCATACAGACCC  413
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 376882
+
+
+  Database: nz nc
+    Posted date:  Nov 5, 2026  5:53 AM
+  Number of letters in database: 978
+  Number of sequences in database:  4
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

@@ -8,11 +8,13 @@
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { FastaReader, RecordKey, ShownIds } from '../../domain/dataset.js';
 import { isPrintedKind } from '../../domain/run-files.js';
-import { FileReadError, type StartResult, type ValidationResult } from '../../ports/engine.js';
+import { parseToolFrame, type ToolFrame } from '../../domain/tool-frames.js';
+import { FileReadError, type StartResult, type ToolValidation, type ValidationResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
+import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 12;
+export const ABI_VERSION = 13;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -40,6 +42,11 @@ export const MESSAGES_STREAM = 10;
  * `-xmlhelp`, or a version), for an argv whose start `prints` (ABI v2 §5, version 10; line WQA's D14, 2026-11-20).
  */
 export const PRINTED_STREAM = 11;
+/**
+ * Stream 12: the files that a tool run writes (`losat_web2_tool`, ABI v2 §5, version 13; line NP WW3a, D-WW3-6, 2026-11-22),
+ * each as it is written: every `emit` is one frame (domain/tool-frames.ts, `parseToolFrame`).
+ */
+export const TOOL_FILES_STREAM = 12;
 /** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */
 export const PLACE_NOWHERE = 0xffff_ffff;
 /**
@@ -117,6 +124,7 @@ export interface AbiExports {
   readonly losat_web2_inflate_chunk: Export;
   readonly losat_web2_inflate_end: Export;
   readonly losat_web2_run: Export;
+  readonly losat_web2_tool: Export;
   readonly losat_web2_file_begin: Export;
   readonly losat_web2_file_chunk: Export;
   readonly losat_web2_file_end: Export;
@@ -125,6 +133,17 @@ export interface AbiExports {
 
 /** Receives the output streams of a run; `bytes` is valid only during the call. */
 export type StreamSink = (stream: number, bytes: Uint8Array) => void;
+
+/**
+ * Receives the streams of a tool run as the engine writes them (ABI v2 §4 `losat_web2_tool`): the standard output
+ * (stream 11), the standard error (stream 3) and the frames of the files (stream 12). `bytes` of a chunk or of a frame of
+ * bytes is valid only during the call: the receiver copies it (`ownedFrame`) or posts it on.
+ */
+export interface ToolSink {
+  stdout(bytes: Uint8Array): void;
+  stderr(bytes: Uint8Array): void;
+  file(frame: ToolFrame): void;
+}
 
 /** An export returned -1; the message is the engine's error text (ABI v2 §4). */
 export class EngineCallError extends Error {
@@ -338,6 +357,15 @@ export class ReactorAbi {
     return { ok: true, dataLoaders: known! };
   }
 
+  /**
+   * The verdict on the argv of a tool run (`losat_web2_validate` with a tool's name as `argv[0]`, ABI v2 §4, version 13): the
+   * command line's error text, or valid. The call emits no response for it, and none is read.
+   */
+  validateTool(argv: readonly string[]): ToolValidation {
+    const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
+    return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
+  }
+
   /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 8). */
   register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
     const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
@@ -505,6 +533,28 @@ export class ReactorAbi {
     } finally {
       this.sink = undefined;
     }
+  }
+
+  /**
+   * Runs a tool (ABI v2 §4 `losat_web2_tool`): its standard output, standard error and the frames of its files go to `sink`
+   * during the call, as the tool writes them, and nothing of them is kept here; returns the exit status that the run's
+   * *status* response gives (the command line's, for any status). A name that is not a tool that the engine runs throws
+   * the engine's message.
+   */
+  tool(argv: readonly string[], sink: ToolSink): number {
+    this.sink = (stream, bytes) => {
+      if (stream === PRINTED_STREAM) sink.stdout(bytes);
+      else if (stream === DIAGNOSTICS_STREAM) sink.stderr(bytes);
+      else if (stream === TOOL_FILES_STREAM) sink.file(parseToolFrame(bytes));
+    };
+    try {
+      this.check(this.call(this.exports.losat_web2_tool, [encoder.encode(argv.join('\0'))]));
+    } finally {
+      this.sink = undefined;
+    }
+    const { status } = this.response() as { status?: unknown };
+    if (typeof status !== 'number' || !Number.isInteger(status)) throw new EngineCallError('the engine sent no exit status of the tool run');
+    return status;
   }
 
   private inflating(sink: (bytes: Uint8Array) => void, body: () => void): void {

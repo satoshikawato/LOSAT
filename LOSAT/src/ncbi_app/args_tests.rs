@@ -43,13 +43,21 @@ const ON_THE_READER: [&str; 7] = [
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
-    let words: Vec<String> = line.iter().map(|word| word.to_string()).collect();
+    let words: Vec<OsString> = line.iter().map(OsString::from).collect();
     parse(&tool(program), &words)
+}
+
+/// The messages of an exception as text (these tests' are UTF-8).
+fn texts(messages: &[Vec<u8>]) -> Vec<String> {
+    let texts = messages
+        .iter()
+        .map(|message| String::from_utf8(message.clone()));
+    texts.collect::<Result<_, _>>().unwrap()
 }
 
 fn messages(program: &'static str, line: &[&str]) -> (&'static str, Vec<String>) {
     match parse_words(program, line) {
-        Err(ArgsError::Invalid(ArgException { code, messages })) => (code, messages),
+        Err(ArgsError::Invalid(ArgException { code, messages })) => (code, texts(&messages)),
         other => panic!("{line:?}: {other:?}"),
     }
 }
@@ -266,7 +274,7 @@ fn class(constraint: Constraint) -> &'static str {
         Constraint::Integers { .. } => "Integers",
         Constraint::StringSet(_) => "StringSet",
         Constraint::IntegerSet(_) => "IntegerSet",
-        Constraint::GeneticCode => "GeneticCode",
+        Constraint::GeneticCode { .. } => "GeneticCode",
         Constraint::MaxFileNameLength(_) => "MaxFileNameLength",
     }
 }
@@ -300,7 +308,7 @@ fn every_default_passes_its_own_checks() {
         for desc in arguments.descs() {
             if let Some(default) = desc.default() {
                 assert!(
-                    process_value(desc, default).is_ok(),
+                    process_value(desc, default.as_bytes()).is_ok(),
                     "{program} -{} {default:?}",
                     desc.name()
                 );
@@ -358,7 +366,7 @@ fn the_reader_gives_ncbi_s_verdicts() {
         let same = match (&got, case.code) {
             (Ok(_), "ok") => true,
             (Err(ArgsError::Invalid(error)), code) => {
-                error.code == code && error.messages == strings(&case.messages)
+                error.code == code && texts(&error.messages) == strings(&case.messages)
             }
             _ => false,
         };
@@ -663,7 +671,7 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
-    const LOWER: [&str; 20] = [
+    const LOWER: [&str; 22] = [
         "name",
         "kind",
         "default",
@@ -679,6 +687,8 @@ fn the_tables_hold_no_pointer() {
         "descs",
         "aliases",
         "dependencies",
+        "refusals",
+        "with_32",
         "static",
         "true",
         "false",
@@ -731,4 +741,86 @@ fn the_tables_hold_no_pointer() {
     }
     assert_eq!(texts, 1);
     assert!(tables > 0);
+}
+
+// No NCBI counterpart: PD-TLOSAN-LOCAL-GENCODE-32. tblastn's `-db_gencode` allows LOSAT's code 32
+// beside NCBI's codes, with NCBI's usage text; tblastx's keys and the other programs' keep NCBI's
+// codes alone.
+#[test]
+fn tblastn_s_db_gencode_alone_allows_code_32() {
+    let constraint = |program, name| find_desc(arguments(program).unwrap(), name)?.constraint;
+    let ncbi: Vec<u32> = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16]
+        .into_iter()
+        .chain(21..=31)
+        .chain([33])
+        .collect();
+    let mut with_32 = ncbi.clone();
+    with_32.insert(with_32.len() - 1, 32);
+    assert_eq!(genetic_codes("tblastn", "db_gencode"), Some(with_32));
+    let tblastn = constraint("tblastn", "db_gencode").unwrap();
+    assert!(tblastn.verify(b"32") && tblastn.verify(b"33") && !tblastn.verify(b"7"));
+    assert_eq!(tblastn.usage(), "values between: 1-6, 9-16, 21-31, 33");
+    for (program, name) in [
+        ("tblastx", "db_gencode"),
+        ("tblastx", "query_gencode"),
+        ("blastx", "query_gencode"),
+        ("rpstblastn", "query_gencode"),
+    ] {
+        assert_eq!(
+            genetic_codes(program, name),
+            Some(ncbi.clone()),
+            "{program} -{name}"
+        );
+        let constraint = constraint(program, name).unwrap();
+        assert!(
+            !constraint.verify(b"32") && constraint.verify(b"1"),
+            "{program} -{name}"
+        );
+    }
+    assert_eq!(genetic_codes("tblastn", "evalue"), None);
+    assert_eq!(genetic_codes("blastp", "db_gencode"), None);
+}
+
+// The one list of LOSAT's refusals of NCBI's arguments (`REFUSED` of `build/ncbi_args.rs`): how
+// each is refused, and the values of a set of strings that describe reads.
+#[test]
+fn the_refusals_and_the_sets_come_from_the_tables() {
+    assert_eq!(refusal("blastn", "remote"), Some(Refusal::Read(None)));
+    assert_eq!(refusal("blastn", "db"), None);
+    assert_eq!(refusal("nosuchprogram", "remote"), None);
+    assert_eq!(
+        refusal("psiblast", "use_sw_tback"),
+        Some(Refusal::Run("the Smith-Waterman traceback"))
+    );
+    // tblastn's `-ungapped` runs (line NP item O4c).
+    assert_eq!(refusal("tblastn", "ungapped"), None);
+    // makeblastdb's `-gi_mask` and `-gi_mask_name` run (line NP item M4c-1): it refuses none.
+    assert_eq!(refusal("makeblastdb", "gi_mask"), None);
+    assert_eq!(refusal("makeblastdb", "gi_mask_name"), None);
+    // The programs on NCBI's reader refuse none of their arguments.
+    // (No count of the rows: un-refusing an argument is deleting its row of `REFUSED`.)
+    let rows = refusals();
+    for program in [
+        "blastdbcmd",
+        "convert2blastmask",
+        "dustmasker",
+        "makembindex",
+        "segmasker",
+        "windowmasker",
+        "rpsbproc",
+    ] {
+        assert!(!rows.iter().any(|row| row.0 == program), "{program}");
+    }
+    assert_eq!(
+        string_values("blastn", "task"),
+        Some(vec![
+            "blastn",
+            "blastn-short",
+            "dc-megablast",
+            "megablast",
+            "rmblastn"
+        ])
+    );
+    assert_eq!(string_values("tblastx", "task"), None);
+    assert_eq!(string_values("blastn", "evalue"), None);
 }

@@ -1,0 +1,13 @@
+
+
+Building a new DB, current time: <T>
+New DB name:   <C>/db
+New DB title:  t
+Sequence type: Nucleotide
+Deleted existing Nucleotide BLAST database named <C>/db
+Keep MBits: T
+Maximum file size: 3000000000B
+Mask file: dust_nucl.asnb
+Adding sequences from FASTA; added 12 sequences in <S> seconds.
+
+

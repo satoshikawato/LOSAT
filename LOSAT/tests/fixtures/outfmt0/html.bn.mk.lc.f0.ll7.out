@@ -1,0 +1,273 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_mask.fna).
+           1 sequences; 353 total letters
+
+
+
+<b>Query=</b> nq_mask query masks 0-74 100-119 170-180 240-250 255-270(gap
+262-264) 310-319(gap 320-321)
+
+Length=355
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns_mask subject masks 0 135-146(gap 140-141) 190-199(gap 200-202)...  <a href=#Subject_1>562</a>     7e-165
+
+
+><a name=Subject_1></a> ns_mask subject masks 0 135-146(gap 140-141) 190-199(gap 200-202) 
+280-285 287-292 338-344(gap 336-337) 350-359
+Length=353
+
+ Score = 562 bits (622),  Expect = 7e-165
+ Identities = 343/360 (95%), Gaps = 12/360 (3%)
+ Strand=Plus/Plus
+
+Query  1    ttgccta  7
+            |||||||
+Sbjct  1    tTGCCTA  7
+
+Query  8    <font color="#000000">tccgctg</font>  14
+            |||||||
+Sbjct  8    TCCGCTG  14
+
+Query  15   <font color="#000000">gcgagaa</font>  21
+            |||||||
+Sbjct  15   GCGAGAA  21
+
+Query  22   <font color="#000000">gtggtgg</font>  28
+            |||||||
+Sbjct  22   GTGGTGG  28
+
+Query  29   <font color="#000000">acgttat</font>  35
+            || ||||
+Sbjct  29   ACATTAT  35
+
+Query  36   <font color="#000000">gagtttt</font>  42
+            |||||||
+Sbjct  36   GAGTTTT  42
+
+Query  43   <font color="#000000">gtgatag</font>  49
+            |||||||
+Sbjct  43   GTGATAG  49
+
+Query  50   <font color="#000000">accacgg</font>  56
+            |||||||
+Sbjct  50   ACCACGG  56
+
+Query  57   <font color="#000000">gtcaatg</font>  63
+            |||||||
+Sbjct  57   GTCAATG  63
+
+Query  64   <font color="#000000">agacaaa</font>  70
+            |||||||
+Sbjct  64   AGACAAA  70
+
+Query  71   <font color="#000000">gtcga</font>GA  77
+            |||||||
+Sbjct  71   GTCGAGA  77
+
+Query  78   CAAGACC  84
+            |||||||
+Sbjct  78   CAAGACC  84
+
+Query  85   ATTGTGG  91
+            |||||| 
+Sbjct  85   ATTGTGT  91
+
+Query  92   TAAAAGT  98
+            |||||||
+Sbjct  92   TAAAAGT  98
+
+Query  99   TC<font color="#000000">gcagt</font>  105
+            |||||||
+Sbjct  99   TCGCAGT  105
+
+Query  106  <font color="#000000">tgggtat</font>  112
+            |||||||
+Sbjct  106  TGGGTAT  112
+
+Query  113  <font color="#000000">tgtccga</font>  119
+            |||||||
+Sbjct  113  TGTCCGA  119
+
+Query  120  <font color="#000000">gCAATCC</font>  126
+            |||||||
+Sbjct  120  GCAATCC  126
+
+Query  127  GCTATCC  133
+            |||||||
+Sbjct  127  GCTATCC  133
+
+Query  134  TTAAGTA  140
+            |||||||
+Sbjct  134  TT<font color="#000000">aagta</font>  140
+
+Query  141  GCCACGG  147
+              |||||
+Sbjct  141  <font color="#000000">--cacgg</font>  145
+
+Query  148  TCTCGTG  154
+            |||||||
+Sbjct  146  TCTCGTG  152
+
+Query  155  CCACCAT  161
+            | |||||
+Sbjct  153  CAACCAT  159
+
+Query  162  ATACTGT  168
+            |||||||
+Sbjct  160  ATACTGT  166
+
+Query  169  TA<font color="#000000">tgaga</font>  175
+            |||||||
+Sbjct  167  TATGAGA  173
+
+Query  176  <font color="#000000">cattgg</font>A  182
+            |||||||
+Sbjct  174  CATTGGA  180
+
+Query  183  TTTGCCA  189
+            |||||||
+Sbjct  181  TTTGCCA  187
+
+Query  190  GCAATGT  196
+            |||||||
+Sbjct  188  G<font color="#000000">caatgt</font>  194
+
+Query  197  TAAGACA  203
+            ||||   
+Sbjct  195  <font color="#000000">taag</font>---  198
+
+Query  204  CGCCATT  210
+            |||||||
+Sbjct  199  CGCCATT  205
+
+Query  211  TCTAGAG  217
+            |||||||
+Sbjct  206  TCTAGAG  212
+
+Query  218  ATTTAGG  224
+            |||||||
+Sbjct  213  ATTTAGG  219
+
+Query  225  TTGGAGG  231
+            | |||||
+Sbjct  220  TGGGAGG  226
+
+Query  232  TGGTGGT  238
+            |||||||
+Sbjct  227  TGGTGGT  233
+
+Query  239  CG<font color="#000000">acgac</font>  245
+            |||||||
+Sbjct  234  CGACGAC  240
+
+Query  246  <font color="#000000">tgtggt</font>T  252
+            |||||||
+Sbjct  241  TGTGGTT  247
+
+Query  253  AGT<font color="#000000">cgtg</font>  259
+            |||||||
+Sbjct  248  AGTCGTG  254
+
+Query  260  <font color="#000000">gcg---g</font>  263
+            |||   |
+Sbjct  255  GCGACCG  261
+
+Query  264  <font color="#000000">caccc</font>AA  270
+            |||||||
+Sbjct  262  CACCCAA  268
+
+Query  271  TTGGCGT  277
+            |||||||
+Sbjct  269  TTGGCGT  275
+
+Query  278  TGTTCAC  284
+            |||||||
+Sbjct  276  <font color="#000000">tgttca</font>C  282
+
+Query  285  TCCCTAA  291
+            |||||||
+Sbjct  283  <font color="#000000">tcccta</font>A  289
+
+Query  292  ACCGGAA  298
+            | |||||
+Sbjct  290  AGCGGAA  296
+
+Query  299  ACAGATC  305
+            |||||||
+Sbjct  297  ACAGATC  303
+
+Query  306  TC<font color="#000000">ctcac</font>  312
+            |||||||
+Sbjct  304  TCCTCAC  310
+
+Query  313  <font color="#000000">acccc</font>--  317
+            |||||  
+Sbjct  311  ACCCCGT  317
+
+Query  318  ACCAAAA  324
+            |||||||
+Sbjct  318  ACCAAAA  324
+
+Query  325  TCATGAC  331
+            |||||||
+Sbjct  325  TCATGAC  331
+
+Query  332  AAGTTCA  338
+              |||||
+Sbjct  332  --<font color="#000000">gttca</font>  336
+
+Query  339  CGTCGAC  345
+            |||||||
+Sbjct  337  <font color="#000000">cg</font>TCGAC  343
+
+Query  346  GTCGTCC  352
+            |||||||
+Sbjct  344  <font color="#000000">gtcgtcc</font>  350
+
+Query  353  CGT  355
+            |||
+Sbjct  351  <font color="#000000">cgt</font>  353
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 117648
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_mask.fna).
+    Posted date:  Unknown
+  Number of letters in database: 353
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2
+</PRE>
+</BODY>
+</HTML>

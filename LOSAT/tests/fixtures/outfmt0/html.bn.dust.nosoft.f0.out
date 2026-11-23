@@ -1,0 +1,79 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/sn_lc.fa).
+           1 sequences; 260 total letters
+
+
+
+<b>Query=</b> qn_lc query with lowercase
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn_lc lowercase subject                                               <a href=#Subject_1>248</a>     2e-70
+
+
+><a name=Subject_1></a> sn_lc lowercase subject
+Length=260
+
+ Score = 248 bits (274),  Expect = 2e-70
+ Identities = 177/201 (88%), Gaps = 2/201 (1%)
+ Strand=Plus/Plus
+
+Query  1    GGTGTACTTTTCTCCCCCTCGTAGTAGCCTAAGGGTTTAACCCGCACGCCGTGGCTTGAG  60
+            |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||
+Sbjct  1    GGTGTACTTTTCTCCCCCTCGTTGTAGCCTAAGGGTTTAACCCGCACGCCGTGGCTTGAG  60
+
+Query  61   CCAATCGCTGAGAGACTGAGGATTGTTTATTCAGGCACAGAAGGAGCAGAAAGGGCTGCC  120
+            ||||||||||||||||||||||||||| ||||||||||| ||||||||||||||||||||
+Sbjct  61   CCAATCGCTGAGAGACTGAGGATTGTTAATTCAGGCACATAAGGAGCAGAAAGGGCTGCC  120
+
+Query  121  ATATTTGGCGCCAT-CGTCACAAGCTCTAACCGCGTCTGGCGTACGATGACTAACGCTCT  179
+              |    ||  | |  | | ||| |    | |||||||||||||||||||||||||||||
+Sbjct  121  GAAGACAGCTTCTTGGGACTCAATCAAGGA-CGCGTCTGGCGTACGATGACTAACGCTCT  179
+
+Query  180  CGGCTTTCTGCCGGGAAGCAT  200
+            ||||||||||| ||||| |||
+Sbjct  180  CGGCTTTCTGCTGGGAATCAT  200
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 86901
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/sn_lc.fa).
+    Posted date:  Unknown
+  Number of letters in database: 260
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2
+</PRE>
+</BODY>
+</HTML>

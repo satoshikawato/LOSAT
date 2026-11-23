@@ -304,8 +304,8 @@ pub(super) fn run(
         Ok(params) => params,
         Err(status) => return status,
     };
-    if let Some(what) = refusal(args) {
-        return diag.refuse(&unsupported(&what));
+    if let Some(refusal) = refusal(args) {
+        return diag.refuse(&refusal);
     }
     let mut built = Built {
         vol_names: Vec::new(),
@@ -339,16 +339,18 @@ pub(super) fn dry_run(
     }
 }
 
-/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads, each a noun phrase: the
-/// binary profiles of `-binary` (their reader, row PS10b) and the database types other than
-/// `rps` (row PS14).
+/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads: the binary profiles of
+/// `-binary` (their reader, row PS10b; its row of the refusals, `cli::run_refusal`) and the
+/// database types other than `rps` (row PS14).
 fn refusal(args: &Args) -> Option<String> {
     if args.flag("binary") {
-        return Some("-binary (PSSM files in ASN.1 binary)".to_string());
+        return Some(crate::cli::run_refusal(super::PROGRAM, "binary"));
     }
     match args.value("dbtype") {
         Some("rps") | None => None,
-        Some(dbtype) => Some(format!("-dbtype {dbtype} (only -dbtype rps is built)")),
+        Some(dbtype) => Some(unsupported(&format!(
+            "-dbtype {dbtype} (only -dbtype rps is built)"
+        ))),
     }
 }
 

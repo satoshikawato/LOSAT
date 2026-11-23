@@ -753,8 +753,16 @@ impl WriteDb {
     // (`destroy_after_failed_close`). An exception that leaves one of these destructors ends
     // makeblastdb (`std::terminate`): LOSAT ends with an error there, and no destructor runs
     // after it (`lmdb` and `taxdb` are dropped without their work).
-    /// `Close`: publishes the last sequence, closes the last volume, gives
-    /// the files their final names, and writes the LMDB files of version 5.
+    //
+    // The GI masks close between the last volume and the renames, and the alias file follows
+    // them, before the LMDB step: a version 5 build whose LMDB step fails (duplicate Seq-ids)
+    // leaves its GI-mask files and its alias file, which `list_files` does not name. When
+    // `x_Publish` fails, the GI masks are not closed: their data files hold what was written
+    // (the streams write it when they are dropped, as NCBI's destructors do), and no offset or
+    // index file is made.
+    /// `Close`: publishes the last sequence, closes the last volume and the GI masks, gives
+    /// the files their final names, writes the alias file of a database of several volumes or
+    /// with GI masks, and the LMDB files of version 5.
     pub fn close(&mut self) -> Result<(), WriteDbError> {
         if self.closed {
             return Ok(());
@@ -768,6 +776,7 @@ impl WriteDb {
         self.volumes[count - 1].close()?;
         drop(self.volumes[count - 1].take_offset_arrays());
         drop(self.volumes[count - 1].take_index_scratch());
+        self.mask.close_gi_masks();
         if count == 1 {
             self.volumes[0].rename_single();
         } else if count > 100 {
@@ -776,7 +785,7 @@ impl WriteDb {
                 volume.rename_file_index(num_digits);
             }
         }
-        if count > 1 {
+        if count > 1 || self.mask.uses_gi_masks() {
             self.make_alias();
         }
         if self.version == DbVersion::V5 {
@@ -863,19 +872,32 @@ impl WriteDb {
 
     /// `RegisterMaskAlgorithm` of a program, its options and a name: registers a masking algorithm
     /// of the filtering program `program` (a `Blast-filter-program` number) and returns its id.
-    /// `name` is the name of the mask file for makeblastdb. The first registration creates the mask
-    /// column.
+    /// `name` is the name of the mask file for makeblastdb (with `-gi_mask`, the name of the
+    /// algorithm's GI-mask files). The first registration creates the mask column; with
+    /// `-gi_mask` every registration creates the GI masks of the algorithm instead.
     pub fn register_mask_algorithm(
         &mut self,
         program: i32,
         options: &[u8],
         name: &[u8],
     ) -> Result<i32, WriteDbError> {
-        let id = self
-            .mask
-            .register_program(program, options, name, !self.volumes.is_empty())?;
+        let id = self.mask.register_program(
+            program,
+            options,
+            name,
+            !self.volumes.is_empty(),
+            self.max_file_size,
+            &self.column_dates,
+        )?;
         self.note_mask_column();
         Ok(id)
+    }
+
+    /// The `use_gi_mask` argument of `CWriteDB` (`makeblastdb -gi_mask`): the masking algorithms
+    /// write GI-indexed files (`super::gi_mask`) instead of the mask column, and the database
+    /// gets an alias file whatever its number of volumes. Called before any registration.
+    pub fn use_gi_masks(&mut self) {
+        self.mask.use_gi_masks();
     }
 
     /// `RegisterMaskAlgorithm` of an id, a description and options: the form of
@@ -893,10 +915,15 @@ impl WriteDb {
         Ok(id)
     }
 
-    /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs are
-    /// written with it when it is published). The ranges are those
+    /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs
+    /// are written with it when it is published; with `-gi_mask` they go to the GI masks under
+    /// the sequence's GIs `gis`, and nowhere for a sequence without one). The ranges are those
     /// `MaskedRangeSet::get_ranges` gives.
-    pub fn set_mask_data(&mut self, ranges: &[MaskedRanges]) -> Result<(), WriteDbError> {
+    pub fn set_mask_data(
+        &mut self,
+        ranges: &[MaskedRanges],
+        gis: &[i64],
+    ) -> Result<(), WriteDbError> {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:964-987
         // `x_ComputeSeqLength` of a sequence from a `CBioseq` is the length of its Seq-inst, of
         // a sequence in the form of the sequence file `WriteDB_FindSequenceLength`.
@@ -908,9 +935,14 @@ impl WriteDb {
             _ => None,
         };
         self.mask
-            .set_mask_data(ranges, seq_length, !self.volumes.is_empty())?;
+            .set_mask_data(ranges, gis, seq_length, !self.volumes.is_empty())?;
         self.note_mask_column();
         Ok(())
+    }
+
+    /// `m_UseGiMask`: whether the masks go to GI-indexed files (`use_gi_masks`).
+    pub fn uses_gi_masks(&self) -> bool {
+        self.mask.uses_gi_masks()
     }
 
     /// Puts the mask column in the list of columns when the mask writer has just made it (the
@@ -1027,18 +1059,41 @@ impl WriteDb {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:405-434
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:405-438
     // The `ofstream` is not tested (`super::ofstream`): an alias file that cannot be opened or
     // written leaves the build going on, and the new database cannot be opened afterwards. The
-    // stream writes the file when it is destroyed. makeblastdb sets no GI mask.
-    /// `x_MakeAlias`: the alias file of a database of several volumes.
+    // stream writes the file when it is destroyed.
+    //
+    // With `-gi_mask` a database of one volume gets an alias file too. NCBI's `DBLIST` there is
+    // the database's own absolute name (`m_Dbname`): the alias file names itself through a
+    // directory, which NCBI's reader takes as another alias file, and every read of the database
+    // ends with "DB alias files are mutually recursive" (NCBI's own makeblastdb too, at its `.njs`
+    // step: exit status 2). LOSAT writes the database's file name without a directory there,
+    // as the list of several volumes names each volume: NCBI's reader takes a `DBLIST` entry
+    // without a directory and with the alias file's own name as the volume
+    // (`CSeqDBAliasNode::x_ExpandAliases`, seqdbalias.cpp:764-797), so the database opens and
+    // the build goes on as a build of several volumes does (approved exception 25 of
+    // PD-LOSAT-NCBI-DEFECTS, the Owner's decision of 2026-11-20; NCBI BLAST+ 2.17.0 reads such a
+    // database: `docs/evidence/gi_mask_single_volume/`). `MASKLIST` names the GI masks that got
+    // GIs, each followed by a space.
+    /// `x_MakeAlias`: the alias file of a database of several volumes, or of a database with GI
+    /// masks.
     fn make_alias(&self) {
         let mut dblist = Vec::new();
-        for (i, volume) in self.volumes.iter().enumerate() {
-            if i > 0 {
-                dblist.push(b' ');
+        if self.volumes.len() > 1 {
+            for (i, volume) in self.volumes.iter().enumerate() {
+                if i > 0 {
+                    dblist.push(b' ');
+                }
+                dblist.extend_from_slice(file_name(volume.volume_name()).as_bytes());
             }
-            dblist.extend_from_slice(file_name(volume.volume_name()).as_bytes());
+        } else {
+            dblist.extend_from_slice(file_name(&self.dbname).as_bytes());
+        }
+        let mut masklist = Vec::new();
+        for name in self.mask.gi_mask_names().filter(|name| !name.is_empty()) {
+            masklist.extend_from_slice(name.as_bytes());
+            masklist.push(b' ');
         }
         let mut alias = OfStream::create(Path::new(&self.alias_name()));
         alias.insert(b"#\n# Alias file created: ");
@@ -1050,6 +1105,11 @@ impl WriteDb {
         alias.insert(b"DBLIST ");
         alias.insert(&dblist);
         alias.insert(b"\n");
+        if !masklist.is_empty() {
+            alias.insert(b"MASKLIST ");
+            alias.insert(&masklist);
+            alias.insert(b"\n");
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1655-1674
@@ -1065,7 +1125,9 @@ impl WriteDb {
     // other files of `CWriteDB_LMDB` and `CWriteDB_TaxID` (`.pos`, `.ptf`,
     // `.pot`, `.pto`) are not, so a failed build of version 5 leaves them
     // (makeblastdb 2.17.0, an error in the FASTA input after the first
-    // sequence: `db.pot`, `db.ptf` and `db.pto` stay).
+    // sequence: `db.pot`, `db.ptf` and `db.pto` stay). Nor are the files of the GI masks, or the
+    // alias file of a database of one volume with GI masks: a failed build with `-gi_mask` leaves
+    // them (survey b1/w30, b2/x03_oob_gi_gimask).
     /// `ListFiles`: every file of the database written so far.
     pub fn list_files(&self) -> Vec<String> {
         let mut files = Vec::new();

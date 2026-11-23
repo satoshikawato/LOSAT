@@ -435,6 +435,7 @@ pub(crate) fn link_even(
         .iter()
         .map(|h| LinkHsp {
             context: h.context,
+            subject_frame: 0,
             query_offset: h.q_start,
             query_end: h.q_end,
             subject_offset: h.s_start,

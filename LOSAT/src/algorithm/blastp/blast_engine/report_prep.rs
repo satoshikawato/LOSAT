@@ -1151,6 +1151,30 @@ pub(super) fn described_subjects(
     )
 }
 
+/// `described_subjects` of the pairwise view `view` by query, of the rows of `query_rows`: the
+/// subjects whose description lines each query's report shows in a format of that view, which the
+/// refusals of what those lines show ask for (`ListedTitles::refuse_described_lines`).
+pub(super) fn described_in<'r>(
+    view: crate::report::pairwise::PairwiseView,
+    args: &'r ResolvedBlastpArgs,
+    pairwise_hits: &'r Option<Arc<Vec<PairwiseHit>>>,
+    rows_of: &'r impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
+    listed_titles: &'r Option<database::ListedTitles<'r>>,
+    psi_found_before: &'r Option<psi_round::FoundBefore>,
+) -> impl Fn(usize) -> Result<Vec<u32>> + 'r {
+    move |q_idx| {
+        let rows = query_rows(pairwise_hits, rows_of, q_idx)?;
+        Ok(described_subjects(
+            view,
+            args,
+            &rows,
+            listed_titles,
+            psi_found_before,
+            q_idx,
+        ))
+    }
+}
+
 // The steps from the final hit lists to the labels of the reports (`ReportSetup`), before the
 // rows of the reports. `hit_list_to_seqalign_order` is `blast_engine`'s import (from `hsp`),
 // which only this module reads.

@@ -1748,7 +1748,7 @@ impl ListedTitles<'_> {
                     let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
                     hit_list.hsplist_array[..count]
                         .iter()
-                        .map(|hsp_list| hsp_list.oid as u32)
+                        .map(|hsp_list| hsp_list.oid)
                         .collect()
                 }
                 None => Vec::new(),

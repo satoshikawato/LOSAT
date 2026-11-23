@@ -5405,21 +5405,28 @@ fn check_shown_subject_titles(
 }
 
 /// The titles that a pairwise report shows, checked where the subjects are a database's
-/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`)
-/// or a FASTA set's (`check_shown_subject_titles`).
+/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`,
+/// then `ListedTitles::refuse_described_lines` of the subjects of the final `hit_lists` whose
+/// description lines the report prints, `described`: line RG-KB item 12 review 1) or a FASTA
+/// set's (`check_shown_subject_titles`).
 fn check_pairwise_shown_titles(
     listed_titles: Option<&database::ListedTitles<'_>>,
     database: Option<&database::BlastpDatabase>,
     shown: &std::collections::BTreeSet<usize>,
     subject_records: &[FastaRecord],
     loads: &crate::report::db_subject::HitLoads,
+    hit_lists: &[Option<BlastpHitList>],
+    described: impl FnMut(usize) -> Result<Vec<u32>>,
 ) -> Result<()> {
     match listed_titles {
-        Some(titles) => titles.check_shown_titles(
-            database.expect("listed titles are a database's"),
-            shown,
-            loads,
-        ),
+        Some(titles) => {
+            titles.check_shown_titles(
+                database.expect("listed titles are a database's"),
+                shown,
+                loads,
+            )?;
+            titles.refuse_described_lines(hit_lists, loads, described)
+        }
         None => check_shown_subject_titles(shown.iter().copied(), subject_records),
     }
 }
@@ -10842,25 +10849,16 @@ fn run_call(
                     &shown,
                     subject_records,
                     &prefetched.hit_loads,
-                )
-                .and_then(|()| match listed_titles.as_ref() {
-                    // What the description lines show, of the subjects whose lines the format
-                    // prints (the first `-num_descriptions`; line RG-KB item 12 review 1).
-                    Some(titles) => {
-                        titles.refuse_described_lines(&hit_lists, &prefetched.hit_loads, |q_idx| {
-                            let rows = report_prep::query_rows(&pairwise_hits, &rows_of, q_idx)?;
-                            Ok(report_prep::described_subjects(
-                                view,
-                                &args,
-                                &rows,
-                                &listed_titles,
-                                &psi_found_before,
-                                q_idx,
-                            ))
-                        })
-                    }
-                    None => Ok(()),
-                });
+                    &hit_lists,
+                    report_prep::described_in(
+                        view,
+                        &args,
+                        &pairwise_hits,
+                        &rows_of,
+                        &listed_titles,
+                        &psi_found_before,
+                    ),
+                );
                 if !format.refusal.check(checked)? {
                     continue;
                 }

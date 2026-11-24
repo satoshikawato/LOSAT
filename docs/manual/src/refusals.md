@@ -50,16 +50,17 @@ There is one section for each program, and one for the five search programs toge
 | Option or feature | Programs affected | Status in v0.2.0 |
 | :--- | :--- | :--- |
 | `-remote`, `-entrez_query` | All search programs | Out of scope (needs NCBI servers) |
-| `-gilist`, `-negative_gilist` | Five search programs, `psiblast` | Out of scope (GI lists) |
+| `-gilist`, `-negative_gilist` | Five search programs, `psiblast`, `deltablast` | Out of scope (GI lists) |
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
-| `-html` | `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` with `-outfmt 1` to `4`; `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
-| `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
+| `-html` | `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` with `-outfmt 1` to `4`; `psiblast`, `deltablast`, `rpsblast`, `rpstblastn` | Not yet supported |
+| `-use_sw_tback` | `psiblast`, `deltablast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
 | `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
+| `-show_domain_hits`, `-query_loc`, non-listed `-outfmt`, `-export_search_strategy` | `deltablast` | Not yet supported (listed: `0`, `6` and `7`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
-| `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
+| `blast_formatter` | Standalone executable | Not yet provided |
 
 ## All five search programs
 
@@ -234,6 +235,27 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 `-matrix IDENTITY` gives NCBI's own error.
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#psiblast).
+
+## deltablast
+
+`deltablast` refuses what `psiblast` refuses for the same options, and a few more. `-remote`, `-entrez_query` and `-import_search_strategy` are refused as in all programs (see the end of this page); `-matrix IDENTITY` gives NCBI's own error.
+
+| Option or value | What happens |
+| :--- | :--- |
+| `-show_domain_hits` | Refused: not yet supported. |
+| `-query_loc` | Refused: not yet supported. |
+| `-outfmt` other than `0`, `6` and `7` | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors, as in `psiblast`. |
+| `-html` | Refused: not yet supported. |
+| `-export_search_strategy` | Refused: not yet supported. |
+| `-use_sw_tback` | Refused, as in `psiblast` (NCBI runs it). |
+| `-gilist`, `-negative_gilist` | Refused: out of scope (GI lists), as in `psiblast`. |
+| A domain database (`-rpsdb`) of several volumes | Refused before anything is written. NCBI searches it. |
+| `-subject` with more records than `-max_target_seqs` | Refused before anything is written. NCBI's first search keeps only the best subjects of the whole set, which LOSAT does not do yet. |
+| `-num_iterations 0` with several queries that NCBI reads together (with one round, and with `-num_iterations 0`, NCBI reads queries together up to 10,000 letters; with 2 or more rounds, one query at a time) | Refused before anything is written. NCBI runs the rounds after the first for the first of those queries only. |
+| A query whose letters give no Karlin-Altschul parameters (a query of `X` alone, for example) read together with other queries in a one-round run | Refused. NCBI crashes. Such a query alone, or with 2 or more rounds, gets NCBI's error (`LOSAT engine error: NULL alignments`, exit status 3), as in NCBI. |
+| `-save_pssm_after_last_round` with one round, when the first of the queries read together has no alignments | Refused, after the PSSM files that NCBI writes before it. NCBI stops with a null pointer exception. |
+
+For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#deltablast).
 
 ## tblastn with `-in_pssm`
 
@@ -442,16 +464,17 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## On the list for a later release
 
-- The programs `deltablast` and `blast_formatter`.
+- The program `blast_formatter`.
 - `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
-- `-html` with `-outfmt 1` to `4`, and in `psiblast`, `rpsblast` and `rpstblastn`.
+- `deltablast`: `-show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, `-html` and `-export_search_strategy`.
+- `-html` with `-outfmt 1` to `4`, and in `psiblast`, `deltablast`, `rpsblast` and `rpstblastn`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 
 - `-remote` and `-entrez_query`: all programs.
-- `-gilist` and `-negative_gilist`: all five search programs and `psiblast`.
+- `-gilist` and `-negative_gilist`: all five search programs, `psiblast` and `deltablast`.
 - `-ipglist` and `-negative_ipglist`: `blastp`, `blastx`, `psiblast`.
 - `-import_search_strategy`: all programs that take it.
 

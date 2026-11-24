@@ -17,7 +17,7 @@ LOSAT Web is an in-browser graphical interface for local sequence searches built
 - **Subjects:** FASTA subjects (`-subject`) loaded locally in the browser.
 - **Not available in LOSAT Web:**
   - BLAST database searches (`-db`), `-filtering_db`, and `-window_masker_taxid` (other than `0`);
-  - PSI-BLAST (`psiblast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, and database tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`);
+  - PSI-BLAST (`psiblast`), DELTA-BLAST (`deltablast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, and database tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`);
   - `tblastn -in_pssm`.
 
 ## Threads in the browser

@@ -200,6 +200,16 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-out_pssm`, a PSSM in ASN.1 binary form whose author names (`Auth-list` `names`, which NCBI reads again only when it writes them) give a message or an error when they are read again. The warning of a UTF8String tag is not one of them: NCBI gives it once, when it first reads the file, and writes the names.
 - A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text and ASN.1 binary are read as NCBI reads them.
 
+## deltablast
+
+These inputs are refused where NCBI BLAST+ 2.17.0 crashes, writes outside its alignment, or reads a domain database that is not built as it expects.
+
+- A domain database (`-rpsdb`) whose Seq-align ids are not local or general ids.
+- A domain whose header has no Seq-id.
+- A domain database in which the id of a profile finds another profile or none.
+- A query whose domain hit has a segment outside the query or of negative length. NCBI writes outside its alignment.
+- A query whose letters give Karlin-Altschul parameters with the domain search's matrix (BLOSUM62) but not with `-matrix`.
+
 ## tblastn with `-in_pssm`
 
 - Where NCBI stops before the search, as for `psiblast -in_pssm`, the output formats (every format `tblastn` writes, `-outfmt 11` included) and the query's titles are not refused. NCBI's prolog and error are written.

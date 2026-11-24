@@ -105,7 +105,7 @@ See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [w
 | Program | Database it reads |
 | --- | --- |
 | [`blastn`](programs/blastn.md), [`tblastx`](programs/tblastx.md), [`tblastn`](programs/tblastn.md) | Nucleotide |
-| [`blastp`](programs/blastp.md), [`blastx`](programs/blastx.md), [`psiblast`](programs/psiblast.md) | Protein |
+| [`blastp`](programs/blastp.md), [`blastx`](programs/blastx.md), [`psiblast`](programs/psiblast.md), [`deltablast`](programs/deltablast.md) | Protein. `deltablast` also reads a domain database with `-rpsdb`, see below. |
 | [`rpsblast`](programs/rpsblast.md), [`rpstblastn`](programs/rpstblastn.md) | A profile database, such as NCBI's CDD (files `.rps`, `.loo`, `.aux`, `.freq`; one or several volumes): NCBI's, or one built by [`makeprofiledb`](programs/makeprofiledb.md). |
 | [`blastdbcmd`](programs/blastdbcmd.md) | Either; `-dbtype` chooses when a name exists for both. |
 | [`dustmasker`](programs/dustmasker.md) (`-infmt blastdb`) | Nucleotide |
@@ -113,7 +113,9 @@ See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [w
 | [`segmasker`](programs/segmasker.md) (`-infmt blastdb`) | Protein |
 | [`rpsbproc`](programs/rpsbproc.md) | None: it reads the archives that `rpsblast` and `rpstblastn` write, and the CDD data files. |
 
-`-subject` works with `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`; `rpsblast` and `rpstblastn` take only `-db`, as in NCBI.
+`-subject` works with `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast` and `deltablast`; `rpsblast` and `rpstblastn` take only `-db`, as in NCBI.
+
+The domain database of `deltablast` (`-rpsdb`, default `cdd_delta`) is found as `-db` is: in the current folder, then in the folders of `BLASTDB`. It must be a DELTA-BLAST domain database: NCBI's `cdd_delta` (download `blast/db/cdd_delta.tar.gz` from NCBI's FTP site) or one made by NCBI's `makeprofiledb -dbtype delta`. It needs the files `.freq`, `.wcounts` and `.obsr` besides the RPS files, and a domain database of several volumes is refused (see [What LOSAT refuses](refusals.md#deltablast)).
 
 A database of the wrong molecule type is reported as not found, with NCBI's message `No alias or index file found for nucleotide database [NAME]` (or `protein`).
 

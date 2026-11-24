@@ -17,6 +17,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Search | [`tblastn`](programs/tblastn.md) | Protein query against translated nucleotide subjects. Tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm`. |
 | Search | [`tblastx`](programs/tblastx.md) | Translated nucleotide query against translated nucleotide subjects. |
 | Search | [`psiblast`](programs/psiblast.md) | Position-specific iterated search, from a protein query or a PSSM. |
+| Search | [`deltablast`](programs/deltablast.md) | Position-specific iterated search whose first round uses the conserved domains of the protein query (DELTA-BLAST). |
 | Search | [`rpsblast`](programs/rpsblast.md) | Protein queries against a database of profiles such as CDD. |
 | Search | [`rpstblastn`](programs/rpstblastn.md) | Translated nucleotide queries against a database of profiles. |
 | Databases and masks | [`makeblastdb`](programs/makeblastdb.md) | Builds a BLAST database (version 5 by default, or 4) from FASTA, also from a `.gz`, `.bz2` or `.zst` file. |
@@ -43,9 +44,10 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast` and `blast_formatter`, and `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`;
+- the program `blast_formatter`, and `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`;
+- `deltablast -show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, and `-export_search_strategy`;
 - `-html`.
 
 LOSAT does not provide these NCBI programs: `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.

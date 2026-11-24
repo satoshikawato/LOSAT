@@ -36,4 +36,14 @@ GI-indexed masks whose alias file's `MASKLIST` names them with the byte 0xE9 (th
 mask files of `LOSAT/tests/seqdb/gi_mask_read/db/sv4`, the masks copied under that name):
 blastdbcmd `-info`, `%m0`, `-mask_sequence_with` by that name and by an unknown one (NCBI's table of
 names keeps the byte), a `MASKLIST` name without files, makembindex `-show_filters` and `-db_mask`,
-and blastn `-db_soft_mask`.
+and blastn `-db_soft_mask`. Then (round 2 of the item's review, the same day) each line of `.files` also holds the file's
+size and the FNV-1a 64 of its bytes (the case's directory in them as `{D}`), but for the files that
+hold their time of writing, whose names end with `.nin`, `.pin`, `.nal`, `.pal`, `.njs` or `.pjs`
+(`*`; two freezes a minute apart gave the same `.files` for every case), and the test masks the
+seconds of makeblastdb's `added <n> sequences in <seconds> seconds.`; the setup steps gained
+`symlink` and `cwd` (the directory where the program runs), and eleven cases: windowmasker
+`-exclude_ids` of a file and masking a database (`-infmt blastdb`), makeprofiledb `-taxid_map` of a
+file, an `-in` list entry and a run in a directory, makeblastdb in a directory (`K10_mb_cwd`: the
+database name is the directory's bytes and `-out`), blastdbcmd `-taxidlist` and `-ipg_batch` of a
+file, an alias file's `DBLIST` entry, a database through a symbolic link to a directory, and a
+volume without its `.nsq` (NCBI's `File (...) not found` keeps the byte), each name with 0xE9.

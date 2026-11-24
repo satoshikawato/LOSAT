@@ -10,8 +10,10 @@
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
-//! `Building a new DB, current time: ` is not compared (as `dropin_corpus.py`); the names of the
-//! files and directories the run made are (`expected/<case>.files`, `made`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
+//! `Building a new DB, current time: ` and the seconds of its `added <n> sequences in` are not
+//! compared (as `dropin_corpus.py`); the files and
+//! directories the run made are, with the contents of the files but those that hold their time of
+//! writing (`expected/<case>.files`, `made`, `DATED`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
 //! survey left open.
 //!
 //! Unix only, and not macOS: a file name there is the system's bytes, and APFS refuses a name that
@@ -81,10 +83,11 @@ fn path_in(d: &Path, name: Vec<u8>) -> PathBuf {
 }
 
 /// The setup steps of a case (`make_fixtures.py`'s text): `copy`, `copydb`, `mkdir`, `write`,
-/// `patch`.
-fn set_up(setup: &str, d: &Path) {
+/// `patch`, `symlink`, `cwd`; the directory where the program runs.
+fn set_up(setup: &str, d: &Path) -> PathBuf {
     let losat = Path::new(env!("CARGO_MANIFEST_DIR"));
     let db = d.as_os_str().as_bytes();
+    let mut cwd = d.to_path_buf();
     for step in setup.split(" ; ") {
         let parts: Vec<&str> = step.split(' ').collect();
         match parts[0] {
@@ -123,9 +126,19 @@ fn set_up(setup: &str, d: &Path) {
                 patched[at..at + old.len()].copy_from_slice(&new);
                 std::fs::write(&path, patched).unwrap();
             }
+            "symlink" => std::os::unix::fs::symlink(
+                OsString::from_vec(words(parts[1], db)),
+                path_in(d, words(parts[2], db)),
+            )
+            .unwrap(),
+            "cwd" => {
+                cwd = path_in(d, words(parts[1], db));
+                std::fs::create_dir(&cwd).unwrap();
+            }
             other => panic!("unknown step {other}"),
         }
     }
+    cwd
 }
 
 /// The frozen bytes of `case` (`expected/<case>.<what>`), `{D}` as `d`, in LOSAT's words.
@@ -134,18 +147,29 @@ fn expected(case: &str, what: &str, d: &[u8]) -> Vec<u8> {
     without_time(&expected_losat_bytes(replace(&frozen, b"{D}", d)))
 }
 
-/// `output` with the time of makeblastdb's `Building a new DB, current time: ` line as `{TIME}`.
+/// `output` with the time of makeblastdb's `Building a new DB, current time: ` line as `{TIME}`
+/// and the seconds of its `added <n> sequences in <seconds> seconds.` as `{SECONDS}`.
 fn without_time(output: &[u8]) -> Vec<u8> {
-    const LINE: &[u8] = b"Building a new DB, current time: ";
-    let Some(at) = output.windows(LINE.len()).position(|w| w == LINE) else {
+    let output = masked(
+        output,
+        b"Building a new DB, current time: ",
+        b"\n",
+        b"{TIME}",
+    );
+    masked(&output, b" sequences in ", b" seconds.", b"{SECONDS}")
+}
+
+/// `output` with the bytes between the first `before` and the next `after` (or the end) as `with`.
+fn masked(output: &[u8], before: &[u8], after: &[u8], with: &[u8]) -> Vec<u8> {
+    let Some(at) = output.windows(before.len()).position(|w| w == before) else {
         return output.to_vec();
     };
-    let start = at + LINE.len();
+    let start = at + before.len();
     let end = output[start..]
-        .iter()
-        .position(|&b| b == b'\n')
+        .windows(after.len())
+        .position(|w| w == after)
         .map_or(output.len(), |n| start + n);
-    [&output[..start], b"{TIME}".as_slice(), &output[end..]].concat()
+    [&output[..start], with, &output[end..]].concat()
 }
 
 /// The paths below `d`, `/`-separated, a directory's with a final `/` (`make_fixtures.py`'s
@@ -168,9 +192,21 @@ fn paths(d: &Path) -> BTreeSet<Vec<u8>> {
     found
 }
 
-/// Each path of `after` not in `before`, one per line in byte order, a byte that is not printable
-/// ASCII or is the backslash as `\xHH` (`make_fixtures.py`'s `made`, `expected/<case>.files`).
-fn made(before: &BTreeSet<Vec<u8>>, after: &BTreeSet<Vec<u8>>) -> Vec<u8> {
+/// The files that hold the time they were written (`make_fixtures.py`'s `DATED`): a database's
+/// index file, alias file and metadata file. Their contents are not compared.
+const DATED: [&str; 6] = [".nin", ".pin", ".nal", ".pal", ".njs", ".pjs"];
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Each path of `after` not in `before` (below `d`), one per line in byte order, a byte that is
+/// not printable ASCII or is the backslash as `\xHH`; a file's line then has its size and the
+/// FNV-1a 64 of its bytes, `d` in them written as `{D}`, after tabs (`*` for both for the files
+/// of `DATED`) (`make_fixtures.py`'s `made`, `expected/<case>.files`).
+fn made(d: &Path, before: &BTreeSet<Vec<u8>>, after: &BTreeSet<Vec<u8>>) -> Vec<u8> {
     let mut out = Vec::new();
     for path in after.difference(before) {
         for &b in path {
@@ -178,6 +214,17 @@ fn made(before: &BTreeSet<Vec<u8>>, after: &BTreeSet<Vec<u8>>) -> Vec<u8> {
                 out.push(b);
             } else {
                 out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
+            }
+        }
+        if path.last() != Some(&b'/') {
+            if DATED.iter().any(|end| path.ends_with(end.as_bytes())) {
+                out.extend_from_slice(b"\t*\t*");
+            } else {
+                let data = std::fs::read(path_in(d, path.clone())).unwrap();
+                let data = replace(&data, d.as_os_str().as_bytes(), b"{D}");
+                out.extend_from_slice(
+                    format!("\t{}\t{:016x}", data.len(), fnv1a64(&data)).as_bytes(),
+                );
             }
         }
         out.push(b'\n');
@@ -201,11 +248,11 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
         let dir = unique_dir(&format!("non_utf8_{case}"));
         let d = std::fs::canonicalize(dir.path()).unwrap();
         let db = d.as_os_str().as_bytes().to_vec();
-        set_up(setup, &d);
+        let cwd = set_up(setup, &d);
         let mut words_of_argv = argv.split(' ');
         let program = words_of_argv.next().unwrap();
         let mut command = Command::new(BIN);
-        command.current_dir(&d).arg(program);
+        command.current_dir(&cwd).arg(program);
         for word in words_of_argv {
             command.arg(OsString::from_vec(words(word, &db)));
         }
@@ -224,7 +271,7 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
         let _files = home_and_worker_log(&mut command, &format!("non_utf8_{case}"));
         let before = paths(&d);
         let output = command.output().expect("run LOSAT");
-        let made = made(&before, &paths(&d));
+        let made = made(&d, &before, &paths(&d));
         ran += 1;
         let rc: i32 = std::fs::read_to_string(fixtures().join(format!("expected/{case}.rc")))
             .unwrap()
@@ -251,6 +298,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 90, "the cases of cases.tsv");
+    assert_eq!(ran, 101, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

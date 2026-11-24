@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Freeze what NCBI BLAST+ 2.17.0 writes for the cases of `cases.tsv` (`expected/<case>.stdout`,
-`.stderr`, `.rc`, and `.files`: the names of the files and directories the run made, `made()`), the
-cases of `LOSAT/tests/non_utf8_names.rs`.
+`.stderr`, `.rc`, and `.files`: the files and directories the run made and the contents of the
+files, `made()`), the cases of `LOSAT/tests/non_utf8_names.rs`.
 
 Each case runs in a new directory of its own (`--work`), made by the case's setup, with an empty
 `HOME`, without `BLASTDB` and `NCBI_CONFIG_PATH` but the case's, and with `BLAST_USAGE_REPORT=false`
@@ -14,6 +14,8 @@ the case's directory. Setup steps, separated by ` ; `:
   mkdir DIR             a directory
   write PATH TEXT       a file of TEXT
   patch PATH OLD NEW    the first OLD of the file replaced by NEW (the same length)
+  symlink TARGET NAME   a symbolic link NAME to TARGET
+  cwd DIR               a directory, where the program runs (the case's directory otherwise)
 
 usage: make_fixtures.py [--ncbi-bin DIR] [--work DIR] [case ...]
 """
@@ -58,7 +60,9 @@ def cases():
         yield case, kind, env, setup, argv
 
 
-def set_up(setup: str, d: bytes) -> None:
+def set_up(setup: str, d: bytes) -> bytes:
+    """Runs the setup steps in `d`; the directory where the program runs."""
+    cwd = d
     for step in setup.split(" ; "):
         op, *args = step.split(" ")
         if op == "copy":
@@ -79,8 +83,14 @@ def set_up(setup: str, d: bytes) -> None:
             data = open(path, "rb").read()
             assert old in data, (path, old)
             open(path, "wb").write(data.replace(old, new, 1))
+        elif op == "symlink":
+            os.symlink(words(args[0], d), os.path.join(d, words(args[1], d)))
+        elif op == "cwd":
+            cwd = os.path.join(d, words(args[0], d))
+            os.mkdir(cwd)
         else:
             raise SystemExit(f"unknown step {step!r}")
+    return cwd
 
 
 def paths(d: bytes) -> set:
@@ -94,13 +104,34 @@ def paths(d: bytes) -> set:
     return found
 
 
-def made(before: set, after: set) -> bytes:
-    """Each path of `after` not in `before`, one per line in byte order, a byte that is not printable
-    ASCII or is the backslash as `\\xHH`."""
+# The files that hold the time they were written: a database's index file (its date), alias file
+# (the comment of its creation) and metadata file (`last-updated`). Their contents are not compared.
+DATED = (b".nin", b".pin", b".nal", b".pal", b".njs", b".pjs")
+
+
+def fnv1a64(data: bytes) -> int:
+    h = 0xCBF29CE484222325
+    for b in data:
+        h = ((h ^ b) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def made(d: bytes, before: set, after: set) -> bytes:
+    """Each path of `after` not in `before` (below `d`), one per line in byte order, a byte that is
+    not printable ASCII or is the backslash as `\\xHH`; a file's line then has its size and the
+    FNV-1a 64 of its bytes, `d` in them written as `{D}`, after tabs (`*` for both where its name
+    ends with one of `DATED`)."""
     out = bytearray()
     for path in sorted(after - before):
         for b in path:
             out += bytes([b]) if 0x21 <= b <= 0x7E and b != 0x5C else b"\\x%02x" % b
+        if not path.endswith(b"/"):
+            if path.endswith(DATED):
+                out += b"\t*\t*"
+            else:
+                with open(os.path.join(d, path), "rb") as made_file:
+                    data = made_file.read().replace(d, b"{D}")
+                out += b"\t%d\t%016x" % (len(data), fnv1a64(data))
         out += b"\n"
     return bytes(out)
 
@@ -123,7 +154,7 @@ def main() -> int:
         os.mkdir(d)
         home = work / f"{case}_home"
         home.mkdir()
-        set_up(setup, d)
+        cwd = set_up(setup, d)
         run_env = {k: v for k, v in os.environ.items() if k not in CLEARED and not k.startswith("LOSAT_")}
         run_env.update(HOME=str(home), BLAST_USAGE_REPORT="false")
         run_env = {os.fsencode(k): os.fsencode(v) for k, v in run_env.items()}
@@ -133,8 +164,8 @@ def main() -> int:
         program, *rest = argv.split(" ")
         command = [os.fsencode(os.path.join(args.ncbi_bin, program))] + [words(w, d) for w in rest]
         before = paths(d)
-        done = subprocess.run(command, cwd=d, env=run_env, capture_output=True, timeout=60)
-        (HERE / "expected" / f"{case}.files").write_bytes(made(before, paths(d)))
+        done = subprocess.run(command, cwd=cwd, env=run_env, capture_output=True, timeout=60)
+        (HERE / "expected" / f"{case}.files").write_bytes(made(d, before, paths(d)))
         for name, data in (("stdout", done.stdout), ("stderr", done.stderr)):
             (HERE / "expected" / f"{case}.{name}").write_bytes(data.replace(d, b"{D}"))
         (HERE / "expected" / f"{case}.rc").write_text(f"{done.returncode}\n")

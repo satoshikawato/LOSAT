@@ -7,6 +7,7 @@ import type { ResolvedDefault } from '../domain/parameters.js';
 import type { ProgramId } from '../domain/programs.js';
 import type { CountsFile, CountsUse } from '../domain/counts.js';
 import type { DirectoryFile, MessagePlace, PrintedKind, RegistryFile, RunFile } from '../domain/run-files.js';
+import type { ToolDescription } from '../domain/tool-description.js';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -424,6 +425,11 @@ export interface ToolValidateOptions {
 
 /** What an engine offers for the command line's tools besides the searches (`windowmasker`). */
 export interface ToolEngine {
+  /**
+   * Reads a tool's options, defaults, value lists, ranges and exclusions by running `<tool> -xmlhelp`
+   * and parsing NCBI's PrintUsageXml output (`parseToolDescription`).
+   */
+  describeTool(tool: string): Promise<ToolDescription>;
   /**
    * Runs a tool as the command line runs it in the run's directory (`argv[0]` is the tool's name, `windowmasker`, then the
    * command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to

@@ -97,10 +97,10 @@ impl LocalTime {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1595
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1592-1617
-    /// `CTime::AsString(CSeqDB::kBlastDbDateFormat)` (`b d, Y  H:m P`): the day without padding,
-    /// the hour of 12 with two digits, for example `Nov 5, 2026  07:00 AM`. The creation date of a
-    /// binary seqid list (`WriteBlastSeqidlistFile`); the index files' date drops the hour's zero
-    /// (`index_date`).
+    /// `CTime::AsString` in the format `CSeqDB::kBlastDbDateFormat` (`b d, Y  H:m P`): the day
+    /// without padding, the hour of 12 with two digits, for example `Nov 5, 2026  07:00 AM`. The
+    /// creation date of a binary seqid list (`WriteBlastSeqidlistFile`); the index files' date
+    /// drops the hour's zero (`index_date`).
     pub fn blast_db_date(&self) -> String {
         let month = MONTH_ABBR[(self.month.clamp(1, 12) - 1) as usize];
         let hour12 = (self.hour + 11) % 12 + 1;

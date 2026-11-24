@@ -141,9 +141,10 @@ const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
 // there resolves to the empty name, whose memory map throws a `CFileException` (not a database
 // error): a search reports it as `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`),
 // `blastdb_aliastool -seqid_file_info` too.
-/// The bytes of the seqid list file `name` as NCBI's readers map them (`CMemoryFile` of
-/// `SeqDB_ResolveDbPath(name)`): the first file of that name on the search path `path`; `Err` is
-/// the exception of the memory map of the empty name, when there is none (or it does not read).
+/// The bytes of the seqid list file `name` as NCBI's readers map them (`CMemoryFile` of the path
+/// that `SeqDB_ResolveDbPath` gives for `name`): the first file of that name on the search path
+/// `path`; `Err` is the exception of the memory map of the empty name, when there is none (or it
+/// does not read).
 pub(crate) fn read_resolved(name: &str, path: &SearchPath) -> Result<Vec<u8>, NcbiException> {
     path.resolve_file(name)
         .and_then(|file| std::fs::read(&file).ok())
@@ -195,7 +196,7 @@ pub fn write_binary(info: &SeqidListInfo, ids: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:121-158
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:122-155
 // The file is mapped whole (`CMemoryFile`); only the header is read, so a list whose ids are
 // cut short still prints.
 /// What `blastdb_aliastool -seqid_file_info` prints of a list's bytes `bytes`

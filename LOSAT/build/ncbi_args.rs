@@ -693,9 +693,9 @@ fn read_argument<'a>(
             // `fAppend` of makeblastdb's `-logfile`, a standard argument that the tables leave out.
             _ if line == "<flags><append/></flags>" && argument.name == "logfile" => {}
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:744-752
-            // `fPreOpen | fBinary` of an `eOutputFile` key (blastdb_aliastool's `-gi_file_out`):
-            // the reader opens the file as it reads the word; LOSAT writes bytes as they are, so
-            // `fBinary` changes nothing.
+            // The flags `fPreOpen` and `fBinary` of an `eOutputFile` key (blastdb_aliastool's
+            // `-gi_file_out`): the reader opens the file as it reads the word; LOSAT writes bytes
+            // as they are, so `fBinary` changes nothing.
             _ if line == "<flags><preOpen/><binary/></flags>" && kind == "OutputFile" => {
                 argument.pre_open = true;
             }

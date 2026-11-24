@@ -235,7 +235,7 @@ pub enum SeqDbError {
     /// `CSeqIdException` of NCBI's simplification of a seqid list's id,
     /// `SeqDB_SimplifyAccession`): LOSAT's refusal wherever a program reports it, in the words of an
     /// `Unsupported` database; a caller that catches every exception of NCBI's (the alias file
-    /// writer's `catch (...)`, `writedb::alias_file`) takes it for NCBI's failure
+    /// writer's catch of any exception, `writedb::alias_file`) takes it for NCBI's failure
     /// ([`SeqDbError::ncbi_throws`]).
     NcbiThrows { path: PathBuf, message: String },
     /// A `CSeqDBException` of the code `eMemoryMappingFailure` whose message is NCBI's (an OID

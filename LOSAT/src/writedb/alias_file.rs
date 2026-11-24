@@ -74,7 +74,7 @@ fn alias_extension(seqtype: SeqType) -> &'static str {
     }
 }
 
-/// The header of an alias file made at `now` (`CTime(CTime::eCurrent).AsString()`).
+/// The header of an alias file made at `now` (the current `CTime` in its default format).
 fn header(now: &LocalTime) -> String {
     format!("#\n# Alias file created {}\n#\n", now.log_time())
 }
@@ -82,16 +82,16 @@ fn header(now: &LocalTime) -> String {
 // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:3917-3922
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-377
 // `SplitPath` cuts after the last of `ALL_SEPARATORS`: `/` on Unix, `:`, `/` and `\` on Windows.
-/// `CDirEntry(path).GetName()`: what follows the last path separator of `path`.
+/// `CDirEntry::GetName` of `path`: what follows the last path separator of `path`.
 pub(crate) fn dir_entry_name(path: &str) -> &str {
     let separator = |c: char| c == '/' || (cfg!(windows) && (c == '\\' || c == ':'));
     path.rfind(separator).map_or(path, |at| &path[at + 1..])
 }
 
-/// Whether a reader error is one that NCBI's reader throws too (its own text, another exception
-/// of NCBI's, or one whose report LOSAT refuses: `SeqDbError::ncbi_throws`): the writer's
-/// `catch (...)` then takes it for a database that does not open. LOSAT's other refusals go to
-/// the caller.
+/// Whether a reader error is one that NCBI's reader throws too (its own text, another exception of
+/// NCBI's, or one whose report LOSAT refuses: `SeqDbError::ncbi_throws`): the writer's catch of any
+/// exception then takes it for a database that does not open. LOSAT's other refusals go to the
+/// caller.
 fn ncbi_error(error: &SeqDbError) -> bool {
     error.ncbi_message().is_some() || error.ncbi_exception().is_some() || error.ncbi_throws()
 }
@@ -268,7 +268,7 @@ pub(crate) fn create_oid_mask_db(
     write(&mut ofs, &format!("TITLE {title}\n"));
     for (i, vol) in vols.iter().enumerate() {
         let mut lines = format!("DBLIST {}\nOIDLIST ", path_base_name(vol));
-        // `oid_mask_type & fExcludeModel` of NCBI's `int`: a negative value has the bit.
+        // NCBI tests the exclude-model bit of the mask as an `int`: a negative value has the bit.
         if (mask as u64) & oid_mask::EXCLUDE_MODEL != 0 {
             let full_path = format!(
                 "{vol}.{}",

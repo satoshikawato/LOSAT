@@ -303,12 +303,12 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
 const ARCHIVE_MESSAGE: &[u8] = b"message \"";
 
 /// [`losat_bytes`] of a whole output (standard output, an `-out` file, or both merged), after each
-/// position of a binary archive's stream is moved by [`IDENT_GROWTH`] ([`archive_positions`]):
+/// position of a binary archive's stream is moved by [`IDENT_GROWTH`] (`archive_positions`):
 /// the messages of an ASN.1 text archive (`message "..."`, which the archive writer writes in
 /// LOSAT's words) are read without the ends of line that wrap them, mapped, and written again as
 /// the writer writes them (`report::serial::asn_text::visible_string_line`); the VisibleStrings
 /// of a binary archive that starts the output are mapped one by one and written again with their
-/// lengths ([`ber_archive`]); the rest is mapped as text.
+/// lengths (`ber_archive`); the rest is mapped as text.
 pub fn losat_output_bytes(output: &[u8]) -> Cow<'_, [u8]> {
     output_mapping(output, true)
 }

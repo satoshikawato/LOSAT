@@ -8949,9 +8949,17 @@ pub(crate) fn check_prefetched_parsed(
                     lookup_texts_differ(db, &[&subject.volume_taxids(), &defline_set_taxids(set)])
                 }));
         if differs {
+            let reason = subject.shown_reason(shown);
+            let reason = if stops {
+                format!(
+                    "{reason}; NCBI BLAST+ 2.17.0 can read that sequence for it, whose definition lines do not hold the Seq-align id, and then stops (oid headers do not contain target gi/seq_id)"
+                )
+            } else {
+                reason
+            };
             return Err(parsed_refusal(
                 db.oid(ordinal),
-                &format!("{}, {PREFETCH_READS_IT}", subject.shown_reason(shown)),
+                &format!("{reason}, {PREFETCH_READS_IT}"),
                 program,
             ));
         }

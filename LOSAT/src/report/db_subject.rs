@@ -938,7 +938,15 @@ impl ScopeWalk {
                 if !registrant.sure {
                     return Some(Resolved::Unknown(Some(registrant.sequence), ShownBy::Order));
                 }
-                if !subject.mine(registrant.sequence) {
+                if subject.mine(registrant.sequence) {
+                    // The subject's own blob, loaded before in the run: its Bioseq enters this
+                    // scope by the line of the handle, where a later load finds it (review 4 of
+                    // line DBID pfoff-4, `pq.zr1.V.U1.b1.0`: a description's load, then a failing
+                    // lookup's alignment that this Bioseq holds weakly).
+                    let keys = Self::keys_as(subject, registrant.sequence);
+                    let line = keys.line_of(handle).unwrap_or(keys.target);
+                    self.load_blob(&keys, line);
+                } else {
                     self.held_blob(registrant.sequence, handle);
                 }
                 return Some(Resolved::Blob(registrant.sequence, ShownBy::Holder));

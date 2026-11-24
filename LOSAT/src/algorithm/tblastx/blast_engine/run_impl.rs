@@ -4081,7 +4081,7 @@ fn run_batch_loop(
                     let xml_before = xml_cuts.reports_before(&reads, &prefetched);
                     let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(
-                        database,
+                        (database, &run_loads),
                         super::super::database::LoadedBefore {
                             hits: &done.hits,
                             spans: &done.spans,

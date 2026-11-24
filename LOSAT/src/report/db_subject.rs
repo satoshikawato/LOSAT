@@ -907,6 +907,16 @@ impl ScopeWalk {
         })
     }
 
+    /// Step 3 as a place, without a load: the registrant of `handle`, `Unknown` where LOSAT does
+    /// not know that it registered it last.
+    fn registered_place(&self, handle: HandleKey) -> Option<Resolved> {
+        self.registered(handle)
+            .map(|registrant| match registrant.sure {
+                true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
+                false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+            })
+    }
+
     /// Step 2: the scope's index, for the Seq-align id of `keys`: the exact handle first, then
     /// the ids that it takes for it or matches weakly; of each, the sequence loaded first (the
     /// record's before the walk's; among the record's, which LOSAT holds as sets, one where they
@@ -1073,13 +1083,7 @@ impl ScopeWalk {
         let resolved = self
             .cached(handle)
             .or_else(|| self.scope_match(keys))
-            .or_else(|| {
-                self.registered(handle)
-                    .map(|registrant| match registrant.sure {
-                        true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
-                        false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
-                    })
-            })?;
+            .or_else(|| self.registered_place(handle))?;
         self.scope.cache.insert(handle, resolved);
         match Self::answer(subject, Some(resolved)) {
             HitLoad::Shown(shown) => Some(ShownInstead {
@@ -1252,6 +1256,23 @@ impl ScopeWalk {
         let end = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
         if end > start + 1 {
             self.scope.unordered.push(start..end);
+        }
+    }
+
+    /// What the prefetch's resolution of the Seq-align id of `subject` gives now without loading
+    /// anything (steps 1 and 3, [`ScopeWalk::bulk`]'s order of places): the scope's cache, else the
+    /// loader's registrant of its handle, else nothing that LOSAT knows (`HitLoad::Loaded`; the
+    /// lookup's own answer). For a failed prefetch ([`HitLoads::of`]): where a blob loaded before
+    /// the failure registered the id of a subject whose lookup throws, the pass gave that blob.
+    pub fn peek(&self, subject: &ParsedSubject) -> HitLoad {
+        let resolved = subject.id_keys().handle.and_then(|handle| {
+            self.cached(handle)
+                .or_else(|| self.registered_place(handle))
+        });
+        let answer = Self::answer(subject, resolved);
+        match &self.other {
+            Some(other) => Self::either(answer, other.peek(subject)),
+            None => answer,
         }
     }
 
@@ -4068,6 +4089,40 @@ pub struct HitLoads {
     /// The number of the reports given that NCBI's run reaches, where a report's load ended it
     /// (`None`: the run reaches every one).
     reached: Option<usize>,
+    /// What each batch's prefetch gave for each subject of its prefetch set, by key
+    /// ([`HitLoads::prefetched`]).
+    prefetched: std::collections::HashMap<usize, HitLoad>,
+    /// The reads after the reports ([`CallReads::after`]) for which a load gives another
+    /// sequence, by report and key ([`HitLoads::read_after`], made by `HitLoads::load_after`).
+    after_shown: std::collections::HashMap<(usize, usize), ShownInstead>,
+}
+
+/// What a call's walk ([`HitLoads::of_call`]) loads besides its reports' own subjects, by report
+/// (the index of the report among those given): `prefetched`, the further subjects of the
+/// report's batch's prefetch, which no report shows (psiblast's traceback hits beyond
+/// `-max_target_seqs`, `report_prep`'s `psiblast_prefetched`; the batch's prefetch loads those
+/// of all its reports at once); `after`, the subjects read by their Seq-align ids after the
+/// report, in the order of the reads (psiblast's PSSM of the query, read after its report and
+/// before the next one, `ListedTitles::check_pssm_holds`); and `stop`, the prefetch of the batch
+/// after the reports whose lookup stops the run (`common::database::batch_prefetch`): its query
+/// batch and subjects. Empty for a call that loads nothing else.
+#[derive(Clone, Debug, Default)]
+pub struct CallReads {
+    pub prefetched: Vec<Vec<usize>>,
+    pub after: Vec<Vec<usize>>,
+    pub stop: Option<(Option<usize>, Vec<usize>)>,
+}
+
+impl CallReads {
+    /// The further prefetched subjects of report `report`.
+    fn prefetched(&self, report: usize) -> &[usize] {
+        self.prefetched.get(report).map_or(&[], Vec::as_slice)
+    }
+
+    /// The reads after report `report`.
+    fn after(&self, report: usize) -> &[usize] {
+        self.after.get(report).map_or(&[], Vec::as_slice)
+    }
 }
 
 impl HitLoads {
@@ -4128,11 +4183,33 @@ impl HitLoads {
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> Self {
+        Self::of_call(
+            before,
+            run,
+            reports,
+            parsed,
+            identities,
+            &CallReads::default(),
+        )
+    }
+
+    /// [`HitLoads::of`] in the one walk of a call that also loads the subjects of `call`
+    /// ([`CallReads`]): each batch's prefetch loads the further subjects of its reports with
+    /// theirs, the reads after a report come after its loads (none after the report whose load
+    /// ends the run), and a stopping batch's prefetch after the reports.
+    pub fn of_call<'p, R: Into<ReportRead>, K: Into<ReportKeys>>(
+        before: LoadsBefore,
+        run: impl Into<FormatThrow>,
+        reports: impl IntoIterator<Item = (R, K)>,
+        parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
+        identities: impl Fn(usize, usize) -> usize,
+        call: &CallReads,
+    ) -> Self {
         let run = run.into();
         Self::after(
             &std::cell::Cell::new(false),
             &mut ScopeWalk::new(before, run.keeps_scope()),
-            run,
+            (run, call),
             reports,
             parsed,
             identities,
@@ -4145,7 +4222,7 @@ impl HitLoads {
     fn after<'p, R: Into<ReportRead>, K: Into<ReportKeys>>(
         ended: &std::cell::Cell<bool>,
         walk: &mut ScopeWalk,
-        run: FormatThrow,
+        (run, call): (FormatThrow, &CallReads),
         reports: impl IntoIterator<Item = (R, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
@@ -4159,7 +4236,7 @@ impl HitLoads {
             FormatThrow::Writes(run) => Some(run),
             FormatThrow::Refused(why) => {
                 loads.refused = Some(why);
-                loads.unordered(walk, &reports, &parsed);
+                loads.unordered(walk, (&reports, call), &parsed);
                 return loads;
             }
             FormatThrow::Unread => None,
@@ -4170,11 +4247,11 @@ impl HitLoads {
         // have loaded before its failure (`ReportRead::prefetch_fails`).
         let mut failed_prefetches: std::collections::HashMap<Option<usize>, Vec<usize>> =
             Default::default();
-        for (read, keys) in reports.iter().filter(|(read, _)| read.prefetch_fails) {
-            let subjects = failed_prefetches.entry(read.batch).or_default();
-            match keys {
-                ReportKeys::Entries(entries) => subjects.extend(entries.iter().flatten()),
-                ReportKeys::Pairwise(reads) => subjects.extend(reads.hits.iter().flatten()),
+        for (report, (read, keys)) in reports.iter().enumerate() {
+            if read.prefetch_fails {
+                let subjects = failed_prefetches.entry(read.batch).or_default();
+                subjects.extend(keys.keys());
+                subjects.extend_from_slice(call.prefetched(report));
             }
         }
         // The reports given, of which the run reaches those before the first that comes after
@@ -4183,6 +4260,10 @@ impl HitLoads {
         // The batch whose prefetch ran last (`ScopeWalk::bulk`), by the index of its first report.
         let mut prefetched = None;
         for (report, (read, keys)) in reports.iter().enumerate() {
+            // The reads after the report before (psiblast's PSSM), in its batch's scope.
+            if let Some(before) = report.checked_sub(1) {
+                loads.load_after(before, call, (ended, &mut *walk), &parsed);
+            }
             if ended.get() {
                 loads.reached.get_or_insert(report);
             }
@@ -4194,34 +4275,29 @@ impl HitLoads {
                 .remove(&read.batch)
                 .filter(|_| read.prefetch_fails && !ended.get())
             {
-                let keys: Vec<usize> = prefetched
-                    .into_iter()
-                    .filter(|&key| {
-                        parsed(key).is_none_or(|subject| subject.lookup_throws().is_none())
-                    })
-                    .collect();
-                walk.failed_prefetch(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
-                loaded.extend(keys);
+                loaded.extend(loads.failed_prefetch(walk, prefetched, &parsed));
             }
             if !read.one_by_one {
-                // A batch's prefetch loads every subject of its reports before them, unless the
-                // run ended before.
+                // A batch's prefetch loads every subject of its reports before them, and the
+                // further subjects of its prefetch set (`CallReads::prefetched`), unless the run
+                // ended before.
                 if ended.get() {
                     passed.extend(keys.keys());
                 } else if prefetched.is_none_or(|first| !same_batch(&reports, first, report)) {
                     prefetched = Some(report);
-                    let batch = reports[report..]
+                    let (shown_keys, further) = batch_prefetch_set(&reports, report, call);
+                    let subjects: Vec<(usize, &ParsedSubject)> = shown_keys
                         .iter()
-                        .enumerate()
-                        .take_while(|&(at, _)| at == 0 || same_batch(&reports, report, report + at))
-                        .flat_map(|(_, (_, keys))| keys.keys());
-                    let subjects: Vec<(usize, &ParsedSubject)> = batch
-                        .filter_map(|key| parsed(key).map(|subject| (key, subject)))
+                        .chain(&further)
+                        .filter_map(|&key| parsed(key).map(|subject| (key, subject)))
                         .collect();
                     let answers = walk.bulk(subjects.iter().copied());
-                    for (&key, answer) in &answers {
-                        if let HitLoad::Shown(shown) = *answer {
-                            loads.shown.insert(key, shown);
+                    for (&key, &answer) in &answers {
+                        loads.prefetched.insert(key, answer);
+                        if let HitLoad::Shown(shown) = answer {
+                            if shown_keys.contains(&key) {
+                                loads.shown.insert(key, shown);
+                            }
                         }
                     }
                     // The description lines of a pairwise report look each title up again
@@ -4330,8 +4406,16 @@ impl HitLoads {
                 passed.extend(keys.filter(|&key| key != first));
             }
         }
+        if let Some(last) = given.checked_sub(1) {
+            loads.load_after(last, call, (ended, &mut *walk), &parsed);
+        }
         if ended.get() {
             loads.reached.get_or_insert(given);
+        } else if let Some((batch, keys)) = &call.stop {
+            // The stopping batch's prefetch, after the reports (`CallReads::stop`).
+            walk.enter(*batch);
+            let answers = walk.bulk(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
+            loads.prefetched.extend(answers);
         }
         loads.unread = passed
             .into_iter()
@@ -4342,6 +4426,55 @@ impl HitLoads {
             })
             .collect();
         loads
+    }
+
+    /// The prefetch of a batch that fails at a subject whose lookup throws on the id
+    /// (`ReportRead::prefetch_fails`), whose prefetch set is `prefetched` (the subjects of its
+    /// reports and its further ones, `CallReads::prefetched`): each subject whose load does not
+    /// throw may have been loaded before the failure ([`ScopeWalk::failed_prefetch`]); what the
+    /// places give then for each subject's Seq-align id ([`ScopeWalk::peek`]: where an earlier
+    /// blob of the pass registered the id of one that throws, the prefetch gave that blob for it)
+    /// is the prefetch's answer ([`HitLoads::prefetched`]). The keys that may have been loaded.
+    fn failed_prefetch<'p>(
+        &mut self,
+        walk: &mut ScopeWalk,
+        prefetched: Vec<usize>,
+        parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+    ) -> Vec<usize> {
+        let keys: Vec<usize> = prefetched
+            .iter()
+            .copied()
+            .filter(|&key| parsed(key).is_none_or(|subject| subject.lookup_throws().is_none()))
+            .collect();
+        walk.failed_prefetch(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
+        for key in prefetched {
+            if let Some(subject) = parsed(key) {
+                self.prefetched.insert(key, walk.peek(subject));
+            }
+        }
+        keys
+    }
+
+    /// The reads after report `report` (`CallReads::after`, psiblast's PSSM), in the walk `walk`
+    /// after its loads, unless the run ended (`ended`): each a load by the subject's Seq-align id
+    /// ([`ScopeWalk::load`]), where its batch's prefetch ran found in the scope's cache.
+    fn load_after<'p>(
+        &mut self,
+        report: usize,
+        call: &CallReads,
+        (ended, walk): (&std::cell::Cell<bool>, &mut ScopeWalk),
+        parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+    ) {
+        if ended.get() {
+            return;
+        }
+        for &key in call.after(report) {
+            if let Some(subject) = parsed(key) {
+                if let HitLoad::Shown(shown) = walk.load(subject) {
+                    self.after_shown.insert((report, key), shown);
+                }
+            }
+        }
     }
 
     /// The loads of a run whose formats refuse a lookup that throws (`FormatThrow::Refused`):
@@ -4355,7 +4488,7 @@ impl HitLoads {
     fn unordered<'p>(
         &mut self,
         walk: &mut ScopeWalk,
-        reports: &[(ReportRead, ReportKeys)],
+        (reports, call): (&[(ReportRead, ReportKeys)], &CallReads),
         parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
     ) {
         let mut subjects: Vec<(usize, &ParsedSubject)> = Vec::new();
@@ -4364,21 +4497,26 @@ impl HitLoads {
         for (report, (read, keys)) in reports.iter().enumerate() {
             walk.enter(read.batch);
             if read.one_by_one {
-                for key in keys.keys() {
+                // The reads after a report (`CallReads::after`) load one by one too.
+                for key in keys
+                    .keys()
+                    .into_iter()
+                    .chain(call.after(report).iter().copied())
+                {
                     if seen.insert(key) {
                         subjects.extend(parsed(key).map(|subject| (key, subject)));
                     }
                 }
             } else if prefetched.is_none_or(|first| !same_batch(reports, first, report)) {
                 prefetched = Some(report);
-                let batch: Vec<(usize, &ParsedSubject)> = reports[report..]
+                let (shown_keys, further) = batch_prefetch_set(reports, report, call);
+                let batch: Vec<(usize, &ParsedSubject)> = shown_keys
                     .iter()
-                    .enumerate()
-                    .take_while(|&(at, _)| at == 0 || same_batch(reports, report, report + at))
-                    .flat_map(|(_, (_, keys))| keys.keys())
-                    .filter_map(|key| parsed(key).map(|subject| (key, subject)))
+                    .chain(&further)
+                    .filter_map(|&key| parsed(key).map(|subject| (key, subject)))
                     .collect();
                 for (key, answer) in walk.bulk(batch) {
+                    self.prefetched.insert(key, answer);
                     if let HitLoad::Shown(shown) = answer {
                         self.shown.insert(key, shown);
                     }
@@ -4438,6 +4576,28 @@ impl HitLoads {
             if let Some(shown) = shown {
                 self.shown.insert(key, shown);
             }
+        }
+        // A read after a report is shown where its subject is (in the reports or by the
+        // prefetch, `HitLoads::prefetched`).
+        for report in 0..reports.len() {
+            for &key in call.after(report) {
+                let shown = self
+                    .shown
+                    .get(&key)
+                    .copied()
+                    .or(match self.prefetched.get(&key) {
+                        Some(&HitLoad::Shown(shown)) => Some(shown),
+                        _ => None,
+                    });
+                if let Some(shown) = shown {
+                    self.after_shown.insert((report, key), shown);
+                }
+            }
+        }
+        if let Some((batch, keys)) = &call.stop {
+            walk.enter(*batch);
+            let answers = walk.bulk(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
+            self.prefetched.extend(answers);
         }
     }
 
@@ -4586,6 +4746,16 @@ impl HitLoads {
             unread: self.unread.into_iter().filter_map(&key).collect(),
             refused: self.refused,
             reached: self.reached,
+            prefetched: self
+                .prefetched
+                .into_iter()
+                .filter_map(|(old, load)| Some((key(old)?, load)))
+                .collect(),
+            after_shown: self
+                .after_shown
+                .into_iter()
+                .filter_map(|((report, old), shown)| Some(((report, key(old)?), shown)))
+                .collect(),
         }
     }
 
@@ -4602,6 +4772,21 @@ impl HitLoads {
         } else {
             HitLoad::Loaded
         }
+    }
+
+    /// What the prefetch of the batch of the subject `key` gave for its Seq-align id (its bulk
+    /// load, [`ScopeWalk::bulk`]; for a prefetch that failed, what the places give after it,
+    /// [`ScopeWalk::peek`]): `None` for a subject that no prefetch of the walk read (a batch whose
+    /// prefetch is off, a subject without parsed Seq-ids). The one answer of the prefetch's checks
+    /// (`common::database::check_prefetched_parsed`, `common::database::batch_prefetch`).
+    pub fn prefetched(&self, key: usize) -> Option<HitLoad> {
+        self.prefetched.get(&key).copied()
+    }
+
+    /// The other sequence that a read of the subject `key` after report `report` gives
+    /// ([`CallReads::after`]: psiblast's PSSM), where a load gives one.
+    pub fn read_after(&self, report: usize, key: usize) -> Option<ShownInstead> {
+        self.after_shown.get(&(report, key)).copied()
     }
 
     /// Whether a report (or a batch's prefetch) loads the subject `key` by a read of its own: not
@@ -4659,6 +4844,28 @@ fn same_batch(reports: &[(ReportRead, ReportKeys)], one: usize, other: usize) ->
         .all(|(read, _)| read.batch.is_none() || read.batch == batch)
 }
 
+/// The prefetch set of the batch whose first report is `first` of `reports`: the subjects of its
+/// reports (as a set), and its further subjects that no report of it shows (`call`,
+/// [`CallReads::prefetched`]).
+fn batch_prefetch_set(
+    reports: &[(ReportRead, ReportKeys)],
+    first: usize,
+    call: &CallReads,
+) -> (std::collections::HashSet<usize>, Vec<usize>) {
+    let batch =
+        (first..reports.len()).take_while(|&at| at == first || same_batch(reports, first, at));
+    let mut shown = std::collections::HashSet::new();
+    let mut further = Vec::new();
+    for report in batch {
+        shown.extend(reports[report].1.keys());
+        further.extend_from_slice(call.prefetched(report));
+    }
+    further.retain(|key| !shown.contains(key));
+    further.sort_unstable();
+    further.dedup();
+    (shown, further)
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`): an exception that leaves a report
 // ends the application; no later report, batch or load runs.
@@ -4713,12 +4920,48 @@ impl RunLoads {
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> HitLoads {
-        let mut walk = self.walk.borrow_mut();
-        let walk = match walk.as_mut() {
-            Some(walk) if walk.before.same_record(&before) => walk,
-            _ => walk.insert(ScopeWalk::new(before, self.answer.keeps_scope())),
-        };
-        HitLoads::after(&self.ended, walk, self.answer, reports, parsed, identities)
+        let mut walk = self.walk_after(before);
+        HitLoads::after(
+            &self.ended,
+            &mut walk,
+            (self.answer, &CallReads::default()),
+            reports,
+            parsed,
+            identities,
+        )
+    }
+
+    /// The prefetch of a query batch whose prefetch set is `subjects` ([`ScopeWalk::bulk`]), in
+    /// the run's walk after the loads `before` (as [`RunLoads::loads`], in the scope of the batch
+    /// that `before` names): the answers by key, which the batch's checks read
+    /// (`common::database::batch_prefetch`'s `PrefetchSubject::load`). None after the run's end,
+    /// where no batch is prefetched.
+    pub fn prefetched<'p>(
+        &self,
+        before: LoadsBefore,
+        subjects: impl IntoIterator<Item = (usize, &'p ParsedSubject)>,
+    ) -> std::collections::HashMap<usize, HitLoad> {
+        if self.ended.get() {
+            return Default::default();
+        }
+        let batch = before.batch();
+        let mut walk = self.walk_after(before);
+        walk.enter(batch);
+        walk.bulk(subjects)
+    }
+
+    /// The run's walk after the loads `before`: the walk so far where the record has not grown
+    /// since it started, else a new one from the record ([`RunLoads::loads`]).
+    fn walk_after(&self, before: LoadsBefore) -> std::cell::RefMut<'_, ScopeWalk> {
+        std::cell::RefMut::map(self.walk.borrow_mut(), |walk| {
+            if walk
+                .as_ref()
+                .is_none_or(|walk| !walk.before.same_record(&before))
+            {
+                *walk = Some(ScopeWalk::new(before, self.answer.keeps_scope()));
+            }
+            walk.as_mut().expect("set above")
+        })
     }
 }
 

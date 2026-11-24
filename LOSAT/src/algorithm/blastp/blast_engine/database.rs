@@ -2056,41 +2056,29 @@ impl ListedTitles<'_> {
     /// for which it can read either of two (`Prefetched::Another`) is refused where the taxonomy
     /// database's texts can differ between them (`shared::lookup_texts_differ`), and else kept as
     /// itself or left out. The subjects that the reports show were refused before for all of
-    /// these (`check_parsed_reports`).
+    /// these (`check_parsed_reports`). What NCBI's places give at the prefetch is the call's one
+    /// walk's (`hit_loads`, `HitLoads::prefetched`, whose batches prefetch the traceback hit
+    /// lists, `ListedTitles::hit_loads`).
     pub(super) fn prefetched_ranks(
         &self,
         database: &BlastpDatabase,
         ranks: &[usize],
-        taxids: bool,
+        (taxids, hit_loads): (bool, &HitLoads),
     ) -> Result<Vec<usize>> {
-        // A failing prefetch may have loaded each other subject of the batch, beyond the cut too,
-        // before its failure (`ReportRead::prefetch_fails`, `ScopeWalk::failed_prefetch`): where
-        // one of them holds an id that NCBI's places take for the Seq-align id that throws, its
-        // reports write that one's record for it.
-        let mut failed = crate::report::db_subject::ScopeWalk::new(
-            database.taxdb.loads_before(None),
-            Some(false),
-        );
-        if ranks.iter().any(|&rank| {
-            self.parsed_subject(rank)
-                .is_some_and(|s| s.prefetch_fails())
-        }) {
-            failed.failed_prefetch(ranks.iter().filter_map(|&rank| {
-                let subject = self.parsed_subject(rank)?;
-                subject.lookup_throws().is_none().then_some((rank, subject))
-            }));
-        }
         let mut kept = Vec::with_capacity(ranks.len());
-        // Another sequence's blob that NCBI's places give is refused where its taxonomy texts can
-        // differ (`shared::check_prefetched_parsed`).
-        let shown = self.prefetch_loads(database, ranks.iter().copied());
         for &rank in ranks {
             let Some(subject) = self.parsed_subject(rank) else {
                 kept.push(rank);
                 continue;
             };
+            // A failing prefetch may have loaded each other subject of the batch, beyond the cut
+            // too, before its failure (`ReportRead::prefetch_fails`, `HitLoads::prefetched`):
+            // where one of them holds an id that NCBI's places take for the Seq-align id that
+            // throws, its reports write that one's record for it.
             if subject.prefetch_fails() {
-                if let load @ crate::report::db_subject::HitLoad::Shown(_) = failed.load(subject) {
+                if let Some(load @ crate::report::db_subject::HitLoad::Shown(_)) =
+                    hit_loads.prefetched(rank)
+                {
                     let reason = subject.fetched(false, load).err().unwrap_or_default();
                     return Err(shared::parsed_refusal(
                         self.oids.oid(self.listed.ordinals[rank]),
@@ -2105,7 +2093,11 @@ impl ListedTitles<'_> {
                 kept.push(rank);
                 continue;
             }
-            if let Some(&load @ crate::report::db_subject::HitLoad::Shown(_)) = shown.get(&rank) {
+            // Another sequence's blob that NCBI's places give is refused where its taxonomy texts
+            // can differ (`shared::check_prefetched_parsed`).
+            if let Some(load @ crate::report::db_subject::HitLoad::Shown(_)) =
+                hit_loads.prefetched(rank)
+            {
                 shared::check_prefetched_parsed(
                     &database.db,
                     subject,
@@ -2196,8 +2188,9 @@ impl ListedTitles<'_> {
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
             let kept = cut(query).min(count);
             let mut beyond = Vec::new();
-            // The PSSM's reads of the query in their order, where its batch reads one by one
-            // (`check_pssm_holds`: NCBI's places may give another sequence for one), each with the fewest letters from which a read of one of its
+            // The PSSM's reads of the query in their order (the call's walk reads them after the
+            // query's report, and NCBI's places may give another sequence for one,
+            // `check_pssm_holds`), each with the fewest letters from which a read of one of its
             // included Seq-aligns takes letters (`PssmAlignment::subject_end`).
             let mut order = Vec::new();
             for (index, hsp_list) in hit_list.hsplist_array[..count]
@@ -2205,9 +2198,7 @@ impl ListedTitles<'_> {
                 .enumerate()
                 .filter(|(_, hsp_list)| pssm_includes(hsp_list, inclusion_ethresh))
             {
-                if self.parsed_subject(hsp_list.oid as usize).is_some()
-                    && prefetch.reads_one_by_one(query)
-                {
+                if self.parsed_subject(hsp_list.oid as usize).is_some() {
                     let reach = hsp_list
                         .hsps
                         .iter()
@@ -2244,7 +2235,7 @@ impl ListedTitles<'_> {
                 reads.loads[query] = Some(QueryLoads { kept, beyond });
             }
             if !order.is_empty() {
-                reads.holds.push((query, order));
+                reads.order.push((query, order));
             }
         }
         // The blob that each read of a subject with parsed Seq-ids loads, whose taxids NCBI looks
@@ -2342,86 +2333,28 @@ impl ListedTitles<'_> {
     // that throws (review 5 of line DBID pfoff-4, H1: a 45-letter holder of a read of 10..94
     // warns; 94 letters warn, 95 read them).
     /// LOSAT's refusal of a PSSM read where NCBI's places give another sequence for its Seq-align
-    /// id (`HitLoad::Shown`, `report::db_subject::ScopeWalk`) and the read takes that sequence's
+    /// id (`ShownInstead`, `report::db_subject::ScopeWalk`) and the read takes that sequence's
     /// letters. Where the subject's lookup fails on a file and the other sequence's letters end
     /// before every included Seq-align's range does (`PssmAlignment::subject_end`), every read
     /// throws, and LOSAT writes NCBI's warning (`pssm_reads` reads no letters for the subject); any
-    /// other such read is refused (a holder that LOSAT cannot name too). One walk in NCBI's order
-    /// of the call: after the loads of the run's record (`shared::TaxdbRun::loads_before`), each
-    /// query's report (`report`: the call's answer `FormatThrow`, which reads nothing for the
-    /// Seq-annot formats and the archive, its walk `HitLoads` of the reported hit lists
-    /// `reported`; a batch that prefetches loads them at once), then its PSSM's reads (those of
-    /// `reads.holds`, `pssm_reads`), each query in the scope of its batch, numbered from
-    /// `batch_base`. A round whose PSSM is made asks it.
+    /// other such read is refused (a holder that LOSAT cannot name too). The reads are those of
+    /// `reads` (`PssmReads::order`), which the call's one walk made after each query's report
+    /// (`hit_loads`: `HitLoads::read_after`, of `ListedTitles::hit_loads` with
+    /// `PssmReads::after_reads`): after the loads of the run's record, the batch's prefetch (also
+    /// beyond `-max_target_seqs`) and the query's report, each query in the scope of its batch.
+    /// A round whose PSSM is made asks it.
     pub(super) fn check_pssm_holds(
         &self,
-        (database, batch_base): (&BlastpDatabase, usize),
+        database: &BlastpDatabase,
         reads: &PssmReads,
-        prefetch: &shared::BatchPrefetch,
-        (run, hit_loads, reported): (
-            crate::report::db_subject::FormatThrow,
-            &HitLoads,
-            &[Option<BlastpHitList>],
-        ),
+        hit_loads: &HitLoads,
     ) -> Result<()> {
-        use crate::report::db_subject::{FormatThrow, HitLoad, ScopeWalk};
-        let Some(&(last, _)) = reads.holds.last() else {
-            return Ok(());
-        };
-        let reports_read = !matches!(run, FormatThrow::Unread);
-        let ordinal = |rank: usize| self.listed.ordinals[rank];
-        // The ranks that the call's report of `query` loads, in its order.
-        let report_loads = |query: usize| -> Vec<usize> {
-            if !reports_read {
-                return Vec::new();
-            }
-            let Some(Some(hit_list)) = reported.get(query) else {
-                return Vec::new();
-            };
-            hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
-                .iter()
-                .filter_map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
-                .filter(|&rank| self.parsed_subject(rank).is_some() && hit_loads.loaded(rank))
-                .collect()
-        };
-        let holds: std::collections::HashMap<usize, &Vec<(usize, usize)>> = reads
-            .holds
-            .iter()
-            .map(|(query, order)| (*query, order))
-            .collect();
-        let first = prefetch.report_read(0, batch_base);
-        let mut walk = ScopeWalk::new(
-            database.taxdb.loads_before(first.batch),
-            Some(run.run().is_some_and(|run| run.keeps_scope)),
-        );
-        for query in 0..=last {
-            let read = prefetch.report_read(query, batch_base);
-            walk.enter(read.batch);
-            let loads = report_loads(query);
-            if read.one_by_one {
-                for &rank in &loads {
-                    walk.load(self.parsed_subject(rank).expect("filtered above"));
-                }
-            } else {
-                walk.bulk(
-                    loads
-                        .iter()
-                        .map(|&rank| (rank, self.parsed_subject(rank).expect("filtered above"))),
-                );
-            }
-            let Some(order) = holds.get(&query) else {
-                for &rank in reads.one_by_one(query) {
-                    if let Some(subject) = self.parsed_subject(rank) {
-                        walk.load(subject);
-                    }
-                }
-                continue;
-            };
-            for &(rank, reach) in order.iter() {
+        for (query, order) in &reads.order {
+            for &(rank, reach) in order {
                 let Some(subject) = self.parsed_subject(rank) else {
                     continue;
                 };
-                let HitLoad::Shown(shown) = walk.load(subject) else {
+                let Some(shown) = hit_loads.read_after(*query, rank) else {
                     continue;
                 };
                 // A holder whose letters end before every included Seq-align's range, for a
@@ -2436,7 +2369,7 @@ impl ListedTitles<'_> {
                     }
                 }
                 return Err(shared::parsed_refusal(
-                    self.oids.oid(ordinal(rank)),
+                    self.oids.oid(self.listed.ordinals[rank]),
                     &subject.pssm_held_reason(shown),
                     self.program,
                 ));
@@ -2547,23 +2480,22 @@ impl ListedTitles<'_> {
     /// LOSAT's refusals of the subjects of ranks `ranks` that a batch's prefetch reads though its
     /// reports read nothing of them (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a
     /// table of fields that read nothing of the subject), without `taxdb.bti` on the search path
-    /// (`shared::check_prefetched_parsed`; with it, `prefetch_messages` refuses them too). A
+    /// (`shared::check_prefetched_parsed`; with it, `prefetch_messages` refuses them too), by what
+    /// the call's one walk's prefetch gave for each (`hit_loads`, `HitLoads::prefetched`). A
     /// lookup that fails is the batch's warning (`batch_prefetch`).
     pub(super) fn check_prefetched(
         &self,
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
+        hit_loads: &HitLoads,
     ) -> Result<()> {
-        let ranks: Vec<usize> = ranks.into_iter().collect();
-        let loads = self.prefetch_loads(database, ranks.iter().copied());
         for rank in ranks {
             if let Some(subject) = self.parsed_subject(rank) {
                 shared::check_prefetched_parsed(
                     &database.db,
                     subject,
-                    loads
-                        .get(&rank)
-                        .copied()
+                    hit_loads
+                        .prefetched(rank)
                         .unwrap_or(crate::report::db_subject::HitLoad::Loaded),
                     self.listed.ordinals[rank],
                     self.program,
@@ -2571,22 +2503,6 @@ impl ListedTitles<'_> {
             }
         }
         Ok(())
-    }
-
-    /// What NCBI's places give for the Seq-align id of each subject of ranks `ranks` at a batch's
-    /// prefetch (its bulk load in the order of the handles after the run's record,
-    /// `report::db_subject::ScopeWalk::bulk`), by rank.
-    fn prefetch_loads(
-        &self,
-        database: &BlastpDatabase,
-        ranks: impl IntoIterator<Item = usize>,
-    ) -> std::collections::HashMap<usize, crate::report::db_subject::HitLoad> {
-        crate::report::db_subject::ScopeWalk::new(database.taxdb.loads_before(None), Some(false))
-            .bulk(
-                ranks
-                    .into_iter()
-                    .filter_map(|rank| Some((rank, self.parsed_subject(rank)?))),
-            )
     }
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
@@ -2867,13 +2783,21 @@ impl ListedTitles<'_> {
     /// `pairwise_reads(query)` (by rank), asked where its batch reads one by one. The reports come
     /// after the loads of the run's record on `database` (psiblast's rounds before, and the calls
     /// before whose loads it does not hold, `shared::TaxdbRun::loads_before`), each query's report
-    /// in the scope of its batch, numbered from `batch_base` (`BatchPrefetch::report_read`).
+    /// in the scope of its batch, numbered from `batch_base` (`BatchPrefetch::report_read`). The
+    /// call's one walk (`HitLoads::of_call`) also loads `call`: the further subjects of each
+    /// batch's prefetch (psiblast's traceback hit lists beyond `-max_target_seqs`), the PSSM's
+    /// reads after each query's report (`PssmReads::after_reads`) and a stopping batch's prefetch,
+    /// whose answers the prefetch's checks (`prefetched_ranks`, `check_prefetched`,
+    /// `batch_prefetch`) and the PSSM's (`check_pssm_holds`) read.
     pub(super) fn hit_loads(
         &self,
         (database, batch_base): (Option<&BlastpDatabase>, usize),
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
-        run: crate::report::db_subject::FormatThrow,
+        (run, call): (
+            crate::report::db_subject::FormatThrow,
+            &crate::report::db_subject::CallReads,
+        ),
         pairwise_reads: impl Fn(usize) -> crate::report::db_subject::PairwiseReads,
     ) -> HitLoads {
         let lists = |query: usize| {
@@ -2894,7 +2818,7 @@ impl ListedTitles<'_> {
                     .taxdb
                     .loads_before(prefetch.report_read(0, batch_base).batch)
             });
-        HitLoads::of(
+        HitLoads::of_call(
             before,
             run,
             (0..hit_lists.len()).map(|query| {
@@ -2922,6 +2846,7 @@ impl ListedTitles<'_> {
                     .max()
                     .unwrap_or(0)
             },
+            call,
         )
     }
 
@@ -3387,12 +3312,12 @@ pub(super) struct PssmReads {
     /// PSSM of a query whose batch reads one by one reads by their Seq-align ids, before the cut
     /// (`one_by_one`).
     one_by_one: Vec<Vec<usize>>,
-    /// The queries (of the call) whose batch reads one by one and one of whose PSSM's reads fails
-    /// on a file where NCBI may give another sequence for it without the lookup
-    /// (`ParsedSubject::held_before`), each with the ranks of its reads with parsed Seq-ids in
-    /// their order and the fewest letters from which a read of one of the subject's included
-    /// Seq-aligns takes letters (`PssmAlignment::subject_end`; `ListedTitles::check_pssm_holds`).
-    holds: Vec<(usize, Vec<(usize, usize)>)>,
+    /// The queries (of the call) whose PSSM reads subjects with parsed Seq-ids, each with the
+    /// ranks of those reads in their order and the fewest letters from which a read of one of the
+    /// subject's included Seq-aligns takes letters (`PssmAlignment::subject_end`): the call's walk
+    /// reads them after the query's report (`after_reads`, `HitLoads::read_after`), and
+    /// `ListedTitles::check_pssm_holds` refuses one that another sequence answers.
+    order: Vec<(usize, Vec<(usize, usize)>)>,
 }
 
 /// What the PSSM's reads of a query need beyond its hit list after the formatter's cut
@@ -3428,6 +3353,19 @@ impl PssmReads {
     /// nothing reads them then).
     pub(super) fn one_by_one(&self, query: usize) -> &[usize] {
         self.one_by_one.get(query).map_or(&[], Vec::as_slice)
+    }
+
+    /// The ranks that the PSSM of each of the call's first `queries` queries reads by their
+    /// Seq-align ids, in the order of the reads (`order`), for the call's walk
+    /// (`db_subject::CallReads::after`): empty where no PSSM is made.
+    pub(super) fn after_reads(&self, queries: usize) -> Vec<Vec<usize>> {
+        let mut after = vec![Vec::new(); queries];
+        for (query, order) in &self.order {
+            if let Some(reads) = after.get_mut(*query) {
+                reads.extend(order.iter().map(|&(rank, _)| rank));
+            }
+        }
+        after
     }
 
     pub(super) fn check(&self) -> Result<()> {

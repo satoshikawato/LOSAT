@@ -636,18 +636,22 @@ fn pairwise_keys(
 /// dropped them, `report_stream`, which records each batch instead: `note_loaded`), as NCBI's
 /// data loader loaded them ([`LoadedBefore`]), read only where the batch stops; the outfmt 5
 /// reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
+/// What the prefetch gives for each Seq-align id is the run's one walk's (`run`,
+/// `RunLoads::prefetched`).
 pub(crate) fn batch_prefetch(
-    database: &TblastxDatabase,
+    (database, run): (&TblastxDatabase, &crate::report::db_subject::RunLoads),
     before: LoadedBefore<'_>,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<crate::report::diag_log::Posts> {
+    let subjects: Vec<shared::PrefetchSubject<'_>> = prefetch_subjects(ordered, titles).collect();
+    let loads = shared::walk_prefetch(&database.taxdb, run, &subjects);
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,
         loaded_subjects(before, titles),
-        prefetch_subjects(ordered, titles),
+        loads,
         PROGRAM,
         queries,
     )
@@ -748,6 +752,7 @@ fn prefetch_subjects<'s>(
             ordinal,
             parsed,
             flipped,
+            load: None,
         }
     })
 }

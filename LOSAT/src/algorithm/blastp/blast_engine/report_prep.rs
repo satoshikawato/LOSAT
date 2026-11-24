@@ -324,6 +324,27 @@ pub(super) fn prefetch_reported_subjects(
         args.app.request_kind(),
         args.html.is_some(),
     );
+    // The call's one walk also loads what NCBI loads besides the reports: psiblast's prefetch of
+    // its traceback hit lists beyond `-max_target_seqs` (review 1 of line DBID holdrec, H1), its
+    // PSSM's reads after each query's report (H2, H3) and the prefetch of a batch that stops.
+    let call_reads = crate::report::db_subject::CallReads {
+        prefetched: psiblast_prefetched
+            .as_ref()
+            .map_or_else(Vec::new, |ranks| ranks[..reported_lists.len()].to_vec()),
+        after: if pssm_made {
+            pssm_reads.after_reads(reported_lists.len())
+        } else {
+            Vec::new()
+        },
+        stop: prefetch_stop.as_ref().map(|span| {
+            (
+                batch_prefetch
+                    .report_read(span.start, ranges.x_ordinal_base)
+                    .batch,
+                prefetched_ranks(span.clone()),
+            )
+        }),
+    };
     let hit_loads = listed_titles
         .as_ref()
         .map_or_else(Default::default, |titles| {
@@ -333,7 +354,7 @@ pub(super) fn prefetch_reported_subjects(
                 (database, ranges.x_ordinal_base),
                 reported_lists,
                 batch_prefetch,
-                after_throw,
+                (after_throw, &call_reads),
                 |query| {
                     pairwise_reading.map_or_else(Default::default, |reading| {
                         pairwise_read_order(
@@ -391,12 +412,7 @@ pub(super) fn prefetch_reported_subjects(
         // run's record, the reports and the reads before it), as a report's (`HitLoad::Held`):
         // after the reports' refusals, as NCBI reads the PSSM after the round's reports.
         if let (true, Some(database)) = (pssm_made, database) {
-            titles.check_pssm_holds(
-                (database, ranges.x_ordinal_base),
-                pssm_reads,
-                batch_prefetch,
-                (after_throw, &hit_loads, reported_lists),
-            )?;
+            titles.check_pssm_holds(database, pssm_reads, &hit_loads)?;
         }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
@@ -738,7 +754,7 @@ pub(super) fn prefetch_reported_subjects(
                         let prefetched = titles.prefetched_ranks(
                             database,
                             &ranks[batch.searched.clone()].concat(),
-                            prefetch_taxids,
+                            (prefetch_taxids, &hit_loads),
                         )?;
                         titles.batch_prefetch(
                             database,
@@ -752,6 +768,7 @@ pub(super) fn prefetch_reported_subjects(
                             titles.check_prefetched(
                                 database,
                                 database::ListedTitles::reported_ranks(lists),
+                                &hit_loads,
                             )?;
                         }
                         titles.batch_prefetch(

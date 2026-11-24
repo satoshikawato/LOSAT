@@ -9174,7 +9174,7 @@ fn run_in_pool(
                     let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
                     database
                         .batch_prefetch(
-                            &titles,
+                            (&titles, &run_loads),
                             database::LoadedBefore {
                                 hits: &hit_lists,
                                 spans: &batch_spans,

@@ -636,19 +636,24 @@ impl BlastnDatabase {
     /// and dropped them, LOSAT_X_RPTSTREAM, which records each batch instead: `note_loaded`), as
     /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops; the outfmt
     /// 5 reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
+    /// What the prefetch gives for each Seq-align id is the run's one walk's (`run`,
+    /// `RunLoads::prefetched`).
     pub(super) fn batch_prefetch(
         &self,
-        titles: &DatabaseTitles,
+        (titles, run): (&DatabaseTitles, &crate::report::db_subject::RunLoads),
         before: LoadedBefore<'_>,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
+        let subjects: Vec<shared::PrefetchSubject<'_>> =
+            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every).collect();
+        let loads = shared::walk_prefetch(&self.taxdb, run, &subjects);
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
             Self::loaded_subjects(titles, before, gapped),
-            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
+            loads,
             PROGRAM,
             queries,
         )
@@ -743,6 +748,7 @@ impl BlastnDatabase {
                     ordinal: hsp_list.oid,
                     parsed,
                     flipped,
+                    load: None,
                 }
             })
     }

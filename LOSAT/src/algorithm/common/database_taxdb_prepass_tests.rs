@@ -588,6 +588,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
             ordinal: 0,
             parsed: Some(&*subject),
             flipped,
+            load: None,
         };
         batch_prefetch(
             &db,
@@ -645,6 +646,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
                 ordinal: 0,
                 parsed: Some(&*failed),
                 flipped: false,
+                load: None,
             }],
             "BLASTN",
             &stop_queries(0),
@@ -661,11 +663,13 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
                     ordinal: 0,
                     parsed: Some(&*failed),
                     flipped: false,
+                    load: None,
                 },
                 PrefetchSubject {
                     ordinal: 1,
                     parsed: Some(&*other),
                     flipped: false,
+                    load: None,
                 },
             ],
             "BLASTN",
@@ -693,6 +697,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
                     ordinal: 1,
                     parsed: Some(&*other),
                     flipped: false,
+                    load: None,
                 }],
                 "BLASTN",
                 &stop_queries(0),
@@ -707,11 +712,13 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
                         ordinal: 1,
                         parsed: Some(&*other),
                         flipped: false,
+                        load: None,
                     },
                     PrefetchSubject {
                         ordinal: 0,
                         parsed: Some(&*failed),
                         flipped: false,
+                        load: None,
                     },
                 ],
                 "BLASTN",
@@ -739,11 +746,13 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
                 ordinal: 1,
                 parsed: Some(&*bbs),
                 flipped: true,
+                load: None,
             },
             PrefetchSubject {
                 ordinal: 0,
                 parsed: Some(&*control),
                 flipped: false,
+                load: None,
             },
         ],
         "BLASTN",
@@ -759,6 +768,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
             ordinal: 1,
             parsed: Some(&*bbs),
             flipped: false,
+            load: None,
         }],
         "BLASTN",
         &stop_queries(0),
@@ -1864,6 +1874,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             ordinal,
             parsed: parsed.as_deref(),
             flipped: false,
+            load: None,
         }
     }
     let stopped = |result: Result<()>| -> (usize, String) {

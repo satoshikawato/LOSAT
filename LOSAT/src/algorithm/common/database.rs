@@ -7523,6 +7523,11 @@ pub(crate) struct PrefetchSubject<'s> {
     /// Whether the batch has a Seq-align of it on the query's minus strand and the subject's plus
     /// strand, whose length NCBI's prefetch asks for.
     pub(crate) flipped: bool,
+    /// What the batch's prefetch gives for its Seq-align id in the run's one walk
+    /// (`report::db_subject::HitLoads::prefetched`, `RunLoads::prefetched`), which the caller
+    /// sets where it is flipped (`None`: the subject's own blob, as for a subject without parsed
+    /// Seq-ids).
+    pub(crate) load: Option<crate::report::db_subject::HitLoad>,
 }
 
 impl<'s> PrefetchSubject<'s> {
@@ -7535,6 +7540,7 @@ impl<'s> PrefetchSubject<'s> {
             ordinal,
             parsed,
             flipped: false,
+            load: None,
         }
     }
 }
@@ -7686,21 +7692,11 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     let mut uncertain: Option<(u32, String)> = None;
     let mut asked: std::collections::HashSet<u32> = Default::default();
     let mut loaded = Vec::new();
-    // What NCBI's places give at the prefetch for each flipped subject's id (the bulk load in the
-    // order of the handles after the run's record, `ScopeWalk::bulk`).
-    let shown = if subjects.iter().any(|subject| subject.flipped) {
-        crate::report::db_subject::ScopeWalk::new(run.loads_before(None), Some(false)).bulk(
-            subjects
-                .iter()
-                .filter_map(|subject| Some((subject.ordinal as usize, subject.parsed?))),
-        )
-    } else {
-        Default::default()
-    };
     for prefetched @ PrefetchSubject {
         ordinal,
         parsed,
         flipped,
+        load,
     } in subjects
     {
         if let Some(subject) = parsed {
@@ -7714,8 +7710,9 @@ pub(crate) fn batch_prefetch<'s, 'b>(
                 failing.push(prefetched);
                 continue;
             }
+            // What NCBI's places give at the prefetch for the id is the run's one walk's
+            // (`PrefetchSubject::load`).
             if flipped && !fails && asked.insert(ordinal) {
-                let load = shown.get(&(ordinal as usize)).copied();
                 match prefetch_gets_no_bioseq(db, ordinal, subject, load, program)? {
                     Ok(no_bioseq) => fails = no_bioseq,
                     Err(reason) => {
@@ -7792,6 +7789,31 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         posts.lines(&prefetch_warning(program));
     }
     Ok(posts)
+}
+
+/// The subjects `subjects` of a query batch's prefetch (BLASTN's and TBLASTX's, whose
+/// Seq-aligns can flip, [`PrefetchSubject::flipped`]) with what the prefetch gives for each
+/// Seq-align id in the run's one walk (`run`, `RunLoads::prefetched` after the run's record on
+/// `taxdb`, [`TaxdbRun::loads_before`]), for [`batch_prefetch`].
+pub(crate) fn walk_prefetch<'s>(
+    taxdb: &TaxdbRun,
+    run: &crate::report::db_subject::RunLoads,
+    subjects: &[PrefetchSubject<'s>],
+) -> Vec<PrefetchSubject<'s>> {
+    // Each sequence once (TBLASTX gives one for each HSP).
+    let set: std::collections::BTreeMap<usize, &crate::report::db_subject::ParsedSubject> =
+        subjects
+            .iter()
+            .filter_map(|subject| Some((subject.ordinal as usize, subject.parsed?)))
+            .collect();
+    let answers = run.prefetched(taxdb.loads_before(None), set);
+    subjects
+        .iter()
+        .map(|&subject| PrefetchSubject {
+            load: answers.get(&(subject.ordinal as usize)).copied(),
+            ..subject
+        })
+        .collect()
 }
 
 /// LOSAT's refusal of a batch's prefetch with a Seq-align id whose lookup fails (`stop`: the

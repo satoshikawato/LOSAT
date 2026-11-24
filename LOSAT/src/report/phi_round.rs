@@ -19,7 +19,7 @@ use super::super::{
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
-use crate::report::ostream::ReportWrite;
+use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::report::query_warnings::ReportPlace;
 use crate::report::x_pairwise_par::QueryGroup;
 use std::io::{self, Write};
@@ -238,8 +238,11 @@ pub(crate) fn write_phi_round_report(
                 aligned,
                 |s_idx| sections.thrown(s_idx),
             );
+            // Each occurrence's alignments are one `CDisplaySeqalign` (its region and its flush).
+            let mut display = DisplaySeqalign::default();
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 place(ReportPlace::Load(s_idx), &mut *writer)?;
+                display.enter(writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx, &pattern)?;
             }
             if let Some((_, exception)) = end {
@@ -249,6 +252,7 @@ pub(crate) fn write_phi_round_report(
                 writer.flush()?;
                 return Err(exception.clone().into_io_error());
             }
+            display.leave(writer)?;
         }
         writeln!(writer)?;
     }

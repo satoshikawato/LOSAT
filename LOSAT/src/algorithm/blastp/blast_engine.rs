@@ -5490,41 +5490,45 @@ fn check_shown_subject_titles(
     Ok(())
 }
 
-/// The titles that a pairwise report shows, checked where the subjects are a database's
-/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`,
-/// then `ListedTitles::refuse_described_lines` of the subjects of the final `hit_lists` whose
-/// description lines the report prints, `described`: line RG-KB item 12 review 1) or a FASTA
-/// set's (`check_shown_subject_titles`, then the same refusals of the description lines of the
-/// records whose ids `-parse_deflines` read, `records_parsed`: review 2, N2).
-#[allow(clippy::too_many_arguments)]
+/// The titles that a pairwise report (`pairwise`) shows, the subjects of the final lists
+/// (`shown`), checked where the subjects are a database's (`ListedTitles::check_shown_titles`,
+/// which takes the subjects whose load throws from the view's `hit_loads`, then
+/// `ListedTitles::refuse_described_lines` of the subjects of the final hit lists whose
+/// description lines the report prints, `report_prep::described_in`: line RG-KB item 12 review
+/// 1) or a FASTA set's (`check_shown_subject_titles`, then the same refusals of the description
+/// lines of the records whose ids `-parse_deflines` read, the view's `listed_parsed`: review 2,
+/// N2). `rows_of` is `run_call`'s closure of the rows of a range of queries.
 fn check_pairwise_shown_titles(
-    listed_titles: Option<&database::ListedTitles<'_>>,
-    database: Option<&database::BlastpDatabase>,
+    view: &report_write::ReportView<'_>,
+    pairwise: crate::report::pairwise::PairwiseView,
+    rows_of: &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
     shown: &std::collections::BTreeSet<usize>,
-    subject_records: &[FastaRecord],
-    records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
-    loads: &crate::report::db_subject::HitLoads,
-    hit_lists: &[Option<BlastpHitList>],
-    described: impl FnMut(usize) -> Result<Vec<u32>>,
-    program: &str,
 ) -> Result<()> {
-    match listed_titles {
+    let described = report_prep::described_in(
+        pairwise,
+        view.args,
+        view.pairwise_hits,
+        rows_of,
+        view.listed_titles,
+        view.psi_found_before,
+    );
+    match view.listed_titles {
         Some(titles) => {
             titles.check_shown_titles(
-                database.expect("listed titles are a database's"),
+                view.database.expect("listed titles are a database's"),
                 shown,
-                loads,
+                view.hit_loads,
             )?;
-            titles.refuse_described_lines(hit_lists, loads, described)
+            titles.refuse_described_lines(view.hit_lists, view.hit_loads, described)
         }
         None => {
-            check_shown_subject_titles(shown.iter().copied(), subject_records)?;
-            if records_parsed.is_empty() {
+            check_shown_subject_titles(shown.iter().copied(), view.subject_records)?;
+            if view.listed_parsed.is_empty() {
                 return Ok(());
             }
             crate::algorithm::common::database::refuse_described_records(
-                hit_lists.len(),
-                |query| match &hit_lists[query] {
+                view.hit_lists.len(),
+                |query| match &view.hit_lists[query] {
                     Some(hit_list) => hit_list
                         .hsplist_array
                         .iter()
@@ -5534,8 +5538,8 @@ fn check_pairwise_shown_titles(
                     None => Vec::new(),
                 },
                 described,
-                records_parsed,
-                program,
+                view.listed_parsed,
+                view.args.app.name(),
             )
         }
     }
@@ -10886,24 +10890,7 @@ fn run_call(
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.s_idx as usize)
                     .collect();
-                let checked = check_pairwise_shown_titles(
-                    listed_titles.as_ref(),
-                    database,
-                    &shown,
-                    subject_records,
-                    &records_parsed,
-                    &prefetched.hit_loads,
-                    &hit_lists,
-                    report_prep::described_in(
-                        view,
-                        &args,
-                        &pairwise_hits,
-                        &rows_of,
-                        &listed_titles,
-                        &psi_found_before,
-                    ),
-                    args.app.name(),
-                );
+                let checked = check_pairwise_shown_titles(&report_view, view, &rows_of, &shown);
                 if !format.refusal.check(checked)? {
                     continue;
                 }

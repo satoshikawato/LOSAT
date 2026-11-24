@@ -48,8 +48,8 @@ pub(super) const NO_RANGE: SeqRange = SeqRange {
 /// `NStr::StringToInt` of `text` (`ncbi_str::string_to_int`): the number, or the message of NCBI's
 /// exception as `GetMsg` gives it (`Int8` for the text that is not a number or passes a 64-bit
 /// integer, `int` for one that fits 64 bits but not 32).
-fn string_to_int(text: &str) -> Result<i32, String> {
-    crate::ncbi_str::string_to_int(text.as_bytes(), 0)
+fn string_to_int(text: &[u8]) -> Result<i32, String> {
+    crate::ncbi_str::string_to_int(text, 0)
         .map_err(|error| String::from_utf8_lossy(error.get_msg()).into_owned())
 }
 
@@ -63,9 +63,9 @@ fn string_to_int(text: &str) -> Result<i32, String> {
 ///
 /// `-range ""` is not reproduced: NCBI reads `tokens.front()` of an empty vector (it
 /// crashed, exit status 139, probe D61).
-pub(super) fn parse_sequence_range_open_end(text: &str) -> Result<SeqRange, String> {
+pub(super) fn parse_sequence_range_open_end(text: impl AsRef<[u8]>) -> Result<SeqRange, String> {
     const PREFIX: &str = "Failed to parse sequence range";
-    let tokens: Vec<&str> = text.split('-').collect();
+    let tokens: Vec<&[u8]> = text.as_ref().split(|&byte| byte == b'-').collect();
     let (Some(&front), Some(&back)) = (tokens.first(), tokens.last()) else {
         unreachable!("split gives at least one piece");
     };

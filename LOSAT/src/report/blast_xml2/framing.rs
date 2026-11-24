@@ -110,15 +110,12 @@ pub fn side_file_open_error() -> anyhow::Error {
     .into()
 }
 
-/// A write to a side file that fails after it was opened (a full disk).
-///
-/// Deviation from NCBI (DECISIONS 35 S2): NCBI's `CObjectOStream` reports the failed flush on
-/// the error stream and goes on (the remaining side files and the master file are written,
-/// exit status 0; TBLASTX stops with an empty master file, also with exit status 0). LOSAT
-/// stops the run in every program with the message and the exit status of a failed write to
-/// `-out` in outfmt 0 (`BLAST failed to write output`, exit status 6; the side files written
-/// before stay, the master file stays empty). The same error is made by all five programs and
-/// by BLASTX's hold, so that a full disk gives one answer.
+/// A write to a side file that fails after it was opened (a full disk) where no stream of NCBI's
+/// is modelled: a caller's receiver that fails, and a library call's side files
+/// (`ostream::write_side_file` writes the command line's as NCBI does: an 802.5 post and exit
+/// status 0). The run stops with the message and the exit status of a failed write to `-out` in
+/// outfmt 0 (`BLAST failed to write output`, exit status 6; the side files written before stay,
+/// the master file stays empty).
 pub fn side_file_write_error() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 6,
@@ -547,7 +544,18 @@ impl<F: SideFiles> Xml2Document<F> {
             return Ok(());
         }
         match self.kind {
-            Xml2Kind::Single16 | Xml2Kind::Single15 => out.extend_from_slice(report),
+            Xml2Kind::Single16 | Xml2Kind::Single15 => {
+                // The report is one object of NCBI's stream inside the report function's `try`
+                // (`ostream::Site::Xml2Report`), then `Close`'s flush; what follows is outside.
+                use crate::report::ostream::{Cut, Site};
+                let json = self.kind == Xml2Kind::Single15;
+                self.posts
+                    .cuts
+                    .push(base, Cut::Site(Site::Xml2Report { json }));
+                out.extend_from_slice(report);
+                self.posts.cuts.push(out.len(), Cut::Flush);
+                self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
+            }
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:770-774
                 // The `CArgException` is caught by the application (blast_app_util.hpp:177-180):

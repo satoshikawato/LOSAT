@@ -13,8 +13,6 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:249-257
 
-use std::io::Write;
-
 use anyhow::{Context, Result};
 
 use super::hsp::BlastnHitList;
@@ -71,7 +69,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     xml: &BlastnXml<'_>,
     document: &mut W,
     hit_lists: &[Option<BlastnHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     const PROGRAM: &str = "BLASTN";

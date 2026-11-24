@@ -76,7 +76,7 @@ impl IsamFiles {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:98-118
     // Both files are `CWriteDB_File`s made with `always_create` false
     // (writedb_isam.cpp:181-186, 771-781).
-    fn new(itype: IsamType, dbname: &str, protein: bool, index: u32, max_file_size: u64) -> Self {
+    fn new(itype: IsamType, dbname: &[u8], protein: bool, index: u32, max_file_size: u64) -> Self {
         Self {
             index: WriteDbFile::lazy(
                 dbname,
@@ -144,10 +144,10 @@ impl IsamFiles {
     // An index with entries is listed before its files are made at the volume's close: a
     // failed build removes those names too (a file that was there).
     /// `ListFiles`: `has_entries` is whether the index holds entries not written yet.
-    fn list_files(&self, has_entries: bool, files: &mut Vec<String>) {
+    fn list_files(&self, has_entries: bool, files: &mut Vec<Vec<u8>>) {
         if has_entries || self.index.created() {
-            files.push(self.index.filename().to_string());
-            files.push(self.data.filename().to_string());
+            files.push(self.index.filename().to_vec());
+            files.push(self.data.filename().to_vec());
         }
     }
 }
@@ -391,7 +391,7 @@ impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:166-213
     pub(crate) fn new(
         itype: IsamType,
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         index: u32,
         max_file_size: u64,
@@ -800,7 +800,7 @@ impl StringIsam {
         self.files.rename_file_index(num_digits);
     }
 
-    pub(crate) fn list_files(&self, files: &mut Vec<String>) {
+    pub(crate) fn list_files(&self, files: &mut Vec<Vec<u8>>) {
         self.files.list_files(self.count != 0, files);
     }
 
@@ -829,7 +829,7 @@ pub(crate) struct NumericIsam {
 impl NumericIsam {
     pub(crate) fn new(
         itype: IsamType,
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         index: u32,
         max_file_size: u64,
@@ -959,7 +959,7 @@ impl NumericIsam {
         self.files.rename_file_index(num_digits);
     }
 
-    pub(crate) fn list_files(&self, files: &mut Vec<String>) {
+    pub(crate) fn list_files(&self, files: &mut Vec<Vec<u8>>) {
         self.files.list_files(!self.table.is_empty(), files);
     }
 }
@@ -991,7 +991,7 @@ pub(crate) struct GiIndex {
 }
 
 impl GiIndex {
-    pub(crate) fn new(dbname: &str, protein: bool, index: u32, max_file_size: u64) -> Self {
+    pub(crate) fn new(dbname: &[u8], protein: bool, index: u32, max_file_size: u64) -> Self {
         Self {
             file: WriteDbFile::lazy(
                 dbname,
@@ -1033,7 +1033,7 @@ impl GiIndex {
         &mut self.file
     }
 
-    pub(crate) fn filename(&self) -> &str {
+    pub(crate) fn filename(&self) -> &[u8] {
         self.file.filename()
     }
 }

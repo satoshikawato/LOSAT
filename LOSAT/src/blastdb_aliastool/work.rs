@@ -48,7 +48,7 @@ impl From<ArgException> for Failure {
 impl From<AliasError> for Failure {
     fn from(error: AliasError) -> Self {
         match error {
-            AliasError::SeqDb(text) => Failure::SeqDb(text.into_bytes()),
+            AliasError::SeqDb(text) => Failure::SeqDb(text),
             AliasError::Reader(error) => Failure::Reader(error),
             AliasError::Clock => Failure::Refused(CLOCK_ERROR.to_string()),
         }
@@ -65,6 +65,11 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
+    // The values are read as text (`Args::text`): one that is not UTF-8 is LOSAT's refusal where
+    // NCBI's `Run` starts, after the reader's errors.
+    if let Some(refusal) = args.text_values_refusal(&super::TOOL) {
+        return diag.refuse(&refusal);
+    }
     match run_mode(args, settings, stdin, out, diag) {
         Ok(status) => status,
         Err(Failure::SeqDb(text)) => {
@@ -114,23 +119,15 @@ fn run_mode(
 
 /// The database search path of NCBI's reader (`CSeqDBAtlas::GenerateSearchPath`: the current
 /// directory, `BLASTDB`, the registry's `[BLAST] BLASTDB`), made where a mode first needs it.
-fn search_path(settings: &ApplicationSettings) -> Result<SearchPath, Failure> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => {
-            return Err(Failure::Refused(
-                crate::algorithm::common::database::refusal(reason, PROGRAM).to_string(),
-            ))
-        }
-    };
-    SearchPath::from_environment(registry).map_err(Failure::Reader)
+fn search_path(settings: &ApplicationSettings) -> SearchPath {
+    SearchPath::from_environment(settings.blastdb.as_deref())
 }
 
 /// The bytes of the input file of the argument `name` (`AsInputFile`, `-` is `stdin`), as the
 /// program's loop reads them; a file that does not open is the `CArgException` of `Run`.
 fn input_file(args: &Args, name: &str, stdin: &mut Cin<'_>) -> Result<Vec<u8>, Failure> {
-    let value = args.value(name).unwrap_or_default();
-    let mut file = files::open_input_file(name, value, stdin)?;
+    let value = args.text(name).unwrap_or_default();
+    let mut file = files::open_input_file(name, std::ffi::OsStr::new(value), stdin)?;
     let mut bytes = Vec::new();
     // NCBI's loop ends at the stream's failure: the bytes read before it are the input.
     let _ = file.read_to_end(&mut bytes);
@@ -173,8 +170,8 @@ fn convert_gi_list(mut input: impl Read, output: &Path) -> usize {
 // again. `CFile::Exists` is true for a regular file.
 /// `-gi_file_in`: the binary GI list `-gi_file_out` (or `<gi_file_in>.bgl`) of the text list.
 fn convert_gi_file(args: &Args, stdin: &mut Cin<'_>, diag: &mut Diag) -> Result<(), Failure> {
-    let gi_file_in = args.value("gi_file_in").unwrap_or_default();
-    let input = files::open_input_file("gi_file_in", gi_file_in, stdin)?;
+    let gi_file_in = args.text("gi_file_in").unwrap_or_default();
+    let input = files::open_input_file("gi_file_in", std::ffi::OsStr::new(gi_file_in), stdin)?;
     let gi_file_out: PathBuf = match args.os_value("gi_file_out") {
         Some(name) => PathBuf::from(name),
         None => PathBuf::from(format!("{gi_file_in}.bgl")),
@@ -223,7 +220,7 @@ fn names_to_aggregate(
     file: &str,
     stdin: &mut Cin<'_>,
 ) -> Result<Vec<Vec<u8>>, Failure> {
-    if let Some(names) = args.value(dbs) {
+    if let Some(names) = args.text(dbs) {
         return Ok(split_names(names)
             .into_iter()
             .map(String::into_bytes)
@@ -282,29 +279,34 @@ fn create_alias_file(
              is used",
         ));
     }
-    let title = match args.value("title") {
-        Some(title) => title.to_string(),
-        None => match args.value("db") {
+    let title: Vec<u8> = match args.text("title") {
+        Some(title) => title.as_bytes().to_vec(),
+        None => match args.text("db") {
             Some(db) => {
-                let limit = if let Some(list) = args.value("gilist") {
+                let limit = if let Some(list) = args.text("gilist") {
                     list.to_string()
-                } else if let Some(list) = args.value("seqidlist") {
+                } else if let Some(list) = args.text("seqidlist") {
                     list.to_string()
-                } else if let Some(list) = args.value("taxidlist") {
+                } else if let Some(list) = args.text("taxidlist") {
                     list.to_string()
                 } else if args.integer("oid_masks").is_some_and(exclude_model) {
                     "exclude model oid masks".to_string()
                 } else {
                     String::new()
                 };
-                format!("{} limited by {limit}", path_base_name(db))
+                [
+                    path_base_name(db.as_bytes()),
+                    b" limited by ",
+                    limit.as_bytes(),
+                ]
+                .concat()
             }
-            None => String::new(),
+            None => Vec::new(),
         },
     };
     let seqtype = seq_type(args)?;
-    let out = args.value("out").unwrap_or_default();
-    let mut gilist = args.value("gilist").unwrap_or_default().to_string();
+    let out = args.text("out").unwrap_or_default();
+    let mut gilist = args.text("gilist").unwrap_or_default().to_string();
     if !gilist.is_empty() {
         if !Path::new(&gilist).is_file() {
             return Err(Failure::SeqDb(format!("{gilist} not found").into_bytes()));
@@ -327,43 +329,45 @@ fn create_alias_file(
             let mol_type = args.as_string("dbtype")?.chars().next().unwrap_or('p');
             let ifname = std::mem::replace(&mut gilist, format!("{out}.{mol_type}.gil"));
             // An input that does not open reads as empty (`ifstream`).
-            let input =
-                files::open_text_file(&ifname).unwrap_or_else(|_| Box::new(std::io::empty()));
+            let input = files::open_text_file(std::ffi::OsStr::new(&ifname))
+                .unwrap_or_else(|_| Box::new(std::io::empty()));
             let count = convert_gi_list(input, Path::new(&gilist));
             diag.post(&format!(
                 "Converted {count} GIs from {ifname} to binary format in {gilist}"
             ));
         }
     }
-    if let Some(dblist) = args.value("dblist") {
-        SeqDb::open_in(dblist, seqtype, &search_path(settings)?).map_err(Failure::Reader)?;
+    if let Some(dblist) = args.text("dblist") {
+        SeqDb::open_in(dblist.as_bytes(), seqtype, &search_path(settings))
+            .map_err(Failure::Reader)?;
     }
     let created = if has(args, "dblist") || has(args, "dblist_file") {
         let databases = database_names(args, stdin)?;
+        let databases: Vec<&[u8]> = databases.iter().map(|name| name.as_bytes()).collect();
         Some(alias_file::create_alias_file(
-            out,
+            out.as_bytes(),
             &databases,
             seqtype,
-            &gilist,
+            gilist.as_bytes(),
             &title,
             FilterType::GiList,
-            &search_path(settings)?,
+            &search_path(settings),
         )?)
     } else if let Some(num_volumes) = args.integer("num_volumes") {
         Some(alias_file::create_volumes_alias_file(
-            out,
+            out.as_bytes(),
             u32::try_from(num_volumes).unwrap_or_default(),
             seqtype,
             &title,
-            &search_path(settings)?,
+            &search_path(settings),
         )?)
-    } else if let Some(db) = args.value("db") {
+    } else if let Some(db) = args.text("db") {
         list_alias_file(args, db, out, seqtype, &gilist, &title, settings)?
     } else {
         None
     };
     if let Some(line) = created {
-        diag.post(&line);
+        diag.post_bytes(&line);
     }
     if has(args, "vdblist") || has(args, "vdblist_file") {
         let (extension, append) = match (seqtype, has(args, "dblist") || has(args, "dblist_file")) {
@@ -374,7 +378,7 @@ fn create_alias_file(
         };
         let title = match append {
             true => "",
-            false => args.value("title").unwrap_or_default(),
+            false => args.text("title").unwrap_or_default(),
         };
         add_vdbs(args, &format!("{out}{extension}"), append, title, stdin)?;
     }
@@ -397,17 +401,24 @@ fn list_alias_file(
     out: &str,
     seqtype: SeqType,
     gilist: &str,
-    title: &str,
+    title: &[u8],
     settings: &ApplicationSettings,
-) -> Result<Option<String>, Failure> {
+) -> Result<Option<Vec<u8>>, Failure> {
     let (list, filter) = if has(args, "gilist") {
         (gilist, FilterType::GiList)
-    } else if let Some(list) = args.value("seqidlist") {
+    } else if let Some(list) = args.text("seqidlist") {
         (list, FilterType::SeqIdList)
-    } else if let Some(list) = args.value("taxidlist") {
+    } else if let Some(list) = args.text("taxidlist") {
         (list, FilterType::TaxIdList)
     } else if let Some(mask) = args.integer("oid_masks") {
-        alias_file::create_oid_mask_db(db, out, seqtype, mask, title, &search_path(settings)?)?;
+        alias_file::create_oid_mask_db(
+            db.as_bytes(),
+            out.as_bytes(),
+            seqtype,
+            mask,
+            title,
+            &search_path(settings),
+        )?;
         return Ok(None);
     } else {
         return Ok(None);
@@ -415,14 +426,16 @@ fn list_alias_file(
     if filter != FilterType::GiList && !list.is_empty() && !Path::new(list).is_file() {
         return Err(Failure::SeqDb(format!("{list} not found").into_bytes()));
     }
+    let databases = split_names(db);
+    let databases: Vec<&[u8]> = databases.iter().map(|name| name.as_bytes()).collect();
     Ok(Some(alias_file::create_alias_file(
-        out,
-        &split_names(db),
+        out.as_bytes(),
+        &databases,
         seqtype,
-        list,
+        list.as_bytes(),
         title,
         filter,
-        &search_path(settings)?,
+        &search_path(settings),
     )?))
 }
 
@@ -482,15 +495,16 @@ fn convert_seqid_file(
     stdin: &mut Cin<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
-    let input_name = args.value("seqid_file_in").unwrap_or_default();
-    let mut input = files::open_input_file("seqid_file_in", input_name, stdin)?;
-    let out_filename = match args.value("seqid_file_out") {
+    let input_name = args.text("seqid_file_in").unwrap_or_default();
+    let mut input =
+        files::open_input_file("seqid_file_in", std::ffi::OsStr::new(input_name), stdin)?;
+    let out_filename = match args.text("seqid_file_out") {
         Some(name) => name.to_string(),
         None => format!("{input_name}.bsl"),
     };
-    let title = match args.value("seqid_title") {
-        Some(title) => title.to_string(),
-        None => base_name(input_name).to_string(),
+    let title: Vec<u8> = match args.text("seqid_title") {
+        Some(title) => title.as_bytes().to_vec(),
+        None => base_name(input_name.as_bytes()).to_vec(),
     };
     let mut output = std::fs::File::create(&out_filename).ok();
     // The input is read after the output is made: an output of the input's name leaves nothing
@@ -502,24 +516,26 @@ fn convert_seqid_file(
         .filter(|line| !line.starts_with(b"#"))
         .map(<[u8]>::to_vec)
         .collect();
-    let db = match args.value("seqid_db") {
+    let db = match args.text("seqid_db") {
         Some(name) => {
-            let path = search_path(settings)?;
-            let types: &[SeqType] = match args.value("seqid_dbtype") {
+            let path = search_path(settings);
+            let types: &[SeqType] = match args.text("seqid_dbtype") {
                 Some(dbtype) if dbtype.starts_with('p') => &[SeqType::Protein],
                 Some(_) => &[SeqType::Nucleotide],
                 None => &[SeqType::Protein, SeqType::Nucleotide],
             };
-            let db = SeqDb::open_guessing(types, |seqtype| SeqDb::open_in(name, seqtype, &path))
-                .map_err(Failure::Reader)?;
-            let (volumes, _) = SeqDb::volume_and_alias_paths(name, db.seqtype(), &path)
+            let db = SeqDb::open_guessing(types, |seqtype| {
+                SeqDb::open_in(name.as_bytes(), seqtype, &path)
+            })
+            .map_err(Failure::Reader)?;
+            let (volumes, _) = SeqDb::volume_and_alias_paths(name.as_bytes(), db.seqtype(), &path)
                 .map_err(Failure::Reader)?;
             Some((db, volumes))
         }
         None => None,
     };
     let db = db.as_ref().map(|(db, volumes)| (db, volumes.as_slice()));
-    match seqidlist_bytes(&seqid_list, title.as_bytes(), db) {
+    match seqidlist_bytes(&seqid_list, &title, db) {
         Ok(list) => {
             if let Some(output) = &mut output {
                 let _ = output.write_all(&list);
@@ -547,11 +563,13 @@ fn seqid_file_info(
     settings: &ApplicationSettings,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
-    let name = args.value("seqid_file_info").unwrap_or_default();
+    let name = args.text("seqid_file_info").unwrap_or_default();
     let bytes =
-        seqidlist::read_resolved(name, &search_path(settings)?).map_err(|error| match error {
-            SeqDbError::Ncbi(exception) => Failure::Exception(exception),
-            error => Failure::Reader(error),
+        seqidlist::read_resolved(name.as_bytes(), &search_path(settings)).map_err(|error| {
+            match error {
+                SeqDbError::Ncbi(exception) => Failure::Exception(exception),
+                error => Failure::Reader(error),
+            }
         })?;
     let text = seqidlist::info_text(&bytes).map_err(|text| Failure::SeqDb(text.into_bytes()))?;
     let _ = out.write_all(&text);

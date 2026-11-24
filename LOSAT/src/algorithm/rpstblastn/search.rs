@@ -204,7 +204,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                 .map_err(|error| match error.downcast::<RpsBatchError>() {
                     // NCBI's errors of the set-up of the batch (`BLAST engine error`).
                     Ok(RpsBatchError::Setup(error)) => search_error(error),
-                    Ok(RpsBatchError::Engine(text)) => engine(text),
+                    Ok(RpsBatchError::Engine(text)) => crate::blastinput::app::engine_error(text),
                     Err(error) => error,
                 })
                 .inspect_err(|_| failed.set(true))
@@ -265,14 +265,14 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
 #[derive(Debug)]
 enum RpsBatchError {
     Setup(anyhow::Error),
-    Engine(String),
+    Engine(Vec<u8>),
 }
 
 impl std::fmt::Display for RpsBatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Setup(error) => write!(f, "{error}"),
-            Self::Engine(text) => f.write_str(text),
+            Self::Engine(text) => f.write_str(&String::from_utf8_lossy(text)),
         }
     }
 }
@@ -413,7 +413,7 @@ impl TranslatedRpsSearch {
                 // The empty matrix name fails every query's score block (blastx's unknown
                 // matrix: one "Unknown error code -1" per query).
                 Ok(Err(RpsVolumeError::NoMatrix)) => {
-                    let text = unknown_matrix_message(batches[0]);
+                    let text = unknown_matrix_message(batches[0]).into_bytes();
                     fail(
                         &mut states,
                         &mut outcome,

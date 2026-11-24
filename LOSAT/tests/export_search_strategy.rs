@@ -738,7 +738,7 @@ fn out_is_created_only_where_ncbi_reaches_it() {
 /// A run of `-html` whose `./.ncbirc` is malformed (`tests/db_search/html/rc/bad`) ends in NCBI's
 /// prolog: `BlastPrintReference`'s registry exception, exit status 255, after the start of the HTML
 /// prolog and before NCBI's first request. With `-export_search_strategy -`, which LOSAT refuses at
-/// that request, BLASTX, BLASTN and TBLASTX write NCBI's standard output (the held prolog, in
+/// that request, BLASTX, BLASTN and TBLASTX write NCBI's standard output (NCBI's prolog, in
 /// LOSAT's words) with exit status 255, as the run without the option does: the exception is NCBI's
 /// error (`cli::native_error_of`), not LOSAT's refusal (line RG F1w review 2, S-b: the held prolog
 /// was dropped and stdout was empty). NCBI's bytes are `html_rcbad/<program>.out`: NCBI BLAST+

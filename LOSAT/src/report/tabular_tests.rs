@@ -812,10 +812,11 @@ fn failed_lookups_write_ncbis_catch_row() {
         failed_rows("qseqid evalue staxid sacc", &[bad(b"Subject_2")]),
         "nq1\t0.0\t<stop 9>"
     );
-    // A later row's `staxid` prints what the row before set: the stop is at `saccver`.
+    // A later row's `staxid` prints what the row before set (`N/A` of a FASTA subject): the stop
+    // is at `saccver` (probe `blastn.nq.s_bg.f6tax`: `nq1\tN/A\ts2\n...nq1\tN/A\t`).
     assert_eq!(
         failed_rows("qseqid staxid saccver", &found_then_bad),
-        "nq1\t0\ts2\nnq1\t0\t<stop 9>"
+        "nq1\tN/A\ts2\nnq1\tN/A\t<stop 9>"
     );
     // A found subject, or a failed one whose fields read neither, writes its whole row.
     assert_eq!(

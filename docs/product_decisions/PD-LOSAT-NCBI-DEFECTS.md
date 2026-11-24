@@ -3034,9 +3034,9 @@ file would differ, and NCBI's programs still could not open the database).
   writes the delimiter before each field, `tabular.cpp:1100-1108`; NCBI's stream is flushed as
   the formatter is destroyed), and then refuses (exit 1): NCBI's stack trace names the paths of
   its build and install and the addresses of its run, and the uninitialised number differs from
-  run to run, so no program can write either. NCBI's run ends there, so no later row, query or
-  batch is written. Before 1.101 LOSAT refused before the query batch's report, and before 1.37
-  every such subject; its output was a prefix of NCBI's then too (probe of line RG-KB item 18b:
+  run to run, so no program can write either. NCBI's run ends at the null pointer, so no later
+  row, query or batch is written; after the uninitialised number NCBI goes on (exit 0). Before
+  1.101 LOSAT refused before the query batch's report, and before 1.37 every such subject; its output was a prefix of NCBI's then too (probe of line RG-KB item 18b:
   blastp, psiblast, blastx, tblastn, tblastx and blastn). A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line
   DBID item pfoff-2) also the first row of a query's report whose subject's load throws where the

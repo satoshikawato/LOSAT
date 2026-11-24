@@ -1185,9 +1185,10 @@ fn subjects_late(dir: &TempDir, name: &str, title: &[u8]) -> PathBuf {
 }
 
 /// A subject whose tabular id LOSAT refuses (`Subject_` and a byte in no encoding NCBI
-/// recognises), which a later batch reaches: without the switch the refusal comes before every
-/// report, with it after the rows of the batches before (drop-in DECISIONS 44), the rows of the
-/// same search with the subject titled otherwise. `outfmt` names the format.
+/// recognises), which a later batch reaches: with the switch and without it the refusal comes
+/// after NCBI's bytes before the row's stop (line RG-KB item 18b): the rows of the batches before
+/// and the stopped row's fields before its `saccver` or `sacc`, the beginning of the same
+/// search's report with the subject titled otherwise. `outfmt` names the format.
 fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Path, outfmt: &str) {
     let refused = subjects_late(dir, "refused.fa", b"Subject_\x81 undecodable");
     let titled = subjects_late(dir, "titled.fa", b"LC738874part second");
@@ -1208,7 +1209,7 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
         "{what}: {}",
         String::from_utf8_lossy(&off.stderr)
     );
-    assert!(off.report.is_empty(), "{what}: off, no row");
+    assert_eq!(off.report, on.report, "{what}: the bytes before the stop");
     // Outfmt 0 and 17 show the subject (and stream, with the off bytes).
     for (outfmt, threads) in [("0", 1), ("17", 4)].into_iter().filter(|_| outfmt == "6") {
         let mut shown = args;

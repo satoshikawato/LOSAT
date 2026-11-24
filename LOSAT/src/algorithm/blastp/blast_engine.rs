@@ -2207,14 +2207,6 @@ impl BlastpReport {
         }
     }
 
-    /// The field list of a custom tabular report (`None`: the default fields, or no table).
-    fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
-        match self {
-            BlastpReport::CustomTabular(spec) => Some(spec),
-            _ => None,
-        }
-    }
-
     /// The subject ids that the report prints (`PrintedIds`): none but in a table.
     fn printed_ids(self) -> crate::report::tabular::PrintedIds {
         match self {

@@ -1,13 +1,17 @@
 //! Unit tests of the query-anchored section of a PSSM query of the molecule `other` (line PS, PS15b-2
 //! fix 1; `write_unreadable_section`): NCBI BLAST+ 2.17.0 merges the HSPs with the query's rows at the
-//! width of a nucleotide sequence, and its run stops with the merge's exception where two blocks of
-//! one HSP meet on a query row (`X_MERGE_START_ITERATOR`) or the rows order shared segments in two
-//! ways (`BUILD_INFINITE_LOOP`). The rows of the real cases are NCBI's own `-outfmt "6 sseqid qstart
-//! sstart btop"` rows of psiblast rounds with the molecule `other` PSSMs of the review kit
-//! (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/rev15b2/inputs/`: `o/tk_other_stdaa.asn`
-//! round 1, NCBI's "Start iterator already exists for seq2"; `ps/ps6c_other_iupacaa.asn`
-//! `-num_iterations 3 -inclusion_ethresh 10`, rounds 2 (answered) and 3, NCBI's "Infinite loop
-//! detected"), with their rows' order and subjects in order of first appearance.
+//! width of a nucleotide sequence, and its run stops where the merge fails: with an exception where two
+//! blocks of one subject row meet on a query row (`X_MERGE_START_ITERATOR`), where the rows order shared
+//! segments in two ways (`BUILD_INFINITE_LOOP`) or where a later pass finds no row of its HSP
+//! (`X_MERGE_PROPER_ROW`), and with SIGSEGV where a query letter against a gap of the subject opens a row
+//! of its own (`MixError::NcbiNullSecondRow`). Each expectation is NCBI's own run: the rows are NCBI's
+//! `-outfmt "6 sseqid qstart sstart btop"` rows (from the PSSM's molecule `aa` twin, whose search is the
+//! same), in their order, subjects numbered in order of first appearance, of psiblast with the review
+//! kit's molecule `other` PSSMs (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/rev15b2/inputs/`:
+//! `o/tk_other_stdaa.asn`, `ps/ps6c_other_iupacaa.asn`) and the subjects of
+//! `/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/fix15b2_t0/` (the PSSM's query with letters
+//! deleted or inserted, and pieces of it), whose `-outfmt 1` NCBI answered (exit status 0), ended with
+//! the merge's exception (255) or with SIGSEGV (139).
 
 use super::tests::push_btop;
 use super::*;
@@ -22,21 +26,33 @@ fn unreadable(rows: &[(u32, u32, u32, &str)]) -> Hsps {
     hsps
 }
 
-/// The section of `hsps`: its bytes, or the refusal's text.
-fn section(hsps: &Hsps) -> Result<Vec<u8>, String> {
+/// The section of `hsps`: its bytes, or how NCBI's merge fails (the refusal's), before which the
+/// section writes nothing.
+fn section(hsps: &Hsps) -> Result<Vec<u8>, MergeFailure> {
     let mut out = Vec::new();
     match write_unreadable_section(&mut out, hsps, "PSIBLAST") {
         Ok(()) => Ok(out),
         Err(error) => {
-            assert!(
-                error
-                    .get_ref()
-                    .is_some_and(|inner| inner.is::<UnreadableMergeRefusal>()),
-                "{error}"
-            );
-            Err(error.to_string())
+            let Some(refusal) = error
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<UnreadableMergeRefusal>())
+            else {
+                panic!("{error}");
+            };
+            assert!(out.is_empty());
+            Err(refusal.failure)
         }
     }
+}
+
+/// The section of `rows` (`unreadable`, `section`).
+fn rows_section(rows: &[(u32, u32, u32, &str)]) -> Result<Vec<u8>, MergeFailure> {
+    section(&unreadable(rows))
+}
+
+/// The section of a merge that returns: a line feed.
+fn line_feed() -> Result<Vec<u8>, MergeFailure> {
+    Ok(b"\n".to_vec())
 }
 
 #[test]
@@ -52,50 +68,141 @@ fn widths_of_a_query_that_is_not_a_protein() {
 
 #[test]
 fn no_hsps_write_nothing() {
-    assert_eq!(section(&unreadable(&[])), Ok(Vec::new()));
+    assert_eq!(rows_section(&[]), Ok(Vec::new()));
 }
 
 #[test]
 fn blocks_on_different_rows_are_merged_and_the_section_is_a_line_feed() {
-    // Starts 0, 10 and 11: rows 0, 1 and 2.
-    assert_eq!(
-        section(&unreadable(&[(0, 1, 1, "10A-10")])),
-        Ok(b"\n".to_vec())
-    );
-    assert_eq!(section(&unreadable(&[(0, 1, 1, "60")])), Ok(b"\n".to_vec()));
+    assert_eq!(rows_section(&[(0, 1, 1, "60")]), line_feed());
+    // Starts 0 and 10: rows 0 and 1; the subject's letter alone goes to the subject's pass.
+    assert_eq!(rows_section(&[(0, 1, 1, "10-A10")]), line_feed());
+    // NCBI: `self`, `ins100`, `ins101` (a letter inserted in the subject).
+    assert_eq!(rows_section(&[(0, 1, 1, "398")]), line_feed());
+    assert_eq!(rows_section(&[(0, 1, 1, "100-W298")]), line_feed());
+    assert_eq!(rows_section(&[(0, 1, 1, "101-W297")]), line_feed());
 }
 
 #[test]
-fn two_blocks_of_one_hsp_meeting_on_a_row_are_refused() {
+fn two_blocks_of_one_hsp_meeting_on_a_row_are_ncbis_exception() {
     // Starts 0 and 12 (row 0), spans [0, 30) and [12, 42): the subject gets two starts in one
     // segment.
-    let refused = section(&unreadable(&[(0, 1, 1, "10A-A-10")])).unwrap_err();
-    assert!(refused.starts_with("-outfmt 1 to 4 with a PSSM query of the molecule other is not supported by LOSAT's PSIBLAST"));
-    assert!(!refused.contains("2.17.0+") && !refused.contains("BLAST error:"));
-    // The same HSP, its blocks on rows 0 and 1 (start 10): merged.
     assert_eq!(
-        section(&unreadable(&[(0, 1, 1, "10A-10")])),
-        Ok(b"\n".to_vec())
+        rows_section(&[(0, 1, 1, "10A-A-10")]),
+        Err(MergeFailure::Exception)
+    );
+    // NCBI: `del101` (starts 0 and 102), `del2gap` (0 and 102), `del100_del200` (0 and 201, after
+    // a query letter alone on row 1, which the matches of two rows come before).
+    for btop in ["101T-296", "100F-T-296", "100F-99K-197"] {
+        assert_eq!(
+            rows_section(&[(0, 1, 1, btop)]),
+            Err(MergeFailure::Exception),
+            "{btop}"
+        );
+    }
+}
+
+#[test]
+fn a_query_letter_against_a_gap_on_a_row_of_its_own_is_ncbis_crash() {
+    // Starts 0 and 11 (rows 0 and 2) and the query's letter alone at 10 (row 1).
+    assert_eq!(
+        rows_section(&[(0, 1, 1, "10A-10")]),
+        Err(MergeFailure::Crash)
+    );
+    // NCBI: `del100`, `del103` (rows 0, 1 alone, 2), `two_self` and `two_ins` (another subject's
+    // blocks on rows 0 and 2).
+    assert_eq!(
+        rows_section(&[(0, 1, 1, "100F-297")]),
+        Err(MergeFailure::Crash)
+    );
+    assert_eq!(
+        rows_section(&[(0, 1, 1, "103L-294")]),
+        Err(MergeFailure::Crash)
+    );
+    assert_eq!(
+        rows_section(&[(0, 1, 1, "398"), (1, 1, 1, "100F-297")]),
+        Err(MergeFailure::Crash)
+    );
+    assert_eq!(
+        rows_section(&[(0, 1, 1, "101-W297"), (1, 1, 1, "100F-297")]),
+        Err(MergeFailure::Crash)
     );
 }
 
 #[test]
-fn shared_segments_in_two_orders_are_refused() {
-    // HSP 1: rows 0 then 1 (starts 0 and 100); HSP 2: rows 1 then 0 (starts 103 and 114). They
+fn a_query_letter_against_a_gap_on_an_open_row_is_merged() {
+    // NCBI: `del102` (the letter alone at 102 in row 0, inside the first block's span), `del3gap`
+    // (at 100 in row 1, the row of the block after it).
+    assert_eq!(rows_section(&[(0, 1, 1, "102D-295")]), line_feed());
+    assert_eq!(rows_section(&[(0, 1, 1, "100F-T-D-295")]), line_feed());
+    // NCBI: `two_cover` and `two_frag2`: another subject's block opened row 1.
+    assert_eq!(
+        rows_section(&[
+            (0, 1, 1, "100F-297"),
+            (1, 2, 1, "299"),
+            (1, 317, 95, "3LQPFQFPT4LV")
+        ]),
+        line_feed()
+    );
+    assert_eq!(
+        rows_section(&[
+            (0, 1, 1, "100F-297"),
+            (1, 3, 1, "298"),
+            (1, 317, 94, "3LQPFQFPT4LV")
+        ]),
+        line_feed()
+    );
+}
+
+/// The HSPs of subject `s1` of `t2a.faa` (its query's first 121 letters with a letter inserted
+/// after 61).
+const T2A_S1: &[(u32, u32, u32, &str)] = &[
+    (0, 1, 1, "61-W60"),
+    (0, 195, 108, "IV1KRKLKAND3LRVI1LI"),
+    (0, 317, 97, "3LQPFQFPT4LV"),
+    (0, 323, 88, "1DELV1LDLVMI1LI1"),
+];
+
+#[test]
+fn shared_segments_in_two_orders_are_ncbis_exception() {
+    // HSP 1: row 0 then row 1 (starts 0 and 10); HSP 2: row 1 then row 0 (starts 13 and 18). They
     // share a segment on each row, in the opposite orders of their subjects.
-    let query_only = "A-".repeat(50);
-    let first = format!("50{query_only}20");
-    let hsps = unreadable(&[(0, 1, 1, &first), (1, 104, 1, "10A-10")]);
-    assert!(section(&hsps).is_err());
-    // Either HSP alone: merged.
     assert_eq!(
-        section(&unreadable(&[(0, 1, 1, &first)])),
-        Ok(b"\n".to_vec())
+        rows_section(&[(0, 1, 1, "10-A10"), (1, 14, 1, "5-A10")]),
+        Err(MergeFailure::Exception)
+    );
+    assert_eq!(rows_section(&[(1, 14, 1, "5-A10")]), line_feed());
+    // NCBI: `t2a -evalue 1e-10` (the same with blocks of 61, 60, 32 and 60 letters; Infinite loop
+    // detected), and `t2none -evalue 1e-10`, whose second HSP's row 0 block starts after the first
+    // HSP's row 0 span (no shared segment there).
+    assert_eq!(
+        rows_section(&[(0, 1, 1, "61-W60"), (1, 101, 1, "32-W60")]),
+        Err(MergeFailure::Exception)
     );
     assert_eq!(
-        section(&unreadable(&[(1, 104, 1, "10A-10")])),
-        Ok(b"\n".to_vec())
+        rows_section(&[(0, 1, 1, "61-W60"), (1, 182, 1, "32-W60")]),
+        line_feed()
     );
+}
+
+#[test]
+fn a_later_pass_without_the_row_of_its_hsp_is_ncbis_exception() {
+    // NCBI: `t2a_s1` (Proper row not found for the match): the first match of row 2 (start 316, the
+    // third HSP's) gives the subject's first row to that HSP, so the letter alone of the first HSP
+    // finds no row of its own; `t2none` (the same, with another subject).
+    assert_eq!(rows_section(T2A_S1), Err(MergeFailure::Exception));
+    let mut t2none = T2A_S1.to_vec();
+    t2none.push((1, 182, 1, "32-W60"));
+    assert_eq!(rows_section(&t2none), Err(MergeFailure::Exception));
+    // NCBI: `t2a_s2` and `t2a` (Start iterator already exists for seq2): the first HSP's row taken
+    // by a later HSP of the subject, whose blocks then meet its own.
+    let t2a_s2 = [
+        (0, 101, 1, "32-W60"),
+        (0, 195, 7, "IV1KRKLKAND3LRVI1LIEAGAGL1R-C-1KT1TD1"),
+    ];
+    assert_eq!(rows_section(&t2a_s2), Err(MergeFailure::Exception));
+    let mut t2a = T2A_S1.to_vec();
+    t2a.extend(t2a_s2.iter().map(|&(_, q, s, btop)| (1, q, s, btop)));
+    assert_eq!(rows_section(&t2a), Err(MergeFailure::Exception));
 }
 
 #[test]
@@ -103,7 +210,7 @@ fn the_hsp_that_ncbi_stops_at_in_round_1_of_tk_other_stdaa_is_refused() {
     // BDT63523.1: 18 aligned columns from query start 200, 5 subject letters, 6 aligned columns
     // from query start 218 (row 2 both).
     let hsps = unreadable(&[(0, 201, 484, "1GF1LVVN2EPGD2RQ2KN1TGQE-Y-E-S-M-T1KH1LF2")]);
-    assert!(section(&hsps).is_err());
+    assert_eq!(section(&hsps), Err(MergeFailure::Exception));
     // A protein query's merge of the same HSP returns.
     let mut protein = Hsps::default();
     push_btop(
@@ -182,6 +289,80 @@ const IUPAC_ROUND_3: &[(u32, u32, u32, &str)] = &[
 
 #[test]
 fn the_rounds_of_ps6c_other_iupacaa_are_ncbis() {
-    assert_eq!(section(&unreadable(IUPAC_ROUND_2)), Ok(b"\n".to_vec()));
-    assert!(section(&unreadable(IUPAC_ROUND_3)).is_err());
+    assert_eq!(rows_section(IUPAC_ROUND_2), line_feed());
+    assert_eq!(rows_section(IUPAC_ROUND_3), Err(MergeFailure::Exception));
+}
+
+/// xorshift64*: the cases of `random_sections_end_as_ncbis_merge_can`, the same in every run.
+struct Cases(u64);
+
+impl Cases {
+    fn below(&mut self, n: u32) -> u32 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        ((x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 33) % u64::from(n)) as u32
+    }
+
+    /// A BTOP of 1 to 4 aligned blocks of 1 to 40 columns, with 1 to 4 letters of the query or of
+    /// the subject alone between two blocks.
+    fn btop(&mut self) -> String {
+        let mut btop = String::new();
+        for block in 0..1 + self.below(4) {
+            if block > 0 {
+                let gap = if self.below(2) == 0 { "A-" } else { "-A" };
+                for _ in 0..1 + self.below(4) {
+                    btop.push_str(gap);
+                }
+            }
+            btop.push_str(&(1 + self.below(40)).to_string());
+        }
+        btop
+    }
+}
+
+#[test]
+fn random_sections_end_as_ncbis_merge_can() {
+    // Each merge of the HSPs that a search can give such a query returns (a line feed) or ends as
+    // NCBI's does: never at a LOSAT internal error or a panic. 1 to 4 subjects of 1 to 3 HSPs
+    // each, anywhere on the first 150 letters of the query and the subject.
+    let mut cases = Cases(0x5eed_0015_b2f1_0001);
+    let mut ends = [0usize; 3];
+    for case in 0..4000 {
+        let mut hsps = Vec::new();
+        for subject in 0..1 + cases.below(4) {
+            for _ in 0..1 + cases.below(3) {
+                let (qstart, sstart) = (1 + cases.below(150), 1 + cases.below(150));
+                hsps.push((subject, qstart, sstart, cases.btop()));
+            }
+        }
+        let rows: Vec<(u32, u32, u32, &str)> = hsps
+            .iter()
+            .map(|(subject, qstart, sstart, btop)| (*subject, *qstart, *sstart, btop.as_str()))
+            .collect();
+        let mut out = Vec::new();
+        let written = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            write_unreadable_section(&mut out, &unreadable(&rows), "PSIBLAST")
+        }));
+        let end = match written {
+            Ok(Ok(())) => {
+                assert_eq!(out, b"\n", "case {case}: {rows:?}");
+                0
+            }
+            Ok(Err(error)) => match error
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<UnreadableMergeRefusal>())
+            {
+                Some(refusal) if refusal.failure == MergeFailure::Exception => 1,
+                Some(_) => 2,
+                None => panic!("case {case}: {rows:?}: {error}"),
+            },
+            Err(_) => panic!("case {case}: {rows:?}: a panic"),
+        };
+        ends[end] += 1;
+    }
+    // Each end is met (line feed, exception, crash).
+    assert!(ends.iter().all(|&count| count > 0), "{ends:?}");
 }

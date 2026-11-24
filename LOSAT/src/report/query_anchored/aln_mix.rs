@@ -34,8 +34,12 @@
 //! modulo 3 (`x_SetSeqFrame`), where it covers three positions for each of its letters. Two
 //! matches of one HSP whose spans meet on such a row put the HSP's subject row twice on a
 //! segment (`X_MERGE_START_ITERATOR`), and segments shared by HSPs on two such rows can follow
-//! each other in two orders (`BUILD_INFINITE_LOOP`): `MixError::NcbiThrows`, which
-//! `super::write_unreadable_section` refuses.
+//! each other in two orders (`BUILD_INFINITE_LOOP`): `MixError::NcbiThrows`. A match of the
+//! query's letters alone (a gap in the subject) whose start modulo 3 is a frame where no match of
+//! two rows opened a row of the query opens a row whose first match has no second row, and NCBI
+//! writes through that null row (`MixError::NcbiNullSecondRow`). The matches of two rows come
+//! first (`SortByScore`), so where one of them throws, that exception is NCBI's end; `Build`
+//! comes after `x_Merge`. `super::write_unreadable_section` refuses each of them.
 //!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
@@ -91,6 +95,24 @@ const BUILD_INFINITE_LOOP: ThrowSite = ThrowSite {
 const BUILD_INFINITE_LOOP_MESSAGE: &str =
     "CAlnMixSegments::Build(): Internal error: Infinite loop detected.";
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:349-376 (cited at
+// `Mix::merge_match`)
+// NCBI BLAST+ 2.17.0 reports it at line 372, in `ncbi::objects::CAlnMixMerger::x_Merge()` (exit
+// 255; line PS, PS15b-2 fix 1, `PS/tmp/fix15b2_t0/t2a_s1.1.err`: psiblast `-in_pssm` of the
+// molecule `other`).
+/// Where `x_Merge` throws when no row of a subject's chain is the row of the Dense-seg of a match
+/// of a later pass (`Mix::merge_match`).
+const X_MERGE_PROPER_ROW: ThrowSite = ThrowSite {
+    file: "src/objtools/alnmgr/alnmerger.cpp",
+    line: 372,
+    kind: "CAlnException::eMergeFailure",
+    function: Some("ncbi::objects::CAlnMixMerger::x_Merge"),
+};
+
+/// The message of `X_MERGE_PROPER_ROW`.
+const X_MERGE_PROPER_ROW_MESSAGE: &str = "CAlnMixMerger::x_Merge(): Proper row not found for the \
+     match. Cannot use fQuerySeqMergeOnly?";
+
 /// An index into `Mix::seqs` (a `CAlnMixSeq`).
 type SeqIx = usize;
 /// An index into `Mix::segs` (a `CAlnMixSegment`).
@@ -113,8 +135,9 @@ pub(crate) enum MixError {
     /// at `super::write_section`): the exception leaves the formatter before the section's first
     /// byte, and the application's `CATCH_ALL` ends the run with `Error: NCBI C++ Exception` (exit
     /// 255). Only the query's own Bioseq added with `fForceTranslation` (TBLASTX) gets there
-    /// (`Mix::merge_match`, `Mix::build`); `super::write_section` fails with it
-    /// (`NcbiException::into_io_error`).
+    /// (`Mix::merge_match`, `Mix::build`), and a query read at the width 3 whose letters are a
+    /// protein's (module doc); `super::write_section` fails with it
+    /// (`NcbiException::into_io_error`), `super::write_unreadable_section` refuses it.
     NcbiThrows(NcbiException),
     /// NCBI frees a segment that it still reads, where a write into a row's map replaces the last
     /// `CRef` of a segment (a `CAlnMixStarts` holds its segments by `CRef`, `m_Segments` by raw
@@ -138,6 +161,15 @@ pub(crate) enum MixError {
     /// A read of freed memory (SIGSEGV in our runs). The program refuses the report before its
     /// first byte (PD-LOSAT-NCBI-DEFECTS rule 3, `super::section_frees`).
     NcbiFreesSegment,
+    /// NCBI writes through a null pointer: the first match placed on a row has no second row, and
+    /// `x_Merge` stores the match's Dense-seg into that row's `m_DsIdx` (`fQuerySeqMergeOnly`,
+    /// `Mix::place`), so official NCBI BLAST+ 2.17.0 ends with SIGSEGV. Only a query read at the
+    /// width 3 whose letters are a protein's gets there (a PSSM query of the molecule `other`,
+    /// `super::Hsps::mix_widths`): a match of the query's letters alone (a gap in the subject)
+    /// whose start modulo 3 is a frame where no match of two rows opened a row of the query, so
+    /// `x_SetSeqFrame` gives it a new row (module doc). `super::write_unreadable_section` refuses
+    /// the report there.
+    NcbiNullSecondRow,
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
@@ -531,9 +563,12 @@ impl Mix {
     /// segments then fit the `m_AnotherRow`, and the HSP added first goes to the next extra row.
     /// When that HSP has no other segment the `m_AnotherRow` keeps no start, which NCBI does not
     /// survive (`MixError::NcbiAborts`, raised by `fill_unaligned_regions`). A first match
-    /// without a second row would have NCBI write through a null `seq2`: the matches of one row
-    /// come after those of two (score 0, `SortByScore`) and every row of a later pass has the
-    /// starts of its Dense-seg's matches with the query, so BLAST's HSPs never make one.
+    /// without a second row has NCBI write through a null `seq2` (`MixError::NcbiNullSecondRow`):
+    /// the matches of one row come after those of two (score 0, `SortByScore`) and every row of a
+    /// later pass has the starts of its Dense-seg's matches with the query, so only a query read
+    /// at the width 3 whose letters are a protein's makes one: its match of the query's letters
+    /// alone opens a row of its own where no match of two rows has the frame of its start (each
+    /// segment of a translated row has its HSP's frame).
     fn place(
         &mut self,
         seq1: SeqIx,
@@ -560,10 +595,8 @@ impl Mix {
             lo_start_i = Some(start1);
             hi_start_i = Some(start1);
             // With `fQuerySeqMergeOnly` in `m_MergeFlags`, `seq2->m_DsIdx` is set from `match->m_DsIdx`
-            // (alnmerger.cpp:499-501, cited above).
-            let seq2 = seq2.ok_or(MixError::Internal(
-                "the first match of a row has no second row",
-            ))?;
+            // (alnmerger.cpp:499-501, cited above), also where `seq2` is null.
+            let seq2 = seq2.ok_or(MixError::NcbiNullSecondRow)?;
             self.seqs[seq2].ds_idx = matched.ds_idx;
         } else {
             let starts = &self.seqs[seq1].starts;
@@ -817,6 +850,15 @@ impl Mix {
     /// The row of an ordinary subject's HSP holds that HSP's aligned segments alone, which never
     /// share a subject position: there the walk never meets a position of the row.
     ///
+    /// A query read at the width 3 whose letters are a protein's (module doc) has a row per frame,
+    /// and the first match placed on each row of the query sets the `m_DsIdx` of its second row
+    /// (`place`), which is the subject's first row whatever the match's Dense-seg (`x_SecondRowFits`
+    /// has not moved it yet). So a later frame's first match gives the subject's first row to the
+    /// HSP of that match: the HSPs of the subject after it can then fit that row too (their
+    /// segments meet the earlier HSP's there, `X_MERGE_START_ITERATOR`, or join them), and a match
+    /// of a later pass that looks for the row of the first HSP finds none
+    /// (`X_MERGE_PROPER_ROW`, `MixError::NcbiThrows`).
+    ///
     /// The query's own Bioseq added with `fForceTranslation` (TBLASTX, `Mix::add`): a match of
     /// such an HSP has the query's sequence on both sides. `x_SetSeqFrame` of the second row
     /// compares the row with the match's first row (whether `seq` is `match->m_AlnSeq1`, both the query's
@@ -842,7 +884,12 @@ impl Mix {
                 }
                 match self.seqs[seq1].extra_row {
                     Some(row) => seq1 = row,
-                    None => return Err(MixError::Internal("proper row not found for the match")),
+                    None => {
+                        return Err(MixError::NcbiThrows(NcbiException::new(
+                            X_MERGE_PROPER_ROW,
+                            X_MERGE_PROPER_ROW_MESSAGE,
+                        )))
+                    }
                 }
             }
         }
@@ -1058,7 +1105,8 @@ impl Mix {
                             stack.push(left);
                             if !on_stack.insert(left) {
                                 // NCBI's throw (cited above), which only the query's own Bioseq
-                                // with `fForceTranslation` can reach (`merge_match`).
+                                // with `fForceTranslation` (`merge_match`) and a query read at
+                                // the width 3 whose letters are a protein's (module doc) reach.
                                 return Err(MixError::NcbiThrows(NcbiException::new(
                                     BUILD_INFINITE_LOOP,
                                     BUILD_INFINITE_LOOP_MESSAGE,

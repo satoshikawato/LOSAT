@@ -745,6 +745,11 @@ fn unasked_merge_stop(error: aln_mix::MixError) -> io::Error {
         aln_mix::MixError::NcbiFreesSegment => {
             internal("a section whose merge NCBI BLAST+ frees a segment in")
         }
+        // Only a query read at the width 3 whose letters are a protein's gets there
+        // (`write_unreadable_section`): a translated row's segments have their HSP's frame.
+        aln_mix::MixError::NcbiNullSecondRow => {
+            internal("a section whose merge NCBI BLAST+ writes through a null row in")
+        }
         aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
     }
 }
@@ -819,12 +824,17 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// group's heading `For reading frame` (where more than one group has HSPs) and its display,
 /// whose `x_PrepareRowData` reads the query's letters as the alignment's first step and throws
 /// (`pairwise::UnreadableQuery`), caught by the group's `try`: the section is that line feed.
-/// Where a merge throws (`aln_mix::MixError::NcbiThrows`: `Merge` is outside the `try`), NCBI's
-/// run ends with that exception before the section's first byte (exit status 255). That is an
-/// NCBI failure without a checkable valid result (AGENTS.md rule 3), so LOSAT refuses there
-/// (`UnreadableMergeRefusal`), after the bytes of the report before the section, which are
-/// NCBI's. The merge reads the HSPs' positions and lengths only (no `fCalcScore`), so the
-/// encoding of the PSSM's sequence plays no part.
+/// Where a merge fails (`Merge` is outside the `try`), NCBI's run ends there, before the
+/// section's first byte: with the merge's exception (`aln_mix::MixError::NcbiThrows`, exit status
+/// 255), or with SIGSEGV where it writes through a null row (`aln_mix::MixError::NcbiNullSecondRow`;
+/// its output then stops where its stream last flushed). That is an NCBI failure without a
+/// checkable valid result (AGENTS.md rule 3), so LOSAT refuses there (`UnreadableMergeRefusal`),
+/// after the bytes of the report before the section, which NCBI writes before its failure. The
+/// merge reads the HSPs' positions and lengths only (no `fCalcScore`), so the encoding of the
+/// PSSM's sequence plays no part. A PSSM query is never one of the subjects' Bioseqs (only a FASTA
+/// query record is, `subject_is_query_record`), and psiblast's HSPs have no segment of length 0
+/// (it has no `-ungapped`), so the merge's other stops (`MixError::NcbiAborts`,
+/// `MixError::NcbiFreesSegment`) stay internal errors.
 pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     writer: &mut W,
     hsps: &Hsps,
@@ -833,14 +843,17 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     if hsps.is_empty() {
         return Ok(());
     }
+    let refusal = |failure| {
+        Err(UnreadableMergeRefusal {
+            program: program.to_string(),
+            failure,
+        }
+        .error())
+    };
     let (merged, num_distinct_frames) = match merge_groups(hsps) {
         Ok(merged) => merged,
-        Err(aln_mix::MixError::NcbiThrows(_)) => {
-            return Err(UnreadableMergeRefusal {
-                program: program.to_string(),
-            }
-            .error())
-        }
+        Err(aln_mix::MixError::NcbiThrows(_)) => return refusal(MergeFailure::Exception),
+        Err(aln_mix::MixError::NcbiNullSecondRow) => return refusal(MergeFailure::Crash),
         Err(error) => return Err(unasked_merge_stop(error)),
     };
     writer.write_all(b"\n")?;
@@ -854,16 +867,28 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     Ok(())
 }
 
+/// How NCBI BLAST+ 2.17.0 ends where its merge of the HSPs of a query that its display cannot
+/// read fails (`write_unreadable_section`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MergeFailure {
+    /// An uncaught `CAlnException` (`aln_mix::MixError::NcbiThrows`; exit status 255).
+    Exception,
+    /// SIGSEGV (`aln_mix::MixError::NcbiNullSecondRow`).
+    Crash,
+}
+
 /// LOSAT's refusal of the query-anchored section (outfmt 1 to 4) of a query that NCBI's display
-/// cannot read, where NCBI's merge of its HSPs throws (`write_unreadable_section`): NCBI BLAST+
-/// 2.17.0 stops there with an uncaught `CAlnException` (exit status 255). It travels as the
-/// `io::Error` of the report's writes (`error`), which the programs pass on as LOSAT's error, not
-/// as NCBI's exception or a failed write (`cli::NativeError::of_writer`, `cli::ReportStream::
-/// finish`), so the run stops with this text and exit status 1.
+/// cannot read, where NCBI's merge of its HSPs fails (`write_unreadable_section`): NCBI BLAST+
+/// 2.17.0 stops there (`failure`). It travels as the `io::Error` of the report's writes (`error`),
+/// which the programs pass on as LOSAT's error, not as NCBI's exception or a failed write
+/// (`cli::NativeError::of_writer`, `cli::ReportStream::finish`), so the run stops with this text
+/// and exit status 1.
 #[derive(Debug)]
 pub(crate) struct UnreadableMergeRefusal {
     /// The program, in LOSAT's words (`PSIBLAST`).
     program: String,
+    /// How NCBI's run ends there.
+    failure: MergeFailure,
 }
 
 impl UnreadableMergeRefusal {
@@ -875,11 +900,15 @@ impl UnreadableMergeRefusal {
 
 impl std::fmt::Display for UnreadableMergeRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let end = match self.failure {
+            MergeFailure::Exception => "stops with a C++ exception",
+            MergeFailure::Crash => "crashes",
+        };
         write!(
             f,
             "-outfmt 1 to 4 with a PSSM query of the molecule other is not supported by LOSAT's {} \
              where NCBI BLAST+ 2.17.0 cannot merge the query's alignments (it reads such a query \
-             as a nucleotide sequence there, and stops with a C++ exception)",
+             as a nucleotide sequence there, and {end})",
             self.program
         )
     }

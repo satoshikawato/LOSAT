@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.91
+- Version: 1.95
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -502,7 +502,9 @@
   at the merge of dev that brought psiblast line item PS10a's 1.82, then 1.89 at the merge of dev that
   brought 1.83 to 1.88 (line NP items M4b-AX, O4b2-2 and M4b-3c, psiblast line items PS10c and PS10d, line RG
   item D1c-1), then 1.91 at the merge of dev that brought line NP item M4b-T2's 1.89 and line RG
-  item T5d's 1.90)
+  item T5d's 1.90);
+  1.95 2026-11-24 (DELTABLAST, the order of tied domain hits, psiblast line item PS13a: an approved
+  difference decided by the Owner; numbered after dev's 1.94)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1523,6 +1525,38 @@ runs of DOMAINS lines that share one query, E-value and bit score with the same 
 query with a NaN E-value or bit score, with the number of such blocks and lines that
 `tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
 `rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
+
+## Approved difference (DELTABLAST, the order of tied domain hits, version 1.95)
+
+Decided by the Owner on 2026-11-24 (question Q-DL-TIE, answer B; psiblast line `DECISIONS.md` 103;
+the Owner's words are in [`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat deltablast`
+sorts the domain hits of a query with Rust's standard stable sort, as `losat rpsbproc` does (the
+approved difference of version 1.67). NCBI's order is deterministic for its binary, so rule 2 would
+otherwise reproduce it.
+
+Before it builds the alignment of conserved domains from which a query's first PSSM is made, NCBI's
+DELTA-BLAST sorts the query's domain hits with `std::sort` by the domain's Seq-id, then by E-value,
+and trims each hit by the hits of its domain kept before it, the last kept first
+(`CCddInputData::x_RemoveMultipleCdHits`, NCBI reference (598d8ae6):
+c++/src/algo/blast/api/cdd_pssm_input.cpp:168-219). The C++ standard does not keep the order of
+elements that compare equal in `std::sort`; NCBI's Linux builds leave hits of one domain with one
+E-value in the order that their C++ library's sort gives. LOSAT sorts with Rust's `slice::sort_by`,
+which is stable: such hits keep the order of the domain search's results.
+
+Where it shows: the order of two tied hits changes the alignment, and with it the PSSM, when their
+query ranges overlap (the hit sorted first trims the other) or when a worse hit of their domain
+overlaps the query ranges of both (it is cut by the two in their order, and the two cuts do not
+commute: a cut can drop a segment that follows the subtracted range, and the second cut reads the
+hit as the first left it). Then the query's PSSM scores, and so every round's alignments,
+statistics and PSSM files for that query, can differ from NCBI's. A search of NCBI's `rpsblast` with
+DELTA-BLAST's domain search options (E-value 0.05, no SEG, composition-based statistics 1) against
+cdd_delta (NCBI FTP, 2020-06-30) on the 4,300 proteins of E. coli K-12 MG1655 (2026-11-24) found 3,909
+queries with domain hits, 79 of them with two hits of one domain and one score, and 49 (1.25 %) where
+two such hits also overlap in the query; worse hits that overlap two tied ones were not counted.
+
+Fixtures: the unit test `hits_of_one_domain_with_one_evalue_keep_the_order_of_the_search`
+(`LOSAT/src/algorithm/deltablast/cdd_input_tests.rs`) holds an example of each case and LOSAT's
+order. No fixture row holds a tie. Code: `deltablast::cdd_input::remove_multiple_cd_hits`.
 
 ## Approved exception 25 (makeblastdb `-gi_mask`, a database of one volume, version 1.81)
 

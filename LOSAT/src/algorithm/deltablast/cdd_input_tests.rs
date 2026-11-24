@@ -94,15 +94,29 @@ fn hits_of_different_domains_do_not_trim_each_other() {
 }
 
 #[test]
-fn equal_evalues_of_one_domain_with_overlapping_query_ranges_are_refused() {
-    let hits = vec![hit(1, 1e-5, &[(0, 0, 20)]), hit(1, 1e-5, &[(10, 50, 20)])];
-    assert!(matches!(
-        remove_multiple_cd_hits(hits),
-        Err(CddRefusal::Tie(_))
-    ));
-    // Disjoint query ranges are no tie.
-    let hits = vec![hit(1, 1e-5, &[(0, 0, 10)]), hit(1, 1e-5, &[(50, 50, 10)])];
-    assert!(remove_multiple_cd_hits(hits).is_ok());
+fn hits_of_one_domain_with_one_evalue_keep_the_order_of_the_search() {
+    // Two tied hits (the same domain and E-value, disjoint query ranges) and a worse hit of the
+    // domain that each of them trims: the cuts do not commute, so the order of the tie decides
+    // the worse hit's segments. LOSAT keeps the order of the domain search's results (Rust's
+    // stable sort, the Owner's choice of 2026-11-24); NCBI's C++ library's sort may not.
+    let t1 = hit(1, 1e-5, &[(5, 5, 7)]);
+    let t2 = hit(1, 1e-5, &[(20, 12, 10)]);
+    let worse = hit(1, 1e-3, &[(0, 0, 10), (20, 12, 10), (40, 24, 10)]);
+    let kept = remove_multiple_cd_hits(vec![t1.clone(), t2.clone(), worse.clone()]).expect("kept");
+    assert_eq!(kept.len(), 3);
+    assert_eq!(spans(&kept[0]), spans(&t1));
+    assert_eq!(spans(&kept[2]), [(0, 5, 0, 5)]);
+    let kept = remove_multiple_cd_hits(vec![t2.clone(), worse.clone(), t1.clone()]).expect("kept");
+    assert_eq!(spans(&kept[0]), spans(&t2));
+    assert_eq!(spans(&kept[2]), [(0, 5, 0, 5), (40, 50, 24, 34)]);
+    // Tied hits with overlapping query ranges are not refused either; they too keep the search's
+    // order.
+    let a = hit(1, 1e-5, &[(0, 0, 20)]);
+    let b = hit(1, 1e-5, &[(10, 50, 20)]);
+    let kept = remove_multiple_cd_hits(vec![a.clone(), b.clone()]).expect("kept");
+    assert_eq!(kept, [a.clone(), b.clone()]);
+    let kept = remove_multiple_cd_hits(vec![b.clone(), a.clone()]).expect("kept");
+    assert_eq!(kept, [b, a]);
 }
 
 #[test]

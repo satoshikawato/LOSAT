@@ -81,9 +81,6 @@ pub(crate) enum CddRefusal {
     /// A domain whose Seq-align id is neither a local nor a general id: NCBI orders them by the
     /// rules of `CSeq_id::CompareOrdered` that LOSAT does not port.
     IdKind(String),
-    /// Two hits of one domain with one E-value whose query ranges overlap: NCBI's sort (the C++
-    /// library's, unstable) decides which is trimmed by the other.
-    Tie(String),
     /// A hit segment that reaches past the query or has negative length: NCBI writes outside its
     /// alignment.
     Range(String),
@@ -95,9 +92,6 @@ impl CddRefusal {
         match self {
             CddRefusal::IdKind(id) => format!(
                 "a domain database whose Seq-align ids are not local or general ids (the hit {id}) is not supported by LOSAT's DELTABLAST"
-            ),
-            CddRefusal::Tie(id) => format!(
-                "a query with two hits of the domain {id} that have the same E-value and overlapping query ranges (NCBI BLAST+ orders them with the C++ library's sort) is not supported by LOSAT's DELTABLAST"
             ),
             CddRefusal::Range(id) => format!(
                 "a query whose domain hit {id} has a segment that is outside the query or has a negative length (NCBI BLAST+ writes outside its alignment) is not supported by LOSAT's DELTABLAST"
@@ -286,14 +280,6 @@ impl Hit {
         }
         self.segments = new_segments;
     }
-
-    /// The query positions of the hit's first and last segments: the range that `Subtract` reads.
-    fn query_span(&self) -> Option<(i32, i32)> {
-        Some((
-            self.segments.first()?.query.from,
-            self.segments.last()?.query.to,
-        ))
-    }
 }
 
 /// The kind of a Seq-id in `CSeq_id::Which` order, for the ids that LOSAT orders.
@@ -383,14 +369,14 @@ pub(crate) fn remove_multiple_cd_hits(mut hits: Vec<Hit>) -> Result<Vec<Hit>, Cd
             return Err(CddRefusal::IdKind(id_label(&hit.id)));
         }
     }
-    // `compare_hits_by_seqid_eval`: the domain's id, then the E-value. Hits of one domain with one
-    // E-value keep their order here; NCBI's sort orders them as the C++ library does, which only
-    // matters where their query ranges overlap (`check_ties`).
+    // `compare_hits_by_seqid_eval`: the domain's id, then the E-value. Rust's stable sort keeps hits
+    // of one domain with one E-value in the order of the domain search's results; NCBI's sort
+    // leaves them in the order its C++ library's sort gives, which can trim a hit of the domain
+    // differently (PD-LOSAT-NCBI-DEFECTS, approved difference of version 1.95; Owner, 2026-11-24).
     hits.sort_by(|a, b| {
         compare_ordered(&a.id, &b.id)
             .then_with(|| a.e_value.partial_cmp(&b.e_value).unwrap_or(Ordering::Equal))
     });
-    check_ties(&hits)?;
     let mut kept: Vec<Hit> = Vec::with_capacity(hits.len());
     let mut hits = hits.into_iter();
     kept.extend(hits.next());
@@ -415,40 +401,6 @@ pub(crate) fn remove_multiple_cd_hits(mut hits: Vec<Hit>) -> Result<Vec<Hit>, Cd
         }
     }
     Ok(kept)
-}
-
-/// Refuses the order that NCBI's sort decides: two hits of one domain with one E-value whose query
-/// ranges overlap (the design's section 4). The hits are sorted.
-///
-/// A trimmed hit reads the hits kept before it only where their query ranges overlap
-/// (`CHit::Subtract` returns where they do not), and the alignment adds the columns of each
-/// position hit by hit: hits whose query ranges do not overlap give the same trimming and the
-/// same sums in any order.
-fn check_ties(hits: &[Hit]) -> Result<(), CddRefusal> {
-    let mut start = 0;
-    while start < hits.len() {
-        let mut end = start + 1;
-        while end < hits.len()
-            && compare_ordered(&hits[start].id, &hits[end].id) == Ordering::Equal
-            && hits[start].e_value == hits[end].e_value
-        {
-            end += 1;
-        }
-        for first in start..end {
-            for second in first + 1..end {
-                let (Some((from_a, to_a)), Some((from_b, to_b))) =
-                    (hits[first].query_span(), hits[second].query_span())
-                else {
-                    continue;
-                };
-                if from_a < to_b && from_b < to_a {
-                    return Err(CddRefusal::Tie(id_label(&hits[first].id)));
-                }
-            }
-        }
-        start = end;
-    }
-    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:222-272

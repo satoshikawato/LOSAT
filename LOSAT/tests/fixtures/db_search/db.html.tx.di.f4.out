@@ -1,0 +1,381 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/ns_ids.fna
+           11 sequences; 4,830 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+<a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nucltop&blast_rank=1&RID=" >XM_000101.1 </a>subject one two HSPs                                      <a href=#XM_000101.1>372</a>     4e-177  2
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>288</a>     1e-81   1
+<a title="Show report for XM_000111.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000111.1?report=genbank&log$=nucltop&blast_rank=3&RID=" >XM_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XM_000111.1>249</a>     1e-71   2
+<a title="Show report for XM_000109.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000109.1?report=genbank&log$=nucltop&blast_rank=4&RID=" >XM_000109.1 </a>subject nine                                              <a href=#XM_000109.1>199</a>     7e-55   1
+<a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nucltop&blast_rank=5&RID=" >CAA00102.2 </a>subject two                                                <a href=#CAA00102.2>185</a>     9e-51   1
+testdb:tag_s8 subject eight                                           <a href=#testdb:tag_s8>176</a>     7e-48   1
+<a title="Show report for AB000106.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000106.1?report=genbank&log$=nucltop&blast_rank=7&RID=" >AB000106.1 </a>subject six                                                <a href=#AB000106.1>170</a>     5e-46   1
+s7_not_in_taxdb_long_label subject seven taxid not in taxdb           <a href=#s7_not_in_taxdb_long_label>167</a>     2e-45   1
+<a title="Show report for AB000104.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000104.1?report=genbank&log$=nucltop&blast_rank=9&RID=" >AB000104.1 </a>subject four                                               <a href=#AB000104.1>165</a>     1e-44   1
+<a title="Show report for XM_000105.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000105.1?report=genbank&log$=nucltop&blast_rank=10&RID=" >XM_000105.1 </a>subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@...  <a href=#123457>156</a>     6e-42   1
+<a title="Show report for AB000110.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000110.1?report=genbank&log$=nucltop&blast_rank=11&RID=" >AB000110.1 </a>subject ten                                                <a href=#AB000110.1>115</a>     2e-29   1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1                     1     CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+XM_000101.1                 1     CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+s3_local_identifier         1                                                       GDESHIVADL  30
+XM_000111.1                 1     CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+XM_000109.1                 1                                   RPMRGRLTLIDPRHRVPYACGDPSHIVAGR  90
+CAA00102.2                  1     CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  180
+tag_s8                      1     CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  180
+XM_000105.1                 1     CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  180
+
+Query_1                     181   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+XM_000101.1                 181   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+s3_local_identifier         31    PAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITCANSVMRAVSK  210
+XM_000111.1                 181   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR                      300
+XM_000109.1                 91    PARPTVTRSVDATISNDPFFNCRCRRDYSITYMLQPRLCRPNGNVESGTCANLVMVAVVK  270
+CAA00102.2                  181   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  360
+tag_s8                      181   PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR                      300
+AB000106.1                  1                                             PSENVESHTSANLVIRPVVK  60
+XM_000105.1                 181   PARPTLTKSVRHAISPDPFF                                          240
+
+Query_1                     361   VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  540
+XM_000101.1                 361   VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL                             459
+XM_000101.1                 904                                  GLSTPFVNLVRHAAQLKVYSRLACDIAHP  990
+s3_local_identifier         211   ASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVPSRLALCYTHG  390
+XM_000109.1                 271   VSAYDTTTKT                                                    300
+AB000106.1                  61    VRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNLVRPAMQLKVPSRSPACYTHL  240
+s7_not_in_taxdb_long_label  1                                   SGLSTPFVDLVRHTMQMKVPSRRAACYTHA  90
+
+Query_1                     541   AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  720
+XM_000101.1                 991   AALKGTRSPRLTDYPRCSIHSGRGLFDPESTLGDPSRVQIPLTERACNLRLITVSTDYCT  1170
+s3_local_identifier         391   AASKGLGSSPLPESNRCSTH                                          450
+XM_000111.1                 690                                              EYRAKQAL*TPITSYAV  740
+XM_000111.1                 592                    SFDSGRGLFEPESDL                              636
+AB000106.1                  241   AALLGLPSPNLSEFFRGST                                           297
+s7_not_in_taxdb_long_label  91    AALKGLPLPRLIEIDNCSNFVKRGLREMEGTLGDLSRRQTPLTETRCHSRLVTPGSNACT  270
+AB000104.1                  16                             FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCT  120
+AB000110.1                  1                         SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCT  120
+
+Query_1                     721   SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  900
+XM_000101.1                 1171  SKTREPAHSCVLVDVNVILICNSSRGSLCKRSRGTEYSKFTSSGFSSPPSMVTTLVNYQN  1350
+XM_000111.1                 741   S                                                             743
+s7_not_in_taxdb_long_label  271   SQSREPRHS                                                     297
+AB000104.1                  121   SKLREPRHSLNLVRYNGKLICNSARGSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ   297
+AB000110.1                  121   SKSCEPVDSPNLVRVNVILI                                          180
+
+For reading frame +2 of query sequence:
+
+Query_1                     2     ASIIKARALFLCIHCV*HRTHSQRYLVE*KDQ*GGDWH**TCVIESPMHVVTSLTSWQDV  181
+XM_000101.1                 2     ASIIKARALFLCIHCV*HRTHSQRYLVE*KDQ*GGDWH**TCVIESPMHVVTSLTSWQDV  181
+s3_local_identifier         2                                                       VTSLTSWQIY  31
+XM_000111.1                 2     ASIIKARALFLCIHCV*HRTHSQRYLVE*KDQ*GGDWH**TCVIESPMHVVTSLTSWQDV  181
+XM_000109.1                 2                                   DQ*GGD*L**THVIESPMHVVTHLTSWPDV  91
+CAA00102.2                  2     ASLIKALALLGYDQLVSHRTHSHLVFRE*NIA*GGEAQP*IYAIESPMHVVTSLLPLQDV  181
+tag_s8                      2     ASIIMARALTLCIHCV*H*THIAR*GVE*KDHLGGDWQK*RSYIESPMHVKTSFTSSQEA  181
+XM_000105.1                 2     ASIIKARALFLCIHCVAT*TQSQR*RVE*KIQRGGFWH**PCVIESIMHVQ*SLTSWQDV  181
+
+Query_1                     182   LPVRL*LGAYATPFHPILSLYVGVEETILSNTCFSRDYFARPKMWNPGLVRT*LCERLLK  361
+XM_000101.1                 182   LPVRL*LGAYATPFHPILSLYVGVEETILSNTCFSRDYFARPKMWNPGLVRT*LCERLLK  361
+s3_local_identifier         32    LPPRL*LGAYALPFHLILSFHVGVEETHLSNTCFSRDYFARPKMWNPSLVRTLLCERLAK  211
+XM_000111.1                 182   LPVRL*LGAYATPFHPILSLYVGVEETILSNTCFSRDYFA                      301
+XM_000109.1                 92    LPVRL*LGA*TLPFQTILSLTVGVEETILSRTCFSRDYVARTVMWNPGLVRT*LWLRLLK  271
+CAA00102.2                  182   LPVRLRLGWYATPFVPSISFCVDVEE*CGSNTCFRVDYFALTEMWNPGIV            331
+tag_s8                      182   LPVRL*L*AYYTPFHPILSLYVRGIMTILSNTCFSRDY                        295
+AB000106.1                  2                                             RPKMWNPILLRT*LFDQLLK  61
+XM_000105.1                 182   LPVRL*LKAYATQFHPILS                                           238
+
+Query_1                     362   YLHMTSPLKQVTILMEVCASATKAM*LLYQVV*VPHLLILYVTPCN*KCHHASLLVILT*  541
+XM_000101.1                 890                             LVKQWV*VPHLLILYVTPPN*KSIHASLATLPTP  991
+XM_000101.1                 362   YLHMTSPLKQVTILMEVCASATKAM*LLY                                 448
+s3_local_identifier         212   LLHMTSPLKQVTILMERCASATKAK*LLYTVV*VPQGGILYVTPCNCRCHHASLCVILTG  391
+XM_000109.1                 272   YLHMT                                                         286
+AB000106.1                  62    *EQPVSPFVQVTIPMETCAYATKAM*LLYQVV*VPVLLILYVLPCN*KCHHARPLVILT*  241
+s7_not_in_taxdb_long_label  2                                   VV*APHLLTLYVTPCK*KCHQEELLVILTQ  91
+
+Query_1                     542   RL*KVLDLRGLQNITAVVLILDVAYSSLNLRLGIPVECKYHSPRLGATVVW*HRSRIIVH  721
+XM_000101.1                 992   RL*KVPGLRGLQTIRAVVSILDVAYSTLNLRLGTPVECKYHSPREPATCVLSQSPRTIVH  1171
+s3_local_identifier         392   RLRKVLEAHHFQKVTAVVL                                           448
+XM_000111.1                 593                    VLTLDVAYSSLNLTSARP                           646
+AB000106.1                  242   RLY*VFRLRIFRNFFAGVL                                           298
+s7_not_in_taxdb_long_label  92    RL*KVFLCRGLLKLITVVIS*NVAYVRWKERLGILVEDKLHSPRLGAIVVW*HRVVTRVH  271
+AB000104.1                  2                         LFVSRSSLKERLGCPVHSKVHSTRLGATVVK*HRSTSIVH  121
+AB000110.1                  2                         LESAF*SLNLRLGIPVVCNRHSPRLGATVHWLHRSRHIVH  121
+
+Query_1                     722   QSLESHDTRVT*FGLTLY*YVTPLGGTCASAREGQSTINSHPQNFPAPHG*TSLL*IIR  898
+XM_000101.1                 1172  QRPESQLTRVS*LTLTLY*YVTPAGGRCASAREGQSTVNSHPQGFPAPHPW*QL**IIR  1348
+s7_not_in_taxdb_long_label  272   HSLESHDTR                                                    298
+AB000104.1                  122   QS*ESHDTR*T*FVTTAN*YVTPLGGACASADEGQSTVNSHPQNLNVPHGGTLLMPII   295
+AB000110.1                  122   QSLASQLTRPT*FGLTLY*                                          178
+
+For reading frame +3 of query sequence:
+
+Query_1                     3     LRLSRQGLYFYVFIAFDIEPIPRDI**SRKTNEGATGIDRRAS*SPLCMW*RVSHRGRTS  182
+XM_000101.1                 3     LRLSRQGLYFYVFIAFDIEPIPRDI**SRKTNEGATGIDRRAS*SPLCMW*RVSHRGRTS  182
+s3_local_identifier         3                                                       *RVSHRGRST  32
+XM_000111.1                 3     LRLSRQGLYFYVFIAFDIEPIPRDI**SRKTNEGATGIDRRAS*SPLCMW*RVSHRGRTS  182
+XM_000109.1                 3                                   TNEGATDFDRPTS*SPLCMW*PISHRGRTS  92
+CAA00102.2                  3     LHLSRRWLYWDTISSCHIEPIPI*FSESRILHEGARRNHKFTP*SPLCMW*RVSCRCRTS  182
+tag_s8                      3     LRL*WQGL*LCVFIAFDTEPILRDKE*SRKTT*GATGRNNAAT*SPLCMSRRVSHLRRRP  182
+XM_000105.1                 3     LRLSRQGLYFYVFIAWRHKPRARDSE*SRRSSEGGSGIDNRAS*SLLCMSSRVSHRGRTS  182
+
+Query_1                     183   CPSDFDSERTPHHFTRSFLCM*V*KRLFYPIHASAETTSPVRKCGIRDLCEPSYASGC*S  362
+XM_000101.1                 183   CPSDFDSERTPHHFTRSFLCM*V*KRLFYPIHASAETTSPVRKCGIRDLCEPSYASGC*S  362
+s3_local_identifier         33    CRPDFDSERTRYHFT*SFLSM*V*KRLIYPIHASAETTSPVRKCGIHHLCELCYASG*QS  212
+XM_000111.1                 183   CPSDFDSERTPHHFTRSFLCM*V*KRLFYPIHASAETTS                       299
+XM_000109.1                 93    CPSDCNSERRRYHFKRSFL*L*V*KRLFYHVHASAETMSPER*CGIRDLCEPSYGCGC*S  272
+CAA00102.2                  183   CPSDFDSGGTPHHLSQVFLSVSM*KSSVDPIHASE*TTSR*QKCGIRVLCDPS         341
+tag_s8                      183   CPSDFDFERITHHFTRSCLCMYVG**LFYPIHASAETTT                       299
+AB000106.1                  3                                             VRKCGIPYFCEPSYSTSC*S  62
+XM_000105.1                 183   CPSDFD*KRTPRNFTRSFL                                           239
+
+Query_1                     363   ICI*LRR*NK*RF*WRCVRARQKLCDSYTKWFEYPIC*SCTSRHAIESAITPRCLLYSPS  542
+XM_000101.1                 363   ICI*LRR*NK*RF*WRCVRARQKLCDSYT                                 449
+XM_000101.1                 909                                   EYPIC*SCTSRRPIESLFTPRLRHCPPR  992
+s3_local_identifier         213   FCI*LRR*NK*RF*WKGVRARQKPSDSYTQWFEYPKEESCTSRHAIAGAITPRSVLYSRG  392
+XM_000109.1                 273   ICI*                                                          284
+AB000106.1                  63    KSSLFRRLYK*RFRWRRVHTRQKLCDSYTKWFEYPFC*SCTSCHAIESAITLARLLYSPS  242
+s7_not_in_taxdb_long_label  3                                   WFEHPIC*PCTSHHANESAIKKSCLLYSRS  92
+
+Query_1                     543   GFKRSWISEAYRI*PL*YSFWTWPIRA*IYAWGSQ*SANTTHRD*VQQSFGNTDHELLYI  722
+XM_000101.1                 993   GFKRYPVSEAYRLSAL*YPFWTWPIRP*IYAWGPQ*SANTTHRESLQPASYHSLHGLLYI  1172
+s3_local_identifier         393   GFERSWKLTTSRK*PL*YS                                           449
+XM_000111.1                 603                       WTWPIRA*I                                 629
+AB000106.1                  243   GFTRSSVSESFGI                                                 281
+s7_not_in_taxdb_long_label  93    GFKRSSFAEAY                                                   125
+s7_not_in_taxdb_long_label  183                                 AWGS**KTNSTHRD*VP*SFGNTG**RVYI  272
+AB000104.1                  6                          SFPVRA*RNAWVARYTARSTPRD*VQQS*SNTDQPVLYI  122
+AB000110.1                  3                         WNRLFRA*IYAWGSQWCATATHRD*VQQCIGYTDHVILYI  122
+
+Query_1                     723   KV*RATTLV*LSSG*RYIDM*LR*GVPVQALARDRVP*IHILRIFQPPMDEPHSCKLSE  899
+XM_000101.1                 1173  KDQRASSLVCLS*R*RYIDM*LQQGVAVQALARDRVQ*IHILRVFQPPIHGDNFSKLSE  1349
+s7_not_in_taxdb_long_label  273   TV*RATTL                                                     296
+AB000104.1                  123   KAKRATTLVELSSLQRQIDM*LR*GEPVQAPTRDRVP*IHILRI*TSPMEELY*CQLS   296
+AB000110.1                  123   KVLRAS*LAQLSSG*RYID                                          179
+
+For reading frame -1 of query sequence:
+
+Query_1                     900   ILIIYKSEVHPWGAGKF*GCEFMVLCPSRALAQVPPSGVTYQYNVNPN*VTRVSWLSRL*  721
+XM_000101.1                 1350  ILIIY*SCHHGWGAGKP*GCEFTVLCPSRALAQRPPAGVTYQYNVNVN*DTRVSWLSGL*  1171
+s7_not_in_taxdb_long_label  297                                                      RVSWLSRL*  271
+AB000104.1                  297    LIIGISRVPPWGTFKF*GCEFTVLCPSSALAQAPPSGVTYQFAVVTN*VQRVSWLS*L*  121
+AB000110.1                  180                                           YQYNVNPN*VGRVNWLARL*  121
+
+Query_1                     720   CTIIRDRCYQTTVAPSLGEWYLHSTGIPKRRFRLE*ATSRMSTTAVIFCKPRRSKTF*SR  541
+XM_000101.1                 1170  CTIVRGDCDKTQVAGSLGEWYLHSTGVPKRRFRVE*ATSRMDTTARIVCKPRRPGTF*SR  991
+s3_local_identifier         450                                           MSTTAVTFWKW*ASKTFRSR  391
+XM_000111.1                 630                                 RFRLE*ATSRVKT                   592
+AB000106.1                  297                                            STPAKKFRKIRRRKT**SR  241
+s7_not_in_taxdb_long_label  270   CTRVTTRCYQTTMAPSLGEWSLSSTKIPKRSFHLT*ATFYEITTVINFNKPRQRKTF*SR  91
+AB000104.1                  120   CTILVDRCYFTTVAPSLVEWTLLCTGQPKRSFRLERETKR                      1
+AB000110.1                  120   CTI*RDRCNQCTVAPSLGEWRLHTTGIPKRRFRL*KADSR                      1
+
+Query_1                     540   *VSITSSEA*WHFQLHGVTYKINKWGTQTTWYKSHIAFVALAHTSIKIVTCFNGEVICRY  361
+XM_000101.1                 462                             TERWWYKSHIAFVALAHTSIKIVTCFNGEVICRY  361
+XM_000101.1                 990   GVGNVASEA*IDFQLGGVTYKINKWGTQT                                 904
+s3_local_identifier         390   PVSITQSEA*WHLQLHGVTYKIPPWGTQTTVYKSHLAFVALAHLSIKIVTCFNGEVICRS  211
+XM_000109.1                 300                                                     CFGRSVICRY  271
+tag_s8                      156                                                  VLTCIGDSM*LRY  118
+AB000106.1                  240   *VSITSGRA*WHFQLHGRTYKINKTGTQTTWYKSHIAFVAYAHVSIGIVTCTNGETGCSY  61
+s7_not_in_taxdb_long_label  90    CVSITSSSS*WHFHLHGVTYKVNKWGAQTT                                1
+
+Query_1                     360   FNNRSHN*VRTSPGFHIFGRAK*SRLKHVLDRIVSSTPTYKERIG*NGVAYAPSQSRTGR  181
+XM_000101.1                 360   FNNRSHN*VRTSPGFHIFGRAK*SRLKHVLDRIVSSTPTYKERIG*NGVAYAPSQSRTGR  181
+s3_local_identifier         210   FANRSHNRVRTSDGFHIFGRAK*SRLKHVLDR*VSSTPTWKERIR*NGNAYAPSQSRGGR  31
+XM_000111.1                 300                       AK*SRLKHVLDRIVSSTPTYKERIG*NGVAYAPSQSRTGR  181
+XM_000109.1                 270   FNNRNHN*VRTSPGFHITVRAT*SRLKHVRDRIVSSTPTVKERIV*NGSVYAPSYSRTGR  91
+CAA00102.2                  360   FENK*AN*GHTIPGFHISVSAK*STLKHVLDPHYSSTSTQKEILGTNGVAYHPSRSRTGR  181
+tag_s8                      300                       AS*SRLKHVLDRIVIIPRTYKDRIG*NGV*YAQSQSRTGR  181
+tag_s8                      117   F                                                             115
+AB000106.1                  60    FNNWSNN*VRRSMGFHIFGR                                          1
+XM_000105.1                 240                                           KERIG*NCVAYAFSQSRTGR  181
+
+Query_1                     180   TSCHDVRLVTTCIGDSMTHVYQCQSPPHWSFYSTKYLWEWVRCQTQ*IHRNKALALIIEA  1
+XM_000101.1                 180   TSCHDVRLVTTCIGDSMTHVYQCQSPPHWSFYSTKYLWEWVRCQTQ*IHRNKALALIIEA  1
+s3_local_identifier         30    *ICHDVRLVT                                                    1
+XM_000111.1                 180   TSCHDVRLVTTCIGDSMTHVYQCQSPPHWSFYSTKYLWEWVRCQTQ*IHRNKALALIIEA  1
+XM_000111.1                 482                                   SVKYLFKGPRCSSR                441
+XM_000109.1                 90    TSGHDVRWVTTCIGDSMTWVYQSQSPPHWS                                1
+CAA00102.2                  180   TSCSGKRLVTTCIGDSMA*IYGCASPPHAIFYSLKTKWEWVRCDTS*SYPNKANALISEA  1
+tag_s8                      180   ASCEDVKLVLTCIGDSM*LRYFCQSPPRWSFYSTPYLAIWVQCQTQ*IHRVKALAIIIEA  1
+XM_000105.1                 180   TSCHDVRLYWTCIIDSMTHGYQCQNPPRWIFYSTRYLWLWVYVATQ*IHRNKALALIIEA  1
+
+For reading frame -2 of query sequence:
+
+Query_1                     899   F**FTRVRFIHGGLENSEDVNLWYSVPRERLHRYPLAELHINITLTRTKLHECRGSLDFD  720
+XM_000101.1                 1349  F**FTKVVTMDGGLENPEDVNLLYSVPRERLHSDPLLELHINITLTSTKTHE*AGSLVFD  1170
+s7_not_in_taxdb_long_label  296                                                      ECRGSLDCD  270
+AB000104.1                  296    **LASVEFLHGGRSNSEDVNLRYSVPRRRLHRLPLAELHINLPL*RTKFNECRGSLSFD  120
+AB000110.1                  179                                           INITLTRTKLGESTGSQDFD  120
+
+Query_1                     719   VQ*FVIGVTKRLLHLVSVSGICTLLGSPSVDSGSNRPRPE*VLQRLYSVSLGDPRPFK<font color="#000000">aa</font>  540
+XM_000101.1                 1169  VQ*SVETVIRRRLQALSVSGICTLLGSPSVDSGSNRPRPEWILQRG*SVSLGDRVPFKAA  990
+s3_local_identifier         449                                           *VLQRLLSGSGELPRPFE    396
+XM_000111.1                 629                                 DSGSNRPRPESKLQSPQSASEHDKR       555
+s7_not_in_taxdb_long_label  269   VHALLPGVTKRLWHLVSVSGVCLLLRSPSVPSISRRPRFTKLLQLSISISLGKGRPFK    96
+AB000104.1                  119   VQYWLIGVTSRLLHLVSWSGPCCVPGNPSVPSGSNGKR                        6
+XM_000105.1                 139                                               RLYDARLSMPEP      104
+AB000110.1                  119   VQYDVIGVTNALLHLVSVSGGCTPLGSPSVDSGSKKPIP                       3
+
+Query_1                     539   <font color="#000000">r*v*qaar</font>RDGTFNCMA*RTRLTNGVLKPLGIRVT*LLSRSHTPPSKSLLVLTAKSYADT  360
+XM_000101.1                 989   GWAMSQARRE*TFNWAA*RTRLTNGVLRP                                 903
+XM_000101.1                 449                                 GIRVT*LLSRSHTPPSKSLLVLTAKSYADT  360
+s3_local_identifier         362            DGTCNCMA*RTRFLLGVLKPLCIRVTWLLSRSHTFPSKSLLVLTAKSYAEA  210
+XM_000109.1                 299                                                     VLVVVSYADT  270
+AB000106.1                  212            DGTFNCMAGRTRLTKRVLKPLGIRVT*LLSRMHTSPSESLLVQTAKQAALT  60
+s7_not_in_taxdb_long_label  62             DGTFICMV*RTRSTNGVLKP                                 3
+
+Query_1                     359   LTTARITRFAQVPDSTFSDGRSSLG*SMYWIE*SLLHLHTKKGSGEMVWRTLRVKVGRAG  180
+XM_000101.1                 359   LTTARITRFAQVPDSTFSDGRSSLG*SMYWIE*SLLHLHTKKGSGEMVWRTLRVKVGRAG  180
+s3_local_identifier         209   LLTARITEFAQVMDSTFSDGRSSLG*SMYWIDESLLHLHGKKGSGEMVTRTLRVKVGAAG  30
+XM_000111.1                 299                       RSSLG*SMYWIE*SLLHLHTKKGSGEMVWRTLRVKVGRAG  180
+XM_000109.1                 269   LTTATITRFAQVPDSTLPFGRHSLG*SMYVIE*SLLHLQLKKGSFEMVASTLRVTVGRAG  90
+CAA00102.2                  359   LRTSKLTRVTQYPDSTFLSARSSLL*SMYWIHTTLLHRHRKKYLGQMVWRTTRVEVGRAG  180
+tag_s8                      299                       RRSLG*SMYWIE*SLSHVHTKTGSGEMVCNTLKVKVGRAG  180
+AB000106.1                  59    LTTGRITRFAEVWDSTFSD                                           3
+XM_000105.1                 239                                           KKGSGEIAWRTLLVKVGRAG  180
+
+Query_1                     179   RPATM*DSSPHA*GTL*RTSINASRPLIGLSTLLNISGNGFDVKRNEYIEIKPLP**SK  3
+XM_000101.1                 179   RPATM*DSSPHA*GTL*RTSINASRPLIGLSTLLNISGNGFDVKRNEYIEIKPLP**SK  3
+s3_local_identifier         29    RSATM*DSS                                                    3
+XM_000111.1                 179   RPATM*DSSPHA*GTL*RTSINASRPLIGLSTLLNISGNGFDVKRNEYIEIKPLP**SK  3
+XM_000109.1                 89    RPATM*DGSPHA*GTL*RGSIKVSRPLIG                                3
+CAA00102.2                  179   RPAAARDSSPHA*GTLWRKFMVAPRPLMQYSTL*KLNGNGFDVTRADRIPIKPTP**VK  3
+tag_s8                      179   PPAKM*NSS*HA*GTLCSCVISASRPLGGLSTLLLISQYGFSVKRNEYTESKPLPL*SK  3
+XM_000105.1                 179   RPATM*DSTGHA**TL*RTVINARTPLAGSSTLLAISGSGFMSPRNEYIEIKPLP**SK  3
+
+For reading frame -3 of query sequence:
+
+Query_1                     898   SDNLQE*GSSMGGWKILRM*IYGTLSLASACTGTP*RSYISI*R*PELSYTSVVAL*TLM  719
+XM_000101.1                 1348  SDNLLKLSPWMGGWKTLRM*IYCTLSLASACTATPCWSYISI*R*RQLRHTSELALWSLM  1169
+s7_not_in_taxdb_long_label  295                                                      SVVAL*TVM  269
+AB000104.1                  298   ADNWHQ*SSSMGDVQILRM*IYGTLSLVGACTGSP*RSYISICRCNELSSTSVVALLALM  119
+AB000110.1                  178                                           SI*R*PELSWASQLARKTLM  119
+
+Query_1                     718   YNNS*SVLPNDCCT*SR*VVFALYWDPQA*IQARIGHVQNEYYSGYIL*ASEIQDLLKPL  539
+XM_000101.1                 1132              CRLSR*VVFALYWGPQA*IQGRIGHVQNGYYSADSL*ASETGYLLKPR  989
+XM_000101.1                 1168  YNS                                                           1160
+s3_local_identifier         448                                           EYYSGYFLEVVSFQDLSKPP  389
+XM_000111.1                 628                                 IQARIGHVQSQNSSRHNQLASMIKE       554
+AB000106.1                  268                                                     SETEDLVKPL  239
+s7_not_in_taxdb_long_label  268   YTRYYPVLPNDYGT*SR*VEFVFY*DPQAFLPSHVGHVLRNYYSYQFQ*ASAKEDLLKPL  89
+AB000104.1                  118   YNTG*SVLLHDCCT*SRGVDLAVYRATQAFLQARTGN                         8
+AB000110.1                  118   YNMT*SV*PMHCCT*SR*VAVAHHWDPQA*IQA                             20
+
+Query_1                     538   GEYNKQRGVMALSIAWRDVQD*QMGYSNHLV*ESHSFCRARTHLHQNRYLF*RRSHMQIL  359
+XM_000101.1                 451                                VV*ESHSFCRARTHLHQNRYLF*RRSHMQIL  359
+XM_000101.1                 988   GGQCRKRGVNRLSIGRRDVQD*QMGYSDPL                                899
+s3_local_identifier         388   REYNTERGVMAPAIAWRDVQDSSLGYSNHCV*ESLGFCRARTPFHQNRYLF*RRSHMQKL  209
+XM_000109.1                 283                                                          HMQIL  269
+AB000106.1                  238   GEYNKRASVMALSIAWQDVQD*QNGYSNHLV*ESHSFCRVCTRLHRNRYLYKRRNRLLLL  59
+s7_not_in_taxdb_long_label  88    REYNKQLFLMALSFAWCDVQGQQMGCSNH                                 2
+
+Query_1                     358   *QPLA*LGSHKSRIPHFRTGEVVSAEACIG*NSLFYTYIQRKDRVKWCGVRSESKSDGQD  179
+XM_000101.1                 358   *QPLA*LGSHKSRIPHFRTGEVVSAEACIG*NSLFYTYIQRKDRVKWCGVRSESKSDGQD  179
+s3_local_identifier         208   C*PLA*QSSHK*WIPHFRTGEVVSAEACIG*MSLFYTYMERKDQVKW*RVRSESKSGRQV  29
+XM_000111.1                 298                       EVVSAEACIG*NSLFYTYIQRKDRVKWCGVRSESKSDGQD  179
+XM_000109.1                 268   *QPQP*LGSHKSRIPHYRSGDIVSAEACT**NSLFYTYS*RKDRLKW*RLRSELQSDGQD  89
+CAA00102.2                  358   *EQVS*LGSHNTRIPHFCQREVVYSEACIGSTLLFYIDTERNTWDKWCGVPPESKSDGQD  179
+tag_s8                      295                        VVSAEACIG*NSHYPTYIQRQDRVKWCVIRSKSKSDGQG  179
+AB000106.1                  58    *QLVE*LGSQKYGIPHFRT                                           2
+XM_000105.1                 238                                           RKDRVKLRGVRF*SKSDGQD  179
+
+Query_1                     178   VLPRCETRHHMHRGLYDARLSMPVAPSLVFLLY*ISLGMGSMSNAMNT*K*SPCLDNRS  2
+XM_000101.1                 178   VLPRCETRHHMHRGLYDARLSMPVAPSLVFLLY*ISLGMGSMSNAMNT*K*SPCLDNRS  2
+s3_local_identifier         28    DLPRCETRH                                                    2
+XM_000111.1                 178   VLPRCETRHHMHRGLYDARLSMPVAPSLVFLLY*ISLGMGSMSNAMNT*K*SPCLDNRS  2
+XM_000109.1                 88    VRPRCEMGHHMHRGLYDVGLSKSVAPSLV                                2
+CAA00102.2                  178   VLQRQETRHHMHRGLYGVNLWLRLAPSCNILLSEN*MGMGSM*HELIVSQ*SQRLD     11
+tag_s8                      178   LLRRCETRLDMHRGLYVAALFLPVAP*VVFLLYSLSRNMGSVSNAMNTQSQSPCHYNRS  2
+XM_000105.1                 178   VLPRCETLLDMHNRLYDARLSMPEPPSLDLLLYSLSLALGLCRHAMNT*K*SPCLDNRS  2
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 375889
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+<a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nucltop&blast_rank=1&RID=" >XM_000101.1 </a>subject one two HSPs                                      <a href=#XM_000101.1>21.2</a>    0.027  1
+<a title="Show report for AB000104.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000104.1?report=genbank&log$=nucltop&blast_rank=2&RID=" >AB000104.1 </a>subject four                                               <a href=#AB000104.1>20.8</a>    0.037  1
+<a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nucltop&blast_rank=3&RID=" >CAA00102.2 </a>subject two                                                <a href=#CAA00102.2>16.6</a>    0.64   1
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>13.9</a>    4.1    1
+
+
+
+For reading frame +2 of query sequence:
+
+Query_2     32   LHRAKRAEVH  61
+AB000104.1  209  LHRLPLAELH  180
+
+For reading frame -1 of query sequence:
+
+Query_2      120   LNSDSTLGRPFFCKNRRTELCTSARLALCKPAH  22
+XM_000101.1  1228                     ICNSSRGSLCK     1260
+AB000104.1   178                      ICNSARGSLCK     210
+CAA00102.2   34    IRSARVTSNPFPFSFQRVEYCMRGRGATINLRH  132
+
+For reading frame -2 of query sequence:
+
+Query_2              65   SCALRH  48
+s3_local_identifier  327  SCTSRH  344
+
+For reading frame -3 of query sequence:
+
+Query_2      94   PILL*EPPHGAVHFGTFGSMQAC  26
+XM_000101.1  479  PLLR*IPYHVTMFFVTFGEL     538
+AB000104.1   235               YGTLSLVGAC  206
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 32729
+
+
+  Database: in/ns_ids.fna
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 4,830
+  Number of sequences in database:  11
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

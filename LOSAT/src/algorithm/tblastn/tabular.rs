@@ -36,8 +36,8 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
-    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
+    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,
+    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
     TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
@@ -91,11 +91,14 @@ pub(super) struct TabularInputs {
     pub names: Option<TabularNames>,
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
-    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`; its pairwise
-    /// writer reads them here too, `stage_e_report::write_pairwise`); None without them.
+    /// An ungapped search (`-ungapped`), whose Seq-aligns are Std-segs (`qcovhsp`,
+    /// `report::tabular::QueryCoveragePerHsp`).
+    pub ungapped: bool,
+    /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`; their
+    /// pairwise writer reads them here too, `stage_e_report::write_pairwise`); None without them.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
-    /// `-html` (`TblastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
-    /// reports (the organism report takes no links).
+    /// `-html` (`TblastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 to 4 and
+    /// 18 reports (the organism report takes no links).
     pub is_html: bool,
 }
 
@@ -378,6 +381,13 @@ pub(super) fn write_tblastn_tabular(
                 .map(|values| values.nucleotide_subject(names, -1, -1));
             let subject_len = i32::try_from(tab.letters.length(oid))?;
             let whole_length = i32::try_from(record_length(oid))?;
+            // The subject's `qcovhsp` rule: its rows only divide.
+            let qcovhsp = QueryCoveragePerHsp::of_subject(
+                tab.inputs.ungapped,
+                list.hsps.hsps.len(),
+                i32::try_from(searched_length)?,
+                i32::try_from(query_length)?,
+            );
             let mut translation = None;
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -502,11 +512,10 @@ pub(super) fn write_tblastn_tabular(
                     q_frame: 0,
                     s_frame,
                     rows: rows_read.then_some((qrow.as_bytes(), srow.as_bytes())),
-                    // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched
-                    // length (blast_seqalign.cpp:1222-1225, `hsp_percent_coverage`).
                     end_gaps: true,
                     stored_gaps: [&query_gaps, &[]],
-                    qcovhsp: hsp_coverage(hsp.q_end - hsp.q_start, i32::try_from(searched_length)?),
+                    // The protein query's residues, in the HSP's context and in the Seq-align.
+                    qcovhsp: qcovhsp.of_hsp(hsp.q_end - hsp.q_start, hsp.q_end - hsp.q_start),
                 };
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_deref_mut() {

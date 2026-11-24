@@ -2471,8 +2471,8 @@ pub enum AfterThrow {
     /// Thrown`), and the report goes on.
     SkipsAlignment { html: bool },
     /// The query-anchored reports, outfmt 1 to 4: the description lines as outfmt 0's
-    /// (`SkipsAlignment`, with `html` alike; LOSAT refuses `-html` with these formats before the
-    /// search, `blastinput::app::html_format_check`); then `GetDbType` and the merge load the
+    /// (`SkipsAlignment`, with `html` alike: these formats write `-html`'s links since line RG
+    /// item T4b, `blastinput::app::formats_link_ids`); then `GetDbType` and the merge load the
     /// subject of each alignment shown, in order, without a `catch`: the run ends after the
     /// query's description lines at the first that throws (`alignment_end`).
     EndsAtAlignment { html: bool },
@@ -2494,8 +2494,10 @@ impl AfterThrow {
     // With `-html`, the `catch` of a description line's load makes the line's link, and
     // `GetIDUrl` loads the subject again by the same id outside any `catch` of the report: the
     // throw leaves the formatter and NCBI's application ends with it (`CATCH_ALL`, exit status 2,
-    // `BLAST Database error: <message>`), with no alignment, and no report after it (line RG item
-    // T4a2; review 3 of line DBID pfoff-4, M2: 81 `-html` runs of NCBI BLAST+ 2.17.0 end there).
+    // `BLAST Database error: <message>`), with no alignment, and no report or later batch's
+    // prefetch after it (line RG item T4a2; review 3 of line DBID pfoff-4, M2: 81 `-html` runs of
+    // NCBI BLAST+ 2.17.0 end there; line RG item T4b review b F2: in formats 0 to 4, a later
+    // batch's prefetch of an empty taxdb.btd is not reached).
     // The `catch` of an alignment makes no link (showalign.cpp:1950-1981), so the alignments do as
     // without `-html`, and so does a report without description lines (`-num_descriptions 0`).
     /// Where the description lines of a pairwise report end the run: the position, among the hits
@@ -2559,7 +2561,8 @@ pub struct Shown {
 /// first, then those of the copies of its record shown in it, each once), the hits whose
 /// description lines it shows (indices of `hits`, in the order of the lines:
 /// `x_pairwise_par::described_subjects`), and the number of its first hits whose alignments it
-/// shows (`QueryGroup::aligned`).
+/// shows (`QueryGroup::aligned`). Where its lines or alignments end the run is the run's answer
+/// ([`AfterThrow::description_end`] with `-html`, [`AfterThrow::alignment_end`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PairwiseReads {
     pub hits: Vec<Vec<usize>>,
@@ -3270,6 +3273,9 @@ impl HitLoads {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     // (`PruneSeqalign` keeps the alignments of the first `m_NumAlignments` hits, cited at
     // `report::x_pairwise_par::QueryGroup::aligned`)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611 (cited at
+    // `AfterThrow::description_end`: with `-html` the run ends at the description line, before the
+    // later lines, the alignments and the later batches with their prefetch)
     /// The loads of one pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`, whose run does
     /// `run` after a throw) in a batch whose prefetch is off, whose reads are `reads` (its
     /// writer's own answers, `x_pairwise_par::QueryGroup::read_order`): unless the run ended

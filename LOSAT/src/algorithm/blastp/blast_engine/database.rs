@@ -746,12 +746,15 @@ pub(super) struct ListedSubjects {
 /// A preliminary hit list that NCBI's composition-based redo reaches in its stream and whose
 /// subject the redo's fetch then excludes (`exclude_fetched`): the list leaves the query's hit
 /// list, and this mark keeps its place, `position` kept lists of the query before it, with what
-/// the redo reads of it there (its best e-value, the early termination test's).
+/// the redo reads of it there (its best e-value, the early termination test's). The
+/// Smith-Waterman redo's status reads the marks, in the one-thread loop
+/// (`redo_run::one_thread_redo`) and in the replay of the parallel redo's windows
+/// (`x_redo_par.rs`, `XSwBatch`), both through `redo_run::query_fetch_excluded_reached`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct FetchExcludedMatch {
-    pub(super) query: usize,
-    pub(super) position: usize,
-    pub(super) best_evalue: f64,
+pub(in crate::algorithm::blastp) struct FetchExcludedMatch {
+    pub(in crate::algorithm::blastp) query: usize,
+    pub(in crate::algorithm::blastp) position: usize,
+    pub(in crate::algorithm::blastp) best_evalue: f64,
 }
 
 /// What `exclude_fetched` keeps of the subjects whose header holds a UTF8String where a
@@ -936,8 +939,9 @@ impl XFetchedUtf8 {
 /// list's, `ListedSubjects::note_fetched`) around its traceback: the PSSM's position-based redo
 /// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
 /// (`after`) every subject of the ordinary traceback, or those that the composition-based redo's
-/// early termination test leaves (its heaps as it left them).
-pub(super) struct FetchNotes<'a> {
+/// early termination test leaves (its heaps as it left them). The replay of the parallel redo's
+/// windows (`x_redo_par.rs` `XSwBatch`) reads `fetched_before_failure` as the one-thread loop does.
+pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,
     /// Whether the PSSM's position-based redo ran and noted its own.
@@ -956,6 +960,16 @@ impl<'a> FetchNotes<'a> {
         }
     }
 
+    /// The notes of a search with neither a seqid list nor a database: none to read.
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(in crate::algorithm::blastp) fn none() -> FetchNotes<'static> {
+        FetchNotes::new(None, None)
+    }
+
     /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
     /// subjects its fetches read.
     pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) {
@@ -972,7 +986,7 @@ impl<'a> FetchNotes<'a> {
     /// the list after `before` of the kept lists of query `query` (`usize::MAX`: after the batch's
     /// last list), with `heaps` as the redo left them: NCBI posted its warning before its error,
     /// its crash or its endless redo (`HeaderReadError::utf8`).
-    pub(super) fn fetched_before_failure(
+    pub(in crate::algorithm::blastp) fn fetched_before_failure(
         &self,
         heaps: &[BlastCompoHeap],
         batch: std::ops::Range<usize>,
@@ -1135,22 +1149,24 @@ impl ListedSubjects {
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
-        let mut listed = Self::x_list(database, hit_lists, x_compact_hit_lists)?;
+        let mut listed = Self::x_list(database, hit_lists, x_compact_hit_lists, true)?;
         listed.x_read_shown(database, &[], XShownResidues::Listed, &[])?;
         Ok(listed)
     }
 
     /// The final hit lists of the call (subjects named by rank) without the subjects that
     /// NCBI makes no Seq-align of (`shared::SeqAligned`): right after the cut to the hit list
-    /// size, before the reads of the reported subjects.
+    /// size, before the reads of the reported subjects. `fetched`: whether the search fetched
+    /// its subjects with `check_oid_exclusion` (`x_list`).
     pub(super) fn drop_unaligned(
         &self,
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
+        fetched: bool,
     ) {
-        // blastp and psiblast fetch every subject of the redo or the traceback with
-        // `check_oid_exclusion` (`exclude_fetched`).
-        let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+        // A gapped search fetched every subject of the redo or the traceback with
+        // `check_oid_exclusion` (`exclude_fetched`); an ungapped one fetches no subject.
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db, fetched) else {
             return;
         };
         let mut first = None;
@@ -1314,7 +1330,7 @@ impl ListedSubjects {
 // it is aligned, after the early termination test of its match (which reads only the heaps,
 // where it never enters), so it takes no place in the final hit lists. LOSAT removes it from
 // the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS` and the
-// sort into the redo's order); blastp and psiblast are gapped here (`-ungapped` is refused).
+// sort into the redo's order).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
@@ -1327,6 +1343,16 @@ impl ListedSubjects {
 // are listed). Shown on ws with NCBI 2.17.0 (rows
 // `db.x4excl.*`: an excluded match after a failed Smith-Waterman redo ends the batch with
 // status 0).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526-1576
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1705-1777
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1582-1586
+// BLASTP's `-ungapped` search fetches no subject (`perform_traceback` is the gapped mode), so
+// such a subject stays in its hit list through the traceback's cut to the hit list size, where
+// it takes a place, its pipes (`-culling_limit`, `-best_hit_*`: its HSPs cull those of other
+// subjects) and the prune, and leaves at its Seq-align, as BLASTX's does
+// (`blastx::database::ReportedSubjects::drop_unaligned`); here `ListedSubjects::x_list` without
+// `fetched` and `ListedSubjects::drop_unaligned`. psiblast is always gapped.
 /// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
 /// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
 /// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a
@@ -2466,7 +2492,7 @@ impl ListedTitles<'_> {
                         &database.db,
                         &database.taxdb,
                         self.parsed_subject(rank as usize),
-                        blob,
+                        (blob, ordinal),
                         &lookups,
                         self.program,
                     )?
@@ -2476,7 +2502,7 @@ impl ListedTitles<'_> {
                     &database.db,
                     &database.taxdb,
                     self.parsed_subject(rank as usize),
-                    ordinal,
+                    (ordinal, ordinal),
                     &[],
                     self.program,
                 )?,

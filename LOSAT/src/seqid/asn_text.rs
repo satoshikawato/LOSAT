@@ -1,7 +1,7 @@
 //! The reader of the Seq-id of NCBI's ASN.1 text (`CObjectIStreamAsn` of a `CSeq_id`), every
 //! alternative, as `ber` is its BER reader: the rpsbproc archive reader reads its Seq-ids with it.
-//! (The PSSM reader, psiblast and tblastn `-in_pssm`, reads them with the generic typed reader,
-//! `report::serial::asn_types`, and converts them to the same model.)
+//! (The PSSM reader, psiblast and tblastn `-in_pssm`, and makeblastdb's mask reader read them with
+//! the table-driven reader, which builds the same model, `report::serial::asn_types::seq_id`.)
 
 use crate::report::serial::asn_text_reader::{AsnSource, Reader, Result};
 use crate::seqid::model::{

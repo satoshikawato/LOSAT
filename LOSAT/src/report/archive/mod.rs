@@ -714,6 +714,7 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
+    fn null_element(&mut self) {}
     fn utf8_str(&mut self, _: &[u8]) {}
     fn delayed(&mut self, _: &[u8]) {}
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
@@ -739,7 +740,10 @@ pub(crate) fn seq_id_written_as_is(
 /// first); in ASN.1 binary the last two and a NaN or infinite REAL (`SerialError::NonFiniteReal`);
 /// in ASN.1 text a member of a binary file that NCBI re-reads with a message (`unread_delayed`).
 /// NCBI BLAST+ 2.17.0 writes them all (probe XA of the review fixes of line PS item PS15b-1,
-/// 2026-11-23); ASN.1 text writes the rest as NCBI does.
+/// 2026-11-23); ASN.1 text writes the rest as NCBI does. In every stream, a list element stated
+/// as `NULL` (`Encoder::null_element`): NCBI's stream throws there in the middle of the archive
+/// (`encoder::NullElement`), which LOSAT's archive does not write yet (its search strategy
+/// does, `writer::write_strategy_request`).
 struct PssmGaps {
     encoding: ArchiveEncoding,
     gap: Option<&'static str>,
@@ -789,6 +793,16 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {
         self.note("a NULL", &[ArchiveEncoding::Xml]);
+    }
+    fn null_element(&mut self) {
+        self.note(
+            "a list element stated as NULL",
+            &[
+                ArchiveEncoding::Xml,
+                ArchiveEncoding::Binary,
+                ArchiveEncoding::Text,
+            ],
+        );
     }
     fn utf8_str(&mut self, _: &[u8]) {
         self.note(

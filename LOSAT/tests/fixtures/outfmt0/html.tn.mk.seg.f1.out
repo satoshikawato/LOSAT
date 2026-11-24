@@ -1,0 +1,75 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_seg.fna).
+           1 sequences; 780 total letters
+
+
+
+<b>Query=</b> pq_seg query 70 Q then random
+
+Length=260
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns_seg back-translation of ps_seg                                     <a href=#Subject_1>502</a>     0.0  
+
+
+
+Query_1    1    qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  60
+Subject_1  1    ............................................................  180
+
+Query_1    61   <font color="#000000">qqqqqqqqqq</font>VPLQWYRGPKAEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE  120
+Subject_1  181  ........................................V...................  360
+Subject_1  593                                         ..AASMTLLS..R.GVGSMQ.  655
+
+Query_1    121  ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAVEQREHIFTPVCFLNKNDCG  180
+Subject_1  361  ........................................F...................  540
+Subject_1  656  .                                                             658
+
+Query_1    181  YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVLEFSWCHLCDGGRVYYETAC  240
+Subject_1  541  ........................................V...................  720
+
+Query_1    241  DPPCGRPATYTNNETYPWRV  260
+Subject_1  721  ....................  780
+
+
+Lambda      K        H        a         alpha
+   0.320    0.130    0.427    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 55696
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_seg.fna).
+    Posted date:  Unknown
+  Number of letters in database: 780
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

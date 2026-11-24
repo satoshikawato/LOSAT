@@ -2633,12 +2633,13 @@ fn the_prefetch_writes_each_text_once_without_a_cache_collision() {
     std::fs::remove_dir_all(&cwd).unwrap();
 }
 
-/// `prefetch_messages`: a run whose volume holds the offset error's taxid (99990, slot 150 of
-/// NCBI's 256) and another taxid of that slot (150) is refused at its first prefetch, before
-/// its subjects are looked at, and at every later one; the taxonomy databases that write no
-/// offset error, and the same database with 151, are not.
+/// `prefetch_messages` (the reads of a report, in their order): a run whose volume holds the offset
+/// error's taxid (99990, slot 150 of NCBI's 256) and another taxid of that slot (150) follows the
+/// slot through the reads (line NP item O4b2-5; refused at its first read until then): st1 writes
+/// the offset error, st2 (150) takes the slot, st3 asks again; the taxonomy databases that write no
+/// offset error, and the same database with 151, have no collision.
 #[test]
-fn a_cache_collision_with_the_offset_error_is_refused_at_the_first_prefetch() {
+fn a_cache_collision_with_the_offset_error_follows_the_slot_through_the_reads() {
     // The databases have parsed Seq-ids: the subjects with their definition lines.
     let prefetch = |db: &SeqDb, run: &TaxdbRun, ordinals: &[u32]| {
         let parsed = parsed_subjects(db);
@@ -2648,21 +2649,17 @@ fn a_cache_collision_with_the_offset_error_is_refused_at_the_first_prefetch() {
             .collect::<Vec<_>>();
         prefetch_messages(db, run, subjects, "BLASTP")
     };
+    let offset = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
     let cwd = empty_cwd("cache_collision");
     let db = db_search("tm_cache150", Some(&variant("offset_last_past_end")), &cwd);
     let run = TaxdbRun::default();
     assert!(run.cache_may_refuse(&db));
-    for ordinals in [&[][..], &[0], &[1, 2]] {
-        let error = prefetch(&db, &run, ordinals).unwrap_err();
-        assert!(error.is::<TaxonomyRefusal>(), "{error:#}");
-        let text = format!("{error:#}");
-        assert!(text.contains("taxid 99990"), "{text}");
-        assert!(text.contains("taxid 150,"), "{text}");
-        assert!(text.contains("256-slot taxonomy cache"), "{text}");
-        assert!(text.contains("LOSAT's BLASTP"), "{text}");
+    for (ordinals, expected) in [(&[][..], ""), (&[0], offset), (&[1, 2], offset)] {
+        let text = String::from_utf8(prefetch(&db, &run, ordinals).unwrap()).unwrap();
+        assert_eq!(text, expected, "{ordinals:?}");
     }
-    // Nothing was looked up: the run's own handle is not open.
-    assert!(run.lazy.get().is_none());
+    // Read again: NCBI keeps the three sequences, so nothing loads.
+    assert_eq!(prefetch(&db, &run, &[0, 1, 2]).unwrap(), b"");
     for taxdb in ["good", "bad_magic", "high_bytes_utf8"] {
         let db = db_search("tm_cache150", Some(&variant(taxdb)), &cwd);
         let run = TaxdbRun::default();
@@ -2760,13 +2757,13 @@ fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
             "{ordinals:?}"
         );
     }
-    // A later batch that loads sN again after sZ: NCBI's scope may keep it.
+    // A later batch that loads sN again after sZ: NCBI keeps every sequence of a database of
+    // four (`keeps_every_load`), so it loads nothing (the probe of item O4b2-3,
+    // `A.nzpc.nz_q.*.limu.b1`: one offset error).
     let run = TaxdbRun::default();
     assert_eq!(prefetch(&db, &run, &parsed, &[0, 3]).unwrap(), offset);
-    let again = prefetch(&db, &run, &parsed, &[0, 3])
-        .unwrap_err()
-        .to_string();
-    assert!(again.contains("256-slot taxonomy cache"), "{again}");
+    assert_eq!(prefetch(&db, &run, &parsed, &[0, 3]).unwrap(), "");
+    assert_eq!(prefetch(&db, &run, &parsed, &[3, 0, 1]).unwrap(), "");
 
     let db = db_search("tm_cache150", Some(&taxdb), &cwd);
     let parsed = parsed_subjects(&db);
@@ -2787,9 +2784,11 @@ fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
     assert_eq!(prefetch(&db, &run, &parsed, &[0]).unwrap(), offset);
     assert_eq!(prefetch(&db, &run, &parsed, &[1]).unwrap(), "");
     assert_eq!(prefetch(&db, &run, &parsed, &[2]).unwrap(), offset);
-    // st1 and st2 in one batch: once, and the slot then holds 99990 or 150 by their order.
+    // st1 and st2 in one batch: once, and the slot then holds 99990 or 150 by their order. The
+    // same batch again loads nothing (NCBI keeps the three sequences).
     let run = TaxdbRun::default();
     assert_eq!(prefetch(&db, &run, &parsed, &[1, 0]).unwrap(), offset);
+    assert_eq!(prefetch(&db, &run, &parsed, &[0, 1]).unwrap(), "");
     let later = format!("{:#}", prefetch(&db, &run, &parsed, &[2]).unwrap_err());
     assert!(
         later.contains("after the prefetch of a query batch read database sequences"),
@@ -2875,6 +2874,64 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
 /// where the slot holds L whether NCBI's scope keeps it or loads it again, and is refused where
 /// loading it again would write the text; a load after a read again that may have put 150
 /// there is refused; other slots and other volumes are apart.
+/// Where NCBI keeps every sequence that the run loads (a database of no more sequences than its
+/// data source's cache holds, `keeps_every_load`), a read again loads nothing: no lookup, the slot
+/// as it was (the probe of item O4b2-3, `A.nzpc.nz_q.*.limu.b1`: a later batch's prefetch of the
+/// same subjects writes no second offset error with four heap layouts).
+#[test]
+fn a_read_again_loads_nothing_where_ncbi_keeps_every_sequence() {
+    const L: i32 = 99990;
+    let mut record = VolumeLookups {
+        kept: true,
+        ..VolumeLookups::default()
+    };
+    assert_eq!(
+        record.offset_slot(0, 0, 0, &[L, 150], L),
+        Ok(vec![true, false])
+    );
+    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(
+        record.offset_slot(0, 0, 0, &[L, 150], L),
+        Ok(vec![false, false])
+    );
+    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, 2, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![true]));
+    // A read again by another subject's Seq-align id is another blob of NCBI's data loader (the
+    // sequence with that id's handle, review 1 of item O4b2-5, H1): a load or none, as before
+    // item O4b2-5. Sequence 2 by subject 4's id may put 150 in the slot: it holds either.
+    assert_eq!(record.offset_slot(0, 2, 4, &[150], L), Ok(vec![false]));
+    // Sequence 3 again by its own id loads nothing; a first load of `L` after it is not certain.
+    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![false]));
+    assert!(record.offset_slot(0, 5, 5, &[L], L).is_err());
+}
+
+/// The bounds of NCBI's object manager: a database of at most 10 sequences keeps every load, of
+/// at most 20 loses none at the reports' reads; an environment variable of its parameters leaves
+/// both to LOSAT's refusals (review 1 of item O4b2-5, M2).
+#[test]
+fn the_object_managers_bounds_follow_its_sizes() {
+    let cwd = empty_cwd("om_bounds");
+    let three = db_search("tm_cache150", Some(&variant("offset_last_past_end")), &cwd);
+    let twelve = db_search("tm_cache_gi", Some(&variant("offset_last_past_end")), &cwd);
+    if default_object_manager() {
+        assert!(keeps_every_load(&three));
+        assert!(!reads_may_load_again(&twelve));
+    }
+    assert!(!keeps_every_load(&twelve));
+    let var = |name: &str| {
+        (
+            std::ffi::OsString::from(name),
+            std::ffi::OsString::from("0"),
+        )
+    };
+    assert!(object_manager_default_in([var("PATH")]));
+    assert!(!object_manager_default_in([var("OBJMGR_BLOB_CACHE")]));
+    assert!(!object_manager_default_in([var(
+        "objmgr_scope_autorelease_size"
+    )]));
+}
+
 #[test]
 fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     const L: i32 = 99990;
@@ -2886,11 +2943,11 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     // H1 (cc_m): one load of L, 150, L; again: its own 150 is between.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, 0, &[L, 150, L], L),
         Ok(vec![true, false, true])
     );
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, 0, &[L, 150, L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
@@ -2902,16 +2959,16 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     // there (Either), and B's read again is not certain.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, 0, &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, 0, &[L, 150], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 1, &[L], L),
+        record.offset_slot(0, 1, 1, &[L], L),
         Err(SlotUncertain {
             ordinal: 1,
             again: true,
@@ -2921,17 +2978,17 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     );
     // A first load after such a read again (C of 99990 + 256 * 2 is not L).
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, 2, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 3, &[9606, L + 512, L], L),
+        record.offset_slot(0, 3, 3, &[9606, L + 512, L], L),
         Ok(vec![false, false, true])
     );
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 4, &[L], L),
+        record.offset_slot(0, 4, 4, &[L], L),
         Err(SlotUncertain {
             ordinal: 4,
             again: false,
@@ -2941,16 +2998,16 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     );
     // M1 (a) (cc_ax): 150 never looked up: L's reads again write nothing.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
     for _ in 0..3 {
-        assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![false]));
+        assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![false]));
     }
     // cc_ac: A (L), C (150), then A again: refused, after C's fetch.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 0, &[L], L),
+        record.offset_slot(0, 0, 0, &[L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
@@ -2960,18 +3017,18 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     );
     // C, then A in another volume (cc_c1 cc_a1), then both again; taxids of other slots.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(1, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, 1, &[L, 9606], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(1, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, 1, &[L, 9606], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 5, &[9606, 151], L),
+        record.offset_slot(0, 5, 5, &[9606, 151], L),
         Ok(vec![false, false])
     );
     assert!(!record.slot_loads.contains(&5));
@@ -2979,8 +3036,9 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
 
 /// `pssm_load_texts` on `tm_cache150` (st1 99990, st2 150, st3 99990, parsed Seq-ids, one
 /// volume) with the offset error of `offset_last_past_end`: the PSSM's loads in their order
-/// write NCBI's texts, and a read again that NCBI's scope decides is refused, naming the fetch
-/// of 150; with 151 (`tm_cache151`) the read again writes nothing.
+/// write NCBI's texts, a read again loads nothing where NCBI keeps every sequence (three), and one
+/// that NCBI's scope decides (`tm_cache_gi`, twelve) is refused, naming the fetch of 150; with 151
+/// (`tm_cache151`) the read again writes nothing.
 #[test]
 fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
     let cwd = empty_cwd("pssm_slot");
@@ -2994,7 +3052,12 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
             let subject = &parsed[ordinal as usize];
             let lookups = blob_taxids(&db, ordinal, Some(subject), ordinal, "PSIBLAST")?;
             text.extend(pssm_load_texts(
-                &db, &run, None, ordinal, &lookups, "PSIBLAST",
+                &db,
+                &run,
+                None,
+                (ordinal, ordinal),
+                &lookups,
+                "PSIBLAST",
             )?);
         }
         Ok(String::from_utf8(text).unwrap())
@@ -3002,13 +3065,16 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
     assert_eq!(loads("tm_cache150", &[0, 1, 2]).unwrap(), offset.repeat(2));
     assert_eq!(loads("tm_cache150", &[0, 2, 1]).unwrap(), offset);
     assert_eq!(loads("tm_cache150", &[0, 0, 2]).unwrap(), offset);
-    let error = loads("tm_cache150", &[0, 1, 0]).unwrap_err();
+    // NCBI keeps every sequence of a database of three: the read again loads nothing.
+    assert_eq!(loads("tm_cache150", &[0, 1, 0]).unwrap(), offset);
+    // Of twelve (`tm_cache_gi`: 0 to 5 hold 99990, 6 to 11 hold 150), NCBI may have released it.
+    let error = loads("tm_cache_gi", &[0, 6, 0]).unwrap_err();
     assert!(error.is::<TaxonomyRefusal>(), "{error:#}");
     let text = format!("{error:#}");
     for part in [
         "taxid 99990, the last entry of the taxonomy database",
         "reads database sequence 0 of the volume",
-        "again after the run's fetch of database sequence 1 with taxid 150",
+        "again after the run's fetch of database sequence 6 with taxid 150",
         "256-slot taxonomy cache",
         "LOSAT's PSIBLAST",
     ] {

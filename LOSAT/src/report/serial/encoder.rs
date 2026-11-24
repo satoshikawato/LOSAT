@@ -56,6 +56,11 @@ pub enum SerialError {
     /// document that LOSAT writes in ASN.1 binary, XML or JSON holds one (psiblast and tblastn
     /// `-in_pssm` refuse `-outfmt 11`).
     Unwritten(&'static str),
+    /// An element of a list of `CRef<>`s that holds no object (`Encoder::null_element`), where
+    /// NCBI's stream throws: a writer that reports NCBI's error writes the document again through
+    /// `Traced` (`NullElement`, the ASN.1 text stream of psiblast's PSSM file and of the search
+    /// strategy); for the others it is the writer's error.
+    NullElement,
 }
 
 impl std::fmt::Display for SerialError {
@@ -79,6 +84,9 @@ impl std::fmt::Display for SerialError {
             SerialError::Unwritten(what) => {
                 write!(f, "{what} in this serialized format is not supported by LOSAT")
             }
+            SerialError::NullElement => f.write_str(
+                "an element of a list stated as NULL (where NCBI BLAST+'s writer stops with a C++ exception) in this serialized format is not supported by LOSAT",
+            ),
         }
     }
 }
@@ -136,6 +144,77 @@ pub struct Replaced {
     pub with_string: bool,
     /// The length of `Encoder::held` when NCBI posts the byte (before its wrap and its `#`).
     pub at: usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:578-605
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:522-555
+/// NCBI's throw at an element of a list of `CRef<>`s that holds no object in the ASN.1 text
+/// stream (`Traced::null_element`): `WriteContainer` throws `fUnassigned` there, before the
+/// element's separator; the throw flushes what the stream's buffer holds (so the output ends with
+/// the bytes before the element), posts the stream's first failure (`SetFailFlags`: error 802.5,
+/// `Serial_OStream`) and throws `CUnassignedMember::eWrite`, to which each frame it leaves adds its
+/// name (`CSerialException::AddFrameInfo`). The message names the container's type, which is
+/// empty: the SET OF or SEQUENCE OF that NCBI's generated class of a named list type holds
+/// (`Seq-descr`) has no name (psiblast and tblastn 2.17.0: `... while writing container `, probe
+/// D3c-3b `probe4`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NullElement {
+    /// `GetStackTrace()` at the element (`Traced::stack_trace`, ending with `.E`).
+    pub trace: String,
+    /// `GetPosition()` after the flush.
+    pub position: StreamPosition,
+    /// `GetFrameName()` of each frame that the exception leaves, from the document's root to the
+    /// element (`object_frame::frame_name`).
+    pub frames: Vec<String>,
+}
+
+/// The `ThrowError` of `CObjectOStreamAsn::WriteContainer` at an element that holds no object.
+const WRITE_CONTAINER: crate::ncbi_exception::ThrowSite = crate::ncbi_exception::ThrowSite {
+    file: "src/serial/objostrasn.cpp",
+    line: 597,
+    kind: "CUnassignedMember::eWrite",
+    function: Some("ncbi::CObjectOStreamAsn::WriteContainer"),
+};
+
+impl NullElement {
+    /// The error code of the post (`Serial_OStream`, include/serial/error_codes.hpp:46).
+    pub const ERR_CODE: (u32, u32) = (802, 5);
+
+    /// The message of the throw (`ThrowError1` of `fUnassigned`).
+    const MESSAGE: &'static str =
+        "cannot write unassigned member NULL element while writing container ";
+
+    /// The post of the stream's failure on the diagnostics stream: `Error: (802.5) `, the
+    /// application's prefix in brackets when it has one, `CObjectOStream: error at <position>:
+    /// <stack trace>: <message>` and an end of line (`ncbi_exception::error_post_line`).
+    pub fn post(&self, prefix: Option<&str>) -> Vec<u8> {
+        let (code, subcode) = Self::ERR_CODE;
+        crate::ncbi_exception::error_post_line(
+            Some(&format!("{code}.{subcode}")),
+            prefix,
+            format!(
+                "CObjectOStream: error at {}: {}: {}",
+                self.position,
+                self.trace,
+                Self::MESSAGE
+            )
+            .as_bytes(),
+        )
+    }
+
+    /// The exception: the position and the message, with the frames' names (the innermost
+    /// added first, as the frames are left).
+    pub fn exception(&self) -> crate::ncbi_exception::NcbiException {
+        let mut exception = crate::ncbi_exception::NcbiException::new(
+            WRITE_CONTAINER,
+            format!("{}: {}", self.position, Self::MESSAGE),
+        );
+        for frame in self.frames.iter().rev() {
+            exception.add_frame_info(frame);
+        }
+        exception
+    }
 }
 
 /// A replaced byte (`ReplacedChar`) and the bytes of its document that NCBI's stream had
@@ -332,6 +411,17 @@ pub trait Encoder {
         self.end_list();
         self.end_variant();
     }
+    /// An element of a list of `CRef<>`s that holds no object (an empty reference that the
+    /// reader kept, `pssm::Seqdesc::Empty`), in place of `element` and its value: NCBI's stream
+    /// throws there (`NullElement`), so the encoder's error is `SerialError::NullElement`, and
+    /// `Traced` writes nothing after it.
+    fn null_element(&mut self);
+    /// `GetPosition()` where the encoder stands, in the bytes it holds (`Traced` adds what it
+    /// handed on); `None` for an encoder whose position `Traced` does not report
+    /// (`Traced::null_element`).
+    fn position(&mut self) -> Option<StreamPosition> {
+        None
+    }
     /// The first error raised while writing (the document is then not written), if any.
     fn error(&self) -> Option<SerialError>;
     /// The bytes that `visible_str_replacing` and `string_store_replacing` replaced so far
@@ -399,6 +489,9 @@ pub struct Traced<E, P = fn(&ReplacedChar) -> std::io::Result<()>> {
     foreign: usize,
     posted: Vec<Posted>,
     post: Option<P>,
+    /// NCBI's throw at an element that holds no object (`null_element`), after which nothing is
+    /// written.
+    thrown: Option<Box<NullElement>>,
 }
 
 /// The empty string of the XML stream's messages.
@@ -442,6 +535,7 @@ impl<E: Encoder> Traced<E> {
             handed: 0,
             posted: Vec::new(),
             post: None,
+            thrown: None,
         }
     }
 
@@ -472,6 +566,7 @@ impl<E: Encoder> Traced<E> {
             foreign: self.foreign,
             posted: self.posted,
             post: Some(post),
+            thrown: self.thrown,
         }
     }
 }
@@ -533,6 +628,25 @@ impl<E: Encoder, P> Traced<E, P> {
         self.inner.held().len()
     }
 
+    /// NCBI's throw at an element that holds no object (`null_element`), if the document met one.
+    pub fn take_thrown(&mut self) -> Option<Box<NullElement>> {
+        self.thrown.take()
+    }
+
+    /// `GetFrameName()` of the root's frame and of each frame open, outermost first
+    /// (`NullElement::frames`).
+    fn frame_names(&self) -> Vec<String> {
+        use super::object_frame::{frame_name, FrameKind};
+        std::iter::once(frame_name(FrameKind::Named, Some(&self.root), None))
+            .chain(self.frames.iter().map(|frame| match frame {
+                Frame::Named(name) => frame_name(FrameKind::ClassMember, None, Some(name)),
+                Frame::List => frame_name(FrameKind::Array, None, None),
+                Frame::Element { .. } => frame_name(FrameKind::ArrayElement, None, None),
+            }))
+            .map(str::to_string)
+            .collect()
+    }
+
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
     pub fn take_replaced_chars(&mut self) -> Vec<ReplacedChar> {
         self.take_posted()
@@ -570,8 +684,12 @@ impl<E: Encoder, P> Traced<E, P> {
 }
 
 impl<E: Encoder, P> Traced<E, P> {
-    /// `write` (one call of `inner`, which writes `piece`), followed in NCBI's buffer.
+    /// `write` (one call of `inner`, which writes `piece`), followed in NCBI's buffer; nothing
+    /// after NCBI's stream threw (`null_element`).
     fn call(&mut self, piece: Piece, write: impl FnOnce(&mut E)) {
+        if self.thrown.is_some() {
+            return;
+        }
         let before = self.inner.held().len();
         let last = self.inner.held().last().copied();
         write(&mut self.inner);
@@ -609,6 +727,9 @@ impl<E: Encoder, P> Traced<E, P> {
     /// A string written by `write`: the bytes that `inner` replaced in it, with the stack trace,
     /// one shared copy of the string and what NCBI had written when it posted each.
     fn string(&mut self, string: &[u8], write: impl FnOnce(&mut E)) {
+        if self.thrown.is_some() {
+            return;
+        }
         let before = self.inner.held().len();
         let last = self.inner.held().last().copied();
         write(&mut self.inner);
@@ -756,6 +877,29 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn unread_delayed(&mut self) {
         self.call(Piece::Raw, |inner| inner.unread_delayed());
+    }
+    /// NCBI's `WriteContainer` at an element that holds no object: the element's frame (pushed
+    /// before NCBI's loop over the elements), then NCBI's throw (`NullElement`) where the ASN.1
+    /// text stream stands; the bytes held are those NCBI flushed, and the calls after it write
+    /// nothing (`call`, `string`). Another stream keeps the inner encoder's error alone.
+    fn null_element(&mut self) {
+        if self.thrown.is_some() {
+            return;
+        }
+        self.end_element();
+        self.frames.push(Frame::Element { shown: true });
+        let position = match E::STREAM {
+            Some(Stream::AsnText) => self.inner.position(),
+            _ => None,
+        };
+        self.inner.null_element();
+        if let Some(StreamPosition::Line(line)) = position {
+            self.thrown = Some(Box::new(NullElement {
+                trace: self.stack_trace(),
+                position: StreamPosition::Line(self.flushed_lines + line),
+                frames: self.frame_names(),
+            }));
+        }
     }
     fn buffered(&self) -> usize {
         self.inner.buffered()

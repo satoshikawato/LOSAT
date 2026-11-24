@@ -450,6 +450,7 @@ export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DP32=1
+export LOSAT_X_DPEDGE=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
@@ -823,6 +824,19 @@ Same values, faster computation:
   its time and max RSS (same-run A/B against dev of megablast, blastn, dc-megablast, blastp, blastx, tblastn
   and tblastx: CPU x0.9988-x1.0023, user instructions x0.99994-x1.00082; blastx over 31 pairs x1.0001,
   where dev against itself gives x0.9997).
+- `LOSAT_X_DPEDGE=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
+  added it, 2026-11-24; `=0` returns to the previous kernel) the 8-bit 256-bit X-drop kernel
+  (`align8`) masks the lanes at and past the end of the matrix (`limit`: the end of `B`, or the
+  fence) only in the one block that crosses it, the row's last; the other blocks no longer test
+  `limit`, select a mask (all ones there) and AND it into H. Every lane holds the same value, so
+  results and edit scripts do not change (the argument is at the head of `utils/x_xdrop_avx2.rs`;
+  the fuzz test against the scalar NCBI loops runs both instances). On the workstation (one core
+  unless noted, median, same run against dev 9ba71edbf): blastn (31,168 Drosophila cDNAs x 3 Mb
+  genome) x0.972 with 2.8 % fewer user instructions, blastp (WSSV x PajaWSV) x0.989,
+  blastn-short x0.999, the blastn case at 16 threads x0.996 and dc-megablast at 16 threads x0.989;
+  megablast runs no `align8` (the same instruction count, x0.9993 cycles); max RSS the same. Line FN
+  s7 measured seven row-frame items of `align8` one by one and in 14 combinations; this one was the
+  only item faster on both the traceback and the score-only rows.
 - `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's
@@ -1956,7 +1970,7 @@ Rebuilding less:
   same heaps (`blastp/x_redo_par.rs`, exactness argument in its header). The jobs run in windows of
   consecutive jobs, one `pool.install` each, that may end inside a query: at most 64 jobs per thread
   (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
-  replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
+  replay (two budgets with a `-use_sw_tback` carry, below). A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
   built again from the same inputs, a small cost that grows with the query's length) and its own
   parameters, prefetches the first Newton problems of its own matches with the Newton lanes (one vector
   of four, against the heaps as the window's start left them), and redoes its matches with per-worker
@@ -1976,12 +1990,45 @@ Rebuilding less:
   one window drops matches of q, and it drops at most 4 x cap(q) of them, cap(q) <= threads + q's jobs at
   risk computed, and all used, before (the one-thread loop computes none); where q's batch's heaps never
   fill, q's windows are back to their budget after a number of windows logarithmic in q's work at risk.
-  With
+  Since line RG X4-mt (2026-11-21) the path also runs the Smith-Waterman redo of `-use_sw_tback` (before, such
+  a search ran the one-thread loop at every thread count): a job answers a match's heap test
+  (`BlastCompo_HeapWouldInsert` before its first alignment) where the heap at the window's start makes the
+  answer certain, and otherwise stops the match's redo at the test as on FALSE and leaves the test to the
+  replay; a FALSE there keeps the job's result (NCBI's), a TRUE stops the replay and carries that match and
+  the window's matches after it to the next window, which finishes the match (a continuation, which resumes
+  the redo from the state its job kept at the test, so neither the composition adjustment nor the first
+  round's score-only scan runs twice) and every carried match whose test is TRUE for certain, and the replay
+  keeps each batch's status with the one-thread loop's own rule (core's `smith_waterman_match::SwBatchStatus`).
+  A kept state (about 3.2 KB, most of it the adjusted matrix) lives from the job to FALSE or to the
+  continuation's job, one per match a window holds with its carry: at most 2 x 4 x 64 x threads. A window with a carry
+  takes at most a budget of new jobs, as one without, and the carried matches (in jobs of four) and the new
+  jobs together are at most two budgets, so a window holds at most 2 x 4 x 64 x threads results before their
+  replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's; it
+  reads no heap's root). One
+  window drops results of q there too (a replay never stops within q after dropping a result of q), and
+  cap(q) grows only by q's jobs at risk of a window whose replay passed all of q's matches in it, so each
+  stopped window before it carries at most cap(q) new jobs at risk of q on to it: it drops at most
+  4 x cap(q) x (1 + those stopped windows) results of q, and at most the 2 x 4 x 64 x threads results it
+  holds. Evidence (head a988bc0f2, node 1 of the workstation, 8 cores, median of 3, `-db paja`, every output =
+  NCBI 2.17.0 `-num_threads 1`): SicyWSV.faa 0.72 s at 8 threads against 4.36 s before (dev dab8ae2ae) and
+  NCBI's 2.14 s; AP027131.faa 2.79 s against 20.52 s and 4.50 s; with `-max_target_seqs 1` and 5 0.67 /
+  2.51 / 1.14 / 3.32 s (dev 3.60 / 17.05 / 4.32 / 20.01 s, NCBI 1.78 / 3.84 / 2.63 / 4.37 s); one thread
+  unchanged (instructions x0.99998); max RSS at most 32.0 MiB (NCBI 74-94 MiB). UniRef50 (5 volumes,
+  19 GB) with 100 human queries, `-max_target_seqs` 1 and 5, at 32 threads (head 4dba02449; no replay
+  stops there, so no carry): 387 / 391 s against dev's 663 / 662 s and NCBI's 1,176 / 1,186 s, max RSS
+  143 / 142 MiB (dev 249 / 245 MiB, NCBI 12,027 / 12,067 MiB with the volumes mapped); the same rows. With
   `LOSAT_TIMING=1` each search the path runs prints
   `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
   par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the
   early termination test ended, as many as in the one-thread loop; `skipped`: those not computed;
-  `wasted`: those computed and dropped). Diagnostics only, the output bytes do not change: the counters
+  `wasted`: those computed and dropped; with `-use_sw_tback` the line ends with ` turned=<t>
+  continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m>`:
+  the matches whose heap test a job could not answer (its redo stopped at the test) and the replay
+  answered FALSE (the job's result stands); the carried matches that a continuation in the next window
+  finishes, by the reason why their test is TRUE (the stopped match itself, the exact look-ahead in a
+  later query, the bound on the lists the heap holds); the most matches a replay carried). A redo that
+  ends in an error prints the line
+  too, with the counts of the windows replayed before the one that ended it. Diagnostics only, the output bytes do not change: the counters
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
   prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
@@ -2040,7 +2087,12 @@ Rebuilding less:
   expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
   counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
   the other paths (the only expansion before the previous switch existed). The expanded lists held at a time are those of the queries of about one
-  window, and each query's compact list is freed when it is expanded.
+  window (with `-use_sw_tback` also those of the queries of the matches that a stopped replay carries behind
+  the window's start, fewer than two budgets' results, while the lists read ahead stay one budget's: about
+  three budgets, two with the carry and one read ahead, with the lists of the first carried query and of the
+  last query read ahead whole; unit test `a_carry_holds_the_expanded_lists_of_about_three_budgets`), and each query's
+  compact list is freed
+  when it is expanded.
   Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in `blastp -db` UniRef50 q100 at 32 threads the expansion of all
   91 lists of the first query batch (194,347 HSPs of 168 bytes) added 31 MiB to the main heap before the redo, which
   ran in 10 windows. Measured (head 6ef84094, workstation, on / off in one job): that run (node 1, the branch merged

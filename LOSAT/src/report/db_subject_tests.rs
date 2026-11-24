@@ -2686,6 +2686,99 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     assert_eq!(later.load(5), HitLoad::Unread);
 }
 
+// Line RG T4b review b F2 (NCBI BLAST+ 2.17.0, probes `nb.pfo.bpe.na0.f{0,1,3}.rep.h` and
+// `nb2.pfo.bpe.na0.f0.rep.p`): with `-html` the description line of a subject whose load throws
+// ends the run (its `catch` makes the line's link, which loads the subject again outside any
+// `catch`): the lines before it load, no later line, alignment, report or batch's prefetch loads.
+// Without `-html` the line is `Unknown` and the run goes on, with `-num_alignments 0` into the
+// next batch, whose prefetch loads every subject; with `-html` too where no shown line throws.
+#[test]
+fn an_html_description_line_whose_load_throws_ends_the_run() {
+    let throws = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+    // 1 and 3 throw.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00001"),
+        plain("AAA00002").found_instead(throws()),
+        plain("AAA00003"),
+        plain("AAA00004").found_instead(throws()),
+        plain("AAA00005"),
+        plain("AAA00006"),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let every = usize::MAX;
+    // A batch whose prefetch is off reports 0 to 3 (its description lines show the first
+    // `descriptions`, its alignments the first `alignments`), then a batch that prefetches 4, 5.
+    // The report's `after` with `-html` where `html` (`AfterThrow::description_end`).
+    let run = |after: AfterThrow, descriptions: usize, alignments: usize, html| {
+        let after = match after {
+            AfterThrow::SkipsAlignment { .. } => AfterThrow::SkipsAlignment { html },
+            AfterThrow::EndsAtAlignment { .. } => AfterThrow::EndsAtAlignment { html },
+            other => other,
+        };
+        let keys = [0, 1, 2, 3];
+        let first = ReportKeys::Pairwise(PairwiseReads {
+            hits: keys.iter().map(|&key| vec![key]).collect(),
+            described: (0..keys.len().min(descriptions)).collect(),
+            aligned: keys.len().min(alignments),
+        });
+        let second = ReportKeys::Entries(vec![Some(4), Some(5)]);
+        let loads = HitLoads::of(
+            LoadsBefore::NONE,
+            Some(RunThrow::every_row(after)),
+            [(true, first), (false, second)],
+            subject,
+            none,
+        );
+        let reaches_second = loads.reaches(1);
+        (
+            (0..6).map(|key| loads.load(key)).collect::<Vec<_>>(),
+            reaches_second,
+        )
+    };
+    use HitLoad::{Loaded as L, Throws as T, Unread as U};
+    for after in [
+        AfterThrow::SkipsAlignment { html: false },
+        AfterThrow::EndsAtAlignment { html: false },
+    ] {
+        // `-num_alignments 0`: the plain lines of 1 and 3 are `Unknown`, the next batch is
+        // prefetched; with `-html` the line of 1 ends the run.
+        assert_eq!(
+            run(after, every, 0, false),
+            (vec![L, T, L, T, L, L], true),
+            "{after:?}"
+        );
+        assert_eq!(
+            run(after, every, 0, true),
+            (vec![L, T, U, U, U, U], false),
+            "{after:?}"
+        );
+        // With alignments too: the line ends it before them.
+        assert_eq!(
+            run(after, every, every, true),
+            (vec![L, T, U, U, U, U], false),
+            "{after:?}"
+        );
+        // No shown line throws (`-num_descriptions 1`, `-num_descriptions 0 -num_alignments 1`):
+        // the run goes on as without `-html`.
+        assert_eq!(
+            run(after, 1, 0, true),
+            (vec![L, U, U, U, L, L], true),
+            "{after:?}"
+        );
+        assert_eq!(
+            run(after, 0, 1, true),
+            (vec![L, U, U, U, L, L], true),
+            "{after:?}"
+        );
+    }
+}
+
 // DBID pfoff-3, NCBI 2.17.0 (probe `R/pfoff/p3`, `bp.U2.b1.dflt.0`, `bp.U2.b1.gis.0`): the
 // description line of a subject whose load throws is the Seq-align id and `Unknown`
 // (`x_GetDeflineInfo`'s catch), the id's FASTA form with `-show_gis` (no space), and its

@@ -746,6 +746,7 @@ fn blastx_description_row_is_the_highest_bit_score() {
             None,
             &mut crate::report::query_warnings::no_places,
             None,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();

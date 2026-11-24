@@ -272,12 +272,15 @@ fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()>
 }
 
 /// The ranges of a search as the reports use them: where the searched letters of each
-/// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
-/// reports end with the epilog (a search that stops at a query batch writes none).
+/// query and subject lie in its record (`-query_loc`, `-subject_loc`), whether the
+/// reports end with the epilog (a search that stops at a query batch writes none), and under
+/// `-parse_deflines` the scopes of the queries, whose Seq-ids place the XML failure of a held
+/// report (`query_batch::QueryScopes::xml_failing_query`).
 pub(super) struct ReportRanges<'a> {
     pub queries: &'a crate::blastinput::seq_range::Placements,
     pub subjects: &'a crate::blastinput::seq_range::Placements,
     pub epilog: bool,
+    pub query_scopes: Option<&'a crate::blastinput::query_batch::QueryScopes>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -369,10 +372,10 @@ pub(super) fn render(
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes a report's
-    // data (`xml_matrix_failure`): that of the run's first query, or of its second where the
-    // report is held (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id,
-    // the second as LOSAT refuses two queries of one id before any output), in the batch of that
-    // query, or for a run of one query whose report is held
+    // data (`xml_matrix_failure`): that of the run's first query, or where the report is held
+    // (`XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another Seq-id
+    // (`QueryScopes::xml_failing_query` of the scopes, `ranges.query_scopes`), in the batch of that
+    // query, or for a run whose held report has no such query
     // in `PrintEpilog` (blast_format.cpp:2204-2212, cited at
     // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
     // caller writes that stop). The start alone is written then (probe `tblastn_sub_lcmatrix`),
@@ -386,6 +389,9 @@ pub(super) fn render(
         matches!(shown, ShownSubjects::Database { .. }),
         pssm.is_some(),
     )
+    .map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(ranges.query_scopes, failure)
+    })
     .filter(|_| !query_records.is_empty())
     {
         for format in outputs.formats.iter_mut() {
@@ -395,7 +401,7 @@ pub(super) fn render(
                 writer.flush()?;
             }
         }
-        let failing = (failure.query() < query_records.len()).then(|| failure.query());
+        let failing = failure.query().filter(|&query| query < query_records.len());
         for posts in query_posts
             .iter()
             .take(failing.map_or(query_records.len(), |query| query + 1))

@@ -355,8 +355,9 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
         subject: None,
         database: None,
     };
+    let query_input = crate::blastinput::seq_range::QueryInput::whole(&queries);
     let rows = Rows::new(
-        &queries,
+        crate::algorithm::blastn::pairwise::QueryRecords::new(&queries, &query_input, &queries, 0),
         crate::algorithm::blastn::x_subject_store::SubjectLetters::new(&subjects, None),
         &masks,
     );

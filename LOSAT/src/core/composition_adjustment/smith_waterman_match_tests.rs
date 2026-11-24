@@ -384,3 +384,111 @@ fn an_excluded_list_clears_the_status_unless_early_termination_stops_it() {
     .expect("no header to read");
     assert!((0..=lists.len()).all(|index| !marks.excluded(index)));
 }
+
+/// `run` through the entry that can resume (`redo_one_match_smith_waterman_from`), from `resume`
+/// where given: with the matrix that the call leaves and the state that it keeps.
+fn run_from(
+    params: &BlastRedoAlignParams,
+    resume: Option<&SwMatchResume>,
+    heap: &mut dyn FnMut() -> SwHeapAnswer,
+) -> (
+    Run,
+    Option<AdjustedProteinMatrix>,
+    Option<Box<SwMatchResume>>,
+) {
+    let query = encode(QUERY);
+    let subject = format!(
+        "{}{}{}",
+        back_translate(&QUERY[..40]),
+        back_translate(SPACER),
+        reverse_complement(&back_translate(&QUERY[8..50]))
+    );
+    let info = BlastCompoQueryInfo {
+        origin: 0,
+        seq: BlastCompoSequenceData::from_ncbistdaa(&query),
+        composition: read_aa_composition(&query),
+        eff_search_space: 1e6,
+        words: Some(build_query_word_hashes(&query)),
+    };
+    let matching_seq =
+        BlastCompoMatchingSequence::new_translated(3, subject.as_bytes().into(), 1).unwrap();
+    let mut workspace = BlastCompositionWorkspace::new_blosum62();
+    let mut matrix = None;
+    let unadjusted = unadjusted_square_matrix(ScoringMatrix::Blosum62);
+    let mut heap_asks = 0;
+    let mut scratch = SwMatchScratch::new();
+    let mut kept = None;
+    let scale = params.score_divisor;
+    let result = redo_one_match_smith_waterman_from(
+        &incoming(&[(0, 40, 1, 0, 40), (8, 50, -1, 0, 42)]),
+        params,
+        0.267 / scale,
+        0.041f64.glibc_ln(),
+        &matching_seq,
+        std::slice::from_ref(&info),
+        &CALLBACKS,
+        &mut workspace,
+        &mut matrix,
+        Some(&unadjusted),
+        10.0,
+        resume,
+        &mut |query_index, _evalue, _score| {
+            assert_eq!(query_index, 0);
+            heap_asks += 1;
+            Ok(heap())
+        },
+        &mut kept,
+        &mut scratch,
+    );
+    (Run { result, heap_asks }, matrix, kept)
+}
+
+// A heap test left open at either window of the call (the first's, or the second's after the
+// first one's FALSE), with and without composition-based statistics: the call goes on as on FALSE
+// (the next window asks again), and the call resumed from the state that it kept at the open test
+// ends as the TRUE answer there does, alignments, p-value, lambda ratio and the matrix left alike,
+// without asking the heap.
+#[test]
+fn a_call_resumed_at_its_open_heap_test_ends_as_the_test_answered_true() {
+    for mode in [
+        BlastCompoAdjustMode::NoCompositionBasedStats,
+        BlastCompoAdjustMode::CompositionMatrixAdjust,
+    ] {
+        let params = params(mode, false, 1);
+        for open_at in [1, 2] {
+            // The test that `open_at` names answered `open`; the others FALSE.
+            let answers = |open: SwHeapAnswer| {
+                let mut asked = 0;
+                move || {
+                    asked += 1;
+                    if asked == open_at {
+                        open
+                    } else {
+                        SwHeapAnswer::Known(false)
+                    }
+                }
+            };
+            let at = (mode, open_at);
+            let (with_false, false_matrix, none) =
+                run_from(&params, None, &mut answers(SwHeapAnswer::Known(false)));
+            assert!(none.is_none(), "{at:?}");
+            let (with_true, true_matrix, _) =
+                run_from(&params, None, &mut answers(SwHeapAnswer::Known(true)));
+            let (open, open_matrix, kept) =
+                run_from(&params, None, &mut answers(SwHeapAnswer::Deferred));
+            assert_eq!(open.heap_asks, 2, "{at:?}");
+            assert_eq!(open.result.unwrap(), with_false.result.unwrap(), "{at:?}");
+            assert_eq!(open_matrix, false_matrix, "{at:?}");
+            let kept = kept.expect("the open test's state");
+            let (resumed, resumed_matrix, again) = run_from(&params, Some(&kept), &mut || {
+                panic!("{at:?}: the resumed call asks the heap again")
+            });
+            assert!(again.is_none(), "{at:?}");
+            assert_eq!(resumed.heap_asks, 0, "{at:?}");
+            let with_true = with_true.result.unwrap();
+            assert_eq!(alignments(&with_true).len(), 3 - open_at, "{at:?}");
+            assert_eq!(resumed.result.unwrap(), with_true, "{at:?}");
+            assert_eq!(resumed_matrix, true_matrix, "{at:?}");
+        }
+    }
+}

@@ -325,10 +325,10 @@ pub struct BlastnHsp {
     pub raw_score: i32,
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-101
     /// NCBI's `Int4` `query.offset` and `query.end` in the HSP's context. They lie outside the
-    /// context (`internal_q_offset_0 < 0`, or `internal_q_end_0` past the context's length,
-    /// `BlastnHsp::outside_query_context`) for an HSP from a hit that passes an end of its
-    /// context, which LOSAT refuses where its report starts
-    /// (`blast_engine::run::post_process_hits_and_write`).
+    /// context (`internal_q_offset_0 < 0`, or `internal_q_end_0` past the context's length) for an
+    /// HSP from a hit that passes an end of its context (an ungapped X-drop of 2^30 raw or more,
+    /// remaining-gaps X1b-o): the reports show it where its Seq-align's query start is at least 0,
+    /// and the search stops or refuses where it is below 0 (`BlastnHsp::seqalign_query_start`).
     pub internal_q_offset_0: i32,
     pub internal_q_end_0: i32,
     pub internal_s_offset_0: usize,
@@ -344,16 +344,73 @@ pub struct BlastnHsp {
 const _: () = assert!(std::mem::size_of::<BlastnHsp>() == 176);
 
 impl BlastnHsp {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2390-2391
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1297-1301
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:121-137
+    /// The lowest query start of the HSP's Seq-align on the query's plus strand (the Dense-diag's
+    /// start, or the Dense-seg's lowest segment start: the first segment's on the plus strand, the
+    /// last one's, `query_length - query.end`, on the minus strand). It is below 0 only for an HSP
+    /// that NCBI keeps outside its query context, on the left of the plus strand or the right of
+    /// the minus strand (remaining-gaps X1b-o): the mapping of a subject set's Seq-align throws
+    /// and NCBI's `CAlnMap` takes such a segment for a gap (`run::left_of_query_refusal`). An
+    /// HSP outside its context on the other side has a start past the query's end, which the
+    /// reports show (X1b-p).
+    #[inline]
+    pub fn seqalign_query_start(&self) -> i64 {
+        if self.query_frame < 0 {
+            self.query_length as i64 - i64::from(self.internal_q_end_0)
+        } else {
+            i64::from(self.internal_q_offset_0)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_diag.cpp:72-90
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:910-917
+    /// `seqalign_query_start` in the query's record, after `RemapToQueryLoc` has moved the query
+    /// row of the Seq-align by `offset` (the `-query_loc` interval's start; 0 without it,
+    /// blast_seqalign.cpp:1520-1534): an ungapped search's Dense-diag (`dense_diag`) moves its
+    /// start whatever it is, a gapped search's Dense-seg only its starts at 0 or past it, so a
+    /// start below 0 stays. Below 0 the subject set's mapping throws and `CAlnMap` takes the
+    /// segment for a gap (`run::left_of_query_refusal`); at 0 or past it the reports show the HSP
+    /// with the record's letters (`pairwise::context_letters`, remaining-gaps X1b-p).
+    #[inline]
+    pub fn record_query_start(&self, offset: usize, dense_diag: bool) -> i64 {
+        let start = self.seqalign_query_start();
+        if dense_diag || start >= 0 {
+            start + offset as i64
+        } else {
+            start
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1126-1129
-    /// Whether the HSP lies outside its query context (`query.offset < 0`, which NCBI's debug
-    /// build asserts against, or `query.end` past the context's length `query_length`), where
-    /// NCBI's report coordinates (`Blast_HSPGetAdjustedOffsets`) leave the query: an HSP from a
-    /// hit whose ungapped extension passed an end of its context (an ungapped X-drop of 2^30
-    /// raw or more, remaining-gaps X1b-o).
+    /// Whether the HSP lies outside its query context (`query.offset < 0`, or `query.end` past the
+    /// context's length `query_length`): an HSP from a hit whose ungapped extension passed an end
+    /// of its context (an ungapped X-drop of 2^30 raw or more, remaining-gaps X1b-o).
     #[inline]
     pub fn outside_query_context(&self) -> bool {
         self.internal_q_offset_0 < 0 || self.internal_q_end_0 as i64 > self.query_length as i64
+    }
+
+    /// Whether `record_query_start(offset, dense_diag)` is below 0, where the mapping of a subject
+    /// set's Seq-align throws (`run::left_of_query_refusal`). Only an HSP outside its query
+    /// context (`outside_query_context`) starts there: a start below 0 is a plus-strand
+    /// `query.offset` below 0 or a minus-strand `query.end` past the context's length, which the
+    /// interval's start does not lower. So each HSP of a batch is tested as X1b-o tested it, and
+    /// the start, which reads the strand and the interval, is made only for an HSP outside its
+    /// context (remaining-gaps X1b-p).
+    #[inline]
+    pub fn starts_left_of_record(&self, offset: usize, dense_diag: bool) -> bool {
+        self.outside_query_context() && self.record_start_below_zero(offset, dense_diag)
+    }
+
+    /// `record_query_start(offset, dense_diag) < 0` for an HSP outside its query context, out of
+    /// the loops that test each HSP of a batch (`starts_left_of_record`): only an ungapped X-drop
+    /// of 2^30 raw or more gives such an HSP, so the loops keep none of its fields in registers
+    /// for it.
+    #[cold]
+    #[inline(never)]
+    fn record_start_below_zero(&self, offset: usize, dense_diag: bool) -> bool {
+        self.record_query_start(offset, dense_diag) < 0
     }
 }
 
@@ -361,9 +418,10 @@ impl BlastnHsp {
 /// NCBI's 1-based report offsets of a blastn HSP (`Blast_HSPGetAdjustedOffsets`) from its offsets
 /// in its context: `query_offset` and `query_end` are NCBI's `Int4` ones (`BlastnHsp::
 /// internal_q_offset_0`), `query_length` the context's length and `query_frame` its strand. The
-/// query offsets are computed in `i64`; for an HSP outside its query context
-/// (`BlastnHsp::outside_query_context`) one below 0 is kept as 0: such an HSP never reaches a
-/// report (`run::post_process_hits_and_write` refuses the search).
+/// query offsets are computed in `i64`; for an HSP outside its query context one below 0 is kept
+/// as 0 (its Seq-align's query start is below 0): such an HSP reaches a report only with
+/// `-query_loc`, whose interval's start moves it to 0 or past it, and the report's offsets are
+/// made again from its Seq-align's start there (`run::shift_to_records`).
 pub(crate) fn adjust_blastn_offsets(
     query_offset: i32,
     query_end: i32,

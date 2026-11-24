@@ -3917,7 +3917,7 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.993; blastn of 5,000 88 -> 87, x0.994).
 - `LOSAT_X_CSRQSKEEP=1` (BLASTN dc-megablast, where a one-template lookup table laid out as CSR (`LOSAT_X_DCCSR`)
   takes its `offsets` through the batch loop's keep (`LOSAT_X_MBLUTKEEP`); in the strict set from the pull request that
-  added it, 2026-11-23: `LOSAT_X_CSRQSKEEP=0` turns it off) keeps the CSR's second array, `qs` (one element per word of
+  added it, #1554, 2026-11-24: `LOSAT_X_CSRQSKEEP=0` turns it off) keeps the CSR's second array, `qs` (one element per word of
   the batch's table), in the keep with the kept table (`blastn/x_mb_lut_keep.rs`, argument in its header). NCBI
   allocates each batch's chains (`next_pos`, `blast_nalookup.c:685` and `:979`), which `qs` stands for, and frees them
   with the table (`:1377`); a CSR build allocated `qs` per batch and the batch freed it with the CSR. For the
@@ -3928,10 +3928,15 @@ Scheduling (each value computed by one thread with the original function; order 
   the most room, one with less is freed with its CSR), and the next such build takes it where it allocated `qs` before
   when its capacity holds the build's `qs` (`x_mb_lut_keep::qs_buffer`, the decision point, in `x_dc_csr::build`,
   `x_disc_lookup_par::csr_on_pool` and `csr_on_pool_steps`); else it frees the kept one and then allocates, as
-  `Keep::take_buffer` does with a table too short. No build follows the loop's last tables, so before they drop
-  (`x_lut_drop::after_prelim` of the last batch, or the last query chunk of a split last batch) the keep frees a kept
-  `qs` and takes none back (`Keep::close_qs`; `Keep::release` closes it too): the last CSR frees its `qs` with its
-  table, where and when it did before the switch, and a search of one batch frees it as before. The switch has no rule
+  `Keep::take_buffer` does with a table too short. The query chunks of a split batch build their tables through the
+  keep as batches do, so a chunk's CSR takes the `qs` of the chunk before, also in a search of one batch that NCBI
+  splits (about 10 Mb of query or more at dc-megablast's chunks of 5,000,000 letters, or a smaller `CHUNK_SIZE`). No
+  build follows the loop's last tables, so once they are built (`search_query_batch`, where
+  `BatchStage::x_last_tables`: the last batch, or the last query chunk of a split last batch) the keep frees the `qs`
+  it holds and takes none back (`Keep::close_qs`): a last CSR, which took the kept `qs`, frees its `qs` with its table,
+  where and when it did before the switch, and a last table of chains is scanned without the kept `qs`; a search of
+  one batch that is not split runs as before the switch. A run that stops at a batch closes the keep before it writes
+  the reports of the batches before (`run_in_pool`). The switch has no rule
   of its own (`docs/decisions/SWITCH_APPROVALS.md` class (ii)): it runs wherever a CSR of `LOSAT_X_DCCSR` takes its
   `offsets` through the keep. The contiguous CSR builds (`LOSAT_X_BNCSR`: `x_bn_csr`, `x_mb_lookup_once`) keep their own `qs`
   (`Csr::x_kept`): their CSR tables have 4^11 cells or fewer (at 4^12 only `LOSAT_X_MBCSR`'s side beside a large
@@ -3946,18 +3951,22 @@ Scheduling (each value computed by one thread with the original function; order 
   Every discontiguous build writes each element of `qs` that it uses before it reads one (its place pass writes each
   place `0 .. words` once), so a kept `qs` is not zeroed and the CSR is the fresh build's: every array and every report
   is what it is without the switch. Memory: no build allocates a `qs` beside the kept one; between a CSR's drop and the
-  next CSR build the loop holds the `qs` it freed there before (through a batch's traceback, as the kept table, but not
-  in the loop's last batch, and through the chain builds of `CBatchSizeMixer`'s probe batches), and a smaller batch's
-  CSR uses the largest kept `qs` (the resident pages that earlier builds wrote). `[TIMING] x_mb_lut_keep: ... qs_kept=
-  qs_fresh=` counts the discontiguous CSR builds through the keep that took the kept `qs` and those that allocated
-  theirs (none kept, or too small); both are 0 with `=0`. The unit tests of `x_mb_lut_keep_tests.rs` (a kept `qs`
-  taken, one too small freed, `close_qs`, `release`, `=0`), `csrs_through_the_keep_share_its_qs` and
+  next CSR build the loop holds the `qs` it freed there before (through a batch's traceback, as the kept table, through
+  the chain builds and scans of `CBatchSizeMixer`'s probe batches, and through the next batch's set-up and table build;
+  in the loop's last batch a CSR build takes it and a build of chains is followed by `Keep::close_qs`, so the last scan
+  and traceback run without it), and a smaller batch's CSR uses the largest kept `qs` (the resident pages that earlier
+  builds wrote). `[TIMING] x_mb_lut_keep: ... qs_kept= qs_fresh= qs_idle= qs_last=` counts the discontiguous CSR
+  builds through the keep that took the kept `qs`, those that allocated theirs (none kept, or too small), the kept `qs`
+  that `Keep::close_qs` freed (the last tables are chains, or the run stopped at a batch) and the CSRs that freed their
+  own `qs` because the keep was closed before they were dropped (the last CSR); all four are 0 with `=0`. The unit tests
+  of `x_mb_lut_keep_tests.rs` (a kept `qs` taken, one too small freed, `close_qs`, a release that leaves the `qs` to
+  the close, `=0`), `csrs_through_the_keep_share_its_qs` and
   `a_csr_kept_without_its_qs_frees_it` (`x_dc_csr_tests.rs`), and each discontiguous CSR build's test on a kept `qs` of
   stale values with exactly the room the fresh build allocated and with one element less
   (`x_dc_csr::x_assert_same_on_a_kept_qs`: the same arrays, the kept buffer taken or freed) check it, and
   `LOSAT/tests/blastn_csr_qs_keep.rs` compares the reports and the standard error (but its `[TIMING]` lines) with
-  `=0`'s for dc-megablast and megablast (the reference side: no `qs` kept) of several query batches at 1 and 4 threads
-  and checks the counters. A probe of line FD (commit e79ea6298, one process-wide `qs` instead of the keep's;
+  `=0`'s for dc-megablast (a last batch laid out as CSR, and a last batch of chains) and megablast (the reference side:
+  no `qs` kept) of several query batches at 1 and 4 threads (the pool's build at 4) and checks the counters. A probe of line FD (commit e79ea6298, one process-wide `qs` instead of the keep's;
   workstation node 1, the cDNAs above against 3 Mb, `-subject`, outfmt 6) took 1.251 s against 1.319 s at 16 threads
   (x0.948, cycles equal) and x0.983 at one, max RSS +0.4 % and -0.06 %.
   Evidence (2026-11-24, line FD, workstation node 1, 16 cores, memory bound to the node; dev 9be4c0c5f, its merge

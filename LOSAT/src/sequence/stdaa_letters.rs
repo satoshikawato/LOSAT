@@ -2,12 +2,12 @@
 //! (blastdbcmd's FASTA path) and IUPACaa (`eCoding_Iupac`: blastdbcmd's `-outfmt %s` and `%h`,
 //! segmasker's writers of a database's sequences).
 
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1850
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1855
 /// NCBIstdaa to ncbieaa, the letters of the FASTA path (`CSeqVector` with `Ncbieaa`): the
 /// table's 28 codes ([`all_codes`]).
 const STDAA_TO_EAA: [u8; 256] = all_codes(b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ");
 
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1818
 /// NCBIstdaa to iupacaa, the letters of `GetSequenceAsString` (`-outfmt %s`, `%h`): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them ([`all_codes`]).
 const STDAA_TO_IUPACAA: [u8; 256] = all_codes(&[

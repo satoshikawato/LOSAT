@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::mask::{ncbi_split, FilterProgram, FILTER_PROGRAMS};
 use super::*;
+use crate::utils::test_dir::TempDir;
 
 /// The table of `Blast-filter-program` is blastdb.asn's (blastdb.asn:51-59), each row the name and
 /// value of the variant at that position.
@@ -56,46 +57,21 @@ fn read_expected(file: &str) -> String {
         .unwrap_or_else(|error| panic!("read {file}: {error}"))
 }
 
-/// A directory that is removed when the test ends.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-seqdb-mask-{tag}-{}-{}",
-            crate::utils::test_dir::process_id(),
-            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-
-    fn path(&self, file: &str) -> PathBuf {
-        self.0.join(file)
-    }
-
-    fn name(&self, db: &str) -> String {
-        self.0.join(db).to_str().unwrap().to_string()
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+/// The path of the database `db` in `dir`, as the text the database reader takes.
+fn db_in(dir: &Path, db: &str) -> String {
+    dir.join(db).to_str().unwrap().to_string()
 }
 
 fn copy_files(db: &str, exts: &[&str], dir: &TempDir) {
     for ext in exts {
         let file = format!("{db}.{ext}");
-        std::fs::copy(fixture_dir().join("db").join(&file), dir.path(&file)).unwrap();
+        std::fs::copy(fixture_dir().join("db").join(&file), dir.join(&file)).unwrap();
     }
 }
 
 /// Copy of the files of `mask_nucl_v4`: the sequence files and the column `a`.
 fn copy_v4(exts: &[&str]) -> TempDir {
-    let dir = TempDir::new("v4");
+    let dir = TempDir::unique("seqdb-mask-v4");
     copy_files("mask_nucl_v4", exts, &dir);
     dir
 }
@@ -338,14 +314,14 @@ fn unknown_algorithm_and_names_of_algorithms() {
             options: "window=64; level=20; linker=1".to_string(),
         }
     );
-    assert_eq!(algorithms.id_of("dustX"), Some(100));
-    assert_eq!(algorithms.id_of("wmY"), Some(101));
-    assert_eq!(algorithms.id_of("nothing"), None);
+    assert_eq!(algorithms.id_of(b"dustX").ok(), Some(100));
+    assert_eq!(algorithms.id_of(b"wmY").ok(), Some(101));
+    assert_eq!(algorithms.id_of(b"nothing").ok(), None);
 
     // A description of two items is its own name: the key is the whole text.
     let db = SeqDb::open(&db_name("mask_nucl_v4"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
-    assert_eq!(algorithms.id_of("30:"), Some(30));
+    assert_eq!(algorithms.id_of(b"30:").ok(), Some(30));
     assert_eq!(
         algorithms.details(30).unwrap(),
         MaskAlgorithm {
@@ -359,9 +335,9 @@ fn unknown_algorithm_and_names_of_algorithms() {
 
     let db = SeqDb::open(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
-    assert_eq!(algorithms.id_of("dustX"), Some(100));
-    assert_eq!(algorithms.id_of("wmY"), Some(101));
-    assert_eq!(algorithms.id_of("wmZ"), Some(102));
+    assert_eq!(algorithms.id_of(b"dustX").ok(), Some(100));
+    assert_eq!(algorithms.id_of(b"wmY").ok(), Some(101));
+    assert_eq!(algorithms.id_of(b"wmZ").ok(), Some(102));
 }
 
 /// An OID past the volumes fails at the locator (`SeqDb::locate_oid`, NCBI's `FindVol`) with
@@ -386,14 +362,14 @@ fn a_search_reads_no_column_file() {
         assert!(SeqDb::open(&db_name(name), seqtype).is_ok(), "{name}");
     }
     let intact = SeqDb::open(&db_name("mask_prot_v4"), SeqType::Protein).unwrap();
-    let dir = TempDir::new("junk-index");
+    let dir = TempDir::unique("seqdb-mask-junk-index");
     copy_files(
         "mask_prot_v4",
         &["pin", "psq", "phr", "paa", "pab", "pac"],
         &dir,
     );
-    std::fs::write(dir.path("mask_prot_v4.paa"), b"column").unwrap();
-    let db = SeqDb::open(&dir.name("mask_prot_v4"), SeqType::Protein).unwrap();
+    std::fs::write(dir.join("mask_prot_v4.paa"), b"column").unwrap();
+    let db = SeqDb::open(&db_in(&dir, "mask_prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(db.num_seqs(), intact.num_seqs());
     for ordinal in 0..db.num_seqs() {
         let (block, intact_block) = (
@@ -413,7 +389,7 @@ fn a_database_without_columns_has_no_masks() {
     let algorithms = db.mask_algorithms().unwrap();
     assert!(algorithms.ids().is_empty());
     assert_eq!(algorithms.descriptions().unwrap(), "");
-    assert_eq!(algorithms.id_of("dust"), None);
+    assert_eq!(algorithms.id_of(b"dust").ok(), None);
     assert_eq!(
         oid_mask_ranges(&db, 0, 11).unwrap(),
         MaskRanges::Ranges(Vec::new())
@@ -497,8 +473,8 @@ fn damaged_column_index_gives_ncbis_messages() {
     ];
     for (tag, at, bytes, message) in cases {
         let dir = copy_v4(&V4_ALL);
-        patch(&dir.path("mask_nucl_v4.naa"), at, bytes);
-        let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+        patch(&dir.join("mask_nucl_v4.naa"), at, bytes);
+        let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
         let error = db.mask_algorithms().unwrap_err();
         assert_eq!(format_message(&error), message, "{tag}");
         // The next call tries again and fails alike.
@@ -510,12 +486,12 @@ fn damaged_column_index_gives_ncbis_messages() {
 fn damaged_metadata_gives_ncbis_messages() {
     // The second key "30" (at 0x6b) becomes the first key "11".
     let dir = copy_v4(&V4_ALL);
-    let index = dir.path("mask_nucl_v4.naa");
+    let index = dir.join("mask_nucl_v4.naa");
     let bytes = std::fs::read(&index).unwrap();
     assert_eq!(&bytes[0x6b..0x6d], b"30");
     assert_eq!(bytes[0x77], 0);
     patch(&index, 0x6b, b"11");
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "CSeqDBColumn: Error; duplicate metadata key."
@@ -523,8 +499,8 @@ fn damaged_metadata_gives_ncbis_messages() {
 
     // The NUL that ends the padding is gone.
     let dir = copy_v4(&V4_ALL);
-    patch(&dir.path("mask_nucl_v4.naa"), 0x77, b"#");
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    patch(&dir.join("mask_nucl_v4.naa"), 0x77, b"#");
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "CBlastDbBlob::ReadString: Unterminated string."
@@ -532,8 +508,8 @@ fn damaged_metadata_gives_ncbis_messages() {
 
     // A string cut by the end of the metadata (the value of "30" grows past it).
     let dir = copy_v4(&V4_ALL);
-    patch(&dir.path("mask_nucl_v4.naa"), 0x6d, &[0x20]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    patch(&dir.join("mask_nucl_v4.naa"), 0x6d, &[0x20]);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "CBlastDbBlob::x_ReadRaw: hit end of data"
@@ -541,8 +517,8 @@ fn damaged_metadata_gives_ncbis_messages() {
 
     // The metadata count states more pairs than the metadata holds.
     let dir = copy_v4(&V4_ALL);
-    patch(&dir.path("mask_nucl_v4.naa"), 0x45, &[0x05]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    patch(&dir.join("mask_nucl_v4.naa"), 0x45, &[0x05]);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "CBlastDbBlob::x_ReadRaw: hit end of data"
@@ -550,13 +526,13 @@ fn damaged_metadata_gives_ncbis_messages() {
 
     // A varint that never ends.
     let dir = copy_v4(&V4_ALL);
-    let index = dir.path("mask_nucl_v4.naa");
+    let index = dir.join("mask_nucl_v4.naa");
     let mut data = std::fs::read(&index).unwrap();
     for byte in &mut data[0x45..0x78] {
         *byte = 0x82;
     }
     std::fs::write(&index, data).unwrap();
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "CBlastDbBlob::ReadVarInt: eof while reading integer."
@@ -566,8 +542,8 @@ fn damaged_metadata_gives_ncbis_messages() {
 #[test]
 fn a_column_with_the_wrong_number_of_sequences_is_refused() {
     let dir = copy_v4(&V4_ALL);
-    patch(&dir.path("mask_nucl_v4.naa"), 15, &[7]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    patch(&dir.join("mask_nucl_v4.naa"), 15, &[7]);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "Error: column has wrong #oids [7 vs 8]."
@@ -577,17 +553,17 @@ fn a_column_with_the_wrong_number_of_sequences_is_refused() {
 #[test]
 fn two_columns_with_one_title_are_refused() {
     let dir = copy_v4(&V4_ALL);
-    std::fs::copy(dir.path("mask_nucl_v4.naa"), dir.path("mask_nucl_v4.nba")).unwrap();
-    std::fs::copy(dir.path("mask_nucl_v4.nac"), dir.path("mask_nucl_v4.nbc")).unwrap();
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    std::fs::copy(dir.join("mask_nucl_v4.naa"), dir.join("mask_nucl_v4.nba")).unwrap();
+    std::fs::copy(dir.join("mask_nucl_v4.nac"), dir.join("mask_nucl_v4.nbc")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "Error: duplicate column title [BlastDb/MaskData]."
     );
 
     // Both faults in one column: the text about the number of sequences wins.
-    patch(&dir.path("mask_nucl_v4.nba"), 15, &[7]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    patch(&dir.join("mask_nucl_v4.nba"), 15, &[7]);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(
         format_message(&db.mask_algorithms().unwrap_err()),
         "Error: column has wrong #oids [7 vs 8]."
@@ -620,7 +596,7 @@ fn byte_reversed(ranges: &str) -> String {
 fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     // An index file without any data file is skipped.
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa"]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert!(db.mask_algorithms().unwrap().ids().is_empty());
     assert_eq!(
         oid_mask_ranges(&db, 0, 11).unwrap(),
@@ -629,7 +605,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
 
     // Only the big-endian data file: the algorithms of the index, the ranges byte-reversed.
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nab"]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
     assert_eq!(algorithms.ids(), [11, 30]);
     assert_eq!(
@@ -649,7 +625,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
 
     // Only the little-endian data file: the ranges as stored.
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nac"]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert_eq!(db.mask_algorithms().unwrap().ids(), [11, 30]);
     for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
         let text = ranges_text(&oid_mask_ranges(&db, oid, algo).unwrap()).unwrap();
@@ -658,10 +634,10 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
 
     // Both: the big-endian file is not read, even when it holds other bytes.
     let dir = copy_v4(&V4_ALL);
-    let big = dir.path("mask_nucl_v4.nab");
+    let big = dir.join("mask_nucl_v4.nab");
     let length = std::fs::metadata(&big).unwrap().len() as usize;
     std::fs::write(&big, vec![0xa5; length]).unwrap();
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert!(db.volumes()[0].columns().unwrap()[0]
         .data_path()
         .ends_with("mask_nucl_v4.nac"));
@@ -672,9 +648,9 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
 
     // A protein mask column alike (seg, 21): `.pab` alone gives the ranges byte-reversed
     // (line SW8's probe Q01, NCBI's `%o\t%m21` of this copy, 2026-11-08).
-    let dir = TempDir::new("prot-big");
+    let dir = TempDir::unique("seqdb-mask-prot-big");
     copy_files("mask_prot_v4", &["pin", "psq", "phr", "paa", "pab"], &dir);
-    let db = SeqDb::open(&dir.name("mask_prot_v4"), SeqType::Protein).unwrap();
+    let db = SeqDb::open(&db_in(&dir, "mask_prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(db.mask_algorithms().unwrap().ids(), [21]);
     assert!(db.volumes()[0].columns().unwrap()[0]
         .data_path()
@@ -751,8 +727,8 @@ fn a_user_column_beside_the_masks_reads_its_big_endian_data_file() {
         &[("format", "text")],
         &blobs,
     );
-    std::fs::rename(dir.path("mask_nucl_v4.nbc"), dir.path("mask_nucl_v4.nbb")).unwrap();
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    std::fs::rename(dir.join("mask_nucl_v4.nbc"), dir.join("mask_nucl_v4.nbb")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     let columns = db.volumes()[0].columns().unwrap();
     assert_eq!(columns.len(), 2);
     assert!(columns[0].data_path().ends_with("mask_nucl_v4.nac"));
@@ -779,8 +755,8 @@ fn a_user_column_beside_the_masks_reads_its_big_endian_data_file() {
 #[test]
 fn an_empty_index_beside_a_big_endian_data_file_fails() {
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nab"]);
-    truncate(&dir.path("mask_nucl_v4.naa"), 0);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    truncate(&dir.join("mask_nucl_v4.naa"), 0);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     for _ in 0..2 {
         let error = db.mask_algorithms().unwrap_err();
         assert_eq!(
@@ -798,16 +774,16 @@ fn damaged_index_and_data_files_are_format_errors() {
         (100, "fewer than the start of its offset array"),
     ] {
         let dir = copy_v4(&V4_ALL);
-        truncate(&dir.path("mask_nucl_v4.naa"), len);
-        let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+        truncate(&dir.join("mask_nucl_v4.naa"), len);
+        let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
         let error = db.mask_algorithms().unwrap_err();
         assert!(format_message(&error).contains(text), "{len}: {error}");
     }
 
     // The offset array cut after the metadata is read: the last sequence has no entry.
     let dir = copy_v4(&V4_ALL);
-    truncate(&dir.path("mask_nucl_v4.naa"), 0x78 + 4 * 8);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    truncate(&dir.join("mask_nucl_v4.naa"), 0x78 + 4 * 8);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert!(db.mask_algorithms().is_ok());
     assert!(oid_mask_ranges(&db, 6, 11).is_ok());
     let error = oid_mask_ranges(&db, 7, 11).unwrap_err();
@@ -819,10 +795,10 @@ fn damaged_index_and_data_files_are_format_errors() {
 
     // A blob range past the end of the data file.
     let dir = copy_v4(&V4_ALL);
-    let data = dir.path("mask_nucl_v4.nac");
+    let data = dir.join("mask_nucl_v4.nac");
     let len = std::fs::metadata(&data).unwrap().len() as usize;
     truncate(&data, len - 4);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     assert!(oid_mask_ranges(&db, 0, 11).is_ok());
     let error = oid_mask_ranges(&db, 7, 11).unwrap_err();
     assert!(
@@ -833,22 +809,22 @@ fn damaged_index_and_data_files_are_format_errors() {
     // The data range of a sequence ends before it starts; or starts below 0.
     let dir = copy_v4(&V4_ALL);
     patch(
-        &dir.path("mask_nucl_v4.naa"),
+        &dir.join("mask_nucl_v4.naa"),
         0x78 + 4 * 3,
         &0x1000i32.to_be_bytes(),
     );
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     let error = oid_mask_ranges(&db, 3, 11).unwrap_err();
     assert!(
         format_message(&error).contains("ends (140) before it starts (4096)"),
         "{error}"
     );
     patch(
-        &dir.path("mask_nucl_v4.naa"),
+        &dir.join("mask_nucl_v4.naa"),
         0x78 + 4 * 3,
         &(-4i32).to_be_bytes(),
     );
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     let error = oid_mask_ranges(&db, 3, 11).unwrap_err();
     assert!(format_message(&error).contains("starts at -4"), "{error}");
 
@@ -870,16 +846,16 @@ fn damaged_index_and_data_files_are_format_errors() {
         (28, [0, 0, 0, 0x45], "has no metadata"),
     ] {
         let dir = copy_v4(&V4_ALL);
-        patch(&dir.path("mask_nucl_v4.naa"), at, &bytes);
-        let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+        patch(&dir.join("mask_nucl_v4.naa"), at, &bytes);
+        let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
         let error = db.mask_algorithms().unwrap_err();
         assert!(format_message(&error).contains(text), "{text}: {error}");
     }
 
     // A date of length 0 (a title of length 0 is made below).
     let dir = copy_v4(&V4_ALL);
-    patch(&dir.path("mask_nucl_v4.naa"), 0x31, &[0]);
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    patch(&dir.join("mask_nucl_v4.naa"), 0x31, &[0]);
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     let error = db.mask_algorithms().unwrap_err();
     assert!(format_message(&error).contains("empty date"), "{error}");
 }
@@ -964,13 +940,13 @@ fn write_column(
     for offset in offsets {
         index.extend_from_slice(&offset.to_be_bytes());
     }
-    std::fs::write(dir.path(&format!("{base}.n{letter}a")), index).unwrap();
-    std::fs::write(dir.path(&format!("{base}.n{letter}c")), data).unwrap();
+    std::fs::write(dir.join(format!("{base}.n{letter}a")), index).unwrap();
+    std::fs::write(dir.join(format!("{base}.n{letter}c")), data).unwrap();
 }
 
 /// A copy of mask_nucl_v4's sequence files (8 sequences) with a column made here.
 fn made_column(metadata: &[(&str, &str)], blobs: &[Vec<u8>]) -> (TempDir, String) {
-    let dir = TempDir::new("made");
+    let dir = TempDir::unique("seqdb-mask-made");
     copy_files("mask_nucl_v4", &["nin", "nsq", "nhr"], &dir);
     write_column(
         &dir,
@@ -980,7 +956,7 @@ fn made_column(metadata: &[(&str, &str)], blobs: &[Vec<u8>]) -> (TempDir, String
         metadata,
         blobs,
     );
-    let name = dir.name("mask_nucl_v4");
+    let name = db_in(&dir, "mask_nucl_v4");
     (dir, name)
 }
 
@@ -1034,7 +1010,7 @@ fn a_made_column_reads_like_a_fixture() {
 
 #[test]
 fn an_empty_title_is_refused() {
-    let dir = TempDir::new("title");
+    let dir = TempDir::unique("seqdb-mask-title");
     copy_files("mask_nucl_v4", &["nin", "nsq", "nhr"], &dir);
     write_column(
         &dir,
@@ -1044,7 +1020,7 @@ fn an_empty_title_is_refused() {
         &[("1", "10:")],
         &eight_empty_blobs(),
     );
-    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_v4")).unwrap();
     let error = db.mask_algorithms().unwrap_err();
     assert!(format_message(&error).contains("empty title"), "{error}");
 }
@@ -1073,7 +1049,7 @@ fn equal_descriptions_in_a_volume_are_refused() {
     );
     let db = open_masked(&name).unwrap();
     let error = db.mask_algorithms().unwrap_err();
-    let message = format_message(&error);
+    let message = String::from_utf8(error.ncbi_message().unwrap()).unwrap();
     assert!(
         message.starts_with("Error: volume (")
             && message.ends_with(") mask data has duplicates value (6:b:same:y)"),
@@ -1083,7 +1059,10 @@ fn equal_descriptions_in_a_volume_are_refused() {
 
     let (_dir, name) = made_column(&[("1", "10:"), ("2", "10:")], &eight_empty_blobs());
     let db = open_masked(&name).unwrap();
-    assert!(format_message(&db.mask_algorithms().unwrap_err()).ends_with("duplicates value (10:)"));
+    let error = db.mask_algorithms().unwrap_err();
+    assert!(String::from_utf8(error.ncbi_message().unwrap())
+        .unwrap()
+        .ends_with("duplicates value (10:)"));
 }
 
 #[test]
@@ -1127,7 +1106,7 @@ fn stored_descriptions_that_cannot_be_read_are_refused() {
 fn a_description_that_is_not_utf8_is_unsupported_not_damaged() {
     // Latin-1 bytes in place of the placeholder "ZZ" (same length, so the file stays valid).
     let (dir, name) = made_column(&[("4", "10:optsZZ")], &eight_empty_blobs());
-    let index = dir.path("mask_nucl_v4.naa");
+    let index = dir.join("mask_nucl_v4.naa");
     let mut bytes = std::fs::read(&index).unwrap();
     let at = bytes.windows(2).position(|w| w == b"ZZ").unwrap();
     bytes[at..at + 2].copy_from_slice(&[0xe9, 0xe8]);
@@ -1158,7 +1137,7 @@ fn descriptions_of_four_items_and_wide_columns() {
             options: "o1:y".to_string(),
         }
     );
-    assert_eq!(algorithms.id_of(&long_name), Some(3));
+    assert_eq!(algorithms.id_of(long_name.as_bytes()).ok(), Some(3));
     // setw(40) does not cut a longer text.
     assert_eq!(
         algorithms.descriptions().unwrap(),
@@ -1233,7 +1212,7 @@ fn mask_blobs_that_end_early_are_format_errors() {
 fn volumes_with_different_ids_for_one_algorithm_are_remapped() {
     // Two volumes: id 30 means "30:" in the first and "10:" in the second, which also has
     // "30:" as id 31. The table keeps 30 for "30:" and gives "10:" the synthetic id 100.
-    let dir = TempDir::new("remap");
+    let dir = TempDir::unique("seqdb-mask-remap");
     for volume in ["mask_nucl_mv.00", "mask_nucl_mv.01"] {
         copy_files(volume, &["nin", "nsq", "nhr"], &dir);
     }
@@ -1258,7 +1237,7 @@ fn volumes_with_different_ids_for_one_algorithm_are_remapped() {
         &[("30", "10:"), ("31", "30:")],
         &second,
     );
-    let db = open_masked(&dir.name("mask_nucl_mv")).unwrap();
+    let db = open_masked(&db_in(&dir, "mask_nucl_mv")).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
     assert_eq!(algorithms.ids(), [30, 100]);
     assert_eq!(algorithms.details(100).unwrap().program_name, "dust");
@@ -1286,13 +1265,13 @@ fn volumes_with_different_ids_for_one_algorithm_are_remapped() {
 fn the_other_volumes_columns_are_opened_first() {
     // A fault in the second volume's column is reported for a request in the first volume
     // (x_GetColumnId opens the columns of every volume).
-    let dir = TempDir::new("order");
+    let dir = TempDir::unique("seqdb-mask-order");
     for volume in ["mask_nucl_mv.00", "mask_nucl_mv.01"] {
         copy_files(volume, &["nin", "nsq", "nhr", "naa", "nab", "nac"], &dir);
     }
     copy_files("mask_nucl_mv", &["nal"], &dir);
-    patch(&dir.path("mask_nucl_mv.01.naa"), 3, &[9]);
-    let db = open_masked(&dir.name("mask_nucl_mv")).unwrap();
+    patch(&dir.join("mask_nucl_mv.01.naa"), 3, &[9]);
+    let db = open_masked(&db_in(&dir, "mask_nucl_mv")).unwrap();
     let error = oid_mask_ranges(&db, 0, 30).unwrap_err();
     assert_eq!(
         format_message(&error),
@@ -1330,7 +1309,7 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
         .map(|blob| blob.to_vec())
         .collect();
     let (dir, name) = made_column(&[("7", "20:window=12")], &blobs);
-    let index = dir.path("mask_nucl_v4.naa");
+    let index = dir.join("mask_nucl_v4.naa");
     let same_as_alone = |what: &str| {
         let db = open_masked(&name).unwrap();
         let column = db.volumes()[0].mask_column().unwrap().unwrap();
@@ -1371,7 +1350,7 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
         .zip(&blobs)
         .all(|(read, blob)| read.as_ref() == Ok(blob)));
     // The data file cut inside the blob of sequence 7.
-    let data = dir.path("mask_nucl_v4.nac");
+    let data = dir.join("mask_nucl_v4.nac");
     let written = std::fs::read(&data).unwrap();
     std::fs::write(&data, &written[..written.len() - 1]).unwrap();
     let alone = same_as_alone("a cut data file");
@@ -1408,9 +1387,9 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
 /// -mask_data` into `dir` (`edge.naa`, `edge.nab`, `edge.nac`), whose sequences `with_blob`
 /// have a blob of 8 bytes and the others none.
 fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::column::Column {
-    let base = dir.name("edge");
+    let base = db_in(dir, "edge");
     let mut column = crate::writedb::column::Column::new(
-        &base,
+        base.as_bytes(),
         false,
         0,
         0,
@@ -1429,7 +1408,7 @@ fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::
     }
     column.close().unwrap();
     column.rename_single();
-    super::column::Column::open(&dir.path("edge.naa"), &dir.path("edge.nac")).unwrap()
+    super::column::Column::open(&dir.join("edge.naa"), &dir.join("edge.nac")).unwrap()
 }
 
 // No NCBI counterpart (reads only): the window of `Column::first_blob_in` (16,384 entries per
@@ -1445,7 +1424,7 @@ fn the_offset_scan_finds_a_blob_on_either_side_of_its_window_edge() {
     const WINDOW: u32 = 1 << 14;
     let num_oids = 2 * WINDOW + 10;
     for at in [WINDOW - 1, WINDOW, WINDOW + 1, 2 * WINDOW] {
-        let dir = TempDir::new("edge");
+        let dir = TempDir::unique("seqdb-mask-edge");
         let column = write_edge_column(&dir, num_oids, &[at]);
         for first in [0, 1, WINDOW - 1, at] {
             assert_eq!(
@@ -1469,12 +1448,12 @@ fn the_offset_scan_finds_a_blob_on_either_side_of_its_window_edge() {
     // The entry that ends the blob of WINDOW + 1 (and starts the next) set past the data file:
     // the scan from before the edge stops there without a blob (`Some(false)`), and the reader
     // of the blobs fails that sequence with an integrity error.
-    let dir = TempDir::new("edge");
+    let dir = TempDir::unique("seqdb-mask-edge");
     drop(write_edge_column(&dir, num_oids, &[2 * WINDOW]));
-    let offsets_end = std::fs::metadata(dir.path("edge.naa")).unwrap().len() as usize;
+    let offsets_end = std::fs::metadata(dir.join("edge.naa")).unwrap().len() as usize;
     let entry = offsets_end - 4 * (num_oids - (WINDOW + 1)) as usize;
-    patch(&dir.path("edge.naa"), entry, &1000i32.to_be_bytes());
-    let column = super::column::Column::open(&dir.path("edge.naa"), &dir.path("edge.nac")).unwrap();
+    patch(&dir.join("edge.naa"), entry, &1000i32.to_be_bytes());
+    let column = super::column::Column::open(&dir.join("edge.naa"), &dir.join("edge.nac")).unwrap();
     assert_eq!(column.first_blob_in(0, num_oids), Some(false));
     assert_eq!(column.first_blob_in(WINDOW + 2, num_oids), Some(false));
     let mut blobs = super::column::ColumnBlobs::default();

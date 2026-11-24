@@ -1,5 +1,7 @@
 // No NCBI counterpart: the searches of a byte string that the ports share (cited in the module).
 pub(crate) mod byte_search;
+// No NCBI counterpart: decimal digits appended without `core::fmt` (cited in the module).
+pub(crate) mod decimal;
 pub mod dust;
 pub mod entry_names;
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, cited in the module).
@@ -30,7 +32,8 @@ mod seg_lnfact;
 // order observed of NCBI's Linux builds.
 pub(crate) mod std_shuffle;
 // No NCBI counterpart: test plumbing; the tests' temporary directory and process id
-// (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
+// (`std::env::temp_dir()` and `std::process::id()` panic on WASI), and the name NCBI's database
+// reader gives such a directory (`test_dir::ncbi_dir`, cited there).
 #[cfg(test)]
 pub(crate) mod test_dir;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188

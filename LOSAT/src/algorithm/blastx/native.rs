@@ -358,8 +358,8 @@ fn run_inner(
     // those of the composition-based statistics handler and of `Validate`, which come later.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // The query options handler comes before the genetic code and formatting handlers
-    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (clap's
-    // value parsers, `resolve`).
+    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (NCBI's
+    // argument reader, `cli::reader`, and `resolve`).
     // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
     // NCBI's error of `-seg` first (`local::check_filtering`).
     super::local::check_filtering(args)?;
@@ -396,7 +396,8 @@ fn run_inner(
                 &mut stderr,
                 program.upper,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -448,7 +449,7 @@ fn run_inner(
             Some(&crate::algorithm::common::database::TaxdbSetting::of(
                 &settings,
             )),
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -631,10 +632,12 @@ fn run_inner(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:217-218
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
     // The letters of a reader / report batch: `BATCH_SIZE` when it is set, else 10002. The
-    // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
-    // large a reader batch is: a reader batch is split into units that are searched as the
-    // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
-    // is searched. (`batch_size` is read above, for the reads before the search.)
+    // search itself keeps units that end at the first query that brings them to 10002 letters
+    // (`BATCH_SIZE` the constant), however large a reader batch is: a reader batch is split into
+    // units that are searched as the batches of a run without `BATCH_SIZE` are, and its report is
+    // written when its last unit is searched; where a unit cannot give the batch's rows alone it
+    // is the whole reader batch (`query_setup::unit_ranges`). (`batch_size` is read above, for the
+    // reads before the search.)
     let batch_size = batch_size?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
     // `blastinput::db_mask::DbMaskOption::resolve`)
@@ -660,7 +663,7 @@ fn run_inner(
     // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
     // starts the search, after its checks.
     if let (Some(database), Some(mask)) = (&database, options.db_mask.as_ref()) {
-        database.check_mask_limits(mask)?;
+        database.check_mask_limits(mask, &options)?;
     }
     app::check_search_environment(program.upper, database.is_none())?;
     // RPSTBLASTN's refusals of the database's files and of its options, before the first byte
@@ -797,6 +800,23 @@ fn run_inner(
             _ => Some(&subjects[..]),
         })
     });
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
+    // The search strategy's request of a reader batch (`-export_search_strategy`), which NCBI
+    // writes once its query factory is made, before its search: the loop takes each batch here
+    // before it looks at the batch's search (`run_query_batches`), so a batch whose search fails
+    // (a query without letters in a batch without a valid context, `Warning: Sequence contains no
+    // data`; the sequence file of `-db`) has one, and the file is apart from the reports. An empty
+    // batch has none: its `Empty CBlastQueryVector` comes before it. Each unit of a batch the
+    // search split takes it once (`StrategyExport::takes`).
+    let batch_take = BatchTake::new(
+        &query_scopes,
+        strategy.as_ref(),
+        archive.as_ref(),
+        &options,
+        search_subjects,
+        &search_error,
+        database.is_none().then_some(&subjects[..]),
+    );
     // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
     let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
@@ -808,12 +828,7 @@ fn run_inner(
      -> Result<()> {
         // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
         // search strategy request holds (`take` below).
-        if let Some(strategy) = &strategy {
-            strategy.note_searched(
-                queries_before..queries_before + queries.len(),
-                archive::batch_searched_space(results, &options),
-            )?;
-        }
+        batch_take.note_searched(queries, results, queries_before)?;
         if let (Some(handle), Some(archive_requests)) = (&archive, &archive_requests) {
             return ArchiveBatch {
                 handle,
@@ -864,7 +879,7 @@ fn run_inner(
                     &options,
                     asks,
                     results,
-                    queries,
+                    (queries, queries_before),
                     query_scopes
                         .borrow()
                         .as_ref()
@@ -949,47 +964,10 @@ fn run_inner(
         )?;
         writer.flush().map_err(output_error)
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
-    // The search strategy's request of a reader batch (`-export_search_strategy`), which NCBI
-    // writes once its query factory is made, before its search: the loop takes each batch here
-    // before it looks at the batch's search (`run_query_batches`), so a batch whose search fails
-    // (a query without letters in a batch without a valid context, `Warning: Sequence contains no
-    // data`; the sequence file of `-db`) has one, and the file is apart from the reports. An empty
-    // batch has none: its `Empty CBlastQueryVector` comes before it. Each unit of a batch the
-    // search split takes it once (`StrategyExport::takes`).
-    let requests = strategy
-        .as_ref()
-        .map(|_| archive::requests(database.is_none().then_some(&subjects[..])));
-    // NCBI's posts of the bytes that its stream replaced in the request go to the run's
-    // diagnostics (`diagnostics`, where the loop takes the batch: after the batch's reader
-    // messages, before its search) and are messages of the archive (`StrategyExport::take_posts`).
-    // The batch that the loop takes joins the scopes of the queries first (`add_batch_scope`).
-    let scope_taken = std::cell::Cell::new(None);
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
                     queries_before: usize|
-     -> Result<()> {
-        add_batch_scope(
-            &query_scopes,
-            &scope_taken,
-            queries,
-            queries_before,
-            strategy.is_some(),
-            &options,
-            search_subjects,
-            &search_error,
-        )?;
-        let (Some(strategy), Some(requests)) = (&strategy, &requests) else {
-            return Ok(());
-        };
-        requests.write(
-            strategy,
-            queries_before,
-            queries,
-            queries.first().map(FastaRecord::placement),
-        )?;
-        Ok(strategy.write_posts(diagnostics, archive.as_ref())?)
-    };
+     -> Result<()> { batch_take.take(diagnostics, queries, queries_before) };
     // RPSTBLASTN's search of the query batches takes the place of BLASTX's, once per run
     // (`args::RpsTblastnSearch`, DECISIONS 38 D1).
     let processed = match &options.rpstblastn {
@@ -1057,6 +1035,10 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
+    /// Whether the reports may read the reported sequences one by one
+    /// (`common::database::prefetch_may_be_off` of the first format), for the reader of the
+    /// headers (`HeaderReader::new`).
+    one_by_one: bool,
     /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
     /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
     throw: crate::report::db_subject::FormatThrow,
@@ -1092,26 +1074,32 @@ impl ReportedAsks {
             } else {
                 crate::report::tabular::PrintedIds::default()
             },
-            // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
-            prefetched: prefetches_subjects(Some(match options.outfmt {
-                10 | 18 | 20 => 6,
-                outfmt => i32::from(outfmt),
-            })) && !crate::algorithm::common::database::prefetch_always_off(),
-            prefetch_runs: (prefetches_subjects(Some(match options.outfmt {
-                10 | 18 | 20 => 6,
-                outfmt => i32::from(outfmt),
-            })) || matches!(options.outfmt, 13..=16))
-                && !crate::algorithm::common::database::prefetch_always_off(),
+            // Outfmt 10 and 20 prefetch as 6 does (`ResolvedOptions::prefetch_format`).
+            prefetched: prefetches_subjects(Some(options.prefetch_format()))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    options.prefetch_format(),
+                ),
+            prefetch_runs: (prefetches_subjects(Some(options.prefetch_format()))
+                || matches!(options.outfmt, 13..=16))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    options.prefetch_format(),
+                ),
+            one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
+                options.prefetch_format(),
+            ),
             throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
                 .map_or(
                     crate::report::db_subject::FormatThrow::Refused(
                         crate::report::db_subject::ThrowRefusal::Format,
                     ),
                     |format| {
+                        // With `-html` where the run has its links (the writer's
+                        // `PairwiseConfig::html`).
                         crate::report::db_subject::FormatThrow::of(
                             format,
                             options.tabular,
                             crate::blastinput::app::Program::Blastx,
+                            options.html.is_some(),
                         )
                     },
                 ),
@@ -1134,13 +1122,18 @@ impl ReportedAsks {
     /// refusal of a subject whose lookup throws over the `-outfmt` values of its other searches,
     /// `others`, too (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
     pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {
+        // The first search's asks start the call's: `FormatThrow::and` of a format that reads
+        // nothing (`Self::default()`'s) with one that stops is a refusal (`FormatThrow::of_formats`).
         let mut asks = options
             .iter()
-            .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+            .map(Self::of)
+            .reduce(Self::or)
+            .unwrap_or_default();
         asks.throw = asks.throw.of_search(
             others,
             crate::blastinput::app::Program::Blastx,
             crate::report::archive::options::RequestKind::Blastx,
+            options.iter().any(|options| options.html.is_some()),
         );
         asks.prefetched = options
             .first()
@@ -1148,6 +1141,9 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
+        asks.one_by_one = options
+            .first()
+            .is_some_and(|options| Self::of(options).one_by_one);
         asks
     }
 
@@ -1164,6 +1160,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            one_by_one: self.one_by_one || other.one_by_one,
             throw: self.throw.and(other.throw),
             changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
         }
@@ -1215,7 +1212,13 @@ pub(super) fn batch_titles(
     let aligned = ReportedSubjects::drop_unaligned(database, results, gapped);
     let earlier = EarlierUtf8::of_batch(first_query, fetched, aligned);
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
+    let titles = ReportedSubjects::read_titles(
+        database,
+        results,
+        gapped,
+        asks.pairwise,
+        (earlier, asks.one_by_one),
+    );
     super::x_timing::run(XRun::Titles, x_t);
     if let Some(posts) = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
@@ -1232,6 +1235,8 @@ pub(super) fn batch_titles(
 pub(super) struct BatchPrefetch {
     /// The batch's Seq-aligns, which `PRE_FETCH_SEQS_LIMIT` counts.
     seq_aligns: usize,
+    /// The format, whose prefetch the batch asks (`ResolvedOptions::prefetch_format`).
+    format: crate::algorithm::common::database::PrefetchFormat,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
     /// It throws at a subject row whose range it cannot take before it loads anything and writes
@@ -1272,12 +1277,14 @@ pub(super) fn batch_prefetch(
             .iter()
             .map(|batch| batch.unlisted.iter().sum::<usize>())
             .sum::<usize>();
-    let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
-    let fails = !off
-        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
-        && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
+    let format = options.prefetch_format();
+    let off = crate::algorithm::common::database::prefetch_off(format, seq_aligns);
+    // A prefetch that runs reads the Seq-aligns (`PrefetchFormat::batch_prefetches`).
+    let fails =
+        !off && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
     BatchPrefetch {
         seq_aligns,
+        format,
         off,
         fails,
     }
@@ -1298,7 +1305,7 @@ impl BatchPrefetch {
         if self.fails {
             crate::algorithm::common::database::BatchLoads::Read(rows)
         } else {
-            crate::algorithm::common::database::batch_loads(self.seq_aligns, rows)
+            crate::algorithm::common::database::batch_loads(self.format, self.seq_aligns, rows)
         }
     }
 }
@@ -1378,7 +1385,8 @@ impl<'a> BatchScopes<'a> {
 /// each batch's reports are written before the next is searched, `reported_error`); a batch whose
 /// prefetch does not stop is recorded in the run (`ReportedSubjects::note_loaded`), without the
 /// loads of an outfmt 5 report that NCBI's XML stream cuts before its hits (`queries`, the reader
-/// batch's records: `XmlCuts`).
+/// batch's records: `XmlCuts`), as the loads of the batch numbered `queries_before` (the queries
+/// of the run before it), in whose scope its reports read (`ReportedSubjects::for_batch`).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1386,7 +1394,7 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
-    queries: &[FastaRecord],
+    (queries, queries_before): (&[FastaRecord], usize),
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     prefetch_queries: &crate::algorithm::common::database::PrefetchQueries<'_>,
     diagnostics: &mut dyn Write,
@@ -1421,6 +1429,7 @@ pub(super) fn reported_batch(
             asks.throw,
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
+            queries_before,
         ),
     );
     super::x_timing::run(XRun::Titles, x_t);
@@ -1452,10 +1461,7 @@ pub(super) fn reported_batch(
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
     // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
     // lookups of the taxonomy names come with the rows (`tabular`).
-    let prefetch_format = match options.outfmt {
-        10 | 18 | 20 => 6,
-        outfmt => i32::from(outfmt),
-    };
+    let prefetch_format = options.prefetch_format();
     let mut reported = reported;
     if prefetch_fails {
         diagnostics.write_all(&database.prefetch_warning())?;
@@ -1496,7 +1502,7 @@ pub(super) fn reported_batch(
                 database,
                 results,
                 options.gapped,
-                rows,
+                (rows, prefetch_format),
                 places,
                 rows_open,
                 pairwise,
@@ -1561,7 +1567,7 @@ pub(super) fn reported_batch(
         })
     };
     reported.note_loaded(
-        database,
+        (database, queries_before),
         results,
         options.gapped,
         loads,
@@ -1619,6 +1625,7 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<super::database::LongSubjectRefusal>()
+        || error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>()
         || error.is::<NativeError>()
         || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
 }
@@ -1789,6 +1796,98 @@ pub(super) fn add_batch_scope(
     })
 }
 
+/// What the query loop does where it takes a reader batch (`run_query_batches`' `take`) and where
+/// it reports one, for the command line's run (`run_inner`) and LOSAT Web's search of records
+/// (`local::render`), so that both keep one order of a batch's search strategy request: the batch
+/// joins the scopes of the queries first (`add_batch_scope`); with `-export_search_strategy` its
+/// request is written (`RunRequests::write`), and NCBI's posts of the bytes that its stream
+/// replaced in it go to the run's diagnostics, as messages of the archive
+/// (`StrategyExport::write_posts`); where the batch is reported, the search space that its set-up
+/// wrote is noted for the next request (`note_searched`).
+pub(super) struct BatchTake<'a> {
+    query_scopes: &'a std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+    scope_taken: std::cell::Cell<Option<usize>>,
+    strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
+    requests: Option<crate::report::archive::requests::RunRequests<'a>>,
+    archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    options: &'a super::args::ResolvedOptions,
+    subjects: Subjects<'a>,
+    search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
+}
+
+impl<'a> BatchTake<'a> {
+    /// The loop's takes of a run with the export `strategy`, the archive `archive` and, with
+    /// `-subject`, its records `request_subjects` (the requests' subjects).
+    pub(super) fn new(
+        query_scopes: &'a std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+        strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
+        archive: Option<&'a crate::report::archive::ArchiveHandle>,
+        options: &'a super::args::ResolvedOptions,
+        subjects: Subjects<'a>,
+        search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
+        request_subjects: Option<&'a [FastaRecord]>,
+    ) -> Self {
+        Self {
+            query_scopes,
+            scope_taken: std::cell::Cell::new(None),
+            strategy,
+            requests: strategy.map(|_| archive::requests(request_subjects)),
+            archive,
+            options,
+            subjects,
+            search_error,
+        }
+    }
+
+    /// Takes the reader batch `queries`, after the `queries_before` queries of the batches
+    /// before it.
+    pub(super) fn take(
+        &self,
+        diagnostics: &mut dyn Write,
+        queries: &[FastaRecord],
+        queries_before: usize,
+    ) -> Result<()> {
+        add_batch_scope(
+            self.query_scopes,
+            &self.scope_taken,
+            queries,
+            queries_before,
+            self.strategy.is_some(),
+            self.options,
+            self.subjects,
+            self.search_error,
+        )?;
+        let (Some(strategy), Some(requests)) = (self.strategy, &self.requests) else {
+            return Ok(());
+        };
+        requests.write(
+            strategy,
+            queries_before,
+            queries,
+            queries.first().map(FastaRecord::placement),
+        )?;
+        Ok(strategy.write_posts(diagnostics, self.archive)?)
+    }
+
+    /// The batch `queries` (after `queries_before` queries) is reported with the results
+    /// `results`: its set-up's `EffectiveSearchSpace`, which the next batch's request holds
+    /// (`StrategyExport::note_searched`).
+    pub(super) fn note_searched(
+        &self,
+        queries: &[FastaRecord],
+        results: &[BatchResults],
+        queries_before: usize,
+    ) -> Result<()> {
+        if let Some(strategy) = self.strategy {
+            strategy.note_searched(
+                queries_before..queries_before + queries.len(),
+                archive::batch_searched_space(results, self.options),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with
 /// the number of queries reported before it, in the reader's order; the reader's warnings go to
@@ -1875,20 +1974,21 @@ pub(super) fn run_query_batches(
                 let x_failed = std::cell::Cell::new(false);
                 let mut pending = ReaderBatchResults::default();
                 let x_wave = pool.threads() * 4;
-                // A unit of more than two search units' letters ends in a query that is longer than
-                // one: it is searched with the pool inside, never queued with others. The query
-                // is split into chunks that use the pool when it is the only query of its reader
-                // batch; in a reader batch of several queries (NCBI splits none) its subjects use
-                // the pool. Measured (2 queries of 280 kb, `BATCH_SIZE=1000000`, 4 and 35
-                // subjects, 8 and 16 threads): 0.10-0.16 s, against 0.17-0.26 s for the same
-                // queries split.
+                // A unit of more than two search units' letters (one long query, a reader batch
+                // whose last query is long, or a reader batch searched whole) is searched with the
+                // pool inside, never queued with others, and so is a unit of several places
+                // (`XUnit::places`). A query is split into chunks that use the pool when it is the
+                // only query of its reader batch; in a unit of several queries (NCBI splits none)
+                // its subjects use the pool. Measured (2 queries of 280 kb, `BATCH_SIZE=1000000`,
+                // 4 and 35 subjects, 8 and 16 threads): 0.10-0.16 s, against 0.17-0.26 s for the
+                // same queries split.
                 let x_large = |queries: &[super::input::FastaRecord]| {
                     queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
                 };
                 // A reader batch becomes its units; a batch of several is prepared first (phase
                 // 1, `reader_batch.rs`): by the waves at once, on the pool, by the flow as tasks.
                 let x_split = |queries: &[super::input::FastaRecord]| {
-                    let units = XUnit::split(queries, options, false);
+                    let units = XUnit::split(queries, options, search_subjects, false);
                     XUnit::prepare_now(&units, &|batch, ranges| {
                         prepare_reader_batch(batch, ranges, options, search_subjects, pool)
                     });
@@ -1920,9 +2020,11 @@ pub(super) fn run_query_batches(
                     // `flow_bound(K)` are unwritten (blastx/x_bx_mem.rs).
                     let x_cap =
                         super::search::x_bx_mem::flow_unit_cap(pool, options, search_subjects);
-                    let (x_bound, x_lookahead, x_max_live) = match x_cap {
-                        Some(k) => (super::search::x_bx_mem::flow_bound(k), 1, k),
-                        None => (x_wave, pool.threads(), usize::MAX),
+                    // The places (`XUnit::places`) scanning at a time: K with the cap, else the
+                    // threads, at one place a thread.
+                    let (x_bound, x_lookahead, x_max_live, x_max_places) = match x_cap {
+                        Some(k) => (super::search::x_bx_mem::flow_bound(k), 1, k, k),
+                        None => (x_wave, pool.threads(), usize::MAX, pool.threads()),
                     };
                     let x_ahead =
                         x_cap.is_some() && super::search::x_bx_mem::prepares_batches_ahead();
@@ -1930,21 +2032,22 @@ pub(super) fn run_query_batches(
                     x_bound,
                     x_lookahead,
                     x_max_live,
+                    x_max_places,
                     &mut *read,
                     // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): in the capped
                     // flow a reader batch of one unit is prepared by a task of its own before
                     // its search, outside the K searched at a time (blastx/x_bx_mem.rs).
                     &|queries: &[super::input::FastaRecord]| {
-                        XUnit::split(queries, options, x_ahead)
+                        XUnit::split(queries, options, search_subjects, x_ahead)
                     },
                     &|queries: &[super::input::FastaRecord],
                       layout: Option<&std::sync::Arc<ReaderBatchShape>>| match layout {
                         Some(layout) => prepare_unit(queries, layout, options, search_subjects),
-                        None => prepare_lone_unit(queries, options),
+                        None => prepare_lone_unit(queries, options, false),
                     },
-                    &|unit: &XUnit, alone: bool| {
+                    &|unit: &XUnit, alone: bool, scan_end: &dyn Fn()| {
                         let queries = unit.queries();
-                        let large = x_cap.is_some() || alone || x_large(queries);
+                        let large = x_cap.is_some() || alone || unit.places > 1 || x_large(queries);
                         crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
                         if large {
                             let _x_live = x_cap
@@ -1955,6 +2058,7 @@ pub(super) fn run_query_batches(
                                 options,
                                 pool,
                                 unit.take_prep(options, search_subjects)?,
+                                Some(scan_end),
                             )
                         } else {
                             super::runtime::x_search_unit_serial(
@@ -1962,6 +2066,7 @@ pub(super) fn run_query_batches(
                                 search_subjects,
                                 options,
                                 unit.take_prep(options, search_subjects)?,
+                                Some(scan_end),
                             )
                         }
                     },
@@ -2030,6 +2135,7 @@ pub(super) fn run_query_batches(
                                     options,
                                     pool,
                                     unit.take_prep(options, search_subjects)?,
+                                    None,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -2044,13 +2150,14 @@ pub(super) fn run_query_batches(
                                     // is split into chunks, otherwise its subjects use the
                                     // pool); a short one is one serial job.
                                     let queries = unit.queries();
-                                    let searched = if x_large(queries) {
+                                    let searched = if unit.places > 1 || x_large(queries) {
                                         super::runtime::x_search_unit_in_pool(
                                             queries,
                                             search_subjects,
                                             options,
                                             pool,
                                             unit.take_prep(options, search_subjects)?,
+                                            None,
                                         )
                                     } else {
                                         super::runtime::x_search_unit_serial(
@@ -2058,6 +2165,7 @@ pub(super) fn run_query_batches(
                                             search_subjects,
                                             options,
                                             unit.take_prep(options, search_subjects)?,
+                                            None,
                                         )
                                     };
                                     super::x_timing::run(XRun::WaveBusy, x_t);
@@ -2120,11 +2228,11 @@ pub(super) fn run_query_batches(
                         if queries.is_empty() {
                             return Err(engine("Empty CBlastQueryVector"));
                         }
-                        // The reader batch is queued as its units (at most 10002 letters
-                        // each), which are searched as the batches of a run without
+                        // The reader batch is queued as its units (`XUnit::split`), which are
+                        // searched as the batches of a run without
                         // `BATCH_SIZE` are; its report is written at its last unit.
                         for unit in x_split(queries) {
-                            let large = x_large(unit.queries());
+                            let large = unit.places > 1 || x_large(unit.queries());
                             let events = {
                                 let mut events = x_events.borrow_mut();
                                 events.push(XEvent::Batch(unit));
@@ -2355,10 +2463,12 @@ fn reader_batch_skipped(results: &mut [BatchResults]) {
 }
 
 // No NCBI counterpart: how LOSAT schedules the search of a reader batch (NCBI's query batch,
-// `BATCH_SIZE` letters). The search keeps units of at most 10002 letters (`batch_ranges` with
-// the constant), whatever `BATCH_SIZE` is (with `-use_sw_tback` the reader batch is one unit,
-// `query_setup::unit_ranges`): the flow and the waves schedule the units as they
-// scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
+// `BATCH_SIZE` letters). The search keeps units that end at the first query that brings them to
+// 10002 letters (`batch_ranges` with the constant), whatever `BATCH_SIZE` is (the reader batch is
+// one unit with `-use_sw_tback` and
+// where the `-db_hard_mask` walk keeps a database sequence apart, `query_setup::unit_ranges`:
+// there a unit cannot give the batch's rows alone): the flow and the waves schedule the units as
+// they scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
 // written when its last unit is searched. The values that NCBI takes of the whole query batch
 // (the split decision, the ungapped link cutoffs, the sum-statistics average length, the
 // composition redo's minimum cutoff) are taken of the reader batch, not of the unit: phase 1
@@ -2372,6 +2482,12 @@ struct XUnit {
     batch: std::sync::Arc<Vec<FastaRecord>>,
     range: std::ops::Range<usize>,
     last: bool,
+    /// The places the unit takes in the flow (`x_flow`, `query_setup::unit_places`): the search
+    /// units that `batch_ranges` makes of its letters, more than one only for a reader batch of
+    /// more than one such unit searched whole (`query_setup::searches_batch_whole`), whose scan
+    /// holds a lookup table and the workers' diagonal tables of all its letters (its batch end
+    /// holds neither: the flow counts the places until the scan ends); 1 for every other unit.
+    places: usize,
     /// Phase 1 of the unit's reader batch when the batch has several units (or, in the capped batch
     /// flow, `LOSAT_X_BXCAPFILL`, is the unit itself), and the unit's place in it. `None`: the unit
     /// is the whole reader batch and prepares itself when it is searched.
@@ -2440,17 +2556,20 @@ impl XUnit {
     /// shared by them. A batch of several units gets its phase 1 (`prepare_now`, or the flow's
     /// tasks), which its units' searches take; with `ahead` (the capped batch flow,
     /// `LOSAT_X_BXCAPFILL`) a batch of one unit of at most two search units' letters gets one too
-    /// (the flow's task, without a shape). A longer batch (one long query) prepares itself when it
-    /// is searched, as before: preparations held ahead are bounded by letters, not only by the
-    /// flow's count of unwritten batches.
+    /// (the flow's task, without a shape). A longer batch (one long query, or a reader batch
+    /// searched whole) prepares itself when it is searched, as before: preparations held ahead are
+    /// bounded by letters, not only by the flow's count of unwritten batches.
     fn split(
         queries: &[FastaRecord],
         options: &super::args::ResolvedOptions,
+        subjects: Subjects<'_>,
         ahead: bool,
     ) -> Vec<XUnit> {
         let batch = std::sync::Arc::new(queries.to_vec());
-        let ranges = super::query_setup::unit_ranges(&batch, options);
+        let db = subjects.seqdb();
+        let ranges = super::query_setup::unit_ranges(&batch, options, db);
         let count = ranges.len();
+        let places = super::query_setup::unit_places(&batch, options, db);
         let ahead = ahead
             && count == 1
             && batch.iter().map(|q| q.sequence.len()).sum::<usize>() <= 2 * BATCH_SIZE;
@@ -2471,6 +2590,7 @@ impl XUnit {
                 batch: std::sync::Arc::clone(&batch),
                 range,
                 last: index + 1 == count,
+                places,
                 prep: prep
                     .as_ref()
                     .map(|prep| (std::sync::Arc::clone(prep), index)),
@@ -2616,7 +2736,9 @@ type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
 
 // EXPERIMENT (LOSAT_X_BXFLOW): the reading loop of `run` with every query batch searched as a task
 // of its own (see the call in `run`). `search` searches one batch (the waves' function; `alone`:
-// with the pool inside), `write_batch` writes one batch's reports (or ends the run at its error),
+// with the pool inside), and calls its third argument when the batch's scan has ended (before its
+// redo and traceback, `runtime::x_search_unit_in_pool`), `write_batch` writes one batch's reports
+// (or ends the run at its error),
 // `write_warning` writes the bytes of one reader warning. A batch is spawned once `lookahead`
 // batches follow it and while fewer than `max_live` are spawned and not yet searched (by the
 // reading thread or by a search that ends); the batches still held when the input ends are
@@ -2634,11 +2756,12 @@ fn x_flow(
     bound: usize,
     lookahead: usize,
     max_live: usize,
+    max_places: usize,
     read: &mut QueryBatchReader<'_>,
     split: &dyn Fn(&[FastaRecord]) -> Vec<XUnit>,
     prepare: &(dyn Fn(&[FastaRecord], Option<&std::sync::Arc<ReaderBatchShape>>) -> Result<UnitPrep>
           + Sync),
-    search: &(dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
+    search: &(dyn Fn(&XUnit, bool, &dyn Fn()) -> Result<Vec<BatchResults>> + Sync),
     write_unit: &mut dyn FnMut(
         &[FastaRecord],
         usize,
@@ -2663,11 +2786,13 @@ fn x_flow(
         unwritten: usize,
     }
     // Units read and not yet spawned (the newest `lookahead` until the end of the input), in
-    // reader order, and the number spawned and not yet searched (at most `max_live`; a unit that
-    // waits for its reader batch's phase 1 is spawned).
+    // reader order, the number spawned and not yet searched (at most `max_live`; a unit that
+    // waits for its reader batch's phase 1 is spawned), and the places (`XUnit::places`) of those
+    // whose scan has not ended (a unit gives back its places at its batch end, `spawn_search`).
     struct XHeld {
         batches: VecDeque<(usize, XUnit)>,
         live: usize,
+        places: usize,
         ended: bool,
         // The writing ended (at the end, at an error, or at a panic it raises again): spawn no more.
         stopped: bool,
@@ -2676,7 +2801,8 @@ fn x_flow(
         held: std::sync::Mutex<XHeld>,
         lookahead: usize,
         max_live: usize,
-        search: &'f (dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
+        max_places: usize,
+        search: &'f (dyn Fn(&XUnit, bool, &dyn Fn()) -> Result<Vec<BatchResults>> + Sync),
     }
     impl XLaunch<'_> {
         // The held units; a panic elsewhere cannot leave them unusable (nothing panics while
@@ -2688,8 +2814,16 @@ fn x_flow(
         }
 
         // Spawns the held units beyond the newest `lookahead` (all of them at the end of the
-        // input, then searched alone) while fewer than `max_live` are spawned and unsearched. A
-        // unit of a reader batch whose phase 1 has not ended is searched when it ends.
+        // input, then searched alone) while fewer than `max_live` are spawned and unsearched,
+        // and a unit of several places (`XUnit::places`) while its places and those of the
+        // spawned units still scanning are at most `max_places`, or none is scanning: a reader
+        // batch searched whole takes the places of the units the split would make of it, so
+        // that the letters scanned at a time (each scan holds a lookup table and diagonal tables
+        // of its letters) stay those of the split's units (one place each), and one of more
+        // places than `max_places` is scanned with no other unit. Its batch end (the redo and
+        // the traceback) holds none of those tables, and leaves the threads it does not use to
+        // the next unit's scan (`spawn_search`). A unit of a reader batch whose phase 1 has not
+        // ended is searched when it ends.
         fn release<'s>(
             &'s self,
             scope: &rayon::Scope<'s>,
@@ -2699,8 +2833,19 @@ fn x_flow(
                 let next = {
                     let mut held = self.held();
                     let keep = if held.ended { 0 } else { self.lookahead };
-                    if !held.stopped && held.batches.len() > keep && held.live < self.max_live {
+                    let fits = held.batches.front().is_some_and(|(_, unit)| {
+                        unit.places <= 1
+                            || held.places == 0
+                            || held.places + unit.places <= self.max_places
+                    });
+                    if !held.stopped
+                        && held.batches.len() > keep
+                        && held.live < self.max_live
+                        && fits
+                    {
                         held.live += 1;
+                        let places = held.batches.front().map_or(1, |(_, unit)| unit.places);
+                        held.places += places;
                         let alone = held.ended;
                         held.batches
                             .pop_front()
@@ -2721,10 +2866,11 @@ fn x_flow(
             }
         }
 
-        // Spawns the search of unit `index`, spawned by `release`. The search sends its result
-        // (or panic) once and then spawns again, so a place freed by a search is filled without
-        // waiting for the writing thread. A unit whose phase 1 ends after the writing ended is
-        // not searched.
+        // Spawns the search of unit `index`, spawned by `release`. The search gives back the
+        // unit's places when its scan ends and spawns again (the units that wait for places
+        // start their scans beside its batch end), sends its result (or panic) once and then
+        // spawns again, so a place freed by a search is filled without waiting for the writing
+        // thread. A unit whose phase 1 ends after the writing ended is not searched.
         fn spawn_search<'s>(
             &'s self,
             scope: &rayon::Scope<'s>,
@@ -2737,15 +2883,31 @@ fn x_flow(
                 let mut held = self.held();
                 if held.stopped {
                     held.live -= 1;
+                    held.places -= unit.places;
                     return;
                 }
             }
             let sender = sender.clone();
             scope.spawn(move |scope| {
+                // The places are given back once: at the end of the scan, or with the search
+                // (a batch without a valid context, or an error before its batch end).
+                let given = std::cell::Cell::new(false);
+                let scan_end = || {
+                    if !given.replace(true) {
+                        self.held().places -= unit.places;
+                        self.release(scope, &sender);
+                    }
+                };
                 let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    (self.search)(&unit, alone)
+                    (self.search)(&unit, alone, &scan_end)
                 }));
-                self.held().live -= 1;
+                {
+                    let mut held = self.held();
+                    held.live -= 1;
+                    if !given.get() {
+                        held.places -= unit.places;
+                    }
+                }
                 // The receiver is gone only when the run already ended at an error.
                 let _ = sender.send((index, searched));
                 self.release(scope, &sender);
@@ -2758,11 +2920,13 @@ fn x_flow(
         held: std::sync::Mutex::new(XHeld {
             batches: VecDeque::new(),
             live: 0,
+            places: 0,
             ended: false,
             stopped: false,
         }),
         lookahead,
         max_live,
+        max_places,
         search,
     };
     // Marks the writing ended when the scope's body returns or unwinds, before the scope waits
@@ -2864,8 +3028,8 @@ fn x_flow(
                 if queries.is_empty() {
                     return Err(engine("Empty CBlastQueryVector"));
                 }
-                // The reader batch enters the flow as its units (at most 10002 letters each),
-                // each as a batch of a run without `BATCH_SIZE` does; the bound counts units. A
+                // The reader batch enters the flow as its units (`XUnit::split`), each as a
+                // batch of a run without `BATCH_SIZE` does; the bound counts units. A
                 // reader batch of several units (in the capped flow with LOSAT_X_BXCAPFILL, every
                 // reader batch) is prepared first (phase 1) by one task per unit,
                 // beside the searches of the batches before it, while this thread reads on: the

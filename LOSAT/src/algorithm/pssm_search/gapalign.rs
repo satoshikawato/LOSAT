@@ -184,6 +184,9 @@ pub(crate) fn pssm_get_offsets_for_gapped_alignment<R: PssmRows>(
     let score_at = |q: i32, s: i32| -> Option<i32> {
         let row = (q >= 0 && (q as usize) < rows.len()).then(|| rows.row(q as usize))?;
         let s = subject.get(usize::try_from(s).ok()?)?;
+        if rows.reads_by_letter(row) {
+            rows.letters_read(row, std::iter::once(*s));
+        }
         Some(row[*s as usize])
     };
     let mut score = 0;
@@ -586,6 +589,14 @@ fn align_ex<R: PssmRows>(
             cells.push(script);
             b_index += 1;
         }
+        // The letters of the cells this row read (before the band's end or the fence), for a row
+        // whose letters are read one by one (`PssmRows::reads_by_letter`).
+        if rows.reads_by_letter(matrix_row) {
+            rows.letters_read(
+                matrix_row,
+                (orig_b_index..b_index).map(|b| subject_letter(subject, s_base, n, b, reverse)),
+            );
+        }
         if first_b_index == b_size || *fence_hit {
             break;
         }
@@ -806,6 +817,20 @@ impl<R: PssmRows> PssmRows for RowsFrom<'_, R> {
     #[inline(always)]
     fn len(&self) -> usize {
         self.rows.len() + 1 - self.start
+    }
+
+    #[inline(always)]
+    fn reads_by_letter(&self, row: &[i32; crate::core::blast_util::BLASTAA_SIZE]) -> bool {
+        self.rows.reads_by_letter(row)
+    }
+
+    #[inline(always)]
+    fn letters_read(
+        &self,
+        row: &[i32; crate::core::blast_util::BLASTAA_SIZE],
+        letters: impl Iterator<Item = u8>,
+    ) {
+        self.rows.letters_read(row, letters);
     }
 }
 

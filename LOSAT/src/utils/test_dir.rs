@@ -1,7 +1,9 @@
-//! The directory of the tests' temporary files, and the number in their names.
+//! The directory of the tests' temporary files, the number in their names, the guard that removes
+//! a test's directory (`TempDir`), and the name NCBI's database reader gives such a directory
+//! (`ncbi_dir`).
 //!
-//! No NCBI counterpart: test plumbing; the product code that needs a temporary directory handles
-//! WASI itself (`blastinput::input_files::temporary_directory`).
+//! No NCBI counterpart for the first three: test plumbing; the product code that needs a temporary
+//! directory handles WASI itself (`blastinput::input_files::temporary_directory`).
 
 /// `std::env::temp_dir()` off WASI. On WASI Rust's `temp_dir()` panics ("no filesystem on wasm",
 /// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), and the panic aborts the whole test binary
@@ -48,5 +50,67 @@ pub(crate) fn process_id() -> u32 {
             // starts gives the same number to both, which only a test run on a coarse clock meets.
             (since.as_secs() as u32).wrapping_mul(1_000_003) ^ since.subsec_nanos()
         })
+    }
+}
+
+/// A directory of a test's files, `<temp_dir>/<name>`: made empty when it is made, and removed
+/// with what it holds when it is dropped, at the end of the test that holds it, passed or failed.
+#[derive(Debug)]
+pub(crate) struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    pub(crate) fn new(name: &str) -> Self {
+        let dir = temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+
+    /// A directory of its own for each call of the process: `losat-<stem>-<process>-<number>`.
+    pub(crate) fn unique(stem: &str) -> Self {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        Self::new(&format!(
+            "losat-{stem}-{}-{}",
+            process_id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ))
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:325-335
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
+// `NormalizePath` with `eFollowLinks` reads the symbolic link of each component on Unix only; the
+// reader names the databases it opens (and with them their volumes, columns and alias files'
+// lists) and the directories of its search path (`BLASTDB`) through it.
+/// The directory `dir` as NCBI's database reader names it: its symbolic links followed on Unix,
+/// as it is elsewhere. On macOS the temporary directory lies under `/var`, a link to
+/// `/private/var`, so NCBI and LOSAT name its files under `/private/var` (Platform checks
+/// 45315823856).
+pub(crate) fn ncbi_dir(dir: &std::path::Path) -> std::path::PathBuf {
+    if cfg!(unix) {
+        dir.canonicalize().unwrap()
+    } else {
+        dir.to_path_buf()
     }
 }

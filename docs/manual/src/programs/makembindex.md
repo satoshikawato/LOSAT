@@ -1,6 +1,6 @@
 # makembindex
 
-`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` searches with the index and gives NCBI's output, two-hit searches and indexes of only some database volumes included. With `-db_hard_mask` it reports the alignments in the unmasked parts of each sequence, the same at every `-num_threads` (see [Differences from NCBI BLAST+](../differences.md#blastn--use_index-true-with--db_hard_mask)). It refuses a few later query batches of an index of only some volumes (see [What LOSAT refuses](../refusals.md)).
+`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` searches with the index and gives NCBI's output, two-hit searches included. With an index of only some database volumes it searches every query batch with the index, where NCBI BLAST+ loses some hits after its first query batch (see [Differences from NCBI BLAST+](../differences.md#blastn--use_index-true-with-an-index-of-only-some-volumes)). With `-db_hard_mask` it reports the alignments in the unmasked parts of each sequence, the same at every `-num_threads` (see [Differences from NCBI BLAST+](../differences.md#blastn--use_index-true-with--db_hard_mask)).
 
 It writes the same files as NCBI's `makembindex` 2.17.0, byte for byte.
 
@@ -15,7 +15,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 ## Input
 
 - `-input` names a nucleotide BLAST database, as `-db` does for a search. An alias database works too; each of its volumes gets its own index.
-- `-db_mask ID` leaves the regions masked by the database's masking algorithm `ID` out of the index. `-show_filters` lists the algorithms the database has, with their ids. Give the number: as in NCBI 2.17.0, a name such as `dust` is not found and the run stops with NCBI's error.
+- `-db_mask ID` leaves the regions masked by the database's masking algorithm `ID` out of the index. `-show_filters` lists the algorithms the database has, with their ids. Give the number: as in NCBI 2.17.0, a name such as `dust` is not found and the run stops with NCBI's error. On a database with GI-indexed masks ([`makeblastdb -gi_mask`](makeblastdb.md#gi-indexed-masks)), the names that `-show_filters` lists (those of `-gi_mask_name`) work too. A new-style index reads each volume of such a database alone, and the volumes do not name the masks: on a database of several volumes `-db_mask` stops with `unrecognized filter algorithm id`, as in NCBI 2.17.0, and `-old_style_index true -iformat blastdb` reads them.
 - With `-old_style_index true`, the input can also be FASTA (`-iformat fasta`, the default of that style): `-input FILE`, or the standard input without `-input`. Lower case letters are masked and left out of the index.
 
 ## Common options
@@ -65,9 +65,10 @@ None in the files or the messages of a normal run.
 - `-legacy false` with a `-stride` above `-ws_hint` − `-nmer` + 1 (for example `-stride 20` with the default `-ws_hint 28` and `-nmer 12`). NCBI's `makembindex` never finishes such an index; LOSAT stops before writing it.
 - `-legacy false` with a `-stride` of 32768 or more, where NCBI's index has no defined result.
 - An index volume of more than 4 GiB of packed sequences (a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume), where NCBI's index sizes wrap at 32 bits.
-- A value that is not UTF-8 of any option but `-out` and `-logfile`, after NCBI's own argument errors and `-dryrun` (NCBI reads the bytes).
 - The database cases that `dustmasker` refuses, such as a definition line with bytes NCBI reads as `#` or a tax id with an empty `taxdb.btd`.
 - A database sequence without letters, which only a damaged database has: NCBI's `makembindex` stops with a null-pointer report.
+- A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes. Other records of 4,294,967,296 letters or more are read as NCBI reads them.
+- With `-old_style_index true`, a FASTA record of 4,294,914,101 letters or more (modulo 2^32): the end of its last chunk wraps at 32 bits and NCBI reads past the end of the sequence.
 
 See [What LOSAT refuses](../refusals.md).
 

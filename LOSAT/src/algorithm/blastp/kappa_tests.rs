@@ -619,7 +619,7 @@ fn test_redo_preliminary_blastp_hit_preserves_internal_offsets_with_ranges() {
 
 #[test]
 fn test_subject_seg_masks_when_enabled_and_not_near_identical() {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2939-2955
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1625-1637
     let matching_residues = vec![1u8; 80];
     let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
     let subject_range = BlastCompoSequenceRange {

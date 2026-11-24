@@ -162,13 +162,59 @@ fn conversions() {
         [0x12, 0x48, 0x83, 0x59, 0x6a, 0xc7, 0xbd, 0xef]
     );
     assert_eq!(iupacna_to_ncbi4na(b"ACN"), [0x12, 0xf0]);
-    assert_eq!(ncbi8na_to_ncbi4na(&[1, 2, 15]).unwrap(), [0x12, 0xf0]);
-    assert_eq!(ncbi8na_to_ncbi4na(&[]).unwrap(), [0u8; 0]);
 }
 
-/// Every row of `CIupacnaTo4na::scm_Table` (sequtil_tables.cpp:392-457, read from NCBI's
-/// source on 2026-11-12): the rows of these letters in either case, 15 for every other
-/// byte.
+/// The NCBI4na bytes of a delta's pieces, in either half of a byte where a piece starts.
+#[test]
+fn ncbi4na_of_pieces() {
+    let bytes = |build: &dyn Fn(&mut Ncbi4naBuilder), letters: usize| {
+        let mut builder = Ncbi4naBuilder::with_letters(letters).unwrap();
+        build(&mut builder);
+        assert_eq!(builder.letters(), letters);
+        builder.into_bytes()
+    };
+    assert_eq!(bytes(&|_| {}, 0), [0u8; 0]);
+    assert_eq!(
+        bytes(
+            &|b| {
+                b.push_iupacna(b"AC");
+                b.push_run(15, 1);
+            },
+            3
+        ),
+        [0x12, 0xf0]
+    );
+    assert_eq!(
+        bytes(
+            &|b| {
+                b.push_iupacna(b"A");
+                b.push_iupacna(b"CGT");
+                b.push_run(15, 3);
+                b.push_iupacna(b"ACG");
+                b.push_run(15, 0);
+                b.push_run(15, 2);
+            },
+            12
+        ),
+        [0x12, 0x48, 0xff, 0xf1, 0x24, 0xff]
+    );
+    for split in 0..=9 {
+        let src = b"ACGTNRYKMS";
+        let whole = bytes(&|b| b.push_iupacna(src), 10);
+        assert_eq!(whole, iupacna_to_ncbi4na(src));
+        let parts = bytes(
+            &|b| {
+                b.push_iupacna(&src[..split]);
+                b.push_iupacna(&src[split..]);
+            },
+            10,
+        );
+        assert_eq!(parts, whole, "split {split}");
+    }
+}
+
+/// The codes without a table are the table's for `A`, `C`, `G`, `T` and `U`, and 0 for every
+/// other byte, whose code in the table is not 0.
 #[test]
 fn the_codes_of_bases_are_the_table() {
     for byte in 0..=u8::MAX {
@@ -182,54 +228,64 @@ fn the_codes_of_bases_are_the_table() {
     }
 }
 
+/// The NCBI4na bytes of `iupacna_to_ncbi4na` and of `Ncbi4naBuilder::push_iupacna` (after an
+/// even and an odd count of letters) are those of the loop before the blocks: a pair of table
+/// codes a byte.
 #[test]
-fn appended_ncbi8na_is_the_table_of_every_residue() {
+fn ncbi4na_pairs_are_the_table_of_every_residue() {
     let table = |src: &[u8]| -> Vec<u8> {
-        src.iter()
-            .map(|&residue| NCBI4NA_CODES[usize::from(residue)])
-            .collect()
+        let mut chunks = src.chunks_exact(2);
+        let mut dst: Vec<u8> = (&mut chunks)
+            .map(|two| NCBI4NA_CODES[two[0] as usize] << 4 | NCBI4NA_CODES[two[1] as usize])
+            .collect();
+        if let [last] = chunks.remainder() {
+            dst.push(NCBI4NA_CODES[*last as usize] << 4);
+        }
+        dst
+    };
+    let built = |first: &[u8], src: &[u8]| {
+        let mut builder = Ncbi4naBuilder::with_letters(first.len() + src.len()).unwrap();
+        builder.push_iupacna(first);
+        builder.push_iupacna(src);
+        builder.into_bytes()
     };
     let check = |src: &[u8]| {
-        let mut seq8na = vec![0x0f, 0x01];
-        append_ncbi8na(&mut seq8na, src);
-        assert_eq!(seq8na[..2], [0x0f, 0x01]);
-        assert_eq!(seq8na[2..], table(src), "{src:?}");
+        let expected = table(src);
+        assert_eq!(iupacna_to_ncbi4na(src), expected, "{src:?}");
+        assert_eq!(built(b"", src), expected, "{src:?}");
+        let odd: Vec<u8> = [b'N'].iter().chain(src).copied().collect();
+        assert_eq!(built(b"N", src), table(&odd), "{src:?}");
     };
-    // Every byte at every place of the first two blocks of bases, in lengths that end in a block,
-    // after it and before it.
+    // Every byte at every place of the first two blocks of bases, in lengths that end at the
+    // byte, at the end of a block and after it.
     let bases: Vec<u8> = (0..200).map(|i| b"ACGTUGCA"[i % 8]).collect();
-    for place in 0..2 * NCBI8NA_BLOCK + 1 {
+    for place in 0..2 * NCBI4NA_BLOCK + 1 {
         for byte in 0..=u8::MAX {
             let mut src = bases.clone();
             src[place] = byte;
-            for length in [place + 1, 2 * NCBI8NA_BLOCK, 2 * NCBI8NA_BLOCK + 3, 200] {
+            for length in [place + 1, 2 * NCBI4NA_BLOCK, 2 * NCBI4NA_BLOCK + 3] {
                 check(&src[..length.max(place + 1)]);
             }
         }
     }
-    for length in 0..300 {
-        check(&bases[..length.min(bases.len())]);
+    for length in 0..=bases.len() {
+        check(&bases[..length]);
     }
 }
 
+/// The shift and OR of a pair as a 16-bit number is `first << 4 | second` for every pair of
+/// bytes.
 #[test]
-fn ncbi4na_of_ncbi8na_is_the_pairs_of_codes() {
-    let pairs = |src: &[u8]| -> Vec<u8> {
-        let mut chunks = src.chunks_exact(2);
-        let mut dst: Vec<u8> = (&mut chunks).map(|two| two[0] << 4 | two[1]).collect();
-        if let [last] = chunks.remainder() {
-            dst.push(last << 4);
-        }
-        dst
-    };
+fn pair_bytes_are_the_shift_and_or() {
     for pair in 0..=u16::MAX {
         let [first, second] = pair.to_be_bytes();
-        for src in [&[first, second][..], &[first], &[0x0f, first, second]] {
-            assert_eq!(ncbi8na_to_ncbi4na(src).unwrap(), pairs(src), "{src:?}");
-        }
+        assert_eq!(pair_byte([first, second]), first << 4 | second, "{pair}");
     }
 }
 
+/// Every row of `CIupacnaTo4na::scm_Table` (sequtil_tables.cpp:392-457, read from NCBI's
+/// source on 2026-11-12): the rows of these letters in either case, 15 for every other
+/// byte.
 #[test]
 fn ncbi4na_codes_are_the_rows_of_the_table() {
     let rows: [(u8, u8); 15] = [
@@ -271,7 +327,7 @@ fn ncbi8na_of_both_codings() {
             base as char
         );
     }
-    let mut seq8na = Vec::new();
-    append_ncbi8na(&mut seq8na, b"ACGTUN");
-    assert_eq!(seq8na, [1, 2, 4, 8, 8, 15]);
+    let mut seq4na = Ncbi4naBuilder::with_letters(6).unwrap();
+    seq4na.push_iupacna(b"ACGTUN");
+    assert_eq!(seq4na.into_bytes(), [0x12, 0x48, 0x8f]);
 }

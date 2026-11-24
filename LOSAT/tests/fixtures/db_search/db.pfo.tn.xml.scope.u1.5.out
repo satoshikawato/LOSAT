@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>tblastn</BlastOutput_program>
+  <BlastOutput_version>TBLASTN 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db>tests/db_search/multidb/gnP tests/db_search/multidb/nP tests/db_search/multidb/nU</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>qpU query of the unparsed only</BlastOutput_query-def>
+  <BlastOutput_query-len>140</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>L;</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>qpU query of the unparsed only</Iteration_query-def>
+  <Iteration_query-len>140</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|4</Hit_id>
+  <Hit_def>ntitle 2 of the nucleotide set</Hit_def>
+  <Hit_accession>4</Hit_accession>
+  <Hit_len>480</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>152.91</Hsp_bit-score>
+      <Hsp_score>385</Hsp_score>
+      <Hsp_evalue>1.96471e-52</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>70</Hsp_query-to>
+      <Hsp_hit-from>91</Hsp_hit-from>
+      <Hsp_hit-to>300</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>1</Hsp_hit-frame>
+      <Hsp_identity>70</Hsp_identity>
+      <Hsp_positive>70</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>70</Hsp_align-len>
+      <Hsp_qseq>PDRRNWMISFYNYGVITMRMRLLIWMPQIEETGDNSPIDYDCKNLEHYTMQCGAYFPMVQLQVYRGCRFE</Hsp_qseq>
+      <Hsp_hseq>PDRRNWMISFYNYGVITMRMRLLIWMPQIEETGDNSPIDYDCKNLEHYTMQCGAYFPMVQLQVYRGCRFE</Hsp_hseq>
+      <Hsp_midline>PDRRNWMISFYNYGVITMRMRLLIWMPQIEETGDNSPIDYDCKNLEHYTMQCGAYFPMVQLQVYRGCRFE</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|6</Hit_id>
+  <Hit_def>ntitle 4 of the nucleotide set</Hit_def>
+  <Hit_accession>6</Hit_accession>
+  <Hit_len>480</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>150.214</Hsp_bit-score>
+      <Hsp_score>378</Hsp_score>
+      <Hsp_evalue>2.39682e-51</Hsp_evalue>
+      <Hsp_query-from>71</Hsp_query-from>
+      <Hsp_query-to>140</Hsp_query-to>
+      <Hsp_hit-from>121</Hsp_hit-from>
+      <Hsp_hit-to>330</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>1</Hsp_hit-frame>
+      <Hsp_identity>70</Hsp_identity>
+      <Hsp_positive>70</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>70</Hsp_align-len>
+      <Hsp_qseq>CFHFNCVQKSYFWKENRGSNWQQDATEIRRSGGMTEGEKIPNNSCLDQVPLNSYIRIEWFHTIMYTQKMR</Hsp_qseq>
+      <Hsp_hseq>CFHFNCVQKSYFWKENRGSNWQQDATEIRRSGGMTEGEKIPNNSCLDQVPLNSYIRIEWFHTIMYTQKMR</Hsp_hseq>
+      <Hsp_midline>CFHFNCVQKSYFWKENRGSNWQQDATEIRRSGGMTEGEKIPNNSCLDQVPLNSYIRIEWFHTIMYTQKMR</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>7</Statistics_db-num>
+      <Statistics_db-len>3360</Statistics_db-len>
+      <Statistics_hsp-len>29</Statistics_hsp-len>
+      <Statistics_eff-space>101787</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>qp1 protein query one</Iteration_query-def>
+  <Iteration_query-len>300</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>ref|NM_100001.1|</Hit_id>
+  <Hit_def>Unknown</Hit_def>
+  <Hit_accession>Unknown</Hit_accession>
+  <Hit_len>0</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>135.961</Hsp_bit-score>
+      <Hsp_score>341</Hsp_score>
+      <Hsp_evalue>1.66717e-43</Hsp_evalue>
+      <Hsp_query-from>0</Hsp_query-from>
+      <Hsp_query-to>0</Hsp_query-to>
+      <Hsp_hit-from>0</Hsp_hit-from>
+      <Hsp_hit-to>0</Hsp_hit-to>
+      <Hsp_identity>65</Hsp_identity>
+      <Hsp_qseq></Hsp_qseq>
+      <Hsp_hseq></Hsp_hseq>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gi|5001|ref|NM_100001.1|</Hit_id>
+  <Hit_def>ntitle 1 of the nucleotide set</Hit_def>
+  <Hit_accession>NM_100001</Hit_accession>
+  <Hit_len>480</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>135.961</Hsp_bit-score>
+      <Hsp_score>341</Hsp_score>
+      <Hsp_evalue>1.66717e-43</Hsp_evalue>
+      <Hsp_query-from>61</Hsp_query-from>
+      <Hsp_query-to>151</Hsp_query-to>
+      <Hsp_hit-from>61</Hsp_hit-from>
+      <Hsp_hit-to>336</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>1</Hsp_hit-frame>
+      <Hsp_identity>65</Hsp_identity>
+      <Hsp_positive>71</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>92</Hsp_align-len>
+      <Hsp_qseq>WDQHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTSRPWGPDRR-YWMISFYNYGVITMRMRSLIWMPQIEE</Hsp_qseq>
+      <Hsp_hseq>WDQHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLE</Hsp_hseq>
+      <Hsp_midline>WDQHNLNCLVAWTKLGGGPGYKIEPAAWKHLCKKQTCGWCNNQKLKPWYPNGLST+RPWG  +  +W    Y +  I   M + I    + E</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>ref|NM_100000.1|</Hit_id>
+  <Hit_def>Unknown</Hit_def>
+  <Hit_accession>Unknown</Hit_accession>
+  <Hit_len>0</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>132.109</Hsp_bit-score>
+      <Hsp_score>331</Hsp_score>
+      <Hsp_evalue>5.7129e-42</Hsp_evalue>
+      <Hsp_query-from>0</Hsp_query-from>
+      <Hsp_query-to>0</Hsp_query-to>
+      <Hsp_hit-from>0</Hsp_hit-from>
+      <Hsp_hit-to>0</Hsp_hit-to>
+      <Hsp_identity>62</Hsp_identity>
+      <Hsp_qseq></Hsp_qseq>
+      <Hsp_hseq></Hsp_hseq>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>15.3938</Hsp_bit-score>
+      <Hsp_score>28</Hsp_score>
+      <Hsp_evalue>6.82993</Hsp_evalue>
+      <Hsp_query-from>0</Hsp_query-from>
+      <Hsp_query-to>0</Hsp_query-to>
+      <Hsp_hit-from>0</Hsp_hit-from>
+      <Hsp_hit-to>0</Hsp_hit-to>
+      <Hsp_identity>5</Hsp_identity>
+      <Hsp_qseq></Hsp_qseq>
+      <Hsp_hseq></Hsp_hseq>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>132.109</Hsp_bit-score>
+      <Hsp_score>331</Hsp_score>
+      <Hsp_evalue>5.7129e-42</Hsp_evalue>
+      <Hsp_query-from>0</Hsp_query-from>
+      <Hsp_query-to>0</Hsp_query-to>
+      <Hsp_hit-from>0</Hsp_hit-from>
+      <Hsp_hit-to>0</Hsp_hit-to>
+      <Hsp_identity>62</Hsp_identity>
+      <Hsp_qseq></Hsp_qseq>
+      <Hsp_hseq></Hsp_hseq>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>4</Hsp_num>
+      <Hsp_bit-score>15.3938</Hsp_bit-score>
+      <Hsp_score>28</Hsp_score>
+      <Hsp_evalue>6.82993</Hsp_evalue>
+      <Hsp_query-from>0</Hsp_query-from>
+      <Hsp_query-to>0</Hsp_query-to>
+      <Hsp_hit-from>0</Hsp_hit-from>
+      <Hsp_hit-to>0</Hsp_hit-to>
+      <Hsp_identity>5</Hsp_identity>
+      <Hsp_qseq></Hsp_qseq>
+      <Hsp_hseq></Hsp_hseq>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|5</Hit_id>
+  <Hit_def>ntitle 3 of the nucleotide set</Hit_def>
+  <Hit_accession>5</Hit_accession>
+  <Hit_len>480</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>129.028</Hsp_bit-score>
+      <Hsp_score>323</Hsp_score>
+      <Hsp_evalue>7.5194e-41</Hsp_evalue>
+      <Hsp_query-from>181</Hsp_query-from>
+      <Hsp_query-to>259</Hsp_query-to>
+      <Hsp_hit-from>121</Hsp_hit-from>
+      <Hsp_hit-to>357</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>1</Hsp_hit-frame>
+      <Hsp_identity>62</Hsp_identity>
+      <Hsp_positive>66</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>79</Hsp_align-len>
+      <Hsp_qseq>YNNVCHREDVLGLAFYNIADLSFSNIGNSPQFGYNKCLVRRYRLLSVAVRILTQGTLYGWYFWKENRGSNWQQDATVIR</Hsp_qseq>
+      <Hsp_hseq>YNNVCHREDVLGLAFYNIADLSFSNIGNSPQFGYNKCLVRRYRLLSVAVRILTQRTLYGWIVTRAERKGYRQPEEVVMQ</Hsp_hseq>
+      <Hsp_midline>YNNVCHREDVLGLAFYNIADLSFSNIGNSPQFGYNKCLVRRYRLLSVAVRILTQ TLYGW   +  R    Q +  V++</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>16.1642</Hsp_bit-score>
+      <Hsp_score>30</Hsp_score>
+      <Hsp_evalue>3.48172</Hsp_evalue>
+      <Hsp_query-from>37</Hsp_query-from>
+      <Hsp_query-to>60</Hsp_query-to>
+      <Hsp_hit-from>190</Hsp_hit-from>
+      <Hsp_hit-to>261</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>-1</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>24</Hsp_align-len>
+      <Hsp_qseq>NGRQFYDIGENTGMFRLGFPKFIG</Hsp_qseq>
+      <Hsp_hseq>NGKQSVPSYEALVIAKLGAVSYIG</Hsp_hseq>
+      <Hsp_midline>NG+Q     E   + +LG   +IG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|4</Hit_id>
+  <Hit_def>ntitle 2 of the nucleotide set</Hit_def>
+  <Hit_accession>4</Hit_accession>
+  <Hit_len>480</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>117.087</Hsp_bit-score>
+      <Hsp_score>292</Hsp_score>
+      <Hsp_evalue>2.60833e-36</Hsp_evalue>
+      <Hsp_query-from>116</Hsp_query-from>
+      <Hsp_query-to>180</Hsp_query-to>
+      <Hsp_hit-from>76</Hsp_hit-from>
+      <Hsp_hit-to>270</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>1</Hsp_hit-frame>
+      <Hsp_identity>56</Hsp_identity>
+      <Hsp_positive>56</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>65</Hsp_align-len>
+      <Hsp_qseq>SRPWGPDRRYWMISFYNYGVITMRMRSLIWMPQIEETGDNSPIDYDCKNLAHYTMQEGAYNPMVQ</Hsp_qseq>
+      <Hsp_hseq>DREREPDRRNWMISFYNYGVITMRMRLLIWMPQIEETGDNSPIDYDCKNLEHYTMQCGAYFPMVQ</Hsp_hseq>
+      <Hsp_midline> R   PDRR WMISFYNYGVITMRMR LIWMPQIEETGDNSPIDYDCKNL HYTMQ GAY PMVQ</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>6</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|6</Hit_id>
+  <Hit_def>ntitle 4 of the nucleotide set</Hit_def>
+  <Hit_accession>6</Hit_accession>
+  <Hit_len>480</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>117.087</Hsp_bit-score>
+      <Hsp_score>292</Hsp_score>
+      <Hsp_evalue>3.29495e-36</Hsp_evalue>
+      <Hsp_query-from>241</Hsp_query-from>
+      <Hsp_query-to>299</Hsp_query-to>
+      <Hsp_hit-from>151</Hsp_hit-from>
+      <Hsp_hit-to>327</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>1</Hsp_hit-frame>
+      <Hsp_identity>56</Hsp_identity>
+      <Hsp_positive>56</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>59</Hsp_align-len>
+      <Hsp_qseq>YFWKENRGSNWQQDATVIRYSGGMTEGEKIQNNSCLDQVPLNSYIRIEWFHTIMYTQKM</Hsp_qseq>
+      <Hsp_hseq>YFWKENRGSNWQQDATEIRRSGGMTEGEKIPNNSCLDQVPLNSYIRIEWFHTIMYTQKM</Hsp_hseq>
+      <Hsp_midline>YFWKENRGSNWQQDAT IR SGGMTEGEKI NNSCLDQVPLNSYIRIEWFHTIMYTQKM</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>7</Statistics_db-num>
+      <Statistics_db-len>3360</Statistics_db-len>
+      <Statistics_hsp-len>35</Statistics_hsp-len>
+      <Statistics_eff-space>231875</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

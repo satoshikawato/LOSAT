@@ -2,11 +2,14 @@
 //! (`CDelta_ext::AddAndSplit`), and the conversions of the residues into NCBI2na,
 //! NCBI4na and NCBI8na (`c++/src/util/sequtil/`).
 
-/// The codings that `Pack` chooses for IUPACna residues without gaps.
+/// The codings that `Pack` chooses for IUPACna residues without gaps, and NCBIeaa, the one
+/// literal of a protein's residues (`CSeqConvert::Pack` copies NCBIeaa when the target takes
+/// no gaps).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Coding {
     Ncbi2na,
     Ncbi4na,
+    Ncbieaa,
 }
 
 /// One segment of the packed residues (`IPackTarget::NewSegment`).
@@ -44,12 +47,14 @@ const BEST_IS_NCBI4NA: [u8; 256] = {
 };
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_shared.cpp:195-203
-/// The sums are made in 64 bits (NCBI's `TSeqPos` sum wraps for a length above
-/// 4,294,967,292, which the reader never packs).
+/// The sums are made in 64 bits. NCBI's `TSeqPos` sum wraps only for a run of
+/// 4,294,967,293 letters or more, which leaves at most two other letters in the piece:
+/// NCBI and LOSAT then both keep the run as one segment, which `add_and_split` refuses.
 fn bytes_needed(coding: Coding, length: u32) -> u64 {
     match coding {
         Coding::Ncbi2na => u64::from(length).div_ceil(4),
         Coding::Ncbi4na => u64::from(length).div_ceil(2),
+        Coding::Ncbieaa => u64::from(length),
     }
 }
 
@@ -63,80 +68,88 @@ const OVERHEAD: u64 = 128;
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1292-1296
 const WIDE_CODING: Coding = Coding::Ncbi4na;
 
-/// No coding before the first one of an arrangement.
-const NO_NODE: u32 = u32::MAX;
+/// A boundary's bit: its new coding (the coding of the segment it starts in the narrow
+/// arrangement) is NCBI4na, not NCBI2na.
+const STEP_NEW_WIDE: u8 = 1;
+/// A boundary's bit: the narrow arrangement that ends here continues the wide one that
+/// ended at the boundary before (`m_EndingNarrow` takes a copy of `m_EndingWide`).
+const STEP_NARROW_FROM_WIDE: u8 = 2;
+/// A boundary's bit: the wide arrangement that ends here continues the narrow one
+/// (`m_EndingWide` takes a copy of `m_EndingNarrow`), so it continues what that one continues.
+const STEP_WIDE_FROM_NARROW: u8 = 4;
 
-/// `CPacker::SArrangement`: the codings of the segments so far and their cost. NCBI
-/// keeps the codings in blocks of 16 that two arrangements share up to their last common
-/// block, so that a copy costs one block; LOSAT keeps each coding as a node that points
-/// to the one before it, so that a copy costs one index (the same list of codings).
-#[derive(Clone, Copy)]
-struct Arrangement {
-    /// The last coding (`codings->GetLast()`), an index of `Packer::nodes`.
-    last: u32,
-    cost: u64,
-}
-
-/// `CSeqConvert_imp::CPacker` for IUPACna.
+/// `CSeqConvert_imp::CPacker` for IUPACna. NCBI keeps the codings of its two arrangements
+/// (`SArrangement`) in blocks of 16 that they share up to their last common block; LOSAT
+/// keeps, for each boundary, which arrangement each of the two that end there continues
+/// (one byte), and reads the best one's codings back from the last boundary. The two
+/// make the same choices; with the boundary's position LOSAT keeps 5 bytes for each
+/// boundary, where a list of nodes (one coding and the index of the one before it, for
+/// each arrangement) and the codings read back from it took 21.
 struct Packer {
     /// `m_Boundaries`.
     boundaries: Vec<u32>,
-    /// The codings of both arrangements: each one with the index of the coding before it.
-    nodes: Vec<(Coding, u32)>,
-    /// `m_EndingNarrow` and `m_EndingWide`.
-    ending_narrow: Arrangement,
-    ending_wide: Arrangement,
+    /// The `STEP_*` bits of each boundary but the last.
+    steps: Vec<u8>,
+    /// The costs of `m_EndingNarrow` and `m_EndingWide`.
+    narrow_cost: u64,
+    wide_cost: u64,
+    /// The last coding of `m_EndingNarrow` (the new coding of the boundary before); the
+    /// last coding of `m_EndingWide` is always NCBI4na.
+    last_narrow: Coding,
 }
 
 impl Packer {
-    /// `SArrangement::AddCoding`.
-    fn add_coding(&mut self, last: u32, coding: Coding) -> u32 {
-        self.nodes.push((coding, last));
-        (self.nodes.len() - 1) as u32
-    }
-
     /// `new_coding` is `None` for `kNoCoding` (the end of the residues).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1194-1249
     fn add_boundary(&mut self, pos: u32, new_coding: Option<Coding>) {
+        let new_wide = |coding: Coding| {
+            if coding == WIDE_CODING {
+                STEP_NEW_WIDE
+            } else {
+                0
+            }
+        };
         let Some(&last_boundary) = self.boundaries.last() else {
             let Some(new_coding) = new_coding else {
                 return;
             };
             self.boundaries.push(pos);
-            self.ending_narrow.last = self.add_coding(NO_NODE, new_coding);
-            self.ending_wide.last = self.add_coding(NO_NODE, WIDE_CODING);
-            self.ending_wide.cost = OVERHEAD;
-            self.ending_narrow.cost = OVERHEAD;
+            self.steps.push(new_wide(new_coding));
+            self.last_narrow = new_coding;
+            self.wide_cost = OVERHEAD;
+            self.narrow_cost = OVERHEAD;
             return;
         };
         let last_length = pos - last_boundary;
         self.boundaries.push(pos);
 
-        let last_narrow = self.nodes[self.ending_narrow.last as usize].0;
-        self.ending_narrow.cost += bytes_needed(last_narrow, last_length);
-        self.ending_wide.cost += bytes_needed(WIDE_CODING, last_length);
+        self.narrow_cost += bytes_needed(self.last_narrow, last_length);
+        self.wide_cost += bytes_needed(WIDE_CODING, last_length);
 
         let Some(new_coding) = new_coding else {
             return;
         };
 
-        if new_coding != WIDE_CODING && self.ending_narrow.cost > self.ending_wide.cost {
-            self.ending_narrow = self.ending_wide;
+        let mut step = new_wide(new_coding);
+        if new_coding != WIDE_CODING && self.narrow_cost > self.wide_cost {
+            self.narrow_cost = self.wide_cost;
+            step |= STEP_NARROW_FROM_WIDE;
         }
 
-        let alt_wide_cost = self.ending_narrow.cost + OVERHEAD;
-        self.ending_narrow.cost += OVERHEAD;
+        let alt_wide_cost = self.narrow_cost + OVERHEAD;
+        self.narrow_cost += OVERHEAD;
 
-        if self.ending_wide.cost > alt_wide_cost {
-            self.ending_wide = self.ending_narrow;
-            self.ending_wide.cost = alt_wide_cost;
+        if self.wide_cost > alt_wide_cost {
+            self.wide_cost = alt_wide_cost;
+            step |= STEP_WIDE_FROM_NARROW;
         } else if new_coding == WIDE_CODING {
-            self.ending_narrow = self.ending_wide;
+            self.narrow_cost = self.wide_cost;
+            step |= STEP_NARROW_FROM_WIDE;
         }
 
-        self.ending_narrow.last = self.add_coding(self.ending_narrow.last, new_coding);
-        self.ending_wide.last = self.add_coding(self.ending_wide.last, WIDE_CODING);
+        self.last_narrow = new_coding;
+        self.steps.push(step);
     }
 }
 
@@ -158,15 +171,10 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
     }
     let mut packer = Packer {
         boundaries: Vec::new(),
-        nodes: Vec::new(),
-        ending_narrow: Arrangement {
-            last: NO_NODE,
-            cost: 0,
-        },
-        ending_wide: Arrangement {
-            last: NO_NODE,
-            cost: 0,
-        },
+        steps: Vec::new(),
+        narrow_cost: 0,
+        wide_cost: 0,
+        last_narrow: WIDE_CODING,
     };
     let mut pos = 0;
     while pos < src.len() {
@@ -184,30 +192,39 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
     }
     packer.add_boundary(src.len() as u32, None);
 
-    let best = if packer.ending_narrow.cost < packer.ending_wide.cost {
-        packer.ending_narrow
-    } else {
-        packer.ending_wide
-    };
-    let n = packer.boundaries.len() - 1;
-    let mut coding_vec = vec![Coding::Ncbi4na; n];
-    let mut node = best.last;
-    for slot in coding_vec.iter_mut().rev() {
-        let (coding, previous) = packer.nodes[node as usize];
-        *slot = coding;
-        node = previous;
+    // The best arrangement's codings, from the last segment back: each step becomes 1
+    // where the segment it starts is NCBI4na.
+    let mut narrow = packer.narrow_cost < packer.wide_cost;
+    for step in packer.steps.iter_mut().rev() {
+        let bits = *step;
+        let wide = !narrow || bits & STEP_NEW_WIDE != 0;
+        narrow = if narrow {
+            bits & STEP_NARROW_FROM_WIDE == 0
+        } else {
+            bits & STEP_WIDE_FROM_NARROW != 0 && bits & STEP_NARROW_FROM_WIDE == 0
+        };
+        *step = u8::from(wide);
     }
+    let coding_of = |wide: u8| {
+        if wide == 1 {
+            Coding::Ncbi4na
+        } else {
+            Coding::Ncbi2na
+        }
+    };
 
+    let steps = &packer.steps;
+    let n = steps.len();
     let mut segments = Vec::new();
     let mut i = 0;
     while i < n {
-        let coding = coding_vec[i];
+        let wide = steps[i];
         let start = packer.boundaries[i];
-        while i < n - 1 && coding_vec[i + 1] == coding {
+        while i < n - 1 && steps[i + 1] == wide {
             i += 1;
         }
         segments.push(Segment {
-            coding,
+            coding: coding_of(wide),
             start,
             length: packer.boundaries[i + 1] - start,
         });
@@ -298,45 +315,51 @@ pub(crate) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
 pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
     let mut dst = Vec::with_capacity(src.len().div_ceil(2));
-    let mut chunks = src.chunks_exact(2);
-    dst.extend(
-        (&mut chunks)
-            .map(|two| NCBI4NA_CODES[two[0] as usize] << 4 | NCBI4NA_CODES[two[1] as usize]),
-    );
-    if let [last] = chunks.remainder() {
-        dst.push(NCBI4NA_CODES[*last as usize] << 4);
+    if let Some(last) = extend_ncbi4na_pairs(&mut dst, src) {
+        dst.push(last << 4);
     }
     dst
 }
 
-/// Appends the NCBI8na codes of the residues of a delta literal, as `s_FixBioseqDeltas`
-/// gets them from the literal's NCBI2na or NCBI4na data. Both ways give the NCBI4na code
-/// of the letter: an NCBI2na literal holds only `A`, `C`, `G`, `T`, `U`, whose codes 0 to
-/// 3 `C2naTo8na` turns into 1, 2, 4, 8, and `C4naTo8na` splits a byte into its two codes
-/// (`tests::ncbi8na_of_both_codings`).
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
-///
-/// A block of residues that are all `A`, `C`, `G`, `T` or `U` gets its codes without a table
-/// (LOSAT's speed); any other block, and the residues after the last block, get the table's.
-pub(super) fn append_ncbi8na(seq8na: &mut Vec<u8>, src: &[u8]) {
-    let (blocks, rest) = src.as_chunks::<NCBI8NA_BLOCK>();
+/// The number of residues that `extend_ncbi4na_pairs` takes at once.
+const NCBI4NA_BLOCK: usize = 64;
+
+/// Appends the NCBI4na bytes of the pairs of residues of `src`, two letters to a byte, the first
+/// in the high half, and returns the code of the residue left over (an odd count). A block of
+/// residues that are all `A`, `C`, `G`, `T` or `U` gets its codes without a table
+/// ([`ncbi4na_code_of_base`]); any other block, and the residues after the last block, get the
+/// table's. A pair of codes becomes its byte by one shift and one OR of the pair as a 16-bit
+/// number (LOSAT's speed).
+fn extend_ncbi4na_pairs(dst: &mut Vec<u8>, src: &[u8]) -> Option<u8> {
+    let (blocks, rest) = src.as_chunks::<NCBI4NA_BLOCK>();
     for block in blocks {
-        let mut codes = [0u8; NCBI8NA_BLOCK];
+        let mut codes = [0u8; NCBI4NA_BLOCK];
         for (code, &residue) in codes.iter_mut().zip(block) {
             *code = ncbi4na_code_of_base(residue);
         }
-        if codes.iter().fold(true, |all, &code| all & (code != 0)) {
-            seq8na.extend_from_slice(&codes);
-        } else {
-            seq8na.extend(block.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
+        if !codes.iter().fold(true, |all, &code| all & (code != 0)) {
+            for (code, &residue) in codes.iter_mut().zip(block) {
+                *code = NCBI4NA_CODES[residue as usize];
+            }
         }
+        dst.extend(codes.as_chunks::<2>().0.iter().map(|&two| pair_byte(two)));
     }
-    seq8na.extend(rest.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
+    let (twos, last) = rest.as_chunks::<2>();
+    dst.extend(twos.iter().map(|&[first, second]| {
+        pair_byte([
+            NCBI4NA_CODES[first as usize],
+            NCBI4NA_CODES[second as usize],
+        ])
+    }));
+    last.first().map(|&residue| NCBI4NA_CODES[residue as usize])
 }
 
-/// The number of residues that `append_ncbi8na` takes at once.
-const NCBI8NA_BLOCK: usize = 64;
+/// The byte of two NCBI4na codes (each 0 to 15), the first in the high half: the low byte of the
+/// pair as a little-endian 16-bit number shifted left by 4, ORed with its high byte.
+fn pair_byte(two: [u8; 2]) -> u8 {
+    let pair = u16::from_le_bytes(two);
+    ((pair << 4) | (pair >> 8)) as u8
+}
 
 /// The NCBI4na code of `A`, `C`, `G`, `T` and `U` (1, 2, 4, 8, 8) without a branch, and 0 for
 /// any other byte (whose code in `NCBI4NA_CODES` is not 0).
@@ -348,24 +371,76 @@ const fn ncbi4na_code_of_base(residue: u8) -> u8 {
     a | (c << 1) | (g << 2) | (t << 3)
 }
 
+/// `s_FixBioseqDeltas`' `seq8na` and its NCBI4na copy in one: the NCBI4na bytes of the
+/// NCBI8na codes appended, two letters to a byte, the first in the high half (`C8naTo4na`).
+/// NCBI makes `seq8na` (1 byte a letter) and converts it; LOSAT writes the NCBI4na bytes
+/// (half a byte a letter) as the codes come, the same bytes without the `seq8na`.
+///
+/// The NCBI8na codes of a literal's residues are the NCBI4na codes of its letters, as
+/// `s_FixBioseqDeltas` gets them from the literal's NCBI2na or NCBI4na data: an NCBI2na
+/// literal holds only `A`, `C`, `G`, `T`, `U`, whose codes 0 to 3 `C2naTo8na` turns into 1,
+/// 2, 4, 8, and `C4naTo8na` splits a byte into its two codes
+/// (`tests::ncbi8na_of_both_codings`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
-/// The length of `src` can be one that the input states rather than holds (a gap line),
-/// so the allocation of the result can fail without the process being short of memory
-/// for anything else; that failure is returned (`fix_bioseq_deltas`).
-pub(super) fn ncbi8na_to_ncbi4na(src: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
-    let mut dst = Vec::new();
-    dst.try_reserve_exact(src.len().div_ceil(2))?;
-    let (twos, rest) = src.as_chunks::<2>();
-    // The first code of a pair in the high four bits, the second below it: one shift and one OR
-    // of the pair as a 16-bit number, for every byte value (LOSAT's speed).
-    dst.extend(twos.iter().map(|&two| {
-        let pair = u16::from_le_bytes(two);
-        ((pair << 4) | (pair >> 8)) as u8
-    }));
-    if let [last] = rest {
-        dst.push(last << 4);
+pub(super) struct Ncbi4naBuilder {
+    bytes: Vec<u8>,
+    /// The last byte holds one letter, in its high half.
+    odd: bool,
+}
+
+impl Ncbi4naBuilder {
+    /// The builder of `letters` letters, whose bytes are reserved at once. The count can be
+    /// one that the input states rather than holds (a gap line), so the allocation can fail
+    /// without the process being short of memory for anything else; that failure is
+    /// returned (`fix_bioseq_deltas`), and no later growth can fail.
+    pub(super) fn with_letters(letters: usize) -> Result<Self, std::collections::TryReserveError> {
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(letters.div_ceil(2))?;
+        Ok(Self { bytes, odd: false })
     }
-    Ok(dst)
+
+    fn push_code(&mut self, code: u8) {
+        match self.bytes.last_mut() {
+            Some(last) if self.odd => *last |= code,
+            _ => self.bytes.push(code << 4),
+        }
+        self.odd = !self.odd;
+    }
+
+    /// `run` letters of the NCBI8na code `code` (a gap: 15).
+    pub(super) fn push_run(&mut self, code: u8, mut run: usize) {
+        if run > 0 && self.odd {
+            self.push_code(code);
+            run -= 1;
+        }
+        self.bytes
+            .resize(self.bytes.len() + run / 2, code << 4 | code);
+        if run % 2 == 1 {
+            self.push_code(code);
+        }
+    }
+
+    /// The NCBI8na codes of IUPACna residues of a literal.
+    pub(super) fn push_iupacna(&mut self, mut src: &[u8]) {
+        if let (true, [first, rest @ ..]) = (self.odd, src) {
+            self.push_code(NCBI4NA_CODES[*first as usize]);
+            src = rest;
+        }
+        if let Some(last) = extend_ncbi4na_pairs(&mut self.bytes, src) {
+            self.push_code(last);
+        }
+    }
+
+    /// The count of letters appended.
+    pub(super) fn letters(&self) -> usize {
+        self.bytes.len() * 2 - usize::from(self.odd)
+    }
+
+    pub(super) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
 }
 
 #[cfg(test)]

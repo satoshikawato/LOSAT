@@ -705,9 +705,24 @@ impl HitPosts {
         }
     }
 
-    /// The `Hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes the
-    /// texts that the writer makes there.
+    /// The `Hit` `hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes
+    /// the texts that the writer makes there. A `Hit` whose subject's lookup throws
+    /// (`XmlHit::lookup_throws`) loads nothing: no read and no text of it (`post` is not called).
     pub fn hit(
+        &mut self,
+        at: usize,
+        hit: &crate::report::blast_xml::XmlHit<'_>,
+        subject: u32,
+        post: impl FnOnce(&mut Vec<u8>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if hit.lookup_throws.is_some() {
+            return Ok(());
+        }
+        self.mark(at, subject, post)
+    }
+
+    /// `hit` of a `Hit` that loads its subject.
+    fn mark(
         &mut self,
         at: usize,
         subject: u32,
@@ -1181,6 +1196,25 @@ impl<'a> QueryWarnings<'a> {
             }
         }
         Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-772 (cited at
+    // `common::database::TaxdbPrinter::batch_texts`)
+    /// Lines that NCBI writes where it prefetches the batch whose first query's report comes next,
+    /// after the posts written before that report (`before_query`): the XML2 and JSON formats'
+    /// taxonomy texts of the batch's prefetch (`TaxdbPrinter::batch_texts`), after the report
+    /// written so far is flushed. Nothing where `lines` is empty.
+    pub(crate) fn prefetch_lines(
+        &mut self,
+        report: &mut dyn Write,
+        lines: Vec<u8>,
+    ) -> io::Result<()> {
+        if lines.is_empty() {
+            return Ok(());
+        }
+        report.flush()?;
+        Posts::of_lines(lines).write(&mut *self.sink, self.archive)?;
+        self.sink.flush()
     }
 }
 

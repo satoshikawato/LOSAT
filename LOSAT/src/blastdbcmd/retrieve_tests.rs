@@ -3,17 +3,17 @@ use super::*;
 #[test]
 fn version5_keys_are_preprocessed_as_ncbi_s() {
     let key = preprocess_accession_for_v5;
-    assert_eq!(key("p69905"), "P69905");
-    assert_eq!(key("np_000002.1"), "NP_000002.1");
-    assert_eq!(key("sp|P99999.2|TEST_HUMAN"), "P99999.2");
-    assert_eq!(key("pdb|1ABC|A"), "1ABC_A");
-    assert_eq!(key("28zx_m"), "28zx_m");
-    assert_eq!(key("lcl|myprot9"), "myprot9");
-    assert_eq!(key("gnl|mydb|prot10"), "mydb:prot10");
-    assert_eq!(key("gnl|BL_ORD_ID|3"), "BL_ORD_ID:3");
-    assert_eq!(key("pir||s00007"), "pir||s00007");
-    assert_eq!(key("gi|123456"), "123456");
-    assert_eq!(key("mydb:prot10"), "MYDB:PROT10");
+    assert_eq!(key(b"p69905"), b"P69905");
+    assert_eq!(key(b"np_000002.1"), b"NP_000002.1");
+    assert_eq!(key(b"sp|P99999.2|TEST_HUMAN"), b"P99999.2");
+    assert_eq!(key(b"pdb|1ABC|A"), b"1ABC_A");
+    assert_eq!(key(b"28zx_m"), b"28zx_m");
+    assert_eq!(key(b"lcl|myprot9"), b"myprot9");
+    assert_eq!(key(b"gnl|mydb|prot10"), b"mydb:prot10");
+    assert_eq!(key(b"gnl|BL_ORD_ID|3"), b"BL_ORD_ID:3");
+    assert_eq!(key(b"pir||s00007"), b"pir||s00007");
+    assert_eq!(key(b"gi|123456"), b"123456");
+    assert_eq!(key(b"mydb:prot10"), b"MYDB:PROT10");
 }
 
 /// The answers of `x_GetOids` in the fixture database `name` (version 4) of
@@ -29,9 +29,9 @@ fn v4_oids(name: &str) -> impl Fn(&str) -> String {
             lookup: Some(db.id_lookup().unwrap()),
             version5: false,
         };
-        match get_oids(&ids, id) {
+        match get_oids(&ids, id.as_bytes()) {
             Lookup::Oids(oids) => format!("oids {oids:?}"),
-            Lookup::NotFound(acc) => format!("not found {acc}"),
+            Lookup::NotFound(acc) => format!("not found {}", String::from_utf8_lossy(&acc)),
             Lookup::Stop(Stop::Ncbi(message)) => format!("error {message}"),
             Lookup::Stop(Stop::NcbiBytes(message)) => {
                 format!("error {}", String::from_utf8_lossy(&message))
@@ -79,7 +79,7 @@ fn the_version_check_of_an_accession_notes_its_utf8_string_reads() {
     let lookup = db.id_lookup().unwrap();
     // A version that no sequence holds: the candidates' headers (`XP_800001.1` and `.2`, OIDs 1
     // and 256) are read, the first with the warning.
-    assert!(accession_to_oids_v4(&lookup, "XP_800001.3")
+    assert!(accession_to_oids_v4(&lookup, b"XP_800001.3")
         .unwrap()
         .is_empty());
     let note = lookup.take_utf8().expect("the read of OID 1");
@@ -90,7 +90,7 @@ fn the_version_check_of_an_accession_notes_its_utf8_string_reads() {
     assert!(lookup.take_utf8().is_none());
     // The stored version: no header is read.
     assert_eq!(
-        accession_to_oids_v4(&lookup, "XP_800001.1").unwrap(),
+        accession_to_oids_v4(&lookup, b"XP_800001.1").unwrap(),
         vec![1]
     );
     assert!(lookup.take_utf8().is_none());
@@ -143,7 +143,7 @@ fn batch_lines_split_in_two() {
     .unwrap();
     let lines = read_batch(
         "entry_batch",
-        file.to_str().unwrap(),
+        file.as_os_str(),
         &mut Cin::new(&mut std::io::empty()),
     )
     .unwrap();
@@ -155,15 +155,16 @@ fn batch_lines_split_in_two() {
     assert_eq!(
         lines,
         [
-            ("gnl|BL_ORD_ID|3".to_string(), String::new()),
-            ("gnl|BL_ORD_ID|4".to_string(), "3-".to_string()),
-            ("x".to_string(), crlf_rest.to_string()),
+            ("gnl|BL_ORD_ID|3", ""),
+            ("gnl|BL_ORD_ID|4", "3-"),
+            ("x", crlf_rest),
         ]
+        .map(|(id, rest)| (id.as_bytes().to_vec(), rest.as_bytes().to_vec()))
     );
     std::fs::remove_dir_all(&dir).unwrap();
     assert!(
-        matches!(read_batch("entry_batch", "in/nosuch.txt", &mut Cin::new(&mut std::io::empty())),
-            Err(Stop::Ncbi(message))
-        if message == "Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
+        matches!(read_batch("entry_batch", std::ffi::OsStr::new("in/nosuch.txt"), &mut Cin::new(&mut std::io::empty())),
+            Err(Stop::NcbiBytes(message))
+        if message == b"Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
     );
 }

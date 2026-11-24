@@ -1061,6 +1061,9 @@ pub struct ApplicationSettings {
     /// a database has to refuse to run then (`algorithm::common::database::
     /// check_seqids`), since the ids of the other searches are local or ordinal.
     pub seq_id_rank_variable: Option<&'static str>,
+    /// `SERIAL_VERIFY_DATA_WRITE` when its value changes what NCBI's object streams write; only
+    /// the runs that write what it changes have to refuse to run then (`WriteVerification`).
+    pub write_verification: Option<WriteVerification>,
     /// The value of the registry entry `[BLAST] MAX_SEQID_LENGTH` in the first layer that has
     /// the entry (the environment, then the program's `.ini` file, then `.ncbirc`), an empty
     /// value too: `registry.Get` answers from that layer, and an empty value there hides the
@@ -1090,6 +1093,87 @@ pub struct ApplicationSettings {
 /// read.)
 pub const SEQ_ID_RANK_VARIABLES: [&str; 2] = ["SEQ_ID_PREFER_ACCESSION_OVER_GI", "SEQ_ID_AVOID_GI"];
 
+/// `SERIAL_VERIFY_DATA_WRITE` with a value that changes what NCBI's object streams write. NCBI reads
+/// the variable only while the parameter `[SERIAL] VERIFY_DATA_WRITE` is unset; LOSAT refuses that
+/// parameter's registry forms (a registry file's entry, `NCBI_CONFIG__SERIAL__VERIFY_DATA_WRITE`) at
+/// every value, as entries it does not know (`rejected_variable`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262
+/// NCBI reference (598d8ae6): c++/include/serial/impl/objostr.inl:376-383
+/// NCBI reference (598d8ae6): c++/include/serial/impl/objostr.inl:396-410
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:784-793
+/// The value is compared with six words, without case; any other value (an empty one, `N`, a
+/// word with a space) keeps NCBI's default, as `YES` does. `NO`, `NEVER`, `DEFVALUE` and
+/// `DEFVALUE_ALWAYS` turn off the check of what is written: a list element stated as NULL is left
+/// out instead of NCBI's throw (`off`). `NEVER`, `ALWAYS` and `DEFVALUE_ALWAYS` also hold against a
+/// writer's own choice, and the BLAST XML report's writer turns the check off for its document,
+/// whose iterations it writes itself (`blast_xml_changed`): under `ALWAYS` it throws at the unset
+/// iterations, under `DEFVALUE_ALWAYS` it writes them empty (`NEVER` is off as the writer's own
+/// choice). NCBI BLAST+ 2.17.0, probe D3c-3c review `probeF`: those are the only changes, every
+/// other report and file is the same with each value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WriteVerification {
+    /// The value as the process has it.
+    value: String,
+    off: bool,
+    blast_xml_changed: bool,
+}
+
+impl WriteVerification {
+    /// The setting of `SERIAL_VERIFY_DATA_WRITE` set to `value`; `None` when the value changes
+    /// nothing (a value that is not UTF-8 is none of the six words).
+    pub fn of(value: &OsStr) -> Option<Self> {
+        let text = value.to_str()?;
+        let is = |word: &&str| text.eq_ignore_ascii_case(word);
+        let off = ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+            .iter()
+            .any(is);
+        let blast_xml_changed = ["ALWAYS", "DEFVALUE_ALWAYS"].iter().any(is);
+        (off || blast_xml_changed).then(|| Self {
+            value: text.to_owned(),
+            off,
+            blast_xml_changed,
+        })
+    }
+
+    /// Whether a list element stated as NULL is left out where NCBI throws by default
+    /// (`report::serial::encoder::NullElement`).
+    pub fn off(&self) -> bool {
+        self.off
+    }
+
+    /// Whether the BLAST XML report (outfmt 5) changes.
+    pub fn blast_xml_changed(&self) -> bool {
+        self.blast_xml_changed
+    }
+
+    /// The setting in LOSAT's refusals: the variable and its value as given.
+    pub fn variable(&self) -> String {
+        format!(
+            "the environment variable SERIAL_VERIFY_DATA_WRITE={}",
+            self.value
+        )
+    }
+
+    /// LOSAT's refusal of a run that writes the BLAST XML report (`formats`: the numbers of the
+    /// run's `-outfmt` values) under a setting that changes it; `None` for any other run. The
+    /// report's writer is the same in every program, so is the refusal.
+    pub fn blast_xml_refusal(
+        setting: Option<&Self>,
+        mut formats: impl Iterator<Item = i32>,
+    ) -> Option<String> {
+        let setting = setting.filter(|setting| setting.blast_xml_changed)?;
+        formats
+            .any(|number| number == crate::blastinput::app::output_format::XML)
+            .then(|| {
+                format!(
+                    "{}, which changes NCBI BLAST+'s XML report (-outfmt 5), is not supported by LOSAT",
+                    setting.variable()
+                )
+            })
+    }
+}
+
 impl Default for ApplicationSettings {
     /// No registry entry and no variable: both data loaders on, no `[BLAST] BLASTDB`.
     ///
@@ -1099,6 +1183,7 @@ impl Default for ApplicationSettings {
             data_loaders: true,
             blastdb: None,
             seq_id_rank_variable: None,
+            write_verification: None,
             max_seqid_length: Ok(None),
             matrix_search: MatrixSearch::default(),
             window_masker_registry: Ok(WindowMaskerRegistry::default()),
@@ -2665,6 +2750,8 @@ fn settings_of(
         seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
             .into_iter()
             .find(|name| env(name).is_some()),
+        write_verification: env("SERIAL_VERIFY_DATA_WRITE")
+            .and_then(|value| WriteVerification::of(&value)),
         max_seqid_length: max_seqid_length.transpose(),
         matrix_search: MatrixSearch {
             data_path: env("NCBI_DATA_PATH"),

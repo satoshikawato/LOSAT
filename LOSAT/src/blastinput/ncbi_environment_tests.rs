@@ -2014,3 +2014,80 @@ fn preparse_takes_ncbi_s_words() {
     assert!(matches!(preparse(&os), Preparsed::Words { .. }));
     assert_eq!(log_file(&os), Some(OsStr::new("-version")));
 }
+
+// D3c-3c review R1: `SERIAL_VERIFY_DATA_WRITE` as NCBI BLAST+ 2.17.0 reads it (probe D3c-3c review
+// `probeF`: rows `v.*` of the NULL element, `x.*` of the reports).
+#[test]
+fn write_verification_is_read_as_ncbi_reads_its_variable() {
+    let of = |value: &str| WriteVerification::of(OsStr::new(value));
+    for off in [
+        "NO",
+        "no",
+        "NEVER",
+        "never",
+        "DEFVALUE",
+        "DEFVALUE_ALWAYS",
+        "defvalue_always",
+    ] {
+        assert!(of(off).is_some_and(|setting| setting.off()), "{off}");
+    }
+    for value in ["NO", "NEVER", "DEFVALUE"] {
+        assert!(!of(value).unwrap().blast_xml_changed(), "{value}");
+    }
+    for value in ["ALWAYS", "always", "DEFVALUE_ALWAYS"] {
+        assert!(of(value).unwrap().blast_xml_changed(), "{value}");
+    }
+    assert!(!of("ALWAYS").unwrap().off());
+    for unchanged in ["YES", "yes", "", "N", " NO", "NO ", "maybe"] {
+        assert_eq!(of(unchanged), None, "{unchanged:?}");
+    }
+
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-ncbi-environment-verify-write-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = |pairs: &[(&str, &str)]| {
+        let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+        all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+        let env = |name: &str| {
+            all.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| OsString::from(value))
+        };
+        application_settings(
+            "psiblast",
+            all.iter()
+                .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+            &env,
+            &NO_PROCESS,
+        )
+        .map(|settings| settings.write_verification)
+    };
+    assert_eq!(settings(&[]), Ok(None));
+    assert_eq!(settings(&[("SERIAL_VERIFY_DATA_WRITE", "YES")]), Ok(None));
+    assert_eq!(
+        settings(&[("SERIAL_VERIFY_DATA_WRITE", "never")]),
+        Ok(of("never"))
+    );
+    // The parameter's registry form (which wins over the variable in NCBI) is an entry that LOSAT
+    // does not know, refused at every value.
+    assert!(settings(&[("NCBI_CONFIG__SERIAL__VERIFY_DATA_WRITE", "YES")]).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // The BLAST XML report changes under ALWAYS and DEFVALUE_ALWAYS only; no other report does.
+    let refusal = |value: &str, formats: &[i32]| {
+        WriteVerification::blast_xml_refusal(of(value).as_ref(), formats.iter().copied())
+    };
+    assert_eq!(
+        refusal("ALWAYS", &[7, 5]).as_deref(),
+        Some(
+            "the environment variable SERIAL_VERIFY_DATA_WRITE=ALWAYS, which changes NCBI BLAST+'s XML report (-outfmt 5), is not supported by LOSAT"
+        )
+    );
+    assert!(refusal("defvalue_always", &[5]).is_some());
+    assert_eq!(refusal("ALWAYS", &[0, 6, 8, 9, 11, 13, 14, 15, 16]), None);
+    for value in ["NO", "NEVER", "DEFVALUE", "YES"] {
+        assert_eq!(refusal(value, &[5]), None, "{value}");
+    }
+}

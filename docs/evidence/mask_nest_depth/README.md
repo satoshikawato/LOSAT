@@ -54,9 +54,9 @@ Its reports take time linear in the depth.
 - In all 90 rows of `results.tsv` LOSAT's exit status, standard output, database and the nest frames of its report
   equal those of NCBI's bioconda run with no stack limit; the 60 rows run with the official release too equal
   that build's.
-- At 100,000 levels LOSAT takes at most 0.09 s and 26 MB, where NCBI takes 0.2-0.55 s and 170-239 MB; a damaged
-  file at most 0.12 s and 16 MB, where NCBI takes 24-28 s and 205-210 MB.
-- The number too large for `int` at 20,000 levels takes LOSAT 0.36 s and 51 MB. Its report has the same
+- At 100,000 levels LOSAT takes at most 0.12 s and 34 MB, where NCBI takes 0.2-0.55 s and 170-239 MB; a damaged
+  file at most 0.13 s and 24 MB, where NCBI takes 24-28 s and 205-210 MB.
+- The number too large for `int` at 20,000 levels takes LOSAT 0.23-0.38 s and 51-53 MB. Its report has the same
   message and the same 80,012 frame lines in the same order as NCBI's (`compare_reports.py`: NCBI's location
   prefixes removed, LOSAT's words through `crate::wording`).
 
@@ -64,7 +64,7 @@ Dev before this change refused every nest of 97 levels and more ("objects nested
 
 ## The runs
 
-`results.tsv` has one row per kind, format and depth (LOSAT's columns: the build of commit fc29d08f8). Each row
+`results.tsv` has one row per kind, format and depth (LOSAT's columns: the build of commit bb678eff6). Each row
 gives:
 - the exit statuses of NCBI's 5 runs with 8 MiB, for the bioconda build and, for the kinds that read, the official
   release;

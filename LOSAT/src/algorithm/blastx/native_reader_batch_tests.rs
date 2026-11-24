@@ -180,11 +180,12 @@ fn a_unit_gives_back_its_places_when_its_scan_ends() {
             scan_end();
             if index + 1 < UNITS {
                 let state = lock.lock().expect("the units started");
-                let (_, waited) = wake
+                let (state, waited) = wake
                     .wait_timeout_while(state, std::time::Duration::from_secs(60), |state| {
                         !state.0.contains(&(index + 1))
                     })
                     .expect("the units started");
+                drop(state);
                 assert!(
                     !waited.timed_out(),
                     "unit {} waited for the batch end of unit {index}",

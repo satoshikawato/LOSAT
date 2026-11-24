@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.93
+- Version: 1.94
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -509,7 +509,12 @@
   and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
   header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
   there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.93 2026-11-23 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
+  1.93 2026-11-24 (under a negative seqid list, a subject whose header NCBI's fetch cannot read
+  ends the search only where the composition-based or Smith-Waterman redo fetches it, rule 2: its
+  list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
+  item O4b2-4's 1.92);
+  1.94 2026-11-23 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
   databases reproduced, rule 2, in blastdbcmd, the five search programs, makeblastdb's copy and
   makembindex, with the search programs' GI-indexed masks on more than one thread, where NCBI
   stops or crashes in some runs, giving NCBI's `-num_threads 1` output as every `-db` search does
@@ -517,13 +522,14 @@
   mapping reads it, and the explicit rejections, rule 3, of an empty `.nog`, of a `.nog` entry
   past its mapping and of a `MASKLIST` name that is not UTF-8 where the masks are read (review
   round of 2026-11-24; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  numbered after 1.92; first
+  numbered after 1.93; first
   1.64, then 1.82 at the merge of line NP item M4c-1's final head, which brought dev's 1.64 to 1.80
   and its own 1.81, then 1.85 at the merge of dev that brought 1.82 to 1.84 (psiblast line items PS10a
   and PS10c, line NP item M4b-AX), then 1.91 at the merge of dev that brought 1.85 to 1.90 (line RG
   items D1c-1 and T5d, psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2), then
   1.92 at the merge of dev that brought psiblast line item PS12d's 1.91, then 1.93 at the merge of dev
-  that brought line NP item O4b2-4's 1.92)
+  that brought line NP item O4b2-4's 1.92, then 1.94 at the merge of dev e89f6237c that brought
+  line RG item D1c-1c's 1.93)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1776,10 +1782,13 @@ file would differ, and NCBI's programs still could not open the database).
   where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
   search of a protein database reads such a header at the Seq-aligns only, where the subject is
   in the final hit list: there NCBI's Seq-align fails (exit 255), and LOSAT's report gives the
-  same error (rule 2). The
-  composition-based redo fetches only the matches that its early termination test leaves, and
-  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
-  NCBI ends it without reading that header.
+  same error (rule 2). The composition-based redo (and the Smith-Waterman redo) fetches only the
+  matches that its early termination test leaves: since version 1.93 such a subject's list stays
+  in the redo's stream (also one whose lines LOSAT refuses where it reads them) and LOSAT refuses
+  the search only where NCBI's redo fetches it, after the reports of the query batches before (as
+  NCBI's search ends in that batch), so a search whose redo frees that match unfetched writes
+  NCBI's output (BLASTP, PSIBLAST, BLASTX, TBLASTN; line RG item D1c-1c, rows `db.il.*.lr*`,
+  `db.il.*.ls*`).
 
 - TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.40,
   2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and
@@ -1880,7 +1889,7 @@ file would differ, and NCBI's programs still could not open the database).
   (the rule-2 rejection of version 1.81 below covers the others). Fixtures `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
   `LOSAT/src/writedb/gi_mask_tests.rs`.
-- The readers of GI-indexed masks (version 1.93, 2026-11-23, line NP item M4c-2; review round
+- The readers of GI-indexed masks (version 1.94, 2026-11-23, line NP item M4c-2; review round
   2026-11-24): `blastdbcmd` (`-info`, `-outfmt %m`, `-mask_sequence_with`), the search programs
   `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` (`-db_soft_mask`, `-db_hard_mask`),
   `makeblastdb -input_type blastdb` (the masks copied into the copy's mask column) and
@@ -3234,7 +3243,7 @@ file would differ, and NCBI's programs still could not open the database).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
 - The readers of GI-indexed masks, a damaged `.nog` or a `MASKLIST` name that is not UTF-8
-  (version 1.93, 2026-11-24, line NP item M4c-2, review S4 and N8; Owner-delegated, standing
+  (version 1.94, 2026-11-24, line NP item M4c-2, review S4 and N8; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI
   reaches and LOSAT reproduces, rule 2, are in the list above). An empty `.nog` is mapped as a
   null pointer: NCBI's blastdbcmd and blastn crash with SIGSEGV where a sequence's GI is read

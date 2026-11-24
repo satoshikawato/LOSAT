@@ -224,9 +224,9 @@ rpsblast yet.
 | FASTA reader | `blastinput::fasta_reader` (makeblastdb reuses it) |
 | errors | `cli::NativeError` |
 
-Known copies that remain: blastx keeps its own FASTA reader types in `blastx/input.rs`
-(`FastaRecord`, `EolStyle`, `PushbackBuffer`, `FastaStream`) next to the shared ones in
-`blastinput/fasta_reader`; each program has its own function that purges HSPs with common
+Known copies that remain: blastx keeps its own record type (`blastx/input.rs`, `FastaRecord`),
+made from the shared reader's record by `blastx/input_source.rs`, which also cuts the reader
+batches of the command line and of the library; each program has its own function that purges HSPs with common
 endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
 (`blastx/culling.rs`) instead of `core::hspfilter_culling`; and each of the five programs keeps its own report glue
 (`tabular.rs`, `blast_xml.rs`, `seqalign.rs`, `archive.rs`) in front of `report`.

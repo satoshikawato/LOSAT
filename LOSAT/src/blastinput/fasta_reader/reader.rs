@@ -1058,7 +1058,7 @@ impl<R: Read> FastaReader<R> {
 ///
 /// The size of the gap line `line` (it starts with `>?`), line `line_number` of the input, after
 /// its warnings: the reader of the four programs (`FastaReader::parse_gap_line`) and BLASTX's
-/// (`blastx::input`) read gap lines with it.
+/// (`blastx::input_source`) read gap lines with it.
 pub(crate) fn gap_line_size(
     line: &[u8],
     line_number: u64,

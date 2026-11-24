@@ -6,7 +6,6 @@ fn record(letters: usize) -> FastaRecord {
         title: Vec::new(),
         sequence: vec![b'A'; letters],
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

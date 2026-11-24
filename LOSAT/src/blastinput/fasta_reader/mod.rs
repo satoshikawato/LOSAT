@@ -695,6 +695,14 @@ impl<R: Read> FastaInputSource<R> {
         self.reader.lines.at_eof()
     }
 
+    /// The input this source reads, given back: the bytes its stream buffered are dropped, so the
+    /// caller puts the input's position where its next reading starts
+    /// (`algorithm::blastx::blast_xml::prescan_queries`, which reads the query file before the
+    /// search and hands the same open file to the search).
+    pub(crate) fn into_input(self) -> R {
+        self.reader.lines.into_input()
+    }
+
     /// The search whose records this source reads under `-parse_deflines`: a query and a subject
     /// with one id are compared (`crate::seqid::id_scope::IdScope`).
     pub fn set_id_scope(

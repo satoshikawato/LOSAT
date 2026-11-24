@@ -958,7 +958,7 @@ pub(super) struct QueryScan {
 pub(super) fn prescan_queries(
     file: crate::blastinput::input_files::InputFile,
     query: &std::path::Path,
-    settings: &super::input::QueryStreamSettings,
+    settings: &super::input_source::QueryStreamSettings,
     options: &ResolvedOptions,
     lowercase: bool,
     batch_size: usize,
@@ -996,7 +996,7 @@ pub(super) fn prescan_queries(
 /// The read of `prescan_queries` on its stream of the query file.
 #[allow(clippy::too_many_arguments)]
 fn scan_query_stream<R: std::io::Read>(
-    stream: &mut super::input::FastaStream<R>,
+    stream: &mut super::input_source::QueryStream<R>,
     options: &ResolvedOptions,
     lowercase: bool,
     batch_size: usize,
@@ -1010,18 +1010,7 @@ fn scan_query_stream<R: std::io::Read>(
         holds_back,
         checks_titles,
         query_scopes,
-        &mut |deliver| {
-            super::input::read_fasta_stream_batches(
-                stream,
-                false,
-                lowercase,
-                batch_size,
-                false,
-                range,
-                deliver,
-                &mut |_| Ok(()),
-            )
-        },
+        &mut |deliver| stream.read_batches(lowercase, batch_size, range, deliver, &mut |_| Ok(())),
     )
 }
 

@@ -19,7 +19,6 @@ fn record(id: &str, letters: &[u8]) -> FastaRecord {
         title: Vec::new(),
         sequence: letters.to_vec(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

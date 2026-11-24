@@ -19,7 +19,13 @@ fn the_encoders_refusal_gets_no_error_archive() {
 // NUL of `ends`, which the error archive does not keep); a query keeps the reader's error.
 #[test]
 fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
-    let subject = subject_input_error(NoDeflineError(4).into());
+    use crate::blastinput::fasta_reader::{ParseErrorCode, ReadError};
+    let no_defline = |message: &str| ReadError::Parse {
+        code: ParseErrorCode::NoDefline,
+        message: message.to_string(),
+        line: 4,
+    };
+    let subject = no_defline("").into_all_seqs_error();
     let native = subject.downcast_ref::<NativeError>().unwrap();
     assert_eq!(
         (native.exit, native.message.as_slice()),
@@ -44,7 +50,9 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
             b"Please refer to the LOSAT user manual.".to_vec(),
         ]
     );
-    let query = input_error(NoDeflineError(4).into());
+    let query =
+        no_defline("CFastaReader: Input doesn't start with a defline or comment around line 4")
+            .into_app_error();
     let native = query.downcast_ref::<NativeError>().unwrap();
     assert_eq!(
         (native.exit, native.message.as_slice()),
@@ -56,7 +64,12 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
         )
     );
     // Every other reader error of the subjects is the reader's (`BLAST query error`).
-    let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
+    let other = ReadError::Parse {
+        code: ParseErrorCode::Format,
+        message: "CFastaReader: x".to_string(),
+        line: 1,
+    }
+    .into_all_seqs_error();
     assert_eq!(
         other.downcast_ref::<NativeError>().unwrap().message,
         b"LOSAT query error: CFastaReader: x\n"

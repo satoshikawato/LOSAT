@@ -516,11 +516,22 @@ impl RpsRun<'_> {
             .iter()
             .map(|_| std::sync::Mutex::new(None))
             .collect();
+        let redo = self.sbp.filter(|_| self.cbs > 0).map(|sbp| RpsRedoParams {
+            files,
+            sbp,
+            gap_open: files.aux.gap_open,
+            gap_extend: files.aux.gap_extend,
+            x_drop_final_bits: self.x_drop_final_bits,
+            smith_waterman: self.options.use_sw_tback,
+            program: self.program,
+        });
         let traceback = RpsTraceback {
             rows,
             offsets,
-            files,
-            row_after_rows: std::sync::OnceLock::new(),
+            // Only the traceback without the redo reads it (`RpsTraceback::row_after`).
+            row_after_rows: redo
+                .is_none()
+                .then(|| super::profile::RowAfter::new(files.row_after_rows())),
             letters,
             alphabet: files.alphabet,
             scale,
@@ -531,15 +542,7 @@ impl RpsRun<'_> {
             gapped: self.gapped,
             expect_value: self.evalue,
             hitlist_size: self.hitlist_size,
-            redo: self.sbp.filter(|_| self.cbs > 0).map(|sbp| RpsRedoParams {
-                files,
-                sbp,
-                gap_open: files.aux.gap_open,
-                gap_extend: files.aux.gap_extend,
-                x_drop_final_bits: self.x_drop_final_bits,
-                smith_waterman: self.options.use_sw_tback,
-                program: self.program,
-            }),
+            redo,
             program: self.program,
         };
         let prelim_karlin = KarlinParams {

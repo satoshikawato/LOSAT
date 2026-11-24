@@ -30,12 +30,10 @@ pub(crate) struct RpsTraceback<'a> {
     /// The concatenated rows and the profiles' offsets.
     pub(crate) rows: &'a [[i32; 28]],
     pub(crate) offsets: &'a [i32],
-    /// The volume's files, whose NCBI row after the rows (`RpsVolumeFiles::row_after_rows`, the
-    /// last entry of its row pointers) the traceback without composition-based statistics reads
-    /// (`TracebackProfile::rows`, `mapped_rows`) through `row_after`.
-    pub(crate) files: &'a crate::seqdb::rps::RpsVolumeFiles,
-    /// That row, read from the `.rps` file when a list first needs it (`row_after`).
-    pub(crate) row_after_rows: std::sync::OnceLock<RowAfter>,
+    /// NCBI's row after the rows (`RpsVolumeFiles::row_after_rows`), the last entry of its row
+    /// pointers, which only the traceback without the redo reads (`TracebackProfile::rows`,
+    /// `mapped_rows`): read from the `.rps` file where `redo` is `None`, else `None`.
+    pub(crate) row_after_rows: Option<RowAfter>,
     /// The `.psq` letters of the profiles, read when a list first needs them
     /// (`ProfileLetters`; `TracebackProfile` reads them).
     pub(crate) letters: &'a ProfileLetters<'a>,
@@ -244,11 +242,11 @@ fn stream_lists(
 }
 
 impl RpsTraceback<'_> {
-    /// NCBI's row after the rows, read from the volume's `.rps` file on the first call (only the
-    /// tracebacks without composition-based statistics read it).
+    /// NCBI's row after the rows, for the traceback without the redo.
     fn row_after(&self) -> &RowAfter {
         self.row_after_rows
-            .get_or_init(|| RowAfter::new(self.files.row_after_rows()))
+            .as_ref()
+            .expect("read where the volume's traceback has no redo")
     }
 
     /// The traceback of the query of letters `query` (without sentinels) and index `q_idx` from

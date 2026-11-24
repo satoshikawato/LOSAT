@@ -3315,3 +3315,58 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
     let differ = differ.into_inner();
     assert!(differ.is_empty(), "{}", differ.join("\n"));
 }
+
+// NCBI reference (598d8ae6): c++/include/util/limited_size_map.hpp:233-280 (cited at
+// `LoaderIds`)
+#[test]
+fn the_loaders_ids_keep_the_1000_most_recently_used_handles() {
+    let a = DbSequence::of_unrestricted(1);
+    let b = DbSequence::of_unrestricted(2);
+    // A handle registered, then 999 others: still held; one more drops it (review 1 of line DBID
+    // holdrec, M1: lru9x100 holds, lru12x100 is NCBI's own record).
+    let mut ids = LoaderIds::default();
+    ids.register([7], a);
+    ids.register(1000..1999, b);
+    assert_eq!(ids.held(7), Held::Present(Registrant::of(a)));
+    ids.register([1999], b);
+    assert_eq!(ids.held(7), Held::Absent);
+    // A use moves it to the end; uses of the same few handles count once each.
+    let mut ids = LoaderIds::default();
+    ids.register([7], a);
+    ids.register(1000..1900, b);
+    ids.use_now(7, Registrant::of(a));
+    ids.register(1900..2800, b);
+    for _ in 0..30 {
+        ids.register(5000..5010, b);
+    }
+    assert_eq!(ids.held(7), Held::Present(Registrant::of(a)));
+    // Uses in an order that LOSAT does not know (a note of the record): a handle among 1,000
+    // others may be gone; one registered by two of them is not sure.
+    let mut ids = LoaderIds::default();
+    let mut note: Vec<(HandleKey, Registrant)> = (1000..2000)
+        .map(|handle| (handle, Registrant::of(b)))
+        .collect();
+    note.push((7, Registrant::of(a)));
+    note.push((1000, Registrant::of(a)));
+    ids.use_unordered(&note);
+    assert_eq!(ids.held(7), Held::Maybe(Registrant::of(a)));
+    let Held::Maybe(registrant) = ids.held(1000) else {
+        panic!("1000 is in the note");
+    };
+    assert!(!registrant.sure);
+    // After 1,000 surely used later, it is surely gone, and the map stays small.
+    ids.register(3000..4000, b);
+    assert_eq!(ids.held(7), Held::Absent);
+    ids.register(10_000..20_000, b);
+    assert!(
+        ids.entries.len() <= 2 * LOADER_IDS + 1,
+        "{}",
+        ids.entries.len()
+    );
+    // A use that may not have happened: maybe held, by that sequence.
+    let mut ids = LoaderIds::default();
+    ids.maybe_use(7, Registrant::of(a));
+    assert_eq!(ids.held(7), Held::Maybe(Registrant::of(a)));
+    ids.register([7], b);
+    assert_eq!(ids.held(7), Held::Present(Registrant::of(b)));
+}

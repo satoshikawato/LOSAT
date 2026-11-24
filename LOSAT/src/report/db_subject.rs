@@ -348,8 +348,209 @@ impl IdKeys {
 struct Registrant {
     sequence: DbSequence,
     sure: bool,
-    /// The record's note that registered it (0 for a walk's own).
-    note: u32,
+}
+
+impl Registrant {
+    /// `sequence`, surely the last.
+    fn of(sequence: DbSequence) -> Self {
+        Registrant {
+            sequence,
+            sure: true,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/data_loaders/blastdb/bdbloader.hpp:155, 222
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:186, 379-423
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:98-110
+// NCBI reference (598d8ae6): c++/include/util/limited_size_map.hpp:199-206, 233-280
+// The BLAST database data loader's `m_Ids` is a map of at most 1,000 handles with least recently
+// used eviction: a find of a present handle marks it used, an insert adds a new one or marks a
+// present one used without changing it, `RegisterIds`' assignment adds or marks used and assigns;
+// each addition then drops the least recently used handles while the map holds more than 1,000
+// (`x_GC`). So a handle is held exactly where fewer than 1,000 other handles were added or used
+// after its last use (review 1 of line DBID holdrec, M1: `lru12x100`, 1,202 registrations after a
+// holder's, is NCBI's own record; `lru9x100`, 902, and `lru12x1`, 12, still the holder's).
+/// The loader's `m_Ids` as LOSAT knows it ([`ScopeWalk`], [`ScopeRecord`]): each handle's last
+/// registrant ([`Registrant`]) and the times of its last use, a range where LOSAT does not know
+/// when it was last used (`lo` the earliest, `hi` the latest; `lo` `None` where LOSAT does not
+/// know that the handle was ever added: a load that may not have happened). A handle is held
+/// ([`Held`]) where fewer than 1,000 others may have been used after its earliest last use, and
+/// gone where at least 1,000 others were used after its latest; in between LOSAT does not know.
+/// A handle that is surely gone is dropped (`gc`), so the map keeps about 2,000 handles at most
+/// besides those whose presence LOSAT does not know.
+#[derive(Clone, Debug, Default)]
+struct LoaderIds {
+    entries: std::collections::HashMap<HandleKey, IdEntry>,
+    /// Each handle's earliest last use (`IdEntry::lo`), in order.
+    by_lo: std::collections::BTreeSet<(u64, HandleKey)>,
+    /// Each handle's latest last use (`IdEntry::hi`), in order.
+    by_hi: std::collections::BTreeSet<(u64, HandleKey)>,
+    /// The number of uses so far (each use takes the next time).
+    clock: u64,
+}
+
+/// One handle of [`LoaderIds`].
+#[derive(Clone, Copy, Debug)]
+struct IdEntry {
+    registrant: Registrant,
+    lo: Option<u64>,
+    hi: u64,
+}
+
+/// Whether the loader's `m_Ids` holds a handle ([`LoaderIds::held`]): surely, with its
+/// registrant; maybe (LOSAT does not know whether 1,000 other handles were used after it, or
+/// whether it was added at all), with the registrant it holds if it does; surely not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Held {
+    Present(Registrant),
+    Maybe(Registrant),
+    Absent,
+}
+
+/// The size of the loader's `m_Ids` (bdbloader.cpp:186).
+const LOADER_IDS: usize = 1000;
+
+impl LoaderIds {
+    /// Whether `m_Ids` holds `handle` now.
+    fn held(&self, handle: HandleKey) -> Held {
+        let Some(entry) = self.entries.get(&handle) else {
+            return Held::Absent;
+        };
+        if let Some(lo) = entry.lo {
+            // At most this many handles were used after its earliest last use.
+            let present = self.clock - lo < LOADER_IDS as u64
+                || self.used_after(&self.by_hi, lo, handle) < LOADER_IDS;
+            if present {
+                return Held::Present(entry.registrant);
+            }
+        }
+        if self.used_after(&self.by_lo, entry.hi, handle) >= LOADER_IDS {
+            return Held::Absent;
+        }
+        Held::Maybe(entry.registrant)
+    }
+
+    /// The number of handles but `handle` of `times` (`by_lo` or `by_hi`) after the time `time`,
+    /// counted up to [`LOADER_IDS`].
+    fn used_after(
+        &self,
+        times: &std::collections::BTreeSet<(u64, HandleKey)>,
+        time: u64,
+        handle: HandleKey,
+    ) -> usize {
+        times
+            .range((time + 1, 0)..)
+            .filter(|&&(_, other)| other != handle)
+            .take(LOADER_IDS)
+            .count()
+    }
+
+    /// Moves `handle`'s times to `lo` and `hi`, with the registrant `registrant`.
+    fn set(&mut self, handle: HandleKey, registrant: Registrant, lo: Option<u64>, hi: u64) {
+        if let Some(old) = self.entries.insert(handle, IdEntry { registrant, lo, hi }) {
+            if let Some(lo) = old.lo {
+                self.by_lo.remove(&(lo, handle));
+            }
+            self.by_hi.remove(&(old.hi, handle));
+        }
+        if let Some(lo) = lo {
+            self.by_lo.insert((lo, handle));
+        }
+        self.by_hi.insert((hi, handle));
+    }
+
+    /// A use of `handle` now (a find that marks it used, or an insert of a new one) whose
+    /// registrant is `registrant`; then the eviction.
+    fn use_now(&mut self, handle: HandleKey, registrant: Registrant) {
+        self.clock += 1;
+        self.set(handle, registrant, Some(self.clock), self.clock);
+        self.gc();
+    }
+
+    /// `RegisterIds` of a new blob of `sequence` whose lines hold the handles `handles`, in their
+    /// order: each assigned (added, or marked used) now.
+    fn register(&mut self, handles: impl IntoIterator<Item = HandleKey>, sequence: DbSequence) {
+        for handle in handles {
+            self.use_now(handle, Registrant::of(sequence));
+        }
+    }
+
+    /// A use of `handle` with the registrant `registrant` that may not have happened (a blob that
+    /// a failed prefetch may have loaded, one that NCBI may have dropped and loaded again): its
+    /// latest last use is now, its registrant is `registrant`'s sequence, not sure where it held
+    /// another.
+    fn maybe_use(&mut self, handle: HandleKey, registrant: Registrant) {
+        self.clock += 1;
+        let (lo, registrant) = match self.entries.get(&handle) {
+            Some(entry) => (
+                entry.lo,
+                Registrant {
+                    sure: entry.registrant.sure
+                        && registrant.sure
+                        && entry.registrant.sequence == registrant.sequence,
+                    ..registrant
+                },
+            ),
+            None => (None, registrant),
+        };
+        self.set(handle, registrant, lo, self.clock);
+        self.gc();
+    }
+
+    /// Uses of `registered` (handles with their registrants) in an order that LOSAT does not
+    /// know, each surely made (a note of the run's record, a set; the ties of a prefetch): each
+    /// one's last use lies among them; a handle that several of them register is not sure.
+    fn use_unordered(&mut self, registered: &[(HandleKey, Registrant)]) {
+        let start = self.clock + 1;
+        self.clock += registered.len() as u64;
+        let mut merged: std::collections::HashMap<HandleKey, Registrant> = Default::default();
+        for &(handle, registrant) in registered {
+            merged
+                .entry(handle)
+                .and_modify(|existing| {
+                    existing.sure &= registrant.sure && existing.sequence == registrant.sequence;
+                })
+                .or_insert(registrant);
+        }
+        for (handle, registrant) in merged {
+            self.set(handle, registrant, Some(start), self.clock);
+        }
+        self.gc();
+    }
+
+    // NCBI reference (598d8ae6): c++/include/util/limited_size_map.hpp:243-250 (`x_GC`)
+    /// Drops the handles that are surely gone: those after whose latest last use at least 1,000
+    /// handles were surely used (the 1,000th latest earliest use is after it). Run where the map
+    /// holds twice its size, so each use costs a constant share.
+    fn gc(&mut self) {
+        if self.entries.len() <= 2 * LOADER_IDS {
+            return;
+        }
+        let Some(&(threshold, _)) = self.by_lo.iter().rev().nth(LOADER_IDS - 1) else {
+            return;
+        };
+        while let Some(&(hi, handle)) = self.by_hi.first() {
+            if hi >= threshold {
+                break;
+            }
+            self.by_hi.pop_first();
+            if let Some(entry) = self.entries.remove(&handle) {
+                if let Some(lo) = entry.lo {
+                    self.by_lo.remove(&(lo, handle));
+                }
+            }
+        }
+    }
+
+    /// The handles used after the time `time`, with their registrants (the uses of a walk of one
+    /// tie, [`ScopeWalk::bulk_ties`]).
+    fn used_since(&self, time: u64) -> Vec<(HandleKey, Registrant)> {
+        self.by_hi
+            .range((time + 1, 0)..)
+            .map(|&(_, handle)| (handle, self.entries[&handle].registrant))
+            .collect()
+    }
 }
 
 /// What a load of a Seq-align id gave in [`ScopeWalk`], as the scope's cache (`m_Seq_idMap`)
@@ -489,21 +690,42 @@ impl ScopePlaces {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:438-447 (the blob
+// id: the OID and the requested handle)
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1999-2070 (cited at `ScopeWalk`)
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1515-1560
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3365 (cited at `ScopeWalk`)
+// A blob that the data source holds (locked by a scope, or among the unlocked blobs it keeps) is
+// given again without `x_LoadData`, so its `RegisterIds` does not run again: only a new blob id
+// registers. The data source keeps up to 10 unlocked blobs (`OBJMGR_BLOB_CACHE`) and a scope up to
+// 10 that no handle locks (`OBJMGR_SCOPE_AUTORELEASE_SIZE`); a blob dropped from both is loaded
+// again, with `RegisterIds`, where a later read of the scope reaches it (`SUnloadedInfo::LockTSE`,
+// `GetBlobById`). Which blobs the formatters' handles keep locked LOSAT does not follow, so in a
+// run with more than 10 blob ids each read of a blob loaded before may register its lines again
+// (`LoaderIds::maybe_use`); with 10 or fewer, nothing is ever dropped.
+/// The number of blobs that NCBI's data source keeps unlocked (`OBJMGR_BLOB_CACHE`'s default):
+/// with no more blob ids in the run, no blob is dropped and loaded again.
+const BLOBS_KEPT: usize = 10;
+
 /// What a run loaded before a walk of its reports' loads ([`LoadsBefore`], kept by
 /// `common::database::TaxdbRun::note_loaded`, the one producer), as one record that only grows,
 /// so that a walk reads it as it was at its start (`LoadsBefore`: the notes and loads before):
-/// the data loader's `m_Ids` (every handle of every definition line of each blob it loaded, the
-/// last registered winning, `registry`, with the registrants that later notes replaced), and
-/// every load in the order of the notes, by the line of its load, with the query batch of each
-/// note (the scope of the run where outfmt 5 keeps one, `RunThrow::keeps_scope`; else the last
-/// recorded batch's, which psiblast's rounds of a query share). A note is a set: where several of
-/// its sequences registered one handle or resolved one id, LOSAT does not know which came last
-/// ([`Registrant::sure`]).
+/// the data loader's `m_Ids` ([`LoaderIds`], copied where it changes after a walk took it), the
+/// blob ids loaded (the OID and the requested handle, with the note of the first load: a blob
+/// loaded again registers nothing, `BLOBS_KEPT`), and every load in the order of the notes, by
+/// the line of its load, with the query batch of each note (the scope of the run where outfmt 5
+/// keeps one, `RunThrow::keeps_scope`; else the last recorded batch's, which psiblast's rounds of
+/// a query share). A note is a set: its loads use `m_Ids` in an order that LOSAT does not know
+/// (`LoaderIds::use_unordered`; where several of its sequences registered one handle, LOSAT does
+/// not know which came last, [`Registrant::sure`]).
 #[derive(Debug, Default)]
 pub struct ScopeRecord {
-    registry: std::collections::HashMap<HandleKey, Registrant>,
-    /// The registrants that a later note replaced, in the order of their notes.
-    replaced: std::collections::HashMap<HandleKey, Vec<Registrant>>,
+    ids: std::sync::Arc<LoaderIds>,
+    /// The blob ids loaded (ordinal id, requested handle; 0 for none), with the first note of
+    /// each.
+    blob_ids: std::collections::HashMap<(u32, HandleKey), u32>,
+    /// The first note after which the run had loaded more than [`BLOBS_KEPT`] blob ids.
+    many_blobs: Option<u32>,
     /// Every load of the notes with a batch, in order.
     places: ScopePlaces,
     /// The loads by the handle of the Seq-align id that each was loaded by (the scope's cache).
@@ -515,9 +737,10 @@ pub struct ScopeRecord {
 
 impl ScopeRecord {
     /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
-    /// loads before a stop), each by the subject's own Seq-align id: the blob that its lookup gives
-    /// ([`ParsedSubject::loaded_blob`]) registers every handle of its lines, and its id resolves
-    /// to it.
+    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
+    /// the blob that it gives ([`ParsedSubject::loaded_blob`]), whose lines register every
+    /// handle where its blob id is new (where it is not, and the run has more than
+    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it.
     pub fn note<'p>(
         &mut self,
         batch: Option<usize>,
@@ -535,32 +758,28 @@ impl ScopeRecord {
         }
         let note = self.notes;
         self.notes += 1;
-        let mut registered: std::collections::HashMap<HandleKey, Registrant> = Default::default();
-        for (_, keys, _) in &loads {
+        let many = self.many_blobs.is_some();
+        let mut used: Vec<(HandleKey, Registrant)> = Vec::new();
+        let mut maybe: Vec<(HandleKey, Registrant)> = Vec::new();
+        for (subject, keys, _) in &loads {
             let sequence = keys.sequence.expect("a loaded blob is a sequence");
-            for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
-                registered
-                    .entry(handle)
-                    .and_modify(|registrant| registrant.sure &= registrant.sequence == sequence)
-                    .or_insert(Registrant {
-                        sequence,
-                        sure: true,
-                        note,
-                    });
+            let requested = subject.id_keys().handle;
+            used.extend(requested.map(|handle| (handle, Registrant::of(sequence))));
+            let lines = keys.lines.iter().flat_map(|line| &line.handles);
+            let id = (sequence.ordinal(), requested.unwrap_or(0));
+            if *self.blob_ids.entry(id).or_insert(note) == note {
+                used.extend(lines.map(|&handle| (handle, Registrant::of(sequence))));
+            } else if many {
+                maybe.extend(lines.map(|&handle| (handle, Registrant::of(sequence))));
             }
         }
-        for (handle, registrant) in registered {
-            match self.registry.get(&handle).copied() {
-                Some(old) if old.sequence == registrant.sequence && old.sure == registrant.sure => {
-                }
-                Some(old) => {
-                    self.replaced.entry(handle).or_default().push(old);
-                    self.registry.insert(handle, registrant);
-                }
-                None => {
-                    self.registry.insert(handle, registrant);
-                }
-            }
+        let ids = std::sync::Arc::make_mut(&mut self.ids);
+        ids.use_unordered(&used);
+        for (handle, registrant) in maybe {
+            ids.maybe_use(handle, registrant);
+        }
+        if self.many_blobs.is_none() && self.blob_ids.len() > BLOBS_KEPT {
+            self.many_blobs = Some(note);
         }
         let Some(batch) = batch else {
             return;
@@ -578,18 +797,9 @@ impl ScopeRecord {
         }
     }
 
-    /// The registrant of `handle` before the note `notes`.
-    fn registered(&self, handle: HandleKey, notes: u32) -> Option<Registrant> {
-        let last = self.registry.get(&handle)?;
-        if last.note < notes {
-            return Some(*last);
-        }
-        self.replaced
-            .get(&handle)?
-            .iter()
-            .rev()
-            .find(|registrant| registrant.note < notes)
-            .copied()
+    /// Whether the blob id `id` was loaded before the note `notes`.
+    fn loaded_before(&self, id: (u32, HandleKey), notes: u32) -> bool {
+        self.blob_ids.get(&id).is_some_and(|&note| note < notes)
     }
 
     /// The loads of the scope of the reports of the query batch `batch` (`None`: of the record's
@@ -659,14 +869,20 @@ impl ScopeRecord {
         )
     }
 
-    /// The sequences that the loader's record held for the handle of `subject`'s Seq-align id
-    /// before the note `notes` (`m_Ids`): the last registrant, and where LOSAT does not know that
-    /// it registered it last, every one that registered it.
-    pub fn registrants_of(&self, subject: &ParsedSubject, notes: u32) -> Vec<DbSequence> {
+    /// The sequences that `m_Ids` as `ids` holds (a walk's start, [`LoadsBefore`]) may hold for
+    /// the handle of `subject`'s Seq-align id, among the first `loads` loads: the last registrant
+    /// where the handle may still be held, and where LOSAT does not know that it registered it
+    /// last, every one of those loads that holds the handle in a line.
+    fn registrants_of(
+        &self,
+        ids: &LoaderIds,
+        subject: &ParsedSubject,
+        loads: u32,
+    ) -> Vec<DbSequence> {
         let Some(handle) = subject.id_keys().handle else {
             return Vec::new();
         };
-        let Some(last) = self.registered(handle, notes) else {
+        let (Held::Present(last) | Held::Maybe(last)) = ids.held(handle) else {
             return Vec::new();
         };
         if last.sure {
@@ -677,6 +893,7 @@ impl ScopeRecord {
             .places
             .loads
             .iter()
+            .take(loads as usize)
             .filter_map(|(keys, _)| {
                 let sequence = keys.sequence?;
                 keys.line_of(handle).map(|_| sequence)
@@ -688,13 +905,19 @@ impl ScopeRecord {
         found
     }
 
-    /// The sequences that the registry holds, by ordinal id, in order (tests).
+    /// The sequences that `m_Ids` may hold now, by ordinal id, in order (tests).
     #[cfg(test)]
     pub fn registered_sequences(&self) -> Vec<u32> {
         let mut ordinals: Vec<u32> = self
-            .registry
-            .values()
-            .map(|registrant| registrant.sequence.ordinal())
+            .ids
+            .entries
+            .keys()
+            .filter_map(|&handle| match self.ids.held(handle) {
+                Held::Present(registrant) | Held::Maybe(registrant) => {
+                    Some(registrant.sequence.ordinal())
+                }
+                Held::Absent => None,
+            })
             .collect();
         ordinals.sort_unstable();
         ordinals.dedup();
@@ -728,6 +951,10 @@ pub struct LoadsBefore {
     loads: u32,
     batch: Option<usize>,
     unrecorded: bool,
+    /// The record's `m_Ids` as it was ([`ScopeRecord::ids`]).
+    ids: std::sync::Arc<LoaderIds>,
+    /// The number of blob ids that the record had loaded.
+    blobs: usize,
 }
 
 impl LoadsBefore {
@@ -739,13 +966,16 @@ impl LoadsBefore {
     /// The loads that `record` holds now, before reports of the query batch `batch`, after calls
     /// whose loads no record holds where `unrecorded`.
     pub fn new(record: &SharedRecord, batch: Option<usize>, unrecorded: bool) -> Self {
-        let (notes, loads) = record.read().expect("the run's record").now();
+        let read = record.read().expect("the run's record");
+        let (notes, loads) = read.now();
         LoadsBefore {
             record: record.clone(),
             notes,
             loads,
             batch,
             unrecorded,
+            ids: read.ids.clone(),
+            blobs: read.blob_ids.len(),
         }
     }
 
@@ -773,10 +1003,12 @@ impl LoadsBefore {
     /// The sequences that the loader's record held for the handle of `subject`'s Seq-align id
     /// before these reports ([`ScopeRecord::registrants_of`]).
     pub fn registrants_of(&self, subject: &ParsedSubject) -> Vec<DbSequence> {
-        self.record
-            .read()
-            .expect("the run's record")
-            .registrants_of(subject, self.notes)
+        self.read(|record| record.registrants_of(&self.ids, subject, self.loads))
+    }
+
+    /// Whether the run had loaded the blob id `id` before these reports.
+    fn loaded_before(&self, id: (u32, HandleKey)) -> bool {
+        self.notes > 0 && self.read(|record| record.loaded_before(id, self.notes))
     }
 
     /// Whether `other` is the same record as these loads, as it was (no note since).
@@ -808,7 +1040,9 @@ impl LoadsBefore {
 // included (`GetMatchingHandles` with `eAllowWeakMatch`), of which the one loaded first
 // (`x_IsBetter`, P3.a of that probe: not the lower OID); (3) the BLAST database data loader's
 // `m_Ids`, the exact handle of every Seq-id of every definition line of each new blob it loaded
-// (`RegisterIds`, which overwrites: the last registered wins, P3.b), kept for the run; (4) the
+// (`RegisterIds`, which overwrites: the last registered wins, P3.b), kept for the run up to its
+// 1,000 most recently used handles ([`LoaderIds`]; a blob id loaded before registers nothing
+// again, [`BLOBS_KEPT`]); (4) the
 // lookup (`SeqidToOid`). The scope (1, 2) is emptied after each query batch (`ResetScopeHistory`),
 // but for outfmt 5, and psiblast's is the query's. A batch whose prefetch runs resolves all its
 // Seq-align ids at once before its reports, in `CSeq_id_Handle`'s order (a gi's value, the digits
@@ -825,8 +1059,13 @@ impl LoadsBefore {
 #[derive(Debug, Default)]
 pub struct ScopeWalk {
     before: LoadsBefore,
-    /// The registrations of the walk's own loads (newer than the record's).
-    registry: std::collections::HashMap<HandleKey, Registrant>,
+    /// The loader's `m_Ids`: the record's as it was, then the walk's own uses.
+    ids: LoaderIds,
+    /// The blob ids (ordinal id, requested handle; 0 for none) that the walk loaded, and those
+    /// that a failed prefetch may have loaded (`maybe_blobs`): a blob loaded before registers
+    /// nothing again ([`ScopeWalk::load_blob`]).
+    blob_ids: std::collections::HashSet<(u32, HandleKey)>,
+    maybe_blobs: std::collections::HashSet<(u32, HandleKey)>,
     /// The walk's own places of the current scope.
     scope: ScopePlaces,
     /// The keys of every blob that the walk loaded, by ordinal id, for the run (a holder that the
@@ -851,8 +1090,10 @@ impl ScopeWalk {
             .then(|| Box::new(ScopeWalk::new(before.clone(), Some(true))));
         let batch = before.batch;
         ScopeWalk {
+            ids: (*before.ids).clone(),
             before,
-            registry: Default::default(),
+            blob_ids: Default::default(),
+            maybe_blobs: Default::default(),
             scope: ScopePlaces::default(),
             blobs: Default::default(),
             batch,
@@ -899,22 +1140,32 @@ impl ScopeWalk {
         self.before.read(|record| record.cached(handle, &range))
     }
 
-    /// Step 3: the data loader's `m_Ids`.
-    fn registered(&self, handle: HandleKey) -> Option<Registrant> {
-        self.registry.get(&handle).copied().or_else(|| {
-            self.before
-                .read(|record| record.registered(handle, self.before.notes))
-        })
+    /// Whether the run has loaded more than [`BLOBS_KEPT`] blob ids, so that NCBI may have dropped
+    /// one and loads it again where a read reaches it.
+    fn many_blobs(&self) -> bool {
+        self.before.blobs + self.blob_ids.len() + self.maybe_blobs.len() > BLOBS_KEPT
     }
 
-    /// Step 3 as a place, without a load: the registrant of `handle`, `Unknown` where LOSAT does
-    /// not know that it registered it last.
+    /// Whether the run loaded the blob id `id` before (the record's, or the walk's).
+    fn loaded_before(&self, id: (u32, HandleKey)) -> bool {
+        self.blob_ids.contains(&id) || self.before.loaded_before(id)
+    }
+
+    /// Step 3 as a place, without a load: the registrant of `handle` where `m_Ids` may hold it,
+    /// `Unknown` where LOSAT does not know that it registered it last.
     fn registered_place(&self, handle: HandleKey) -> Option<Resolved> {
-        self.registered(handle)
-            .map(|registrant| match registrant.sure {
-                true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
-                false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
-            })
+        match self.ids.held(handle) {
+            Held::Present(registrant) | Held::Maybe(registrant) => Some(Self::place(registrant)),
+            Held::Absent => None,
+        }
+    }
+
+    /// The place that `m_Ids`' registrant `registrant` gives.
+    fn place(registrant: Registrant) -> Resolved {
+        match registrant.sure {
+            true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
+            false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+        }
     }
 
     /// Step 2: the scope's index, for the Seq-align id of `keys`: the exact handle first, then
@@ -939,26 +1190,66 @@ impl ScopeWalk {
         None
     }
 
-    /// Registers the blob of `keys` (`RegisterIds`: every handle of every line, overwriting) and
-    /// puts its Bioseq into the scope by its line `line`.
-    fn load_blob(&mut self, keys: &std::sync::Arc<BlobKeys>, line: usize) {
+    /// The blob of `keys` loaded by the requested handle `requested` (its blob id): where it is
+    /// new, `RegisterIds` (every handle of every line, overwriting); where the run loaded it
+    /// before, nothing, unless NCBI may have dropped it (more than [`BLOBS_KEPT`] blob ids) or a
+    /// failed prefetch may have loaded it, where its lines may register again
+    /// ([`LoaderIds::maybe_use`]); then its Bioseq enters the scope by its line `line`.
+    fn load_blob(
+        &mut self,
+        keys: &std::sync::Arc<BlobKeys>,
+        line: usize,
+        requested: Option<HandleKey>,
+    ) {
         let Some(sequence) = keys.sequence else {
             return;
         };
         self.blobs
             .entry(sequence.ordinal())
             .or_insert_with(|| keys.clone());
-        for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
-            self.registry.insert(
-                handle,
-                Registrant {
-                    sequence,
-                    sure: true,
-                    note: 0,
-                },
-            );
+        let id = (sequence.ordinal(), requested.unwrap_or(0));
+        let handles = keys
+            .lines
+            .iter()
+            .flat_map(|line| line.handles.iter().copied());
+        if self.loaded_before(id) {
+            if self.many_blobs() {
+                self.maybe_register(keys);
+            }
+        } else if self.maybe_blobs.contains(&id) {
+            self.maybe_register(keys);
+            self.blob_ids.insert(id);
+        } else {
+            self.ids.register(handles, sequence);
+            self.blob_ids.insert(id);
         }
         self.scope.add(keys, line);
+    }
+
+    /// A `RegisterIds` of the blob of `keys` that may run (a blob that NCBI may have dropped and
+    /// loads again, or that a failed prefetch may have loaded).
+    fn maybe_register(&mut self, keys: &BlobKeys) {
+        let Some(sequence) = keys.sequence else {
+            return;
+        };
+        for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
+            self.ids.maybe_use(handle, Registrant::of(sequence));
+        }
+    }
+
+    /// Where NCBI may have dropped the blob of `sequence` (more than [`BLOBS_KEPT`] blob ids in
+    /// the run), a read that the scope answers with it may load it again, which registers its
+    /// lines ([`LoaderIds::maybe_use`]).
+    fn relock(&mut self, resolved: Option<Resolved>) {
+        let Some(Resolved::Blob(sequence, _) | Resolved::Unknown(Some(sequence), _)) = resolved
+        else {
+            return;
+        };
+        if self.many_blobs() {
+            if let Some(keys) = self.blob_of(sequence) {
+                self.maybe_register(&keys);
+            }
+        }
     }
 
     /// The blob keys of `subject` as the sequence `sequence` (its own, or a copy of its record that
@@ -992,7 +1283,27 @@ impl ScopeWalk {
     /// lookup's, `FoundInstead`).
     fn loader(&mut self, subject: &ParsedSubject, keys: &IdKeys) -> Option<Resolved> {
         if let Some(handle) = keys.handle {
-            if let Some(registrant) = self.registered(handle) {
+            let registrant = match self.ids.held(handle) {
+                Held::Present(registrant) => Some(registrant),
+                // Where LOSAT does not know whether `m_Ids` still holds the handle, the lookup
+                // that would answer instead gives the same sequence, or LOSAT does not know.
+                Held::Maybe(registrant)
+                    if registrant.sure && self.looked_up(subject) == Some(registrant.sequence) =>
+                {
+                    Some(registrant)
+                }
+                Held::Maybe(registrant) => {
+                    self.ids.maybe_use(handle, registrant);
+                    return Some(match subject.mine(registrant.sequence) {
+                        true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+                        false => Self::place(registrant),
+                    });
+                }
+                Held::Absent => None,
+            };
+            if let Some(registrant) = registrant {
+                // The find marks the handle used.
+                self.ids.use_now(handle, registrant);
                 if !registrant.sure {
                     return Some(Resolved::Unknown(Some(registrant.sequence), ShownBy::Order));
                 }
@@ -1000,10 +1311,11 @@ impl ScopeWalk {
                     // The subject's own blob, loaded before in the run: its Bioseq enters this
                     // scope by the line of the handle, where a later load finds it (review 4 of
                     // line DBID pfoff-4, `pq.zr1.V.U1.b1.0`: a description's load, then a failing
-                    // lookup's alignment that this Bioseq holds weakly).
+                    // lookup's alignment that this Bioseq holds weakly); it registers its lines
+                    // only where its blob id is new (`load_blob`).
                     let keys = Self::keys_as(subject, registrant.sequence);
                     let line = keys.line_of(handle).unwrap_or(keys.target);
-                    self.load_blob(&keys, line);
+                    self.load_blob(&keys, line, Some(handle));
                 } else {
                     self.held_blob(registrant.sequence, handle);
                 }
@@ -1023,8 +1335,28 @@ impl ScopeWalk {
         }
         let (blob, line) = subject.loaded_blob()?;
         let sequence = blob.sequence?;
-        self.load_blob(&blob, line);
+        // The lookup adds the handle with the sequence it gives.
+        if let Some(handle) = keys.handle {
+            self.ids.use_now(handle, Registrant::of(sequence));
+        }
+        self.load_blob(&blob, line, keys.handle);
         Some(Resolved::Blob(sequence, ShownBy::Holder))
+    }
+
+    /// The sequence whose blob the lookup of `subject`'s Seq-align id gives ([`ScopeResolution`]),
+    /// where LOSAT knows it: `None` for none, a lookup that throws, and a call after the first
+    /// whose calls before may hold another ([`ScopeHolders::loader`]).
+    fn looked_up(&self, subject: &ParsedSubject) -> Option<DbSequence> {
+        if self.before.unrecorded && subject.resolution.unrecorded.loader.first().is_some() {
+            return None;
+        }
+        if matches!(
+            subject.resolution.found,
+            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
+        ) {
+            return None;
+        }
+        subject.loaded_blob()?.0.sequence
     }
 
     /// Where step 3 gave another sequence, `holder`, for the handle `handle`: its new blob (by
@@ -1033,7 +1365,7 @@ impl ScopeWalk {
     fn held_blob(&mut self, holder: DbSequence, handle: HandleKey) {
         if let Some(keys) = self.blob_of(holder) {
             if let Some(line) = keys.line_of(handle) {
-                self.load_blob(&keys, line);
+                self.load_blob(&keys, line, Some(handle));
             }
         }
     }
@@ -1115,11 +1447,15 @@ impl ScopeWalk {
         let keys = subject.id_keys();
         if let Some(handle) = keys.handle {
             if let Some(resolved) = self.cached(handle) {
+                self.relock(Some(resolved));
                 return Some(resolved);
             }
         }
         let resolved = match scope.then(|| self.scope_match(keys)).flatten() {
-            Some(resolved) => Some(resolved),
+            Some(resolved) => {
+                self.relock(Some(resolved));
+                Some(resolved)
+            }
             // A scope kept for the run (outfmt 5) after calls whose loads LOSAT has no record
             // of may hold a holder that LOSAT lists from the database (`ScopeHolders::scope`).
             None if scope && self.keeps_scope && self.before.unrecorded => {
@@ -1222,33 +1558,27 @@ impl ScopeWalk {
         }
         let blobs: Vec<(std::sync::Arc<BlobKeys>, usize)> = subjects
             .into_iter()
-            .filter_map(|(_, subject)| self.first_blob(subject))
+            .filter_map(|(_, subject)| {
+                let (keys, line) = self.first_blob(subject)?;
+                let sequence = keys.sequence?;
+                // Its lookup in `m_Ids`, then its blob, may have been made.
+                let requested = subject.id_keys().handle;
+                if let Some(handle) = requested {
+                    self.ids.maybe_use(handle, Registrant::of(sequence));
+                }
+                let id = (sequence.ordinal(), requested.unwrap_or(0));
+                if !self.loaded_before(id) {
+                    self.maybe_register(&keys);
+                    self.maybe_blobs.insert(id);
+                } else if self.many_blobs() {
+                    self.maybe_register(&keys);
+                }
+                self.blobs
+                    .entry(sequence.ordinal())
+                    .or_insert_with(|| keys.clone());
+                Some((keys, line))
+            })
             .collect();
-        let mut registered: std::collections::HashMap<HandleKey, Registrant> = Default::default();
-        for (keys, _) in &blobs {
-            let Some(sequence) = keys.sequence else {
-                continue;
-            };
-            self.blobs
-                .entry(sequence.ordinal())
-                .or_insert_with(|| keys.clone());
-            for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
-                registered
-                    .entry(handle)
-                    .and_modify(|registrant| registrant.sure &= registrant.sequence == sequence)
-                    .or_insert(Registrant {
-                        sequence,
-                        sure: true,
-                        note: 0,
-                    });
-            }
-        }
-        for (handle, mut registrant) in registered {
-            if let Some(before) = self.registered(handle) {
-                registrant.sure &= before.sure && before.sequence == registrant.sequence;
-            }
-            self.registry.insert(handle, registrant);
-        }
         let start = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
         for (keys, line) in &blobs {
             self.scope.add(keys, *line);
@@ -1286,7 +1616,7 @@ impl ScopeWalk {
             if self.cached(handle).is_some() {
                 return None;
             }
-            if let Some(registrant) = self.registered(handle) {
+            if let Held::Present(registrant) | Held::Maybe(registrant) = self.ids.held(handle) {
                 let blob = match subject.mine(registrant.sequence) {
                     true => Self::keys_as(subject, registrant.sequence),
                     false => self.blob_of(registrant.sequence)?,
@@ -1320,12 +1650,15 @@ impl ScopeWalk {
         group: &[(usize, &ParsedSubject)],
         answers: &mut std::collections::HashMap<usize, HitLoad>,
     ) {
-        let start = self.registry.clone();
+        let start = self.ids.clock;
         let mut results = Vec::with_capacity(group.len());
+        let mut blob_ids = Vec::new();
         for &(_, subject) in group {
             let mut alone = ScopeWalk {
                 before: self.before.clone(),
-                registry: start.clone(),
+                ids: self.ids.clone(),
+                blob_ids: self.blob_ids.clone(),
+                maybe_blobs: self.maybe_blobs.clone(),
                 scope: self.scope.clone(),
                 blobs: self.blobs.clone(),
                 batch: self.batch,
@@ -1334,27 +1667,18 @@ impl ScopeWalk {
                 other: None,
             };
             let resolved = alone.resolve(subject, false);
-            let changed: Vec<(HandleKey, Registrant)> = alone
-                .registry
-                .into_iter()
-                .filter(|(handle, registrant)| start.get(handle) != Some(registrant))
-                .collect();
+            let changed = alone.ids.used_since(start);
             for (ordinal, keys) in alone.blobs {
                 self.blobs.entry(ordinal).or_insert(keys);
             }
+            blob_ids.extend(alone.blob_ids.difference(&self.blob_ids).copied());
             results.push((resolved, changed, alone.scope));
         }
-        let mut merged: std::collections::HashMap<HandleKey, Registrant> = Default::default();
-        for (_, changed, _) in &results {
-            for &(handle, registrant) in changed {
-                merged
-                    .entry(handle)
-                    .and_modify(|existing| {
-                        existing.sure &= existing.sequence == registrant.sequence;
-                    })
-                    .or_insert(registrant);
-            }
-        }
+        // Every tie's uses, in an order that LOSAT does not know.
+        let merged: Vec<(HandleKey, Registrant)> = results
+            .iter()
+            .flat_map(|(_, changed, _)| changed.iter().copied())
+            .collect();
         for (index, &(key, subject)) in group.iter().enumerate() {
             let resolved = results[index].0;
             let mut answer = Self::answer(subject, resolved);
@@ -1391,9 +1715,8 @@ impl ScopeWalk {
                 self.scope.add(keys, *line);
             }
         }
-        for (handle, registrant) in merged {
-            self.registry.insert(handle, registrant);
-        }
+        self.ids.use_unordered(&merged);
+        self.blob_ids.extend(blob_ids);
     }
 }
 

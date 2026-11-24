@@ -68,7 +68,10 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
   line after 4096 bytes and stops at it after 4097. `xwq0.faa`, `xwq1.faa` hold each sequence as a query.
 - `pn` (D1c-1c-b PR 2b): version 5 of ln.faa back-translated (nucleotides, taxids from ln.map), the lines of `ln`
   rewritten without Seq-ids. `lnq0.faa`, `lnq1.faa` and `lnq3.faa` hold OIDs 0, 1 and 3 of ln.faa as queries, the
-  `.fna` files of the same names the same back-translated.
+  `.fna` files of the same names the same back-translated. OIDs 0 and 1 of ln.faa with a letter put after the 20th
+  of a query's line (`write_edited_queries`): `lnqw.faa` and the back-translated `lnqw.fna` an invalid `1` in q1
+  (NCBI's reader message), `lnqo0.faa` and `lnqo1.faa` an `O` in q0 or q1 (the query's own warning): the stderr
+  that NCBI writes before it stops at the sallacc of q1's subject.
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -442,6 +445,20 @@ def build_pn(ncbi: Path):
     write_queries("ln.faa", {"lnq0.faa": [0], "lnq1.faa": [1], "lnq3.faa": [3]})
     for name in ("lnq0", "lnq1", "lnq3"):
         back_translate(OUT / f"{name}.faa", OUT / f"{name}.fna")
+    write_edited_queries()
+
+
+def write_edited_queries():
+    """The queries q0 and q1 of ln.faa with one letter put after the 20th of a query's line (`build_pn`)."""
+    write_queries("ln.faa", {"lnq01.faa": [0, 1]})
+    back_translate(OUT / "lnq01.faa", OUT / "lnq01.fna")
+    for source, name, query, letter in (("lnq01.faa", "lnqw.faa", 1, "1"), ("lnq01.fna", "lnqw.fna", 1, "1"),
+                                        ("lnq01.faa", "lnqo0.faa", 0, "O"), ("lnq01.faa", "lnqo1.faa", 1, "O")):
+        lines = (OUT / source).read_text().splitlines()
+        lines[2 * query + 1] = lines[2 * query + 1][:20] + letter + lines[2 * query + 1][20:]
+        (OUT / name).write_text("\n".join(lines) + "\n")
+    for name in ("lnq01.faa", "lnq01.fna"):
+        (OUT / name).unlink()
 
 
 def main():

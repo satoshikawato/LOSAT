@@ -127,7 +127,10 @@
   `rpsblast` and `rpstblastn`, not compared, and made LOSAT's refusal of a tabular row where NCBI
   stops or prints an uninitialised `staxid` (these, and the `sacc`, `saccver` and `staxid` rows of
   the tables) come after the reports of the query batches before in every program, as NCBI writes
-  them (BLASTP, psiblast, TBLASTN and TBLASTX wrote none of them before); the rest of this history
+  them (BLASTP, psiblast, TBLASTN and TBLASTX wrote none of them before), and after the failing
+  batch's messages that NCBI writes to stderr before that row (its reader messages, posts and the own
+  warnings of its queries up to the row's; TBLASTN, TBLASTX and BLASTN dropped its reader messages,
+  every program its queries' own warnings); the rest of this history
   under the maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
@@ -1239,7 +1242,10 @@ id alone, with the sequence's length; the tabular formats print `Unknown` in `sa
 `sallgi` and `N/A` for an untitled line in `salltitles`, and are refused only at `sallacc` (the
 table above), after the reports of the query batches before, which NCBI writes before it stops
 there (rows `db.il.*.qab1.rej.6`, `db.il.ps.ln.qa*.rej.6`, `db.il.bp.x1.q01b1.rej.6`; so does every
-refused tabular row where NCBI stops or prints an uninitialised `staxid`, in every program).
+refused tabular row where NCBI stops or prints an uninitialised `staxid`, in every program), and after
+what NCBI writes to stderr of the failing batch before that row: the batch's reader messages, its
+search strategy posts, its UTF8String warning, its prefetch texts and the own warnings of its queries
+up to the row's (rows `db.il.*.qwb1.*.6`, `db.il.ps.ln.qwq.*.6`, `db.il.*.qo*.wrn.6`).
 
 A sequence without parsed Seq-ids or with an `lcl|Subject_N` id whose title, or the name in the
 taxonomy database from which NCBI makes an empty title or the end of a protein title ending in ` [ ]`

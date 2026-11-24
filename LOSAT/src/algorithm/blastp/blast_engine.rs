@@ -66,17 +66,24 @@ mod database;
 mod db_masked;
 // What the replay of the parallel redo's windows (`x_redo_par.rs`, built where they run) reads of
 // the one-thread loop's Smith-Waterman redo: the marks of the lists that the redo's fetch excludes
-// and the loop's reader of a query's marks, the errors of a batch and of a match, and the notes
-// that give an error the warning of a header read before it (the status of a query batch is core's
-// `smith_waterman_match::SwBatchStatus`, which both import).
+// and the loop's reader of a query's marks, the errors of a batch and of a match (with the refusal
+// or the warning of a header read before them), and the notes they read (the status of a query
+// batch is core's `smith_waterman_match::SwBatchStatus`, which both import).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(super) use {
     database::{FetchExcludedMatch, FetchNotes},
-    redo_run::{query_fetch_excluded_reached, sw_batch_failed, sw_endless},
+    redo_run::{query_fetch_excluded_reached, sw_batch_failed_after, sw_endless_after},
 };
+// The errors that the windows' tests expect (`x_redo_par_tests.rs`).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use redo_run::{sw_batch_failed, sw_endless};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
@@ -4335,22 +4342,14 @@ pub fn run(
     )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // The search strategy's request, with the archive's options handle.
-    args.strategy = strategy_file
-        .map(|file| {
-            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                file,
-                super::archive::option_inputs(&args),
-                choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs,
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.db.as_deref().map(crate::seqdb::db_argument_name),
-                &options,
-            ))
-        })
-        .transpose()?;
+    args.strategy = strategy_file.map(|file| {
+        crate::report::archive::strategy::StrategyExport::for_args(
+            &args,
+            file,
+            choice.number(),
+            &options,
+        )
+    });
     // LOSAT's thread capability is checked before any input or output, as for BLASTN.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -4946,38 +4945,30 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested {
         args.archive = super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(
-                    args,
-                    query_records,
-                    query_end,
-                    subject_records,
-                    query_label,
-                    subject_label,
-                    view,
-                )
-            });
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(
-        args,
-        query_records,
-        query_end,
-        subject_records,
-        query_label,
-        subject_label,
-        outputs,
-    )
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(
+            args,
+            query_records,
+            query_end,
+            subject_records,
+            query_label,
+            subject_label,
+            outputs,
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543
@@ -5289,23 +5280,21 @@ pub fn run_local_database(
         .formats
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     args.archive = super::archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, query_end, settings, view)
-            });
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(args, query_records, query_end, settings, outputs),
-    }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(args, query_records, query_end, settings, outputs)
+    })
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -5529,20 +5518,18 @@ fn split_option_space(batch: &[i64], context_index: usize, options_searchsp: i64
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its BLASTP does not write (`app::report_format`): the command line's
-/// checks before it opens `-out` (`run`). The formatting handler's come after
-/// (`resolve_for_formats`).
+/// rejection of a format that its BLASTP does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run`). The formatting handler's come after
+/// (`resolve_for_formats`), and so does the error of a value left to it with a search strategy
+/// file.
 fn report_formats(args: &BlastpArgs, outputs: &ReportOutputs<'_>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(
-            &choice,
-            app::Program::Blastp,
-            format.side_out(args.out.as_deref()),
-        )?;
-    }
-    Ok(())
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Blastp,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
@@ -5556,14 +5543,20 @@ fn resolve_for_formats(
     for (index, format) in outputs.formats.iter().enumerate() {
         let mut requested = args.clone();
         requested.outfmt = format.outfmt.to_string();
-        let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
+        let choice = crate::blastinput::app::early_format_choice(
+            &requested.outfmt,
+            args.export_search_strategy.is_some(),
+        )?;
         let program = crate::blastinput::app::Program::Blastp;
         let out = format.side_out(args.out.as_deref());
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
         // the XInclude formats without a file come after `Query is Empty!`, in `search`
-        // (`xinclude_format`).
-        if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
-            crate::blastinput::app::formatting_handler_check(&choice, program)?;
+        // (`xinclude_format`). A value left to the formatting handler
+        // (`app::EarlyFormat::Deferred`) fails in `check_options`, after the query options.
+        if let Some(choice) = choice.parsed() {
+            if crate::blastinput::app::report_format(choice, program, out)?.is_none() {
+                crate::blastinput::app::formatting_handler_check(choice, program)?;
+            }
         }
         // The options handlers of every format (`check_options`, also through `resolve`) make
         // the formatting handler's checks, the custom delimiter's among them.
@@ -6914,7 +6907,16 @@ fn search(
         // without letters) has its search strategy request: NCBI made its query factory before
         // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+            // NCBI's stream that throws while it writes the request (an empty descriptor of a
+            // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
+            // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
+            if let Err(error) = write_alone(span) {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
@@ -10027,6 +10029,7 @@ fn run_call(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
+            !args.ungapped,
         )?),
         None => None,
     };
@@ -10267,7 +10270,7 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
-    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches);
+    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches)?;
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {
@@ -10289,12 +10292,12 @@ fn run_call(
         rps_multi_volume,
         sorts_results,
     );
-    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
-    // subject that the seqid list keeps without a definition line (line DBID item lineless).
-    // psiblast's lists are cut to the preliminary size here; the formatter's cut to
-    // `-max_target_seqs` below takes the Seq-aligns, so such a subject takes no place there.
+    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a subject
+    // that the seqid list keeps without a definition line (line DBID item lineless; `-ungapped`:
+    // also under a negative list). psiblast's lists are cut to the preliminary size here; the
+    // formatter's cut to `-max_target_seqs` below takes the Seq-aligns: no place for it there.
     if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
-        listed.drop_unaligned(database, &mut hit_lists);
+        listed.drop_unaligned(database, &mut hit_lists, !args.ungapped);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
     // A database: the definition lines of the final hit lists are read first, where NCBI

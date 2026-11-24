@@ -1,0 +1,92 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: t
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           12 sequences; 5,020 total letters
+
+
+
+Query= pq1
+
+Length=195
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+seq9 nine local id                                                    16.5    2.4  
+
+
+>seq9 nine local id
+Length=400
+
+ Score = 16.5 bits (31),  Expect = 2.4, Method: Compositional matrix adjust.
+ Identities = 5/8 (63%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = -3
+
+Query  167  QNICHPRP  174
+             +IC PRP
+Sbjct  332  SSICPPRP  309
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.135    0.476    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 203665
+
+
+Query= pq2
+
+Length=220
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NM_000011.1 eleven                                                    18.1    0.99 
+
+
+>NM_000011.1 eleven
+Length=425
+
+ Score = 18.1 bits (35),  Expect = 0.99, Method: Compositional matrix adjust.
+ Identities = 7/19 (37%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +2
+
+Query  31   RGPSEIQIRQSTYTDWPGP  49
+            RGP   ++   ++TD  GP
+Sbjct  77   RGPGSFRLSN*SWTDNRGP  133
+
+
+
+Lambda      K        H        a         alpha
+   0.313    0.132    0.441    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 231805
+
+
+  Database: t
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 20, 2026  8:20 PM
+  Number of letters in database: 5,020
+  Number of sequences in database:  12
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

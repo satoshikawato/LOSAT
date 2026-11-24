@@ -157,6 +157,10 @@ pub struct BlastxArgs {
     /// made by its command line from its own arguments as given, with `-export_search_strategy`;
     /// `None` in every BLASTX run.
     pub(crate) request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
+    /// The search strategy export of a search of records (`local::run_local`): LOSAT Web's
+    /// `-export_search_strategy` (`web_adapter::give_strategy`). The command line makes its own
+    /// (`native::RunSetup::open`).
+    pub(crate) strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
     /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
     /// the library (`api::run`) reads from the call's application settings when a report looks
@@ -247,6 +251,7 @@ impl BlastxArgs {
             comp_based_stats: args.option_or_default("comp_based_stats")?,
             rpstblastn: Default::default(),
             request_inputs: Default::default(),
+            strategy: Default::default(),
             taxdb_setting: Default::default(),
             matrix_search: Default::default(),
             first_query_ordinal: Default::default(),

@@ -254,6 +254,9 @@ impl RpstblastnArgs {
             taxdb_setting: None,
             matrix_search: None,
             first_query_ordinal: 0,
+            // The command line's `run` makes the file (`RunSetup::open`); only LOSAT Web's
+            // records searches take it here, and they do not run RPSTBLASTN.
+            strategy: None,
             scope_refusal: None,
         })
     }

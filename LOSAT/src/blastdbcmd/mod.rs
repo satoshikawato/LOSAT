@@ -121,7 +121,9 @@ fn run_body(
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
     if args.given("show_blastdb_search_path") {
-        let _ = writeln!(out, "{}", path.as_str());
+        // NCBI inserts the path and ends the line with a flush, so the line goes out in one
+        // write.
+        let _ = out.write_all(format!("{}\n", path.as_str()).as_bytes());
         let _ = out.flush();
         return 0;
     }

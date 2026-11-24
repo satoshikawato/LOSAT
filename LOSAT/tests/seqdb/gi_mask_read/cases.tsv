@@ -1,0 +1,170 @@
+bdc_m01_info	m01	m01	-	blastdbcmd	-db	db	-info
+bdc_m01_m0	m01	m01	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m01_m1	m01	m01	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m1
+bdc_m01_m2	m01	m01	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m2
+bdc_m01_m11	m01	m01	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m11
+bdc_m01_msw_0	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	0
+bdc_m01_msw_1	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	1
+bdc_m01_msw_m1	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	m1
+bdc_m01_msw_m2	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	m2
+bdc_m01_msw_2	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	2
+bdc_m01_msw_11	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	11
+bdc_m01_msw_dust	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	dust
+bdc_m01_msw_-1	m01	m01	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1,AB000004.1	-mask_sequence_with	-1
+bdc_m01_msw1_m0	m01	m01	-	blastdbcmd	-db	db	-entry	all	-mask_sequence_with	1	-outfmt	%a %s %m0
+bdc_m01_msw0_m1	m01	m01	-	blastdbcmd	-db	db	-entry	all	-mask_sequence_with	0	-outfmt	%a %s %m1
+bdc_m01_parent_m0	m01	.	-	blastdbcmd	-db	m01/db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m01_parent_info	m01	.	-	blastdbcmd	-db	m01/db	-info
+bdc_m01_parent_msw	m01	.	-	blastdbcmd	-db	m01/db	-entry	AB000002.1	-mask_sequence_with	m1
+bdc_m01_abs_m0	m01	.	-	blastdbcmd	-db	{R}/m01/db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m01_blastdb_m0	m01	.	BLASTDB={R}/m01	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m01_blastdb_info	m01	.	BLASTDB={R}/m01	blastdbcmd	-db	db	-info
+bdc_m01_al_info	m01	m01	-	blastdbcmd	-db	al	-info
+bdc_m01_al_m0	m01	m01	-	blastdbcmd	-db	al	-entry	all	-outfmt	%o %a %g %m0
+bdc_m01_two_info	m01	m01	-	blastdbcmd	-db	db db	-info
+bdc_m01_two_m0	m01	m01	-	blastdbcmd	-db	db db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m10_info	m10	m10	-	blastdbcmd	-db	db	-info
+bdc_m10_m1	m10	m10	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m1
+bdc_m09_info	m09	m09	-	blastdbcmd	-db	db	-info
+bdc_m09_m0	m09	m09	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m09_msw_0	m09	m09	-	blastdbcmd	-db	db	-entry	all	-mask_sequence_with	0
+bdc_m03_info	m03	m03	-	blastdbcmd	-db	db	-info
+bdc_m03_msw_0	m03	m03	-	blastdbcmd	-db	db	-entry	AB000002.1	-mask_sequence_with	0
+bdc_m03_m0	m03	m03	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m06_info	m06	m06	-	blastdbcmd	-db	db	-info
+bdc_m06_m0	m06	m06	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_m06_msw_oth	m06	m06	-	blastdbcmd	-db	db	-entry	AB000002.1	-mask_sequence_with	oth
+bdc_m06n_info	m06n	m06n	-	blastdbcmd	-db	db	-info
+bdc_m07_m0	m07	m07	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_g01_m0	g01	g01	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_g02_parent_m0	g02	.	-	blastdbcmd	-db	g02/db	-entry	all	-outfmt	%o %a %g %m0
+bdc_d10_m0	d10	d10	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_d10_info	d10	d10	-	blastdbcmd	-db	db	-info
+bdc_d20_m0	d20	d20	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sp_info	sp	sp	-	blastdbcmd	-db	db	-info
+bdc_sp_m1	sp	sp	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m1
+bdc_sp_msw_b	sp	sp	-	blastdbcmd	-db	db	-entry	AB000002.1	-mask_sequence_with	b
+bdc_big_m0	big	big	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv5_info	sv5	sv5	-	blastdbcmd	-db	db	-info
+bdc_sv5_m0	sv5	sv5	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv5_msw_gm1	sv5	sv5	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1	-mask_sequence_with	gm1
+bdc_sv4_info	sv4	sv4	-	blastdbcmd	-db	db	-info
+bdc_sv4_m0	sv4	sv4	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4_msw_gm1	sv4	sv4	-	blastdbcmd	-db	db	-entry	AB000002.1,AB000008.1	-mask_sequence_with	gm1
+bdc_svp_m0	svp	svp	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_svp_info	svp	svp	-	blastdbcmd	-db	db	-info
+bn_m01_soft0_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_m01_soft0_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	0
+bn_m01_soft1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	1	-outfmt	6
+bn_m01_soft1_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	1	-outfmt	0
+bn_m01_softm1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	m1	-outfmt	6
+bn_m01_softm1_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	m1	-outfmt	0
+bn_m01_soft2_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	2	-outfmt	6
+bn_m01_soft11_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	11	-outfmt	6
+bn_m01_softnosuch_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	nosuch	-outfmt	6
+bn_m01_soft-1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	-1	-outfmt	6
+bn_m01_soft-2_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	-2	-outfmt	6
+bn_m01_hard0_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	0	-outfmt	6
+bn_m01_hard0_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	0	-outfmt	0
+bn_m01_hard1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	1	-outfmt	6
+bn_m01_hard1_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	1	-outfmt	0
+bn_m01_hardm1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	m1	-outfmt	6
+bn_m01_hardm1_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	m1	-outfmt	0
+bn_m01_hard2_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	2	-outfmt	6
+bn_m01_hard11_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	11	-outfmt	6
+bn_m01_hardnosuch_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	nosuch	-outfmt	6
+bn_m01_hard-1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	-1	-outfmt	6
+bn_m01_hard-2_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	-2	-outfmt	6
+bn_m01_softdust_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	dust	-outfmt	6
+bn_m01_plain_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-outfmt	0
+bn_m01_parent_soft0	m01	.	-	blastn	-query	{R}/q.fa	-dust	no	-db	m01/db	-db_soft_mask	0	-outfmt	6
+bn_m01_parent_plain	m01	.	-	blastn	-query	{R}/q.fa	-dust	no	-db	m01/db	-outfmt	6
+bn_m01_blastdb_soft0	m01	.	BLASTDB={R}/m01	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_m01_al_soft0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	al	-db_soft_mask	0	-outfmt	6
+bn_m01_al_plain	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	al	-outfmt	6
+bn_m01_two_hard0_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db db	-db_hard_mask	0	-outfmt	6
+bn_m01_two_soft0_f0	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db db	-db_soft_mask	0	-outfmt	0
+bn_m01_two_soft1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db db	-db_soft_mask	1	-outfmt	6
+bn_m01_two_softm1_f6	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	db db	-db_soft_mask	m1	-outfmt	6
+bn_m10_hard1_f6	m10	m10	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	1	-outfmt	6
+bn_m03_soft0_f6	m03	m03	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_m06_soft0_f0	m06	m06	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	0
+bn_m07_soft0_f6	m07	m07	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_d10_soft0_f6	d10	d10	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_d20_hard0_f6	d20	d20	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	0	-outfmt	6
+bn_sp_soft0_f6	sp	sp	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_g02_parent_soft0	g02	.	-	blastn	-query	{R}/q.fa	-dust	no	-db	g02/db	-db_soft_mask	0	-outfmt	6
+bn_sv5_soft0_f0	sv5	sv5	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	0
+bn_sv5_hard0_f6	sv5	sv5	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	gm1	-outfmt	6
+bn_sv4_soft0_f0	sv4	sv4	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	0
+bn_sv4_hard0_f6	sv4	sv4	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	gm1	-outfmt	6
+tbn_m01_plain	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
+tbx_m01_plain	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-outfmt	6
+bp_m09_plain	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
+bx_m09_plain	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-outfmt	6
+psi_m09_plain	m09	m09	-	psiblast	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
+bp_svp_plain	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
+bp_m09_soft0_f6	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+bp_m09_softpm1_f0	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	pm1	-outfmt	0
+bp_m09_hard0_f6	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+bp_m09_hardpm1_f0	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	pm1	-outfmt	0
+bp_svp_soft0_f6	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+bp_svp_softpm1_f0	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	pm1	-outfmt	0
+bp_svp_hard0_f6	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+bp_svp_hardpm1_f0	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	pm1	-outfmt	0
+bx_m09_soft0_f6	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+bx_m09_softpm1_f0	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	pm1	-outfmt	0
+bx_m09_hard0_f6	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+bx_m09_hardpm1_f0	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	pm1	-outfmt	0
+tbn_m01_soft0_f6	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbn_m01_softm1_f0	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	m1	-outfmt	0
+tbn_m01_hard0_f6	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbn_m01_hardm1_f0	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	m1	-outfmt	0
+tbn_sv5_soft0_f6	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbn_sv5_softgm1_f0	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	gm1	-outfmt	0
+tbn_sv5_hard0_f6	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbn_sv5_hardgm1_f0	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	gm1	-outfmt	0
+tbx_m01_soft0_f6	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbx_m01_softm2_f0	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	m2	-outfmt	0
+tbx_m01_hard0_f6	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbx_m01_hardm2_f0	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	m2	-outfmt	0
+tbx_sv5_soft0_f6	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbx_sv5_softgm1_f0	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	gm1	-outfmt	0
+tbx_sv5_hard0_f6	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbx_sv5_hardgm1_f0	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	gm1	-outfmt	0
+raw_m01	m01	m01	-	makeblastdb	-in	db	-input_type	blastdb	-dbtype	nucl	-out	copy
+raw_m01_info	m01	m01	-	blastdbcmd	-db	copy	-dbtype	nucl	-info
+raw_m01_m11	m01	m01	-	blastdbcmd	-db	copy	-dbtype	nucl	-entry	all	-outfmt	%a %m11
+raw_m01_m12	m01	m01	-	blastdbcmd	-db	copy	-dbtype	nucl	-entry	all	-outfmt	%a %m12
+raw_sv5	sv5	sv5	-	makeblastdb	-in	db	-input_type	blastdb	-dbtype	nucl	-out	copy
+raw_sv5_info	sv5	sv5	-	blastdbcmd	-db	copy	-dbtype	nucl	-info
+raw_sv5_m11	sv5	sv5	-	blastdbcmd	-db	copy	-dbtype	nucl	-entry	all	-outfmt	%a %m11
+raw_svp	svp	svp	-	makeblastdb	-in	db	-input_type	blastdb	-dbtype	prot	-out	copy
+raw_svp_info	svp	svp	-	blastdbcmd	-db	copy	-dbtype	prot	-info
+raw_svp_m21	svp	svp	-	blastdbcmd	-db	copy	-dbtype	prot	-entry	all	-outfmt	%a %m21
+raw_m01_hard12	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	copy	-db_hard_mask	12	-outfmt	6
+raw_m01_parent	m01	.	-	makeblastdb	-in	m01/db	-input_type	blastdb	-dbtype	nucl	-out	m01/copy_up
+raw_m01_two	m01	m01	-	makeblastdb	-in	db db	-input_type	blastdb	-dbtype	nucl	-title	t2	-out	copy2
+raw_m01_two_info	m01	m01	-	blastdbcmd	-db	copy2	-info
+bdc_wide_m0	wide	wide	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_wide_info	wide	wide	-	blastdbcmd	-db	db	-info
+bdc_wide_msw0	wide	wide	-	blastdbcmd	-db	db	-entry	WD000003.1	-mask_sequence_with	0
+bdc_sv4n12_m0	sv4n12	sv4n12	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4n15_m0	sv4n15	sv4n15	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4n42_m0	sv4n42	sv4n42	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4nx_m0	sv4nx	sv4nx	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bdc_sv4nf_m0	sv4nf	sv4nf	-	blastdbcmd	-db	db	-entry	all	-outfmt	%o %a %g %m0
+bn_sv4n42_soft0_f6	sv4n42	sv4n42	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_soft_mask	0	-outfmt	6
+bn_sv4nf_hard0_f6	sv4nf	sv4nf	-	blastn	-query	{R}/q.fa	-dust	no	-db	db	-db_hard_mask	0	-outfmt	6
+mbi_m01_id0	m01	m01	-	makembindex	-input	db	-db_mask	0	-nmer	8
+mbi_m01_show	m01	m01	-	makembindex	-input	db	-show_filters
+mbi_m01_old_m1	m01	m01	-	makembindex	-old_style_index	true	-iformat	blastdb	-output	o	-input	db	-db_mask	m1	-nmer	8
+mbi_m01_old_show	m01	m01	-	makembindex	-old_style_index	true	-iformat	blastdb	-input	db	-show_filters
+mbi_sv5_id0	sv5	sv5	-	makembindex	-input	db	-db_mask	0	-nmer	8
+mbi_sv5_gm1	sv5	sv5	-	makembindex	-input	db	-db_mask	gm1	-nmer	8
+mbi_sv5_nosuch	sv5	sv5	-	makembindex	-input	db	-db_mask	nosuch	-nmer	8
+mbi_sv5_id7	sv5	sv5	-	makembindex	-input	db	-db_mask	7	-nmer	8
+mbi_sv5_show	sv5	sv5	-	makembindex	-input	db	-show_filters
+mbi_sv5_old_gm1	sv5	sv5	-	makembindex	-old_style_index	true	-iformat	blastdb	-output	o	-input	db	-db_mask	gm1	-nmer	8
+mbi_sv5_parent	sv5	.	-	makembindex	-input	sv5/db	-db_mask	0	-nmer	8
+mbi_d10_old0	d10	d10	-	makembindex	-old_style_index	true	-iformat	blastdb	-output	o	-input	db	-db_mask	0	-nmer	8

@@ -21,8 +21,8 @@
 // filters) are the files of the instance's working directory for that run (run-directory.ts), which the
 // engine opens by name and reads in place; a run of -db takes no subject (line WQA D12a, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
-import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase, type ToolValidation } from '../../ports/engine.js';
+import { namedRunFiles, readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
+import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase, type StartInfo, type ToolValidation } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
@@ -374,9 +374,9 @@ export class EngineRuntime {
         // stop does neither (the chunks before a trap are discarded, ABI v2 §4).
         if (abi.stoppedBy !== undefined) throw error;
         writer.fail();
-        throw failedWithFiles(error, archive);
+        throw failedWithFiles(error, archive, started.start);
       }
-      const runFiles = readRunFiles(archive);
+      const runFiles = readRunFiles(archive, started.start);
       if (messages === undefined) throw new Error(`the engine did not say where the messages of the run go (stream ${MESSAGES_STREAM})`);
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
@@ -655,8 +655,11 @@ function joined(chunks: readonly Uint8Array[]): Uint8Array {
   return bytes;
 }
 
-/** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
-function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
+/**
+ * The files of a run's archive (stream 8, in chunks), each with the option that named it in the
+ * argv's *start* `start` (`namedRunFiles`); none when the run sent none.
+ */
+function readRunFiles(chunks: readonly Uint8Array[], start: StartInfo): RunFile[] {
   if (chunks.length === 0) return [];
   const archive = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
   let offset = 0;
@@ -664,7 +667,7 @@ function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
     archive.set(chunk, offset);
     offset += chunk.length;
   }
-  return readStoredZip(archive);
+  return namedRunFiles(readStoredZip(archive), start);
 }
 
 /**
@@ -672,12 +675,12 @@ function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
  * (`withRunOutputFailed`), with the files that the run made (`withRunFiles`). An archive that cannot
  * be read is told after the run's error, which stays the run's.
  */
-function failedWithFiles(error: unknown, chunks: readonly Uint8Array[]): unknown {
+function failedWithFiles(error: unknown, chunks: readonly Uint8Array[], start: StartInfo): unknown {
   if (!(error instanceof Error)) return error;
   const failed = withRunOutputFailed(error);
   let runFiles: RunFile[];
   try {
-    runFiles = readRunFiles(chunks);
+    runFiles = readRunFiles(chunks, start);
   } catch (unreadable) {
     failed.message = `${failed.message} (${messageOf(unreadable)})`;
     return failed;

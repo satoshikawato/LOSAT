@@ -16,7 +16,7 @@ import {
   type StartResult,
   type ValidationResult,
 } from 'losat/ports';
-import { Coordinator, type SearchRequest } from '../../src/application/coordinator';
+import { Coordinator, isToolRun, type RunView, type SearchRequest } from '../../src/application/coordinator';
 import type { RunStatus } from '../../src/domain/run';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -67,8 +67,10 @@ function setup(
   return { coordinator, data, store, saved };
 }
 
-const viewOf = (coordinator: Coordinator, runId: string) =>
-  coordinator.state.get().runs.find((run) => run.snapshot.runId === runId);
+const viewOf = (coordinator: Coordinator, runId: string): RunView | undefined => {
+  const run = coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId);
+  return run !== undefined && !isToolRun(run) ? run : undefined;
+};
 const statusOf = (coordinator: Coordinator, runId: string): RunStatus | undefined => viewOf(coordinator, runId)?.status;
 
 function waitFor(coordinator: Coordinator, runId: string, status: RunStatus): Promise<void> {
@@ -91,7 +93,7 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
   private readonly pending = new Map<
     string,
     { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
@@ -180,7 +182,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {

@@ -24,6 +24,10 @@ pub use reader::ArgvError;
 mod stdio_buffer;
 pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
+// The process's standard output with no buffer of Rust's, under the command line's writers.
+mod standard_output;
+pub(crate) use standard_output::standard_output;
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it.
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
@@ -677,6 +681,22 @@ impl NativeError {
             exit: 255,
             message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384 (cited at
+    // `report::serial::encoder::NullElement`)
+    /// The end of a run whose ASN.1 text stream threw at an element that holds no object
+    /// (`encoder::NullElement`, the application `application`): the stream's post of its first
+    /// failure, then `CATCH_ALL`'s report of the exception (`exception`, exit status 255).
+    pub(crate) fn null_element(
+        application: &str,
+        thrown: &crate::report::serial::encoder::NullElement,
+    ) -> NativeError {
+        let mut error = Self::exception(&thrown.exception());
+        let mut message = thrown.post(Some(application));
+        message.append(&mut error.message);
+        error.message = message;
+        error
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263

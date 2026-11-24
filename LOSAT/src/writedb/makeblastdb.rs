@@ -6,7 +6,7 @@
 use crate::wording::DATABASE_ERROR;
 use std::io::{BufRead, Read, Write};
 
-use super::build_db::BuildDatabase;
+use super::build_db::{endl, BuildDatabase};
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::mask_data::process::{process_mask_data, MaskDataOptions};
@@ -759,11 +759,12 @@ fn build_database_with_log(
         db.set_oid_masks(oid_masks as u64);
     }
     let max_file_size = max_file_size(args)?;
-    let _ = writeln!(
+    let _ = write!(
         db.log(),
         "Maximum file size: {}",
         uint8_to_string_data_size(max_file_size)
     );
+    endl(db.log());
     db.set_max_file_size(max_file_size);
     let (taxids, stdin_map) = read_taxids(args, stdin, err)?;
     if let Some(taxids) = taxids {
@@ -1174,17 +1175,21 @@ fn add_fasta(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1171
-// Every line of the log ends with `endl`, which flushes the stream, so the
-// log and the messages of the standard error stream reach a common
-// destination (`2>&1`) in the order of the events. The standard output of
-// the Rust library is line buffered whatever it is connected to; the log
-// goes to it without another buffer.
+// The log is `cout`, and every line of it ends with a new line and a flush (`build_db::endl`),
+// so the log and the messages of the standard error stream reach a common destination (`2>&1`)
+// in the order of the events. `CoutLog` writes it as NCBI's `cout` (`writedb::cout`) over the
+// process's standard output with no buffer of Rust's (`cli::standard_output`). The buffer
+// writes a line where NCBI's does, a write that fails loses what the buffer held, and the
+// stream writes nothing after it (`badbit`; line RG item KC-11b-2).
 /// Runs `losat makeblastdb` with the settings of its application start and returns the exit code.
 pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
     let stderr = std::io::stderr();
-    let mut out = stdout.lock();
+    let mut device = crate::cli::standard_output();
+    let mut out = CoutLog(super::cout::cout(
+        &mut device,
+        crate::cli::NcbiStdio::cout(),
+    ));
     let mut err = stderr.lock();
     let now = LocalTime::now();
     let status = run_with(
@@ -1196,8 +1201,26 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
         &mut out,
         &mut err,
     );
+    // The exit's flush of `cout`.
     let _ = out.flush();
     status
+}
+
+/// makeblastdb's log on NCBI's `cout`: a write is an insertion, a flush is the stream's flush
+/// (the end of each line, `build_db::endl`). The stream's state is not reported: NCBI's
+/// makeblastdb does not read it.
+struct CoutLog<'a>(super::cout::Cout<'a>);
+
+impl Write for CoutLog<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.insert(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush();
+        Ok(())
+    }
 }
 
 /// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes: `None` when the

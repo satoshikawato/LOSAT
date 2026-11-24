@@ -342,3 +342,100 @@ fn errors_end_with_makeblastdb_s_exit_codes_and_prefixes() {
         assert_eq!(error.to_string(), text);
     }
 }
+
+/// A device that records each write and fails the writes whose numbers (from 1) are listed,
+/// once each, with `EAGAIN` (a failure that passes).
+struct Writes {
+    writes: Vec<Vec<u8>>,
+    fail: Vec<usize>,
+    count: usize,
+}
+
+impl Write for Writes {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.count += 1;
+        if self.fail.contains(&self.count) {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        self.writes.push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Writes the first lines of a log as `BuildDatabase::new` inserts them, with a title of
+/// `title`.
+fn write_log_head(log: &mut dyn Write, title: &[u8]) {
+    let (time, name) = ("T", "/d/x");
+    let _ = write!(log, "\n\nBuilding a new DB, current time: {time}");
+    super::super::build_db::endl(log);
+    let _ = write!(log, "New DB name:   {name}");
+    super::super::build_db::endl(log);
+    let _ = log
+        .write_all(b"New DB title:  ")
+        .and_then(|()| log.write_all(title));
+    super::super::build_db::endl(log);
+    let _ = write!(log, "Keep MBits: T");
+    super::super::build_db::endl(log);
+    super::super::build_db::endl(log);
+}
+
+/// The log on standard output (a pipe or a file) as NCBI's `cout`, over `device`.
+fn cout_log(device: &mut Writes) -> CoutLog<'_> {
+    let stream = crate::cli::NcbiStdio::Cout {
+        block: 4096,
+        lines: false,
+    };
+    CoutLog(super::super::cout::cout(device, stream))
+}
+
+/// The log on standard output is NCBI's `cout` with a flush at each line's end: a pipe or a
+/// file gets each line in one write, a title with a new line in it included (line RG item
+/// KC-11b-2).
+#[test]
+fn each_line_of_the_log_reaches_standard_output_in_one_write() {
+    for (title, line) in [
+        (b"x.fa".as_slice(), b"New DB title:  x.fa\n".as_slice()),
+        (b"t\n", b"New DB title:  t\n\n"),
+    ] {
+        let mut device = Writes {
+            writes: Vec::new(),
+            fail: Vec::new(),
+            count: 0,
+        };
+        let mut log = cout_log(&mut device);
+        write_log_head(&mut log, title);
+        log.flush().unwrap();
+        drop(log);
+        let lines: Vec<&[u8]> = vec![
+            b"\n\nBuilding a new DB, current time: T\n",
+            b"New DB name:   /d/x\n",
+            line,
+            b"Keep MBits: T\n",
+            b"\n",
+        ];
+        assert_eq!(device.writes, lines);
+    }
+}
+
+/// A write of the log that fails loses its line, and the stream writes nothing after it
+/// (`badbit`), even where the device takes the later writes (line RG item KC-11b-2).
+#[test]
+fn after_a_failed_write_the_log_writes_nothing() {
+    for failed in 1..=5 {
+        let mut device = Writes {
+            writes: Vec::new(),
+            fail: vec![failed],
+            count: 0,
+        };
+        let mut log = cout_log(&mut device);
+        write_log_head(&mut log, b"x.fa");
+        log.flush().unwrap();
+        drop(log);
+        assert_eq!(device.count, failed, "write {failed}");
+        assert_eq!(device.writes.len(), failed - 1, "write {failed}");
+    }
+}

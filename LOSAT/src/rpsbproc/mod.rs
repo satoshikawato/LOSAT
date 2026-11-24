@@ -334,7 +334,7 @@ pub(crate) fn write_stderr_bytes(bytes: &[u8]) {
 /// Writes `text` (help or version) to standard output; a failed write ends LOSAT as a failed
 /// write of the report does (exception 9).
 pub(crate) fn write_stdout(text: &str) {
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = crate::cli::standard_output();
     if let Err(error) = stdout
         .write_all(text.as_bytes())
         .and_then(|()| stdout.flush())
@@ -747,7 +747,7 @@ fn init(
         }
     };
     header.extend_from_slice(b"\n#Output data file:");
-    let mut out: Box<dyn Write> = Box::new(std::io::stdout());
+    let mut out: Box<dyn Write> = Box::new(crate::cli::standard_output());
     if let Some(outfile) = &args.outfile {
         match std::fs::File::create(outfile) {
             Ok(file) => {

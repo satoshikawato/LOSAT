@@ -150,8 +150,11 @@ fn run_main_entry() -> Result<()> {
         }
         match crate::cli::install_shims(argv.get(2).map(std::ffi::OsString::as_os_str)) {
             Ok(paths) => {
+                // The names made, a line each, as the help text goes out (a failed write drops
+                // the line; the shims are made).
+                let mut out = crate::cli::standard_output();
                 for path in paths {
-                    println!("{}", path.display());
+                    write_dropping_errors(&mut out, &format!("{}\n", path.display()));
                 }
                 return Ok(());
             }
@@ -183,7 +186,7 @@ fn run_main_entry() -> Result<()> {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
         } else {
-            write_dropping_errors(&mut std::io::stdout(), &text);
+            write_dropping_errors(&mut crate::cli::standard_output(), &text);
         }
         return Ok(());
     }
@@ -205,7 +208,7 @@ fn run_main_entry() -> Result<()> {
         let top_level = crate::cli::top_level(&argv);
         match top_level.error {
             true => write_dropping_errors(&mut std::io::stderr(), &top_level.text),
-            false => write_dropping_errors(&mut std::io::stdout(), &top_level.text),
+            false => write_dropping_errors(&mut crate::cli::standard_output(), &top_level.text),
         }
         std::process::exit(top_level.status);
     };
@@ -229,7 +232,7 @@ fn run_main_entry() -> Result<()> {
     let read = crate::ncbi_app::read(
         tool,
         &words,
-        &mut std::io::stdout().lock(),
+        &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
     );

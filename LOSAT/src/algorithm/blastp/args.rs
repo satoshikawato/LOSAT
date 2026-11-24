@@ -318,8 +318,8 @@ pub struct BlastpArgs {
     /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
     /// reads the arguments (`archive::handle_for`).
     pub archive: Option<crate::report::archive::ArchiveHandle>,
-    /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`strategy::StrategyExport::for_run`).
+    /// The run's search strategy export (`-export_search_strategy`), made by `run` and by LOSAT
+    /// Web's `web_adapter::give_strategy` (`strategy::StrategyExport::for_args`).
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The recorded options of the search strategy's requests of an application whose search is
     /// BLASTP's (psiblast, rpsblast: `archive::option_inputs`), made by its command line from its

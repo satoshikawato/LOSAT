@@ -965,4 +965,147 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(enqueued[0]!.argv).toContain('7');
     expect(enqueued[0]!.argv).not.toContain('6');
   });
+
+  it('holds submit session-file tokens before buildStageRequests awaits so Remove during combine or -ustat lookup does not drop early', async () => {
+    // Part A: Remove clicked while combineFastaFiles awaits reading the tail byte of an inflated .gz file.
+    const { data } = makeData();
+    const dropped: string[] = [];
+    const origDrop = data.dropSessionFile.bind(data);
+    data.dropSessionFile = async (token: string) => {
+      dropped.push(token);
+      await origDrop(token);
+    };
+
+    let releaseSlice!: () => void;
+    let sliceWaiting = false;
+    const sliceGate = new Promise<void>((resolve) => {
+      releaseSlice = resolve;
+    });
+    const origInflate = data.inflateToSessionFile.bind(data);
+    data.inflateToSessionFile = async (file: File) => {
+      const ref = await origInflate(file);
+      if (ref.token === undefined) return ref;
+      const realFile = ref.file;
+      const origSlice = realFile.slice.bind(realFile);
+      realFile.slice = ((start?: number, end?: number, contentType?: string) => {
+        const sliced = origSlice(start, end, contentType);
+        const origArrayBuffer = sliced.arrayBuffer.bind(sliced);
+        sliced.arrayBuffer = async () => {
+          sliceWaiting = true;
+          await sliceGate;
+          return origArrayBuffer();
+        };
+        return sliced;
+      }) as typeof realFile.slice;
+      return ref;
+    };
+
+    const base = new FakeEngine();
+    const runGates: Array<() => void> = [];
+    const readTexts: string[] = [];
+    const engine = stubEngine(base, {
+      async runTool(argv, opts) {
+        await new Promise<void>((resolve) => runGates.push(resolve));
+        for (const entry of opts?.directory ?? []) {
+          readTexts.push(`${entry.name}:${await entry.file.text()}`);
+        }
+        return base.runTool(argv, opts);
+      },
+    });
+    const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
+    let id = 0;
+    const coordinator = new Coordinator({
+      engine,
+      data,
+      downloader: { save: () => undefined },
+      now: () => 10_000,
+      newRunId: () => `comb-${++id}`,
+      digest: sha256Hex,
+      sessionFiles,
+    });
+    const enqueue = (reqs: readonly ToolRequest[]) => coordinator.enqueueToolAll(reqs);
+    const busy = () => coordinator.isBusy();
+    const draft = new ToolDraft({ engine, data, enqueueToolAll: enqueue, isBusy: busy, sessionFiles, debounceMs: 0 });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    draft.addFastaFiles([
+      new File([gzipSync('>first\nACGT')], 'first.fa.gz'),
+      new File(['>second\nTGCA\n'], 'second.fa'),
+    ]);
+    for (let i = 0; i < 40 && draft.state.get().fastaFiles.some((f) => f.status !== 'ready'); i++) await sleep(10);
+    const firstEntry = draft.state.get().fastaFiles[0]!;
+    const firstTok = firstEntry.sessionToken!;
+    expect(firstTok).toBeDefined();
+
+    const submitCombine = draft.submit();
+    for (let i = 0; i < 40 && !sliceWaiting; i++) await sleep(10);
+    expect(sliceWaiting).toBe(true);
+
+    // User clicks Remove on first.fa.gz while combineFastaFiles is awaiting its tail byte.
+    draft.removeFastaFile(firstEntry.key);
+    expect(dropped).toEqual([]);
+
+    releaseSlice();
+    const combineRes = await submitCombine;
+    expect(combineRes.ok).toBe(true);
+    expect(dropped.length).toBe(0);
+
+    await nextGate(runGates);
+    const combineRun = await waitTerminal(coordinator, combineRes.runIds![0]!);
+    expect(combineRun.status).toBe('completed');
+    expect(readTexts).toContain('combined_input.fa:>first\nACGT\n>second\nTGCA\n');
+    expect(dropped).toEqual([firstTok]);
+
+    // Part B: Remove clicked while Mask stage awaits reading the -ustat saved counts file.
+    let releaseUstat!: () => void;
+    let ustatWaiting = false;
+    const ustatGate = new Promise<void>((resolve) => {
+      releaseUstat = resolve;
+    });
+    const maskDraft = new ToolDraft({
+      engine,
+      data: {
+        inflateToSessionFile: (file) => origInflate(file),
+        dropSessionFile: (token) => data.dropSessionFile(token),
+        getToolOutputFile: (runId, key, name) => data.getToolOutputFile(runId, key, name),
+      },
+      enqueueToolAll: enqueue,
+      isBusy: busy,
+      readSavedCounts: async () => {
+        ustatWaiting = true;
+        await ustatGate;
+        return new File(['counts'], 'wmasker.obinary');
+      },
+      sessionFiles,
+      debounceMs: 0,
+    });
+    maskDraft.ensureLoaded();
+    await sleep(20);
+    maskDraft.setStage('mask');
+    maskDraft.setUstatSaved(562, 6);
+    maskDraft.addFastaFiles([new File([gzipSync('>mask_in\nACGT\n')], 'mask.fa.gz')]);
+    for (let i = 0; i < 40 && maskDraft.state.get().fastaFiles[0]?.status !== 'ready'; i++) await sleep(10);
+    const maskEntry = maskDraft.state.get().fastaFiles[0]!;
+    const maskTok = maskEntry.sessionToken!;
+    expect(maskTok).toBeDefined();
+
+    const submitMask = maskDraft.submit();
+    for (let i = 0; i < 40 && !ustatWaiting; i++) await sleep(10);
+    expect(ustatWaiting).toBe(true);
+
+    maskDraft.removeFastaFile(maskEntry.key);
+    expect(dropped).toEqual([firstTok]);
+
+    releaseUstat();
+    const maskRes = await submitMask;
+    expect(maskRes.ok).toBe(true);
+    expect(dropped.length).toBe(1);
+
+    await nextGate(runGates);
+    const maskRun = await waitTerminal(coordinator, maskRes.runIds![0]!);
+    expect(maskRun.status).toBe('completed');
+    expect(readTexts).toContain('mask.fa:>mask_in\nACGT\n');
+    expect(dropped).toEqual([firstTok, maskTok]);
+  });
 });

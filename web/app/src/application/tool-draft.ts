@@ -475,48 +475,54 @@ export class ToolDraft {
       // Re-read the draft state after awaiting validation (same order as SearchDraft.prepareAndEnqueue)
       // so changes that arrived during the await (an inflate finishing, an option changing) are used.
       const state = this.state.get();
-      let extraWords: readonly string[];
-      try {
-        extraWords = this.parseExtra(state);
-      } catch (error) {
-        const message = errorMessage(error);
-        this.reportError(message);
-        return { ok: false, message };
-      }
-
-      const currentKey = this.validationKey(state);
-      const validated = state.validation;
-      if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
-        const text = toolValidationSummary(validated.message);
-        this.reportError(text);
-        return { ok: false, message: text };
-      }
-
-      const preview = this.buildArgv(state, extraWords);
-      const prints = toolPrintsKind(preview);
-
-      const requests = prints !== null
-        ? [this.buildPrintRequest(state, extraWords, prints)]
-        : await this.buildStageRequests(state, extraWords);
-
+      // Hold every inflated session file token before any await inside buildStageRequests
+      // (such as -ustat/-in lookup or combineFastaFiles tail reads) so clicking Remove during
+      // submission cannot drop an OPFS session file out from under the submission.
       const submitHolder = `submit:${this.nextKey++}`;
-      const tokens = requests.flatMap((request) => request.sessionTokens ?? []);
-      if (tokens.length > 0) this.sessionFiles.set(submitHolder, tokens);
-      let result: EnqueueAllResult;
+      const stateTokens = state.fastaFiles.flatMap((entry) => (entry.sessionToken === undefined ? [] : [entry.sessionToken]));
+      if (stateTokens.length > 0) this.sessionFiles.set(submitHolder, stateTokens);
       try {
-        result = await this.deps.enqueueToolAll(requests);
+        let extraWords: readonly string[];
+        try {
+          extraWords = this.parseExtra(state);
+        } catch (error) {
+          const message = errorMessage(error);
+          this.reportError(message);
+          return { ok: false, message };
+        }
+
+        const currentKey = this.validationKey(state);
+        const validated = state.validation;
+        if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
+          const text = toolValidationSummary(validated.message);
+          this.reportError(text);
+          return { ok: false, message: text };
+        }
+
+        const preview = this.buildArgv(state, extraWords);
+        const prints = toolPrintsKind(preview);
+
+        const requests = prints !== null
+          ? [this.buildPrintRequest(state, extraWords, prints)]
+          : await this.buildStageRequests(state, extraWords);
+
+        const requestTokens = requests.flatMap((request) => request.sessionTokens ?? []);
+        if (requestTokens.length > 0) {
+          this.sessionFiles.set(submitHolder, new Set([...stateTokens, ...requestTokens]));
+        }
+        const result = await this.deps.enqueueToolAll(requests);
+        if (!result.ok) {
+          const text = toolValidationSummary(result.message);
+          this.set({
+            validation: { state: 'invalid', message: result.message },
+            message: { kind: 'error', text },
+          });
+          return { ok: false, message: text };
+        }
+        return result;
       } finally {
         this.sessionFiles.release(submitHolder);
       }
-      if (!result.ok) {
-        const text = toolValidationSummary(result.message);
-        this.set({
-          validation: { state: 'invalid', message: result.message },
-          message: { kind: 'error', text },
-        });
-        return { ok: false, message: text };
-      }
-      return result;
     } catch (error) {
       const message = failureText(error);
       this.reportError(message);

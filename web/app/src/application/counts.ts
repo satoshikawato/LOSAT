@@ -64,6 +64,41 @@ export function originOf(copy: CountsCopy): CountsOrigin {
   return { kind: 'downloaded', taxid: copy.taxid, url: copy.url, lastModified: copy.lastModified };
 }
 
+/** Identity of a browser-made counts copy saved from a tool run output tab. */
+export interface SavedTabCopy {
+  readonly taxid: number;
+  readonly run: number;
+  readonly madeAt: number;
+  readonly size: number;
+}
+
+/** Captures the identity of a saved browser-made counts copy for `ToolRunView`. */
+export function savedTabCopyOf(copy: CountsCopy): SavedTabCopy | undefined {
+  if (copy.made === undefined) return undefined;
+  return { taxid: copy.taxid, run: copy.made.run, madeAt: copy.made.madeAt, size: copy.size };
+}
+
+/**
+ * Returns `saved.taxid` only while `stored` is still that exact saved copy (same taxonomy ID,
+ * `made.run`, `madeAt`, and `size`). Returns `undefined` when another run or an NCBI download
+ * replaced the copy or it was deleted, so "Use in BLASTN" uses the run's own file instead.
+ */
+export function activeSavedCountsTaxid(
+  saved: SavedTabCopy | undefined,
+  stored: CountsCopy | null | undefined,
+): number | undefined {
+  if (saved === undefined || stored == null || !stored.complete || stored.made === undefined) return undefined;
+  if (
+    stored.taxid !== saved.taxid ||
+    stored.made.run !== saved.run ||
+    stored.made.madeAt !== saved.madeAt ||
+    stored.size !== saved.size
+  ) {
+    return undefined;
+  }
+  return saved.taxid;
+}
+
 /** A downloaded copy counts only if its URL matches this release's NCBI URL; made copies always count. */
 function accepted(saved: SavedCounts | undefined, taxid: number): SavedCounts | undefined {
   if (saved === undefined) return undefined;

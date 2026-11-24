@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { sha256Hex } from 'losat';
 import type { ReactorAbi } from 'losat';
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from 'losat/domain';
-import { CountsLoader } from '../../src/application/counts';
+import { activeSavedCountsTaxid, CountsLoader, savedTabCopyOf } from '../../src/application/counts';
 import { Coordinator, isToolRun, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
@@ -723,6 +723,33 @@ describe('CountsLoader', () => {
     expect(otherDraft.has(562)).toBe(false);
     expect(other.state.get().saved[562]).toBeNull();
     expect(other.state.get().list).toEqual([]);
+  });
+
+  it('offers the saved taxonomy ID for "Use in BLASTN" only while the stored copy matches the saved run identity', async () => {
+    const { loader } = setup({ files: { 562: COUNTS } });
+    const stored = () => loader.state.get().saved[562];
+
+    // Run 1 saves its counts for 562 -> activeSavedCountsTaxid offers 562.
+    const r1 = await loader.saveMade(562, new File([bytesOf(300, 1)], 'r1.obinary'), madeMeta(1));
+    expect(r1.ok).toBe(true);
+    const run1Saved = r1.ok ? savedTabCopyOf(r1.copy) : undefined;
+    expect(run1Saved).toEqual({ taxid: 562, run: 1, madeAt: MADE_AT, size: 300 });
+    expect(activeSavedCountsTaxid(run1Saved, stored())).toBe(562);
+
+    // Run 2 replaces 562 (even with identical size and madeAt) -> Run 1 falls back to its own file, Run 2 offers 562.
+    const r2 = await loader.saveMade(562, new File([bytesOf(300, 2)], 'r2.obinary'), madeMeta(2), { replace: true });
+    expect(r2.ok).toBe(true);
+    const run2Saved = r2.ok ? savedTabCopyOf(r2.copy) : undefined;
+    expect(activeSavedCountsTaxid(run1Saved, stored())).toBeUndefined();
+    expect(activeSavedCountsTaxid(run2Saved, stored())).toBe(562);
+
+    // Deleting or replacing with an NCBI download invalidates Run 2's saved taxonomy ID too.
+    await loader.delete(562);
+    expect(activeSavedCountsTaxid(run2Saved, stored())).toBeUndefined();
+    loader.download(562);
+    await loader.idle();
+    expect(stored()?.complete).toBe(true);
+    expect(activeSavedCountsTaxid(run2Saved, stored())).toBeUndefined();
   });
 });
 

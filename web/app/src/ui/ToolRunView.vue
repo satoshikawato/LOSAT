@@ -6,7 +6,7 @@
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
 // "Mask with these counts".
 import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue';
-import type { CountsLoader } from '../application/counts';
+import { activeSavedCountsTaxid, savedTabCopyOf, type CountsLoader, type SavedTabCopy } from '../application/counts';
 import type { Coordinator, SessionCountsEntry, ToolRunView } from '../application/coordinator';
 import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
 import type { ToolFileOrigin, ToolOutputEntry } from '../domain/run';
@@ -103,7 +103,7 @@ const saveTaxidText = ref('');
 const saving = ref(false);
 const saveError = ref<string | undefined>();
 const saveStatus = ref<string | undefined>();
-const savedByTab = ref<Readonly<Record<string, number>>>({});
+const savedByTab = ref<Readonly<Record<string, SavedTabCopy>>>({});
 const saveButton = ref<HTMLButtonElement | null>(null);
 const pendingReplace = shallowRef<
   | {
@@ -121,10 +121,9 @@ let readToken = 0;
 const activeSavedTaxid = computed(() => {
   const key = activeTab.value?.key;
   if (key === undefined) return undefined;
-  const taxid = savedByTab.value[`${props.run.snapshot.runId}:${key}`];
-  if (taxid === undefined) return undefined;
-  const copy = countsState?.value.saved[taxid];
-  return copy?.complete === true ? taxid : undefined;
+  const saved = savedByTab.value[`${props.run.snapshot.runId}:${key}`];
+  if (saved === undefined) return undefined;
+  return activeSavedCountsTaxid(saved, countsState?.value.saved[saved.taxid]);
 });
 
 watch(
@@ -219,7 +218,7 @@ async function saveForTaxid(): Promise<void> {
     };
     const result = await counts.saveMade(taxid, file, made, { replace: false });
     if (result.ok) {
-      finishSave(tab.key, taxid, result.kept);
+      finishSave(tab.key, result.copy, result.kept);
       return;
     }
     if (result.reason === 'exists') {
@@ -247,7 +246,7 @@ async function confirmReplace(): Promise<void> {
   try {
     const result = await counts.saveMade(pending.taxid, pending.file, pending.made, { replace: true });
     if (result.ok) {
-      finishSave(pending.tabKey, pending.taxid, result.kept);
+      finishSave(pending.tabKey, result.copy, result.kept);
     } else if (result.reason !== 'exists') {
       saveError.value = result.message;
       announce(result.message, 'alert');
@@ -268,11 +267,14 @@ async function cancelReplace(): Promise<void> {
   saveButton.value?.focus();
 }
 
-function finishSave(tabKey: string, taxid: number, kept: boolean): void {
-  savedByTab.value = { ...savedByTab.value, [`${props.run.snapshot.runId}:${tabKey}`]: taxid };
+function finishSave(tabKey: string, copy: CountsCopy, kept: boolean): void {
+  const identity = savedTabCopyOf(copy);
+  if (identity !== undefined) {
+    savedByTab.value = { ...savedByTab.value, [`${props.run.snapshot.runId}:${tabKey}`]: identity };
+  }
   const text = kept
-    ? `Saved for taxonomy ID ${taxid}.`
-    : `Kept in this tab only for taxonomy ID ${taxid}.`;
+    ? `Saved for taxonomy ID ${copy.taxid}.`
+    : `Kept in this tab only for taxonomy ID ${copy.taxid}.`;
   saveStatus.value = text;
   announce(text);
 }

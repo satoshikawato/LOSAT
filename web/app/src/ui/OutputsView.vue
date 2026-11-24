@@ -8,7 +8,7 @@
 // its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles). A run that printed the command line's help or
 // version in place of a search has that text as its one output, "Help" or "Version" (PrintedText; line WQA's D14, 2026-11-20).
 import { computed, ref, useId, watch } from 'vue';
-import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader, OutputSaver } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
@@ -87,7 +87,7 @@ const tabs = computed(() => [
     : [
         {
           value: FILES as Tab,
-          label: `-logfile ${runFiles.value.map((file) => file.name).join(', ')}`,
+          label: runFiles.value.map((file) => `-${runFileOption(file)} ${file.name}`).join(', '),
           testid: 'format-run-files',
           id: `${ids}-tab-${FILES}`,
           panel: `${ids}-panel`,

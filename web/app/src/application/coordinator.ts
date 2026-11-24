@@ -17,6 +17,7 @@ import {
   type FastaReader,
   type PrintedKind,
   type ProgramId,
+  runFileOption,
   type RunFile,
   type RunOutput,
 } from 'losat/domain';
@@ -518,8 +519,9 @@ export class Coordinator {
   }
 
   /**
-   * Saves a file that a run made besides its outputs (RunRecord.runFiles: the file of `-logfile`), its
-   * bytes as the engine wrote them, named by runFileName. A failed run keeps its files too.
+   * Saves a file that a run made besides its outputs (RunRecord.runFiles: the file of `-logfile`, the
+   * search strategy file of `-export_search_strategy`), its bytes as the engine wrote them, named by
+   * runFileName. A failed run keeps its files too.
    */
   async exportRunFile(runId: string, index: number): Promise<void> {
     const view = this.findSearch(runId);
@@ -527,7 +529,7 @@ export class Coordinator {
     if (view === undefined || file === undefined) throw new Error('the run has no such file');
     const { number, program, argv, queuedAt } = view.snapshot;
     const task = await this.taskOf(view.snapshot);
-    this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
+    this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name, runFileOption(file)), file.bytes, 'text/plain');
   }
 
   /**

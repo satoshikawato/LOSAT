@@ -592,3 +592,45 @@ test('a dry run says that it searched nothing', async ({ page, browserName }) =>
   await page.getByTestId('format-run-files').click();
   await expect(page.getByTestId('run-file-0').getByTestId('run-file-empty')).toHaveText('The file is empty.');
 });
+
+// The search strategy file of -export_search_strategy (line RG item F1w; ABI v2 §5 stream 8) is a file of the run as the
+// file of -logfile is: shown under its option after the formats and saved as the CLI writes it. A name that the CLI
+// cannot open is NCBI's error before the run, as on the command line.
+test('the file of -export_search_strategy is a file of the run, saved as the CLI writes it', async ({ page, browserName }, testInfo) => {
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the file: ${NO_NATIVE_REASON}` });
+  await program(page, 'blastn');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  const extra = page.getByTestId('param-extra');
+  await extra.fill('-export_search_strategy /etc/s.asn');
+  const validation = page.getByTestId('argv-validation');
+  await expect(validation).toHaveAttribute('data-state', 'invalid');
+  await expect(validation).toContainText('Argument "export_search_strategy". File is not accessible:  `/etc/s.asn\'');
+  await extra.fill('-export_search_strategy out/s.asn -logfile run.log');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  const tab = page.getByTestId('format-run-files');
+  await expect(tab).toHaveText('-export_search_strategy out/s.asn, -logfile run.log');
+  await tab.click();
+  const file = page.getByTestId('run-file-0');
+  await expect(file.getByTestId('run-file-name')).toHaveText('out/s.asn');
+  await expect(file.getByTestId('run-file-text')).toContainText('Blast4-request ::= {');
+  await shoot(page.getByTestId('results-outputs'), '09-outputs-strategy', browserName);
+  const saved = await downloaded(page, () => page.getByTestId('run-file-download-0').click());
+  expect(saved.name).toMatch(/^losat-run1-blastn-.*Z\.export_search_strategy\.out_s\.asn$/);
+  await page.getByTestId('results-download-all').click();
+  const item = page.getByTestId('results-download-menu').getByTestId('results-download-run-file-0');
+  await expect(item).toHaveText('out/s.asn (-export_search_strategy)');
+  expect(await downloaded(page, () => item.click())).toEqual(saved);
+  if (NATIVE !== undefined) {
+    const directory = nativeDirectory(QUERY, SUBJECT);
+    mkdirSync(join(directory, 'out'));
+    const cli = spawnSync(NATIVE, ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-export_search_strategy', 'out/s.asn', '-num_threads', '1'], { cwd: directory });
+    expect(cli.status, cli.stderr.toString('utf8')).toBe(0);
+    expect(saved.bytes.equals(readFileSync(join(directory, 'out/s.asn'))), "blastn -export_search_strategy out/s.asn: the CLI's file").toBe(true);
+  }
+});

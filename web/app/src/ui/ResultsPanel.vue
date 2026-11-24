@@ -8,7 +8,7 @@
 // finished shows its status here (RunStatus) until it completes. Every view follows one
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
-import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionCountsEntry } from '../application/coordinator';
 import type { CountsLoader } from '../application/counts';
 import { OutputSaver } from '../application/outputs';
@@ -113,7 +113,7 @@ const downloads = computed(() => {
     if (input?.from !== undefined) items.push({ key: `input-${role}`, input: role, label: `${input.name} (-${role})`, testid: `results-download-${role}` });
   }
   (loaded.value?.run.record.runFiles ?? []).forEach((file, index) =>
-    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-logfile)`, testid: `results-download-run-file-${index}` }),
+    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-${runFileOption(file)})`, testid: `results-download-run-file-${index}` }),
   );
   return items;
 });

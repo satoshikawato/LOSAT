@@ -581,26 +581,26 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
     }
     // An element stated as NULL (a Seq-descr element, a feature's dbxref element: the reader's
     // empty references, line RG item D3c-3b): NCBI's three streams throw at it in the middle of
-    // the archive (`NULL element while writing container`), which LOSAT's archive does not write.
-    // (The XML stream writes the feature's anonymous SEQUENCE before its dbxref, line RG-F3 PR 2.)
-    const NULL_ELEMENT: Option<PssmGap> = Some(PssmGap::NullElement);
+    // the archive (`NULL element while writing container`), as LOSAT's do (line RG item D3c-3c,
+    // `writer::write_archive`): no gap. (The XML stream writes the feature's anonymous SEQUENCE
+    // before its dbxref, line RG-F3 PR 2.)
     for path in [
         "pssm/d3b_descr_elem_null.asn.gz",
         "pssm/d3b_f_dbxref_null.asn.gz",
     ] {
         let pssm = fixture_pssm(path);
+        assert!(pssm_holds_null_element(&pssm), "{path}");
         for encoding in [
             ArchiveEncoding::Xml,
             ArchiveEncoding::Binary,
             ArchiveEncoding::Text,
         ] {
-            assert_eq!(
-                pssm_unwritten(encoding, &pssm),
-                NULL_ELEMENT,
-                "{path} {encoding:?}"
-            );
+            assert_eq!(pssm_unwritten(encoding, &pssm), None, "{path} {encoding:?}");
         }
     }
+    assert!(!pssm_holds_null_element(&fixture_pssm(
+        "db_search/db.ps.asn.rnd.6.asn"
+    )));
 }
 
 // Line PS item PS7c: the archive block of a Lambda the results do not keep (`stats::tables::ancillary_kept`).

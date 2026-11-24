@@ -324,15 +324,23 @@ fn the_output_samples_map_to_losats_bytes() {
     let mut count = 0;
     for line in OUTPUT_SAMPLES.lines().filter(|line| !line.starts_with('#')) {
         let (ncbi, losat) = line.split_once('\t').expect("two fields");
-        let (ncbi, losat) = (unescape(ncbi), unescape(losat));
+        // The fields are read as Latin-1 (`\xNN` any byte), as `losat_wording.py` reads them.
+        let latin1 = |field: &str| -> Vec<u8> {
+            unescape(field)
+                .chars()
+                .map(|c| u8::try_from(c).expect("a Latin-1 sample"))
+                .collect()
+        };
+        let (ncbi, losat) = (latin1(ncbi), latin1(losat));
         assert_eq!(
-            losat_output_bytes(ncbi.as_bytes()).as_ref(),
-            losat.as_bytes(),
-            "{ncbi:?}"
+            losat_output_bytes(&ncbi).as_ref(),
+            losat.as_slice(),
+            "{:?}",
+            String::from_utf8_lossy(&ncbi)
         );
         count += 1;
     }
-    assert!(count >= 3, "{count} samples");
+    assert!(count >= 7, "{count} samples");
 }
 
 #[test]

@@ -730,7 +730,7 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
-    fn null_element(&mut self) {}
+    fn null_element(&mut self, _: &str) {}
     /// NCBI's XML stream checks a UTF8String's bytes as a VisibleString's
     /// (`XmlEncoder::utf8_str`); ASN.1 text writes them as they are.
     fn utf8_str(&mut self, value: &[u8]) {
@@ -789,21 +789,19 @@ pub(crate) fn seq_id_written_as_is(
 /// stream's own format is copied (`Encoder::delayed`); the other values are written as NCBI
 /// writes them (line RG-F3, PR 2: the XML stream's anonymous SEQUENCE and CHOICE, NULL and
 /// UTF8String, the binary stream's UTF8String and its NaN and infinite REALs; line PS item
-/// PS15b-1's probe XA, 2026-11-23). In every stream a list element stated as `NULL`
-/// (`Encoder::null_element`), where NCBI's stream throws in the middle of the archive, is not
-/// written yet.
+/// PS15b-1's probe XA, 2026-11-23). It also finds a list element stated as `NULL`
+/// (`Encoder::null_element`, `pssm_holds_null_element`), where every stream of NCBI's throws in
+/// the middle of the archive, as LOSAT's does through `Traced` (`encoder::NullElement`,
+/// `writer::write_archive`).
 struct PssmGaps {
     encoding: ArchiveEncoding,
     gap: Option<PssmGap>,
+    null_element: bool,
 }
 
 /// What an archive's stream does not write yet of a PSSM file's members (`pssm_unwritten`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PssmGap {
-    /// A list element stated as `NULL` (`Encoder::null_element`): NCBI's stream throws there in
-    /// the middle of the archive. The search strategy's writer writes it
-    /// (`writer::write_strategy_request`).
-    NullElement,
     /// A member read into a delay buffer of another format that NCBI's `CDelayBuffer::Update`
     /// reads again with an error (`Encoder::unread_delayed`), which no writer of LOSAT writes.
     ReadAgain,
@@ -813,7 +811,6 @@ impl PssmGap {
     /// The gap in the words of LOSAT's refusal.
     pub(crate) fn what(self) -> &'static str {
         match self {
-            PssmGap::NullElement => "a list element stated as NULL",
             PssmGap::ReadAgain => {
                 "a member read into a delay buffer of another format that NCBI reads again with an error"
             }
@@ -845,13 +842,10 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
-    /// A list element stated as `NULL`: NCBI's stream throws there in the middle of the archive
-    /// (`encoder::NullElement`), which LOSAT's archive does not write yet (its search strategy
-    /// does, `writer::write_strategy_request`).
-    fn null_element(&mut self) {
-        if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
-            self.gap = Some(PssmGap::NullElement);
-        }
+    /// A list element stated as `NULL`: every stream of NCBI's throws there in the middle of the
+    /// archive, as LOSAT's does through `Traced` (`encoder::NullElement`).
+    fn null_element(&mut self, _: &str) {
+        self.null_element = true;
     }
     fn utf8_str(&mut self, _: &[u8]) {}
     fn delayed(&mut self, _: &[u8]) {}
@@ -878,9 +872,24 @@ pub(crate) fn pssm_unwritten(
     let mut check = PssmGaps {
         encoding,
         gap: None,
+        null_element: false,
     };
     crate::report::serial::pssm::write_value(&mut check, pssm);
     check.gap
+}
+
+/// Whether `pssm` holds a list element stated as `NULL` (`PssmGaps::null_element`), where the
+/// archive's stream throws (`writer::RequestInputs::written_as_is`).
+pub(crate) fn pssm_holds_null_element(
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> bool {
+    let mut check = PssmGaps {
+        encoding: ArchiveEncoding::Nothing,
+        gap: None,
+        null_element: false,
+    };
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.null_element
 }
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
@@ -949,9 +958,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // several lines (an exception's chain), and the macro of an invalid input posts the user
     // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
     // second one.
+    // The post of a stream's failure that `cli::NativeError::null_element` writes before
+    // `CATCH_ALL`'s report (`encoder::NullElement::post`) is a post of its own too.
     let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
-    let text = &native.message[..native
-        .message
+    let (stream_post, report) =
+        crate::report::serial::encoder::NullElement::split_post(&native.message);
+    let text = &report[..report
         .iter()
         .rposition(|&byte| byte != b'\n')
         .map_or(0, |last| last + 1)];
@@ -960,7 +972,9 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         _ => (text, None),
     };
     Some(
-        std::iter::once(first)
+        stream_post
+            .into_iter()
+            .chain(std::iter::once(first))
             .chain(refer)
             .filter_map(|part| {
                 let text = crate::report::diag_log::sanitize(part);

@@ -3,7 +3,9 @@
 //! output, standard error (in LOSAT's words, `losat::wording`) and exit status
 //! (`ncbi/<row>.{out,err,rc}`) and, for each file the run wrote, its size and FNV-1a digest
 //! (`ncbi/<row>.files`; the date of a `.pin` or `.pal` file replaced by `<DATE>`, its size `*`;
-//! on Windows the files read back to Linux's, `as_on_linux`),
+//! on Windows the files read back to Linux's, `as_on_linux`; where LMDB's pages are not Linux's
+//! 4096 bytes, as on macOS on Apple silicon, an LMDB file is checked for whole pages of the
+//! host's size, `losat_lmdb_line` and `ncbi_lmdb_line`),
 //! frozen from the oracle of row PS10a (2026-11-21; README.md of the directory). NCBI is not run
 //! here. Then `losat rpsblast` on databases that `losat makeprofiledb` built gives NCBI rpsblast's
 //! bytes on NCBI makeprofiledb's databases (`rps/`).
@@ -170,6 +172,73 @@ fn as_on_linux(name: &str, bytes: Vec<u8>) -> Vec<u8> {
     out
 }
 
+/// The page size of the LMDB files of NCBI's frozen runs (Linux x86-64).
+const LINUX_PAGE: usize = 4096;
+
+/// Whether `name` is an LMDB file of a database (`.pdb`, `.ptf`, also of a volume).
+fn is_lmdb(name: &str) -> bool {
+    name.ends_with(".pdb") || name.ends_with(".ptf")
+}
+
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:321,395 (GET_PAGESIZE)
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:4400-4402 (the page size of a new file)
+/// The page size of the LMDB files that NCBI's makeprofiledb and LOSAT's write on this host
+/// (`writedb::platform::host_page_size`): the operating system's page size, `sysconf` of
+/// `_SC_PAGE_SIZE` off Windows (16384 bytes on macOS on Apple silicon), up to 32768; on Windows
+/// 4096 bytes (`as_on_linux`).
+fn host_lmdb_page() -> usize {
+    #[cfg(unix)]
+    let os = rustix::param::page_size();
+    #[cfg(not(unix))]
+    let os = LINUX_PAGE;
+    os.min(32768)
+}
+
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1036-1054 (MDB_meta, mm_psize)
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3747 (the meta page records it)
+/// The page size that the LMDB file `bytes` records in its first meta page: after the page's
+/// header of 16 bytes, the magic number and the version (4 bytes each), the address and the map
+/// size (8 each), the `md_pad` of the first `MDB_db`.
+fn recorded_page_size(bytes: &[u8]) -> Option<usize> {
+    let field = bytes.get(40..44)?;
+    Some(u32::from_le_bytes(field.try_into().unwrap()) as usize)
+}
+
+/// The line of the LMDB file `name` where LMDB's pages are not Linux's (`host_lmdb_page`): such a
+/// file cannot be read back to NCBI's Linux file, whose B-trees fill pages of 4096 bytes, so the
+/// line says whether the file is made of whole pages of `page` bytes, in place of its length and
+/// digest.
+fn pages_line(name: &str, whole: bool, page: usize) -> String {
+    let made_of = if whole { "whole" } else { "not whole" };
+    format!("{name}\tLMDB file of {made_of} pages of {page} bytes\n")
+}
+
+/// The line of LOSAT's LMDB file `name` (`bytes`) on a host of other pages than Linux's: whole
+/// pages of the size the file records (`recorded_page_size`), which is the host's in NCBI's
+/// (`ncbi_lmdb_line`). `None` for another file, on a host of Linux's pages, and for a file
+/// shorter than two pages (no environment: the empty file of a refused run, whose line stays
+/// exact).
+fn losat_lmdb_line(name: &str, bytes: &[u8]) -> Option<String> {
+    let host = host_lmdb_page();
+    if host == LINUX_PAGE || !is_lmdb(name) || bytes.len() < 2 * host {
+        return None;
+    }
+    let page = recorded_page_size(bytes)?;
+    Some(pages_line(name, bytes.len().is_multiple_of(page), page))
+}
+
+/// The line of NCBI's LMDB file `name` of `length` bytes (frozen on Linux) on a host of other
+/// pages: NCBI's makeprofiledb writes it here in whole pages of the host's size (LMDB's page
+/// size, `host_lmdb_page`). `None` as for `losat_lmdb_line`.
+fn ncbi_lmdb_line(name: &str, length: &str) -> Option<String> {
+    let host = host_lmdb_page();
+    let length: usize = length.parse().ok()?;
+    if host == LINUX_PAGE || !is_lmdb(name) || length < 2 * LINUX_PAGE {
+        return None;
+    }
+    Some(pages_line(name, true, host))
+}
+
 /// A command of `binary` with no LOSAT, NCBI or BLAST variable, run in `dir`.
 fn command(binary: &Path, dir: &Path) -> Command {
     let mut command = Command::new(binary);
@@ -237,6 +306,10 @@ fn run(dir: &Path, words: &[String]) -> Run {
     let mut files = String::new();
     for path in files_below(dir) {
         let bytes = as_on_linux(&path, fs::read(dir.join(&path)).unwrap());
+        if let Some(line) = losat_lmdb_line(&path, &bytes) {
+            files.push_str(&line);
+            continue;
+        }
         match masked(&path, &bytes) {
             Some(masked) => files.push_str(&format!("{path}\t*\t{:016x}\n", fnv1a64(&masked))),
             None => files.push_str(&format!(
@@ -267,13 +340,37 @@ fn expected(name: &str) -> Run {
             .trim()
             .parse()
             .unwrap(),
-        fs::read_to_string(file("files")).unwrap(),
+        fs::read_to_string(file("files"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let mut fields = line.split('\t');
+                let (path, length) = (fields.next().unwrap(), fields.next().unwrap_or(""));
+                ncbi_lmdb_line(path, length).unwrap_or_else(|| format!("{line}\n"))
+            })
+            .collect(),
     )
 }
 
 fn scratch(name: &str) -> PathBuf {
     Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("makeprofiledb-{name}-{}", std::process::id()))
+}
+
+// LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:3747 (the meta page records it)
+/// LOSAT's LMDB files record the host's page size (LMDB's `GET_PAGESIZE`), the field that
+/// `losat_lmdb_line` reads where the pages are not Linux's.
+#[test]
+fn makeprofiledb_s_lmdb_files_record_the_host_s_page_size() {
+    let (_, words) = cases().into_iter().find(|(name, _)| name == "O00").unwrap();
+    let dir = scratch("pages");
+    let (_, _, status, _) = run(&dir, &words);
+    assert_eq!(status, 0);
+    for file in ["db.pdb", "db.ptf"] {
+        let bytes = fs::read(dir.join(file)).unwrap();
+        assert_eq!(recorded_page_size(&bytes), Some(host_lmdb_page()), "{file}");
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

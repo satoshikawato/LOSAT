@@ -99,7 +99,7 @@ fn taxid_options_go_with_a_database_only() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2309-2314
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2211-2221,2287,2289,2302-2319,2364-2370
 // Line DI-8b: `-seqidlist` and `-negative_seqidlist` go with `-db` only, exclude each other,
 // every taxid list and `-no_taxid_expansion` (NCBI's argument reader's exclusions, exit status 1,
 // as the taxid lists' are).
@@ -1624,7 +1624,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302,3338-3340
 // BLASTN, BLASTP and TBLASTN read `-culling_limit` as a non-negative integer (a hexadecimal
 // value too, as NCBI's argument parser does).
 #[test]
@@ -2180,16 +2180,16 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
 // `argv[1]` names when it is one of `ENTRY_NAMES`, and runs a parsed command with that start
 // (`cli::main_entry`, which holds the start of every command it parses).
 #[test]
-fn every_command_is_an_entry_name() {
-    use clap::CommandFactory;
-    let command = Cli::command();
-    for sub in command.get_subcommands() {
-        for name in std::iter::once(sub.get_name()).chain(sub.get_all_aliases()) {
-            assert!(
-                crate::cli::ENTRY_NAMES.contains(&name),
-                "the command {name} is not one of ENTRY_NAMES"
-            );
-        }
+fn every_program_is_an_entry_name_on_the_reader() {
+    for (name, _) in crate::cli::PROGRAMS {
+        assert!(
+            crate::cli::ENTRY_NAMES.contains(&name),
+            "the program {name} is not one of ENTRY_NAMES"
+        );
+        assert!(
+            crate::cli::reader::tool(name).is_some(),
+            "the program {name} is not on the reader"
+        );
     }
 }
 

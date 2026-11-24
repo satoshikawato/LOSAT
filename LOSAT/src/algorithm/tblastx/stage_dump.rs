@@ -230,7 +230,7 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
                         .map(|(hit, _)| hit.e_value)
                         .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
                         .unwrap_or(f64::MAX);
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3098-3104
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3095-3106
                     let best_score = hits.first().map(|(hit, _)| hit.raw_score).unwrap_or(0);
                     FinalSubjectGroup {
                         s_idx,

@@ -53,7 +53,7 @@ fn the_directory_loses_its_trailing_separators() {
         "/tests/fixtures/blastdb_aliastool/in"
     );
     let names = |given: &str| -> Vec<Vec<u8>> {
-        find_blast_dbs(given, "prot", false, false)
+        find_blast_dbs(given.as_bytes(), "prot", false, false)
             .iter()
             .map(FoundDb::file_name)
             .collect()

@@ -81,13 +81,13 @@ impl Tests {
         &mut self,
         log: &mut Log<'_>,
         db: &SeqDb,
-        name: &str,
+        name: &[u8],
         seen: &mut Seen,
         diag: &mut Diag<'_>,
     ) -> Result<u32, Stop> {
         let mut volume = Volume {
             db,
-            name: name.as_bytes(),
+            name,
             flags: &self.flags,
             taxdb: &self.taxdb,
             run: TaxdbRun::sequential_with(Arc::clone(&self.taxdb)),
@@ -101,7 +101,7 @@ impl Tests {
                 Err(Escape::Stop(stop)) => return Err(stop),
                 Err(Escape::Thrown(error)) => {
                     let exception = caught(&error)?;
-                    log.line(BRIEF, &[b"  [ERROR] caught exception in ", name.as_bytes()])?;
+                    log.line(BRIEF, &[b"  [ERROR] caught exception in ", name])?;
                     log.what(b"", exception.what.as_deref(), &|| unknown_text(&error))?;
                     return Ok(1);
                 }
@@ -481,7 +481,7 @@ impl<'a> Volume<'a, '_> {
         let set = self.db.header_set_at(at)?;
         if set.is_none() && self.db.filters_header_sets(at) {
             return Err(SeqDbError::Unsupported {
-                path: std::path::PathBuf::from(String::from_utf8_lossy(self.name).into_owned()),
+                path: path_from_bytes(self.name),
                 message: format!(
                     "OID {oid}: a stored header of no bytes in a volume whose sets NCBI filters"
                 ),

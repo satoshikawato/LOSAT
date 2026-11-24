@@ -223,20 +223,22 @@ impl Read for InputFile<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-737
-/// `AsInputFile()` of the argument `name` whose value is `value`: `-` is the standard input,
-/// `stdin` (probes K30-K32 of line BDC), the empty name opens nothing (K39), and another name
-/// opens the file; on Linux a directory opens too (its reads fail). `Err` is NCBI's `eNoFile`.
+/// `AsInputFile()` of the argument `name` whose value is `value` (its bytes, as NCBI's
+/// `std::string`): `-` is the standard input, `stdin` (probes K30-K32 of line BDC), the empty
+/// name opens nothing (K39), and another name opens the file; on Linux a directory opens too (its
+/// reads fail). `Err` is NCBI's `eNoFile`, which names the value's bytes.
 pub(crate) fn open_input_file<'a>(
     name: &str,
-    value: &str,
+    value: &OsStr,
     stdin: &'a mut Cin<'_>,
 ) -> Result<InputFile<'a>, ArgException> {
+    let bytes: &[u8] = &crate::utils::os_bytes::os_str_bytes(value);
     let source = if value == "-" {
         Source::Stdin(stdin)
     } else if value.is_empty() {
-        return Err(not_accessible(name, value.as_bytes()));
+        return Err(not_accessible(name, bytes));
     } else {
-        let file = File::open(value).map_err(|_| not_accessible(name, value.as_bytes()))?;
+        let file = File::open(value).map_err(|_| not_accessible(name, bytes))?;
         Source::File(TextReader::new(file, LineEnds::HOST))
     };
     Ok(InputFile { source })
@@ -245,30 +247,29 @@ pub(crate) fn open_input_file<'a>(
 /// The file `path` opened as a program's own `CNcbiIfstream` of `path` opens it (not an argument's
 /// stream): read in the text mode of LOSAT's platform; `Err` when it does not open (on Linux a
 /// directory opens, and its reads fail).
-pub(crate) fn open_text_file(path: &str) -> std::io::Result<Box<dyn Read>> {
+pub(crate) fn open_text_file(path: &OsStr) -> std::io::Result<Box<dyn Read>> {
     Ok(Box::new(TextReader::new(File::open(path)?, LineEnds::HOST)))
 }
 
 /// The bytes of the input file `value` of the argument `name` (`AsInputFile`, `-` is `stdin`)
 /// as the loops of `NcbiGetlineEOL` over its stream read them (blastdbcmd's batch files,
-/// `input_lines`): `Err` with NCBI's message (`File is not accessible`) when it does not open or
-/// a read fails. On Linux the stream of a directory opens and reads nothing there (probes
-/// K33-K35 of line BDC).
+/// `input_lines`): `Err` with NCBI's message (`File is not accessible`, the bytes of the value)
+/// when it does not open or a read fails. On Linux the stream of a directory opens and reads
+/// nothing there (probes K33-K35 of line BDC).
 pub(crate) fn read_input_file(
     name: &str,
-    value: &str,
+    value: &OsStr,
     stdin: &mut Cin<'_>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, Vec<u8>> {
     if cfg!(unix) && value != "-" && !value.is_empty() && std::path::Path::new(value).is_dir() {
         return Ok(Vec::new());
     }
-    let mut file =
-        open_input_file(name, value, stdin).map_err(|error| error.message_text().into_owned())?;
+    let mut file = open_input_file(name, value, stdin).map_err(|error| error.message().to_vec())?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(|_| {
-        not_accessible(name, value.as_bytes())
-            .message_text()
-            .into_owned()
+        not_accessible(name, &crate::utils::os_bytes::os_str_bytes(value))
+            .message()
+            .to_vec()
     })?;
     Ok(bytes)
 }
@@ -485,7 +486,7 @@ pub(crate) fn open_output_file<'a>(
     if value == "-" {
         return Ok(OutputFile::Stdout(stdout));
     }
-    let bytes = value.as_encoded_bytes();
+    let bytes: &[u8] = &crate::utils::os_bytes::os_str_bytes(value);
     if value.is_empty() {
         return Err(not_accessible(name, bytes));
     }

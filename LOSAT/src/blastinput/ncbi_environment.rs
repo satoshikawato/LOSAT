@@ -1089,12 +1089,10 @@ pub struct ApplicationSettings {
     /// (`fasta_reader::ReaderConfig::data_loaders`).
     pub data_loaders: bool,
     /// The registry entry `[BLAST] BLASTDB`, the last part of the path where a database
-    /// name is looked for (`seqdb::SearchPath::new`): `Ok(None)` when the registry has no
-    /// such entry, `Ok(Some(value))` with the value NCBI's registry gives. `Err(reason)`
-    /// when a registry file sets the entry to a value that LOSAT does not read as NCBI
-    /// reads it; only a program that opens a database has to refuse to run then, since
-    /// the entry changes nothing else.
-    pub blastdb: Result<Option<String>, String>,
+    /// name is looked for (`seqdb::SearchPath::new`): `None` when the registry has no such
+    /// entry, else the bytes of the value NCBI's registry gives (a `std::string`, UTF-8 or
+    /// not: `utils::os_bytes`).
+    pub blastdb: Option<Vec<u8>>,
     /// The first of `SEQ_ID_RANK_VARIABLES` that is set (with any value). NCBI's choice of the
     /// Seq-ids of a database with parsed Seq-ids depends on it; only a program that opens such
     /// a database has to refuse to run then (`algorithm::common::database::
@@ -1220,7 +1218,7 @@ impl Default for ApplicationSettings {
     fn default() -> Self {
         Self {
             data_loaders: true,
-            blastdb: Ok(None),
+            blastdb: None,
             seq_id_rank_variable: None,
             write_verification: None,
             max_seqid_length: Ok(None),
@@ -1492,10 +1490,13 @@ fn max_seqid_length_entry(
 /// cited at `data_loaders_of`); the file reader stores such an entry
 /// (`CMemoryRegistry::x_Set`, ncbireg.cpp:1066-1070: removing it is "historic behavior;
 /// could inappropriately expose entries in lower layers").
-fn blastdb_of(
-    env: Option<Result<String, String>>,
-    files: [Result<Option<String>, String>; 2],
-) -> Result<Option<String>, String> {
+/// The same layers give the parameter `[NCBI] Data` (`MatrixSearch::data`), whose value LOSAT
+/// reads as text: `E` is why a file's value is not read (`Infallible` for `[BLAST] BLASTDB`,
+/// whose bytes are the value).
+fn blastdb_of<T, E>(
+    env: Option<Result<T, E>>,
+    files: [Result<Option<T>, E>; 2],
+) -> Result<Option<T>, E> {
     if let Some(value) = env {
         return value.map(Some);
     }
@@ -2761,7 +2762,15 @@ fn settings_of(
         })
     };
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
-    let env_blastdb = utf8_variable("NCBI_CONFIG__BLAST__BLASTDB");
+    let bytes = |value: &OsStr| crate::utils::os_bytes::os_str_bytes(value).into_owned();
+    let blastdb_entry = |file: Option<(&Path, &[RegistryEntry])>| {
+        Ok(file
+            .and_then(|(_, entries)| last_value(entries, "BLAST", "BLASTDB").map(<[u8]>::to_vec)))
+    };
+    let Ok(blastdb) = blastdb_of::<Vec<u8>, std::convert::Infallible>(
+        env("NCBI_CONFIG__BLAST__BLASTDB").map(|value| Ok(bytes(&value))),
+        [blastdb_entry(ini), blastdb_entry(ncbirc)],
+    );
     let window_masker_registry = window_masker_path_of(
         utf8_variable("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH"),
         utf8_variable("WINDOW_MASKER_PATH"),
@@ -2774,13 +2783,7 @@ fn settings_of(
                 file.and_then(|(_, entries)| last_value(entries, "BLAST", "DATA_LOADERS"))
             }),
         ),
-        blastdb: blastdb_of(
-            env_blastdb,
-            [
-                text(ini, "BLAST", "BLASTDB"),
-                text(ncbirc, "BLAST", "BLASTDB"),
-            ],
-        ),
+        blastdb,
         seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
             .into_iter()
             .find(|name| env(name).is_some()),

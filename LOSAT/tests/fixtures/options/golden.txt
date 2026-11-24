@@ -1,0 +1,1854 @@
+# The options of the ten programs on NCBI's reader (src/cli/options_tests.rs, `golden`): for each
+# program its options at their defaults, `[program]`, one line per value (the path of fields that
+# holds it = its Debug), then for each argument the words given and the lines that they take away
+# (-) and add (+). Frozen from clap's conversion before line RG item K4i-3c; checked by
+# `the_options_of_each_program_are_frozen`. After a deliberate change of an option type, rewrite it
+# with `cargo test --lib write_the_options_golden -- --ignored` and review its diff.
+[blastx]
+query = "-"
+subject = None
+subject_loc = None
+db = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.no_taxid_expansion = false
+db_mask.db_soft_mask = None
+db_mask.db_hard_mask = None
+dbsize = None
+show_gis = false
+html = false
+parse_deflines = false
+searchsp = None
+out = None
+export_search_strategy = None
+task = "blastx"
+evalue = 10.0
+word_size = None
+max_hsps = None
+qcov_hsp_perc = None
+sum_stats = None
+gap_open = None
+gap_extend = None
+max_intron_length = 0
+seg = "12 2.2 2.5"
+soft_masking = false
+matrix = None
+threshold = None
+window_size = None
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+subject_besthit = false
+ungapped = false
+lcase_masking = false
+use_sw_tback = false
+strand = "both"
+query_loc = None
+query_gencode = 1
+outfmt = "0"
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+num_threads = 1
+mt_mode = None
+comp_based_stats = "2"
+rpstblastn = None
+request_inputs = None
+strategy = None
+taxdb_setting = None
+matrix_search = None
+first_query_ordinal = 0
+scope_refusal = None
+[blastx -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[blastx -task blastx-fast]
+- task = "blastx"
++ task = "blastx-fast"
+[blastx -db x]
+- db = None
++ db = "x"
+[blastx -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[blastx -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[blastx -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[blastx -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[blastx -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[blastx -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[blastx -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[blastx -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[blastx -db_soft_mask x]
+- db_mask.db_soft_mask = None
++ db_mask.db_soft_mask = "x"
+[blastx -db_hard_mask x]
+- db_mask.db_hard_mask = None
++ db_mask.db_hard_mask = "x"
+[blastx -subject x]
+- subject = None
++ subject = "x"
+[blastx -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[blastx -query x]
+- query = "-"
++ query = "x"
+[blastx -out x]
+- out = None
++ out = "x"
+[blastx -evalue 0.5]
+- evalue = 10.0
++ evalue = 0.5
+[blastx -word_size 2]
+- word_size = None
++ word_size = 2
+[blastx -gapopen 2]
+- gap_open = None
++ gap_open = 2
+[blastx -gapextend 2]
+- gap_extend = None
++ gap_extend = 2
+[blastx -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[blastx -max_hsps 2]
+- max_hsps = None
++ max_hsps = 2
+[blastx -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[blastx -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[blastx -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[blastx -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[blastx -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[blastx -max_intron_length 2]
+- max_intron_length = 0
++ max_intron_length = 2
+[blastx -seg x]
+- seg = "12 2.2 2.5"
++ seg = "x"
+[blastx -soft_masking true]
+- soft_masking = false
++ soft_masking = true
+[blastx -matrix x]
+- matrix = None
++ matrix = "x"
+[blastx -threshold 0.5]
+- threshold = None
++ threshold = 0.5
+[blastx -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[blastx -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[blastx -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[blastx -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[blastx -window_size 2]
+- window_size = None
++ window_size = 2
+[blastx -ungapped]
+- ungapped = false
++ ungapped = true
+[blastx -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[blastx -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[blastx -strand plus]
+- strand = "both"
++ strand = "plus"
+[blastx -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[blastx -query_gencode 2]
+- query_gencode = 1
++ query_gencode = 2
+[blastx -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[blastx -show_gis]
+- show_gis = false
++ show_gis = true
+[blastx -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[blastx -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[blastx -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[blastx -html]
+- html = false
++ html = true
+[blastx -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[blastx -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[blastx -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[blastx -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[blastx -mt_mode 2 -num_threads 2]
+- num_threads = 1
+- mt_mode = None
++ num_threads = 2
++ mt_mode = 2
+[blastx -comp_based_stats x]
+- comp_based_stats = "2"
++ comp_based_stats = "x"
+[blastx -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[blastn]
+query = "-"
+subject = None
+db = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.no_taxid_expansion = false
+db_mask.db_soft_mask = None
+db_mask.db_hard_mask = None
+db_mask_resolved = None
+megablast_index_loaded = None
+dbsize = None
+show_gis = false
+html = false
+parse_deflines = false
+id_scope = None
+searchsp = None
+task = "megablast"
+template_type = None
+template_length = None
+word_size = None
+num_threads = 1
+mt_mode = None
+use_index = None
+index_name = None
+evalue = None
+percent_identity = None
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+report_counts.hitlist_size = 500
+report_counts.num_descriptions = 500
+report_counts.num_alignments = 250
+html_links = None
+limit_lookup = false
+max_db_word_count = 30
+max_hsps_per_subject = None
+qcov_hsp_perc = None
+min_diag_separation = 0
+out = None
+export_search_strategy = None
+reward = None
+penalty = None
+gap_open = None
+gap_extend = None
+dust_filtering = None
+dust = Yes
+lcase_masking = false
+soft_masking = None
+filtering_db = None
+repeat_filter = None
+window_masker_taxid = None
+window_masker_db = None
+window_masker = None
+window_masker_counts = None
+window_masker_registry = None
+tabular_taxdb = None
+subject_taxdb = None
+taxdb_setting = None
+strand = "both"
+query_loc = None
+subject_loc = None
+subject_besthit = false
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+ungapped = false
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+no_greedy = false
+min_raw_gapped_score = None
+window_size = None
+off_diagonal_range = None
+verbose = false
+scan_step = 0
+outfmt = "0"
+archive = None
+strategy = None
+command_line = None
+progress_bar = false
+one_query_batch = false
+hits_only = false
+first_query_ordinal = 0
+scope_refusal = None
+[blastn -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[blastn -task dc-megablast]
+- task = "megablast"
++ task = "dc-megablast"
+[blastn -db x]
+- db = None
++ db = "x"
+[blastn -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[blastn -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[blastn -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[blastn -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[blastn -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[blastn -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[blastn -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[blastn -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[blastn -db_soft_mask x]
+- db_mask.db_soft_mask = None
++ db_mask.db_soft_mask = "x"
+[blastn -db_hard_mask x]
+- db_mask.db_hard_mask = None
++ db_mask.db_hard_mask = "x"
+[blastn -subject x]
+- subject = None
++ subject = "x"
+[blastn -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[blastn -query x]
+- query = "-"
++ query = "x"
+[blastn -out x]
+- out = None
++ out = "x"
+[blastn -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[blastn -word_size 5]
+- word_size = None
++ word_size = 5
+[blastn -gapopen 2]
+- gap_open = None
++ gap_open = 2
+[blastn -gapextend 2]
+- gap_extend = None
++ gap_extend = 2
+[blastn -perc_identity 0.5]
+- percent_identity = None
++ percent_identity = 0.5
+[blastn -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[blastn -max_hsps 2]
+- max_hsps_per_subject = None
++ max_hsps_per_subject = 2
+[blastn -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[blastn -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[blastn -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[blastn -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[blastn -penalty 0]
+- penalty = None
++ penalty = 0
+[blastn -reward 2]
+- reward = None
++ reward = 2
+[blastn -no_greedy]
+- no_greedy = false
++ no_greedy = true
+[blastn -min_raw_gapped_score 2]
+- min_raw_gapped_score = None
++ min_raw_gapped_score = 2
+[blastn -template_type coding -template_length 16]
+- template_type = None
+- template_length = None
++ template_type = Coding
++ template_length = 16
+[blastn -template_length 16 -template_type coding]
+- template_type = None
+- template_length = None
++ template_type = Coding
++ template_length = 16
+[blastn -dust x]
+- dust_filtering = None
++ dust_filtering = "x"
+[blastn -filtering_db x]
+- filtering_db = None
++ filtering_db = "x"
+[blastn -window_masker_taxid 2]
+- window_masker_taxid = None
++ window_masker_taxid = 2
+[blastn -window_masker_db x]
+- window_masker_db = None
++ window_masker_db = "x"
+[blastn -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[blastn -ungapped]
+- ungapped = false
++ ungapped = true
+[blastn -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[blastn -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[blastn -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[blastn -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[blastn -window_size 2]
+- window_size = None
++ window_size = 2
+[blastn -off_diagonal_range 2]
+- off_diagonal_range = None
++ off_diagonal_range = 2
+[blastn -use_index true]
+- use_index = None
++ use_index = true
+[blastn -index_name x]
+- index_name = None
++ index_name = "x"
+[blastn -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[blastn -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[blastn -strand plus]
+- strand = "both"
++ strand = "plus"
+[blastn -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[blastn -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[blastn -show_gis]
+- show_gis = false
++ show_gis = true
+[blastn -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[blastn -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[blastn -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[blastn -html]
+- html = false
++ html = true
+[blastn -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[blastn -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[blastn -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[blastn -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[blastn -mt_mode 2 -num_threads 2]
+- num_threads = 1
+- mt_mode = None
++ num_threads = 2
++ mt_mode = 2
+[blastp]
+query = "-"
+subject = None
+db = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.no_taxid_expansion = false
+db_mask.db_soft_mask = None
+db_mask.db_hard_mask = None
+dbsize = None
+show_gis = false
+html = false
+parse_deflines = false
+id_scope = None
+searchsp = None
+task = "blastp"
+evalue = None
+threshold = None
+word_size = None
+num_threads = 1
+mt_mode = None
+out = None
+export_search_strategy = None
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+max_hsps_per_subject = None
+qcov_hsp_perc = None
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+subject_besthit = false
+ungapped = false
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+window_size = None
+matrix = None
+gap_open = None
+gap_extend = None
+comp_based_stats = "2"
+seg = None
+soft_masking = None
+lcase_masking = false
+use_sw_tback = false
+query_loc = None
+subject_loc = None
+outfmt = "0"
+archive = None
+strategy = None
+request_inputs = None
+app = Blastp
+taxdb_setting = None
+matrix_search = None
+write_verification = None
+inclusion_ethresh = None
+gap_trigger = None
+sum_stats = false
+first_query_ordinal = 0
+scope_refusal = None
+psiblast_pssm = None
+rps = None
+[blastp -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[blastp -task blastp-fast]
+- task = "blastp"
++ task = "blastp-fast"
+[blastp -db x]
+- db = None
++ db = "x"
+[blastp -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[blastp -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[blastp -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[blastp -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[blastp -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[blastp -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[blastp -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[blastp -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[blastp -db_soft_mask x]
+- db_mask.db_soft_mask = None
++ db_mask.db_soft_mask = "x"
+[blastp -db_hard_mask x]
+- db_mask.db_hard_mask = None
++ db_mask.db_hard_mask = "x"
+[blastp -subject x]
+- subject = None
++ subject = "x"
+[blastp -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[blastp -query x]
+- query = "-"
++ query = "x"
+[blastp -out x]
+- out = None
++ out = "x"
+[blastp -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[blastp -word_size 2]
+- word_size = None
++ word_size = 2
+[blastp -gapopen 2]
+- gap_open = None
++ gap_open = 2
+[blastp -gapextend 2]
+- gap_extend = None
++ gap_extend = 2
+[blastp -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[blastp -max_hsps 2]
+- max_hsps_per_subject = None
++ max_hsps_per_subject = 2
+[blastp -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[blastp -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[blastp -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[blastp -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[blastp -seg x]
+- seg = None
++ seg = "x"
+[blastp -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[blastp -matrix x]
+- matrix = None
++ matrix = "x"
+[blastp -threshold 0.5]
+- threshold = None
++ threshold = 0.5
+[blastp -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[blastp -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[blastp -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[blastp -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[blastp -window_size 2]
+- window_size = None
++ window_size = 2
+[blastp -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[blastp -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[blastp -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[blastp -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[blastp -show_gis]
+- show_gis = false
++ show_gis = true
+[blastp -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[blastp -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[blastp -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[blastp -html]
+- html = false
++ html = true
+[blastp -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[blastp -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[blastp -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[blastp -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[blastp -mt_mode 2 -num_threads 2]
+- num_threads = 1
+- mt_mode = None
++ num_threads = 2
++ mt_mode = 2
+[blastp -ungapped]
+- ungapped = false
++ ungapped = true
+[blastp -comp_based_stats x]
+- comp_based_stats = "2"
++ comp_based_stats = "x"
+[blastp -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[tblastx]
+query = "-"
+subject = None
+db = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.no_taxid_expansion = false
+db_mask.db_soft_mask = None
+db_mask.db_hard_mask = None
+dbsize = None
+show_gis = false
+html = false
+parse_deflines = false
+id_scope = None
+searchsp = None
+evalue = 10.0
+threshold = None
+matrix = None
+word_size = None
+num_threads = 1
+out = None
+export_search_strategy = None
+query_gencode = 1
+db_gencode = 1
+max_intron_length = None
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+report_counts.hitlist_size = 500
+report_counts.num_descriptions = 500
+report_counts.num_alignments = 250
+html_links = None
+max_hsps = None
+qcov_hsp_perc = None
+seg = "12 2.2 2.5"
+soft_masking = None
+sum_stats = None
+lcase_masking = false
+strand = "both"
+xdrop_ungap = None
+window_size = None
+outfmt = "0"
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+subject_besthit = false
+query_loc = None
+subject_loc = None
+archive = None
+strategy = None
+tabular_taxdb = None
+subject_taxdb = None
+taxdb_setting = None
+first_query_ordinal = 0
+scope_refusal = None
+matrix_file = None
+[tblastx -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[tblastx -db x]
+- db = None
++ db = "x"
+[tblastx -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[tblastx -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[tblastx -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[tblastx -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[tblastx -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[tblastx -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[tblastx -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[tblastx -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[tblastx -db_soft_mask x]
+- db_mask.db_soft_mask = None
++ db_mask.db_soft_mask = "x"
+[tblastx -db_hard_mask x]
+- db_mask.db_hard_mask = None
++ db_mask.db_hard_mask = "x"
+[tblastx -subject x]
+- subject = None
++ subject = "x"
+[tblastx -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[tblastx -query x]
+- query = "-"
++ query = "x"
+[tblastx -out x]
+- out = None
++ out = "x"
+[tblastx -evalue 0.5]
+- evalue = 10.0
++ evalue = 0.5
+[tblastx -word_size 2]
+- word_size = None
++ word_size = 2
+[tblastx -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[tblastx -max_hsps 2]
+- max_hsps = None
++ max_hsps = 2
+[tblastx -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[tblastx -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[tblastx -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[tblastx -max_intron_length 2]
+- max_intron_length = None
++ max_intron_length = 2
+[tblastx -seg x]
+- seg = "12 2.2 2.5"
++ seg = "x"
+[tblastx -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[tblastx -matrix x]
+- matrix = None
++ matrix = "x"
+[tblastx -threshold 0.5]
+- threshold = None
++ threshold = 0.5
+[tblastx -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[tblastx -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[tblastx -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[tblastx -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[tblastx -window_size 2]
+- window_size = None
++ window_size = 2
+[tblastx -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[tblastx -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[tblastx -strand plus]
+- strand = "both"
++ strand = "plus"
+[tblastx -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[tblastx -query_gencode 2]
+- query_gencode = 1
++ query_gencode = 2
+[tblastx -db_gencode 2]
+- db_gencode = 1
++ db_gencode = 2
+[tblastx -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[tblastx -show_gis]
+- show_gis = false
++ show_gis = true
+[tblastx -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[tblastx -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[tblastx -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[tblastx -html]
+- html = false
++ html = true
+[tblastx -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[tblastx -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[tblastx -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[tblastx -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[tblastn]
+query = "-"
+subject = None
+db = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.no_taxid_expansion = false
+db_mask.db_soft_mask = None
+db_mask.db_hard_mask = None
+dbsize = None
+show_gis = false
+html = false
+parse_deflines = false
+id_scope = None
+searchsp = None
+task = "tblastn"
+out = None
+export_search_strategy = None
+evalue = None
+word_size = None
+gap_open = None
+gap_extend = None
+db_gencode = 1
+max_intron_length = None
+matrix = None
+threshold = None
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+comp_based_stats = "2"
+outfmt = "0"
+query_loc = None
+subject_loc = None
+seg = None
+lcase_masking = false
+use_sw_tback = false
+soft_masking = None
+sum_stats = None
+window_size = None
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+max_hsps = None
+qcov_hsp_perc = None
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+subject_besthit = false
+num_threads = 1
+mt_mode = None
+ungapped = false
+in_pssm = None
+archive = None
+write_verification = None
+strategy = None
+tabular_taxdb = None
+subject_taxdb = None
+taxdb_setting = None
+first_query_ordinal = 0
+matrix_file = None
+scope_refusal = None
+[tblastn -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[tblastn -task tblastn-fast]
+- task = "tblastn"
++ task = "tblastn-fast"
+[tblastn -db x]
+- db = None
++ db = "x"
+[tblastn -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[tblastn -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[tblastn -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[tblastn -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[tblastn -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[tblastn -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[tblastn -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[tblastn -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[tblastn -db_soft_mask x]
+- db_mask.db_soft_mask = None
++ db_mask.db_soft_mask = "x"
+[tblastn -db_hard_mask x]
+- db_mask.db_hard_mask = None
++ db_mask.db_hard_mask = "x"
+[tblastn -subject x]
+- subject = None
++ subject = "x"
+[tblastn -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[tblastn -query x]
+- query = "-"
++ query = "x"
+[tblastn -out x]
+- out = None
++ out = "x"
+[tblastn -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[tblastn -word_size 2]
+- word_size = None
++ word_size = 2
+[tblastn -gapopen 2]
+- gap_open = None
++ gap_open = 2
+[tblastn -gapextend 2]
+- gap_extend = None
++ gap_extend = 2
+[tblastn -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[tblastn -max_hsps 2]
+- max_hsps = None
++ max_hsps = 2
+[tblastn -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[tblastn -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[tblastn -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[tblastn -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[tblastn -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[tblastn -db_gencode 2]
+- db_gencode = 1
++ db_gencode = 2
+[tblastn -ungapped]
+- ungapped = false
++ ungapped = true
+[tblastn -max_intron_length 2]
+- max_intron_length = None
++ max_intron_length = 2
+[tblastn -seg x]
+- seg = None
++ seg = "x"
+[tblastn -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[tblastn -matrix x]
+- matrix = None
++ matrix = "x"
+[tblastn -threshold 0.5]
+- threshold = None
++ threshold = 0.5
+[tblastn -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[tblastn -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[tblastn -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[tblastn -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[tblastn -window_size 2]
+- window_size = None
++ window_size = 2
+[tblastn -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[tblastn -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[tblastn -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[tblastn -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[tblastn -show_gis]
+- show_gis = false
++ show_gis = true
+[tblastn -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[tblastn -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[tblastn -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[tblastn -html]
+- html = false
++ html = true
+[tblastn -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[tblastn -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[tblastn -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[tblastn -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[tblastn -mt_mode 2 -num_threads 2]
+- num_threads = 1
+- mt_mode = None
++ num_threads = 2
++ mt_mode = 2
+[tblastn -comp_based_stats x]
+- comp_based_stats = "2"
++ comp_based_stats = "x"
+[tblastn -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[tblastn -in_pssm x]
+- in_pssm = None
++ in_pssm = "x"
+[psiblast]
+query = "-"
+subject = None
+db = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.no_taxid_expansion = false
+dbsize = None
+show_gis = false
+parse_deflines = false
+searchsp = None
+sum_stats = None
+evalue = None
+threshold = None
+word_size = None
+num_threads = 1
+out = None
+export_search_strategy = None
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+max_hsps_per_subject = None
+qcov_hsp_perc = None
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+subject_besthit = false
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+gap_trigger = 22.0
+window_size = None
+matrix = None
+gap_open = None
+gap_extend = None
+comp_based_stats = "2"
+seg = None
+soft_masking = None
+lcase_masking = false
+use_sw_tback = false
+query_loc = None
+subject_loc = None
+outfmt = "0"
+num_iterations = 1
+pseudocount = 0
+inclusion_ethresh = 0.002
+out_pssm = None
+out_ascii_pssm = None
+save_pssm_after_last_round = false
+save_each_pssm = false
+in_pssm = None
+in_msa = None
+msa_master_idx = None
+ignore_msa_master = false
+first_query_ordinal = 0
+scope_refusal = None
+pssm_versions.asn = 1
+pssm_versions.ascii = 1
+pssm_check = Call
+[psiblast -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[psiblast -db x]
+- db = None
++ db = "x"
+[psiblast -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[psiblast -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[psiblast -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[psiblast -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[psiblast -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[psiblast -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[psiblast -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[psiblast -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[psiblast -subject x]
+- subject = None
++ subject = "x"
+[psiblast -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[psiblast -query x]
+- query = "-"
++ query = "x"
+[psiblast -out x]
+- out = None
++ out = "x"
+[psiblast -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[psiblast -word_size 2]
+- word_size = None
++ word_size = 2
+[psiblast -gapopen 2]
+- gap_open = None
++ gap_open = 2
+[psiblast -gapextend 2]
+- gap_extend = None
++ gap_extend = 2
+[psiblast -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[psiblast -max_hsps 2]
+- max_hsps_per_subject = None
++ max_hsps_per_subject = 2
+[psiblast -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[psiblast -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[psiblast -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[psiblast -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[psiblast -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[psiblast -seg x]
+- seg = None
++ seg = "x"
+[psiblast -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[psiblast -matrix x]
+- matrix = None
++ matrix = "x"
+[psiblast -threshold 0.5]
+- threshold = None
++ threshold = 0.5
+[psiblast -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[psiblast -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[psiblast -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[psiblast -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[psiblast -window_size 2]
+- window_size = None
++ window_size = 2
+[psiblast -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[psiblast -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[psiblast -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[psiblast -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[psiblast -show_gis]
+- show_gis = false
++ show_gis = true
+[psiblast -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[psiblast -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[psiblast -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[psiblast -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[psiblast -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[psiblast -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[psiblast -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[psiblast -comp_based_stats x]
+- comp_based_stats = "2"
++ comp_based_stats = "x"
+[psiblast -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[psiblast -gap_trigger 0.5]
+- gap_trigger = 22.0
++ gap_trigger = 0.5
+[psiblast -num_iterations 2]
+- num_iterations = 1
++ num_iterations = 2
+[psiblast -out_pssm x]
+- out_pssm = None
++ out_pssm = "x"
+[psiblast -out_ascii_pssm x]
+- out_ascii_pssm = None
++ out_ascii_pssm = "x"
+[psiblast -save_pssm_after_last_round]
+- save_pssm_after_last_round = false
++ save_pssm_after_last_round = true
+[psiblast -save_each_pssm]
+- save_each_pssm = false
++ save_each_pssm = true
+[psiblast -in_msa x]
+- in_msa = None
++ in_msa = "x"
+[psiblast -msa_master_idx 2 -in_msa x]
+- in_msa = None
+- msa_master_idx = None
++ in_msa = "x"
++ msa_master_idx = 2
+[psiblast -ignore_msa_master -in_msa x]
+- in_msa = None
+- ignore_msa_master = false
++ in_msa = "x"
++ ignore_msa_master = true
+[psiblast -in_pssm x]
+- in_pssm = None
++ in_pssm = "x"
+[psiblast -pseudocount 2]
+- pseudocount = 0
++ pseudocount = 2
+[psiblast -inclusion_ethresh 0.5]
+- inclusion_ethresh = 0.002
++ inclusion_ethresh = 0.5
+[rpsblast]
+query = "-"
+db = None
+out = None
+export_search_strategy = None
+evalue = None
+dbsize = None
+searchsp = None
+comp_based_stats = "1"
+outfmt = "0"
+show_gis = false
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+max_target_seqs = None
+max_hsps_per_subject = None
+qcov_hsp_perc = None
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+sum_stats = None
+use_sw_tback = false
+seg = None
+soft_masking = None
+window_size = None
+lcase_masking = false
+query_loc = None
+parse_deflines = false
+num_threads = 1
+mt_mode = None
+[rpsblast -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[rpsblast -db x]
+- db = None
++ db = "x"
+[rpsblast -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[rpsblast -query x]
+- query = "-"
++ query = "x"
+[rpsblast -out x]
+- out = None
++ out = "x"
+[rpsblast -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[rpsblast -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[rpsblast -max_hsps 2]
+- max_hsps_per_subject = None
++ max_hsps_per_subject = 2
+[rpsblast -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[rpsblast -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[rpsblast -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[rpsblast -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[rpsblast -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[rpsblast -seg x]
+- seg = None
++ seg = "x"
+[rpsblast -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[rpsblast -window_size 2]
+- window_size = None
++ window_size = 2
+[rpsblast -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[rpsblast -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[rpsblast -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[rpsblast -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[rpsblast -show_gis]
+- show_gis = false
++ show_gis = true
+[rpsblast -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[rpsblast -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[rpsblast -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[rpsblast -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[rpsblast -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[rpsblast -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[rpsblast -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[rpsblast -mt_mode 1]
+- mt_mode = None
++ mt_mode = 1
+[rpsblast -comp_based_stats x]
+- comp_based_stats = "1"
++ comp_based_stats = "x"
+[rpsblast -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[rpstblastn]
+query = "-"
+query_gencode = 1
+query_loc = None
+strand = "both"
+db = None
+out = None
+export_search_strategy = None
+evalue = None
+comp_based_stats = "1"
+outfmt = "0"
+show_gis = false
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+seg = None
+soft_masking = None
+lcase_masking = false
+qcov_hsp_perc = None
+max_hsps_per_subject = None
+max_target_seqs = None
+dbsize = None
+searchsp = None
+sum_stats = None
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+window_size = None
+ungapped = false
+parse_deflines = false
+num_threads = 1
+mt_mode = None
+use_sw_tback = false
+[rpstblastn -export_search_strategy x]
+- export_search_strategy = None
++ export_search_strategy = "x"
+[rpstblastn -db x]
+- db = None
++ db = "x"
+[rpstblastn -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[rpstblastn -query x]
+- query = "-"
++ query = "x"
+[rpstblastn -out x]
+- out = None
++ out = "x"
+[rpstblastn -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[rpstblastn -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[rpstblastn -max_hsps 2]
+- max_hsps_per_subject = None
++ max_hsps_per_subject = 2
+[rpstblastn -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[rpstblastn -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[rpstblastn -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[rpstblastn -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[rpstblastn -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[rpstblastn -query_gencode 2]
+- query_gencode = 1
++ query_gencode = 2
+[rpstblastn -seg x]
+- seg = None
++ seg = "x"
+[rpstblastn -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[rpstblastn -window_size 2]
+- window_size = None
++ window_size = 2
+[rpstblastn -ungapped]
+- ungapped = false
++ ungapped = true
+[rpstblastn -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[rpstblastn -query_loc x]
+- query_loc = None
++ query_loc = "x"
+[rpstblastn -strand minus]
+- strand = "both"
++ strand = "minus"
+[rpstblastn -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[rpstblastn -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[rpstblastn -show_gis]
+- show_gis = false
++ show_gis = true
+[rpstblastn -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[rpstblastn -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[rpstblastn -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[rpstblastn -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[rpstblastn -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[rpstblastn -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[rpstblastn -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[rpstblastn -mt_mode 1]
+- mt_mode = None
++ mt_mode = 1
+[rpstblastn -comp_based_stats x]
+- comp_based_stats = "1"
++ comp_based_stats = "x"
+[rpstblastn -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[makeblastdb]
+input = "-"
+input_type = "fasta"
+dbtype = "nucl"
+title = None
+out = None
+blastdb_version = 5
+max_file_sz = "3GB"
+metadata_output_prefix = None
+logfile = None
+hash_index = false
+taxid = None
+taxid_map = None
+mask_data = None
+mask_id = None
+mask_desc = None
+gi_mask = false
+gi_mask_name = None
+parse_seqids = false
+oid_masks = None
+randomize = false
+[makeblastdb -dbtype nucl -in x]
+- input = "-"
++ input = "x"
+[makeblastdb -dbtype nucl -input_type asn1_bin]
+- input_type = "fasta"
++ input_type = "asn1_bin"
+[makeblastdb -dbtype prot]
+- dbtype = "nucl"
++ dbtype = "prot"
+[makeblastdb -dbtype nucl -title x]
+- title = None
++ title = "x"
+[makeblastdb -dbtype nucl -parse_seqids]
+- parse_seqids = false
++ parse_seqids = true
+[makeblastdb -dbtype nucl -hash_index]
+- hash_index = false
++ hash_index = true
+[makeblastdb -dbtype nucl -mask_data x]
+- mask_data = None
++ mask_data = "x"
+[makeblastdb -dbtype nucl -mask_id x -mask_data x]
+- mask_data = None
+- mask_id = None
++ mask_data = "x"
++ mask_id = "x"
+[makeblastdb -dbtype nucl -mask_desc x -mask_id x -mask_data x]
+- mask_data = None
+- mask_id = None
+- mask_desc = None
++ mask_data = "x"
++ mask_id = "x"
++ mask_desc = "x"
+[makeblastdb -dbtype nucl -gi_mask -parse_seqids]
+- gi_mask = false
+- parse_seqids = false
++ gi_mask = true
++ parse_seqids = true
+[makeblastdb -dbtype nucl -gi_mask_name x -mask_data x -gi_mask -parse_seqids]
+- mask_data = None
+- gi_mask = false
+- gi_mask_name = None
+- parse_seqids = false
++ mask_data = "x"
++ gi_mask = true
++ gi_mask_name = "x"
++ parse_seqids = true
+[makeblastdb -dbtype nucl -out x]
+- out = None
++ out = "x"
+[makeblastdb -dbtype nucl -blastdb_version 4]
+- blastdb_version = 5
++ blastdb_version = 4
+[makeblastdb -dbtype nucl -max_file_sz x]
+- max_file_sz = "3GB"
++ max_file_sz = "x"
+[makeblastdb -dbtype nucl -metadata_output_prefix x]
+- metadata_output_prefix = None
++ metadata_output_prefix = "x"
+[makeblastdb -dbtype nucl -taxid 2]
+- taxid = None
++ taxid = 2
+[makeblastdb -dbtype nucl -taxid_map x -parse_seqids]
+- taxid_map = None
+- parse_seqids = false
++ taxid_map = "x"
++ parse_seqids = true
+[makeblastdb -dbtype nucl -oid_masks 2]
+- oid_masks = None
++ oid_masks = 2
+[makeblastdb -dbtype nucl -randomize]
+- randomize = false
++ randomize = true
+[makeblastdb -dbtype nucl -logfile x]
+- logfile = None
++ logfile = "x"
+[rpsbproc]
+infile = None
+outfile = None
+evalue = 0.01
+data_mode = "rep"
+target_data = "both"
+data_path = None
+show_families = false
+quiet = false
+[rpsbproc -i x]
+- infile = None
++ infile = "x"
+[rpsbproc -o x]
+- outfile = None
++ outfile = "x"
+[rpsbproc -e 0.5]
+- evalue = 0.01
++ evalue = 0.5
+[rpsbproc -m full]
+- data_mode = "rep"
++ data_mode = "full"
+[rpsbproc -t doms]
+- target_data = "both"
++ target_data = "doms"
+[rpsbproc -d x]
+- data_path = None
++ data_path = "x"
+[rpsbproc -f]
+- show_families = false
++ show_families = true
+[rpsbproc -q]
+- quiet = false
++ quiet = true

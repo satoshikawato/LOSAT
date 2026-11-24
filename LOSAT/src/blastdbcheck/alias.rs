@@ -104,10 +104,9 @@ fn decide(value: Both, test: impl Fn(i128) -> bool, name: &[u8], what: &str) -> 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:698-820
 pub(super) fn alias_file_test(
     log: &mut Log<'_>,
-    name: &str,
+    name: &[u8],
     path: &SearchPath,
 ) -> Result<u32, Stop> {
-    let name = name.as_bytes();
     let file = FileParts::of(name);
     let prefix: Vec<u8> = [b"  ", name, b" / AliasFileTest: "].concat();
     let mut faults = 0u32;
@@ -387,8 +386,6 @@ fn open(
     } else {
         SeqType::Nucleotide
     };
-    // The parts of a name that is a `String` cut at ASCII bytes: UTF-8 as the name.
-    let db = String::from_utf8_lossy(&db);
     match SeqDb::open_in(&db, seqtype, path) {
         Ok(_) => Ok(0),
         Err(error) => {

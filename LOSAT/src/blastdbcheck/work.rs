@@ -166,9 +166,8 @@ fn check(
     log: &mut Log<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Stop> {
-    // Read first, so that LOSAT's refusal of a name comes before the report's first line.
-    let db = name_value(args, "db")?;
-    let dir = name_value(args, "dir")?;
+    let db = args.bytes("db").unwrap_or_default();
+    let dir = args.bytes("dir").unwrap_or_default();
     let target: Vec<u8> = match args.os_value("logfile") {
         Some(name) if args.given("logfile") => [
             b"file  (".as_slice(),
@@ -265,7 +264,7 @@ fn check(
         )));
     }
     log.line(SUMMARY, &[])?;
-    let path = search_path(settings)?;
+    let path = search_path(settings);
     let mut tests = Tests::new(list, flags, LazyTaxDb::new(path.clone()));
     let seqtype = match dbtype {
         "prot" => Some(SeqType::Protein),
@@ -278,38 +277,17 @@ fn check(
         diag,
     };
     let okay = if db.is_empty() {
-        walk.directory(log, dir, dbtype, args.flag("recursive"))?
+        walk.directory(log, &dir, dbtype, args.flag("recursive"))?
     } else {
-        walk.names(log, db, seqtype)?
+        walk.names(log, &db, seqtype)?
     };
     Ok(if okay { 0 } else { 1 })
 }
 
-/// The value of the name key `key` (`-db`, `-dir`), read by its bytes (`""` where it is not
-/// given). NCBI takes any bytes; LOSAT's database reader takes UTF-8 names only: its refusal of
-/// others.
-fn name_value<'a>(args: &'a Args, key: &str) -> Result<&'a str, Stop> {
-    match args.os_value(key) {
-        None => Ok(""),
-        Some(value) => value
-            .to_str()
-            .ok_or_else(|| Stop::Refused(crate::cli::non_utf8_value_refusal(PROGRAM, key))),
-    }
-}
-
 /// The database search path of the run (`SeqDB_ResolveDbPath`'s: the current directory, `BLASTDB`
 /// and the configuration's `[BLAST] BLASTDB`).
-fn search_path(settings: &ApplicationSettings) -> Result<SearchPath, Stop> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => {
-            return Err(Stop::Refused(
-                crate::algorithm::common::database::refusal(reason, PROGRAM).to_string(),
-            ))
-        }
-    };
-    SearchPath::from_environment(registry)
-        .map_err(|error| Stop::Refused(losat_reader_error(&error, PROGRAM)))
+fn search_path(settings: &ApplicationSettings) -> SearchPath {
+    SearchPath::from_environment(settings.blastdb.as_deref())
 }
 
 /// The walk of the run's volumes and alias files with its tests.
@@ -322,8 +300,8 @@ struct Walk<'r, 'd> {
 /// The volumes and alias files to test (`set<string>`: byte order, each once).
 #[derive(Default)]
 struct Found {
-    volumes: BTreeSet<String>,
-    aliases: BTreeSet<String>,
+    volumes: BTreeSet<Vec<u8>>,
+    aliases: BTreeSet<Vec<u8>>,
 }
 
 impl Walk<'_, '_> {
@@ -337,12 +315,15 @@ impl Walk<'_, '_> {
     fn names(
         mut self,
         log: &mut Log<'_>,
-        db: &str,
+        db: &[u8],
         seqtype: Option<SeqType>,
     ) -> Result<bool, Stop> {
         let mut faults = 0u32;
         let mut found = Found::default();
-        for name in db.split(' ').filter(|name| !name.is_empty()) {
+        for name in db
+            .split(|&byte| byte == b' ')
+            .filter(|name| !name.is_empty())
+        {
             faults += self.volume_list(log, name, seqtype, &mut found)?;
         }
         let total = found.volumes.len();
@@ -367,7 +348,7 @@ impl Walk<'_, '_> {
     fn directory(
         mut self,
         log: &mut Log<'_>,
-        dir: &str,
+        dir: &[u8],
         dbtype: &str,
         recursive: bool,
     ) -> Result<bool, Stop> {
@@ -381,15 +362,7 @@ impl Walk<'_, '_> {
             (SeqType::Nucleotide, &mut nucleotide),
         ] {
             for db in dbs.iter().filter(|db| db.seqtype == seqtype) {
-                let name = std::str::from_utf8(&db.quoted).map_err(|_| {
-                    Stop::Refused(format!(
-                        "the database {} of the directory, whose name is not valid UTF-8 (LOSAT \
-                         keeps the names of database files as UTF-8 strings), which is not \
-                         supported by LOSAT's {PROGRAM}",
-                        String::from_utf8_lossy(&db.file_name())
-                    ))
-                })?;
-                faults += self.volume_list(log, name, Some(seqtype), found)?;
+                faults += self.volume_list(log, &db.quoted, Some(seqtype), found)?;
             }
         }
         let mut aliases = std::mem::take(&mut protein.aliases);
@@ -422,7 +395,7 @@ impl Walk<'_, '_> {
     fn volume_list(
         &mut self,
         log: &mut Log<'_>,
-        name: &str,
+        name: &[u8],
         seqtype: Option<SeqType>,
         found: &mut Found,
     ) -> Result<u32, Stop> {
@@ -445,7 +418,7 @@ impl Walk<'_, '_> {
                     BRIEF,
                     &[
                         b"  [ERROR] could not find all volume or alias files referenced in ",
-                        name.as_bytes(),
+                        name,
                         b", [skipped]",
                     ],
                 )?;
@@ -461,11 +434,11 @@ impl Walk<'_, '_> {
     fn volume(
         &mut self,
         log: &mut Log<'_>,
-        volume: &str,
+        volume: &[u8],
         seqtype: Option<SeqType>,
         seen: &mut Seen,
     ) -> Result<u32, Stop> {
-        log.line(DETAILS, &[b" ", volume.as_bytes()])?;
+        log.line(DETAILS, &[b" ", volume])?;
         let types: &[SeqType] = match seqtype {
             Some(SeqType::Protein) => &[SeqType::Protein],
             Some(SeqType::Nucleotide) => &[SeqType::Nucleotide],
@@ -477,10 +450,7 @@ impl Walk<'_, '_> {
             Ok(db) => self.tests.run(log, &db, volume, seen, self.diag),
             Err(error) => {
                 let exception = caught(&error)?;
-                log.line(
-                    BRIEF,
-                    &[b"  [ERROR] caught exception in ", volume.as_bytes()],
-                )?;
+                log.line(BRIEF, &[b"  [ERROR] caught exception in ", volume])?;
                 log.what(b"", exception.what.as_deref(), &|| unknown_text(&error))?;
                 Ok(1)
             }
@@ -507,14 +477,14 @@ impl Walk<'_, '_> {
     fn aliases_and_total(
         self,
         log: &mut Log<'_>,
-        aliases: &BTreeSet<String>,
+        aliases: &BTreeSet<Vec<u8>>,
         mut faults: u32,
     ) -> Result<bool, Stop> {
         let total = aliases.len();
         log.line(SUMMARY, &[format!("Testing {total} alias(es).").as_bytes()])?;
         let mut passed = 0;
         for alias in aliases {
-            log.line(DETAILS, &[b" ", alias.as_bytes()])?;
+            log.line(DETAILS, &[b" ", alias])?;
             let alias_faults = alias_file_test(log, alias, self.path)?;
             faults += alias_faults;
             passed += usize::from(alias_faults == 0);

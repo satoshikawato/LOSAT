@@ -139,7 +139,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// `FindBlastDBs` with `dir`, `dbtype`, `recursive`, true and `remove_redundant`: blastdbcmd's
 /// `-list` and blastdbcheck's `-dir` (without `remove_redundant`).
 pub(crate) fn find_blast_dbs(
-    dir: &str,
+    dir: &[u8],
     dbtype: &str,
     recursive: bool,
     remove_redundant: bool,
@@ -152,7 +152,7 @@ pub(crate) fn find_blast_dbs(
         extensions.extend([".nin", ".nal"]);
     }
     let mut dbs = Vec::new();
-    find_files(dir.as_bytes(), &extensions, recursive, &mut dbs);
+    find_files(dir, &extensions, recursive, &mut dbs);
     if remove_redundant {
         remove_alias_components(&mut dbs);
     }

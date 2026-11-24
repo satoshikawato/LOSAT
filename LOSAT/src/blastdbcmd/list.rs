@@ -12,19 +12,6 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
 use super::{refusal, Diag};
 
-/// The name of the listed database `db` in its quotes, as the database reader takes it, which
-/// keeps the names of database files as UTF-8 strings (`seqdb::alias::SearchPath::new`): a
-/// name that is not UTF-8 is LOSAT's refusal of the letters that open the database (`%t %n %l
-/// %d %U`; NCBI BLAST+ 2.17.0 opens it, probe R6a of line LIB-B).
-fn reader_name(db: &FoundDb) -> Result<&str, ListStop> {
-    std::str::from_utf8(&db.quoted).map_err(|_| {
-        ListStop::Refused(refusal(&format!(
-            "{}: the name of the database is not valid UTF-8 (LOSAT keeps the names of database files as UTF-8 strings)",
-            String::from_utf8_lossy(&db.file_name())
-        )))
-    })
-}
-
 /// `CBlastDbFormatter`: the format with `%%` made `%`, and the place and letter of each
 /// replacement.
 #[derive(Debug, PartialEq, Eq)]
@@ -128,7 +115,7 @@ fn file_extensions(version5: bool) -> Vec<&'static str> {
 }
 
 /// The length of the regular file `path` (`CFile::Exists`, `GetLength`; links followed).
-fn file_length(path: &str) -> Option<u64> {
+fn file_length(path: &Path) -> Option<u64> {
     std::fs::metadata(path)
         .ok()
         .filter(|meta| meta.is_file())
@@ -142,7 +129,8 @@ fn file_length(path: &str) -> Option<u64> {
 // J161 of line BDC). The volumes are those of the whole alias tree, each once.
 /// `GetDiskUsage` of the listed database `db` (of version 5 when `version5`).
 fn disk_usage(db: &FoundDb, version5: bool, path: &SearchPath) -> Result<u64, ListStop> {
-    let name = reader_name(db)?;
+    use crate::utils::os_bytes::{path_bytes, path_of_bytes};
+    let name = db.quoted.as_slice();
     let (volumes, _) = SeqDb::volume_and_alias_paths(name, db.seqtype, path)?;
     let mol = match db.seqtype {
         SeqType::Protein => 'p',
@@ -150,33 +138,42 @@ fn disk_usage(db: &FoundDb, version5: bool, path: &SearchPath) -> Result<u64, Li
     };
     let extensions = file_extensions(version5);
     let mut total = 0u64;
-    let mut dirname = String::new();
+    let mut dirname = Vec::new();
     for volume in &volumes {
         for ext in &extensions {
-            let file = format!("{volume}.{mol}{ext}");
+            let file = [volume.as_slice(), format!(".{mol}{ext}").as_bytes()].concat();
+            let file = path_of_bytes(&file);
             if let Some(length) = file_length(&file) {
                 total += length;
-                dirname = Path::new(&file)
+                dirname = file
                     .parent()
-                    .map(|dir| dir.to_string_lossy().into_owned())
+                    .map(|dir| path_bytes(dir).into_owned())
                     .unwrap_or_default();
             }
         }
     }
     if volumes.len() > 1 {
-        if name.split(' ').filter(|piece| !piece.is_empty()).count() > 1 {
+        if name
+            .split(|&byte| byte == b' ')
+            .filter(|piece| !piece.is_empty())
+            .count()
+            > 1
+        {
             return Err(ListStop::Ncbi(
-                format!(
-                    "{DATABASE_ERROR} Cannot compute disk usage for multiple BLASTDBs \
-                     (i.e.: '{name}') at once. Please try again using one BLASTDB at a time."
-                )
-                .into_bytes(),
+                [
+                    DATABASE_ERROR.as_bytes(),
+                    b" Cannot compute disk usage for multiple BLASTDBs (i.e.: '",
+                    name,
+                    b"') at once. Please try again using one BLASTDB at a time.",
+                ]
+                .concat(),
                 2,
             ));
         }
         for ext in &extensions {
-            let file = Path::new(&dirname).join(format!("{name}.{mol}{ext}"));
-            if let Some(length) = file_length(&file.to_string_lossy()) {
+            let file_name = [name, format!(".{mol}{ext}").as_bytes()].concat();
+            let file = path_of_bytes(&dirname).join(path_of_bytes(&file_name));
+            if let Some(length) = file_length(&file) {
                 total += length;
             }
         }
@@ -195,7 +192,7 @@ fn open<'a>(
     path: &SearchPath,
 ) -> Result<&'a SeqDb, ListStop> {
     if opened.is_none() {
-        *opened = Some(SeqDb::open_in(reader_name(db)?, db.seqtype, path)?);
+        *opened = Some(SeqDb::open_in(&db.quoted, db.seqtype, path)?);
     }
     Ok(opened.as_ref().expect("opened above"))
 }
@@ -262,16 +259,18 @@ fn write_line(format: &ListFormat, db: &FoundDb, path: &SearchPath) -> Result<Ve
 // writes no line.
 /// `-list`: the databases of the directory, one line each, to `out`; the exit status.
 pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut Ostream<'_>) -> i32 {
-    let dir = args.value("list").unwrap_or("");
+    let dir = args.bytes("list").unwrap_or_default();
     let dbtype = args.value("dbtype").unwrap_or("guess");
     let dbs = find_blast_dbs(
-        dir,
+        &dir,
         dbtype,
         args.given("recursive"),
         args.given("remove_redundant_dbs"),
     );
-    let fmt = args.value("list_outfmt").unwrap_or("%f %p");
-    let Ok(format) = ListFormat::parse(fmt.as_bytes()) else {
+    let fmt = args
+        .bytes("list_outfmt")
+        .unwrap_or(std::borrow::Cow::Borrowed(b"%f %p"));
+    let Ok(format) = ListFormat::parse(&fmt) else {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:167-171
         diag.post(&format!("{OPTIONS_ERROR} Invalid format specification"));
         return 1;

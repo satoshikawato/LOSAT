@@ -10584,6 +10584,8 @@ fn search_call<'a>(
     }
     let titles = listed_titles.map(database::ListedTitles::held);
     let utf8 = reads.into_held();
+    // The subjects' statistics borrow the call's values, which the held call takes.
+    drop(subject_parameters);
     Ok(Some(SearchedCall {
         requested_formats,
         query_ids,
@@ -10874,14 +10876,6 @@ fn prefetch_call<'a>(
         &mut psiblast_pssms,
     )
     .map_err(|error| database::HeaderReadError::after_reads(error, reads.utf8()))?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:364-365,490-491
-    // deltablast's prefetch of the batch comes before its reports: its posts are written here
-    // (`posts_as_made`), the others' with their batch's first report.
-    if posts_as_made(&args) {
-        for (_, posts) in std::mem::take(&mut prefetched.posts) {
-            posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-        }
-    }
     // An ungapped HSP of length 0 at the first letter of a `-subject`'s searched part ends the call
     // with NCBI's exception after the formats' prologs (`empty_alignments`).
     let subject_start_exception = empty_alignments::subject_start_exception(
@@ -10890,6 +10884,14 @@ fn prefetch_call<'a>(
         database.is_none(),
     );
     let unreportable = report_prep::refuse_unreportable(&prep, &rows_of);
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:364-365,490-491
+    // deltablast's prefetch of the batch comes before its reports: its posts are written here
+    // (`posts_as_made`), the others' with their batch's first report.
+    if posts_as_made(&args) {
+        for (_, posts) in std::mem::take(&mut prefetched.posts) {
+            posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+        }
+    }
     // It was the first of `refuse_unreportable`'s refusals and its error still comes first; it is
     // made after them because they read `prep`, which holds the outputs (line WQA's sweep, D7,
     // 2026-11-19).
@@ -11100,7 +11102,7 @@ fn report_call(
         context,
         pairwise_hits,
         output_format_start,
-        query_warning_lines,
+        mut query_warning_lines,
         kept,
         prefetched,
         subject_start_exception,

@@ -690,12 +690,13 @@ pub(super) fn db_extent<'a>(
     // The total length of a database is the one of its index files, not a sum over
     // sequences read; NCBI's `Int8` on every target (an alias file's `LENGTH` is not bounded by
     // the letters LOSAT holds). A subject set's lengths are in memory (at most `isize::MAX`).
-    let total_db_len = match database {
-        None => subjects
+    let total_db_len = match (database, args.whole_subject_set) {
+        (None, Some((letters, _))) => letters,
+        (None, None) => subjects
             .iter()
             .map(|subject| subject.aa_len as i64)
             .sum::<i64>(),
-        Some(database) => database.total_letters(),
+        (Some(database), _) => database.total_letters(),
     };
     // rpsblast: the search units of the database (`rps_hooks::with_units`, line RG D1a-4), whose
     // first unit's numbers the set-up reads in place of the database's (`rps_hooks::RpsSetup`).
@@ -741,6 +742,9 @@ pub(super) fn db_extent<'a>(
     // NCBI's `Int4`: negative for an alias file's negative `NSEQ` or one of 2^31 or more.
     let num_subjects: i32 = match database {
         None if total_db_len == 0 => 1,
+        None if args.whole_subject_set.is_some() => {
+            args.whole_subject_set.map_or(1, |(_, count)| count)
+        }
         None => i32::try_from(subjects.len().max(1)).unwrap_or(i32::MAX),
         Some(database) => rps_setup.map_or_else(
             || database.statistics_num_sequences(),

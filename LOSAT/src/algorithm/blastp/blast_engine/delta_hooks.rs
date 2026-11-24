@@ -125,7 +125,11 @@ impl DeltaRun {
         let mut args: BlastpArgs = command.args.into_blastp_args()?;
         // The options handle's E-value is the domain inclusion threshold; the query's lower case
         // masks the domain search too (the query factory is the same).
-        args.evalue = Some(self.options.domain_inclusion_ethresh);
+        // A threshold of 0 or less is NCBI's options error of the domain search, which comes after
+        // the domain database is opened (below): the check of its options runs where the search
+        // does.
+        let ethresh = self.options.domain_inclusion_ethresh;
+        args.evalue = Some(if ethresh > 0.0 { ethresh } else { 10.0 });
         args.lcase_masking = self.lcase_masking;
         args.matrix_search = Some(settings.matrix_search.clone());
         let mut resolved = args.check_options(diagnostics)?;
@@ -140,6 +144,12 @@ impl DeltaRun {
         };
         let database = open_search_database(&args, &mut resolved, None, settings, &mut outputs)?
             .ok_or_else(|| anyhow!("LOSAT internal error: deltablast opened no domain database"))?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
+        if ethresh <= 0.0 {
+            return Err(crate::algorithm::psiblast::pssm::blast_options_error(
+                "expect value or cutoff score must be greater than zero",
+            ));
+        }
         if rps_hooks::volume_count(&database) > 1 {
             bail!("a domain database of several volumes is not supported by LOSAT's DELTABLAST");
         }

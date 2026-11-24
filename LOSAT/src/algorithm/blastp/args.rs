@@ -692,6 +692,10 @@ pub struct ResolvedBlastpArgs {
     /// deltablast: its options (`BlastpArgs::delta`) and, once the command line has opened them,
     /// the domain database and its files (`blast_engine::delta_hooks`); `None` for the others.
     pub(crate) delta: Option<std::sync::Arc<super::blast_engine::DeltaRun>>,
+    /// deltablast's round 1 of `-subject` (`CPsiBl2Seq`): the call searches one subject of the set
+    /// and reads the statistics of the whole set: its letters and its number of sequences
+    /// (`blast_engine::psi_round::run_queries`). `None` for every other call.
+    pub(crate) whole_subject_set: Option<(i64, i32)>,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -1214,6 +1218,7 @@ impl BlastpArgs {
             inclusion_ethresh: self
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
+            whole_subject_set: None,
             traceback_hitlist: 0,
             subject_taxdb_found: false,
             subject_taxdb: None,

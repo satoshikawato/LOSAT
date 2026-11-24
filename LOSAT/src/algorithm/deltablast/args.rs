@@ -332,7 +332,7 @@ impl DeltablastArgs {
             matrix: self.matrix,
             gap_open: self.gap_open,
             gap_extend: self.gap_extend,
-            comp_based_stats: self.comp_based_stats,
+            comp_based_stats: Self::comp_based_stats_as_psiblast(&self.comp_based_stats),
             seg: self.seg,
             soft_masking: self.soft_masking,
             lcase_masking: self.lcase_masking,
@@ -369,6 +369,17 @@ impl DeltablastArgs {
             pssm.rounds = Some(u32::try_from(num_iterations).unwrap_or(0));
         }
         Ok(args)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:837-870
+    /// deltablast's reading of `-comp_based_stats`: `D`, `d`, `T` and `t` are mode 1 (psiblast's
+    /// are 2), so they are given to psiblast's reader as `1`; every other value is read as
+    /// psiblast reads it (2 and 3 keep the warning of PSSM searches).
+    fn comp_based_stats_as_psiblast(value: &str) -> String {
+        match value.as_bytes().first() {
+            Some(b'D' | b'd' | b'T' | b't') => format!("1{}", &value[1..]),
+            _ => value.to_string(),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748

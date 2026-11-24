@@ -10275,6 +10275,15 @@ fn run_call(
         rps_multi_volume,
         sorts_results,
     );
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:353,405
+    // deltablast's round 1 saves its PSSM's files when its search has ended, before anything of
+    // its results is read (`PsiRoundIo::before_report`).
+    if let Some(write) = reports
+        .psi_round
+        .and_then(|io| io.before_report.lock().expect("the round's step").take())
+    {
+        write(&mut *outputs.diagnostics)?;
+    }
     // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
     // subject that the seqid list keeps without a definition line (line DBID item lineless).
     // psiblast's lists are cut to the preliminary size here; the formatter's cut to

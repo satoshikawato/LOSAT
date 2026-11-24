@@ -624,4 +624,81 @@ describe('Coordinator single queue and DataService tool storage', () => {
     await data.dropSessionFile(ref.token!);
     expect(store.usage()).toBe(0);
   });
+
+  it('computes Supported / Not yet supported / Development build badge on tool runs in ResultsBrowser', async () => {
+    const engine = new FakeEngine();
+    const { data } = makeData();
+    let id = 0;
+    const makeCoord = (path: 'serial' | 'fake') =>
+      new Coordinator({
+        engine,
+        data,
+        downloader: { save: () => undefined },
+        now: () => 10_000,
+        newRunId: () => `r-${++id}`,
+        digest: sha256Hex,
+        toolRuntime: { path, engineBuild: path === 'fake' ? 'fake-engine' : 'serial-build' },
+      });
+    const table = {
+      ncbi: '2.17.0',
+      sources: [],
+      programs: {},
+      tools: { windowmasker: { optionSets: [JSON.stringify([['-mk_counts', '']])] } },
+    };
+
+    const serialCoord = makeCoord('serial');
+    const results = new ResultsBrowser({
+      data,
+      describe: (p) => engine.describe(p),
+      describeTool: (t) => engine.describeTool(t),
+      runs: serialCoord.state,
+      verification: table,
+    });
+    const supportedId = (await serialCoord.enqueueTool(sampleMkCountsRequest())).runId!;
+    await waitTerminal(serialCoord, supportedId);
+    await results.open(supportedId);
+    await sleep(20);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
+
+    const outsideId = (
+      await serialCoord.enqueueTool({
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'w.ascii', '-unit', '11'],
+        directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
+      })
+    ).runId!;
+    await waitTerminal(serialCoord, outsideId);
+    await results.open(outsideId);
+    await sleep(20);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'outside', label: 'Not yet supported' });
+
+    const helpId = (
+      await serialCoord.enqueueTool({
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv: ['windowmasker', '-mk_counts', '-h'],
+        directory: [],
+        prints: 'help',
+      })
+    ).runId!;
+    await waitTerminal(serialCoord, helpId);
+    await results.open(helpId);
+    await sleep(20);
+    expect(results.state.get().toolBadge).toBeUndefined();
+
+    const fakeCoord = makeCoord('fake');
+    const fakeResults = new ResultsBrowser({
+      data,
+      describe: (p) => engine.describe(p),
+      describeTool: (t) => engine.describeTool(t),
+      runs: fakeCoord.state,
+      verification: table,
+    });
+    const fakeId = (await fakeCoord.enqueueTool(sampleMkCountsRequest())).runId!;
+    await waitTerminal(fakeCoord, fakeId);
+    await fakeResults.open(fakeId);
+    await sleep(20);
+    expect(fakeResults.state.get().toolBadge).toMatchObject({ level: 'development', label: 'Development build' });
+  });
 });

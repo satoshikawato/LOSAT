@@ -54,6 +54,7 @@ const emit = defineEmits<{
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
+const toolSection = ref<'outputs' | 'details'>('outputs');
 const state = useStore(props.results.state);
 const heading = ref<HTMLElement>();
 const alignments = ref<InstanceType<typeof AlignmentsView>>();
@@ -182,6 +183,12 @@ watch([() => state.value.runId, () => state.value.phase], () => {
   downloadsOpen.value = false;
   saver.reset();
 });
+watch(
+  () => state.value.runId,
+  () => {
+    toolSection.value = 'outputs';
+  },
+);
 
 // With no run chosen, show the newest completed run (or failed tool run that wrote outputs).
 watch(
@@ -306,6 +313,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <dt>Tool</dt>
             <dd class="results-program">
               <span data-testid="results-program">WindowMasker · {{ windowMaskerStageById(selectedTool.snapshot.stage).label }}</span>
+              <VerificationBadge v-if="state.toolBadge" :badge="state.toolBadge" compact @details="toolSection = 'details'" />
             </dd>
             <dt>Options</dt>
             <dd class="run-inputs" data-testid="results-run-options">
@@ -412,9 +420,11 @@ async function toAlignments(id: HspId): Promise<void> {
       <ToolRunView
         v-if="state.phase === 'ready' && state.toolRun"
         :key="state.toolRun.snapshot.runId"
+        v-model:section="toolSection"
         :coordinator="coordinator"
         :run="state.toolRun"
         :counts="counts"
+        :badge="state.toolBadge"
         :takes-value="state.grammar?.takesValue"
         @use-in-blastn="emit('use-in-blastn', $event)"
         @use-taxid-in-blastn="emit('use-taxid-in-blastn', $event)"

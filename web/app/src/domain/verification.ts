@@ -1,4 +1,5 @@
-import type { OutputFormat, ProgramId } from 'losat/domain';
+import type { OutputFormat, ProgramId, ToolDescription } from 'losat/domain';
+import type { ToolId } from './tools';
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
 // options were compared byte for byte with NCBI BLAST+ for every output format (the records
@@ -32,12 +33,20 @@ export interface BrowserVerification {
   readonly browsers: readonly string[];
 }
 
+/** What the records show for one CLI tool (`cases.tsv` frozen against NCBI BLAST+). */
+export interface ToolVerification {
+  /** Sorted canonical keys (`toolOptionKey`) that have an NCBI-frozen exit-0 row. */
+  readonly optionSets: readonly string[];
+}
+
 export interface VerificationTable {
   /** NCBI BLAST+ version of the comparisons. */
   readonly ncbi: string;
   /** The records the table was generated from, with their SHA-256. */
   readonly sources: readonly { readonly path: string; readonly sha256: string; readonly optionSets: number }[];
   readonly programs: Readonly<Partial<Record<ProgramId, ProgramVerification>>>;
+  /** CLI tools besides BLAST searches (windowmasker). */
+  readonly tools?: Readonly<Partial<Record<ToolId, ToolVerification>>>;
 }
 
 /**
@@ -50,12 +59,93 @@ const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_thre
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';
+/** Placeholder for file-path option values (`-ustat`, `-ids`, `-exclude_ids`) in tool option keys. */
+export const FILE_VALUE = '<file>';
+/** Tool flags that name only input/output/log files and do not change the option set. */
+const TOOL_NOT_OPTIONS = new Set(['-in', '-out', '-logfile']);
+/** Tool flags whose values name files in the run directory (the flag stays in the key, the file name does not). */
+const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids']);
 
 export interface OptionGrammar {
   /** Whether the flag takes a value (the engine's `describe`). */
   takesValue(flag: string): boolean;
   /** The program's default task, which an argv may leave out or write. */
   readonly defaultTask?: string;
+}
+
+export interface ToolOptionGrammar extends OptionGrammar {
+  /** Whether the flag takes an NCBI Boolean value (`T`/`true`/`yes` vs `F`/`false`/`no`). */
+  isBoolean?(flag: string): boolean;
+  /** Default value of the flag in `-xmlhelp`, omitted from the key when written explicitly. */
+  defaultValue?(flag: string): string | undefined;
+}
+
+/** Builds a `ToolOptionGrammar` from a tool's parsed `-xmlhelp` description. */
+export function toolOptionGrammar(description: ToolDescription | undefined): ToolOptionGrammar {
+  const valued = new Set(['-logfile', '-conffile']);
+  const booleans = new Set<string>();
+  const defaults = new Map<string, string>();
+  for (const param of description?.parameters ?? []) {
+    if (param.takesValue) valued.add(param.flag);
+    if (param.kind === 'Boolean') booleans.add(param.flag);
+    if (param.defaultValue !== undefined && param.defaultValue !== '') defaults.set(param.flag, param.defaultValue);
+  }
+  return {
+    takesValue: (flag) => valued.has(flag),
+    isBoolean: (flag) => booleans.has(flag),
+    defaultValue: (flag) => defaults.get(flag),
+  };
+}
+
+function normalizeToolBool(value: string): string {
+  const lower = value.trim().toLowerCase();
+  if (lower === 't' || lower === 'true' || lower === 'y' || lower === 'yes' || lower === '1') return 'true';
+  if (lower === 'f' || lower === 'false' || lower === 'n' || lower === 'no' || lower === '0') return 'false';
+  return value;
+}
+
+/**
+ * The canonical key of a tool argv (with or without the tool name first): its stage flag and
+ * options other than `-in`, `-out`, `-logfile` and file names, with boolean spellings and explicit
+ * defaults normalized. Returns undefined when the words cannot be read as options.
+ */
+export function toolOptionKey(words: readonly string[], grammar: ToolOptionGrammar): string | undefined {
+  const pairs: [string, string][] = [];
+  let i = words[0] !== undefined && !words[0].startsWith('-') ? 1 : 0;
+  while (i < words.length) {
+    const word = words[i]!;
+    if (!word.startsWith('-')) return undefined;
+    const eq = word.indexOf('=');
+    let flag: string;
+    let value: string;
+    if (eq >= 0) {
+      flag = word.slice(0, eq);
+      value = word.slice(eq + 1);
+      i++;
+    } else {
+      flag = word;
+      const takesValue = TOOL_NOT_OPTIONS.has(flag) || grammar.takesValue(flag);
+      if (takesValue && i + 1 >= words.length) return undefined;
+      value = takesValue ? words[i + 1]! : '';
+      i += takesValue ? 2 : 1;
+    }
+    if (TOOL_NOT_OPTIONS.has(flag)) continue;
+    if (TOOL_FILE_OPTIONS.has(flag)) {
+      pairs.push([flag, FILE_VALUE]);
+      continue;
+    }
+    const isBool = grammar.isBoolean?.(flag) === true;
+    const normalized = isBool ? normalizeToolBool(value) : value;
+    const def = grammar.defaultValue?.(flag);
+    if (def !== undefined && def !== '') {
+      const normalizedDef = isBool ? normalizeToolBool(def) : def;
+      if (normalized === normalizedDef) continue;
+    }
+    pairs.push([flag, normalized]);
+  }
+  if (pairs.length === 0) return undefined;
+  pairs.sort(([fa, va], [fb, vb]) => (fa < fb ? -1 : fa > fb ? 1 : va < vb ? -1 : va > vb ? 1 : 0));
+  return JSON.stringify(pairs);
 }
 
 /**
@@ -164,6 +254,45 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
     ],
     exceptions,
+  };
+}
+
+export interface ToolBadgeInput {
+  readonly tool: ToolId;
+  readonly argv: readonly string[];
+  readonly runtimePath: 'serial' | 'fake' | undefined;
+  readonly grammar: ToolOptionGrammar;
+}
+
+export function toolVerificationBadge(input: ToolBadgeInput, table: VerificationTable): Badge {
+  if (input.runtimePath === 'fake') {
+    return {
+      level: 'development',
+      label: 'Development build',
+      details: ['The fake engine wrote these outputs. They are not tool results.'],
+      exceptions: [],
+    };
+  }
+  const key = toolOptionKey(input.argv, input.grammar);
+  const optionSets = table.tools?.[input.tool]?.optionSets;
+  if (key !== undefined && optionSets !== undefined && optionSets.includes(key)) {
+    return {
+      level: 'certified',
+      label: SUPPORTED_LABEL,
+      details: [
+        `This stage and these options of ${input.tool} were compared byte for byte with NCBI BLAST+ ${table.ncbi} on LOSAT's test fixtures.`,
+        'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
+      ],
+      exceptions: [],
+    };
+  }
+  return {
+    level: 'outside',
+    label: NOT_SUPPORTED_LABEL,
+    details: [
+      `This stage and these options of ${input.tool} were not compared with NCBI BLAST+ ${table.ncbi} on LOSAT's test fixtures.`,
+    ],
+    exceptions: [],
   };
 }
 

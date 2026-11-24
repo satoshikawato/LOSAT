@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Results view of a WindowMasker tool run (WW3b DESIGN §3):
-// Shows only "Outputs" and "Run details" (no Hits, no Dot Plot, no Supported badge).
+// Shows "Outputs" and "Run details" (no Hits, no Dot Plot) and the Supported mark for completed runs.
 // Outputs preview at most 512 KiB so large counts/FASTA outputs never grow page JS heap;
 // binary outputs show "Binary, <size>". Download streams the full OPFS-backed File.
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
@@ -12,6 +12,7 @@ import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
 import type { ToolFileOrigin, ToolOutputEntry } from '../domain/run';
 import { toolCommandWords } from '../domain/tool-argv';
 import { decodeUtf8Preview, windowMaskerStageById } from '../domain/tools';
+import type { Badge } from '../domain/verification';
 import type { CountsCopy } from '../ports/counts';
 import { announce } from './announcer';
 import CommandText from './CommandText.vue';
@@ -19,6 +20,7 @@ import { formatBytes, formatDateTime, formatDuration } from './format';
 import OutputText from './OutputText.vue';
 import ReplaceCountsDialog from './ReplaceCountsDialog.vue';
 import TabList from './TabList.vue';
+import VerificationBadge from './VerificationBadge.vue';
 import { useStore } from './useStore';
 
 const PREVIEW_BYTES = 512 * 1024;
@@ -27,6 +29,7 @@ const props = defineProps<{
   coordinator: Coordinator;
   run: ToolRunView;
   counts?: CountsLoader | undefined;
+  badge?: Badge | undefined;
   takesValue?: ((flag: string) => boolean) | undefined;
 }>();
 
@@ -39,7 +42,7 @@ const emit = defineEmits<{
 const countsState = props.counts === undefined ? undefined : useStore(props.counts.state);
 
 const ids = useId();
-const section = ref<'outputs' | 'details'>('outputs');
+const section = defineModel<'outputs' | 'details'>('section', { default: 'outputs' });
 const SECTION_TABS = [
   { value: 'outputs', label: 'Outputs', testid: 'results-view-outputs', id: `${ids}-outputs-tab`, panel: `${ids}-outputs` },
   { value: 'details', label: 'Run details', testid: 'results-view-details', id: `${ids}-details-tab`, panel: `${ids}-details` },
@@ -425,6 +428,11 @@ function originText(origin: ToolFileOrigin): string {
       class="results-group run-details"
       data-testid="run-details"
     >
+      <template v-if="badge">
+        <h3>Support status</h3>
+        <VerificationBadge :badge="badge" />
+      </template>
+
       <div class="details-grid">
         <h3>Command (fixed when the run was submitted)</h3>
         <dl class="details-list" data-testid="run-snapshot">
@@ -451,6 +459,14 @@ function originText(origin: ToolFileOrigin): string {
 
         <h3>Run</h3>
         <dl class="details-list" data-testid="run-record">
+          <template v-if="run.record.runtimePath">
+            <dt>Engine</dt>
+            <dd data-detail="path">{{ run.record.runtimePath }}</dd>
+          </template>
+          <template v-if="run.record.engineBuild">
+            <dt>Build</dt>
+            <dd data-detail="build">{{ run.record.engineBuild }}</dd>
+          </template>
           <dt>Exit status</dt>
           <dd data-testid="tool-details-exit-status">{{ run.record.exitStatus }}</dd>
           <template v-if="run.record.startedAt !== undefined">

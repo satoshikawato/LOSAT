@@ -3655,7 +3655,11 @@ hits into the list that NCBI frees.
     (`CHUNK_SIZE` 600 to 2,500, one-hit) in 132; 121 two-hit searches; nmer 8 to 12, 163 indexes of
     `-legacy false` with a stride; 1 and 4 threads): each LOSAT run gave the oracle's rows (NCBI's
     search with the index as one query batch, or for query chunks its search without the index);
-    NCBI's own run of the same command lost rows in 163 and stopped with 134 or 139 in 25.
+    NCBI's own run of the same command lost rows in 163 and stopped with 134 or 139 in 25. Two-hit
+    searches in query chunks, which no NCBI search of such a database gives anew, were compared where
+    every volume without an index comes before the index volumes, so that NCBI keeps no results
+    (`rand_d5c2.py`, 267 databases of 2 to 9 volumes, `CHUNK_SIZE` 600 to 2,500, 1 and 4 threads):
+    each LOSAT run gave NCBI's output.
 
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 

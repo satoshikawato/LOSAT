@@ -77,7 +77,7 @@ pub(crate) fn validate_cd_msa(msa: &PsiCdMsa) -> Result<(), PsiError> {
             let Some(data) = msa.column(domain, position) else {
                 continue;
             };
-            // `!(iobsr >= kEpsilon)` is not `iobsr < kEpsilon` for a NaN: C's test lets it pass.
+            // A NaN passes, as NCBI's test (refuse unless the value is at least epsilon) lets it pass.
             if data.iobsr < K_EPSILON {
                 return Err(PsiError::BadProfile);
             }
@@ -145,7 +145,7 @@ fn compute_frequencies_from_cds(msa: &PsiCdMsa) -> CdWeights {
                     sum_weights[residue] / total_observations;
             }
         }
-        // MIN(400.0, total_observations)
+        // The observations capped at 400.
         weights.independent_observations[position] = if 400.0 < total_observations {
             400.0
         } else {
@@ -171,7 +171,7 @@ fn compute_freq_ratios_from_cds(
         let mut column_counts = 0.0;
         let mut observations = 0.0;
         if !query_is_x {
-            // MAX(0.0, independent_observations[p] - 1.0)
+            // One less than the column's independent observations, at least zero.
             let observed = weights.independent_observations[position] - 1.0;
             observations = if 0.0 > observed { 0.0 } else { observed };
             column_counts = if pseudo_count == 0 {
@@ -210,8 +210,7 @@ fn compute_freq_ratios_from_cds(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:229-321
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2912-2961
 /// `PSICreatePssmFromCDD` with DELTA-BLAST's options (`PSIBlastOptionsNew`: the pseudocount 0, no
-/// IMPALA scaling) and its diagnostics request (`PSIDiagnosticsRequestNewEx(false)`: the
-/// frequency ratios).
+/// IMPALA scaling) and its diagnostics request (the frequency ratios only).
 pub(crate) fn create_pssm_from_cdd(
     msa: &PsiCdMsa,
     pseudo_count: i32,

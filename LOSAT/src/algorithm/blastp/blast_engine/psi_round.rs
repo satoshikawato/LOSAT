@@ -725,7 +725,7 @@ fn run_queries(
 // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:282-362
 /// deltablast `-num_iterations 1`: NCBI reads the queries in batches of `BATCH_SIZE` letters
 /// (10000) and searches the batch's queries one after the other, but makes the PSSM files and
-/// the last PSSM of the batch's first query only (`GetPssm(0)`, `(*results)[0]`). The searched
+/// the last PSSM of the batch's first query only (the batch's first PSSM and first result). The searched
 /// queries that start a batch; `None` for every other run (each query is its round's first).
 fn delta_group_firsts(
     args: &ResolvedBlastpArgs,

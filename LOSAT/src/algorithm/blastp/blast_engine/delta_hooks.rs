@@ -55,8 +55,8 @@ impl std::fmt::Debug for DeltaRun {
     }
 }
 
-/// The domain database and the RPS search's options (`CBlastOptionsFactory::Create(eRPSBlast)`
-/// with the domain inclusion threshold as its E-value and no filter).
+/// The domain database and the RPS search's options (NCBI's factory of the RPS-BLAST options
+/// handle, with the domain inclusion threshold as its E-value and no filter).
 struct DomainSide {
     args: ResolvedBlastpArgs,
     database: database::BlastpDatabase,

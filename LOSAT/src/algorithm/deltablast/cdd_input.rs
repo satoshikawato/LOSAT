@@ -151,8 +151,8 @@ impl Hit {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:442-538
-    /// `CHit::IntersectWith(ranges)`: the segments cut to the sorted `ranges`, by the subject's
-    /// positions or the query's.
+    /// The intersection of `CHit` with a list of ranges: the segments cut to the sorted `ranges`,
+    /// by the subject's positions or the query's.
     fn intersect_with_ranges(&mut self, ranges: &[Range], by_subject: bool) {
         let mut slots: Vec<Option<Segment>> = std::mem::take(&mut self.segments)
             .into_iter()
@@ -206,7 +206,7 @@ impl Hit {
         self.segments = new_segments;
     }
 
-    /// `CHit::IntersectWith(hit)`: this hit's segments cut to the other hit's ranges.
+    /// The intersection of `CHit` with another hit: this hit's segments cut to the other hit's ranges.
     fn intersect_with(&mut self, other: &Hit, by_subject: bool) {
         let mut ranges: Vec<Range> = other
             .segments

@@ -141,7 +141,7 @@ pub(crate) struct CdColumns {
 
 impl CdProfileFiles {
     /// Opens `.wcounts`, then `.obsr`, of the volume `base` as `CBlastRPSInfo` does for
-    /// DELTA-BLAST (`fFrequenciesFile | fObservationsFile`).
+    /// DELTA-BLAST (the frequencies file and the observations file).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:576-592
     pub(crate) fn open(base: &Path, program: &str) -> Result<Self, RpsOpenError> {
@@ -208,7 +208,8 @@ impl CdProfileFiles {
         let mut iobsr = Vec::with_capacity(to - from);
         let mut start = 0usize;
         for pair in pairs.chunks_exact(2) {
-            // `(Int4)data[i + 1]` as the number of columns of the run: a negative one has none.
+            // The run's second word, read as a signed 32-bit number, is its number of columns: a
+            // negative one has none.
             let columns = usize::try_from(pair[1] as i32).unwrap_or(0);
             let end = start.saturating_add(columns);
             for column in start.max(from)..end.min(to) {

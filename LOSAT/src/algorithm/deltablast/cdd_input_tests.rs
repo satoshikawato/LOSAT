@@ -22,7 +22,7 @@ fn spans(hit: &Hit) -> Vec<(i32, i32, i32, i32)> {
 
 #[test]
 fn the_range_of_a_segment_ends_at_start_plus_length() {
-    // `CRange(from, to)` keeps `to + 1` open: a segment of 10 columns at 5 is 5..=15.
+    // NCBI's range of a segment ends one past its last column: a segment of 10 columns at 5 is 5..=15.
     let h = hit(1, 1e-5, &[(5, 20, 10)]);
     assert_eq!(spans(&h), [(5, 15, 20, 30)]);
 }

@@ -1262,7 +1262,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     byte."""
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
-    # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
+    # The library API refuses rpsblast, rpstblastn and deltablast (`api::Program::parse`, line PS items PS11a,
+    # PS12a, PS13a).
     # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
     # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call, nor has
     # a row that gives `-in_msa` with either of them, or the alignment's master options
@@ -1275,7 +1276,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and `-html` reaches
     # the library's host, LOSAT Web, in T4b (decision T4-1 of line RG).
     argv = search_argv(row)
-    if library and (row["program"] in ("rpsblast", "rpstblastn")
+    if library and (row["program"] in ("rpsblast", "rpstblastn", "deltablast")
                     or ("-query" in argv and "-in_pssm" in argv)
                     or ("-in_msa" in argv and ("-query" in argv or "-in_pssm" in argv))
                     or ("-in_msa" not in argv

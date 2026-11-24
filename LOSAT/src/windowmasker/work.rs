@@ -37,8 +37,8 @@ pub(super) struct Options<'a> {
     pub pct: PctSettings,
     /// `-dust_level` when `-dust` is true (`eGenerateMasksWithDuster`).
     pub dust_level: Option<i32>,
-    /// The `BLASTDB` of the configuration (`ApplicationSettings::blastdb`).
-    pub blastdb_registry: Result<Option<&'a str>, &'a str>,
+    /// The settings of the database reader (`ApplicationSettings::database`).
+    pub database: crate::blastinput::ncbi_environment::DatabaseSettings<'a>,
 }
 
 /// One sequence of the input (`CBioseq`).
@@ -172,7 +172,7 @@ pub(super) fn reader<'a, R: Read + 'a>(
         ("fasta", Some(input)) => fasta_source(input, options.parse_seqids).map(Some),
         ("blastdb", _) => database_source(
             options.input,
-            options.blastdb_registry,
+            options.database,
             prints_title(options.outfmt),
         )
         .map(Some),
@@ -193,16 +193,16 @@ pub(super) fn fasta_source<'a, R: Read + 'a>(
     }))
 }
 
-/// `CMaskBDBReader` of the nucleotide database `name` on the search path of `registry`
-/// (`Options::blastdb_registry`); `title_printed` as `MaskBdbReader::open`'s.
+/// `CMaskBDBReader` of the nucleotide database `name` with the reader's settings `database`
+/// (`Options::database`); `title_printed` as `MaskBdbReader::open`'s.
 pub(super) fn database_source(
     name: &str,
-    registry: Result<Option<&str>, &str>,
+    database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
     title_printed: bool,
 ) -> Result<Box<dyn SequenceSource>, Failure> {
     Ok(Box::new(DatabaseSource::open(
         name,
-        registry,
+        database,
         title_printed,
     )?))
 }
@@ -285,13 +285,13 @@ struct DatabaseSource {
 impl DatabaseSource {
     fn open(
         name: &str,
-        registry: Result<Option<&str>, &str>,
+        database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         title_printed: bool,
     ) -> Result<Self, Failure> {
         let reader = MaskBdbReader::open(
             name,
             SeqType::Nucleotide,
-            registry,
+            database,
             title_printed,
             super::PROGRAM,
         )

@@ -4,7 +4,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::blastinput::ncbi_environment::{ApplicationSettings, ReadVerification};
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin, OutputFile};
 use crate::ncbi_app::Diag;
@@ -168,6 +168,10 @@ struct Params<'a> {
     db_ver: DbVersion,
     taxids: TaxIdSet,
     user_taxids: bool,
+    /// The run's `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET`
+    /// (`ApplicationSettings::read_verification`), which the read of each profile checks
+    /// (`read_profile`).
+    read_verification: ReadVerification,
 }
 
 impl Params<'_> {
@@ -296,6 +300,7 @@ fn init<'a>(
         db_ver,
         taxids,
         user_taxids,
+        read_verification: ReadVerification::default(),
     })
 }
 
@@ -319,7 +324,7 @@ struct Built {
 /// its destructor; the exit status.
 pub(super) fn run(
     args: &Args,
-    _settings: &ApplicationSettings,
+    settings: &ApplicationSettings,
     input: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
@@ -328,6 +333,7 @@ pub(super) fn run(
         Ok(params) => params,
         Err(status) => return status,
     };
+    params.read_verification = settings.read_verification.clone();
     if let Some(refusal) = refusal(args) {
         return diag.refuse(&refusal);
     }
@@ -597,9 +603,13 @@ fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Res
 // message (`line N: ...`), the frame of the root object for a text that ends in it
 // (`CEofException`), the message of the newest exception of the reader's stack; a `std::exception`
 // is the handler's unknown one.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+// A mandatory member that the profile skips is NCBI's read error unless `SERIAL_VERIFY_DATA_READ`
+// turns the check off, which LOSAT refuses there (`read_verification`, `ReadVerification::refused`).
 fn read_profile(
     path: &Path,
     filename: &[u8],
+    read_verification: &ReadVerification,
     diag: &mut Diag,
 ) -> Result<PssmWithParameters, RunError> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1390-1394
@@ -622,7 +632,10 @@ fn read_profile(
         // `GetMsg()` of the newest exception (the stream's position, or the rethrow of a member
         // with a set flag), which `CATCH_ALL` prints after "ERROR: ".
         Err(PssmReadError::Ncbi(ReadError::Serial(exception))) => {
-            Err(RunError::Exception(exception.get_msg().to_vec()))
+            match read_verification.refused(&exception, "a profile (-in)") {
+                Some(refused) => Err(RunError::Refused(refused)),
+                None => Err(RunError::Exception(exception.get_msg().to_vec())),
+            }
         }
         Err(PssmReadError::Ncbi(ReadError::Eof)) => Err(RunError::Exception(
             b" Frame type= eFrameNamed, Object type= PssmWithParameters".to_vec(),
@@ -798,7 +811,7 @@ fn add_profiles(
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(RunError::Input([filename, b" does not exists"].concat()));
         }
-        let mut pssm_w_parameters = read_profile(&path, filename, diag)?;
+        let mut pssm_w_parameters = read_profile(&path, filename, &params.read_verification, diag)?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
         // `seq_size`, the `int` of `GetQueryLength()`: negative past `INT_MAX` (`query_length`).
         let seq_size = query_length(&pssm_w_parameters);

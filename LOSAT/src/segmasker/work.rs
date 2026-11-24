@@ -141,16 +141,12 @@ fn run_masks(
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);
-    let registry = match &settings.blastdb {
-        Ok(value) => Ok(value.as_deref()),
-        Err(reason) => Err(reason.as_str()),
-    };
     let mut source = reader(
         value("infmt"),
         value("in"),
         parse_seqids,
         prints_title(outfmt),
-        registry,
+        settings.database(),
         stdin,
     )?;
     let mut output = args.output_file("out", out).map_err(file_failure)?;
@@ -257,7 +253,7 @@ fn reader<'a>(
     input: &str,
     parse_seqids: bool,
     title_printed: bool,
-    registry: Result<Option<&str>, &str>,
+    database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
     stdin: &'a mut Cin<'_>,
 ) -> Result<Source<'a>, Failure> {
     match infmt {
@@ -271,7 +267,7 @@ fn reader<'a>(
         "blastdb" => MaskBdbReader::open(
             input,
             SeqType::Protein,
-            registry,
+            database,
             title_printed,
             super::PROGRAM,
         )

@@ -186,7 +186,8 @@ pub(super) struct GenomeInput<'r, 'd, 'w, 'o> {
     files: Vec<Vec<u8>>,
     database: bool,
     lists: &'r IdLists,
-    registry: Result<Option<&'r str>, &'r str>,
+    /// The settings of the database reader (`ApplicationSettings::database`).
+    reader_settings: crate::blastinput::ncbi_environment::DatabaseSettings<'r>,
     /// The standard output, which comes out before each post.
     out: &'d mut Ostream<'o>,
     diag: &'d mut Diag<'w>,
@@ -228,7 +229,7 @@ impl GenomeInput<'_, '_, '_, '_> {
         for name in &self.files {
             let mut source: Box<dyn SequenceSource> = if self.database {
                 // Names that are not UTF-8 were refused before (`make_counts`).
-                database_source(&String::from_utf8_lossy(name), self.registry, false)?
+                database_source(&String::from_utf8_lossy(name), self.reader_settings, false)?
             } else {
                 let file = File::open(path_from_bytes(name.as_slice()))
                     .map_err(|_| Failure::Ncbi(read_error()))?;
@@ -388,10 +389,7 @@ fn make_counts(
         files,
         database,
         lists,
-        registry: match &settings.blastdb {
-            Ok(value) => Ok(value.as_deref()),
-            Err(reason) => Err(reason.as_str()),
-        },
+        reader_settings: settings.database(),
         out: &mut *stdout,
         diag: &mut *diag,
         posts: Vec::new(),

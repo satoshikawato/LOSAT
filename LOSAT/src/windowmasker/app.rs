@@ -133,10 +133,7 @@ fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a>
             args.integer("dust_level")
                 .expect("-dust_level has a default")
         }),
-        blastdb_registry: match &settings.blastdb {
-            Ok(value) => Ok(value.as_deref()),
-            Err(reason) => Err(reason.as_str()),
-        },
+        database: settings.database(),
     }
 }
 

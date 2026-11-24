@@ -14,7 +14,7 @@ fn makeblastdb(words: &[&str]) -> (i32, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
         Some(&time_of("Nov 21, 2026  9:00 AM")),
         LINUX,
         &mut std::io::empty(),

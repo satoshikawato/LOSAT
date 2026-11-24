@@ -231,6 +231,12 @@ pub struct TblastnArgs {
     /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
     #[arg(skip)]
     pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` of the run's application settings
+    /// (`ncbi_environment::ReadVerification`), set with them as `write_verification` is;
+    /// `-in_pssm`'s reader refuses a PSSM that fails a check they turn off
+    /// (`in_pssm::PssmReader::read_verification`). Not a public option.
+    #[arg(skip)]
+    pub read_verification: crate::blastinput::ncbi_environment::ReadVerification,
     /// The run's search strategy export (`-export_search_strategy`), made by `run` and by LOSAT
     /// Web's `web_adapter::give_strategy` (`strategy::StrategyExport::for_args`).
     #[arg(skip)]
@@ -584,6 +590,7 @@ impl TblastnArgs {
                 self.db.is_some(),
                 self.archive.as_ref(),
                 self.write_verification.as_ref(),
+                &self.read_verification,
                 diagnostics,
             )?)),
             None => None,

@@ -28,9 +28,10 @@ pub(super) struct Options<'a> {
     pub linker: i32,
     pub parse_seqids: bool,
     pub hard_masking: bool,
-    /// The `BLASTDB` of the configuration (`[BLAST] BLASTDB`), for `CSeqDB`'s search path
-    /// (`ApplicationSettings::blastdb`: `Err` when LOSAT does not read the entry as NCBI does).
-    pub blastdb_registry: Result<Option<&'a str>, &'a str>,
+    /// The settings of the database reader (`ApplicationSettings::database`): the `BLASTDB` of
+    /// the configuration (`[BLAST] BLASTDB`) for `CSeqDB`'s search path, and the checks of its
+    /// reads.
+    pub database: crate::blastinput::ncbi_environment::DatabaseSettings<'a>,
 }
 
 /// One sequence of the input (`CBioseq`): its Seq-ids, its title descriptor, its IUPAC letters.
@@ -247,7 +248,7 @@ fn reader<'a>(
         }
         "blastdb" => Ok(Box::new(DatabaseSource::open(
             options.input,
-            options.blastdb_registry,
+            options.database,
             prints_title(options.outfmt),
         )?)),
         _ => Err(Failure::Std("Unknown input format".to_string())),
@@ -262,13 +263,13 @@ struct DatabaseSource {
 impl DatabaseSource {
     fn open(
         name: &str,
-        registry: Result<Option<&str>, &str>,
+        database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         title_printed: bool,
     ) -> Result<Self, Failure> {
         let reader = MaskBdbReader::open(
             name,
             SeqType::Nucleotide,
-            registry,
+            database,
             title_printed,
             super::PROGRAM,
         )

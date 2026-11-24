@@ -426,6 +426,12 @@ pub struct BlastpArgs {
     /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
     #[arg(skip)]
     pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` of the run's application settings
+    /// (`ncbi_environment::ReadVerification`), set with them as `write_verification` is;
+    /// `-in_pssm`'s reader refuses a PSSM that fails a check they turn off
+    /// (`in_pssm::PssmReader::read_verification`). Not a public option.
+    #[arg(skip)]
+    pub read_verification: crate::blastinput::ncbi_environment::ReadVerification,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
@@ -923,6 +929,7 @@ impl BlastpArgs {
             database: self.db.is_some(),
             archive: self.archive.as_ref(),
             write_verification: self.write_verification.as_ref(),
+            read_verification: Some(&self.read_verification),
             out_pssm: self
                 .psiblast_pssm
                 .as_ref()

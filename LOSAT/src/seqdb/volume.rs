@@ -2,7 +2,7 @@
 //! sequences read by position.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
@@ -10,6 +10,7 @@ use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
+use crate::blastinput::ncbi_environment::ReadVerification;
 
 /// One volume of a database (`NAME.pin` / `.psq` / `.phr`, or the `n` files).
 #[derive(Debug)]
@@ -36,7 +37,14 @@ pub struct Volume {
     /// The failure of NCBI's OID list that a search meets at its first read of a sequence
     /// (`Volume::fail_sequence_reads`), none when the list can be built.
     read_failure: Option<super::oid_list::OidListError>,
+    /// The run's settings of NCBI's checks of what it reads (`SeqDb::refuse_unchecked_reads`),
+    /// none for NCBI's default.
+    read_verification: Option<Arc<ReadVerification>>,
 }
+
+/// A header record in LOSAT's refusal of a setting that turns a check of NCBI's reader off
+/// (`ReadVerification::refused`).
+const HEADER_RECORD: &str = "a database header record";
 
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
 /// the database (`m_VolStart`), which NCBI adds to the tag of each `BL_ORD_ID` before the rule
@@ -137,6 +145,7 @@ impl Volume {
             oid_mask_type: 0,
             columns: OnceLock::new(),
             read_failure: None,
+            read_verification: None,
         })
     }
 
@@ -555,7 +564,38 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
         let file = self.hdr_file()?;
-        file.with_range(start, end, |record| read(record, file.path()))?
+        self.checked(file.with_range(start, end, |record| read(record, file.path()))?)
+    }
+
+    /// `result` of a decode of a header record, where NCBI's exception of a check that the run's
+    /// settings turn off is LOSAT's refusal (`SeqDb::refuse_unchecked_reads`): the one place of
+    /// that choice for every read of the volume's records (`with_header_record`,
+    /// `visit_headers`).
+    #[inline(always)]
+    fn checked<T>(&self, mut result: Result<T, SeqDbError>) -> Result<T, SeqDbError> {
+        if let Err(error) = &mut result {
+            self.unchecked(error);
+        }
+        result
+    }
+
+    /// `checked`'s error, replaced in place: out of line, so that a record that decodes costs
+    /// one test and its value is not moved.
+    #[cold]
+    #[inline(never)]
+    fn unchecked(&self, error: &mut SeqDbError) {
+        if let (SeqDbError::Ncbi(exception), Some(setting)) =
+            (&*error, self.read_verification.as_deref())
+        {
+            if let Some(refused) = setting.refused(exception, HEADER_RECORD) {
+                *error = SeqDbError::Setting(refused);
+            }
+        }
+    }
+
+    /// Sets the run's settings of NCBI's checks of what it reads (`SeqDb::refuse_unchecked_reads`).
+    pub(super) fn refuse_unchecked_reads(&mut self, setting: Arc<ReadVerification>) {
+        self.read_verification = Some(setting);
     }
 
     /// The header of the sequence `oid` (volume-relative) from one read of its record
@@ -1305,7 +1345,7 @@ impl Volume {
                 let hi = (u64::from(offsets[j + 1]) - start) as usize;
                 if !visit(
                     first + j as u32,
-                    decode(first + j as u32, &data[lo..hi], &hr_path),
+                    self.checked(decode(first + j as u32, &data[lo..hi], &hr_path)),
                 ) {
                     return false;
                 }

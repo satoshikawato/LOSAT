@@ -252,13 +252,18 @@ fn every_argument_of_the_xml_is_in_its_table() {
         }
     }
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
-    // windowmasker's 16 and makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid).
-    assert_eq!(constraints, 169 + 6 + 16 + 4);
+    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid) and
+    // deltablast's 18 (NCBI BLAST+ 2.17.0 `deltablast -xmlhelp`, the file of `ncbi_xmlhelp`:
+    // psiblast's 19 without -msa_master_idx, line PS item PS13a).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 18);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
-    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3 and
-    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other).
+    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other) and deltablast's 147 (the same
+    // XML: psiblast's 187 without those of -in_pssm, -in_msa, -msa_master_idx, -ignore_msa_master,
+    // -phi_pattern, -ipglist and -negative_ipglist, with -show_domain_hits and -remote, and
+    // -show_domain_hits and -subject, excluding each other in both directions).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 2);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 147);
 }
 
 /// Which class a constraint is.

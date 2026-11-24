@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.94
+- Version: 1.95
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -514,7 +514,7 @@
   list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
   item O4b2-4's 1.92);
-  1.94 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
+  1.95 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
   chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
   every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
   in the class of 1.37, of its printed `-show_gis` description line, whose GI NCBI never sets,
@@ -522,7 +522,8 @@
   the description line and organism report, and NCBI's throw where no line holds it; line
   RG-KB item 12, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; first
   1.92, then 1.93 at the merge of dev that brought line NP item O4b2-4's 1.92, then 1.94 at the
-  merge of dev that brought line RG item D1c-1c's 1.93)
+  merge of dev that brought line RG item D1c-1c's 1.93, then 1.95 for line NP item M4c-2's 1.94,
+  which dev took after that merge)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1855,7 +1856,7 @@ file would differ, and NCBI's programs still could not open the database).
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - A database sequence whose Seq-align id is a pdb id that its Seq-id handle holds with another
-  chain (version 1.94, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
+  chain (version 1.95, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07). The handle normalizes a pdb id (`CSeq_id_PDB_Info::Normalize`,
   `seq_id_tree.cpp:3381-3464`): where it rebuilds the id (a release date that normalizes, a
   lower-case letter in the molecule, or a chain and chain-id that disagree) the chain becomes the
@@ -2606,11 +2607,11 @@ file would differ, and NCBI's programs still could not open the database).
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
-  prints what the last loaded row set. Since version 1.94 (line RG-KB item 12) also the rows of a
+  prints what the last loaded row set. Since version 1.95 (line RG-KB item 12) also the rows of a
   subject whose pdb Seq-align id NCBI's data loader serves no sequence for (rule 2 above): exit
   status 255 after the row's earlier fields, LOSAT's refusal before the batch's report.
 - `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
-  serves no sequence for (version 1.94, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
+  serves no sequence for (version 1.95, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle
   keeps the GI it was allocated with (`x_GetDeflineInfo` sets no GI before `x_FillDeflineAndId`
   returns, `showdefline.cpp:1576-1589`, `:388-394`), which the description line prints when it is
@@ -2622,7 +2623,7 @@ file would differ, and NCBI's programs still could not open the database).
   `-num_descriptions 0`, or where the subject's rank is past it, the output is NCBI's (row
   `db.pdbchain.only.blastp.0g`).
 - A database sequence whose pdb Seq-align id's handle another id of the same sequence holds (rule
-  2 above; version 1.94, 2026-11-24, line RG-KB item 12, review 1, Owner-delegated, standing
+  2 above; version 1.95, 2026-11-24, line RG-KB item 12, review 1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). Where another definition line than the Seq-align
   id's holds it, NCBI's outfmt 0 to 4 description line and outfmt 18's generated title show that
   line's title: LOSAT refuses (exit 1, "... a definition line other than the Seq-align id's holds

@@ -120,7 +120,7 @@ fn blastp_trace_matches_hsp(target: BlastpTraceHspTarget, hsp: &BlastpHsp) -> bo
         && hsp.s_start.max(hsp.s_end) == target.s_end
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:360-374
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-366
 fn blastp_trace_gap_summary(gap_info: Option<&[GapEditOp]>) -> String {
     let Some(gap_info) = gap_info else {
         return "ungapped".to_string();
@@ -1763,7 +1763,7 @@ where
     if let Some(target) = blastp_trace_hsp_target() {
         for (index, hsp) in hsp_list.hsps.iter().enumerate() {
             if blastp_trace_matches_hsp(target, hsp) {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:459-535
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:531,3691-3701
                 eprintln!(
                     "[BLASTP_TRACE_HSP] final_hsp[{index}] q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} len={} ident={} positives={} gaps={} gap_opens={} mismatch={} identity={:.6} {}",
                     hsp.q_start,

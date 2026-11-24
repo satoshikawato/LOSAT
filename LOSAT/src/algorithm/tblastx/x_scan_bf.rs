@@ -184,7 +184,7 @@ fn x_table_sparse(lookup: &BlastAaLookupTable) -> bool {
     2 * set < lookup.backbone.len() as u64
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:504-505
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject`, or `x_scan_subject_bf` when
 /// `branch_free` (`x_scan_bf_for` of the table; the offset array then from `x_offset_pairs_len`).
 #[inline]

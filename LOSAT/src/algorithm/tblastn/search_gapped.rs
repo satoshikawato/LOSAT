@@ -206,7 +206,7 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
                 scratch,
             )
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058-4091:
         if gapped.score >= cutoff_scores[context] {
             let saved = GappedHsp {
                 frame: frame.frame,
@@ -1299,7 +1299,7 @@ fn x_preliminary_protein_hsps_by_unit<
                 }
             }
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614,807:
         // Right after the scan, before anything that can fail, so that the table is ready for the
         // next unit whatever this one returns.
         two_hit.exit(chunk.length);
@@ -2730,7 +2730,7 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
     identity_events: Option<&mut Vec<(usize, usize)>>,
 ) -> Result<Vec<(GappedHsp, bool)>> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:555,844:
     // The Stage C observers pass one subject's preliminary HSPs, which reach the
     // traceback in this score order.
     let mut ordered = gapped.to_vec();

@@ -387,7 +387,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let min_diag_separation = defaults.min_diag_separation;
     let (mb_template_type, mb_template_length) = determine_template(args);
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:45-185
+    // No NCBI counterpart: placeholders; `finalize_task_config` sets the lookup kind and width.
     let use_two_stage = false;
     let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
     let lut_word_length = effective_word_size;
@@ -526,7 +526,7 @@ pub fn finalize_task_config(
     discontig_template: bool,
 ) {
     let max_q_off = max_query_length.saturating_sub(1);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:45-185
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:128-130
     let (lut_kind, lut_width) = choose_na_lookup_table(
         config.effective_word_size,
         total_query_length,

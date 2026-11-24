@@ -964,8 +964,8 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501
         let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-765 and
-            // c++/src/algo/blast/core/masksubj.inl:58-59
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-769 and
+            // c++/src/algo/blast/core/masksubj.inl:50-57
             // The one-hit word finder's loop does not start on a first range shorter than a
             // word, so `scansub`, which would step to the next ranges, is never called: the unit
             // has no hit.

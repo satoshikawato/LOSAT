@@ -147,7 +147,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1451
 // The saved NCBI outputs name the inputs by the paths NCBI read, so those paths are
 // passed as the display names.
 #[test]

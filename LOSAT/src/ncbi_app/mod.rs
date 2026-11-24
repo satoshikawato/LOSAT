@@ -1,8 +1,8 @@
 //! NCBI's application (`CNcbiApplication::AppMain`, c++/src/corelib/ncbiapp.cpp) for the programs
-//! that LOSAT reads with NCBI's argument reader rather than clap's: `losat blastdbcmd`, `losat
-//! dustmasker`, `losat segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat
-//! windowmasker`. Each program is a `Tool` (its name, version, frozen `-help` text; its argument
-//! XML is NCBI's) and a body, its `Run`; `run_with` does what NCBI's application does around it,
+//! that NCBI's application starts and runs: `losat blastdbcmd`, `losat dustmasker`, `losat
+//! segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat windowmasker`. Each
+//! program is a `Tool` (its name, version, frozen `-help` text; its argument XML is NCBI's) and
+//! a body, its `Run`; `run_with` does what NCBI's application does around it,
 //! in NCBI's order: the diagnostics of `-logfile`, the words taken before the reader (`-version`,
 //! `-conffile`, `-dryrun`), the configuration load, the arguments (`args`, NCBI's
 //! `CArgDescriptions`), the usage and the report of an argument error, and LOSAT's refusals of
@@ -309,10 +309,35 @@ impl Diag<'_> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+/// A reader error that `CATCH_ALL` of a program's `Run` reports (blastdbcmd, blastdb_aliastool):
+/// NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>` with exit status 2,
+/// another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias file's value that does not
+/// convert) as `Error: <what()>` with exit status 255, else LOSAT's refusal in the program's name.
+pub(crate) fn database_error(diag: &mut Diag, error: crate::seqdb::SeqDbError) -> i32 {
+    if let Some(exception) = error.ncbi_exception() {
+        diag.post_bytes(&[b"Error: ".as_slice(), &exception.what()].concat());
+        return 255;
+    }
+    match error.ncbi_message() {
+        Some(text) => {
+            diag.post_bytes(&[crate::wording::DATABASE_ERROR.as_bytes(), b" ", &text].concat());
+            2
+        }
+        None => {
+            let program = diag.tool.refusal_name;
+            diag.refuse(&crate::algorithm::common::database::losat_reader_error(
+                &error, program,
+            ))
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112 (cited at
 // `Diag::report_arg_exception`)
-/// NCBI's reader of `tool`'s arguments `words` (`args::parse`, the words that the application
+/// NCBI's reader of `tool`'s arguments `words` (`args::parse_in`, the words that the application
 /// leaves to it: `ncbi_environment::preparse`) with what NCBI's application writes for each
 /// outcome; the arguments, or the exit status of the command line that the reader ends. The one
 /// producer of these bytes for every caller of the reader.
@@ -341,8 +366,9 @@ pub(crate) fn read(
     out: &mut dyn Write,
     diag: &mut Diag,
     xml_help: Option<fn(&str) -> Option<String>>,
+    files: &OpenFiles,
 ) -> Result<Args, ReadEnd> {
-    let text = match args::parse(tool, words) {
+    let text = match args::parse_in(tool, words, files) {
         Ok(args) => return Ok(args),
         Err(ArgsError::Usage) => short_usage(tool),
         Err(ArgsError::Help) => help_text(tool.help).into_owned(),
@@ -550,7 +576,7 @@ fn run_app(
     }
     // NCBI's XML, which the command line's run writes (`cli::xml_help_text`); the library API
     // writes none.
-    let args = match read(tool, &words, out, &mut diag, xml_help) {
+    let args = match read(tool, &words, out, &mut diag, xml_help, &files) {
         Ok(args) => args,
         Err(ReadEnd::Exit(status)) => return status,
         Err(ReadEnd::Refused(reason)) => return diag.refuse(&reason),

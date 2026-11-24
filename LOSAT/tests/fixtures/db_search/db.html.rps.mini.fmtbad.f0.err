@@ -1,0 +1,5 @@
+Warning: [rpsblast] Query_1 allx a query of X only: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [rpsblast] Query_2 oj_tk TK-TMK with.. : One or more O characters replaced by X for alignment score calculations at positions 29 
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbireg.cpp", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'this line has no equals sign' (m_Pos = 1)
+

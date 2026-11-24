@@ -64,7 +64,7 @@ pub fn run_local(
     // A search of records reads no database: `run_local_database` searches the database of `-db`.
     // `check_options` (LOSAT Web's `validate`) checks `-db` as the command line does (line WQA D12a).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
+        bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;

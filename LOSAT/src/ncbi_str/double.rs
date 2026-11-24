@@ -2,12 +2,12 @@
 //! data loader calls (`NStr::StringToNumeric<double>`, ncbistr.hpp:3632-3637) for the bit score
 //! thresholds of `bitscore_specific.txt`, the BLAST programs' argument readers for the SEG locut
 //! and hicut (`blastinput::app::read_seg_option`) and the constraints of the arguments
-//! (`blastinput::value_parsers`), and glibc's `strtod` that it reads the number with.
+//! (`ncbi_app::constraint`), and glibc's `strtod` that it reads the number with.
 //!
 //! Also `NStr::StringToDouble` with `NStr::fDecimalPosixOrLocal`, which NCBI's argument reader
 //! calls for an `eDouble` key (`CArg_Double`: every real argument of the BLAST programs and
-//! rpsbproc, `blastinput::value_parsers::ncbi_double`, and segmasker's `-locut` and `-hicut`,
-//! `ncbi_app::args`): [`string_to_double_posix_or_local`]; and NCBI's own decimal reader
+//! rpsbproc, and segmasker's `-locut` and `-hicut`, `ncbi_app::args`; LOSAT Web's ABI v1,
+//! `web_v1_argv::ncbi_double`): [`string_to_double_posix_or_local`]; and NCBI's own decimal reader
 //! `NStr::StringToDoublePosix` that it calls, which the ASN.1 text and XML readers call too for a
 //! REAL (`report::serial::asn_text_reader`, `report::serial::xml_reader`):
 //! [`string_to_double_posix`].

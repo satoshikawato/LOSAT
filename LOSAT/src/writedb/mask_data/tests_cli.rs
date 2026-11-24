@@ -31,10 +31,11 @@ use super::tests_e2e::{
 };
 use super::tests_ids::{masked_rows, rows, Row};
 use crate::seqdb::{SeqDb, SeqType};
+use crate::utils::test_dir::TempDir;
 use crate::writedb::makeblastdb::run_with;
 use crate::writedb::tests::{
-    files_named, log_with_markers, parse_makedb_words, replace_bytes, seqdb_fixtures, stored_date,
-    time_of, TempDir, LINUX,
+    base_in, files_named, log_with_markers, parse_makedb_words, replace_bytes, seqdb_fixtures,
+    stored_date, time_of, LINUX,
 };
 
 /// What a run of the command left on its two streams, with the directory of the input files cut
@@ -139,8 +140,8 @@ fn the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
             .unwrap();
         let stderr = read(&expected_dir, &format!("{name}.stderr"));
         let stdout = read(&expected_dir, &format!("{name}.stdout"));
-        let tmp = TempDir::new(name);
-        let base = tmp.base(name);
+        let tmp = TempDir::unique(&format!("writedb-{name}"));
+        let base = base_in(&tmp, name);
 
         let mut words: Vec<String> = [
             "-in",
@@ -202,11 +203,11 @@ fn the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
             built += 1;
             // makeblastdb also writes the metadata file, which the fixtures do not keep.
             for extension in ["njs", "pjs"] {
-                let _ = std::fs::remove_file(tmp.0.join(format!("{name}.{extension}")));
+                let _ = std::fs::remove_file(tmp.join(format!("{name}.{extension}")));
             }
             assert_eq!(
                 stored_title(
-                    &tmp.0.join(format!("{}.{letter}in", fixture_bases[0])),
+                    &tmp.join(format!("{}.{letter}in", fixture_bases[0])),
                     seqtype
                 ),
                 case.title,
@@ -231,7 +232,7 @@ fn the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
             // column files store the time of their creation to the second, which the command line
             // cannot be given, so that date is set to the one in NCBI's file first.
             for base in &fixture_bases {
-                let written = tmp.0.join(format!("{base}.{letter}aa"));
+                let written = tmp.join(format!("{base}.{letter}aa"));
                 if let (Some(want), Some(have)) = (
                     column_date(&dir.join("db").join(format!("{base}.{letter}aa"))),
                     column_date(&written),
@@ -244,11 +245,11 @@ fn the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
                     .unwrap();
                 }
             }
-            assert_same_files(&tmp.0, name, &dir.join("db"), name, case.version);
+            assert_same_files(&tmp, name, &dir.join("db"), name, case.version);
         } else {
             failed += 1;
             assert_eq!(
-                files_named(&tmp.0, &format!("{name}.")),
+                files_named(&tmp, &format!("{name}.")),
                 Vec::<String>::new(),
                 "{name}: files left behind"
             );
@@ -282,8 +283,8 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
         } else {
             seqdb.join(&ncbi.fasta)
         };
-        let tmp = TempDir::new("mask-parse-cli");
-        let base = tmp.base("db");
+        let tmp = TempDir::unique("writedb-mask-parse-cli");
+        let base = base_in(&tmp, "db");
         // The default format version (5).
         let words: Vec<String> = [
             "-in",
@@ -305,7 +306,7 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
         // 2.17.0 does (`db.not`, `db.ntf`, `db.nto` after "Masked data offsets out of bounds"):
         // nothing else is left.
         let no_files = || {
-            let left = files_named(&tmp.0, "db.");
+            let left = files_named(&tmp, "db.");
             assert!(
                 left.iter()
                     .all(|f| ["db.not", "db.ntf", "db.nto"].contains(&f.as_str())),
@@ -356,8 +357,8 @@ fn a_sample_of_the_mask_ids_cases_runs_through_the_command_line() {
     }));
     assert_eq!(chosen.len(), 6);
     for row in chosen {
-        let tmp = TempDir::new("mask-ids-cli");
-        let base = tmp.base("db");
+        let tmp = TempDir::unique("writedb-mask-ids-cli");
+        let base = base_in(&tmp, "db");
         let mut words: Vec<String> = [
             "-in",
             &in_words(&[dir.join("fasta").join(&row.fasta)]),
@@ -417,7 +418,7 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
         for version in ["5", "4"] {
             let stem = format!("{name}.v{version}");
             let expected = |extension: &str| read(&expected_dir, &format!("{stem}.{extension}"));
-            let tmp = TempDir::new("mask-order");
+            let tmp = TempDir::unique("writedb-mask-order");
             let in_files: Vec<_> = inputs.split(' ').map(|file| dir.join(file)).collect();
             let words: Vec<String> = [
                 "-in",
@@ -430,14 +431,14 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
                 "-mask_data",
                 &mask_words(&dir, masks),
                 "-out",
-                &tmp.base("db"),
+                &base_in(&tmp, "db"),
                 "-blastdb_version",
                 version,
             ]
             .map(str::to_string)
             .to_vec();
             let run = run_words(&words, "Oct 20, 2026  1:00 PM", &[&dir]);
-            let left: String = files_named(&tmp.0, "db.")
+            let left: String = files_named(&tmp, "db.")
                 .iter()
                 .map(|file| format!("{file}\n"))
                 .collect();
@@ -483,7 +484,7 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
 fn the_command_line_reads_the_options_as_makeblastdb_does() {
     let tmp = option_root();
     let fasta = seqdb_fixtures().join("mask_nucl.fna");
-    let root = tmp.0.clone();
+    let root = tmp.to_path_buf();
     let missing = |name: &str| {
         format!("Error: [makeblastdb] Ignoring mask file '{name}' as it does not exist.\n")
     };
@@ -557,14 +558,14 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
         ),
     ];
     for (mask_data, mask_id, mask_desc, status, stderr, files) in cases {
-        let tmp_out = TempDir::new("mask-options-cli");
+        let tmp_out = TempDir::unique("writedb-mask-options-cli");
         let mut words: Vec<String> = [
             "-in",
             &in_words(std::slice::from_ref(&fasta)),
             "-dbtype",
             "nucl",
             "-out",
-            &tmp_out.base("db"),
+            &base_in(&tmp_out, "db"),
             "-title",
             "mask_nucl.fna",
         ]

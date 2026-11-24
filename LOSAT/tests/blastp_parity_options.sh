@@ -4,9 +4,9 @@
 #
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:101-211
 #
-# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:570-622
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:109
 #
-# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:190-210
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:208
 BLASTP_PARITY_COMMON_OPTIONS=(
     -task blastp
     -matrix BLOSUM62

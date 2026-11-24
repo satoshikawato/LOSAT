@@ -19,7 +19,7 @@
 //! `s_off - 1 - i` of the whole chunk slice. The traceback blocks and `reduce_gaps`, which read
 //! subject bytes, run only with `do_traceback`, which is false here.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520,701-705,1651-1684
 //! A call widens only the bases around its ungapped hit (`X_WINDOW_MARGIN` on each side, into
 //! the worker's `GreedyAlignScratch::x_window`), with NCBI's fence sentry before and after them
 //! where the window does not reach an end of the chunk, as NCBI's partial fetch places it
@@ -32,8 +32,8 @@
 //! it: a slide that starts at the sentry reads it, and an affine deletion run, which passes
 //! subject bases without reading them, reaches the sentry's offset or beyond only in states the
 //! X-drop test drops (each further base lowers the run's score by the extension cost while the
-//! best score does not fall); with no sentry on a side, that side's length is the whole copy's. A call that meets it returns no result (as NCBI's traceback drops
-//! the HSP) and runs again on the one-byte copy of the whole subject, made on the first such
+//! best score does not fall); with no sentry on a side, that side's length is the whole copy's. A call that meets it returns no result (as NCBI's traceback stops and restores
+//! its input HSP list) and runs again on the one-byte copy of the whole subject, made on the first such
 //! call and shared by every chunk and worker of that subject, from the `max_dist` it started
 //! with (the fenced call may have doubled it). `max_dist` is sized by the chunk's length in both
 //! calls (`greedy_gapped_alignment_internal`).

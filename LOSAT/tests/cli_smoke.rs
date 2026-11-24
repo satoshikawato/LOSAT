@@ -927,7 +927,7 @@ fn ncbi_version_is_two_lines_for_every_program() {
         let output = run_losat(&[name, "--", "-version"]);
         assert!(!output.status.success(), "{name} -- -version");
     }
-    // The top level `--version` is clap's.
+    // The top level's `--version` (`cli::top_level`).
     let output = run_losat(&["--version"]);
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),

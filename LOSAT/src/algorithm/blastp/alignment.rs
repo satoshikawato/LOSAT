@@ -41,14 +41,14 @@ pub struct ProteinAlignmentView {
     pub alignment_len: usize,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-836
 pub fn build_alignment_view_with_matrix(
     query: &[u8],
     subject: &[u8],
     hit: &Hit,
     matrix: ScoringMatrix,
 ) -> Option<ProteinAlignmentView> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-836
     if matrix == ScoringMatrix::Blosum62 {
         build_alignment_view_with_matrix_impl::<true>(query, subject, hit, matrix)
     } else {
@@ -56,7 +56,7 @@ pub fn build_alignment_view_with_matrix(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-836
 fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
     query: &[u8],
     subject: &[u8],

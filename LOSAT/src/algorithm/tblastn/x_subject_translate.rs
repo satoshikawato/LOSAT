@@ -1416,7 +1416,7 @@ impl XW128 {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:595 (see `x_phase_words`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:592,598,606,611,616,622,627,631 (see `x_phase_words`)
     /// Entry `index` (0..64) of the 64-byte table `table`, held as four registers of 16 entries,
     /// for every byte of `index`.
     #[inline(always)]

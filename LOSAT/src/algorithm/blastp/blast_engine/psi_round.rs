@@ -352,8 +352,9 @@ fn run_queries(
                     &mut *outputs.diagnostics,
                 )?);
             }
-            // `SavePssmToFile(GetPssm(0))`: the files of the batch's first PSSM only, its ASCII
-            // PSSM with `m_AncillaryData`.
+            // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:328-353
+            // NCBI saves the batch's first PSSM only (`SavePssmToFile` of the first query's), its
+            // ASCII PSSM with the application's ancillary data (`m_AncillaryData`).
             for (index, cdd) in cdds.iter_mut().enumerate() {
                 let current = &mut cdd.pssm;
                 if index > 0 {

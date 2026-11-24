@@ -243,5 +243,26 @@ class ExcludeTests(unittest.TestCase):
         self.assertFalse(self.excluded(["data[!0-9].bin"], "data7.bin"))
 
 
+
+class IntegrationTestFilesRun(unittest.TestCase):
+    """Every `LOSAT/tests/*.rs` is compiled: Cargo.toml sets `autotests = false`, so a file runs only as a
+    `[[test]]` target's path or as a module that a suite of `tests/suites/` includes by `#[path = "../NAME"]`.
+    A file that neither names is never built and its tests never run (PS13a fix round 1, 2026-11-24:
+    `deltablast_refusals.rs` had not run since it was written)."""
+
+    def test_every_integration_test_file_is_a_target_or_a_suite_module(self) -> None:
+        import re
+        import tomllib
+
+        crate = Path(__file__).resolve().parent.parent
+        manifest = tomllib.loads((crate / "Cargo.toml").read_text(encoding="utf-8"))
+        targets = {Path(target["path"]).as_posix() for target in manifest.get("test", [])}
+        suites = "".join(path.read_text(encoding="utf-8") for path in (crate / "tests" / "suites").glob("*.rs"))
+        included = set(re.findall(r'#\[path = "\.\./([^"]+)"\]', suites))
+        orphans = [path.name for path in sorted((crate / "tests").glob("*.rs"))
+                   if f"tests/{path.name}" not in targets and path.name not in included]
+        self.assertEqual(orphans, [], "tests/*.rs files that no [[test]] target or suite includes")
+
+
 if __name__ == "__main__":
     unittest.main()

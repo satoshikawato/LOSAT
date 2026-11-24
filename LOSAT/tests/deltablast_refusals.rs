@@ -22,7 +22,13 @@ fn run_query(query: &str, args: &[&str]) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .current_dir(root)
         .env_remove("BLASTDB")
-        .args(["deltablast", "-query", &format!("tests/db_search/delta/{query}"), "-db", "tests/db_search/delta/dbs"])
+        .args([
+            "deltablast",
+            "-query",
+            &format!("tests/db_search/delta/{query}"),
+            "-db",
+            "tests/db_search/delta/dbs",
+        ])
         .args(args)
         .output()
         .expect("runs losat");
@@ -37,14 +43,27 @@ fn run_query(query: &str, args: &[&str]) -> Run {
 fn assert_refused(run: &Run, what: &str, text: &str) {
     assert_ne!(run.rc, 0, "{what}");
     assert!(run.stderr.contains(text), "{what}: {}", run.stderr);
-    assert!(run.stderr.contains("is not supported by LOSAT's DELTABLAST"), "{what}: {}", run.stderr);
-    assert!(run.stdout.is_empty(), "{what}: stdout {:?}", String::from_utf8_lossy(&run.stdout));
+    assert!(
+        run.stderr
+            .contains("is not supported by LOSAT's DELTABLAST"),
+        "{what}: {}",
+        run.stderr
+    );
+    assert!(
+        run.stdout.is_empty(),
+        "{what}: stdout {:?}",
+        String::from_utf8_lossy(&run.stdout)
+    );
 }
 
 fn refused(extra: &[&str], text: &str) {
     let mut args = RPS.to_vec();
     args.extend_from_slice(extra);
-    assert_refused(&run_query("q_serpin.faa", &args), &format!("{extra:?}"), text);
+    assert_refused(
+        &run_query("q_serpin.faa", &args),
+        &format!("{extra:?}"),
+        text,
+    );
 }
 
 #[test]
@@ -82,9 +101,15 @@ fn a_subject_set_larger_than_max_target_seqs_is_refused_before_any_output() {
         .current_dir(root)
         .env_remove("BLASTDB")
         .args([
-            "deltablast", "-query", "tests/db_search/delta/q_serpin.faa", "-subject",
-            "tests/db_search/delta/subj_mix.faa", "-rpsdb", "tests/db_search/delta/deltatest",
-            "-max_target_seqs", "2",
+            "deltablast",
+            "-query",
+            "tests/db_search/delta/q_serpin.faa",
+            "-subject",
+            "tests/db_search/delta/subj_mix.faa",
+            "-rpsdb",
+            "tests/db_search/delta/deltatest",
+            "-max_target_seqs",
+            "2",
         ])
         .output()
         .expect("runs losat");
@@ -105,7 +130,11 @@ fn a_query_of_x_with_other_queries_in_a_one_round_batch_is_refused() {
     for query in ["q_x2.faa", "q_xs.faa"] {
         let mut args = RPS.to_vec();
         args.extend_from_slice(&["-outfmt", "6"]);
-        assert_refused(&run_query(query, &args), query, "no Karlin-Altschul parameters");
+        assert_refused(
+            &run_query(query, &args),
+            query,
+            "no Karlin-Altschul parameters",
+        );
     }
 }
 
@@ -113,7 +142,11 @@ fn a_query_of_x_with_other_queries_in_a_one_round_batch_is_refused() {
 fn num_iterations_0_with_a_batch_of_several_queries_is_refused_before_any_output() {
     let mut args = RPS.to_vec();
     args.extend_from_slice(&["-num_iterations", "0", "-outfmt", "7"]);
-    assert_refused(&run_query("multi.faa", &args), "it0m", "-num_iterations 0 with a query batch of several queries");
+    assert_refused(
+        &run_query("multi.faa", &args),
+        "it0m",
+        "-num_iterations 0 with a query batch of several queries",
+    );
 }
 
 struct TempDir(PathBuf);
@@ -125,19 +158,31 @@ impl Drop for TempDir {
 }
 
 #[test]
-fn save_last_with_one_round_and_a_first_query_without_alignments_is_refused_after_the_cdd_pssm_files() {
+fn save_last_with_one_round_and_a_first_query_without_alignments_is_refused_after_the_cdd_pssm_files(
+) {
     // NCBI writes the batch's CDD PSSM files and its (empty) outfmt 6 report, then stops with an exception for a
     // null pointer (exit 255) where it would compute the last PSSM from the query's alignments (probe none1).
-    let temp = TempDir(std::env::temp_dir().join(format!("losat-deltablast-none1-{}", std::process::id())));
+    let temp = TempDir(
+        std::env::temp_dir().join(format!("losat-deltablast-none1-{}", std::process::id())),
+    );
     std::fs::create_dir_all(&temp.0).unwrap();
     let ascii = temp.0.join("a");
     let asn = temp.0.join("s");
     let mut args = RPS.to_vec();
     args.extend_from_slice(&["-outfmt", "6", "-save_pssm_after_last_round"]);
-    args.extend_from_slice(&["-out_ascii_pssm", ascii.to_str().unwrap(), "-out_pssm", asn.to_str().unwrap()]);
+    args.extend_from_slice(&[
+        "-out_ascii_pssm",
+        ascii.to_str().unwrap(),
+        "-out_pssm",
+        asn.to_str().unwrap(),
+    ]);
     let run = run_query("q_none.faa", &args);
     assert_refused(&run, "none1", "-save_pssm_after_last_round with one round");
     for file in [&ascii, &asn] {
-        assert!(std::fs::metadata(file).is_ok_and(|meta| meta.len() > 0), "{} is written", file.display());
+        assert!(
+            std::fs::metadata(file).is_ok_and(|meta| meta.len() > 0),
+            "{} is written",
+            file.display()
+        );
     }
 }

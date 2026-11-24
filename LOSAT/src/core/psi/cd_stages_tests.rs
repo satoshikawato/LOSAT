@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::config::ScoringMatrix;
+use crate::core::psi::KarlinBlk;
 
 /// BLOSUM62 11/1's gapped block (`Blast_KarlinBlkGappedCalc`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:268

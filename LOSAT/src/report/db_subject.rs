@@ -77,6 +77,8 @@ pub struct ParsedSubject {
     blob_keys: std::sync::OnceLock<std::sync::Arc<BlobKeys>>,
     /// `id_keys`, made at the first load that asks.
     id_keys: std::sync::OnceLock<IdKeys>,
+    /// `display_keys`, made at the first description line that asks.
+    display_keys: std::sync::OnceLock<Option<IdKeys>>,
 }
 
 /// The keys by which NCBI's scope finds a query for the Seq-align id of a reported database
@@ -316,6 +318,24 @@ pub struct IdKeys {
     order: u64,
 }
 
+impl IdKeys {
+    /// The keys of the Seq-id `id`.
+    fn of(id: &ParsedSeqId) -> Self {
+        let mut scope = Vec::new();
+        crate::seqid::defline_set::scope_keys(id, &mut scope);
+        let mut weak = Vec::new();
+        crate::seqid::id_scope::weak_keys(id, &mut weak);
+        IdKeys {
+            handle: handle_key(id),
+            scope,
+            weak,
+            order: crate::seqid::mask_handle::mask_handle_order(
+                crate::seqid::mask_handle::mask_handle_packed(id),
+            ),
+        }
+    }
+}
+
 /// A sequence that registered a handle in the data loader's `m_Ids` last, and whether LOSAT knows
 /// that it was the last (`sure`: not where several sequences of one record of loads registered
 /// it, whose order the record does not keep, `ScopeRecord::note`).
@@ -354,6 +374,8 @@ pub enum ShownBy {
     /// The calls of the run before this one, of which LOSAT has no record
     /// ([`ScopeHolders`]).
     Calls,
+    /// The description table's second lookup, by the display id ([`ScopeWalk::display`]).
+    Display,
 }
 
 /// Another sequence that NCBI gives for a subject's Seq-align id at a load ([`HitLoad::Shown`]):
@@ -999,6 +1021,54 @@ impl ScopeWalk {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
+    /// The description table's second lookup of a described subject whose load gave its own
+    /// record (outfmt 0 to 4: the title of the Bioseq of its display id,
+    /// [`ParsedSubject::display_keys`]), after its load: the cache, then the scope's index (the
+    /// Bioseq loaded first whose line holds it: the subject's own holds it, so the index answers
+    /// at the latest there), then the loader's `m_Ids`; kept in the cache. `Some` where that is
+    /// another sequence (`ShownBy::Display`; probe `R/hr/bin/hr1open.py` D.ab: one batch whose
+    /// prefetch is off finds the first record's title for the second, the prefetch the first
+    /// loaded by the bulk order for both).
+    pub fn display(&mut self, subject: &ParsedSubject) -> Option<ShownInstead> {
+        let one = self.display_one(subject);
+        let Some(other) = &mut self.other else {
+            return one;
+        };
+        let other = other.display_one(subject);
+        if one == other {
+            return one;
+        }
+        Some(ShownInstead {
+            holder: one.or(other).and_then(|shown| shown.holder),
+            by: ShownBy::Display,
+        })
+    }
+
+    /// [`ScopeWalk::display`] of this walk alone.
+    fn display_one(&mut self, subject: &ParsedSubject) -> Option<ShownInstead> {
+        let keys = subject.display_keys()?;
+        let handle = keys.handle?;
+        let resolved = self
+            .cached(handle)
+            .or_else(|| self.scope_match(keys))
+            .or_else(|| {
+                self.registered(handle)
+                    .map(|registrant| match registrant.sure {
+                        true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
+                        false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+                    })
+            })?;
+        self.scope.cache.insert(handle, resolved);
+        match Self::answer(subject, Some(resolved)) {
+            HitLoad::Shown(shown) => Some(ShownInstead {
+                holder: shown.holder,
+                by: ShownBy::Display,
+            }),
+            _ => None,
+        }
+    }
+
     /// The answer of two walks that differ in whether the run keeps one scope.
     fn either(one: HitLoad, other: HitLoad) -> HitLoad {
         if one == other {
@@ -1429,6 +1499,7 @@ impl ParsedSubject {
             skipped_id: std::sync::OnceLock::new(),
             blob_keys: std::sync::OnceLock::new(),
             id_keys: std::sync::OnceLock::new(),
+            display_keys: std::sync::OnceLock::new(),
         })
     }
 
@@ -1466,6 +1537,7 @@ impl ParsedSubject {
             skipped_id: std::sync::OnceLock::new(),
             blob_keys: std::sync::OnceLock::new(),
             id_keys: std::sync::OnceLock::new(),
+            display_keys: std::sync::OnceLock::new(),
         }
     }
 
@@ -1676,21 +1748,22 @@ impl ParsedSubject {
     /// The keys of the Seq-align id by which NCBI's places find a sequence for it ([`IdKeys`]),
     /// made at the first load that asks.
     pub fn id_keys(&self) -> &IdKeys {
-        self.id_keys.get_or_init(|| {
-            let id = &self.alignment_id;
-            let mut scope = Vec::new();
-            crate::seqid::defline_set::scope_keys(id, &mut scope);
-            let mut weak = Vec::new();
-            crate::seqid::id_scope::weak_keys(id, &mut weak);
-            IdKeys {
-                handle: handle_key(id),
-                scope,
-                weak,
-                order: crate::seqid::mask_handle::mask_handle_order(
-                    crate::seqid::mask_handle::mask_handle_packed(id),
-                ),
-            }
-        })
+        self.id_keys.get_or_init(|| IdKeys::of(&self.alignment_id))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
+    /// The keys of the display id ([`ParsedSubject::display_id`]) where its handle is not the
+    /// Seq-align id's: the description table (outfmt 0 to 4) looks the title up again by it in
+    /// NCBI's places ([`ScopeWalk::display`]), which can give another sequence's Bioseq (probe
+    /// `R/hr/bin/hr1open.py` D.ab: two records with other GIs and one accession). `None` where
+    /// that lookup is the Seq-align id's own.
+    pub fn display_keys(&self) -> Option<&IdKeys> {
+        self.display_keys
+            .get_or_init(|| {
+                let keys = IdKeys::of(self.display_id()?);
+                (keys.handle.is_some() && keys.handle != self.id_keys().handle).then_some(keys)
+            })
+            .as_ref()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:411-451 (cited at
@@ -1736,7 +1809,7 @@ impl ParsedSubject {
                     || "the sequences that the calls of the run before loaded".to_owned(),
                     str::to_owned,
                 ),
-            ShownBy::Order | ShownBy::Holder | ShownBy::Weak => match shown.holder {
+            ShownBy::Order | ShownBy::Holder | ShownBy::Weak | ShownBy::Display => match shown.holder {
                 Some(other) => format!(
                     "whether database sequence {other}, which also holds it, is loaded before it (an order of NCBI BLAST+'s loads that their Seq-ids do not decide)"
                 ),
@@ -1896,6 +1969,20 @@ impl ParsedSubject {
     pub fn shown_reason(&self, shown: ShownInstead) -> String {
         let id = String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match (shown.holder, shown.by) {
+            (other, ShownBy::Display) => {
+                let mut display = Vec::new();
+                if let Some(id) = self.display_id() {
+                    label::fasta(id, &mut display);
+                }
+                format!(
+                    "has the display id {} (its description line's), by which the description table of NCBI BLAST+ 2.17.0's outfmt 0 to 4 looks the title up again and finds {}: it can write that sequence's title for it",
+                    String::from_utf8_lossy(&display),
+                    other.map_or_else(
+                        || "another sequence".to_string(),
+                        |other| format!("database sequence {other}")
+                    )
+                )
+            }
             (Some(other), ShownBy::Holder | ShownBy::Calls) => format!(
                 "has the Seq-align id {id}, which database sequence {other} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
             ),
@@ -3955,9 +4042,22 @@ impl HitLoads {
                     let subjects: Vec<(usize, &ParsedSubject)> = batch
                         .filter_map(|key| parsed(key).map(|subject| (key, subject)))
                         .collect();
-                    for (key, answer) in walk.bulk(subjects) {
-                        if let HitLoad::Shown(shown) = answer {
+                    let answers = walk.bulk(subjects.iter().copied());
+                    for (&key, answer) in &answers {
+                        if let HitLoad::Shown(shown) = *answer {
                             loads.shown.insert(key, shown);
+                        }
+                    }
+                    // The description lines of a pairwise report look each title up again
+                    // (`ScopeWalk::display`); the bulk resolved every Seq-align id, so the order
+                    // of the lines does not change what each finds.
+                    if run.is_some_and(|run| run.after.is_pairwise()) {
+                        for &(key, subject) in &subjects {
+                            if answers.get(&key) == Some(&HitLoad::Loaded) {
+                                if let Some(shown) = walk.display(subject) {
+                                    loads.shown.insert(key, shown);
+                                }
+                            }
                         }
                     }
                 }
@@ -4121,6 +4221,20 @@ impl HitLoads {
                 holder: Some(holder),
                 by: ShownBy::Order,
             });
+            // A description line's second lookup by the display id (`ScopeWalk::display`).
+            if shown.is_none() {
+                shown = subject.display_keys().and_then(|keys| {
+                    places
+                        .holders(keys, true)
+                        .into_iter()
+                        .map(|(at, _)| places.sequence(at))
+                        .find(|&other| !subject.mine(other))
+                        .map(|holder| ShownInstead {
+                            holder: Some(holder),
+                            by: ShownBy::Display,
+                        })
+                });
+            }
             if shown.is_none() {
                 if let HitLoad::Shown(before) = walk.load(subject) {
                     shown = Some(before);
@@ -4192,13 +4306,31 @@ impl HitLoads {
             state[hit] = Some(now);
             now
         };
+        // A description line's reads: its load, then where that gave the subject itself, the
+        // second lookup by its display id (`ScopeWalk::display`), once.
+        let displayed = std::cell::RefCell::new(vec![false; reads.hits.len()]);
+        let describe = |hit: usize| {
+            let now = read(hit);
+            if !matches!(now, Read::Loads)
+                || std::mem::replace(&mut displayed.borrow_mut()[hit], true)
+            {
+                return now;
+            }
+            match first(hit).and_then(|subject| walk.borrow_mut().display(subject)) {
+                Some(shown) => {
+                    state.borrow_mut()[hit] = Some(Read::Shown(shown));
+                    Read::Shown(shown)
+                }
+                None => now,
+            }
+        };
         if !ended.get() {
             // With `-html` the description lines end the run at the first whose load throws
             // (`AfterThrow::description_end`, the writer's answer): nothing after it loads.
             let description_end = run
                 .after
                 .description_end(reads.described.iter().copied(), |hit| {
-                    matches!(read(hit), Read::Throws)
+                    matches!(describe(hit), Read::Throws)
                 });
             if description_end.is_some() {
                 ended.set(true);
@@ -4207,7 +4339,7 @@ impl HitLoads {
                 // read them all, no line threw, and the loop reads them again, which changes nothing:
                 // `read` keeps `Loads` and `Shown`).
                 for &hit in &reads.described {
-                    read(hit);
+                    describe(hit);
                 }
                 let end = run.after.alignment_end(
                     0..reads.aligned,

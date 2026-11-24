@@ -2281,7 +2281,8 @@ pub(crate) fn prefetch_always_off(format: PrefetchFormat) -> bool {
 /// reads them so in outfmt 8, 9 and 11: review 5 of line DBID pfoff-4, H2 and H3). That matters for a call whose
 /// reports read nothing of the subjects ([`ParsedShown::prefetched`], refused by
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
-/// reads make ([`ParsedShown::one_by_one`]).
+/// reads make ([`BatchPrefetch::reads_one_by_one`], walked by
+/// [`crate::report::db_subject::ScopeWalk`]).
 #[derive(Debug)]
 pub(crate) struct BatchPrefetch(Batches, BatchStarts);
 

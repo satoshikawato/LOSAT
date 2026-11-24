@@ -14,6 +14,11 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKind {
     Named,
+    /// The named frame of `ReadNamedType` / `SkipNamedType` around a value of a named type that is
+    /// neither a SEQUENCE, a CHOICE nor an ENUMERATED (`eFrameNamed`; only the XML stream's reader
+    /// pushes it, `asn_input::Input::NAMED_TYPES`), whose `END_OBJECT_FRAME` is in those
+    /// functions rather than in `Read`.
+    NamedType,
     Class,
     ClassMember,
     Choice,
@@ -29,7 +34,7 @@ pub(crate) enum FrameKind {
 /// frame, once `SetTopMemberId` named it) is `member`.
 pub(crate) fn frame_info(kind: FrameKind, type_name: Option<&str>, member: Option<&str>) -> String {
     let kind = match kind {
-        FrameKind::Named => "eFrameNamed",
+        FrameKind::Named | FrameKind::NamedType => "eFrameNamed",
         FrameKind::Class => "eFrameClass",
         FrameKind::ClassMember => "eFrameClassMember",
         FrameKind::Choice => "eFrameChoice",
@@ -61,7 +66,7 @@ pub(crate) fn frame_name<'a>(
     match kind {
         FrameKind::ClassMember | FrameKind::ChoiceVariant => member.unwrap_or(""),
         FrameKind::Array | FrameKind::ArrayElement => "[]",
-        FrameKind::Named => type_name.unwrap_or(""),
+        FrameKind::Named | FrameKind::NamedType => type_name.unwrap_or(""),
         FrameKind::Class | FrameKind::Choice => "",
     }
 }
@@ -187,6 +192,9 @@ pub(crate) fn text_frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32
     const ISTR: &str = "src/serial/objistr.cpp";
     match (kind, skip) {
         (FrameKind::Named, _) => (ISTR, 968, "ncbi::CObjectIStream::Read"),
+        // The text and binary streams read a named type without a frame of its own
+        // (`Input::NAMED_TYPES`).
+        (FrameKind::NamedType, _) => unreachable!("the text stream pushes no named-type frame"),
         (FrameKind::Class, false) => (ASN, 1396, "ncbi::CObjectIStreamAsn::ReadClassSequential"),
         (FrameKind::ClassMember, false) => {
             (ASN, 1393, "ncbi::CObjectIStreamAsn::ReadClassSequential")

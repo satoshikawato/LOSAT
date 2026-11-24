@@ -2262,8 +2262,11 @@ fn header_members_lengths_and_bytes() {
 
 // D3c-3d: a header record without its mandatory seqid, read under `SERIAL_VERIFY_DATA_READ`.
 // NCBI's default read throws "member seqid expected"; with the check off it posts the member as
-// missing and reads on, which LOSAT refuses at that read (`SeqDbError::Setting`). The other
-// variable, the values that keep the check, and the other records read as before.
+// missing and reads on, which LOSAT refuses at that read (`SeqDbError::Setting`), alone
+// (`read_header`, `defline_set`) and in a piece (`visit_sequence_headers`). The decoder of the
+// ordinal ids takes such a record for one of parsed Seq-ids under every setting, and its readers
+// then read the whole set (`Volume::decode_header`). The other variable, the values that keep the
+// check, and the other records read as before.
 #[test]
 fn unchecked_reads_of_a_record_without_its_seqid_are_refused() {
     use crate::blastinput::ncbi_environment::ReadVerification;
@@ -2297,14 +2300,15 @@ fn unchecked_reads_of_a_record_without_its_seqid_are_refused() {
     ] {
         let mut db = SeqDb::open(&name, SeqType::Protein).unwrap();
         db.refuse_unchecked_reads(&setting(read, get));
+        let ordinal = db.deflines(0).unwrap_err();
+        assert!(ordinal.is_parsed_seqids(), "{read:?} {get:?}: {ordinal}");
         let errors = [
-            db.deflines(0).unwrap_err(),
             db.read_header(0).unwrap_err(),
             db.defline_set(0).unwrap_err(),
         ];
         let mut visited = Vec::new();
-        db.visit_deflines(db.header_ranges(10)[0], |ordinal, lines| {
-            visited.push((ordinal, lines.map(|lines| lines.len())));
+        db.visit_sequence_headers(db.header_ranges(10)[0], |ordinal, header| {
+            visited.push((ordinal, header.map(|_| 1)));
             true
         });
         for error in errors

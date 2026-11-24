@@ -2067,7 +2067,7 @@ fn tied_report() -> Option<std::sync::Arc<std::sync::Mutex<Core>>> {
 }
 
 /// Before a text that NCBI writes outside `cerr`, where no tie flushes `cout`: with C's `stderr`
-/// (`c_stderr`), through the handler of the `-logfile` file (`cerr_post`) or to a side file
+/// (`c_stderr_write`), through the handler of the `-logfile` file (`cerr_post`) or to a side file
 /// (`write_side_file`). NCBI's writes of the report so far are made (`Core::sync`); what NCBI's
 /// buffer holds stays there.
 pub fn sync_report() -> std::io::Result<()> {
@@ -2077,39 +2077,20 @@ pub fn sync_report() -> std::io::Result<()> {
     }
 }
 
-thread_local! {
-    /// Whether this thread's writes of the command line's standard error (`CliStderr`) are NCBI's
-    /// C `stderr`'s (`c_stderr`).
-    static C_STDERR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
-/// `write` with the command line's standard error (`CliStderr`) as NCBI's C `stderr`, which
-/// NCBI's formatter writes with `fprintf` (`InitConfig`'s `REGISTRY:` line of `GETURL_DEBUG`),
-/// not as its `cerr`: no tie flushes `cout`, NCBI's writes of the report so far are made first
-/// (`sync_report`), so the line comes before the bytes that NCBI's buffer holds where both
+/// `text` on the command line's NCBI C `stderr`, which NCBI's formatter writes with `fprintf`
+/// (`InitConfig`'s `REGISTRY:` line of `GETURL_DEBUG`), apart from its `cerr` (`CliStderr`) and
+/// from the run's diagnostics: no tie flushes `cout`, NCBI's writes of the report so far are made
+/// first (`sync_report`), so the line comes before the bytes that NCBI's buffer holds where both
 /// streams go to one pipe (line RG T4a2 fix round 2, review c C4: after the prolog's last
 /// `NcbiEndl`; review e S1: after a first query's footer `NcbiEndl` where that query has no hits,
 /// probes `T/t4/review_t4a2_e/out/nh1.*`, `nhx.*`). The text goes to the terminal where the run's
 /// messages follow `-logfile` (`ncbi_environment::terminal_stderr`: C's `stderr` stays the
 /// terminal), and a failed write is dropped, also on a bad `cerr` (NCBI reads nothing that
-/// `fprintf` returns). A library call's diagnostics are not the process's: `write` writes them
-/// as it does.
-pub fn c_stderr<R>(write: impl FnOnce() -> R) -> R {
-    /// Ends the mode also where `write` unwinds.
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            C_STDERR.with(|mode| mode.set(false));
-        }
-    }
-    C_STDERR.with(|mode| mode.set(true));
-    let _reset = Reset;
-    write()
-}
-
-/// `text` on NCBI's C `stderr` (`c_stderr`).
-fn c_stderr_write(text: &[u8]) -> std::io::Result<()> {
+/// `fprintf` returns). The one writer of that stream, for the command line's process only
+/// (`query_warnings::QueryWarnings::html_stderr_line`): a library call has no C `stderr` of its
+/// own, its line goes to the call's diagnostics.
+pub(crate) fn c_stderr_write(text: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     if text.is_empty() {
         return Ok(());
@@ -2203,23 +2184,13 @@ pub fn cerr_post(text: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// A write of `CliStderr`: NCBI's C `stderr`'s inside `c_stderr`, else its `cerr`'s.
-fn cli_stderr_write(text: &[u8]) -> std::io::Result<()> {
-    if C_STDERR.with(std::cell::Cell::get) {
-        c_stderr_write(text)
-    } else {
-        cerr_post(text)
-    }
-}
-
 /// The command line's standard error (`cerr_post`), tied to the report's standard output
 /// (`tie_standard_output`): what standard output writes before a text is written before it where
 /// the text is made. A whole message is written with one `write_all` of the stream, which
 /// `std::io::Stderr` writes under one lock of standard error, so that no other thread's message
 /// comes inside it. An empty write is no write of NCBI's to `cerr` (a query without warnings,
 /// whose `ERR_POST` NCBI does not make): it writes nothing of the report. A failed write of
-/// standard error is no error of the run (`Cerr`). Inside `c_stderr` it is NCBI's C `stderr`,
-/// which no tie flushes `cout` before.
+/// standard error is no error of the run (`Cerr`).
 pub struct CliStderr;
 
 impl CliStderr {
@@ -2231,12 +2202,12 @@ impl CliStderr {
 
 impl std::io::Write for CliStderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        cli_stderr_write(buf)?;
+        cerr_post(buf)?;
         Ok(buf.len())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        cli_stderr_write(buf)
+        cerr_post(buf)
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {

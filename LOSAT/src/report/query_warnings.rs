@@ -1085,23 +1085,25 @@ impl<'a> QueryWarnings<'a> {
     /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post), after the report written so
     /// far (`report`, LOSAT's flush: it reaches its stream): with C's `fprintf` to `stderr`, which
     /// does not flush `cout`, so in a pipe of both streams the line comes before the bytes that
-    /// NCBI's buffer holds since its last flush (`ostream::c_stderr`: the prolog's last `NcbiEndl`,
-    /// line RG T4a2 fix round 2, review c C4, probes `T/t4/fix2/out/c4.*`; the footer's `NcbiEndl`
-    /// of a first query without hits, review e S1, probes `T/t4/review_t4a2_e/out/nh1.*`, `nhx.*`).
-    /// It goes to the sink of the report's posts (`html_posts_sink`): on the command line the
-    /// process's standard error, the terminal where the run's messages follow `-logfile` (tblastx:
-    /// NCBI's posts go to the file, its own line to the terminal); a library call's messages have
-    /// no terminal of their own: that sink.
+    /// NCBI's buffer holds since its last flush (`ostream::c_stderr_write`: the prolog's last
+    /// `NcbiEndl`, line RG T4a2 fix round 2, review c C4, probes `T/t4/fix2/out/c4.*`; the footer's
+    /// `NcbiEndl` of a first query without hits, review e S1, probes
+    /// `T/t4/review_t4a2_e/out/nh1.*`, `nhx.*`). On the command line it is the process's C
+    /// `stderr` (`c_stderr_write`; the terminal where the run's messages follow `-logfile`, tblastx:
+    /// NCBI's posts go to the file, its own line to the terminal), apart from the run's
+    /// diagnostics; a library call has no C `stderr` of its own: the sink of the report's posts
+    /// (`html_posts_sink`).
     pub fn html_stderr_line(&mut self, line: &[u8], report: &mut dyn Write) -> io::Result<()> {
         if line.is_empty() {
             return Ok(());
         }
         report.flush()?;
+        if crate::cli::is_command_line_run() {
+            return crate::report::ostream::c_stderr_write(line);
+        }
         let sink = self.html_posts_sink();
-        crate::report::ostream::c_stderr(|| {
-            sink.write_all(line)?;
-            sink.flush()
-        })
+        sink.write_all(line)?;
+        sink.flush()
     }
 
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),

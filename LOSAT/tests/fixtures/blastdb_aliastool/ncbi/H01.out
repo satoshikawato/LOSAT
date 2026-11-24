@@ -1,0 +1,160 @@
+USAGE
+  blastdb_aliastool [-h] [-help] [-gi_file_in input_file]
+    [-gi_file_out output_file] [-db dbname] [-dbtype molecule_type]
+    [-title database_title] [-gilist input_file] [-seqidlist input_file]
+    [-taxidlist input_file] [-oid_masks oid_masks] [-out database_name]
+    [-dblist database_names] [-dblist_file file_name] [-vdblist vdb_names]
+    [-vdblist_file file_name] [-num_volumes positive_integer]
+    [-seqid_file_in input_file] [-seqid_title seqid_title]
+    [-seqid_file_out output_file] [-seqid_db dbname]
+    [-seqid_dbtype molecule_type] [-seqid_file_info seqid_file_info]
+    [-logfile File_Name] [-version]
+
+DESCRIPTION
+   Application to create BLAST database aliases, version 2.17.0+
+   
+   This application has three modes of operation:
+   
+   1) GI file conversion:
+      Converts a text file containing GIs (one per line) to a more efficient
+      binary format. This can be provided as an argument to the -gilist option
+      of the BLAST search command line binaries or to the -gilist option of
+      this program to create an alias file for a BLAST database (see below).
+   
+   2) Alias file creation (restricting with GI List or Sequence ID List):
+      Creates an alias for a BLAST database and a GI or ID list which
+      restricts this database. This is useful if one often searches a subset
+      of a database (e.g., based on organism or a curated list). The alias
+      file makes the search appear as if one were searching a regular BLAST
+      database rather than the subset of one.
+   
+   3) Alias file creation (aggregating BLAST databases):
+      Creates an alias for multiple BLAST databases. All databases must be of
+      the same molecule type (no validation is done). The relevant options are
+      -dblist and -num_volumes.
+
+OPTIONAL ARGUMENTS
+ -h
+   Print USAGE and DESCRIPTION;  ignore all other parameters
+ -help
+   Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters
+ -version
+   Print version number;  ignore other arguments
+
+ *** GI file conversion options
+ -gi_file_in <File_In>
+   Text file to convert, should contain one GI per line
+    * Incompatible with:  db, dblist, dbtype, gilist, num_volumes, out,
+   seqid_db, seqid_dbtype, seqid_file_in, seqid_file_info, seqid_file_out,
+   seqidlist, title, vdblist
+ -gi_file_out <File_Out>
+   File name of converted GI file
+   Default = input file name provided to -gi_file_in argument with the .bgl
+   extension
+    * Requires:  gi_file_in
+    * Incompatible with:  db, dblist, dbtype, gilist, num_volumes, out,
+   seqid_db, seqid_dbtype, seqid_file_in, seqid_file_info, seqid_file_out,
+   seqidlist, title, vdblist
+
+ *** Alias file creation options
+ -db <String>
+   BLAST database name
+    * Requires:  out
+    * Incompatible with:  gi_file_in, gi_file_out, dblist, dblist_file,
+   vdblist, vdblist_file, num_volumes, seqid_file_in, seqid_file_out,
+   seqid_file_info
+ -dbtype <String, `nucl', `prot'>
+   Molecule type stored in BLAST database
+   Default = `prot'
+    * Incompatible with:  gi_file_in, gi_file_out, seqid_file_in,
+   seqid_file_out, seqid_file_info
+ -title <String>
+   Title for BLAST database
+   Default = name of BLAST database provided to -db argument with the -gifile
+   argument appended to it
+    * Requires:  out
+    * Incompatible with:  gi_file_in, gi_file_out, seqid_file_in,
+   seqid_file_out, seqid_file_info
+ -gilist <File_In>
+   Text or binary gi file to restrict the BLAST database provided in -db
+   argument
+   If text format is provided, it will be converted to binary
+    * Requires:  out
+    * Incompatible with:  gi_file_in, gi_file_out, seqidlist, taxidlist,
+   oid_masks, num_volumes, seqid_file_in, seqid_file_out, seqid_file_info
+ -seqidlist <File_In>
+   Text sequence id or accession file to restrict the BLAST database provided
+   in -db argument
+    * Requires:  out
+    * Incompatible with:  gi_file_in, gi_file_out, gilist, taxidlist,
+   oid_masks, num_volumes, seqid_file_in, seqid_file_out, seqid_file_info
+ -taxidlist <File_In>
+   Text taxonomy id file to restrict the BLAST database provided in -db
+   argument
+    * Requires:  out
+    * Incompatible with:  gilist, seqidlist, oid_masks
+ -oid_masks <Integer>
+   Create alias db with pre-built oid masks
+   0x01 Exclude Model
+    * Requires:  out
+    * Incompatible with:  gilist, seqidlist, taxidlist
+ -out <String>
+   Name of BLAST database alias to be created
+    * Incompatible with:  gi_file_in, gi_file_out, seqid_file_in,
+   seqid_file_out, seqid_file_info
+ -dblist <String>
+   A space separated list of BLAST database names to aggregate
+    * Requires:  out, dbtype, title
+    * Incompatible with:  gi_file_in, gi_file_out, db, num_volumes,
+   dblist_file, seqid_file_in, seqid_file_out, seqid_file_info
+ -dblist_file <File_In>
+   A file containing a list of BLAST database names to aggregate, one per line
+    * Requires:  out, dbtype, title
+    * Incompatible with:  db, num_volumes, dblist
+ -vdblist <String>
+   A space separated list of VDB names to aggregate
+    * Requires:  out, dbtype, title
+    * Incompatible with:  gi_file_in, gi_file_out, db, num_volumes,
+   vdblist_file, seqid_file_in, seqid_file_out, seqid_file_info
+ -vdblist_file <File_In>
+   A file containing a list of vdb names to aggregate, one per line
+    * Requires:  out, dbtype, title
+    * Incompatible with:  db, num_volumes, vdblist
+ -num_volumes <Integer, >=1>
+   Number of volumes to aggregate, in which case the basename for the database
+   is extracted from the out option
+    * Requires:  out, dbtype, title
+    * Incompatible with:  gi_file_in, gi_file_out, dblist, dblist_file,
+   vdblist, vdblist_file, db, gilist, seqidlist, seqid_file_in,
+   seqid_file_out, seqid_file_info
+
+ *** Seqd ID file conversion options
+ -seqid_file_in <File_In>
+   Text file to convert, should contain one seq id per line
+    * Incompatible with:  gi_file_in, gi_file_out, db, dblist, dbtype, gilist,
+   num_volumes, out, seqidlist, title, vdblist, seqid_file_info
+ -seqid_title <String>
+   Title for seqid list.
+    Default = input file name provided to -seqid_file_in argument
+    * Requires:  seqid_file_in
+ -seqid_file_out <String>
+   File name of converted seq id file
+   Default = input file name provided to -seqid_file_in argument with the .bsl
+   extension
+    * Incompatible with:  gi_file_in, gi_file_out, db, dblist, dbtype, gilist,
+   num_volumes, out, seqidlist, title, vdblist, seqid_file_info
+ -seqid_db <String>
+   BLAST database for seqidlist
+    * Requires:  seqid_file_in
+    * Incompatible with:  gi_file_in, gi_file_out
+ -seqid_dbtype <String, `nucl', `prot'>
+   Molecule type BLAST database
+    * Requires:  seqid_file_in, seqid_db
+    * Incompatible with:  gi_file_in, gi_file_out
+ -seqid_file_info <String>
+   Display seqidlist file info
+    * Incompatible with:  gi_file_in, gi_file_out, db, dblist, dbtype, gilist,
+   num_volumes, out, seqid_file_in, seqid_file_out, seqidlist, title, vdblist
+ -logfile <File_Out>
+   File to which the program log should be redirected
+

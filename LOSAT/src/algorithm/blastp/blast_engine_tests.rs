@@ -2559,6 +2559,8 @@ fn banks_filled_refusal_names_the_batch_of_the_table() {
     let resolve = |ungapped: bool| {
         let mut args = make_blastp_args();
         args.task = "blastp-fast".to_string();
+        // An ungapped search takes no composition adjustment.
+        args.comp_based_stats = "0".to_string();
         args.ungapped = ungapped;
         args.resolve().expect("resolved blastp-fast args")
     };

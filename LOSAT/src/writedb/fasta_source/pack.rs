@@ -316,8 +316,36 @@ pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
 /// (`tests::ncbi8na_of_both_codings`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
+///
+/// A block of residues that are all `A`, `C`, `G`, `T` or `U` gets its codes without a table
+/// (LOSAT's speed); any other block, and the residues after the last block, get the table's.
 pub(super) fn append_ncbi8na(seq8na: &mut Vec<u8>, src: &[u8]) {
-    seq8na.extend(src.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
+    let (blocks, rest) = src.as_chunks::<NCBI8NA_BLOCK>();
+    for block in blocks {
+        let mut codes = [0u8; NCBI8NA_BLOCK];
+        for (code, &residue) in codes.iter_mut().zip(block) {
+            *code = ncbi4na_code_of_base(residue);
+        }
+        if codes.iter().fold(true, |all, &code| all & (code != 0)) {
+            seq8na.extend_from_slice(&codes);
+        } else {
+            seq8na.extend(block.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
+        }
+    }
+    seq8na.extend(rest.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
+}
+
+/// The number of residues that `append_ncbi8na` takes at once.
+const NCBI8NA_BLOCK: usize = 64;
+
+/// The NCBI4na code of `A`, `C`, `G`, `T` and `U` (1, 2, 4, 8, 8) without a branch, and 0 for
+/// any other byte (whose code in `NCBI4NA_CODES` is not 0).
+const fn ncbi4na_code_of_base(residue: u8) -> u8 {
+    let a = (residue == b'A') as u8;
+    let c = (residue == b'C') as u8;
+    let g = (residue == b'G') as u8;
+    let t = ((residue == b'T') | (residue == b'U')) as u8;
+    a | (c << 1) | (g << 2) | (t << 3)
 }
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
@@ -327,9 +355,14 @@ pub(super) fn append_ncbi8na(seq8na: &mut Vec<u8>, src: &[u8]) {
 pub(super) fn ncbi8na_to_ncbi4na(src: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
     let mut dst = Vec::new();
     dst.try_reserve_exact(src.len().div_ceil(2))?;
-    let mut chunks = src.chunks_exact(2);
-    dst.extend((&mut chunks).map(|two| two[0] << 4 | two[1]));
-    if let [last] = chunks.remainder() {
+    let (twos, rest) = src.as_chunks::<2>();
+    // The first code of a pair in the high four bits, the second below it: one shift and one OR
+    // of the pair as a 16-bit number, for every byte value (LOSAT's speed).
+    dst.extend(twos.iter().map(|&two| {
+        let pair = u16::from_le_bytes(two);
+        ((pair << 4) | (pair >> 8)) as u8
+    }));
+    if let [last] = rest {
         dst.push(last << 4);
     }
     Ok(dst)

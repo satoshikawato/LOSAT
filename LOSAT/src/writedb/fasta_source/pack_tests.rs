@@ -170,6 +170,67 @@ fn conversions() {
 /// source on 2026-11-12): the rows of these letters in either case, 15 for every other
 /// byte.
 #[test]
+fn the_codes_of_bases_are_the_table() {
+    for byte in 0..=u8::MAX {
+        let code = ncbi4na_code_of_base(byte);
+        if b"ACGTU".contains(&byte) {
+            assert_eq!(code, NCBI4NA_CODES[usize::from(byte)], "{byte}");
+        } else {
+            assert_eq!(code, 0, "{byte}");
+            assert_ne!(NCBI4NA_CODES[usize::from(byte)], 0, "{byte}");
+        }
+    }
+}
+
+#[test]
+fn appended_ncbi8na_is_the_table_of_every_residue() {
+    let table = |src: &[u8]| -> Vec<u8> {
+        src.iter()
+            .map(|&residue| NCBI4NA_CODES[usize::from(residue)])
+            .collect()
+    };
+    let check = |src: &[u8]| {
+        let mut seq8na = vec![0x0f, 0x01];
+        append_ncbi8na(&mut seq8na, src);
+        assert_eq!(seq8na[..2], [0x0f, 0x01]);
+        assert_eq!(seq8na[2..], table(src), "{src:?}");
+    };
+    // Every byte at every place of the first two blocks of bases, in lengths that end in a block,
+    // after it and before it.
+    let bases: Vec<u8> = (0..200).map(|i| b"ACGTUGCA"[i % 8]).collect();
+    for place in 0..2 * NCBI8NA_BLOCK + 1 {
+        for byte in 0..=u8::MAX {
+            let mut src = bases.clone();
+            src[place] = byte;
+            for length in [place + 1, 2 * NCBI8NA_BLOCK, 2 * NCBI8NA_BLOCK + 3, 200] {
+                check(&src[..length.max(place + 1)]);
+            }
+        }
+    }
+    for length in 0..300 {
+        check(&bases[..length.min(bases.len())]);
+    }
+}
+
+#[test]
+fn ncbi4na_of_ncbi8na_is_the_pairs_of_codes() {
+    let pairs = |src: &[u8]| -> Vec<u8> {
+        let mut chunks = src.chunks_exact(2);
+        let mut dst: Vec<u8> = (&mut chunks).map(|two| two[0] << 4 | two[1]).collect();
+        if let [last] = chunks.remainder() {
+            dst.push(last << 4);
+        }
+        dst
+    };
+    for pair in 0..=u16::MAX {
+        let [first, second] = pair.to_be_bytes();
+        for src in [&[first, second][..], &[first], &[0x0f, first, second]] {
+            assert_eq!(ncbi8na_to_ncbi4na(src).unwrap(), pairs(src), "{src:?}");
+        }
+    }
+}
+
+#[test]
 fn ncbi4na_codes_are_the_rows_of_the_table() {
     let rows: [(u8, u8); 15] = [
         (b'A', 1),

@@ -60,6 +60,8 @@ U = f"-query {O}/tblastx_unsearched_query.fasta {SUBJECTS}"
 A = f"-query {O}/tblastx_ambig_query.fasta -subject {O}/tblastx_ambig_subject.fasta"
 C = f"-query {O}/tblastx_code4_query.fasta -subject {O}/tblastx_code4_subject.fasta -query_gencode 4"
 Y = f"-query {O}/tblastx_many_query.fasta -subject {O}/tblastx_many_subject.fasta"
+# The one-hit search of the short-query linking cases (X-short-tbx-link).
+LINK = "-seg no -evalue 1e10 -window_size 0 -outfmt 6"
 # (case_id, NCBI argv after `tblastx`, extra LOSAT-only arguments[, environment[, NCBI environment]])
 _CASES = [
     # Query batches (blast_input_aux.cpp GetQueryBatchSize; the linking cutoffs use each
@@ -282,6 +284,17 @@ _CASES = [
                                       " -strand minus -outfmt 6", ""),
     ("strand.both_avg0_pad_subject", f"-query {I}/avg0_both_query.fa -subject {I}/avg0_pad_subject.fa"
                                      " -dbsize 3000 -outfmt 6", ""),
+    # A short query against one short subject (line RG item X-short-tbx-link): NCBI's expected
+    # length is 0 (`link.q11_s12`, the -inf route) or negative (`link.q8_s12_ws2`,
+    # `link.rq76_rs76_ws2`, the NaN route), so with one subject its big-gap cutoff is INT_MIN + 1
+    # (blast_parameters.c:1036-1072) and NCBI crashes in the linking (link_hsps.c:868, 931-932),
+    # as in approved exception 20. LOSAT runs the one-subject search; NCBI's bytes are those of the
+    # nearest run it completes (ORACLE_ARGV): a second subject of N, which has no hits and makes the
+    # database longer than the subject (a finite cutoff), and -dbsize of the subject alone.
+    ("link.q11_s12", f"-query {I}/link_q11.fa -subject {I}/link_s12.fa {LINK}", ""),
+    ("link.q8_s12_ws2", f"-query {I}/link_q8.fa -subject {I}/link_s12w.fa {LINK} -word_size 2 -threshold 1", ""),
+    ("link.rq76_rs76_ws2", f"-query {I}/link_rq76.fa -subject {I}/link_rs76.fa {LINK} -word_size 2 -threshold 1",
+     ""),
     # A first query of 2 nt (no frame +1) with -searchsp: the archive's EffectiveSearchSpace is the
     # option's value for every strand (split_query_aux_priv.cpp:157-161).
     ("strand.both_short2_first_searchsp_fmt11", f"-query {I}/short2_query.fa {SUBJECTS} -searchsp 1000000"
@@ -294,6 +307,11 @@ ORACLE_ARGV = {
                                         " -culling_limit 2147483644 -outfmt 6",
     "culling.near_int4_max_2147483647": f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
                                         " -culling_limit 2147483644 -outfmt 6",
+    "link.q11_s12": f"-query {I}/link_q11.fa -subject {I}/link_s12_pad.fa {LINK} -dbsize 12",
+    "link.q8_s12_ws2": f"-query {I}/link_q8.fa -subject {I}/link_s12w_pad.fa {LINK} -word_size 2 -threshold 1"
+                       " -dbsize 12",
+    "link.rq76_rs76_ws2": f"-query {I}/link_rq76.fa -subject {I}/link_rs76_pad.fa {LINK} -word_size 2"
+                          " -threshold 1 -dbsize 15",
 }
 
 
@@ -337,6 +355,15 @@ def command_generate(_args) -> int:
     letters = "".join(mutated.split("\n", 1)[1].split()) + "N" * 57003
     (INPUTS / "avg0_long_subject.fa").write_text(
         ">Sa0long Sa0mut and 57,003 N\n" + "".join(letters[i:i + 60] + "\n" for i in range(0, len(letters), 60)))
+    # Short queries against one short subject (line RG item X-short-tbx-link), and each subject
+    # with a second one of N (12 N, or 300 N where the expected length is far below 0 and 12 N
+    # would leave the database's length in protein letters under the reduced subject's).
+    short_link = {"q11": "TGGTGGTGGTT", "s12": "TGGTGGTGGTTT", "q8": "TGGTGGTG", "s12w": "TGGTGGTGGTGG",
+                  "rq76": "CATCATCATT", "rs76": "GGGTATATGTATTAT"}
+    for name, letters in short_link.items():
+        (INPUTS / f"link_{name}.fa").write_text(f">{name}\n{letters}\n")
+    for name, pad in (("s12", 12), ("s12w", 12), ("rs76", 300)):
+        (INPUTS / f"link_{name}_pad.fa").write_text(f">{name}\n{short_link[name]}\n>pad\n{'N' * pad}\n")
     (INPUTS / "short4_query.fa").write_text(">" + records[1] + ">s4 four\nACGT\n>" + records[2]
                                             + ">sN3 three N\nNNN\n>" + records[3])
     code4_query = (ENGINE / O / "tblastx_code4_query.fasta").read_text()

@@ -34,8 +34,8 @@ impl ListedSubjects {
     /// subjects (`fetched`: a gapped search, whose redo or traceback fetches them), those that its
     /// fetches exclude leave both lists first, each list leaving a mark of its place
     /// (`exclude_fetched`, `fetch_excluded`; a header that the fetch cannot read is LOSAT's
-    /// refusal); an ungapped search fetches none, and they leave at the Seq-aligns
-    /// (`drop_unaligned`).
+    /// refusal where the redo or the traceback fetches it, `note_fetched`); an ungapped search
+    /// fetches none, and they leave at the Seq-aligns (`drop_unaligned`).
     pub(in crate::algorithm::blastp::blast_engine) fn x_list(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
@@ -43,7 +43,7 @@ impl ListedSubjects {
         fetched: bool,
     ) -> Result<Self> {
         let (fetch_excluded, fetched_utf8) = if fetched {
-            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?
+            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)
         } else {
             Default::default()
         };

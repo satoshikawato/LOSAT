@@ -37,14 +37,22 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     .into()
 }
 
+/// NCBI's engine error of a traceback that fails (`engine_error`): the traceback's own setup of a
+/// split batch whose chunks found nothing (`blastp::protein_query_split::UnmetChecks`), a failed
+/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTP's, psiblast's
+/// and TBLASTN's error there.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
+pub const TRACEBACK_FAILED: &str = "Traceback failed";
+
 /// An error that NCBI raises as a `CBlastException` that is neither an option nor a
-/// memory error (exit 3).
+/// memory error (exit 3); `message` is written as its bytes (a path in it as the system's).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-pub fn engine_error(message: &str) -> anyhow::Error {
+pub fn engine_error(message: impl AsRef<[u8]>) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("{ENGINE_ERROR} {message}\n").into(),
+        message: [ENGINE_ERROR.as_bytes(), b" ", message.as_ref(), b"\n"].concat(),
     }
     .into()
 }

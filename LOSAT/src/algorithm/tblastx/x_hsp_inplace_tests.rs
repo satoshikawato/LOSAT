@@ -580,7 +580,7 @@ fn int4_linking_drops_hsps_of_length_zero_or_less() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-893
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-1091; c++/src/algo/blast/core/blast_hits.c:452-453,687,699
 // HSPs of length 0 or less with any score, anywhere in the list: none leaves the linking call,
 // every other HSP leaves it once, serially and on the pool alike.
 #[test]

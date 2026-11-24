@@ -5,7 +5,6 @@
 //! file of several.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use super::bioseq::{Bioseq, SeqData};
 use super::column::{unsupported_late_column, BlobPair, ColumnDates, ColumnMeta};
@@ -33,7 +32,7 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 /// `CWriteDB_Impl` of format version 4 or 5, with the indices of `-parse_seqids` and
 /// `-hash_index`.
 pub struct WriteDb {
-    dbname: String,
+    dbname: Vec<u8>,
     protein: bool,
     title: Vec<u8>,
     date: Vec<u8>,
@@ -137,7 +136,7 @@ fn invalid_column_id() -> WriteDbError {
 impl std::fmt::Debug for WriteDb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WriteDb")
-            .field("dbname", &self.dbname)
+            .field("dbname", &String::from_utf8_lossy(&self.dbname))
             .field("protein", &self.protein)
             .field("version", &self.version)
             .field("volumes", &self.volumes.len())
@@ -199,7 +198,7 @@ impl WriteDb {
     /// `-hash_index`).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         title: &[u8],
         date: &[u8],
@@ -209,7 +208,7 @@ impl WriteDb {
         indices: Indices,
     ) -> Self {
         Self {
-            dbname: dbname.to_string(),
+            dbname: dbname.to_vec(),
             protein,
             title: title.to_vec(),
             date: date.to_vec(),
@@ -734,14 +733,17 @@ impl WriteDb {
             )
         };
         let lmdb = WriteDbLmdb::new(
-            std::path::Path::new(&lmdb_fname_w_path),
+            &crate::utils::os_bytes::path_of_bytes(&lmdb_fname_w_path),
             lmdb_map,
             &platform,
             &settings,
         )?;
         self.lmdb = Some(lmdb);
         let taxdb = WriteDbTaxId::new(
-            &lmdb_file_name(std::path::Path::new(&lmdb_fname_w_path), "tf"),
+            &lmdb_file_name(
+                &crate::utils::os_bytes::path_of_bytes(&lmdb_fname_w_path),
+                "tf",
+            ),
             tax_map,
             &platform,
             &settings,
@@ -799,10 +801,10 @@ impl WriteDb {
         }
         if self.version == DbVersion::V5 {
             if let Some(lmdb) = self.lmdb.as_mut() {
-                let vol_names: Vec<String> = self
+                let vol_names: Vec<&[u8]> = self
                     .volumes
                     .iter()
-                    .map(|volume| file_name(volume.volume_name()).to_string())
+                    .map(|volume| file_name(volume.volume_name()))
                     .collect();
                 let vol_num_oids: Vec<u32> = self.volumes.iter().map(Volume::oid).collect();
                 lmdb.insert_volumes_info(&vol_names, &vol_num_oids)?;
@@ -1060,12 +1062,9 @@ impl WriteDb {
         self.column_dates.set_fallback(date);
     }
 
-    fn alias_name(&self) -> String {
-        format!(
-            "{}.{}",
-            self.dbname,
-            if self.protein { "pal" } else { "nal" }
-        )
+    fn alias_name(&self) -> Vec<u8> {
+        let extension: &[u8] = if self.protein { b".pal" } else { b".nal" };
+        [self.dbname.as_slice(), extension].concat()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:405-438
@@ -1094,17 +1093,18 @@ impl WriteDb {
                 if i > 0 {
                     dblist.push(b' ');
                 }
-                dblist.extend_from_slice(file_name(volume.volume_name()).as_bytes());
+                dblist.extend_from_slice(file_name(volume.volume_name()));
             }
         } else {
-            dblist.extend_from_slice(file_name(&self.dbname).as_bytes());
+            dblist.extend_from_slice(file_name(&self.dbname));
         }
         let mut masklist = Vec::new();
         for name in self.mask.gi_mask_names().filter(|name| !name.is_empty()) {
             masklist.extend_from_slice(name.as_bytes());
             masklist.push(b' ');
         }
-        let mut alias = OfStream::create(Path::new(&self.alias_name()));
+        let mut alias =
+            OfStream::create(&crate::utils::os_bytes::path_of_bytes(&self.alias_name()));
         alias.insert(b"#\n# Alias file created: ");
         alias.insert(&self.date);
         alias.insert(b"\n#\n");
@@ -1123,10 +1123,10 @@ impl WriteDb {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1655-1674
     /// `ListVolumes`: the volumes written so far (paths without extension).
-    pub fn list_volumes(&self) -> Vec<String> {
+    pub fn list_volumes(&self) -> Vec<Vec<u8>> {
         self.volumes
             .iter()
-            .map(|volume| volume.volume_name().to_string())
+            .map(|volume| volume.volume_name().to_vec())
             .collect()
     }
 
@@ -1138,7 +1138,7 @@ impl WriteDb {
     // alias file of a database of one volume with GI masks: a failed build with `-gi_mask` leaves
     // them (survey b1/w30, b2/x03_oob_gi_gimask).
     /// `ListFiles`: every file of the database written so far.
-    pub fn list_files(&self) -> Vec<String> {
+    pub fn list_files(&self) -> Vec<Vec<u8>> {
         let mut files = Vec::new();
         for volume in &self.volumes {
             volume.list_files(&mut files);
@@ -1211,16 +1211,14 @@ pub(crate) fn gi_only_between_keys_message(oid: u32, name: &[u8]) -> Vec<u8> {
 // stops at the first sequence it publishes).
 /// `BuildLMDBFileName` of `basename` and `is_protein`: `<db>.pdb` or `<db>.ndb`.
 pub(crate) fn build_lmdb_file_name(
-    basename: &str,
+    basename: &[u8],
     is_protein: bool,
-) -> Result<String, WriteDbError> {
+) -> Result<Vec<u8>, WriteDbError> {
     if basename.is_empty() {
         return Err(WriteDbError::InvalidArgument("Basename is empty"));
     }
-    Ok(format!(
-        "{basename}{}",
-        if is_protein { ".pdb" } else { ".ndb" }
-    ))
+    let extension: &[u8] = if is_protein { b".pdb" } else { b".ndb" };
+    Ok([basename, extension].concat())
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:97-125
@@ -1255,9 +1253,9 @@ fn union_of_tax_ids(deflines: &[crate::seqid::BlastDefline]) -> Vec<i32> {
 }
 
 /// `GetName` of a `CDirEntry` of `path`: the part after the last path separator.
-fn file_name(path: &str) -> &str {
-    let is_separator = |c: char| c == '/' || (cfg!(windows) && (c == '\\' || c == ':'));
-    match path.rfind(is_separator) {
+fn file_name(path: &[u8]) -> &[u8] {
+    let is_separator = |c: &u8| *c == b'/' || (cfg!(windows) && (*c == b'\\' || *c == b':'));
+    match path.iter().rposition(is_separator) {
         Some(at) => &path[at + 1..],
         None => path,
     }

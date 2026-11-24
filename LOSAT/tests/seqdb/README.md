@@ -181,6 +181,39 @@ cases `x10_*` put beside a database (setup `F=>G`) as an earlier run of NCBI's l
 holds and compares the six files byte for byte (but a name that the alias file lists twice, case `x12`). A rerun changes the dates of the `.gmi`/`.gni`, mask column and
 alias files.
 
+## Readers of GI-indexed masks (`gi_mask_read/`)
+
+`make_gi_mask_read_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-20, makeblastdb, blastdbcmd,
+blastdb_aliastool and the search programs 2.17.0 with `BLAST_USAGE_REPORT=false`) builds the databases of
+`gi_mask_read/dbs.tsv` with NCBI's makeblastdb from the writer's inputs (`gi_mask/in/`, the same functions):
+multi-volume version 5 and 4, protein, a database without masks, a description of another program, the GI
+4294967295 beside a sequence without a GI, duplicate GIs (version 4), an absolute `-gi_mask_name`, data volumes of
+10 and 20 bytes (one of them never written, survey D8), a `-gi_mask_name` with a space, and single-volume databases
+(whose alias file it rewrites to `DBLIST db`, the form LOSAT's makeblastdb writes: PD-LOSAT-NCBI-DEFECTS approved
+exception 25). It then freezes what NCBI's programs print for each row of `gi_mask_read/cases.tsv` (name, databases,
+directory under the root, environment, words): `blastdbcmd -info`, `-outfmt %m`, `-mask_sequence_with`, `blastn
+-db_soft_mask` / `-db_hard_mask` by id and name, from another directory, with `BLASTDB`, by absolute name, through an
+alias file over the database and as `-db 'db db'`, a plain search of each program family, and (rows added
+2026-11-23) `blastp`, `blastx`, `tblastn` and `tblastx` with `-db_soft_mask` / `-db_hard_mask` by id (`-outfmt 6`)
+and by name (`-outfmt 0`) on the protein databases `m09`, `svp` and the nucleotide databases `m01`, `sv5`; the rows
+`raw_*` copy `m01`, `sv5` and `svp` with `makeblastdb -input_type blastdb` and read the copies back (`-info`, `%m`,
+a hard-masked search), from another directory, and with `-in 'db db'`; and (rows added 2026-11-24, review of
+line NP item M4c-2) `blastdbcmd` and `blastn` on `wide`, whose GI-mask data file holds 88,012 bytes (its third record
+crosses byte 65,536, the size of the chunks and windows that LOSAT reads), and on the variants of `sv4` in
+`gi_mask_read/variants.tsv`, whose `.nog` (the GI of each sequence) is cut inside its header, inside its entries,
+removed, or gives a count of 3 with two entries swapped, and `makembindex` with `-db_mask` by id and name, an
+unknown name and id, `-show_filters`, an old-style index, from another directory and on `d10` (the rows run in
+order in one root). `gi_mask_read/db/<db>/` holds the databases (the root `<R>` in their text files),
+`gi_mask_read/expected/<case>.{rc,stdout,stderr}` the runs (the root as `<R>`), and for a makembindex row
+`<case>.files` each file it made or changed (path, size, FNV-1a 64 digest), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
+difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS: NCBI's headers with the letters of NCBI's `-outfmt %s` run, NCBI's
+own FASTA in `bdc_m09_msw_0.ncbi_stdout`. `tests/gi_mask_read.rs` runs every case through the `losat` binary
+(searches also with `-num_threads 4`, whose reference is NCBI's `-num_threads 1` output, Owner decision DB-3) and on
+databases that `losat makeblastdb` builds;
+`src/seqdb/gi_mask_tests.rs` reads every GI of `gi_mask/db/big*` (1 to 1,100 GIs, one and four data volumes),
+reads across the 64 KiB chunks, and reads the `.nog` of `gi_mask_read/db/sv4` and `big` cut where NCBI's program
+crashes (an empty file) or reads past its mapping (an entry past the 4 KiB page): LOSAT's refusals.
+
 ## Masks ordered by address, and the errors that come first (`mask_order/`)
 
 `make_mask_order_fixtures.py` (`--ncbi-bin DIR --work DIR`, 2026-11-14, makeblastdb 2.17.0 with

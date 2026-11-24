@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "pm",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pm",
+  "number-of-letters": 410,
+  "number-of-sequences": 9,
+  "last-updated": "2026-11-24T07:00:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50932,
+  "bytes-to-cache": 572,
+  "files": [
+    "pm.pdb",
+    "pm.phr",
+    "pm.pin",
+    "pm.pnd",
+    "pm.pni",
+    "pm.pog",
+    "pm.pos",
+    "pm.pot",
+    "pm.psq",
+    "pm.ptf",
+    "pm.pto",
+    "pm.pxm"
+  ]
+}

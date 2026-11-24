@@ -89,7 +89,9 @@ needs a result later copies it out first.
   The texts of an argument error are frozen with the ABI: since line RG item K4i-2b the command
   line and ABI v2 read the arguments with NCBI's argument reader and write NCBI's usage and posts
   ([`abi_v2.md`](abi_v2.md)), but ABI v1 keeps the texts it had, which the argument reader of its
-  BLASTX and TBLASTN (a copy of the one the command line had before, `LOSAT/src/web_v1_argv.rs`)
+  BLASTX and TBLASTN (a copy of the one the command line had before, `LOSAT/src/web_v1_argv.rs`;
+  since line RG item K4i-3c, 2026-11-24, with its own frozen copy of the clap command of the two
+  programs, as their derive built it, while the command line reads its options without clap)
   and the parsers of its other three programs write (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
   exception 1).
 - A pointer is valid until the next call into the module that writes the same buffer

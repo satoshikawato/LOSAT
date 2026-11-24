@@ -12,7 +12,7 @@ Put the program name after `losat` and keep the rest of the command line:
 | `makeblastdb -in p.faa -dbtype prot` | `losat makeblastdb -in p.faa -dbtype prot` |
 | `blastdbcmd -db p_db -info` | `losat blastdbcmd -db p_db -info` |
 
-The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` and `rpsbproc`.
+The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool` and `rpsbproc`.
 
 ## Use the NCBI names: `losat --install-shims`
 

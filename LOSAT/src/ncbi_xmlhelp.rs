@@ -40,6 +40,10 @@ const PROGRAMS: &[(&str, &str)] = &[
         "makeprofiledb",
         include_str!("ncbi_xmlhelp/makeprofiledb.xml"),
     ),
+    (
+        "blastdb_aliastool",
+        include_str!("ncbi_xmlhelp/blastdb_aliastool.xml"),
+    ),
 ];
 
 /// NCBI 2.17.0's `-xmlhelp` of `program`, unchanged.

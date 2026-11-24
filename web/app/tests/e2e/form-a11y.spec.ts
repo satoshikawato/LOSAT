@@ -190,37 +190,50 @@ test('the "?" help stays while the pointer moves from the "?" onto it, and goes 
 });
 
 test('two "?" helps are not open by the pointer at once, where one "?" is inside the box around another', async ({ page }) => {
+  // The page as it is, with NCBI's helps (line RG item K4i-3a): 960 pixels wide, the "?" of BLASTP's -lcase_masking, in
+  // the row under -soft_masking, is inside the box around -soft_masking's "?" and its help, in the three browsers (the
+  // other modes alike; at 1280 pixels no "?" is inside another's box).
+  await page.setViewportSize({ width: 960, height: 900 });
   await openSearch(page);
+  await program(page, 'blastp');
   await openParameters(page);
-  await page.getByTestId('param-gapcosts').selectOption('other');
-  const open = page.getByTestId('param-gapopen-help-toggle');
-  const extend = page.getByTestId('param-gapextend-help-toggle');
+  const first = page.getByTestId('param-soft_masking-help-toggle');
+  const second = page.getByTestId('param-lcase_masking-help-toggle');
+  const firstHelp = page.getByTestId('param-soft_masking-help');
+  const secondHelp = page.getByTestId('param-lcase_masking-help');
   const helps = page.locator('[role="tooltip"].help');
-  await open.hover();
+  await first.hover();
   await expect(helps).toHaveCount(1);
+  await expect(firstHelp).toBeVisible();
   // Across the box of the first help, onto the second "?": a pointer move at a time, so that the
   // two helps are never open together.
-  const from = await middle(open);
-  const to = await middle(extend);
-  // The premise: the second "?" is inside the box around the first "?" and its help.
-  const boxes = [(await open.boundingBox())!, (await page.getByTestId('param-gapopen-help').boundingBox())!];
+  const from = await middle(first);
+  const to = await middle(second);
+  // The premise: the second "?" is inside the box around the first "?" and its help, and the
+  // pointer reaches it there (the help does not cover it).
+  const boxes = [(await first.boundingBox())!, (await firstHelp.boundingBox())!];
   expect(to.x).toBeGreaterThanOrEqual(Math.min(...boxes.map((b) => b.x)));
   expect(to.x).toBeLessThanOrEqual(Math.max(...boxes.map((b) => b.x + b.width)));
   expect(to.y).toBeGreaterThanOrEqual(Math.min(...boxes.map((b) => b.y)));
   expect(to.y).toBeLessThanOrEqual(Math.max(...boxes.map((b) => b.y + b.height)));
+  const reached = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid]')?.getAttribute('data-testid'),
+    [to.x, to.y] as const,
+  );
+  expect(reached).toBe('param-lcase_masking-help-toggle');
   await page.mouse.move(from.x, from.y);
   const steps = 24;
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
     expect(await helps.count()).toBeLessThanOrEqual(1);
   }
-  await expect(page.getByTestId('param-gapextend-help')).toBeVisible();
-  await expect(page.getByTestId('param-gapopen-help')).toHaveCount(0);
+  await expect(secondHelp).toBeVisible();
+  await expect(firstHelp).toHaveCount(0);
   await expect(helps).toHaveCount(1);
   // Back onto the first: the second goes.
   await page.mouse.move(from.x, from.y, { steps });
-  await expect(page.getByTestId('param-gapopen-help')).toBeVisible();
-  await expect(page.getByTestId('param-gapextend-help')).toHaveCount(0);
+  await expect(firstHelp).toBeVisible();
+  await expect(secondHelp).toHaveCount(0);
   // Away from both: gone.
   await page.mouse.move(0, 0, { steps: 4 });
   await expect(helps).toHaveCount(0);

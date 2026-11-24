@@ -6,4 +6,5 @@ export * from './output-format.js';
 export * from './parameters.js';
 export * from './programs.js';
 export * from './run-files.js';
+export * from './tool-description.js';
 export * from './tool-frames.js';

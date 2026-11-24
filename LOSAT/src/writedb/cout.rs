@@ -1,6 +1,7 @@
 //! NCBI's `cout` as a stream with a state: the stream (`super::ofstream::BasicStream`) over
-//! standard output's buffer, for a writer whose failures NCBI reports (the serializer of
-//! blastdbcmd's `-metadata`, `super::metadata`).
+//! standard output's buffer, for the serializer of blastdbcmd's `-metadata`
+//! (`super::metadata`), whose failures NCBI reports, and for makeblastdb's log
+//! (`super::makeblastdb`), whose failures it does not.
 //!
 //! When the bytes of an insertion reach standard output is `crate::cli::NcbiBuffer`'s rule (read
 //! from the writes of NCBI's programs, line LIB-O O1b). What a failed write leaves is read from
@@ -14,10 +15,10 @@
 //! runs and the C++ standard's text on the stream state, not from the source of a C++ runtime or
 //! of a C library.
 //!
-//! Those failures last (every later write fails too). On the command line the writer is Rust's
-//! standard output, whose own buffer keeps up to 1023 bytes of a write that fails: a failure that
-//! passes before the exit (`EAGAIN` on a non-blocking standard output) would write them late,
-//! where NCBI's buffer drops them (line RG item KC-11b-2: a standard output without that buffer).
+//! On the command line the output under it is the process's standard output with no buffer
+//! of Rust's (`crate::cli::standard_output`). A failure that passes before the exit (`EAGAIN`
+//! on a non-blocking standard output) loses the bytes of the failed write there too, as NCBI's
+//! buffer does (line RG item KC-11b-2).
 
 use std::io::Write;
 

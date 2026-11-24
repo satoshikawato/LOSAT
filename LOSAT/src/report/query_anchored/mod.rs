@@ -558,12 +558,12 @@ pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out:
     }
 }
 
-/// Appends the searched letters `from..=to` (positions in the records) of a query whose letters
-/// are `letters` (a record's in upper case, a PSSM query's Bioseq letters as they are:
-/// `row_letters::QueryLetters::get`) and whose searched letters start at the record position
-/// `shift` (the `-query_loc` interval's start; `Placements::offset`): the letters that the
-/// sections of BLASTN's, TBLASTN's and TBLASTX's reports read (`ReportSequences::query_letters`),
-/// as far as the record has them.
+/// Appends the letters `from..=to` (positions in the records) of a query whose letters are
+/// `letters` (a record's in upper case, a PSSM query's Bioseq letters as they are:
+/// `row_letters::QueryLetters::get`) and start at the record position `shift` (the searched
+/// letters of TBLASTN and TBLASTX: the `-query_loc` interval's start, `Placements::offset`;
+/// BLASTN's whole record: 0, `algorithm::blastn::pairwise::QueryRecords`): the letters that the
+/// sections of the reports read (`ReportSequences::query_letters`), as far as the letters go.
 pub(crate) fn query_record_letters(
     letters: crate::report::row_letters::QueryLetters<'_>,
     shift: usize,

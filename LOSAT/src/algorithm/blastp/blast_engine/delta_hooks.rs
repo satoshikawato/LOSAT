@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail, Result};
 
 use super::{
-    database, open_search_database, rps_hooks, run_resolved_in_pool, BlastpRanges, BlastpReports,
+    database, open_search_database, run_resolved_in_pool, BlastpRanges, BlastpReports,
     BlastpSubjectSource, PrelimOnly,
 };
 use crate::algorithm::blastp::args::{BlastpArgs, DeltaOptions, ResolvedBlastpArgs};
@@ -99,6 +99,34 @@ impl DeltaRun {
         *self.settings.lock().expect("deltablast's settings") = Some(settings);
     }
 
+    /// LOSAT's refusal of a domain database (`-rpsdb`) of several volumes, made before the run
+    /// writes anything (`psi_round::refuse_before_output`; NCBI 2.17.0 searches one, probes
+    /// `delta2`, `delta2_0` of PS13a's fix round 2a): its volumes as the domain search opens them
+    /// (`open_side`, NCBI's open of the domain database in its first search, after the prolog). A
+    /// database that does not open here gets NCBI's error there, at NCBI's place.
+    pub(super) fn refuse_several_volumes(&self) -> Result<()> {
+        let Some(settings) = self.settings.lock().expect("deltablast's settings").clone() else {
+            return Ok(());
+        };
+        let Some(name) = self.options.domain.db.as_deref() else {
+            return Ok(());
+        };
+        let name = crate::seqdb::db_argument_name(name);
+        if let Ok(db) = crate::algorithm::common::database::open_database(
+            name,
+            crate::seqdb::SeqType::Protein,
+            &settings,
+            "DELTABLAST",
+        ) {
+            if db.volumes().len() > 1 {
+                bail!(
+                    "a domain database of several volumes is not supported by LOSAT's DELTABLAST"
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// The domain search's side, opened by the first query.
     fn side(&self, diagnostics: &mut (dyn std::io::Write + Send)) -> Result<Arc<DomainSide>> {
         let mut side = self.side.lock().expect("deltablast's domain database");
@@ -148,9 +176,6 @@ impl DeltaRun {
             return Err(crate::algorithm::psiblast::pssm::blast_options_error(
                 "expect value or cutoff score must be greater than zero",
             ));
-        }
-        if rps_hooks::volume_count(&database) > 1 {
-            bail!("a domain database of several volumes is not supported by LOSAT's DELTABLAST");
         }
         Ok(DomainSide {
             args: resolved,

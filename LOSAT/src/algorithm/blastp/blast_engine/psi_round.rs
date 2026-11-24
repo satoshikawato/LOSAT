@@ -219,8 +219,9 @@ fn app_mode(mode: BlastpCompositionMode) -> CompositionMode {
 /// deltablast's refusals that the inputs decide before any search, made before the run writes
 /// anything: `-num_iterations 0` with a query batch of several queries (NCBI BLAST+ searches the
 /// rounds after the first of the batch's first query only: deltablast_app.cpp `DoPsiBlastIterations`
-/// with a batch of NCBI's 10000 letters), and a subject set (`-subject`) of more records than
-/// `-max_target_seqs` (the round-1 search below).
+/// with a batch of NCBI's 10000 letters), a subject set (`-subject`) of more records than
+/// `-max_target_seqs` (the round-1 search below), and a domain database of several volumes
+/// (`DeltaRun::refuse_several_volumes`).
 fn refuse_before_output(
     args: &ResolvedBlastpArgs,
     plan: &PsiRoundPlan,
@@ -243,6 +244,9 @@ fn refuse_before_output(
             "-subject with more records than -max_target_seqs ({}) is not supported by LOSAT's DELTABLAST (NCBI BLAST+ keeps the best subjects of the set in its first search)",
             args.max_target_seqs
         );
+    }
+    if let Some(delta) = args.delta.as_deref() {
+        delta.refuse_several_volumes()?;
     }
     Ok(())
 }

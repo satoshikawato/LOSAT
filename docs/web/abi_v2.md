@@ -31,8 +31,8 @@ state.
 
 | Artifact | Target | Cargo features of `LOSAT` | Notes |
 |---|---|---|---|
-| `losat-web-serial.wasm` | `wasm32-wasip1` | none | Serial. The engine rejects `-num_threads` above 1 |
-| `losat-web-threads.wasm` | `wasm32-wasip1-threads` | `parallel`, `wasm-threads` | Needs a cross-origin isolated page and shared memory |
+| `losat-web-serial.wasm` | `wasm32-wasip1` | `web-abi-v1` | Serial. The engine rejects `-num_threads` above 1 |
+| `losat-web-threads.wasm` | `wasm32-wasip1-threads` | `parallel`, `wasm-threads`, `web-abi-v1` | Needs a cross-origin isolated page and shared memory |
 
 Both are WASI preview1 **reactors**: the host calls `_initialize` once after
 instantiation, then calls the exports below any number of times. The build must match

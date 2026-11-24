@@ -81,7 +81,7 @@ DEALINGS IN THE SOFTWARE.
 anstream 1.0.0
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/rust-cli/anstyle.git
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -109,7 +109,7 @@ SOFTWARE.
 anstyle 1.0.14
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/rust-cli/anstyle.git
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -137,7 +137,7 @@ SOFTWARE.
 anstyle-parse 1.0.0
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/rust-cli/anstyle.git
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -165,7 +165,7 @@ SOFTWARE.
 anstyle-query 1.1.5
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/rust-cli/anstyle.git
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -599,7 +599,7 @@ THE SOFTWARE.
 clap 4.6.7
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/clap-rs/clap
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -627,7 +627,7 @@ SOFTWARE.
 clap_builder 4.6.7
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/clap-rs/clap
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -655,7 +655,7 @@ SOFTWARE.
 clap_lex 1.1.0
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/clap-rs/clap
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -683,7 +683,7 @@ SOFTWARE.
 colorchoice 1.0.5
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/rust-cli/anstyle.git
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -1418,7 +1418,7 @@ SOFTWARE.
 is_terminal_polyfill 1.70.2
 License: MIT OR Apache-2.0 (used under MIT)
 Repository: https://github.com/polyfill-rs/is_terminal_polyfill
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 
@@ -2303,7 +2303,7 @@ DEALINGS IN THE SOFTWARE.
 strsim 0.11.1
 License: MIT
 Repository: https://github.com/rapidfuzz/strsim-rs
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE ---
 
@@ -2513,7 +2513,7 @@ SOFTWARE.
 utf8parse 0.2.2
 License: Apache-2.0 OR MIT (used under MIT)
 Repository: https://github.com/alacritty/vte
-Linked into: losat CLI (WASI targets: WASI, WASI threads); LOSAT Web (both reactors)
+Linked into: LOSAT Web (both reactors)
 
 --- LICENSE-MIT ---
 

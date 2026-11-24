@@ -170,8 +170,9 @@ jobs:
           path: web/app/test-results/
           retention-days: 7
 
-  # The web API tests compile only for wasm32, so the native `cargo test` in ci.yml
-  # never runs them. Run them on wasm32-wasip1 under Node's WASI.
+  # The web API tests compile only for wasm32 with the feature `web-abi-v1` (ABI v1, which only the
+  # Web's modules carry), so the native `cargo test` in ci.yml never runs them. Run them on
+  # wasm32-wasip1 under Node's WASI; the three steps share one build (the same features).
   engine-web-api:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
@@ -190,7 +191,7 @@ jobs:
         working-directory: LOSAT
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
-        run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
+        run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features --features web-abi-v1 -- web_api::tests
       # The texts of a database file that does not open or read in LOSAT Web: the WASI error codes
       # give the native CLI's texts on Linux (utils::os_error_text), and the reader's errors carry
       # them as NCBI's (seqdb::tests::ncbis_errors_are_told_from_losats; line WQA D18,
@@ -200,7 +201,7 @@ jobs:
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: >-
-          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
+          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --features web-abi-v1 --
           seqdb::tests::ncbis_errors_are_told_from_losats utils::os_error_text
       # The lib tests of the 128-bit SIMD kernels on the target that ships them (simd128: the
       # wasm32 layer of utils/xdrop_simd.rs and the kernels written over it); the native
@@ -220,7 +221,7 @@ jobs:
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: >-
-          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --
+          cargo test --locked --lib --target wasm32-wasip1 --no-default-features --features web-abi-v1 --
           x_restricted_gap::tests xdrop_simd::x_w128::tests
           tblastn::x_subject_translate::tests::x_w128_loops x_same_matrix
           x_seed_fused::tests x_seed_diag::tests x_seed_fused_clut::tests

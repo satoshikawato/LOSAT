@@ -110,10 +110,11 @@ pub(crate) mod ncbi_xmlhelp;
 // domain annotation of rpsblast's archives.
 pub(crate) mod rpsbproc;
 
-#[cfg(target_arch = "wasm32")]
+// LOSAT Web's ABI v1 (`losat_web_*`): a wasm32 build with the feature `web-abi-v1` (build.rs).
+#[cfg(losat_web_abi_v1)]
 pub(crate) mod web_api;
 // The words of a request of LOSAT Web's ABI v1 (frozen), read as v1 reads them.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) mod web_v1_argv;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.

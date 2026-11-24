@@ -23,7 +23,7 @@ mod constraint;
 
 pub(crate) use constraint::{is_genetic_code, string_to_int8, Constraint};
 // The file name rule of LOSAT Web ABI v1's own output path parser (`web_v1_argv`).
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) use constraint::file_name_length;
 
 /// What an argument holds (`CArgDescriptions::EType` of a key, or a flag).
@@ -1044,7 +1044,7 @@ pub(crate) fn parse_in(
 /// converted by its key's kind, without its constraint (`kind_value`), and no default is added:
 /// the options' readers take a key's table default (`Args::option_or_default`). `None` where a
 /// name is not one of `tool`'s or a value does not convert.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) fn checked(tool: &Tool, given: &[(String, Option<OsString>)]) -> Option<Args> {
     let arguments = tool_arguments(tool);
     let mut values: BTreeMap<&'static str, Option<Value>> = BTreeMap::new();

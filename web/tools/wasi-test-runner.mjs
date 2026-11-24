@@ -1,7 +1,7 @@
 // Cargo runner for wasm32-wasip1 test binaries, so engine tests that compile only for
 // wasm32 (for example `LOSAT/src/web_api.rs`) can run in CI:
 //   CARGO_TARGET_WASM32_WASIP1_RUNNER="node web/tools/wasi-test-runner.mjs" \
-//     cargo test --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
+//     cargo test --lib --target wasm32-wasip1 --no-default-features --features web-abi-v1 -- web_api::tests
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { WASI } from 'node:wasi';

@@ -269,7 +269,7 @@ impl TblastnArgs {
     /// returned instead of written to standard output. The `query` and `subject` of `self` are
     /// only the names the report shows for the inputs; `out` is `None`. The diagnostics go to
     /// standard error, as the command line's.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(losat_web_abi_v1, test))]
     pub(crate) fn run_in_memory(
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -588,10 +588,10 @@ enum RunIo<'a> {
     Files,
     /// Web ABI v1 (`run_in_memory`): the call's bytes, and the report kept in memory.
     #[cfg_attr(
-        not(any(target_arch = "wasm32", test)),
+        not(any(losat_web_abi_v1, test)),
         expect(
             dead_code,
-            reason = "made only by `run_in_memory`, for the web ABI (wasm32) and tests"
+            reason = "made only by `run_in_memory`, for the web ABI (`web-abi-v1`) and tests"
         )
     )]
     Memory {

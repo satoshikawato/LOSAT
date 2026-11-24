@@ -32,8 +32,8 @@ ADAPTER = Path(__file__).resolve().parents[1]
 ROOT = ADAPTER.parents[1]
 ENGINE = ROOT / "LOSAT"
 SPECS = {
-    "serial": ("wasm32-wasip1", ["--lib"], [], "serial-reactor"),
-    "threads": ("wasm32-wasip1-threads", ["--lib", "--features", "threads"], ["parallel", "wasm-threads"], "threaded-reactor"),
+    "serial": ("wasm32-wasip1", ["--lib"], ["web-abi-v1"], "serial-reactor"),
+    "threads": ("wasm32-wasip1-threads", ["--lib", "--features", "threads"], ["parallel", "wasm-threads", "web-abi-v1"], "threaded-reactor"),
 }
 
 

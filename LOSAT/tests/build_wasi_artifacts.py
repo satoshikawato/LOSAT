@@ -14,8 +14,8 @@ CRATE = ROOT / "LOSAT"
 SPECS = {
     "serial-command": ("wasm32-wasip1", ["--bin", "losat", "--no-default-features"], []),
     "threaded-command": ("wasm32-wasip1-threads", ["--bin", "losat", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
-    "threaded-reactor": ("wasm32-wasip1-threads", ["--lib", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
-    "serial-reactor": ("wasm32-wasip1", ["--lib", "--no-default-features"], []),
+    "threaded-reactor": ("wasm32-wasip1-threads", ["--lib", "--features", "wasm-threads,web-abi-v1"], ["parallel", "wasm-threads", "web-abi-v1"]),
+    "serial-reactor": ("wasm32-wasip1", ["--lib", "--no-default-features", "--features", "web-abi-v1"], ["web-abi-v1"]),
 }
 
 

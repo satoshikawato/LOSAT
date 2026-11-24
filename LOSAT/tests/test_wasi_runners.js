@@ -371,6 +371,12 @@ test("artifact preparation preserves validation and ABI rejection", () => {
       /exactly one of _start or _initialize/);
     assert.throws(() => inspect(command({ threaded: false, aliases: ["_initialize", ...api] })),
       /exactly one of _start or _initialize/);
+    for (const threaded of [false, true]) {
+      assert.throws(() => inspect(command({ threaded, aliases: ["losat_web_run_pair"] })),
+        /command exports the Web ABI: losat_web_run_pair/);
+      assert.throws(() => inspect(command({ threaded, aliases: ["losat_web2_tool"] })),
+        /command exports the Web ABI: losat_web2_tool/);
+    }
     assert.throws(() => inspect(command({ threaded: false, exportMemory: false })),
       /must export its single memory/);
     assert.throws(() => inspect(command({ threaded: false, memoryLimits: [1, 1, 2, 1] })),

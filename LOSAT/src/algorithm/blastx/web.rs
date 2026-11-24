@@ -86,8 +86,8 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
 #[cfg_attr(
-    not(target_arch = "wasm32"),
-    expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
+    not(losat_web_abi_v1),
+    expect(dead_code, reason = "called only by the web ABI (`web_api`, `web-abi-v1`)")
 )]
 pub(crate) fn run_pair(
     args: BlastxArgs,

@@ -97,7 +97,8 @@ NATIVE = (
 # - LOSAT Web: web/adapter/tools/build_reactors.py (SPECS), which web.yml runs: the serial reactor
 #   `--target wasm32-wasip1 --lib`, the threaded one `--target wasm32-wasip1-threads --lib
 #   --features threads` (adapter feature `threads` = losat/parallel + losat/wasm-threads). The
-#   adapter builds the engine with default-features = false. LOSAT/.cargo/config.toml's
+#   adapter builds the engine with default-features = false and its feature `web-abi-v1` (ABI v1 and
+#   clap, which only the Web's modules carry; line RG item K4i-3d). LOSAT/.cargo/config.toml's
 #   `build-web-unknown` (wasm32-unknown-unknown) is used by no workflow, so it is not listed.
 BUILDS: tuple[Build, ...] = (
     *(Build(CLI, label, "native", "LOSAT", triple, ()) for label, triple in NATIVE),

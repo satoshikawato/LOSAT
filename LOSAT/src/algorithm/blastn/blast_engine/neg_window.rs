@@ -85,7 +85,7 @@ enum Body {
 
 /// Where the steps of a batch of offset pairs of a two-stage table go
 /// (`pair_extend::extend_offset_pairs`), as the search chose once for its word finder
-/// (`prelim_subject::prelim_chunk_hits`' `NEG`): `()` for a window of 0 or more, whose steps are
+/// (`prelim_subject::SpecialFinders::neg_window`): `()` for a window of 0 or more, whose steps are
 /// `pair_extend`'s own with nothing tested (the default path's code), or the table of a window
 /// below 0 (`&mut NegTable`), whose steps are this module's.
 pub(super) trait NegSteps {

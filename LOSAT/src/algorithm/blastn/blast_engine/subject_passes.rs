@@ -570,7 +570,7 @@ impl SubjectPasses<'_> {
     ) -> Result<()> {
         // What the preliminary search of every subject and chunk of the batch reads besides
         // `PrelimBatch`: its lookup tables (`ScanBatch`), built once for the pass.
-        let scan = ScanBatch::new::<UNGAPPED>(self.prelim_batch, lookup_tables);
+        let scan = ScanBatch::new(self.prelim_batch, lookup_tables);
         match self.subjects {
             SubjectSource::Prepared(_) => {
                 self.search_subjects::<UNGAPPED>(None, Some(&scan), &mut |oid, _, mut prelim| {

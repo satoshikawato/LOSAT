@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.98
+- Version: 1.100
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -650,7 +650,12 @@
   merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
   of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
   of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
-  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96))
+  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
+  1.100 2026-11-24 (the tabular rows of 1.37 and 1.50 at which NCBI stops with its null pointer or
+  prints an uninitialised taxid: NCBI's bytes before the stop are written, then the refusal of
+  rule 3, in every program, through one owner of the rows' stops; line RG-KB item 18b,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.99,
+  which line RG-KB item 12 and line RG item xtlink take)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3005,9 +3010,16 @@ file would differ, and NCBI's programs still could not open the database).
   `CCoreException::eNullPtr`, `ncbiobj.cpp:1010`), and stops with exit status 255 and a stack trace
   of its build after the row's earlier fields. Also `staxid` of such a row when it is the first row
   of its query's (or round's) report: `m_SubjectTaxId` is printed before any row set it
-  (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). LOSAT
-  refuses (exit 1) before the query batch's report, where it refused every such subject before
-  1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
+  (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). Since
+  version 1.100 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
+  the rows before it and the row's fields before that field, each after its delimiter (`Print`
+  writes the delimiter before each field, `tabular.cpp:1100-1108`; NCBI's stream is flushed as
+  the formatter is destroyed), and then refuses (exit 1): NCBI's stack trace names the paths of
+  its build and install and the addresses of its run, and the uninitialised number differs from
+  run to run, so no program can write either. NCBI's run ends there, so no later row, query or
+  batch is written. Before 1.100 LOSAT refused before the query batch's report, and before 1.37
+  every such subject; its output was a prefix of NCBI's then too (probe of line RG-KB item 18b:
+  blastp, psiblast, blastx, tblastn, tblastx and blastn). A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line
   DBID item pfoff-2) also the first row of a query's report whose subject's load throws where the
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with

@@ -8056,7 +8056,8 @@ enum BatchStage<'a> {
     ///
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
-    /// (`x_lut_drop::after_prelim`).
+    /// (`x_lut_drop::after_prelim`), and its `qs` (LOSAT_X_CSRQSKEEP) once the batch's tables are
+    /// built (`BatchStage::x_last_tables`).
     ///
     /// `setup_only`: the set-up of the batch alone, up to its checks of the subjects
     /// (`context_statistics`), which ends with `SetUpOnly` where they pass: the set-up of a batch
@@ -8074,13 +8075,29 @@ enum BatchStage<'a> {
     /// spaces of the batch's contexts.
     ///
     /// EXPERIMENT (LOSAT_X_CSRQSKEEP) `x_last`: the last chunk of the batch loop's last batch, after
-    /// whose tables no build follows, so the loop's keep takes no `qs` back when they drop
+    /// whose tables no build follows (`BatchStage::x_last_tables`), so the loop's keep frees the
+    /// `qs` it holds once they are built and takes none back when they drop
     /// (`x_mb_lut_keep::Keep::close_qs`).
     ChunkPrelim {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
         x_last: bool,
     },
+}
+
+impl BatchStage<'_> {
+    /// Whether the batch loop builds no lookup table after this call's (EXPERIMENT
+    /// LOSAT_X_MBLUTKEEP, LOSAT_X_CSRQSKEEP; no NCBI counterpart, memory only): the loop's last
+    /// batch (`Search`'s `last`; a split one builds none of its own, after its chunks') or the last
+    /// chunk of a split last batch (`ChunkPrelim`'s `x_last`). The one test of it for the loop's
+    /// keep: it closes the keep to `qs` once these tables are built and frees its table after the
+    /// last batch's preliminary stage.
+    fn x_last_tables(self) -> bool {
+        matches!(
+            self,
+            BatchStage::Search { last: true, .. } | BatchStage::ChunkPrelim { x_last: true, .. }
+        )
+    }
 }
 
 /// The end of a batch's set-up alone (`BatchStage::Search::setup_only`) whose checks pass: no
@@ -8398,6 +8415,12 @@ fn run_in_pool(
         // the prologs that come with them), before the batch's messages and its error.
         macro_rules! write_reports_before {
             () => {{
+                // EXPERIMENT (LOSAT_X_CSRQSKEEP): the loop builds no table after this, so its keep
+                // frees the `qs` it holds before the reports are written (`Keep::close_qs`;
+                // nothing with the switch off). No NCBI counterpart (memory only).
+                if let Some(keep) = &x_lut_keep {
+                    keep.close_qs();
+                }
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                 // written when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8773,6 +8796,11 @@ fn run_in_pool(
                 // The reports of the batches before are written, then the error, which
                 // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
                 Ok(ErrorAfterInvalidBatches(error)) => {
+                    // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees
+                    // the `qs` it holds first. No NCBI counterpart (memory only).
+                    if let Some(keep) = &x_lut_keep {
+                        keep.close_qs();
+                    }
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                     // written when the loop took them.
                     let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8922,6 +8950,11 @@ fn run_in_pool(
         if let Err(error) = crate::blastinput::app::check_prefetch_environment(
             outputs.only_archive() || args.hits_only,
         ) {
+            // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees the `qs`
+            // it holds first. No NCBI counterpart (memory only).
+            if let Some(keep) = &x_lut_keep {
+                keep.close_qs();
+            }
             write_before_failed_batch(
                 &args,
                 queries.before(&kept, start),
@@ -10815,6 +10848,14 @@ fn search_query_batch<const UNGAPPED: bool>(
             // without an index, `partial`, and never reads it: every OID is the index's.)
             split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
+    // EXPERIMENT (LOSAT_X_CSRQSKEEP): the loop builds no table after these
+    // (`BatchStage::x_last_tables`), so its keep frees the `qs` it still holds (these tables are
+    // chains, which take none) before their scan, and takes none back from here on: a last CSR took
+    // the kept `qs` and frees its `qs` when its tables drop, as before the switch. No NCBI
+    // counterpart (memory only).
+    if let (true, Some(keep)) = (stage.x_last_tables(), x_keep) {
+        keep.close_qs();
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
     // Cutoff scores are computed per subject in the main loop; no global map needed.
@@ -11198,14 +11239,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
     subject_space_overflow.check()?;
-    if let BatchStage::ChunkPrelim { x_last, .. } = stage {
-        // EXPERIMENT (LOSAT_X_CSRQSKEEP): the last chunk of the loop's last batch: no build
-        // follows, so its CSR frees its `qs` when its tables drop at this return, as before the
-        // switch (`x_lut_drop::after_prelim` for a batch that is not split). No NCBI counterpart
-        // (memory only).
-        if let (true, Some(keep)) = (x_last, x_keep) {
-            keep.close_qs();
-        }
+    if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
@@ -11214,9 +11248,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // The keep of LOSAT_X_MBLUTKEEP frees its table too when no later batch builds one on it.
     x_lut_drop::after_prelim(
         lookup_tables,
-        x_keep
-            .filter(|_| matches!(stage, BatchStage::Search { last: true, .. }))
-            .map(|keep| &**keep),
+        x_keep.filter(|_| stage.x_last_tables()).map(|keep| &**keep),
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
     // NCBI frees the initial (ungapped) hit list at the end of its preliminary search. No NCBI

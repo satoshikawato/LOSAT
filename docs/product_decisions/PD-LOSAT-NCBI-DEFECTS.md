@@ -2737,7 +2737,12 @@ file would differ, and NCBI's programs still could not open the database).
   `kappa` or `h` of `NOT-A-NUMBER`, a negative gapped value, and psiblast's `lambdaUngapped` of
   `PLUS-INFINITY` were refused here while LOSAT did not compute NCBI's output of them. Since line PS
   item PS7c LOSAT does: NCBI goes on with these values (E-values 0.0, bit scores `inf` or -1.0) and
-  so does LOSAT, so none of them is refused now. Tests:
+  so does LOSAT, so none of them is refused for what it is. A gapped `lambda` below 0 (a finite one)
+  or so small that NCBI's search for the score of the hit-saving cutoff (`BLAST_SpougeEtoS`) doubles
+  or adds its `Int4` scores past 2^31 - 1 is refused at that signed overflow, after the prolog that
+  NCBI writes before the search (line PS item PS7c, fix round 1, review B1: NCBI never ends there,
+  or goes on with the wrapped cutoff, 2^30 for a `lambda` below 0, a negative one at the
+  bisection; rows `db.ps7c.ps.rej.lambda_*` and `db.ps7c.tbn.rej.lambda_*`). Tests:
   `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
   `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
   `db.ber.ps.*` and `db.ber.tbn.*`.

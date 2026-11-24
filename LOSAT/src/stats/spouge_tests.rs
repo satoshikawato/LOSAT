@@ -559,8 +559,9 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
 }
 
 // Line PS item PS7c, review B1: a gapped Lambda that makes NCBI's search pass `Int4` is
-// `SpougeCutoffOverflow`, at the doubling (where NCBI's x86-64 build never ends) or at the
-// bisection's sum; the first upper bound is NCBI's cast (a quotient past `Int4` starts at 2).
+// `SpougeCutoffOverflow`, at the doubling (where NCBI's x86-64 build never ends, or, with a
+// negative Lambda, wraps to the cutoff 2^30) or at the bisection's sum; the first upper bound is
+// NCBI's cast (a quotient past `Int4` starts at 2, a negative one too).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
 #[test]
 fn a_cutoff_search_that_passes_int4_is_an_overflow() {
@@ -598,7 +599,9 @@ fn a_cutoff_search_that_passes_int4_is_an_overflow() {
     );
     // ln(5000 / 10) / 2e-9 (3.1e9) passes `Int4`: NCBI's cast starts at 2, and the doubling reaches
     // 2^30 with an e-value above 10.
-    for lambda in [2e-9, 1e-9, 1e-300] {
+    // A negative Lambda (fix round 1): the e-value grows with the score, and the doubling from 2
+    // reaches 2^30 with an e-value above 10 (NCBI wraps to `INT_MIN`, whose e-value is 0).
+    for lambda in [2e-9, 1e-9, 1e-300, -0.5, -1e-9] {
         assert_eq!(
             etos(lambda),
             Err(SpougeCutoffOverflow {

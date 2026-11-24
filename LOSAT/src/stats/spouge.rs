@@ -537,15 +537,18 @@ pub fn blast_spouge_stoe(
 /// The overflow of NCBI's `Int4` scores in `BLAST_SpougeEtoS`'s search for the score of an
 /// e-value (`blast_spouge_etos`): the doubling of the upper bound (`b *= 2`, `doubling`) or the
 /// bisection's sum (`a + b`) would pass 2^31 - 1, a signed overflow (undefined behaviour). At the
-/// doubling the x86-64 build of NCBI BLAST+ 2.17.0 then never ends (the bound wraps to `INT_MIN`
-/// and then 0, whose e-value stays above the target). At the bisection it wraps the sum to a
-/// negative score, takes it as the lower bound, wraps `b - a` below 0 and returns that negative
-/// score as the cutoff (line PS item PS7c, fix round 1, NCBI under gdb: psiblast's Lambda 6e-9 gives
-/// -1,046,740,562, tblastn's 4e-9 -832,239,653), and the search goes on with it. Where the overflow
-/// comes depends on the e-value, the lengths and the Gumbel block; a gapped Lambda small enough for
-/// it (below about 1e-8 with BLOSUM62's block and `-evalue 10`) comes from a PSSM's file only (line
-/// PS item PS7c, review B1). `lambda` is the block's Lambda, which LOSAT's refusal names
-/// (`refusal`).
+/// doubling the x86-64 build of NCBI BLAST+ 2.17.0 wraps the bound to `INT_MIN`: with a small
+/// positive Lambda that e-value is above the target too, the bound wraps to 0 and the search never
+/// ends; with a negative Lambda (whose e-value grows with the score, so that no score reaches the
+/// target) the e-value of `INT_MIN` is 0, and the bisection returns 2^30 as the cutoff (NCBI under
+/// gdb, Lambda -0.5: 2, 4, ..., 2^30, -2^31, -2^29, then 1,073,741,824), with which the search goes
+/// on. At the bisection it wraps the sum to a negative score, takes it as the lower bound, wraps
+/// `b - a` below 0 and returns that negative score as the cutoff (line PS item PS7c, fix round 1,
+/// NCBI under gdb: psiblast's Lambda 6e-9 gives -1,046,740,562, tblastn's 4e-9 -832,239,653), and
+/// the search goes on with it. Where the overflow comes depends on the e-value, the lengths and the
+/// Gumbel block; a gapped Lambda small enough for it (below about 1e-8 with BLOSUM62's block and
+/// `-evalue 10`) or below 0 comes from a PSSM's file only (line PS item PS7c, review B1). `lambda`
+/// is the block's Lambda, which LOSAT's refusal names (`refusal`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpougeCutoffOverflow {
     pub lambda: f64,
@@ -569,7 +572,7 @@ impl SpougeCutoffOverflow {
     /// capitals): exit status 1, its message.
     pub(crate) fn refusal(self, program: &str) -> anyhow::Error {
         let step = if self.doubling {
-            "doubles its score past 32-bit integers and never ends"
+            "doubles its score past 32-bit integers"
         } else {
             "adds two scores past 32-bit integers"
         };

@@ -656,9 +656,10 @@
   expected length is 0 or less, where NCBI's big-gap cutoff is `INT_MIN + 1` as for a batch
   averaging 0 and NCBI crashes in its first linking call; LOSAT's sums in 64 bits, and the cutoff
   of a negative expected length taken as NCBI's `INT_MIN + 1` (LOSAT computed 1 there); its rows
-  equal NCBI's own output for the nearest search it completes in every probed case; several
-  subjects on the route of a negative expected length pending question Q-XT2; the Owner's answer of 2026-11-24 to question
-  Q-XT1 of line RG item X-short-tbx-link, 「Q-XT1=A」; numbered after 1.98; first 1.97)
+  equal NCBI's own output for the nearest search it completes in every probed case; the Owner's
+  answer of 2026-11-24 to question Q-XT1 of line RG item X-short-tbx-link, 「Q-XT1=A」; and the
+  same for several subjects on the route of a negative expected length, the Owner's answer of
+  2026-11-24 to question Q-XT2, 「A」; numbered after 1.98; first 1.97)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3995,8 +3996,10 @@ request that added it.
     subject of fewer than 12 bases the next step of such a search is the re-evaluation that the
     TBLASTX item of version 1.51 refuses (rule 3), so LOSAT refuses there, after the linking.
 
-    *Several subjects (found after the decision; pending the Owner's answer to question Q-XT2 of
-    line RG item X-short-tbx-link).* On the NaN route other subjects whose length in all is not
+    *Several subjects (found after the decision of Q-XT1; the Owner's answer of 2026-11-24 to
+    question Q-XT2 of line RG item X-short-tbx-link, 「A」, its option A: exception 20 covers every
+    ungapped linking whose big-gap cutoff is NCBI's `INT_MIN + 1`, whatever the number of
+    subjects).* On the NaN route other subjects whose length in all is not
     above minus the expected length leave the cutoff at `INT_MIN + 1`, and NCBI dies the same way:
     10 of the 42 random TBLASTX runs above died with the subject and a second subject of 12 N.
     LOSAT computes the same cutoff and writes rows there (as it did before this version, with its

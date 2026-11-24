@@ -4,7 +4,10 @@
   with a native confirmation dialog before replacing an existing copy, in-place refusal when
   another tab is downloading that ID, cross-tab synchronization, `Made in this browser` status in
   BLASTN's taxonomy ID row, `Use in BLASTN` switching to `-window_masker_taxid`, and saved counts
-  listed in WindowMasker's `-ustat` and `-in` pickers.
+  listed in WindowMasker's `-ustat` and `-in` pickers. While a queued or running search or tool run
+  reads a taxonomy ID's saved counts, Replace, Delete and Download of that ID are refused in place
+  (in every tab), so the run keeps reading the file it was queued with; a save that the browser's
+  storage has no room for is refused before the copy it would replace is touched.
 - LOSAT Web: WindowMasker tool runs now display a `Supported` / `Not yet supported` status badge
   generated at build time from the NCBI-frozen exit-0 rows of `LOSAT/tests/windowmasker/cases.tsv`.
 - LOSAT Web: fixed the BLASTN `Counts file` hint wrapping so the help sentence and `?` stay on a

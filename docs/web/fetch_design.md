@@ -298,6 +298,14 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
      同じ ID に既に保存済み（取得済み・途中まで取得・ブラウザ作成のいずれか）があれば `COUNTS_EXISTS` で止めて確認ダイアログ
      （`ReplaceCountsDialog.vue`）を出す。別のタブが同じ ID を取得中ならその場で「Another tab is downloading the counts for <taxid>.」と断る。
      途中で途切れた作成コピー（`complete: false`）は再開せず、次の読み取り時に削除する。
+   - 保存済み counts を読む run（`-window_masker_taxid` の検索、保存済みコピーを `-ustat`・`-in` に選んだ WindowMasker の run）は、
+     待ち行列に入る時から終わるまで（完了・失敗・待ち行列での Cancel・実行中の Cancel）その ID の Web Lock を shared で持つ
+     （PR #1597 の review、指摘 3）。差し替え・削除・取得は同じ lock を exclusive・`ifAvailable` で取り、取れなければその場で
+     「A search that uses the counts for <taxid> is queued or running.」と断る（削除は書き込み中の取得・保存は従来どおり待つ）。
+     待ち行列に入れる時に選んだファイルの最後の 1 byte を読み、選んだ後に差し替え・削除されたコピーは入れずに断る。
+     Web Locks の無いブラウザでは何も持たない（従来どおり）。
+   - 作成コピーの保存は、書き始める前に `navigator.storage.estimate()` を読み、`quota − usage + 置き換える前のコピーの大きさ < 新しい大きさ`
+     なら何も変えずに断る。書き始めた後の失敗は、置き換える前のコピーがもう無いことを文に足す。
    - ポートは `readCounts(taxid)`（由来は `downloaded` / `made` の直和）と `listCounts()`（保存済み一覧、WindowMasker の `-ustat` / `-in`
      の選択に並べる）を持つ。ダウンロード側の URL 一致確認は `CountsLoader` に残す。
    - BroadcastChannel `losat-web:windowmasker` は削除だけでなく保存・差し替えでも変更を知らせ（古いタブ互換のため `{deleted: taxid}` の形を維持）、

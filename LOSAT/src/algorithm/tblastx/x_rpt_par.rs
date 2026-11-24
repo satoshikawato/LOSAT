@@ -23,7 +23,9 @@
 //!    before the next window is formatted, so at most one window of rows is held unwritten. The
 //!    warnings before each query, the outfmt 7 headers and the last line stay on the loop's
 //!    thread, in the serial order. With the Web adapter's format observer (`FormatProbe`, which
-//!    flushes around every row) the rows are written by the serial function.
+//!    flushes around every row), or a subject whose load throws or whose id fails (rows that a
+//!    failed lookup leaves as the rows before, or that stop: `report::write_tabular`), the rows are
+//!    written by the serial function.
 //!
 //! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
 //! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
@@ -94,8 +96,8 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
     pooled.then_some(pool)
 }
 
-/// `report::write_tabular` without a format observer, with the rows of each query formatted on
-/// `pool` (item 3).
+/// `report::write_tabular` without a format observer or a subject whose load throws or whose id
+/// fails, with the rows of each query formatted on `pool` (item 3).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tabular<W: Write>(
     pool: &SearchPool<'_>,

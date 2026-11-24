@@ -782,14 +782,29 @@ pub(super) fn write_blastx_tabular(
                             writer.flush()?;
                             probe.begin(next_hsp);
                         }
-                        table.row(
+                        // A row where NCBI has no result ends the run after its bytes before
+                        // the stop (`report::tabular::RowStop`).
+                        if let Some(stop) = table.row(
                             &mut buf,
                             &mut table_rows,
                             &row_query,
                             &row_subject,
                             kept.as_ref(),
                             &row,
-                        );
+                        ) {
+                            return Err(crate::report::tabular::row_stop_end(
+                                writer,
+                                &buf,
+                                stop,
+                                super::report::stopped_subject(shown, subjects, stop.subject),
+                                options.program().upper,
+                                || {
+                                    if let Some(reads) = reads.as_mut() {
+                                        reads.end_run();
+                                    }
+                                },
+                            ));
+                        }
                         writer.write_all(&buf)?;
                         buf.clear();
                         if let Some(probe) = probe.as_deref_mut() {

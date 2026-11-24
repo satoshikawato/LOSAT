@@ -48,11 +48,11 @@ pub(crate) const COUNTS_BLOCK: [TabularField; 16] = [
 /// parsed Seq-ids also its `sseqid` and `sacc`), as the programs' lists of them hold it by subject
 /// index or rank: `None` where NCBI's `GetSeqIdList` makes none and `SetSubjectId` throws
 /// (`report::tabular::SubjectLookup::Failed`), whose rows NCBI writes with its catch's values or
-/// stops at (`report::tabular::check_failed_lookups`).
+/// stops at (`report::tabular::row_stop_end`).
 pub(crate) type SubjectId = Option<Arc<[u8]>>;
 
 /// The bytes of `ids[s_idx]` (`SubjectId`) that a row prints: empty where the lookup fails, whose
-/// default fields' rows are refused before they are written (`check_failed_lookups`), or where
+/// default fields' rows stop before them (`report::tabular::TabularRows::default_stop`), or where
 /// `ids` has no such subject.
 #[inline]
 pub(crate) fn printed_id(ids: &[SubjectId], s_idx: usize) -> &[u8] {
@@ -252,77 +252,51 @@ impl SubjectValues<'_> {
     }
 }
 
-/// Which lookups of subject `s_idx` fail (`report::tabular::check_failed_lookups`) for a report of
-/// `spec` (`None`: the default fields): its id among `ids` (`SubjectId`: `None` where
-/// `SetSubjectId` throws), and for a subject with parsed Seq-ids (`parsed`) and a report of
-/// `sall*`, also `x_SetSubjectIds` (`ParsedSubject::lookup_failure`). `database`: the subjects are
-/// a database's (the one definition line of a sequence without parsed Seq-ids throws in
-/// `x_SetSubjectIds` too, `LookupFailure::of_plain`); `protein` is their kind. A subject whose
-/// load throws (`loads`, by subject index: `report::db_subject::HitLoad::Throws`) fails there,
-/// before every other lookup (`LookupFailure::thrown`).
-pub(crate) fn subject_lookup_failure(
-    spec: Option<&TabularSpec>,
+/// Which lookups of subject `s_idx` fail for a row of the default fields
+/// (`report::tabular::TabularRows::default_stop`): its load, where it throws (`thrown`,
+/// `LookupFailure::thrown`), else `SetSubjectId` where its id among `ids` is `None`
+/// (`SubjectId`); `None` where neither does (`sall*` are not among the default fields).
+#[inline]
+pub(crate) fn default_failure(
     ids: &[SubjectId],
-    parsed: &[Option<Arc<ParsedSubject>>],
-    loads: &crate::report::db_subject::HitLoads,
-    database: bool,
-    protein: bool,
+    thrown: bool,
     s_idx: usize,
 ) -> Option<crate::report::tabular::LookupFailure> {
-    if loads.thrown(s_idx).is_some() {
-        return Some(crate::report::tabular::LookupFailure::thrown());
-    }
-    let failed_id = matches!(ids.get(s_idx), Some(None));
-    match parsed.get(s_idx).and_then(Option::as_deref) {
-        Some(subject) if spec.is_some_and(reports_all_ids) => {
-            subject.lookup_failure(protein).ok().flatten()
-        }
-        Some(_) => failed_id.then_some(crate::report::tabular::LookupFailure {
+    if thrown {
+        Some(crate::report::tabular::LookupFailure::thrown())
+    } else if matches!(ids.get(s_idx), Some(None)) {
+        Some(crate::report::tabular::LookupFailure {
             subject_id: true,
-            all_ids: false,
-            bioseq: false,
-        }),
-        None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
+            ..Default::default()
+        })
+    } else {
+        None
     }
-}
-
-/// Whether the report shows `sallseqid`, `sallgi` or `sallacc` (`x_SetSubjectIds` runs).
-pub(crate) fn reports_all_ids(spec: &TabularSpec) -> bool {
-    spec.has_any(&[
-        TabularField::SubjectAllSeqIds,
-        TabularField::SubjectAllGis,
-        TabularField::SubjectAllAccessions,
-    ])
-}
-
-/// Whether the lookups of some subject can fail, so that a tabular report may need the check of
-/// `checks_failed_lookups`: a failed id among `ids` (`SetSubjectId` throws), or subjects with
-/// parsed Seq-ids (`parsed` is empty when none has them).
-#[inline]
-pub(crate) fn lookups_may_fail(ids: &[SubjectId], parsed: &[Option<Arc<ParsedSubject>>]) -> bool {
-    !parsed.is_empty() || ids.iter().any(Option::is_none)
-}
-
-/// Whether a tabular report of `spec` is checked for rows whose lookups fail
-/// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (`None` for a failed
-/// `SetSubjectId`) and `parsed` are as given: some id failed, a subject with parsed Seq-ids
-/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`), or the load of some subject throws
-/// (`loads`).
-pub(crate) fn checks_failed_lookups(
-    spec: Option<&TabularSpec>,
-    ids: &[SubjectId],
-    parsed: &[Option<Arc<ParsedSubject>>],
-    loads: &crate::report::db_subject::HitLoads,
-) -> bool {
-    (ids.iter().any(Option::is_none)
-        || loads.any_throws()
-        || (!parsed.is_empty()
-            && spec.is_some_and(reports_all_ids)
-            && parsed.iter().any(Option::is_some)))
-        && crate::report::tabular::may_stop_at_failed_lookup(spec)
 }
 
 impl<'a> TabularSubjects<'a> {
+    /// What LOSAT's refusal at a row of subject `s_idx` where NCBI has no result
+    /// (`report::tabular::RowStop`) says of it: a `-subject` record's title
+    /// (`report::tabular::failed_record_title`), or the database sequence and the load that throws
+    /// (`report::tabular::failed_database_subject`).
+    #[cold]
+    pub(crate) fn stopped_subject(&self, s_idx: usize) -> String {
+        match *self {
+            TabularSubjects::Records { records, .. } => {
+                crate::report::tabular::failed_record_title(s_idx, records[s_idx].shown_id())
+            }
+            TabularSubjects::Database {
+                ordinals,
+                oids,
+                loads,
+                ..
+            } => crate::report::tabular::failed_database_subject(
+                oids.oid(ordinals[s_idx]),
+                loads.thrown(s_idx),
+            ),
+        }
+    }
+
     /// The parsed subjects by subject index (empty when none has parsed Seq-ids).
     pub(crate) fn parsed(&self) -> &'a [Option<Arc<ParsedSubject>>] {
         match *self {

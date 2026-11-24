@@ -2670,7 +2670,7 @@ impl ListedTitles<'_> {
     /// listed subject, by rank (`shared::tabular_subject_id`); a
     /// subject without rows gets an empty id, one whose lookup fails none
     /// (`common::tabular::SubjectId`: `TabularSubjectId::Unknown`, a parsed subject's
-    /// `ParsedSubject::tabular_ids`; `report::tabular::check_failed_lookups`). A subject with rows
+    /// `ParsedSubject::tabular_ids`; `report::tabular::row_stop_end`). A subject with rows
     /// whose id LOSAT cannot write as NCBI is an error before any format is written where a
     /// tabular report `reads` the subject (`report::tabular::reads_subject`), else its ids are
     /// empty: a table of fields that read nothing of the subject prints none of them.

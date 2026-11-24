@@ -482,69 +482,6 @@ pub(super) fn render(
     } else {
         Vec::new()
     };
-    // The rows of subjects whose lookup fails (no id) where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before any format is written.
-    let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
-        ShownSubjects::Fasta { parsed, .. } => parsed,
-        ShownSubjects::Database { reported, .. } => &reported.parsed,
-    };
-    let database = matches!(shown, ShownSubjects::Database { .. });
-    // A subject set's subjects are all loaded.
-    let every_loaded = crate::report::db_subject::HitLoads::default();
-    let loads = match shown {
-        ShownSubjects::Fasta { .. } => &every_loaded,
-        ShownSubjects::Database { reported, .. } => &reported.loads,
-    };
-    // Each tabular format's refusal is that format's (`FormatRefusal::check`).
-    for format in outputs
-        .formats
-        .iter_mut()
-        .filter(|format| shows_ids(format))
-    {
-        let spec = super::tabular::tabular_spec(format.outfmt);
-        if crate::algorithm::common::tabular::checks_failed_lookups(
-            spec.as_ref(),
-            &subject_ids,
-            parsed,
-            loads,
-        ) {
-            let checked = crate::report::tabular::check_failed_lookups(
-                spec.as_ref(),
-                hitlists.iter().map(|hitlist| {
-                    hitlist
-                        .lists()
-                        .iter()
-                        .filter(|list| !list.hsps.hsps.is_empty())
-                        .map(|list| list.oid as usize)
-                }),
-                |s_idx| {
-                    crate::algorithm::common::tabular::subject_lookup_failure(
-                        spec.as_ref(),
-                        &subject_ids,
-                        parsed,
-                        loads,
-                        database,
-                        false,
-                        s_idx,
-                    )
-                },
-                |s_idx| match shown {
-                    ShownSubjects::Database { reported, oids, .. } => {
-                        crate::report::tabular::failed_database_subject(
-                            oids.oid(reported.ordinals[s_idx]),
-                            loads.thrown(s_idx),
-                        )
-                    }
-                    ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
-                        s_idx,
-                        subject_records[s_idx].shown_id(),
-                    ),
-                },
-                "TBLASTN",
-            );
-            format.refusal.check(checked)?;
-        }
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411:
     // The alignments are rendered once from the final result, for outfmt 0 and for
     // the caller's hit records, in the order of the tabular rows.
@@ -1025,6 +962,9 @@ fn write_tabular(
             // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
             // (`TabularRows::write_thrown_default`).
             let thrown = loads.thrown(oid).is_some();
+            // The subject's lookups that fail at its rows' `saccver` (`TabularRows::default_stop`).
+            let failure =
+                crate::algorithm::common::tabular::default_failure(subject_ids, thrown, oid);
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // The subject's first row (the default fields read it) loads it where the query's
             // batch did not prefetch it (`QueryWarnings::subject_read`).
@@ -1038,6 +978,21 @@ fn write_tabular(
                 "TBLASTN report payload count mismatch"
             );
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                // A row where NCBI has no result ends the run after the bytes before its stop.
+                if let Some((written, stop)) = rows.default_stop(query.shown_id(), failure, oid) {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &written,
+                        stop,
+                        stopped_subject(shown, subject_records, stop.subject),
+                        "TBLASTN",
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
                 if thrown {
                     if let Some(probe) = probe.as_mut() {
                         writer.flush()?;
@@ -1087,7 +1042,7 @@ fn write_tabular(
                 // written as bytes.
                 writer.write_all(query.shown_id())?;
                 writer.write_all(b"\t")?;
-                // A failed lookup's rows are refused before (`check_failed_lookups`).
+                // A failed lookup's row stopped before its subject id (`default_stop`).
                 rows.found(oid);
                 writer.write_all(crate::algorithm::common::tabular::printed_id(
                     subject_ids,
@@ -1126,6 +1081,29 @@ fn write_tabular(
     Ok(())
 }
 
+/// What LOSAT's refusal at a row of subject `s_idx` where NCBI has no result
+/// (`report::tabular::RowStop`, the default fields' rows) says of it: a database sequence and the
+/// load that throws (`report::tabular::failed_database_subject`), or a `-subject` record's title
+/// (`report::tabular::failed_record_title`).
+#[cold]
+fn stopped_subject(
+    shown: &ShownSubjects<'_>,
+    subject_records: &[FastaRecord],
+    s_idx: usize,
+) -> String {
+    match shown {
+        ShownSubjects::Database { reported, oids, .. } => {
+            crate::report::tabular::failed_database_subject(
+                oids.oid(reported.ordinals[s_idx]),
+                reported.loads.thrown(s_idx),
+            )
+        }
+        ShownSubjects::Fasta { .. } => {
+            crate::report::tabular::failed_record_title(s_idx, subject_records[s_idx].shown_id())
+        }
+    }
+}
+
 /// The 1-based reported coordinates of an HSP (query start and end, subject start and end
 /// in nucleotides) moved from the searched letters into the records: by the start of the
 /// query's interval and of the subject's interval, on either frame. Without ranges nothing
@@ -1155,7 +1133,7 @@ pub(super) fn record_coordinates(
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
 /// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's; `None`
 /// where `GenerateDefline` throws (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
-/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`report::tabular::row_stop_end`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 fn tabular_subject_ids(

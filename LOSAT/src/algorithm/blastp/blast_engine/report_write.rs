@@ -1272,6 +1272,18 @@ pub(super) fn write_text(
         ..
     } = *view;
     let mut writer = format.sink.open()?;
+    // What the refusal at a row where NCBI has no result says of its subject
+    // (`report::tabular::row_stop_end`).
+    let stopped = |s_idx: usize| match view.listed_titles {
+        Some(titles) => crate::report::tabular::failed_database_subject(
+            titles.oid(s_idx),
+            view.hit_loads.thrown(s_idx),
+        ),
+        None => crate::report::tabular::failed_record_title(
+            s_idx,
+            view.subject_records[s_idx].shown_id(),
+        ),
+    };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1107
     write_blastp_tabular_hit_lists(
         hit_lists,
@@ -1296,6 +1308,7 @@ pub(super) fn write_text(
         args.psi_search
             .as_ref()
             .and_then(|search| search.query_other_coding),
+        (&stopped, args.app.name()),
     )?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146

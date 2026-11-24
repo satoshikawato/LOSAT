@@ -983,23 +983,24 @@ impl TabularSpec {
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:262-272
-/// Why NCBI has no result for a tabular report of `spec` (`None`: the default fields, whose
-/// `saccver` is the first case) with a row whose subject lookups fail as `failure` says, the row
+/// Where NCBI has no result for a tabular report of `spec` (`None`: the default fields, whose
+/// `saccver` is the first case) at a row whose subject lookups fail as `failure` says, the row
 /// being the first of its result set when `first`: `sacc` and `saccver` of the empty
 /// `m_SubjectId` (`SetSubjectId` threw) take the label of a null `FindBestChoice` (NCBI BLAST+
 /// 2.17.0 stops with `CCoreException::eNullPtr`, exit 255, after the row's earlier fields), and
 /// `staxid` of a first row prints `m_SubjectTaxId` before any row set it (an uninitialised `int`:
-/// a different number in each run). `None`: the report has a result (`TabularWriter::row`).
-pub fn failed_lookup_stop(
+/// a different number in each run). `(null pointer, staxid)`: whether each applies.
+fn failed_lookup_stops(
     spec: Option<&TabularSpec>,
     failure: LookupFailure,
     first: bool,
-) -> Option<&'static str> {
+) -> (bool, bool) {
     let Some(spec) = spec else {
-        return (failure.subject_id || (failure.bioseq && first))
-            .then_some(FAILED_LOOKUP_NULL_POINTER);
+        return (failure.subject_id || (failure.bioseq && first), false);
     };
-    let stage = spec.failure_stage(failure)?;
+    let Some(stage) = spec.failure_stage(failure) else {
+        return (false, false);
+    };
     // A load that throws leaves `m_SubjectId` as the last row that found its subject set it: empty
     // only before such a row (the result set's first row; every row before a later one that
     // throws has thrown too, which this check meets first).
@@ -1008,16 +1009,60 @@ pub fn failed_lookup_stop(
         FailedStage::Bioseq => first,
         FailedStage::SubjectIds => false,
     };
-    if empty_id && spec.has_any(&[SubjectAccession, SubjectAccessionVersion]) {
-        Some(FAILED_LOOKUP_NULL_POINTER)
-    } else if first && spec.has(SubjectTaxId) {
-        Some("NCBI BLAST+ prints an uninitialised staxid in the row when it is the first row of a query's report (a different number in each run)")
-    } else {
-        None
+    (empty_id, first)
+}
+
+/// Why NCBI has no result for a tabular report of `spec` at a row whose subject lookups fail as
+/// `failure` says (`failed_lookup_stops`): the null pointer of `sacc` or `saccver`, else an
+/// uninitialised `staxid`; `None`: the report has a result (`TabularWriter::row`).
+pub fn failed_lookup_stop(
+    spec: Option<&TabularSpec>,
+    failure: LookupFailure,
+    first: bool,
+) -> Option<&'static str> {
+    let (null_pointer, taxid) = failed_lookup_stops(spec, failure, first);
+    match spec {
+        None => null_pointer.then_some(FAILED_LOOKUP_NULL_POINTER),
+        Some(spec)
+            if null_pointer && spec.has_any(&[SubjectAccession, SubjectAccessionVersion]) =>
+        {
+            Some(FAILED_LOOKUP_NULL_POINTER)
+        }
+        Some(spec) => (taxid && spec.has(SubjectTaxId)).then_some(FAILED_LOOKUP_UNSET_TAXID),
     }
 }
 
-const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7, 10 and 20 print saccver)";
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+/// The field at which a row of a tabular report of `spec` (`None`: the default fields, whose
+/// `saccver` is the second) stops where NCBI has no result (`failed_lookup_stops`): its first
+/// `sacc` or `saccver` that reads the null `m_SubjectId`, or `staxid` of a first row, whichever
+/// comes first in the field list, with what NCBI does there. `Print` writes each field after the
+/// delimiter before it, so NCBI's bytes of the row are its fields before that one and the
+/// delimiter before it.
+fn row_stop_field(
+    spec: Option<&TabularSpec>,
+    failure: LookupFailure,
+    first: bool,
+) -> Option<(usize, &'static str)> {
+    let (null_pointer, taxid) = failed_lookup_stops(spec, failure, first);
+    let Some(spec) = spec else {
+        return null_pointer.then_some((1, FAILED_LOOKUP_NULL_POINTER));
+    };
+    spec.fields
+        .iter()
+        .enumerate()
+        .find_map(|(at, field)| match field {
+            SubjectAccession | SubjectAccessionVersion if null_pointer => {
+                Some((at, FAILED_LOOKUP_NULL_POINTER))
+            }
+            SubjectTaxId if taxid => Some((at, FAILED_LOOKUP_UNSET_TAXID)),
+            _ => None,
+        })
+}
+
+const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7, 10 and 20 print saccver), whose report prints a stack trace with the run's memory addresses";
+
+const FAILED_LOOKUP_UNSET_TAXID: &str = "NCBI BLAST+ prints an uninitialised staxid in the row when it is the first row of a query's report (a different number in each run)";
 
 /// Whether NCBI's run of a tabular report of `spec` (`None`: the default fields) ends where the
 /// first row of a query's report loads a subject whose load throws (`failed_lookup_stop` of
@@ -1028,50 +1073,53 @@ pub fn first_thrown_row_ends_run(spec: Option<&TabularSpec>) -> bool {
 }
 
 /// Whether a tabular report of `spec` (`None`: the default fields) can stop where NCBI has no
-/// result (`TabularSpec::may_stop_at_failed_lookup`), so that its rows are checked
-/// (`check_failed_lookups`) before it is written.
+/// result (`TabularSpec::may_stop_at_failed_lookup`, `RowStop`).
 pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
 }
 
-/// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
-/// `result_sets` (each the indices of its subjects in row order, a subject's run of rows once,
-/// one set per query or psiblast round), that NCBI has a result for each row whose subject
-/// lookups fail (`failure`, `None` where they do not): `failed_lookup_stop`'s cases are LOSAT's
-/// refusals, which name the subject (`describe`: what its title is) and the program.
-pub fn check_failed_lookups<S>(
-    spec: Option<&TabularSpec>,
-    result_sets: impl IntoIterator<Item = S>,
-    failure: impl Fn(usize) -> Option<LookupFailure>,
-    describe: impl Fn(usize) -> String,
-    program: &str,
-) -> anyhow::Result<()>
-where
-    S: IntoIterator<Item = usize>,
-{
-    if !may_stop_at_failed_lookup(spec) {
-        return Ok(());
-    }
-    for set in result_sets {
-        for (row, s_idx) in set.into_iter().enumerate() {
-            let Some(failure) = failure(s_idx) else {
-                continue;
-            };
-            if let Some(reason) = failed_lookup_stop(spec, failure, row == 0) {
-                return Err(FailedLookupRefusal(format!(
-                    "{}; {reason}, which is not supported by LOSAT's {program}",
-                    describe(s_idx)
-                ))
-                .into());
-            }
-        }
-    }
-    Ok(())
+/// A row at which NCBI has no result (`failed_lookup_stop`: a null pointer that ends its run, or
+/// an uninitialised number), which its writer (`TabularWriter::row`, `TabularRows::default_stop`)
+/// wrote up to the field where NCBI stops: the caller ends the run there (`row_stop_end`).
+#[must_use]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowStop {
+    /// The row's subject (`TabularSubject::index`: its subject index or rank).
+    pub subject: usize,
+    /// What NCBI does at the field (`failed_lookup_stop`).
+    pub reason: &'static str,
 }
 
-/// LOSAT's refusal of `check_failed_lookups` (exit status 1 with its message in every program; a
-/// type of its own, so that a program that reports its engine's errors otherwise, BLASTX's
-/// `native::report_error`, passes it on as a refusal).
+/// The end of the run at a row where NCBI has no result (`RowStop`): the report's bytes before
+/// the stop, `written` (the rows before it and the row's fields before its stop, NCBI's bytes),
+/// are written to `writer` and flushed, the reads end (`end_reads`, as `run_end`: NCBI loads
+/// nothing after it), and LOSAT's refusal, which names the row's subject (`describe`, from
+/// `failed_record_title` or `failed_database_subject`) and the program, is the run's error.
+/// NCBI's report of its null pointer prints a stack trace with the run's memory addresses (and a
+/// first row's `staxid` is a different number in each run): no program can write those bytes
+/// (PD-LOSAT-NCBI-DEFECTS rule 3), so the output is NCBI's up to them.
+pub fn row_stop_end(
+    writer: &mut dyn Write,
+    written: &[u8],
+    stop: RowStop,
+    describe: String,
+    program: &str,
+    end_reads: impl FnOnce(),
+) -> anyhow::Error {
+    if let Err(error) = writer.write_all(written).and_then(|()| writer.flush()) {
+        return error.into();
+    }
+    end_reads();
+    FailedLookupRefusal(format!(
+        "{describe}; {}, which is not supported by LOSAT's {program}",
+        stop.reason
+    ))
+    .into()
+}
+
+/// LOSAT's refusal at a row where NCBI has no result (`row_stop_end`; exit status 1 with its
+/// message in every program; a type of its own, so that a program that reports its engine's
+/// errors otherwise, BLASTX's `native::report_error`, passes it on as a refusal).
 #[derive(Debug)]
 pub struct FailedLookupRefusal(String);
 
@@ -1083,7 +1131,7 @@ impl std::fmt::Display for FailedLookupRefusal {
 
 impl std::error::Error for FailedLookupRefusal {}
 
-/// What `check_failed_lookups` says of the `-subject` record `s_idx` (0-based) shown as
+/// What LOSAT's refusal at a row where NCBI has no result (`row_stop_end`) says of the `-subject` record `s_idx` (0-based) shown as
 /// `shown_id`, whose lookup fails (a `Subject_` first word of its title, or a parsed
 /// `lcl|Subject_N` id).
 pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
@@ -1094,7 +1142,8 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
     )
 }
 
-/// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails: where its
+/// What LOSAT's refusal at a row where NCBI has no result (`row_stop_end`) says of the database
+/// sequence `oid` whose lookup fails: where its
 /// load throws `thrown` (a batch whose prefetch is off, `SubjectLookup::Throws`), that load;
 /// otherwise its title (`failed_database_title`).
 pub fn failed_database_subject(
@@ -1110,7 +1159,7 @@ pub fn failed_database_subject(
     }
 }
 
-/// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails.
+/// What `failed_database_subject` says of the database sequence `oid` whose title fails.
 pub fn failed_database_title(oid: impl std::fmt::Display) -> String {
     format!(
         "database sequence {oid} has a title (or a name in the taxonomy database from which NCBI BLAST+ makes an empty one or the end of a protein title ending in ']') in no encoding that NCBI BLAST+ recognises"
@@ -1582,6 +1631,9 @@ pub struct TabularRows {
     /// Whether a row since that one emptied `m_SubjectId` (`FailedStage::SubjectId`), which a
     /// row whose load throws (`FailedStage::Bioseq`) then prints as it is.
     subject_id_emptied: bool,
+    /// Whether the result set has a row before the next: its first row is the one before which
+    /// no row set `m_SubjectId` or `m_SubjectTaxId` (`failed_lookup_stop`).
+    started: bool,
 }
 
 impl TabularRows {
@@ -1599,6 +1651,28 @@ impl TabularRows {
         self.last_found = Some(index);
         self.failed_ids = None;
         self.subject_id_emptied = false;
+        self.started = true;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108 (cited at
+    // `row_stop_field`)
+    /// Where the next row of the default fields (outfmt 6 and 7 without a field list,
+    /// `outfmt6::write_hit_fields_bytes`) of the query `query_id` stops where NCBI has no result:
+    /// a row of subject `subject` whose lookups fail as `failure` says (`None`: they do not; a
+    /// `-subject` record's or database sequence's failed id, `LookupFailure::of_plain`, or a load
+    /// that throws, `LookupFailure::thrown`) reads the null `m_SubjectId` at `saccver`
+    /// (`failed_lookup_stop`, `None` for the default fields): the bytes of the row before it,
+    /// `qaccver` and a tab, and the stop (`row_stop_end`). `None`: the row is written. The one
+    /// check of every program's default fields.
+    pub fn default_stop(
+        &self,
+        query_id: &[u8],
+        failure: Option<LookupFailure>,
+        subject: usize,
+    ) -> Option<(Vec<u8>, RowStop)> {
+        let (at, reason) = row_stop_field(None, failure?, !self.started)?;
+        debug_assert_eq!(at, 1);
+        Some(([query_id, b"\t"].concat(), RowStop { subject, reason }))
     }
 
     /// The subject whose `m_SubjectId` a row whose load throws prints (`FailedStage::Bioseq`): the
@@ -1617,10 +1691,10 @@ impl TabularRows {
     /// coordinates keep the 0 of `x_ResetFields` (`pident` 0.000 of an alignment length 0), and
     /// `saccver` prints `m_SubjectId` as the kept subject set it (`kept_id`, whose `saccver` the
     /// caller gives, `saccver(index)`); before such a row `m_SubjectId` is NCBI's null pointer,
-    /// refused before the report (`failed_lookup_stop`). The one writer of such rows of every
-    /// program's default fields.
+    /// where the row stops (`default_stop`, which the caller asks first). The one writer of such
+    /// rows of every program's default fields.
     pub fn write_thrown_default<W: Write + ?Sized, S: AsRef<[u8]>>(
-        &self,
+        &mut self,
         writer: &mut W,
         query_id: &[u8],
         saccver: impl FnOnce(usize) -> S,
@@ -1629,6 +1703,7 @@ impl TabularRows {
         config: &crate::report::outfmt6::OutputConfig,
     ) -> io::Result<()> {
         let kept = self.kept_id().map(saccver);
+        self.started = true;
         crate::report::outfmt6::write_hit_fields_bytes(
             writer,
             query_id,
@@ -1909,7 +1984,9 @@ impl<'a> TabularWriter<'a> {
     /// One row (`SetFields` then `Print`) of the result set whose formatter state is `rows`,
     /// appended to `out`. A row whose subject lookup fails (`fails`) is given `kept`, the subject
     /// of `rows.last_found()` (`None` before a row that found its subject), whose titles,
-    /// taxonomy and `sall*` it shows as NCBI's members keep them; other rows ignore it.
+    /// taxonomy and `sall*` it shows as NCBI's members keep them; other rows ignore it. `Some`: the
+    /// row stops where NCBI has no result (`row_stop_field`), after the fields before it, and the
+    /// caller ends the run with the bytes so far (`row_stop_end`).
     pub fn row(
         &self,
         out: &mut Vec<u8>,
@@ -1918,13 +1995,13 @@ impl<'a> TabularWriter<'a> {
         subject: &TabularSubject<'_>,
         kept: Option<&TabularSubject<'_>>,
         hsp: &TabularHsp<'_>,
-    ) {
+    ) -> Option<RowStop> {
         if let Some(stage) = self.spec.failed_stage(subject.lookup) {
-            self.failed_row(out, rows, query, subject, kept, hsp, stage);
-            return;
+            return self.failed_row(out, rows, query, subject, kept, hsp, stage);
         }
         rows.found(subject.index);
         self.found_row(out, query, subject, hsp);
+        None
     }
 
     /// The row of a subject whose lookup fails at `stage`: the fields before the catch (the
@@ -1934,8 +2011,9 @@ impl<'a> TabularWriter<'a> {
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:771-797
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-194
     /// `sseqid` of the empty `m_SubjectId` (`SetSubjectId` threw) is `Unknown` and `sgi` 0;
-    /// `sacc` and `saccver` read a null `FindBestChoice` (NCBI stops: `failed_lookup_stop`, before
-    /// the report), so no row of this writer prints them. Where only `x_SetSubjectIds` threw, the
+    /// `sacc` and `saccver` read a null `FindBestChoice`, where NCBI stops (`row_stop_field`):
+    /// the row ends after the delimiter before that field, without its newline, and gives the
+    /// stop (`RowStop`), as at a first row's `staxid`. Where only `x_SetSubjectIds` threw, the
     /// subject's own ids and length were set. Where the load threw (`FailedStage::Bioseq`), the
     /// subject ids are the kept subject's (the empty ones before a row that found its subject,
     /// or after a row that emptied them).
@@ -1951,8 +2029,15 @@ impl<'a> TabularWriter<'a> {
         kept: Option<&TabularSubject<'_>>,
         hsp: &TabularHsp<'_>,
         stage: FailedStage,
-    ) {
+    ) -> Option<RowStop> {
         let spec = self.spec;
+        let stop = match subject.lookup {
+            SubjectLookup::Failed(failed) => Some(failed.failure()),
+            SubjectLookup::Throws(_) => Some(LookupFailure::thrown()),
+            SubjectLookup::Found => None,
+        }
+        .and_then(|failure| row_stop_field(Some(spec), failure, !rows.started));
+        rows.started = true;
         // The Seq-align id that the catch pushes, and where `x_SetSubjectIds` threw, the lists
         // of the definition lines before the one that throws.
         let (pushed, pushed_gi, lines): ([&[u8]; 2], i64, _) = match subject.lookup {
@@ -2026,12 +2111,18 @@ impl<'a> TabularWriter<'a> {
             if i > 0 {
                 out.extend_from_slice(spec.delimiter.as_bytes());
             }
+            if let Some((_, reason)) = stop.filter(|&(at, _)| at == i) {
+                return Some(RowStop {
+                    subject: subject.index,
+                    reason,
+                });
+            }
             if kept_by_failed_row(*field) {
                 match (kept, &names) {
                     (Some(kept), Some(names)) => self.subject_field(out, *field, kept, names),
                     // Before a row that found its subject: the members as constructed (empty).
-                    // `staxid` reads an uninitialised `m_SubjectTaxId` there
-                    // (`failed_lookup_stop`, before the report).
+                    // `staxid` reads an uninitialised `m_SubjectTaxId` there in a first row
+                    // (`row_stop_field`, which stopped above).
                     _ => {
                         let quoted = spec.is_csv()
                             && matches!(
@@ -2099,6 +2190,7 @@ impl<'a> TabularWriter<'a> {
             }
         }
         out.push(b'\n');
+        None
     }
 
     /// The row of a subject whose lookup does not fail. Inline in its one caller (`row`), so that

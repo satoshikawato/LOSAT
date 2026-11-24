@@ -522,14 +522,28 @@ pub(super) fn write_tblastn_tabular(
                     writer.flush()?;
                     probe.begin(hsp_index);
                 }
-                table.row(
+                // A row where NCBI has no result ends the run after the bytes before its stop.
+                if let Some(stop) = table.row(
                     &mut buf,
                     &mut rows,
                     &tabular_query,
                     &subject,
                     kept.as_ref(),
                     &row,
-                );
+                ) {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &buf,
+                        stop,
+                        subjects.stopped_subject(stop.subject),
+                        PROGRAM,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
                 writer.write_all(&buf)?;
                 buf.clear();
                 if let Some(probe) = probe.as_deref_mut() {

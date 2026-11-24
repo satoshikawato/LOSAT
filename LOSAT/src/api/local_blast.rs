@@ -249,16 +249,16 @@ pub struct FormatOutput<'a> {
 
 /// What an error of one format's report does (`FormatRefusal::check`), the error that the command
 /// line's run of that format alone stops with: LOSAT's refusals that a program's check of the
-/// format makes before the report's rows (a tabular row at which NCBI stops,
-/// `report::tabular::check_failed_lookups`, every program; the `-db` list's counts that the
-/// prolog of outfmt 0 to 4 prints where NCBI's sums overflow,
-/// `common::database::check_formats_report_sums`, every program; BLASTP's subject title of
-/// punctuation in outfmt 0 to 4; BLASTX's subject of empty rows that the mapper rewrites,
-/// `blastx::empty_rows::refuse_mapped_without_scores`), and every error that ends the format's
-/// report in its middle (LOSAT's refusals there, such as the `-sorthits` total that NCBI pads
-/// without end, `report::pairwise::TotalScoreRefusal`, and NCBI's errors of the format alone,
-/// such as BLASTX's `Row is empty` in outfmt 0): each program passes the result of each format's
-/// report, of each query batch where it writes them batch by batch, to its format's `check`.
+/// format makes before the report's rows (the `-db` list's counts that the prolog of outfmt 0 to 4
+/// prints where NCBI's sums overflow, `common::database::check_formats_report_sums`, every
+/// program; BLASTP's subject title of punctuation in outfmt 0 to 4; BLASTX's subject of empty rows
+/// that the mapper rewrites, `blastx::empty_rows::refuse_mapped_without_scores`), and every error
+/// that ends the format's report in its middle (LOSAT's refusals there, such as a tabular row at
+/// which NCBI stops, `report::tabular::row_stop_end`, every program, and the `-sorthits` total
+/// that NCBI pads without end, `report::pairwise::TotalScoreRefusal`, and NCBI's errors of the
+/// format alone, such as BLASTX's `Row is empty` in outfmt 0): each program passes the result of
+/// each format's report, of each query batch where it writes them batch by batch, to its format's
+/// `check`.
 #[derive(Debug, Default)]
 pub enum FormatRefusal {
     /// The error fails the call: the command line's one format, the library's reports.

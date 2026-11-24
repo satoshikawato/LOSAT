@@ -358,7 +358,7 @@ fn taxonomy_names_get_ncbis_fillers() {
             qcovhsp: 100,
         };
         let mut out = Vec::new();
-        writer.row(
+        let stop = writer.row(
             &mut out,
             &mut TabularRows::default(),
             &TabularQuery::local(b"q", 10),
@@ -366,6 +366,7 @@ fn taxonomy_names_get_ncbis_fillers() {
             None,
             &hsp,
         );
+        assert_eq!(stop, None);
         String::from_utf8(out).unwrap()
     };
     let two = TabularTaxonomy {
@@ -556,7 +557,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             qcovhsp: 100,
         };
         let mut out = Vec::new();
-        writer.row(
+        let stop = writer.row(
             &mut out,
             &mut TabularRows::default(),
             &TabularQuery::local(b"q", 6),
@@ -564,6 +565,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             None,
             &hsp,
         );
+        assert_eq!(stop, None);
         String::from_utf8(out).unwrap()
     };
     let frames = spec(ReportFormat::Tabular, "qseqid frames sframe");
@@ -653,7 +655,7 @@ fn id_columns_are_the_subject_s_own() {
         qcovhsp: 100,
     };
     let mut out = Vec::new();
-    TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
+    let stop = TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
         &mut out,
         &mut TabularRows::default(),
         &TabularQuery::local(b"q1", 6),
@@ -661,6 +663,7 @@ fn id_columns_are_the_subject_s_own() {
         None,
         &hsp,
     );
+    assert_eq!(stop, None);
     assert_eq!(
         String::from_utf8(out).unwrap(),
         "q1\tq1\tq1\tgb|AE000111.1|\tAE000111\tAE000111.1\t42\tfirst title\tfirst title<>N/A\n"
@@ -668,7 +671,8 @@ fn id_columns_are_the_subject_s_own() {
 }
 
 /// The rows of `subjects` (failed or found, in order) of one query under `fields`, with a
-/// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900.
+/// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900; a row that stops
+/// where NCBI has no result (`RowStop`) ends them with `<stop N>`, N its subject index.
 fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
     let spec = blastp_spec(
         ReportFormat::Tabular,
@@ -706,14 +710,17 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         let kept = rows
             .last_found()
             .and_then(|index| subjects.iter().find(|subject| subject.index == index));
-        writer.row(
+        if let Some(stop) = writer.row(
             &mut out,
             &mut rows,
             &TabularQuery::local(b"nq1", 900),
             subject,
             kept.filter(|_| writer.fails(subject)),
             &hsp,
-        );
+        ) {
+            out.extend_from_slice(format!("<stop {}>", stop.subject).as_bytes());
+            break;
+        }
     }
     String::from_utf8(out).unwrap()
 }
@@ -786,6 +793,89 @@ fn failed_lookups_write_ncbis_catch_row() {
         ),
         "nq1\tSubject_9\t0.0\n"
     );
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108 (cited at
+    // `row_stop_field`)
+    // The row stops at the first field where NCBI has no result: `sacc` or `saccver` of the empty
+    // `m_SubjectId` at any row, `staxid` at the query's first row; the rows before it and the
+    // row's fields before that one, each after its delimiter, are NCBI's bytes (probe of line
+    // RG-KB item 18b, `blastn.nq.s_gb.f6sacc`: `nq1\ts2\t...\nnq1\tUnknown\t`).
+    let found_then_bad = [subject(b"s2", None, 1), bad(b"Subject_2")];
+    assert_eq!(
+        failed_rows("qseqid sseqid sacc evalue", &found_then_bad),
+        "nq1\ts2\ts2\t0.0\nnq1\tUnknown\t<stop 9>"
+    );
+    assert_eq!(
+        failed_rows("saccver qseqid", &found_then_bad),
+        "s2\tnq1\n<stop 9>"
+    );
+    assert_eq!(
+        failed_rows("qseqid evalue staxid sacc", &[bad(b"Subject_2")]),
+        "nq1\t0.0\t<stop 9>"
+    );
+    // A later row's `staxid` prints what the row before set: the stop is at `saccver`.
+    assert_eq!(
+        failed_rows("qseqid staxid saccver", &found_then_bad),
+        "nq1\t0\ts2\nnq1\t0\t<stop 9>"
+    );
+    // A found subject, or a failed one whose fields read neither, writes its whole row.
+    assert_eq!(
+        failed_rows("qseqid sseqid evalue", &found_then_bad),
+        "nq1\ts2\t0.0\nnq1\tUnknown\t0.0\n"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108 (cited at
+// `row_stop_field`)
+// The default fields (`qaccver saccver ...`): a row whose `saccver` is NCBI's null pointer stops
+// after `qaccver` and its tab; a load that throws stops only at the query's first row
+// (`TabularRows::write_thrown_default` writes the later ones).
+#[test]
+fn default_rows_stop_at_saccver() {
+    let mut rows = TabularRows::default();
+    let failed = LookupFailure {
+        subject_id: true,
+        ..LookupFailure::default()
+    };
+    assert_eq!(rows.default_stop(b"q1", None, 0), None);
+    let (written, stop) = rows.default_stop(b"q1", Some(failed), 3).unwrap();
+    assert_eq!(written, b"q1\t");
+    assert_eq!(stop.subject, 3);
+    assert_eq!(stop.reason, FAILED_LOOKUP_NULL_POINTER);
+    assert!(rows
+        .default_stop(b"q1", Some(LookupFailure::thrown()), 4)
+        .is_some());
+    rows.found(0);
+    assert!(rows.default_stop(b"q1", Some(failed), 3).is_some());
+    assert_eq!(
+        rows.default_stop(b"q1", Some(LookupFailure::thrown()), 4),
+        None
+    );
+}
+
+// The end of the run at a stop: the bytes before it, flushed, the reads ended, and LOSAT's
+// refusal naming the subject and the program.
+#[test]
+fn row_stop_end_writes_the_bytes_before_and_refuses() {
+    let mut out = Vec::new();
+    let mut ended = false;
+    let error = row_stop_end(
+        &mut out,
+        b"q1\t",
+        RowStop {
+            subject: 1,
+            reason: FAILED_LOOKUP_NULL_POINTER,
+        },
+        failed_record_title(1, b"Subject_9"),
+        "BLASTN",
+        || ended = true,
+    );
+    assert_eq!(out, b"q1\t");
+    assert!(ended);
+    assert!(error.downcast_ref::<FailedLookupRefusal>().is_some());
+    let text = error.to_string();
+    assert!(text.starts_with("subject record 2 (Subject_9) has a title"));
+    assert!(text.contains("null pointer exception"));
+    assert!(text.ends_with("which is not supported by LOSAT's BLASTN"));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId` of `list`, then a return of -1)
@@ -882,8 +972,8 @@ fn a_load_that_throws_writes_the_kept_row() {
         failed_rows("qseqid sseqid sgi stitle sallseqid evalue", &[thrown]),
         "nq1\tUnknown\t0\tN/A\tgi|5|gb|BBB00002.1|\t0.0\n"
     );
-    // The refusals before the report: a first row with `sacc`, `saccver` (the default fields)
-    // or `staxid`; a later one has a result.
+    // The stops (`row_stop_end`): a first row with `sacc`, `saccver` (the default fields) or
+    // `staxid`; a later one has a result.
     let spec = |fields: &str| {
         blastp_spec(
             ReportFormat::Tabular,
@@ -1172,26 +1262,16 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         "qseqid sseqid sallseqid evalue"
     ))));
     assert!(may_stop_at_failed_lookup(None));
-    let record = |s_idx| (s_idx == 1).then(|| LookupFailure::of_plain(false));
-    let result = check_failed_lookups(
-        Some(&spec("qseqid sseqid staxid")),
-        [vec![0, 1], vec![1, 0]],
-        record,
-        |s_idx| failed_record_title(s_idx, b"Subject_9"),
-        "BLASTN",
-    );
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .starts_with("subject record 2 (Subject_9) has a title"));
-    assert!(check_failed_lookups(
-        Some(&spec("qseqid sseqid staxid")),
-        [vec![0, 1], vec![0, 1]],
-        record,
-        |s_idx| failed_record_title(s_idx, b"x"),
-        "BLASTN",
-    )
-    .is_ok());
+    // The field of the stop (`row_stop_field`): the first that NCBI has no result for.
+    let field = |fields: Option<&str>, failure, first| {
+        row_stop_field(fields.map(spec).as_ref(), failure, first).map(|(at, _)| at)
+    };
+    let failed = LookupFailure::of_plain(false);
+    assert_eq!(field(None, failed, false), Some(1));
+    assert_eq!(field(Some("qseqid staxid sacc"), failed, true), Some(1));
+    assert_eq!(field(Some("qseqid staxid sacc"), failed, false), Some(2));
+    assert_eq!(field(Some("qseqid sseqid staxid"), failed, false), None);
+    assert_eq!(field(Some("qseqid sseqid evalue"), failed, true), None);
 }
 
 #[test]

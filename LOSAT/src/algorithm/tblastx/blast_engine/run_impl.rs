@@ -2229,65 +2229,13 @@ fn write_tblastx_outputs(
     } else {
         Vec::new()
     };
-    // The rows of subjects whose lookup fails (no id) where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before any format is written: each tabular
-    // format's refusal is that format's (`FormatRefusal::check`).
-    let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match &run.database {
-        Some(database) => &database.reported.parsed,
-        None => &records_parsed,
-    };
-    // A subject set's subjects are all loaded.
+    // What the reports do at each subject (`report::db_subject::HitLoads`); a subject set's
+    // subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let loads = run
         .database
         .as_ref()
         .map_or(&every_loaded, |database| &database.reported.loads);
-    for (output, format) in outputs
-        .formats
-        .iter_mut()
-        .zip(&output_formats)
-        .filter(|(_, format)| format.is_tabular())
-    {
-        let spec = format.tabular_spec();
-        if crate::algorithm::common::tabular::checks_failed_lookups(
-            spec,
-            &subject_ids,
-            parsed,
-            loads,
-        ) {
-            let checked = crate::report::tabular::check_failed_lookups(
-                spec,
-                (0..run.queries.len()).map(|q_idx| {
-                    hits.iter()
-                        .filter(move |hsp| hsp.hit.q_idx as usize == q_idx)
-                        .map(|hsp| hsp.hit.s_idx as usize)
-                }),
-                |s_idx| {
-                    crate::algorithm::common::tabular::subject_lookup_failure(
-                        spec,
-                        &subject_ids,
-                        parsed,
-                        loads,
-                        run.database.is_some(),
-                        false,
-                        s_idx,
-                    )
-                },
-                |s_idx| match &run.database {
-                    Some(database) => crate::report::tabular::failed_database_subject(
-                        database.oids.oid(database.reported.ordinals[s_idx]),
-                        loads.thrown(s_idx),
-                    ),
-                    None => crate::report::tabular::failed_record_title(
-                        s_idx,
-                        run.subjects[s_idx].shown_id(),
-                    ),
-                },
-                "TBLASTX",
-            );
-            output.refusal.check(checked)?;
-        }
-    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     //
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
@@ -2760,8 +2708,13 @@ fn write_tblastx_outputs(
                 | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                     // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
                     // observer (which flushes around every row) the serial writer, which also
-                    // writes the rows of subjects whose load throws (`report::write_tabular`).
-                    Some(pool) if probe.is_none() && !loads.any_throws() => {
+                    // writes the rows of subjects whose load throws or whose id fails, and the rows
+                    // that stop (`report::write_tabular`).
+                    Some(pool)
+                        if probe.is_none()
+                            && !loads.any_throws()
+                            && !subject_ids.iter().any(Option::is_none) =>
+                    {
                         crate::algorithm::tblastx::x_rpt_par::write_tabular(
                             pool,
                             &hits,
@@ -2776,20 +2729,37 @@ fn write_tblastx_outputs(
                             warnings.as_mut(),
                         )?
                     }
-                    _ => report::write_tabular(
-                        &hits,
-                        &mut writer,
-                        output_format == report::TblastxOutputFormat::TabularWithComments,
-                        &query_titles,
-                        &database,
-                        run.query_ids,
-                        &subject_ids,
-                        loads,
-                        &unsearched,
-                        run.epilog.then_some(run.queries_before),
-                        probe.as_mut(),
-                        warnings.as_mut(),
-                    )?,
+                    _ => {
+                        if let Some(stop) = report::write_tabular(
+                            &hits,
+                            &mut writer,
+                            output_format == report::TblastxOutputFormat::TabularWithComments,
+                            &query_titles,
+                            &database,
+                            run.query_ids,
+                            &subject_ids,
+                            loads,
+                            &unsearched,
+                            run.epilog.then_some(run.queries_before),
+                            probe.as_mut(),
+                            warnings.as_mut(),
+                        )? {
+                            // A row where NCBI has no result ends the run after the bytes before
+                            // its stop.
+                            return Err(crate::report::tabular::row_stop_end(
+                                &mut writer,
+                                &[],
+                                stop,
+                                stopped_subject(run, stop.subject),
+                                "TBLASTX",
+                                || {
+                                    if let Some(warnings) = warnings.as_mut() {
+                                        warnings.end_run();
+                                    }
+                                },
+                            ));
+                        }
+                    }
                 },
             }
             std::io::Write::flush(&mut writer)?;
@@ -2809,6 +2779,21 @@ fn write_tblastx_outputs(
         }
     }
     Ok(())
+}
+
+/// What LOSAT's refusal at a row of subject `s_idx` where NCBI has no result
+/// (`report::tabular::RowStop`, the default fields' rows) says of it: a database sequence and the
+/// load that throws (`report::tabular::failed_database_subject`), or a `-subject` record's title
+/// (`report::tabular::failed_record_title`).
+#[cold]
+fn stopped_subject(run: &TblastxReportRun<'_>, s_idx: usize) -> String {
+    match &run.database {
+        Some(database) => crate::report::tabular::failed_database_subject(
+            database.oids.oid(database.reported.ordinals[s_idx]),
+            database.reported.loads.thrown(s_idx),
+        ),
+        None => crate::report::tabular::failed_record_title(s_idx, run.subjects[s_idx].shown_id()),
+    }
 }
 
 /// Whether the outfmt 0 rows of every query are made before any format is written
@@ -2992,7 +2977,7 @@ fn subject_tabular_id(subject: &FastaRecord) -> Option<Arc<[u8]>> {
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
 /// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's; `None` where
 /// `GenerateDefline` throws (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
-/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`report::tabular::row_stop_end`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 fn tabular_subject_ids(

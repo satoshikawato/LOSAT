@@ -322,12 +322,16 @@ fn database_check(
         stops_at_failed_lookup: format.is_tabular()
             && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec()),
         prefetched: format.prefetches_subjects()
-            && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+            && !crate::algorithm::common::database::prefetch_always_off(format.prefetch_format()),
+        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
+            format.prefetch_format(),
+        ),
         titles: crate::algorithm::common::database::TitleReads::of(
             format.writes_seq_aligns(),
             format.prefetches_subjects()
-                && !crate::algorithm::common::database::prefetch_always_off(),
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    format.prefetch_format(),
+                ),
         ),
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).

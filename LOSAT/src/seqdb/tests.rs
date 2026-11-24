@@ -14,6 +14,7 @@ use super::header::{decode_defline_set, decode_defline_taxids};
 use super::index::IndexFile;
 use super::*;
 use crate::core::blast_encoding::{encode_iupac_to_blastna, iupacna_to_ncbi4na};
+use crate::utils::test_dir::ncbi_dir;
 
 /// NCBIstdaa: the residue at position `i` has the code `i`
 /// (c++/src/algo/blast/core/blast_encoding.c:115-118, `NCBISTDAA_TO_AMINOACID`).
@@ -1118,9 +1119,14 @@ fn alias_oid_lists_select_ncbis_oids() {
     let db = open("u").unwrap();
     assert_eq!(oids(&db), [0, 2, 3, 4, 5, 9]);
     assert_eq!(db.ncbi_num_seqs(), 6);
-    // A missing file is the constructor's error when it scans.
+    // A missing file is the constructor's error when it scans. Its path is the directory of the
+    // first volume, which NCBI names with its links followed (seqdbalias.cpp:851-862, 2001-2005).
     write("x.pal", b"DBLIST prot_v4\nOIDLIST none.msk\n");
-    let missing = dir.join("none.msk").to_str().unwrap().to_string();
+    let missing = ncbi_dir(&dir)
+        .join("none.msk")
+        .to_str()
+        .unwrap()
+        .to_string();
     let text = format!("To be memory mapped the file must exist: '{missing}'");
     let error = open("x").unwrap_err();
     assert!(
@@ -1214,10 +1220,11 @@ fn oid_lists_over_unions_of_ranges_keep_ncbis_oids() {
     let db = SeqDb::open(dir.join("pb").to_str().unwrap(), SeqType::Protein).unwrap();
     let error = db.build_oid_list().unwrap_err();
     assert!(error.ncbi_crashes(), "{error}");
+    // The alias file under the name NCBI resolves it to, its links followed (`ncbi_dir`).
     assert!(
         error
             .to_string()
-            .starts_with(&format!("{}:", dir.join("pb.pal").display())),
+            .starts_with(&format!("{}:", ncbi_dir(&dir).join("pb.pal").display())),
         "{error}"
     );
     write("pa.pal", b"DBLIST c3 c4\nFIRST_OID 10\nLAST_OID 10\n");
@@ -1277,9 +1284,11 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
     }
     std::fs::write(dir.join("np.pal"), b"DBLIST prot_v4\nOIDLIST np.msk\n").unwrap();
     let error = SeqDb::open(dir.join("np").to_str().unwrap(), SeqType::Protein).unwrap_err();
+    // The list beside the alias file, in the directory NCBI names with its links followed
+    // (seqdbalias.cpp:325-335, 2001-2005).
     let text = format!(
         "CMemoryFile: Cannot memory map file '{}':Permission denied",
-        mask.display()
+        ncbi_dir(&dir).join("np.msk").display()
     );
     assert_eq!(error.ncbi_request_message().unwrap(), text.as_bytes());
     assert_eq!(
@@ -1675,6 +1684,82 @@ fn header_records_are_decoded() {
     assert_eq!(decode(&trailing).unwrap(), decode(&first).unwrap());
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139
+// (`alias::gi_mask_list`).
+/// `MASKLIST` in the alias file of a database given as one name makes its filtering algorithms
+/// the GI masks it names (ids 0 to N-1 in its order, no file read before one is asked for); over
+/// it in another alias file, or with the database named twice, it is passed over.
+#[test]
+fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
+    let dir = temp_dir("masklist");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("gm.pal"),
+        "TITLE t\nDBLIST prot_v4\nMASKLIST a b \n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("over.pal"), "TITLE o\nDBLIST gm\n").unwrap();
+    let name = dir.join("gm").to_str().unwrap().to_string();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    let algorithms = db.mask_algorithms().unwrap();
+    assert_eq!(algorithms.ids(), vec![0, 1]);
+    assert_eq!(algorithms.id_of("b"), Ok(1));
+    let table = "\nAvailable filtering algorithm(s):\n\nAlgorithm ID  Algorithm name                          \n    0         a                                       \n    1         b                                       \n";
+    assert_eq!(
+        algorithms.id_of("dust"),
+        Err(format!("Filtering algorithm dust does not exist.\n{table}"))
+    );
+    // The files are looked for along the search path (here the current directory), where
+    // there are none.
+    let error = algorithms.details(0).unwrap_err();
+    assert_eq!(
+        error.ncbi_message().as_deref(),
+        Some(b"Could not open gi-mask index files.".as_slice())
+    );
+    match algorithms.details(2).unwrap_err() {
+        SeqDbError::Range(text) => {
+            assert_eq!(
+                text,
+                format!("Filtering algorithm ID 2 does not exist.\n{table}")
+            )
+        }
+        other => panic!("{other}"),
+    }
+    let over = dir.join("over").to_str().unwrap().to_string();
+    let twice = format!("{name} {name}");
+    for passed_over in [over.as_str(), twice.as_str()] {
+        let db = SeqDb::open(passed_over, SeqType::Protein).unwrap();
+        assert!(
+            db.mask_algorithms().unwrap().ids().is_empty(),
+            "{passed_over}"
+        );
+    }
+}
+
+/// A `MASKLIST` name that is not UTF-8 is LOSAT's refusal where the masks are asked for, not at
+/// the opening: the database's sequences read (review N8 of line NP item M4c-2).
+#[test]
+fn a_masklist_name_not_utf8_is_refused_where_the_masks_are_read() {
+    let dir = temp_dir("masklist-utf8");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("gm.pal"),
+        b"TITLE t\nDBLIST prot_v4\nMASKLIST a \xff\n".as_slice(),
+    )
+    .unwrap();
+    let name = dir.join("gm").to_str().unwrap().to_string();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert_eq!(db.num_seqs(), 10);
+    for _ in 0..2 {
+        let error = db.mask_algorithms().unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::Unsupported { message, .. }
+                if message == "a MASKLIST name is not valid UTF-8"),
+            "{error}"
+        );
+    }
+}
+
 #[test]
 fn every_filtering_alias_key_is_rejected() {
     let dir = temp_dir("keys");
@@ -1702,18 +1787,17 @@ fn every_filtering_alias_key_is_rejected() {
     )
     .unwrap();
     assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
-    for key in ["MEMB_BIT", "MASKLIST"] {
-        std::fs::write(
-            dir.join("keyed.pal"),
-            format!("TITLE t\nDBLIST prot_v4\n{key} 1\n"),
-        )
-        .unwrap();
-        let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
-            "{key}: {error}"
-        );
-    }
+    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT stays refused.
+    std::fs::write(
+        dir.join("keyed.pal"),
+        "TITLE t\nDBLIST prot_v4\nMEMB_BIT 1\n",
+    )
+    .unwrap();
+    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+    assert!(
+        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("MEMB_BIT")),
+        "{error}"
+    );
     // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
     // VDBLIST.
     std::fs::write(
@@ -1871,7 +1955,6 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
         SeqType::Protein,
         super::alias::LocalCopy::Dir(here.to_str().unwrap()),
         &SearchPath::current_dir().unwrap(),
-        super::alias::MaskList::Refuse,
     )
     .unwrap();
     assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);
@@ -2923,7 +3006,8 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
     let dir = temp_dir("parsed-unreadable");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let name = dir.join("prot_v4").to_str().unwrap().to_string();
-    let phr = dir.join("prot_v4.phr");
+    // The header file under the name the reader opens it by, its links followed (`ncbi_dir`).
+    let phr = ncbi_dir(&dir).join("prot_v4.phr");
     let len = std::fs::metadata(&phr).unwrap().len();
     file::refused_reads::refuse(&phr, &dir);
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
@@ -2949,7 +3033,7 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
         &std::fs::read(later.join("prot_v4.phr")).unwrap()[..1],
     )
     .unwrap();
-    file::refused_reads::refuse(&later.join("prot_v4.phr"), &short);
+    file::refused_reads::refuse(&ncbi_dir(&later).join("prot_v4.phr"), &short);
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
     assert!(!db.has_parsed_seqids().unwrap());
     let error = db.deflines(0).expect_err("the header is not read");

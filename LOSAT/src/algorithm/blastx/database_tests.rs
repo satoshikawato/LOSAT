@@ -187,7 +187,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             &batches,
             true,
             (false, Default::default()),
-            Default::default(),
+            (Default::default(), true),
         )
         .unwrap();
         let reported = ReportedSubjects::for_batch(
@@ -211,7 +211,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             false,
             false,
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None),
+            (crate::report::db_subject::FormatThrow::Unread, None, 0),
         )
         .unwrap();
         let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -270,7 +270,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             &batches,
             true,
             (false, Default::default()),
-            Default::default(),
+            (Default::default(), true),
         )
         .unwrap();
         let mut reported = ReportedSubjects::for_batch(
@@ -294,7 +294,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             false,
             false,
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None),
+            (crate::report::db_subject::FormatThrow::Unread, None, 0),
         )
         .unwrap();
         for hsp in batches
@@ -305,7 +305,21 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             hsp.identity = identities;
         }
         reported
-            .fetch_by_query(&database, &batches, true, rows, false, false, None)
+            .fetch_by_query(
+                &database,
+                &batches,
+                true,
+                (
+                    rows,
+                    crate::algorithm::common::database::PrefetchFormat::of(
+                        6,
+                        crate::report::archive::options::RequestKind::Blastx,
+                    ),
+                ),
+                false,
+                false,
+                None,
+            )
             .unwrap();
         [
             reported.query_fetches(0).to_vec(),

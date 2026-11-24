@@ -39,4 +39,4 @@ For every option: `losat blastdb_aliastool -help`.
 
 None in the files or the messages, apart from the date written into each file, for the inputs LOSAT runs.
 
-LOSAT refuses a value that is not UTF-8 of an option other than `-gi_file_out` and `-logfile`, and a line of `-dblist_file` that is not UTF-8 (NCBI writes such bytes as they are). An alias file of `-seqidlist` or `-taxidlist` over a version 5 database is not yet supported: LOSAT stops with its refusal and leaves no alias file (see [What LOSAT refuses](../refusals.md#blastdb_aliastool)). The same lists over a version 4 database, and every other mode, are supported.
+A name or title with bytes that are not UTF-8 (a Latin-1 name, say), in any option or in a line of `-dblist_file` or `-vdblist_file`, is read and written as those bytes, as NCBI's. An alias file of `-seqidlist` or `-taxidlist` over a version 5 database is not yet supported: LOSAT stops with its refusal and leaves no alias file (see [What LOSAT refuses](../refusals.md#blastdb_aliastool)). The same lists over a version 4 database, and every other mode, are supported.

@@ -44,4 +44,5 @@ such lists (line RG-D, item D1c-2), so there the test expects LOSAT's refusal an
 (`AWAITING_V5_LISTS`); NCBI's frozen result stays for the day the reader reads them.
 
 The row `R08` names a database by a `-dblist_file` line that is not UTF-8, which NCBI writes into the alias file as
-it is; LOSAT refuses it (`NOT_UTF8_NAMES`), and NCBI's result is kept beside it.
+it is (then the database does not open, and the alias file is removed); LOSAT reads the line by its bytes and gives
+NCBI's result (line RG item K10d, 2026-11-25; before it, LOSAT refused the line).

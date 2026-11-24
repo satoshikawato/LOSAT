@@ -141,7 +141,12 @@ def undated(d: bytes, path: bytes, data: bytes) -> bytes:
     """`data`, the bytes of the file `path` below `d`, with the build's dates as `<DATE>`: the
     date field of an index file (`index_date`) and every text of `DATE_TEXTS`; in a metadata file
     (`.njs`, `.pjs`) `bytes-total` counts the index files it lists without their date fields,
-    whose length changes with the date."""
+    whose length changes with the date; in a binary seqid list (`.bsl`) its date with the date's
+    length byte, and its 8-byte size, which counts the date, as zeros with its first byte."""
+    if path.endswith(b".bsl") and len(data) > 21 and data[0] == 0:
+        date = 21 + int.from_bytes(data[17:21], "little")
+        if date < len(data):
+            data = bytes(9) + data[9:date] + b"<DATE>" + data[date + 1 + data[date] :]
     if path.endswith(INDEX):
         span = index_date(data)
         if span:

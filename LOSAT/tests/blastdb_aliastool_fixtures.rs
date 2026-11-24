@@ -8,8 +8,7 @@
 //!
 //! The rows of alias files that name a seqid or taxid list over a version 5 database
 //! (`AWAITING_V5_LISTS`) are those that LOSAT's reader refuses until line RG-D (D1c-2) reads such
-//! lists, and the row of a `-dblist_file` line that is not UTF-8 (`NOT_UTF8_NAMES`) is LOSAT's
-//! refusal: there LOSAT must refuse and leave no alias file.
+//! lists: there LOSAT must refuse and leave no alias file.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,10 +25,6 @@ fn fixtures() -> PathBuf {
 const AWAITING_V5_LISTS: [&str; 10] = [
     "S02", "S03", "S05", "S07", "S09", "S10", "T01", "T02", "T05", "T06",
 ];
-
-/// The rows of a `-dblist_file` line that is not UTF-8, which LOSAT refuses (NCBI writes its
-/// bytes into the alias file).
-const NOT_UTF8_NAMES: [&str; 1] = ["R08"];
 
 /// The rows of the table: the name and the command-line words.
 fn cases() -> Vec<(String, Vec<String>)> {
@@ -247,7 +242,7 @@ fn blastdb_aliastool_gives_ncbis_bytes() {
     for (name, words) in cases() {
         let dir = scratch(&name);
         let got = run(&dir, &words);
-        if AWAITING_V5_LISTS.contains(&name.as_str()) || NOT_UTF8_NAMES.contains(&name.as_str()) {
+        if AWAITING_V5_LISTS.contains(&name.as_str()) {
             // LOSAT's refusal, before the alias file is kept.
             let refused = got.2 == 1
                 && got.1.starts_with(b"Error: ")

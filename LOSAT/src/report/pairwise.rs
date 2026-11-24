@@ -3844,7 +3844,13 @@ fn write_description_table<W: Write>(
     if described.is_empty() {
         return writeln!(writer);
     }
-    let rows: Vec<(u32, Option<&PairwiseHit>, f64, i32, Option<SortColumnValues>)> = described
+    let rows: Vec<(
+        u32,
+        Option<&PairwiseHit>,
+        f64,
+        i32,
+        Option<SortColumnValues>,
+    )> = described
         .iter()
         .filter_map(|s_idx| {
             let hits = subject_hits.get(s_idx)?;
@@ -4042,7 +4048,10 @@ impl SortColumnValues {
         }
         let (num_ident, length) = best.map_or((0, 1), |best| {
             let best = HspScores::of(best);
-            (best.num_ident, best.alignment_length(columns.tblastx, false))
+            (
+                best.num_ident,
+                best.alignment_length(columns.tblastx, false),
+            )
         });
         let identity = percent_identity(num_ident, length);
         let mut percent_identity = (0.5 + identity) as i64;

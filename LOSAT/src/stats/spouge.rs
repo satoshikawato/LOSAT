@@ -538,11 +538,14 @@ pub fn blast_spouge_stoe(
 /// e-value (`blast_spouge_etos`): the doubling of the upper bound (`b *= 2`, `doubling`) or the
 /// bisection's sum (`a + b`) would pass 2^31 - 1, a signed overflow (undefined behaviour). At the
 /// doubling the x86-64 build of NCBI BLAST+ 2.17.0 then never ends (the bound wraps to `INT_MIN`
-/// and then 0, whose e-value stays above the target); at the bisection it crashes (a Lambda of
-/// 5e-9, 6e-9 and 7e-9 with psiblast, probes b1b of line PS item PS7c). Where it comes depends on the e-value, the
-/// lengths and the Gumbel block; a gapped Lambda small enough for it (1e-9 with BLOSUM62's block
-/// and `-evalue 10` for a query of 30 letters) comes from a PSSM's file only (line PS item PS7c,
-/// review B1). `lambda` is the block's Lambda, which LOSAT's refusal names (`refusal`).
+/// and then 0, whose e-value stays above the target). At the bisection it wraps the sum to a
+/// negative score, takes it as the lower bound, wraps `b - a` below 0 and returns that negative
+/// score as the cutoff (line PS item PS7c, fix round 1, NCBI under gdb: psiblast's Lambda 6e-9 gives
+/// -1,046,740,562, tblastn's 4e-9 -832,239,653), and the search goes on with it. Where the overflow
+/// comes depends on the e-value, the lengths and the Gumbel block; a gapped Lambda small enough for
+/// it (below about 1e-8 with BLOSUM62's block and `-evalue 10`) comes from a PSSM's file only (line
+/// PS item PS7c, review B1). `lambda` is the block's Lambda, which LOSAT's refusal names
+/// (`refusal`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpougeCutoffOverflow {
     pub lambda: f64,
@@ -568,7 +571,7 @@ impl SpougeCutoffOverflow {
         let step = if self.doubling {
             "doubles its score past 32-bit integers and never ends"
         } else {
-            "adds its scores past 32-bit integers and crashes"
+            "adds two scores past 32-bit integers"
         };
         anyhow::anyhow!(
             "a gapped Karlin-Altschul Lambda of {:?}, for which NCBI BLAST+ 2.17.0's search for the score of the hit-saving cutoff's E-value (BLAST_SpougeEtoS) {step} (signed overflow, undefined behaviour), is not supported by LOSAT's {program}",
@@ -577,7 +580,7 @@ impl SpougeCutoffOverflow {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5263
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5282
 // The first upper bound is NCBI's cast of the double (`ncbi_int4_from_double`: `INT_MIN` past
 // `Int4`, then 2). The doubling and the bisection stop with `SpougeCutoffOverflow` where NCBI's
 // `Int4` arithmetic would overflow (`b *= 2` above 2^30 - 1, `a + b` above 2^31 - 1); every other

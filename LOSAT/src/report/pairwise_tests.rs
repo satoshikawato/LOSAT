@@ -1600,7 +1600,8 @@ fn the_shown_hsp_raises_the_highest_bit_score_from_zero() {
             ..make_hit()
         })
     };
-    let (nan, negative, five, five_again) = (hit(f64::NAN, 1), hit(-1.0, 2), hit(5.0, 3), hit(5.0, 4));
+    let (nan, negative, five, five_again) =
+        (hit(f64::NAN, 1), hit(-1.0, 2), hit(5.0, 3), hit(5.0, 4));
     let shown = |hits: &[&PairwiseHit]| shown_hsp(hits).map(|hit| hit.hit.num_ident);
     assert_eq!(shown(&[&nan, &five]), Some(3));
     assert_eq!(shown(&[&negative, &five, &five_again]), Some(3));

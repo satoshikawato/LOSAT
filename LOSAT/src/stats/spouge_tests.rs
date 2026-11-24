@@ -543,7 +543,10 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
         alpha: 1.9,
         beta: -30.0,
     };
-    assert_eq!(blast_spouge_etos(1e-6, &default_kbp, &gbp, 100, 200), Ok(2537));
+    assert_eq!(
+        blast_spouge_etos(1e-6, &default_kbp, &gbp, 100, 200),
+        Ok(2537)
+    );
 
     let tight_kbp = KarlinParams {
         lambda: 0.267 / 16.0,
@@ -558,7 +561,7 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
 // Line PS item PS7c, review B1: a gapped Lambda that makes NCBI's search pass `Int4` is
 // `SpougeCutoffOverflow`, at the doubling (where NCBI's x86-64 build never ends) or at the
 // bisection's sum; the first upper bound is NCBI's cast (a quotient past `Int4` starts at 2).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5263
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5282
 #[test]
 fn a_cutoff_search_that_passes_int4_is_an_overflow() {
     let gbp = BlastGumbelBlk {
@@ -604,4 +607,60 @@ fn a_cutoff_search_that_passes_int4_is_an_overflow() {
             })
         );
     }
+}
+
+// Line PS item PS7c, fix round 1: the arguments that NCBI BLAST+ 2.17.0 passes to
+// `BLAST_SpougeEtoS` (read under gdb: the rnd PSSM of 30 letters with K 0.045959763921667597,
+// `-evalue 10`, the shortest subject of tests/db_search/paja, 10 letters, and of
+// tests/db_search/tslice, 3 codons, and their database lengths). Where NCBI's search stays inside
+// `Int4` LOSAT's score is NCBI's (psiblast's and tblastn's 8e-9, the last scores of NCBI's
+// bisection); where NCBI's bisection adds past `Int4` (tblastn's 4e-9: 876,829,330 + 1,753,658,660,
+// which NCBI wraps to the cutoff -832,239,653; psiblast's 6e-9) or its doubling passes it
+// (psiblast's 1e-9, where NCBI never ends) the search is `SpougeCutoffOverflow`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5282
+#[test]
+fn ncbi_s_cutoff_searches_of_the_rnd_pssm_overflow_where_ncbi_s_do() {
+    let gbp = |db_length: i64| BlastGumbelBlk {
+        lambda: 0.267,
+        c: 0.669720,
+        g: 12.0,
+        a: 1.9,
+        alpha: 42.602800,
+        sigma: 43.636200,
+        a_un: 0.7916,
+        alpha_un: 4.964660,
+        b: 2.0 * 12.0 * (0.7916 - 1.9),
+        beta: 2.0 * 12.0 * (4.964660 - 42.602800),
+        tau: 2.0 * 12.0 * (4.964660 - 43.636200),
+        db_length,
+    };
+    let etos = |lambda: f64, subject_length: i32, db_length: i64| {
+        let kbp = KarlinParams {
+            lambda,
+            k: 0.045959763921667597,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        blast_spouge_etos(10.0, &kbp, &gbp(db_length), 30, subject_length)
+    };
+    let (psiblast, tblastn) = ((10, 66_738), (3, 11_128));
+    assert_eq!(etos(8e-9, psiblast.0, psiblast.1), Ok(923_444_142));
+    assert_eq!(etos(8e-9, tblastn.0, tblastn.1), Ok(844_769_078));
+    for (lambda, (subject_length, db_length)) in [(4e-9, tblastn), (6e-9, psiblast)] {
+        assert_eq!(
+            etos(lambda, subject_length, db_length),
+            Err(SpougeCutoffOverflow {
+                lambda,
+                doubling: false
+            })
+        );
+    }
+    assert_eq!(
+        etos(1e-9, psiblast.0, psiblast.1),
+        Err(SpougeCutoffOverflow {
+            lambda: 1e-9,
+            doubling: true
+        })
+    );
 }

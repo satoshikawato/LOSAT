@@ -821,7 +821,12 @@ pub(crate) fn psi_search_and_object_of(
         && letters.len() as i64 != length
         && length >= letters.len() as i64 - 1
         && (1..RATIOS_LENGTH_HOST_MEMORY).contains(&length);
-    if ratios_only && reads_values && !letters.is_empty() && letters.len() as i64 != length && !ratios_length_error {
+    if ratios_only
+        && reads_values
+        && !letters.is_empty()
+        && letters.len() as i64 != length
+        && !ratios_length_error
+    {
         return Err(reader.refuse(if length < letters.len() as i64 - 1 {
             "a PSSM of frequency ratios only whose query has at least two letters more than its Seq-inst's length (NCBI BLAST+ 2.17.0 writes outside its query buffer)".to_string()
         } else {

@@ -1262,14 +1262,17 @@ fn replaced_bytes_of_a_long_string_share_it() {
 }
 
 // Line PS item PS7c: the E-value and bit score that a Seq-align carries (`seqalign_scores`): an
-// E-value is 0 below 1e-180 (a negative one too) and missing for a NaN, a bit score is missing below 0;
-// the readers' default for a missing one is -1.
+// E-value is 0 below 1e-180 (a negative one too) and stays the NaN that marks it missing
+// (`seqalign_evalue_absent`, which its readers take as -1), a bit score is missing below 0 and
+// the readers' -1 then.
 #[test]
 fn a_seqalign_lacks_a_nan_or_negative_score() {
-    use super::seqalign::seqalign_scores;
+    use super::seqalign::{seqalign_evalue_absent, seqalign_evalue_read, seqalign_scores};
     assert_eq!(seqalign_scores(1e-200, 5.0), (0.0, 5.0));
     assert_eq!(seqalign_scores(0.25, 0.0), (0.25, 0.0));
-    assert_eq!(seqalign_scores(f64::NAN, f64::NAN), (-1.0, -1.0));
+    let (absent, bits) = seqalign_scores(f64::NAN, f64::NAN);
+    assert!(seqalign_evalue_absent(absent));
+    assert_eq!((seqalign_evalue_read(absent), bits), (-1.0, -1.0));
     assert_eq!(seqalign_scores(-1.0, -3.5), (0.0, -1.0));
     assert_eq!(
         seqalign_scores(f64::INFINITY, f64::INFINITY),

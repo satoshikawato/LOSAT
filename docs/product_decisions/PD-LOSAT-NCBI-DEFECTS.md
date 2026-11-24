@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.96
+- Version: 1.101
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -618,7 +618,18 @@
   line item PS10c's 1.84 and line RG item D1c-1's 1.85, then psiblast line item PS10d's 1.86, line
   NP item O4b2-2's 1.87, line NP item M4b-3c's 1.88 and line NP item M4b-T2's 1.89, then line RG
   item T5d's 1.90 and line PS item PS12d's 1.91, then line NP item O4b2-4's 1.92, then line RG item
-  D1c-1c's 1.93, then line NP item M4c-2's 1.94, then line NP item M4b-3b's 1.95)
+  D1c-1c's 1.93, then line NP item M4c-2's 1.94, then line NP item M4b-3b's 1.95);
+  1.101 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
+  `BL_ORD_ID` (`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) or a `ti` tag that is
+  not a number, is written as NCBI writes it with the prefetch on or off: NCBI's prefetch of the
+  batch catches the exception, writes `Error pre-fetching sequence data` and ends its loads, and
+  the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
+  1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
+  at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17, a holder that
+  NCBI's scope or data loader gives for the id, and a weak match of another sequence that a report
+  of such a batch reads; line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.100)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

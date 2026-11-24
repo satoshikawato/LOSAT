@@ -2721,7 +2721,11 @@ formats that read the Bioseq or prefetch it, outfmt 8 is NCBI's (no row here).
 `pdbchain/q_pdb1ab1.faa` (decision KB-12-1 of line RG-KB item 12; rows `db.pdbchain.seen.*`) is the query `pdb|1AB1|A`
 of the duplicated record's letters: read with `-parse_deflines`, its Bioseq holds the id of the handle of `1AB1` chain 321
 (chain 65), so NCBI's scope finds the query for that sequence of `pdbonly` and `pdbtwo`: the tables show the query's ids,
-`N/A` titles, its length and no taxonomy, the organism report its line without a taxid.
+`N/A` titles, its length and no taxonomy, the organism report its line without a taxid. `pdbchain/pdbn` (review 3 of
+item 12, F2; rows `db.pdbchain.seen.n.*` of TBLASTN, BLASTN and TBLASTX) is the nucleotide database of `pdbonly`'s first
+two records back-translated, with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb writes them, and
+`pdbchain/q_pdb1ab1.fna` the nucleotide query `pdb|1AB1|A` of the same letters back-translated (also BLASTX's against
+`pdbonly`, rows `db.pdbchain.seen.only.blastx.*`): NCBI's scope finds the query for `1AB1` in each program.
 `descid/` (line RG-KB item 12, review 2 N2 and review 3 F3; rows `db.pd.n2.*`): the `-subject` sets `lng.fa` (protein) and
 `nlng.fa` (nucleotide) of `gb|AAA00001.1|` and a record whose `gnl` description id is longer than 65 bytes, and the queries
 `q_r0.faa` and `q_r0.fna`: with `-num_descriptions 1` the long id's description line is not printed, so NCBI's output

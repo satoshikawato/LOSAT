@@ -55,6 +55,11 @@ first, before that of `1AB8`, whose label NCBI's BLAST XML cannot write.
 with `-parse_deflines`, its Bioseq holds the id of the handle of `1AB1` chain 321 (chain 65), so NCBI's scope finds the
 query for that sequence in `pdbonly` and `pdbtwo`.
 
+`pdbn` (review 3 of item 12, F2) is the nucleotide database of `pdbonly`'s first two records back-translated (one codon
+per letter, BACK), with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb writes them (no rewrite), and
+`q_pdb1ab1.fna` the query `pdb|1AB1|A` of the duplicated record's letters back-translated: NCBI's scope finds the query
+(`q_pdb1ab1.faa` in TBLASTN, `q_pdb1ab1.fna` in BLASTN and TBLASTX) for `1AB1`.
+
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
 `CPDB_seq_id` forms the chain of a Seq-id without a chain-id), lower case, the keys the search looks
@@ -159,7 +164,16 @@ TAXIDS = [9606, 10090, 9606, 10090, 9606, 10090]
 TWO_LINES = [("1AB1", None), ("1AB2", "t0")]
 
 # The databases: name -> whether each record has the gb Seq-id before the pdb one.
-DATABASES = {"pdbchain": True, "pdbonly": False, "pdbnorm": False, "pdbtwo": False}
+DATABASES = {"pdbchain": True, "pdbonly": False, "pdbnorm": False, "pdbtwo": False, "pdbn": False}
+
+# One codon per letter: the back-translation of `pdbn` and `q_pdb1ab1.fna`.
+BACK = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGC", "H": "CAC",
+        "I": "ATC", "L": "CTG", "K": "AAA", "M": "ATG", "F": "TTC", "P": "CCG", "S": "TCT", "T": "ACC", "W": "TGG",
+        "Y": "TAC", "V": "GTG"}
+
+
+def back(protein):
+    return "".join(BACK[c] for c in protein)
 
 
 def ctx(tag, content):
@@ -284,8 +298,18 @@ def main(ncbi_bin, names):
         f.write(">qn0 the letters of pdbnorm's first record\n" + record_letters(seq, 0) + "\n")
     with open(os.path.join(HERE, "q_pdb1ab1.faa"), "w") as f:
         f.write(">pdb|1AB1|A query title\n" + seq + "\n")
+    with open(os.path.join(HERE, "q_pdb1ab1.fna"), "w") as f:
+        f.write(">pdb|1AB1|A query title\n" + back(seq) + "\n")
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
+        if db == "pdbn":
+            with open(fasta, "w") as f:
+                for k, (name, _, _) in enumerate(CHAINS[:2]):
+                    f.write(f">pdb|{name}|A\n" + back(record_letters(seq, k)) + "\n")
+            subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
+                            "-blastdb_version", "4", "-title", db, "-out", os.path.join(HERE, db)],
+                           check=True, env=env, stdout=subprocess.DEVNULL)
+            continue
         if db == "pdbtwo":
             lines = [f"pdb|{mol}|B{'' if title is None else ' ' + title}\x01pdb|{mol}|A t1"
                      for mol, title in TWO_LINES]

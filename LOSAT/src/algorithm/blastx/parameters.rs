@@ -616,7 +616,6 @@ fn context_cutoffs(
                 c.length as i32,
                 n,
             )
-            .map_err(|overflow| overflow.refusal("BLASTX"))?
         } else {
             cutoff_score_from_evalue(options.evalue, p.search_space, &ka).max(1)
         };

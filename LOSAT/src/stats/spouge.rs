@@ -494,6 +494,20 @@ pub fn blast_spouge_stoe(
     query_length: i32,
     subject_length: i32,
 ) -> f64 {
+    spouge_stoe_at(f64::from(score), kbp, gbp, query_length, subject_length)
+}
+
+/// `blast_spouge_stoe` at the score `y`, the double that NCBI's function makes of its `Int4` score:
+/// `blast_spouge_etos` reads it also at the scores past `Int4` of its widened search.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5176-5231
+#[inline]
+fn spouge_stoe_at(
+    y: f64,
+    kbp: &KarlinParams,
+    gbp: &BlastGumbelBlk,
+    query_length: i32,
+    subject_length: i32,
+) -> f64 {
     let scale_factor = kbp.lambda / gbp.lambda;
     let db_scale_factor = if gbp.db_length != 0 {
         (gbp.db_length as f64) / (subject_length as f64)
@@ -511,7 +525,6 @@ pub fn blast_spouge_stoe(
     let tau_hat = gbp.tau;
 
     let const_val = 0.398_942_280_401_432_7_f64;
-    let y = score as f64;
     let m = query_length as f64;
     let n = subject_length as f64;
 
@@ -534,97 +547,60 @@ pub fn blast_spouge_stoe(
     area * k * (-lambda * y).glibc_exp() * db_scale_factor
 }
 
-/// The overflow of NCBI's `Int4` scores in `BLAST_SpougeEtoS`'s search for the score of an
-/// e-value (`blast_spouge_etos`): the doubling of the upper bound (`b *= 2`, `doubling`) or the
-/// bisection's sum (`a + b`) would pass 2^31 - 1, a signed overflow (undefined behaviour). At the
-/// doubling the x86-64 build of NCBI BLAST+ 2.17.0 wraps the bound to `INT_MIN`: with a small
-/// positive Lambda that e-value is above the target too, the bound wraps to 0 and the search never
-/// ends; with a negative Lambda (whose e-value grows with the score, so that no score reaches the
-/// target) the e-value of `INT_MIN` is 0, and the bisection returns 2^30 as the cutoff (NCBI under
-/// gdb, Lambda -0.5: 2, 4, ..., 2^30, -2^31, -2^29, then 1,073,741,824), with which the search goes
-/// on. At the bisection it wraps the sum to a negative score, takes it as the lower bound, wraps
-/// `b - a` below 0 and returns that negative score as the cutoff (line PS item PS7c, fix round 1,
-/// NCBI under gdb: psiblast's Lambda 6e-9 gives -1,046,740,562, tblastn's 4e-9 -832,239,653), and
-/// the search goes on with it. Where the overflow comes depends on the e-value, the lengths and the
-/// Gumbel block; a gapped Lambda small enough for it (below about 1e-8 with BLOSUM62's block and
-/// `-evalue 10`) or below 0 comes from a PSSM's file only (line PS item PS7c, review B1). `lambda`
-/// is the block's Lambda, which LOSAT's refusal names (`refusal`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpougeCutoffOverflow {
-    pub lambda: f64,
-    pub doubling: bool,
-}
-
-impl std::fmt::Display for SpougeCutoffOverflow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "the Spouge cutoff search of the gapped Lambda {:?} passes 32-bit integers",
-            self.lambda
-        )
-    }
-}
-
-impl std::error::Error for SpougeCutoffOverflow {}
-
-impl SpougeCutoffOverflow {
-    /// LOSAT's refusal of the overflow in `program`'s search (NCBI's name of the program in
-    /// capitals): exit status 1, its message.
-    pub(crate) fn refusal(self, program: &str) -> anyhow::Error {
-        let step = if self.doubling {
-            "doubles its score past 32-bit integers"
-        } else {
-            "adds two scores past 32-bit integers"
-        };
-        anyhow::anyhow!(
-            "a gapped Karlin-Altschul Lambda of {:?}, for which NCBI BLAST+ 2.17.0's search for the score of the hit-saving cutoff's E-value (BLAST_SpougeEtoS) {step} (signed overflow, undefined behaviour), is not supported by LOSAT's {program}",
-            self.lambda
-        )
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
-// The first upper bound is NCBI's cast of the double (`ncbi_int4_from_double`: `INT_MIN` past
-// `Int4`, then 2). The doubling and the bisection stop with `SpougeCutoffOverflow` where NCBI's
-// `Int4` arithmetic would overflow (`b *= 2` above 2^30 - 1, `a + b` above 2^31 - 1); every other
-// step is NCBI's, so every search that stays inside `Int4` gives NCBI's score.
+// The score of the e-value `evalue`, the hit-saving cutoff: NCBI's search, from NCBI's first upper
+// bound (its cast of the double, `ncbi_int4_from_double`: `INT_MIN` past `Int4`, then 2), with the
+// doubling of the upper bound (`b *= 2`) and the bisection's sum (`a + b`) in 64 bits where NCBI's
+// `Int4` arithmetic overflows (signed overflow, undefined behaviour: NCBI BLAST+ 2.17.0 never ends
+// there or goes on with a wrapped cutoff; PD-LOSAT-NCBI-DEFECTS approved exception 30, the Owner's
+// answer Q-PS7c-SPOUGE=B of 2026-11-24). A search inside `Int4` takes NCBI's steps and gives NCBI's
+// score. The lower bound `a` is a score whose e-value is above `evalue`, and no step lowers it:
+// once it passes 2^31 - 1 the cutoff is above every `Int4` score and the search ends with
+// `i32::MAX`, the cutoff of NCBI's context that saves nothing (blast_parameters.c:920). So the
+// doubling runs at most 31 times and the bisection at most 33 for every Lambda (also a negative
+// one, whose e-value grows with the score and so stays above `evalue`).
 pub fn blast_spouge_etos(
     evalue: f64,
     kbp: &KarlinParams,
     gbp: &BlastGumbelBlk,
     query_length: i32,
     subject_length: i32,
-) -> Result<i32, SpougeCutoffOverflow> {
-    let overflow = |doubling| SpougeCutoffOverflow {
-        lambda: kbp.lambda,
-        doubling,
+) -> i32 {
+    let stoe = |score: i64| {
+        // A score of the search is below 2^33, where a double holds every integer.
+        spouge_stoe_at(score as f64, kbp, gbp, query_length, subject_length)
     };
-    let mut a = 0i32;
+    let mut a = 0i64;
     let db_scale_factor = if gbp.db_length != 0 {
         gbp.db_length as f64
     } else {
         1.0
     };
     let e0 = evalue.max(f64::MIN_POSITIVE);
-    let mut b = crate::core::blast_util::ncbi_int4_from_double(
-        (db_scale_factor / e0).glibc_ln() / kbp.lambda,
-    )
-    .max(2);
+    let mut b = i64::from(
+        crate::core::blast_util::ncbi_int4_from_double(
+            (db_scale_factor / e0).glibc_ln() / kbp.lambda,
+        )
+        .max(2),
+    );
 
-    let mut e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
+    let mut e = stoe(b);
     if e > e0 {
         while e > e0 {
             a = b;
-            b = b.checked_mul(2).ok_or_else(|| overflow(true))?;
-            e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
+            if a > i64::from(i32::MAX) {
+                return i32::MAX;
+            }
+            b *= 2;
+            e = stoe(b);
         }
     } else {
         a = 0;
     }
 
     while b - a > 1 {
-        let c = a.checked_add(b).ok_or_else(|| overflow(false))? / 2;
-        e = blast_spouge_stoe(c, kbp, gbp, query_length, subject_length);
+        let c = (a + b) / 2;
+        e = stoe(c);
         if e > e0 {
             a = c;
         } else {
@@ -632,7 +608,7 @@ pub fn blast_spouge_etos(
         }
     }
 
-    Ok(a)
+    i32::try_from(a).unwrap_or(i32::MAX)
 }
 
 #[cfg(test)]

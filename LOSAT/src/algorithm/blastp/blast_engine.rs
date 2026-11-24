@@ -744,17 +744,13 @@ fn blastp_cutoff_score_max(
     search_space: i64,
 ) -> i32 {
     match gumbel_params {
-        // The Gumbel block comes with a gapped search only (`has_gumbel`), whose block is the
-        // matrix's table (`gapped_block`, Lambda 0.17 or more): its search ends below `Int4`
-        // for every e-value down to the smallest one it reads (`SpougeCutoffOverflow`).
         Some(gumbel_params) => blast_spouge_etos(
             blastp_prelim_evalue(expect_value, comp_based_stats),
             gapped_params,
             gumbel_params,
             query_length,
             subject_length_for_hit_cutoff,
-        )
-        .expect("a matrix table's gapped Lambda keeps the Spouge cutoff search within Int4"),
+        ),
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
         None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
             expect_value,

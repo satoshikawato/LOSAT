@@ -33,7 +33,6 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
 use crate::stats::search_space::SearchSpace;
-use crate::stats::spouge::SpougeCutoffOverflow;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]): the PSSM's words
@@ -233,8 +232,7 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
 /// calls it), its `cutoff_score` is the traceback's `cutoff_score_min` (one context): the
 /// traceback's hit-saving parameters are made again from the same options
 /// (`BLAST_GapAlignSetUp`), and the update for each subject does not reach them
-/// (blast_traceback.c:1596-1628 updates the thread's copy). A `kbp_gap_psi` whose cutoff search
-/// passes NCBI's `Int4` is `SpougeCutoffOverflow` (`EvalueStats::hit_cutoff`).
+/// (blast_traceback.c:1596-1628 updates the thread's copy).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (cited at
 /// `blast_engine::sum_stats_hit_cutoff`)
@@ -245,13 +243,13 @@ fn psi_hit_cutoffs(
     stats: &EvalueStats<'_>,
     cutoff_subject_length: i32,
     prelim_evalue: f64,
-) -> Result<(i32, i32), SpougeCutoffOverflow> {
+) -> (i32, i32) {
     let cutoff_score_max = stats.hit_cutoff(
         prelim_evalue,
         &karlin.gapped,
         contexts[0].aa_len as i32,
         cutoff_subject_length,
-    )?;
+    );
     let cutoff_score = if args.sum_stats {
         cutoff_score_max.min(super::sum_stats_hit_cutoff(
             contexts,
@@ -261,7 +259,7 @@ fn psi_hit_cutoffs(
     } else {
         cutoff_score_max
     };
-    Ok((cutoff_score_max, cutoff_score))
+    (cutoff_score_max, cutoff_score)
 }
 
 /// The query's context as psiblast's `-sum_stats true` links it in a PSSM search: `kbp_gap_psi`
@@ -295,10 +293,10 @@ fn psi_prelim_cutoffs(
     subject_length: i32,
     evalue: f64,
     search_space: &SearchSpace,
-) -> Result<(i32, i32, Option<(EvenGapLinkParams, LinkContext)>), SpougeCutoffOverflow> {
+) -> (i32, i32, Option<(EvenGapLinkParams, LinkContext)>) {
     let ctx = &contexts[0];
     let (cutoff_score_max, hit_cutoff) =
-        psi_hit_cutoffs(args, contexts, karlin, stats, subject_length, evalue)?;
+        psi_hit_cutoffs(args, contexts, karlin, stats, subject_length, evalue);
     let word_cutoff =
         gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(cutoff_score_max);
     let link = args.sum_stats.then(|| {
@@ -307,7 +305,7 @@ fn psi_prelim_cutoffs(
             psi_link_context(karlin, ctx, search_space),
         )
     });
-    Ok((word_cutoff, hit_cutoff, link))
+    (word_cutoff, hit_cutoff, link)
 }
 
 /// The preliminary search of a PSSM query over the database `database` or the subject set
@@ -322,9 +320,7 @@ fn psi_prelim_cutoffs(
 /// kernels cannot size with the PSSM's Lambda is refused before the search, as blastp refuses it
 /// with the matrix's (`core::x_drop::check_gapped_x_dropoffs`). With `-culling_limit` or
 /// `-best_hit_*` the subjects' lists go to the option's writer `prelim_filter` in place of the
-/// collector, as blastp's do. A hit-saving cutoff whose search passes NCBI's `Int4`, the setup's
-/// or (with the statistics of each subject) a subject's, is the search's `SpougeCutoffOverflow`
-/// (`psi_hit_cutoffs`), which the caller makes the batch's failure (`prelim_run`).
+/// collector, as blastp's do.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:204-221
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:338-345
@@ -384,7 +380,7 @@ pub(super) fn pssm_prelim(
         run.cutoff_subject_length,
         run.prelim_evalue,
         &run.search_spaces[0],
-    )?;
+    );
     let window = run.window;
     let prelim = PssmPrelim {
         rows: &psi.pssm,
@@ -405,7 +401,6 @@ pub(super) fn pssm_prelim(
     };
     let diag_mask = run.diag_mask;
     let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
-    let subject_cutoff_overflow = std::sync::OnceLock::<SpougeCutoffOverflow>::new();
     let process_subject = |scratch: &mut BlastpSubjectScratch,
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,
@@ -446,7 +441,7 @@ pub(super) fn pssm_prelim(
                     Some(gumbel) => EvalueStats::spouge(gumbel),
                     None => EvalueStats::new(None, lengths.eff_searchsp),
                 };
-                let (word_cutoff, hit_cutoff, link) = match psi_prelim_cutoffs(
+                let (word_cutoff, hit_cutoff, link) = psi_prelim_cutoffs(
                     args,
                     run.contexts,
                     &karlin,
@@ -457,13 +452,7 @@ pub(super) fn pssm_prelim(
                         effective_space: lengths.eff_searchsp as f64,
                         length_adjustment: i64::from(lengths.length_adjustment),
                     },
-                ) {
-                    Ok(cutoffs) => cutoffs,
-                    Err(overflow) => {
-                        let _ = subject_cutoff_overflow.set(overflow);
-                        return;
-                    }
-                };
+                );
                 subject_prelim = PssmPrelim {
                     word_cutoff,
                     hit_cutoff,
@@ -556,10 +545,7 @@ pub(super) fn pssm_prelim(
     };
     searched?;
     subject_space_overflow.check()?;
-    match subject_cutoff_overflow.into_inner() {
-        Some(overflow) => Err(overflow.into()),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
 /// The traceback of a PSSM search: mode 0's (`pssm_search::traceback0`), or the position-based
@@ -606,19 +592,17 @@ pub(super) fn pssm_traceback(
         .sum_stats
         .then(|| psi_link_context(&karlin, &contexts[0], &search_spaces[0]));
     if args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats {
-        let link = link_context
-            .map(|context| {
-                let (_, cutoff_score_min) = psi_hit_cutoffs(
-                    args,
-                    contexts,
-                    &karlin,
-                    &stats,
-                    cutoff_subject_length,
-                    prelim_evalue,
-                )?;
-                Ok::<_, SpougeCutoffOverflow>(redo1::RedoLink::new(cutoff_score_min, context))
-            })
-            .transpose()?;
+        let link = link_context.map(|context| {
+            let (_, cutoff_score_min) = psi_hit_cutoffs(
+                args,
+                contexts,
+                &karlin,
+                &stats,
+                cutoff_subject_length,
+                prelim_evalue,
+            );
+            redo1::RedoLink::new(cutoff_score_min, context)
+        });
         return pssm_redo(
             args,
             psi,

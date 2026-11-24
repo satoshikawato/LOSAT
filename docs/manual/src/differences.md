@@ -96,6 +96,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sizes without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `-in_pssm` with a very small or negative gapped Lambda
+
+- **What you see.** A report without hits, as with a slightly larger Lambda. NCBI BLAST+ 2.17.0 never ends, or, where it ends, writes the same report.
+- **When.** `psiblast -in_pssm` or `tblastn -in_pssm` with a PSSM file whose gapped Lambda is so small that the score of the hit-saving cutoff passes the largest 32-bit integer (about 7e-9 or less for a PSSM of 30 columns at the default `-evalue`; where it starts depends on the e-value and the lengths), or is below 0. For that PSSM NCBI never ends with 1e-9, and ends with LOSAT's report with 4e-9 to 7e-9 and below 0.
+- **Why.** NCBI finds the cutoff's score by doubling and halving a signed 32-bit integer, which overflows there (undefined in C). LOSAT makes the same search without overflow: the cutoff is then above every score, so no hit is kept.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.

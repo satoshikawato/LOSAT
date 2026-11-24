@@ -316,7 +316,6 @@ impl RpsRun<'_> {
                 (query.aa_seq.len() - 2) as i32,
                 self.cutoff_subject_length,
             )
-            .map_err(|overflow| overflow.refusal(self.program))?
             .checked_mul(int_scale)
             .ok_or_else(|| scale_overflow(scale, self.program))?;
         let gap_trigger = crate::core::x_drop::gap_trigger_raw_score(

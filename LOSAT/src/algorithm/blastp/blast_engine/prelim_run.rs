@@ -404,47 +404,28 @@ where
             prelim_filter.as_mut(),
             x_compact_hit_lists,
         )
-        .map_err(|error| {
-            match error.downcast::<crate::stats::spouge::SpougeCutoffOverflow>() {
-                // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-260
-                // LOSAT's refusal of a hit-saving cutoff whose search NCBI's `Int4` cannot hold
-                // (`SpougeCutoffOverflow`): NCBI's preliminary search of the query's batch overflows
-                // there, after the outfmt 0 prolog, so the refusal fails that batch after it, as
-                // BLASTP's refusals of a step where NCBI's search of a batch never ends do
-                // (`database::HeaderReadError`, `redo_run::sw_endless`).
-                Ok(overflow) => database::HeaderReadError {
-                    query: query_batches
-                        .iter()
-                        .find(|batch| !batch.searched.is_empty())
-                        .map_or(0, |batch| batch.searched.start),
-                    error: overflow.refusal(args.app.name()),
-                    utf8: None,
-                }
-                .into(),
-                Err(error) => match database {
-                    // A sequence file that cannot be read: NCBI's error of the batch's preliminary
-                    // search, as for blastp's database search below.
-                    Some(database) => match error.downcast::<database::PreliminaryReadError>() {
-                        Ok(read_error) => preliminary_search_error(
-                            args,
-                            query_records,
-                            subject_source,
-                            subject_label,
-                            outputs,
-                            blastp_parallel_pool,
-                            ranges,
-                            reports,
-                            query_batches,
-                            query_batch_skipped,
-                            query_chunk,
-                            database.name(),
-                            read_error.0,
-                        ),
-                        Err(other) => other,
-                    },
-                    None => error,
-                },
-            }
+        .map_err(|error| match database {
+            // A sequence file that cannot be read: NCBI's error of the batch's preliminary
+            // search, as for blastp's database search below.
+            Some(database) => match error.downcast::<database::PreliminaryReadError>() {
+                Ok(read_error) => preliminary_search_error(
+                    args,
+                    query_records,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    blastp_parallel_pool,
+                    ranges,
+                    reports,
+                    query_batches,
+                    query_batch_skipped,
+                    query_chunk,
+                    database.name(),
+                    read_error.0,
+                ),
+                Err(other) => other,
+            },
+            None => error,
         })?;
     } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // The files that a run made besides its outputs (line RG E1w-3b; docs/web/abi_v2.md §5, stream 8):
-// the file of `-logfile NAME`, as the engine wrote it. Each file shows its name, its size and its
-// text (a log, read once as UTF-8: bytes that are not UTF-8 show as U+FFFD) as the Outputs show an
-// output (OutputText), and saves its bytes unchanged under the run's name for its files and its own
-// name (domain/output-format.ts, runFileName). The Outputs of a completed run and the status of a
+// the file of `-logfile NAME` and the search strategy file of `-export_search_strategy NAME` (line
+// RG F1w), as the engine wrote them. Each file shows the option that named it, its name, its size
+// and its text (a log or ASN.1 text, read once as UTF-8: bytes that are not UTF-8 show as U+FFFD)
+// as the Outputs show an output (OutputText), and saves its bytes unchanged under the run's name
+// for its files, its option and its own name (domain/output-format.ts, runFileName). The Outputs of a completed run and the status of a
 // failed run show them; each run has its own (keyed by the run), so that the reason of a save that
 // failed stays with its run.
 import { computed } from 'vue';
+import { runFileOption } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { formatBytes } from './format';
@@ -29,7 +31,7 @@ const problem = useStore(saver.problem);
   <div class="run-files" data-testid="run-files">
     <section v-for="(file, index) in files" :key="`${run.snapshot.runId}:${index}`" class="run-file" :data-testid="`run-file-${index}`">
       <p class="run-file-name">
-        <OptionName name="-logfile" /> <span data-testid="run-file-name">{{ file.name }}</span><span class="muted small">, {{ formatBytes(file.bytes.length) }}</span>
+        <OptionName :name="`-${runFileOption(file)}`" /> <span data-testid="run-file-name">{{ file.name }}</span><span class="muted small">, {{ formatBytes(file.bytes.length) }}</span>
       </p>
       <OutputText v-if="file.bytes.length > 0" :text="texts[index]!" :label="file.name" data-testid="run-file-text" />
       <p v-else class="muted" data-testid="run-file-empty">The file is empty.</p>

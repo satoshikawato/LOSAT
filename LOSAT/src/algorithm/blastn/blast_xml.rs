@@ -117,6 +117,10 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
+            // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
+            if q_idx < reports {
+                warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
+            }
         }
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
@@ -170,7 +174,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
                 posts.hit(sink.position(), &hit, lists[range.start].oid, |texts| {
                     if posting {
-                        taxdb_printer.at_names(s_idx, subject, texts)
+                        taxdb_printer.at_names((q_idx, s_idx), subject, texts)
                     } else {
                         Ok(())
                     }

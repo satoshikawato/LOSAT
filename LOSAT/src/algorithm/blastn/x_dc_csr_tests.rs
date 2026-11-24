@@ -91,7 +91,33 @@ fn the_runs_are_the_chains_with_the_fills_presence_vector_and_counters() {
                 chains(&w, cells, pv_len, pv_array_bts);
             let mut pv = vec![0 as PvArrayType; pv_len];
             let mut helper = vec![0u32; cells >> 11];
-            let csr = build(&w, cells, &mut pv, pv_array_bts, &mut helper, Vec::new());
+            let csr = build(
+                &w,
+                cells,
+                &mut pv,
+                pv_array_bts,
+                &mut helper,
+                Vec::new(),
+                None,
+            );
+            // EXPERIMENT (LOSAT_X_CSRQSKEEP): on a kept `qs` of stale values, the same CSR.
+            x_assert_same_on_a_kept_qs(
+                &csr,
+                |x_qs| {
+                    let mut pv = vec![0 as PvArrayType; pv_len];
+                    let mut helper = vec![0u32; cells >> 11];
+                    build(
+                        &w,
+                        cells,
+                        &mut pv,
+                        pv_array_bts,
+                        &mut helper,
+                        Vec::new(),
+                        x_qs,
+                    )
+                },
+                &format!("{template_type:?} n {n} len {len}"),
+            );
             let longest = disc_longest_chain(&fill_helper, &[], false);
             x_assert_runs_are_the_chains(
                 &w,
@@ -111,6 +137,108 @@ fn the_runs_are_the_chains_with_the_fills_presence_vector_and_counters() {
             assert!(csr.words() > 0 || n == 1);
         }
     }
+}
+
+// EXPERIMENT (LOSAT_X_CSRQSKEEP): CSRs built one after another through one batch loop's keep, as
+// the loop's batches build them: each gives its `offsets` and its `qs` back when it is dropped;
+// the next build takes the kept `qs` when it has room for its words (the same buffer), else
+// allocates its own, with more room, which the keep takes back instead; each CSR is the fresh
+// build's. The last one is dropped after the keep is closed (`close_qs`, as the loop's last
+// batch does) and frees its own `qs`; `release` leaves no `qs` kept. With the switch off
+// (`take_qs` gives `None`) no `qs` is kept.
+#[test]
+fn csrs_through_the_keep_share_its_qs() {
+    use super::super::x_mb_lut_keep::Keep;
+    let mut rng = Rng(0x7173_6b65_6570_0001);
+    let (template_type, template_length, cells, bts) =
+        (DiscTemplateType::T11_16Coding, 16, 1usize << 22, 5);
+    let pv_len = cells >> bts;
+    let keep = std::sync::Arc::new(Keep::default());
+    let on = keep.take_qs().is_some();
+    let (mut kept, mut taken): (Option<(*const u32, usize)>, usize) = (None, 0);
+    // About 17,000, 6,000 and 37,000 words.
+    for (round, (n, len)) in [(6, 3000), (3, 2000), (10, 4000)].into_iter().enumerate() {
+        let (seqs, offsets, masks) = queries(&mut rng, n, len);
+        let refs: Vec<&[u8]> = seqs.iter().map(|s| s.as_slice()).collect();
+        let w = words(&refs, &offsets, &masks, template_length, template_type);
+        let mut pv = vec![0 as PvArrayType; pv_len];
+        let mut helper = vec![0u32; cells >> 11];
+        let fresh = build(&w, cells, &mut pv, bts, &mut helper, Vec::new(), None);
+        let (x_offsets, length, dirty) = keep.take_buffer(cells + 1);
+        let x_qs = keep.take_qs();
+        assert_eq!(x_qs.is_some(), on, "round {round}");
+        let mut pv = vec![0 as PvArrayType; pv_len];
+        let mut helper = vec![0u32; cells >> 11];
+        let csr = build(&w, cells, &mut pv, bts, &mut helper, x_offsets, x_qs)
+            .x_kept_with_qs(&keep, (length, dirty));
+        assert!(csr.x_same_arrays(&fresh), "round {round}");
+        if let Some((ptr, room)) = kept {
+            if room >= csr.words() {
+                assert_eq!(csr.x_qs_ptr(), ptr, "round {round}: the kept qs taken");
+                taken += 1;
+            } else {
+                assert!(csr.qs.capacity() > room, "round {round}: a qs of its own");
+            }
+        }
+        let (ptr, room) = (csr.x_qs_ptr(), csr.qs.capacity());
+        if round == 2 {
+            // The loop's last batch: the keep takes no `qs` back.
+            keep.close_qs();
+            drop(csr);
+            assert!(
+                keep.take_qs().is_none_or(|qs| qs.capacity() == 0),
+                "the last CSR freed its own qs"
+            );
+            continue;
+        }
+        drop(csr);
+        if on {
+            let mut back = keep.take_qs().expect("the switch is on");
+            assert_eq!(back.as_ptr(), ptr, "round {round}: given back");
+            keep.give_back_qs(&mut back);
+            kept = Some((ptr, room));
+        }
+    }
+    assert_eq!(
+        taken,
+        usize::from(on),
+        "the second build took the first one's qs"
+    );
+    assert!(keep.release(), "a table was kept");
+    assert!(
+        keep.take_qs().is_none_or(|qs| qs.capacity() == 0),
+        "released"
+    );
+}
+
+// EXPERIMENT (LOSAT_X_CSRQSKEEP): a CSR made with `x_kept` (the contiguous builds, `x_bn_csr`)
+// gives its `offsets` back to the keep and frees its own `qs`: the keep holds no `qs` after it.
+#[test]
+fn a_csr_kept_without_its_qs_frees_it() {
+    use super::super::x_mb_lut_keep::Keep;
+    let mut rng = Rng(0x7173_6b65_6570_0002);
+    let (template_type, template_length, cells, bts) =
+        (DiscTemplateType::T11_16Coding, 16, 1usize << 22, 5);
+    let pv_len = cells >> bts;
+    let keep = std::sync::Arc::new(Keep::default());
+    let (seqs, offsets, masks) = queries(&mut rng, 3, 2000);
+    let refs: Vec<&[u8]> = seqs.iter().map(|s| s.as_slice()).collect();
+    let w = words(&refs, &offsets, &masks, template_length, template_type);
+    let mut pv = vec![0 as PvArrayType; pv_len];
+    let mut helper = vec![0u32; cells >> 11];
+    let (x_offsets, length, dirty) = keep.take_buffer(cells + 1);
+    let csr =
+        build(&w, cells, &mut pv, bts, &mut helper, x_offsets, None).x_kept(&keep, (length, dirty));
+    assert!(csr.words() > 0);
+    drop(csr);
+    assert!(
+        keep.take_buffer(cells + 1).0.capacity() > cells,
+        "offsets back"
+    );
+    assert!(
+        keep.take_qs().is_none_or(|qs| qs.capacity() == 0),
+        "no qs kept"
+    );
 }
 
 #[test]

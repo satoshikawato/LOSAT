@@ -1,0 +1,1 @@
+- `blastp -use_sw_tback` now runs its Smith-Waterman alignments on the threads that `-num_threads` gives, where it used one thread at any thread count; the results stay those of NCBI BLAST+ 2.17.0 at one thread.

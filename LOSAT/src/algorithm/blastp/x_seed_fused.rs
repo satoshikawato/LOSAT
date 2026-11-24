@@ -1126,41 +1126,9 @@ pub fn x_bp_hit_bf_print_summary() {
     }
 }
 
-/// The diagonal test of one word hit as NCBI applies it before an extension, on the hit's own
-/// entry. Returns `Some((last_hit, diff))` when the hit needs the rest of the test.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
-//
-// The sums and differences wrap (two's complement i32): that is what `+` and `-` do in release
-// builds (no overflow checks), and what NCBI's arithmetic on its `subject_offset` (a `Uint4`) gives.
-// LOSAT_X_BPDIAG's batches compute the same wrapping values per lane, and their tests compare
-// with this function on offsets whose sum passes 2^31 - 1.
-#[inline(always)]
-pub(super) fn x_test_hit(
-    entry: &mut DiagStruct,
-    subject_offset: i32,
-    diag_offset: i32,
-    window: i32,
-    word_size: i32,
-) -> Option<(i32, i32)> {
-    if entry.flag() != 0 {
-        let subject_plus_offset = subject_offset.wrapping_add(diag_offset);
-        if subject_plus_offset >= entry.last_hit() {
-            entry.set_last_hit(subject_plus_offset);
-            entry.set_flag(0);
-        }
-        return None;
-    }
-    let last_hit = entry.last_hit().wrapping_sub(diag_offset);
-    let diff = subject_offset.wrapping_sub(last_hit);
-    if diff >= window {
-        entry.set_last_hit(subject_offset.wrapping_add(diag_offset));
-        return None;
-    }
-    if diff < word_size {
-        return None;
-    }
-    Some((last_hit, diff))
-}
+// The two-hit diagonal test of one hit (`common::diag_entry`, shared with the one word of a
+// hard chunk shorter than the word).
+pub(super) use crate::algorithm::common::diag_entry::x_test_hit;
 
 /// Scans `subject` with `lookup` (two-hit mode) and applies the diagonal test to every word hit
 /// in scan order; `candidate(query_offset, subject_offset, last_hit, diff, entry)` receives each
@@ -2314,7 +2282,7 @@ fn x_call_candidates<H: XHit, F>(
 ///
 /// With `flag` the entry's bit 31, `last` its sign-extended 31-bit `last_hit`,
 /// `sum = s + diag_offset` and `diff = s - (last - diag_offset)` (wrapping, as in `x_test_hit`):
-/// - write = flag ? sum >= last : diff >= window; the new entry is then `sum` truncated to 31
+/// - write when `flag` is set and `sum >= last`, or `flag` is clear and `diff >= window`; the new entry is then `sum` truncated to 31
 ///   bits with the flag cleared (`set_last_hit` + `set_flag(0)`, or `set_last_hit` on an entry
 ///   without the flag), otherwise the old entry;
 /// - candidate = !flag && word_size <= diff < window (its entry is not written).
@@ -2452,7 +2420,7 @@ unsafe fn x_batch_avx2<H: XHit>(
         _mm256_set1_epi32(s),
         _mm256_sub_epi32(last, _mm256_set1_epi32(test.diag_offset)),
     );
-    // keep (no write) = flag ? sum < last : diff < window
+    // keep (no write): `sum < last` when `flag` is set, else `diff < window`
     let sum_below_last = _mm256_cmpgt_epi32(last, _mm256_set1_epi32(subject_plus_offset));
     let in_window = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.window), diff);
     let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);

@@ -1,12 +1,11 @@
-//! The *describe* response (docs/web/abi_v2.md §9), generated from the engine's clap
-//! definitions and value parsers, so that the application shows exactly the options,
+//! The *describe* response (docs/web/abi_v2.md §9), generated from NCBI's argument tables that the
+//! command line's reader reads (the options in the order of the usage line of its `-help`, their
+//! help, defaults and allowed values: the library API's rows,
+//! `losat::web_adapter::described_parameters`), so that the application shows exactly the options,
 //! defaults and allowed values of the command line.
 
 use std::fmt::Write as _;
 use std::sync::{Mutex, PoisonError};
-
-use clap::CommandFactory;
-use losat::web_adapter::Cli;
 
 use crate::json;
 use crate::run::Program;
@@ -30,9 +29,9 @@ const ADAPTER_OWNED: [&str; 6] = [
 ];
 
 /// The options of `program` that the browser's searches of records take none of (tblastn's
-/// `-in_pssm`, which the browser refuses until line PS's PSW1; the search strategy file
-/// `-export_search_strategy`, until line RG's F1w gives it as a side file): the browser's list
-/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out.
+/// `-in_pssm`, which the browser refuses until line PS's PSW1): the browser's list
+/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out. The
+/// search strategy file `-export_search_strategy` is a file of the run (line RG's F1w), described.
 fn records_refused(program: Program) -> &'static [&'static str] {
     losat::web_adapter::records_refused_options(program.api())
 }
@@ -54,10 +53,6 @@ pub fn describe(program: &str) -> Result<String, String> {
 }
 
 fn describe_program(program: Program) -> Result<String, String> {
-    let root = Cli::command();
-    let command = root
-        .find_subcommand(program.name())
-        .ok_or_else(|| format!("the engine has no {} command", program.name()))?;
     let mut out = String::from("{\"program\":");
     json::string(&mut out, program.name());
     out.push_str(",\"formats\":[");
@@ -70,12 +65,9 @@ fn describe_program(program: Program) -> Result<String, String> {
     out.push_str("],\"parameters\":[");
     let mut first = true;
     let refused = records_refused(program);
-    for arg in command.get_arguments() {
-        let Some(long) = arg.get_long() else { continue };
-        if matches!(long, "help" | "version")
-            || ADAPTER_OWNED.contains(&long)
-            || refused.contains(&long)
-        {
+    for parameter in losat::web_adapter::described_parameters(program.api()) {
+        let long = parameter.flag.trim_start_matches('-');
+        if ADAPTER_OWNED.contains(&long) || refused.contains(&long) {
             continue;
         }
         if !first {
@@ -83,30 +75,19 @@ fn describe_program(program: Program) -> Result<String, String> {
         }
         first = false;
         out.push_str("{\"flag\":");
-        json::string(&mut out, &format!("-{long}"));
+        json::string(&mut out, &parameter.flag);
         out.push_str(",\"help\":");
-        json::string(
-            &mut out,
-            &arg.get_help().map(ToString::to_string).unwrap_or_default(),
-        );
-        let _ = write!(out, ",\"takes_value\":{}", arg.get_action().takes_values());
-        let defaults: Vec<String> = arg
-            .get_default_values()
-            .iter()
-            .map(|value| value.to_string_lossy().into_owned())
-            .collect();
-        if !defaults.is_empty() {
+        json::string(&mut out, &parameter.help);
+        let _ = write!(out, ",\"takes_value\":{}", parameter.takes_value);
+        // The default and the values that NCBI's argument reader allows (line RG DECISIONS
+        // K4i-2b-1): none for a flag.
+        if let Some(default) = &parameter.default {
             out.push_str(",\"default\":");
-            json::string(&mut out, &defaults.join(" "));
+            json::string(&mut out, default);
         }
-        let choices: Vec<String> = arg
-            .get_possible_values()
-            .iter()
-            .map(|value| value.get_name().to_string())
-            .collect();
-        if !choices.is_empty() {
+        if !parameter.choices.is_empty() {
             out.push_str(",\"choices\":[");
-            for (index, choice) in choices.iter().enumerate() {
+            for (index, choice) in parameter.choices.iter().enumerate() {
                 if index > 0 {
                     out.push(',');
                 }
@@ -121,15 +102,11 @@ fn describe_program(program: Program) -> Result<String, String> {
         ("query_gencode", "query_gencodes"),
         ("db_gencode", "subject_gencodes"),
     ] {
-        if !command
-            .get_arguments()
-            .any(|arg| arg.get_long() == Some(long))
-        {
-            continue;
-        }
         // The codes of the key's constraint in the engine's argument tables (NCBI's, and LOSAT's
-        // 32 of tblastn's `-db_gencode`).
-        let accepted = losat::web_adapter::genetic_codes(program.name(), long).unwrap_or_default();
+        // 32 of tblastn's `-db_gencode`); no list for a program without the key.
+        let Some(accepted) = losat::web_adapter::genetic_codes(program.name(), long) else {
+            continue;
+        };
         let _ = write!(out, ",\"{key}\":[");
         for (index, code) in accepted.iter().enumerate() {
             if index > 0 {
@@ -159,11 +136,11 @@ mod tests {
                     "{program} lists -{flag}"
                 );
             }
-            // The hit list options are described with the CLI's help text, which carries
-            // the defaults (they are `Option`s: "given or not" is NCBI's).
+            // The hit list options are described with NCBI's help text, which carries the
+            // defaults (NCBI's table has none: "given or not" is NCBI's).
             for (flag, default) in [
-                ("num_descriptions", "[default: 500]"),
-                ("num_alignments", "[default: 250]"),
+                ("num_descriptions", "Default = `500'"),
+                ("num_alignments", "Default = `250'"),
             ] {
                 let entry = described
                     .split("{\"flag\":")
@@ -176,22 +153,19 @@ mod tests {
         }
     }
 
-    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1; the
-    // search strategy file of the five programs: until line RG's F1w. The adapter's `describe`
-    // lists neither (the browser's list, `records_refused`).
+    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
+    // the adapter's `describe` does not list it (the browser's list, `records_refused`). The search
+    // strategy file of the five programs is a file of the run (line RG's F1w): listed.
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
-        assert_eq!(
-            records_refused(Program::Tblastn),
-            ["in_pssm", "export_search_strategy"]
-        );
+        assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
         for program in [
             Program::Blastn,
             Program::Blastp,
             Program::Blastx,
             Program::Tblastx,
         ] {
-            assert_eq!(records_refused(program), ["export_search_strategy"]);
+            assert!(records_refused(program).is_empty());
         }
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let described = describe(program).unwrap();
@@ -201,6 +175,10 @@ mod tests {
                     "{program} lists -{flag}"
                 );
             }
+            assert!(
+                described.contains("\"-export_search_strategy\""),
+                "{program} does not list -export_search_strategy"
+            );
         }
     }
 }

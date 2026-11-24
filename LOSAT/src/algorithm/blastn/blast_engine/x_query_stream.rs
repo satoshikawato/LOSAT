@@ -908,6 +908,16 @@ impl BatchRecords<'_> {
         }
     }
 
+    /// The records of the batch for its reports (`ReportQueries`): the searched ones, and the
+    /// input records, the first of which is input record `first`.
+    pub(super) fn report_queries(&self, first: usize) -> ReportQueries<'_> {
+        ReportQueries {
+            searched: self.searched(),
+            input: self.input(),
+            first,
+        }
+    }
+
     /// The searched records for a writer after the batch: those taken out of the `Store`, else a
     /// copy.
     pub(super) fn into_searched(self) -> Vec<FastaRecord> {
@@ -1065,28 +1075,80 @@ impl<'a> Queries<'a> {
         }
     }
 
-    /// The searched records of the batches before searched query `start`, for a writer that
-    /// writes their reports: the records read before the search, or `kept` (the records of the
-    /// batches taken, which the loop keeps where such a writer runs: `run_in_pool`).
-    pub(super) fn before<'s>(&'s self, kept: &'s [FastaRecord], start: usize) -> &'s [FastaRecord] {
+    /// The records of the batches before searched query `start`, for a writer that writes their
+    /// reports (`ReportQueries`, from input record 0): the records read before the search, or
+    /// `kept` (the records of the batches taken, which the loop keeps where such a writer runs:
+    /// `run_in_pool`).
+    pub(super) fn before<'s>(&'s self, kept: &'s Kept, start: usize) -> ReportQueries<'s> {
         match self {
-            Queries::Records { searched, .. } => &searched[..start],
+            Queries::Records { input, searched } => ReportQueries {
+                searched: &searched[..start],
+                input,
+                first: 0,
+            },
             Queries::Streamed(_) | Queries::Taken(_) => {
                 assert!(
-                    start <= kept.len(),
+                    start <= kept.searched.len(),
                     "LOSAT_X_QSTREAM or LOSAT_X_BNQPACK: a writer reads the records of earlier batches, which were not kept"
                 );
-                &kept[..start]
+                ReportQueries {
+                    searched: &kept.searched[..start],
+                    input: &kept.input,
+                    first: 0,
+                }
             }
         }
     }
 
-    /// Every searched record, for the reports after the loop (`before` with every query).
-    pub(super) fn all<'s>(&'s self, kept: &'s [FastaRecord]) -> &'s [FastaRecord] {
+    /// Every record, for the reports after the loop (`before` with every query).
+    pub(super) fn all<'s>(&'s self, kept: &'s Kept) -> ReportQueries<'s> {
         match self {
-            Queries::Records { searched, .. } => searched,
-            Queries::Streamed(_) | Queries::Taken(_) => kept,
+            Queries::Records { input, searched } => ReportQueries {
+                searched,
+                input,
+                first: 0,
+            },
+            Queries::Streamed(_) | Queries::Taken(_) => ReportQueries {
+                searched: &kept.searched,
+                input: &kept.input,
+                first: 0,
+            },
         }
+    }
+}
+
+/// The query records of a report call (`run::write_reports`): the searched records, and the input
+/// records from input record `first` on, whose whole letters NCBI's reports read where an HSP's
+/// query row passes a `-query_loc` interval (`pairwise::QueryRecords`; without `-query_loc` the
+/// searched records are the input records and are read themselves).
+#[derive(Clone, Copy, Default)]
+pub(super) struct ReportQueries<'a> {
+    pub(super) searched: &'a [FastaRecord],
+    pub(super) input: &'a [FastaRecord],
+    pub(super) first: usize,
+}
+
+/// EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQPACK): the records of the batches taken that the loop
+/// keeps for a writer after their batch (`Queries::before`, `Queries::all`): their searched
+/// records, and with `-query_loc` their input records (every input record from the first, those
+/// that the interval leaves out included), whose letters past the intervals the reports read.
+#[derive(Default)]
+pub(super) struct Kept {
+    pub(super) searched: Vec<FastaRecord>,
+    pub(super) input: Vec<FastaRecord>,
+}
+
+impl Kept {
+    /// Keeps the records of a batch (its input records only where `ranged`, a `-query_loc`
+    /// search): the number of its searched records.
+    pub(super) fn keep(&mut self, batch: BatchRecords<'_>, ranged: bool) -> usize {
+        if ranged {
+            self.input.extend_from_slice(batch.input());
+        }
+        let searched = batch.into_searched();
+        let count = searched.len();
+        self.searched.extend(searched);
+        count
     }
 }
 

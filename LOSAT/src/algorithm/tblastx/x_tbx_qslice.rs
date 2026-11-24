@@ -544,7 +544,9 @@ impl<M: TbxScore> XPairPar<M> {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false, 0>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, false, false, 0>(
+            group, unit, inp, scratch, init_hsps,
+        );
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -559,6 +561,7 @@ impl<M: TbxScore> XPairPar<M> {
         const B: bool,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -647,14 +650,12 @@ impl<M: TbxScore> XPairPar<M> {
                 if seq_ranges.is_empty() {
                     continue;
                 }
-                // [C] scan_range[0] = 0;
-                // [C] scan_range[1] = subject->seq_ranges[0].left;
-                // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
+                // Initialize `scan_range` to range index 0, start offset, and last word position.
                 let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-                // [C] while (scan_range[1] <= scan_range[2])
+                // Scan batches until the current subject offset advances past the end bound.
                 while scan_range[1] <= scan_range[2] {
                     let prev_scan_left = scan_range[1];
-                    // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+                    // Scan the next batch of subject word hits via `scansub` into `offset_pairs`.
                     let hits = slice.scan(
                         subject,
                         &seq_ranges,
@@ -676,7 +677,7 @@ impl<M: TbxScore> XPairPar<M> {
                         // below width = scratch.diag.len() as below; `fits` holds (the caller's
                         // rule); every candidate's cell is a cell of this unit's table.
                         unsafe {
-                            x_tbx_hitbf::x_hits_bf::<_, PF>(
+                            x_tbx_hitbf::x_hits_bf::<_, PF, STEP>(
                                 diag_ptr,
                                 offset_pairs_ptr,
                                 hits as usize,
@@ -710,7 +711,7 @@ impl<M: TbxScore> XPairPar<M> {
                         };
                         continue;
                     }
-                    // [C] for (i = 0; i < hits; ++i)
+                    // Process each hit returned in this batch in scan order.
                     for i in 0..hits as usize {
                         #[cfg(target_arch = "x86_64")]
                         if PF && i + X_PREFETCH_AHEAD < hits as usize {
@@ -729,7 +730,7 @@ impl<M: TbxScore> XPairPar<M> {
                         let pair = unsafe { &*offset_pairs_ptr.add(i) };
                         let query_offset = pair.q_off;
                         let subject_offset = pair.s_off;
-                        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+                        // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
                         // Unit cell: the raw diagonal minus the unit's lowest one (no mask).
                         let diag_coord =
                             query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;

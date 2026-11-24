@@ -2,7 +2,15 @@
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
 import { RunOutputWriter, sha256Hex, toProgramDescription } from 'losat';
-import { CUSTOM_OUTPUT, OUTPUT_FORMATS, recordMismatch, type ProgramId, type RunOutput } from 'losat/domain';
+import {
+  CUSTOM_OUTPUT,
+  OUTPUT_FORMATS,
+  parseToolDescription,
+  recordMismatch,
+  type ProgramId,
+  type RunOutput,
+  type ToolDescription,
+} from 'losat/domain';
 import {
   DIAGNOSTICS_STREAM,
   HITS_STREAM,
@@ -16,12 +24,22 @@ import {
   type ProgramDescription,
   type RuntimeInfo,
   type StartResult,
+  type ToolEngine,
+  type ToolFile,
+  type ToolRunOptions,
+  type ToolRunResult,
+  type ToolValidation,
   type ValidationResult,
 } from 'losat/ports';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
+import { toolOptionValue } from '../../domain/tool-argv';
+import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
 import DESCRIBE from './describe.json';
+import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
+
+const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -30,9 +48,10 @@ export interface FakeEngineOptions {
   readonly phaseDelayMs?: number;
 }
 
-export class FakeEngine implements EngineGateway {
+export class FakeEngine implements EngineGateway, ToolEngine {
   private readonly cancelled = new Set<string>();
   private readonly phaseDelayMs: number;
+  private windowMaskerDescription: ToolDescription | undefined;
 
   constructor(options: FakeEngineOptions = {}) {
     this.phaseDelayMs = options.phaseDelayMs ?? 0;
@@ -50,6 +69,149 @@ export class FakeEngine implements EngineGateway {
     return toProgramDescription(json);
   }
 
+  async describeTool(tool: string): Promise<ToolDescription> {
+    if (tool !== 'windowmasker') throw new Error(`unknown tool: ${tool}`);
+    this.windowMaskerDescription ??= parseToolDescription(WINDOWMASKER_XMLHELP);
+    return this.windowMaskerDescription;
+  }
+
+  async validateTool(argv: readonly string[]): Promise<ToolValidation> {
+    const tool = argv[0];
+    if (tool !== 'windowmasker') return { ok: false, message: `unknown tool: ${tool}` };
+    const description = await this.describeTool(tool);
+    const byFlag = new Map(description.parameters.map((param) => [param.flag, param]));
+    const seen = new Set<string>();
+    for (let i = 1; i < argv.length; i++) {
+      const word = argv[i]!;
+      const [flag, inline] = word.split(/=(.*)/s, 2);
+      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
+      const param = byFlag.get(flag!);
+      const extraValued = flag === '-logfile' || flag === '-conffile';
+      if (param === undefined && !extraValued) {
+        return { ok: false, message: `Argument error: Unknown argument: "${word}"` };
+      }
+      seen.add(flag!);
+      const takesValue = param?.takesValue ?? extraValued;
+      if (takesValue) {
+        let value = inline;
+        if (value === undefined) {
+          if (i + 1 >= argv.length) return { ok: false, message: `Argument error: Missing value for "${flag}"` };
+          value = argv[++i]!;
+        }
+        if (param?.choices !== undefined && !param.choices.includes(value)) {
+          return { ok: false, message: `Argument error: Invalid value "${value}" for "${flag}"` };
+        }
+        if (param?.kind === 'Integer' || param?.kind === 'Int8') {
+          if (!/^-?\d+$/.test(value)) {
+            return { ok: false, message: `Argument error: Invalid integer "${value}" for "${flag}"` };
+          }
+          const num = Number(value);
+          if (param.range !== undefined && (num < param.range.min || num > param.range.max)) {
+            return { ok: false, message: `Argument error: Value ${value} for "${flag}" is out of range` };
+          }
+        }
+        if (param?.kind === 'Boolean' && !/^(?:true|false|t|f|1|0)$/i.test(value)) {
+          return { ok: false, message: `Argument error: Invalid boolean "${value}" for "${flag}"` };
+        }
+      }
+    }
+    for (const [first, second] of description.excludes) {
+      if (seen.has(first) && seen.has(second)) {
+        return { ok: false, message: `Argument error: ${first} and ${second} are mutually exclusive` };
+      }
+    }
+    if (!seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
+      return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
+    }
+    return { ok: true };
+  }
+
+  async runTool(argv: readonly string[], options: ToolRunOptions = {}): Promise<ToolRunResult> {
+    const runId = `fake-tool:${crypto.randomUUID()}`;
+    const checkAborted = () => {
+      if (options.signal?.aborted === true) throw new RunCancelledError(runId);
+    };
+    const pause = () => this.pauseAbortable(options.signal);
+    checkAborted();
+    await pause();
+    checkAborted();
+
+    const encoder = new TextEncoder();
+    const stdoutParts: BlobPart[] = [];
+    const stderrParts: BlobPart[] = [];
+    const collectedFiles: ToolFile[] = [];
+    const finish = (status: number): ToolRunResult => ({
+      status,
+      stdout: new Blob(stdoutParts),
+      stderr: new Blob(stderrParts),
+      files: collectedFiles,
+    });
+    const writeStdout = async (text: string) => {
+      const bytes = encoder.encode(text);
+      if (options.sinks?.onStdout !== undefined) await options.sinks.onStdout(bytes);
+      else stdoutParts.push(bytes);
+    };
+    const writeStderr = async (text: string) => {
+      const bytes = encoder.encode(text);
+      if (options.sinks?.onStderr !== undefined) await options.sinks.onStderr(bytes);
+      else stderrParts.push(bytes);
+    };
+    const verdict = await this.validateTool(argv);
+    if (!verdict.ok) {
+      await writeStderr(`${verdict.message}\n`);
+      return finish(1);
+    }
+
+    const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
+    if (words.includes('-xmlhelp')) {
+      await writeStdout(WINDOWMASKER_XMLHELP);
+      return finish(0);
+    }
+    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
+      await writeStdout(`USAGE\n  windowmasker ... (${FAKE_MARKER})\n`);
+      return finish(0);
+    }
+    if (words.some((w) => WINDOWMASKER_VERSION_FLAGS.has(w))) {
+      await writeStdout(`windowmasker: 0.2.0 (${FAKE_MARKER})\n`);
+      return finish(0);
+    }
+
+    const outName = toolOptionValue(argv, '-out');
+    const logName = toolOptionValue(argv, '-logfile');
+    const bodyText = `# ${FAKE_MARKER}\n# losat ${argv.join(' ')}\n`;
+    const logText = `Warning: ${FAKE_MARKER}\n`;
+
+    const writeFile = async (name: string, chunks: readonly string[]) => {
+      const sink = options.sinks?.onFile !== undefined ? await options.sinks.onFile(name) : undefined;
+      if (sink !== undefined) {
+        let offset = 0;
+        for (const text of chunks) {
+          const bytes = encoder.encode(text);
+          await sink.write(bytes, offset);
+          offset += bytes.length;
+        }
+        await sink.close();
+      } else {
+        collectedFiles.push({ name, file: new Blob([...chunks], { type: 'text/plain' }) });
+      }
+    };
+
+    await pause();
+    checkAborted();
+
+    const sameOutAndLog = outName !== undefined && outName !== '-' && logName !== undefined && outName === logName;
+    if (sameOutAndLog) {
+      await writeFile(outName, [bodyText, logText]);
+    } else {
+      if (outName !== undefined && outName !== '-') await writeFile(outName, [bodyText]);
+      else await writeStdout(bodyText);
+      if (logName !== undefined) await writeFile(logName, [logText]);
+      else await writeStderr(logText);
+    }
+
+    return finish(0);
+  }
+
   /**
    * NCBI's application start is not imitated: no registry file, no file of the run, no dry run (its
    * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list), no
@@ -57,7 +219,7 @@ export class FakeEngine implements EngineGateway {
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+    return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
   }
 
   /**
@@ -78,7 +240,7 @@ export class FakeEngine implements EngineGateway {
       }
       const [flag, value] = word.split(/=(.*)/s, 2);
       const option = parameters.find((p) => p.flag === flag);
-      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help to list the options\n` };
+      if (option === undefined) return { ok: false, message: unknownArgument(program as ProgramId, word) };
       if (option.takesValue && value === undefined) i++;
     }
     // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
@@ -229,6 +391,50 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+
+  private pauseAbortable(signal: AbortSignal | undefined): Promise<void> {
+    if (this.phaseDelayMs <= 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      if (signal?.aborted === true) {
+        resolve();
+        return;
+      }
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, this.phaseDelayMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+}
+
+/**
+ * The engine's argument error for a word that the fake does not read, in its form: a short usage,
+ * a line of 72 `=`, an empty line and the two posts (the second with two spaces after `Error:`).
+ * An option word is `Unknown argument` without its first dash and without a value joined by `=`
+ * (`-foo=3` is `"foo"`, as NCBI's reader splits the word at its first `=`); a word that is not one
+ * is a positional argument, of which the programs take none.
+ */
+function unknownArgument(program: ProgramId, word: string): string {
+  const post = word.startsWith('-') ? `Unknown argument: "${word.slice(1).split('=')[0]!}"` : `Too many positional arguments (1), the offending value: ${word}`;
+  return [
+    'USAGE',
+    `  ${program} [-h] [-help] [-query input_file] [-subject subject_input_file] [-out output_file]`,
+    '',
+    'DESCRIPTION',
+    '   Fake engine',
+    '',
+    "Use '-help' to print detailed descriptions of command line arguments",
+    '='.repeat(72),
+    '',
+    `Error: ${post}`,
+    `Error:  ${post}`,
+    '',
+  ].join('\n');
 }
 
 /** The output that the CLI's run of the argv writes: the argv's own -outfmt output, else the format of its number (0 without one). */

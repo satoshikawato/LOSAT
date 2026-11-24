@@ -34,6 +34,23 @@ use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, Subj
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::utils::dust::MaskedInterval;
 
+/// What a BLASTN run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options (`-dust` as given), the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for BlastnArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self, self.dust_filtering.as_deref()),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs,
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
+
 /// The recorded options of a BLASTN run (`options::algorithm_options`'s inputs). `dust` is
 /// the `-dust` value as given (`BlastnArgs::resolve_dust` consumes it).
 pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInputs {
@@ -453,6 +470,7 @@ pub(crate) fn for_each_batch(
                         space: context.context0_space,
                         query_length: context.context0_length,
                     }),
+                    round: None,
                 };
                 each(span, &batch)
             },
@@ -474,9 +492,9 @@ pub(crate) fn write_blastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: call.subjects.db_title(),
         gapped: call.batches.gapped,
+        program_type: None,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
         for index in span.clone() {

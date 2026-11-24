@@ -16,7 +16,8 @@
 
 use super::search_init::{XTwoHit, XUngapWalks};
 use crate::algorithm::blastp::extension::{
-    extend_one_hit_for, BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult,
+    extend_one_hit_for, extend_one_hit_outside, BlastpOneHitUngappedResult,
+    BlastpTwoHitUngappedResult, ChunkLetters,
 };
 use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
@@ -29,7 +30,10 @@ use crate::algorithm::pssm_search::gapalign::{
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
 use crate::algorithm::pssm_search::rows::{PssmRows, QueryPssm};
-use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
+use crate::algorithm::pssm_search::ungapped::{
+    pssm_extend_one_hit, pssm_extend_one_hit_outside, pssm_extend_two_hit,
+    pssm_extend_two_hit_outside,
+};
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::BLASTAA_SIZE;
 use anyhow::Result;
@@ -132,6 +136,20 @@ pub(super) trait TbnScore: Copy + Send + Sync {
         matrix: ScoringMatrix,
     ) -> Option<BlastpOneHitUngappedResult>;
 
+    /// `one_hit` of a word before its chunk (`s_off` below 0, masks stored out of order), on the
+    /// letters around the chunk (`XTwoHit::x_one_hit_around`).
+    #[allow(clippy::too_many_arguments)]
+    fn one_hit_around(
+        self,
+        query: &[u8],
+        chunk: ChunkLetters<'_>,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+        word_size: i32,
+        matrix: ScoringMatrix,
+    ) -> Option<BlastpOneHitUngappedResult>;
+
     /// The score-only gapped alignment of the preliminary stage (`s_BlastProtGappedAlignment`
     /// without restricted alignment, blast_gapalign.c:4209-4347).
     #[allow(clippy::too_many_arguments)]
@@ -217,7 +235,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-    //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
+    // Selects the gapped alignment start offset from the query and subject windows.
     #[inline(always)]
     fn gapped_start(
         self,
@@ -235,8 +253,8 @@ impl TbnScore for MatrixScore {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
     // c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3419-3420,3435-3437
-    // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and q_start + MIN(q_length,
-    // s_length) wraps back to q_start + length, so only the first window is scored: its sum over
+    // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and `q_start` plus `min(q_length,
+    // s_length)` wraps back to `q_start + length`, so only the first window is scored: its sum over
     // the bytes NCBI reads gives q_start + 5 when above 0, else q_start (`gapped_start_int4` of
     // `blastp::gapalign`, which BLASTX shares). BLASTP's own function for this
     // (`blastp::blast_engine`) reads its sequences with the letters past them as the sentinel
@@ -320,8 +338,25 @@ impl TbnScore for MatrixScore {
         extend_one_hit_for(matrix, query, subject, q_off, s_off, dropoff, word_size)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791 (cited at
+    // `blastp::extension::extend_one_hit_outside`)
+    fn one_hit_around(
+        self,
+        query: &[u8],
+        chunk: ChunkLetters<'_>,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+        word_size: i32,
+        matrix: ScoringMatrix,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        Some(extend_one_hit_outside(
+            matrix, query, chunk, q_off, s_off, dropoff, word_size,
+        ))
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3953:
-    // status = s_BlastProtGappedAlignment(...);
+    // Computes preliminary gapped protein alignment score via `s_BlastProtGappedAlignment`.
     #[inline(always)]
     fn score_only(
         self,
@@ -350,7 +385,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
-    // retval = BlastGetOffsetsForGappedAlignment(...);
+    // Computes gapped alignment starting offsets via `BlastGetOffsetsForGappedAlignment`.
     #[inline(always)]
     fn offsets(
         self,
@@ -547,6 +582,28 @@ impl<'a> TbnScore for PssmScore<'a> {
         ))
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791 (cited at
+    // `pssm_search::ungapped::pssm_extend_one_hit_outside`)
+    fn one_hit_around(
+        self,
+        _query: &[u8],
+        chunk: ChunkLetters<'_>,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+        word_size: i32,
+        _matrix: ScoringMatrix,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        Some(pssm_extend_one_hit_outside(
+            &XOneHitRows(self.0),
+            chunk,
+            s_off,
+            q_off,
+            dropoff,
+            word_size,
+        ))
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4245-4347 (cited at
     // `pssm_search::gapalign::pssm_score_only_gapped_alignment`; `subject->length` is the unit's
     // letters, the slice)
@@ -676,7 +733,7 @@ impl XUngapWalks for XPssmWalks<'_> {
         self,
         _query: &[u8],
         subject: &[u8],
-        s_left_off: usize,
+        s_left_off: i32,
         s_right_off: usize,
         q_right_off: usize,
         dropoff: i32,
@@ -685,12 +742,32 @@ impl XUngapWalks for XPssmWalks<'_> {
         Some(Some(pssm_extend_two_hit(
             self.0,
             subject,
-            s_left_off as i32,
+            s_left_off,
             s_right_off as i32,
             q_right_off as i32,
             dropoff,
             word_size as i32,
         )))
+    }
+
+    fn two_hit_around(
+        self,
+        chunk: ChunkLetters<'_>,
+        s_left_off: i32,
+        s_right_off: i32,
+        q_right_off: i32,
+        dropoff: i32,
+        word_size: i32,
+    ) -> Option<BlastpTwoHitUngappedResult> {
+        Some(pssm_extend_two_hit_outside(
+            self.0,
+            chunk,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        ))
     }
 }
 
@@ -700,12 +777,24 @@ impl XUngapWalks for std::convert::Infallible {
         self,
         _query: &[u8],
         _subject: &[u8],
-        _s_left_off: usize,
+        _s_left_off: i32,
         _s_right_off: usize,
         _q_right_off: usize,
         _dropoff: i32,
         _word_size: usize,
     ) -> Option<Option<BlastpTwoHitUngappedResult>> {
+        match self {}
+    }
+
+    fn two_hit_around(
+        self,
+        _chunk: ChunkLetters<'_>,
+        _s_left_off: i32,
+        _s_right_off: i32,
+        _q_right_off: i32,
+        _dropoff: i32,
+        _word_size: i32,
+    ) -> Option<BlastpTwoHitUngappedResult> {
         match self {}
     }
 }

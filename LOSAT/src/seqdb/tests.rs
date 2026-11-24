@@ -1650,31 +1650,105 @@ fn header_records_are_decoded() {
             .unwrap_err()
             .is_parsed_seqids());
     }
-    // A damaged record with such an id is a parsed one here; its error comes from the decoder of
-    // every Seq-id (`decode_full`), when a report reads it, as for any other parsed Seq-id.
+    // A record with bytes after the set and such an id is a parsed one here; the bytes after the
+    // set are not read, as NCBI's `EndOfRead` does not (line RG item T5d).
     let mut trailing = defline_record(b"title", &bl_ord_id(&[5]));
     trailing.push(0);
     assert!(decode_defline_set(&trailing, path, 0)
         .unwrap_err()
         .is_parsed_seqids());
-    assert!(matches!(
-        decode_defline_set(&trailing, path, 5),
-        Err(SeqDbError::Format { .. })
-    ));
+    assert!(decode_defline_set(&trailing, path, 5).is_ok());
     // A negative ordinal id, a cut record, bytes after the record.
     assert!(matches!(
         decode(&defline_record(b"title", &bl_ord_id(&[0xff]))),
         Err(SeqDbError::Format { .. })
     ));
+    // A cut record is NCBI's error of its stream's end (`HandleEOF`, line RG item T5d).
     for cut in 1..first.len() {
         assert!(
-            matches!(decode(&first[..cut]), Err(SeqDbError::Format { .. })),
+            matches!(decode(&first[..cut]), Err(SeqDbError::Ncbi(_))),
             "record cut at {cut}"
         );
     }
     let mut trailing = first.clone();
     trailing.push(0);
-    assert!(matches!(decode(&trailing), Err(SeqDbError::Format { .. })));
+    assert_eq!(decode(&trailing).unwrap(), decode(&first).unwrap());
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139
+// (`alias::gi_mask_list`).
+/// `MASKLIST` in the alias file of a database given as one name makes its filtering algorithms
+/// the GI masks it names (ids 0 to N-1 in its order, no file read before one is asked for); over
+/// it in another alias file, or with the database named twice, it is passed over.
+#[test]
+fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
+    let dir = temp_dir("masklist");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("gm.pal"),
+        "TITLE t\nDBLIST prot_v4\nMASKLIST a b \n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("over.pal"), "TITLE o\nDBLIST gm\n").unwrap();
+    let name = dir.join("gm").to_str().unwrap().to_string();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    let algorithms = db.mask_algorithms().unwrap();
+    assert_eq!(algorithms.ids(), vec![0, 1]);
+    assert_eq!(algorithms.id_of("b"), Ok(1));
+    let table = "\nAvailable filtering algorithm(s):\n\nAlgorithm ID  Algorithm name                          \n    0         a                                       \n    1         b                                       \n";
+    assert_eq!(
+        algorithms.id_of("dust"),
+        Err(format!("Filtering algorithm dust does not exist.\n{table}"))
+    );
+    // The files are looked for along the search path (here the current directory), where
+    // there are none.
+    let error = algorithms.details(0).unwrap_err();
+    assert_eq!(
+        error.ncbi_message().as_deref(),
+        Some(b"Could not open gi-mask index files.".as_slice())
+    );
+    match algorithms.details(2).unwrap_err() {
+        SeqDbError::Range(text) => {
+            assert_eq!(
+                text,
+                format!("Filtering algorithm ID 2 does not exist.\n{table}")
+            )
+        }
+        other => panic!("{other}"),
+    }
+    let over = dir.join("over").to_str().unwrap().to_string();
+    let twice = format!("{name} {name}");
+    for passed_over in [over.as_str(), twice.as_str()] {
+        let db = SeqDb::open(passed_over, SeqType::Protein).unwrap();
+        assert!(
+            db.mask_algorithms().unwrap().ids().is_empty(),
+            "{passed_over}"
+        );
+    }
+}
+
+/// A `MASKLIST` name that is not UTF-8 is LOSAT's refusal where the masks are asked for, not at
+/// the opening: the database's sequences read (review N8 of line NP item M4c-2).
+#[test]
+fn a_masklist_name_not_utf8_is_refused_where_the_masks_are_read() {
+    let dir = temp_dir("masklist-utf8");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("gm.pal"),
+        b"TITLE t\nDBLIST prot_v4\nMASKLIST a \xff\n".as_slice(),
+    )
+    .unwrap();
+    let name = dir.join("gm").to_str().unwrap().to_string();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert_eq!(db.num_seqs(), 10);
+    for _ in 0..2 {
+        let error = db.mask_algorithms().unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::Unsupported { message, .. }
+                if message == "a MASKLIST name is not valid UTF-8"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -1693,7 +1767,8 @@ fn every_filtering_alias_key_is_rejected() {
         let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
         assert!(
             matches!(&error, SeqDbError::MemoryMap(message)
-                if String::from_utf8_lossy(message).ends_with("/1'")),
+                if String::from_utf8_lossy(message)
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR))),
             "{key}: {error}"
         );
     }
@@ -1703,18 +1778,17 @@ fn every_filtering_alias_key_is_rejected() {
     )
     .unwrap();
     assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
-    for key in ["MEMB_BIT", "MASKLIST"] {
-        std::fs::write(
-            dir.join("keyed.pal"),
-            format!("TITLE t\nDBLIST prot_v4\n{key} 1\n"),
-        )
-        .unwrap();
-        let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
-            "{key}: {error}"
-        );
-    }
+    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT stays refused.
+    std::fs::write(
+        dir.join("keyed.pal"),
+        "TITLE t\nDBLIST prot_v4\nMEMB_BIT 1\n",
+    )
+    .unwrap();
+    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+    assert!(
+        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("MEMB_BIT")),
+        "{error}"
+    );
     // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
     // VDBLIST.
     std::fs::write(
@@ -1872,7 +1946,6 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
         SeqType::Protein,
         super::alias::LocalCopy::Dir(here.to_str().unwrap()),
         &SearchPath::current_dir().unwrap(),
-        super::alias::MaskList::Refuse,
     )
     .unwrap();
     assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);
@@ -2082,6 +2155,46 @@ fn x_check_range_gives_the_errors_of_read_range() {
 }
 
 #[test]
+fn with_range_lends_the_bytes_and_errors_of_read_range() {
+    let dir = temp_dir("with-range");
+    let path = dir.join("ten");
+    let bytes: Vec<u8> = (0..10).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    let file = file::DbFile::open(&path).unwrap();
+    // The longest range first: a later, shorter range is lent its own bytes only.
+    for (start, end) in [
+        (0, 10),
+        (3, 2),
+        (0, 11),
+        (10, 11),
+        (10, 10),
+        (4, 6),
+        (9, 10),
+        (0, 3),
+    ] {
+        assert_eq!(
+            file.with_range(start, end, <[u8]>::to_vec)
+                .map_err(|e| e.to_string()),
+            file.read_range(start, end).map_err(|e| e.to_string()),
+            "{start}..{end}"
+        );
+    }
+    // A read inside the reader's read is lent a buffer of its own, and the outer bytes stay.
+    let nested = file
+        .with_range(2, 8, |outer| {
+            let inner = file.with_range(5, 7, <[u8]>::to_vec).unwrap();
+            (inner, outer.to_vec())
+        })
+        .unwrap();
+    assert_eq!(nested, (bytes[5..7].to_vec(), bytes[2..8].to_vec()));
+    assert_eq!(
+        file.with_range(1, 4, <[u8]>::to_vec).unwrap(),
+        bytes[1..4].to_vec()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn header_members_lengths_and_bytes() {
     let path = Path::new("test.phr");
     let decode = |record: &[u8]| decode_defline_set(record, path, 0);
@@ -2113,18 +2226,20 @@ fn header_members_lengths_and_bytes() {
     assert_eq!(deflines[0].title, b"t");
     assert_eq!(deflines[0].volume_ordinal, 3);
 
-    // Members out of order, and values nested too deeply in a skipped member.
+    // Members out of order, and values nested too deeply in a skipped member: NCBI's read of the
+    // record stops before them, at the taxid that follows no seqid (line RG item T5d).
     let mut out_of_order = vec![0x30, 0x80, 0x30, 0x80, 0xa2, 0x80, 0x02, 0x01, 0x00, 0, 0];
     out_of_order.extend_from_slice(&[0xa0, 0x80, 0x1a, 0x01, b't', 0, 0]);
     assert!(matches!(
         decode(&out_of_order),
-        Err(SeqDbError::Format { .. })
+        Err(SeqDbError::Ncbi(exception))
+            if exception.text() == b"byte 6: member seqid expected ( at Blast-def-line-set.[].[].taxid)"
     ));
     let mut deep = vec![0x30, 0x80, 0x30, 0x80, 0xa2, 0x80];
     deep.extend(std::iter::repeat_n([0x30u8, 0x80], 100_000).flatten());
     assert!(matches!(
         decode(&deep),
-        Err(SeqDbError::Format { message, .. }) if message.contains("nested too deeply")
+        Err(SeqDbError::Ncbi(exception)) if exception.get_msg() == b"byte 6: member seqid expected"
     ));
 
     // Bytes outside ' ' ..= '~' in a title are read as '#', as NCBI reads them.

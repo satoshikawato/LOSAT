@@ -207,7 +207,7 @@ impl Volume {
         self.seq_file().map(|_| ())
     }
 
-    fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
+    pub(super) fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
         self.lazy_file(&self.hdr, "hr")
     }
 
@@ -537,57 +537,57 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2316
-    /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative).
-    #[cfg(test)]
+    /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative;
+    /// `with_header_record`'s).
     pub fn header_bytes(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
-        self.header_record(oid).map(|(record, _)| record)
+        self.with_header_record(oid, |record, _| Ok(record.to_vec()))
     }
 
-    /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative) and the path of
-    /// the header file, which the messages of its decode name: the open file's own, not a name
-    /// built again for each record.
-    fn header_record(&self, oid: u32) -> Result<(Vec<u8>, &Path), SeqDbError> {
+    /// `read` of the encoded `Blast-def-line-set` of the sequence `oid` (volume-relative) and the
+    /// path of the header file, which the messages of its decode name: the open file's own, not a
+    /// name built again for each record. The record is lent from the thread's buffer of the reads
+    /// of a range (`DbFile::with_range`): a read of one header per sequence allocates no record.
+    fn with_header_record<T>(
+        &self,
+        oid: u32,
+        read: impl FnOnce(&[u8], &Path) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
         let file = self.hdr_file()?;
-        Ok((file.read_range(start, end)?, file.path()))
+        file.with_range(start, end, |record| read(record, file.path()))?
     }
 
     /// The header of the sequence `oid` (volume-relative) from one read of its record
     /// (`SeqDb::read_header`).
     pub fn header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        self.decode_header(oid, &record, path)
+        self.with_header_record(oid, |record, path| self.decode_header(oid, record, path))
     }
 
     /// The `taxid` of each definition line of the sequence `oid` (volume-relative), 0 for none.
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        self.kept_lines(
-            oid,
-            &record,
-            path,
-            decode_defline_taxids(&record, path, oid),
-        )
+        self.with_header_record(oid, |record, path| {
+            self.kept_lines(oid, record, path, decode_defline_taxids(record, path, oid))
+        })
     }
 
     /// The definition lines of the sequence `oid` (volume-relative) with every member and
     /// every Seq-id (`header::decode_full`); a `general` id `BL_ORD_ID` keeps its
     /// volume-relative tag.
     pub fn defline_set(&self, oid: u32) -> Result<crate::seqid::DeflineSet, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        self.decode_kept_set(oid, &record, path)
+        self.with_header_record(oid, |record, path| self.decode_kept_set(oid, record, path))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
     /// `defline_set`, `None` for a stored header of no bytes, which NCBI's read gives as no set
     /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_at`).
     pub fn header_set(&self, oid: u32) -> Result<Option<crate::seqid::DeflineSet>, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        if record.is_empty() {
-            return Ok(None);
-        }
-        self.decode_kept_set(oid, &record, path).map(Some)
+        self.with_header_record(oid, |record, path| {
+            if record.is_empty() {
+                return Ok(None);
+            }
+            self.decode_kept_set(oid, record, path).map(Some)
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
@@ -599,12 +599,13 @@ impl Volume {
         &self,
         oid: u32,
     ) -> Result<Option<(crate::seqid::DeflineSet, Option<Vec<u8>>)>, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        if record.is_empty() {
-            return Ok(None);
-        }
-        let (set, dropped) = self.decode_kept_set_dropped(oid, &record, path)?;
-        Ok(Some((set, (!dropped).then_some(record))))
+        self.with_header_record(oid, |record, path| {
+            if record.is_empty() {
+                return Ok(None);
+            }
+            let (set, dropped) = self.decode_kept_set_dropped(oid, record, path)?;
+            Ok(Some((set, (!dropped).then(|| record.to_vec()))))
+        })
     }
 
     /// Restricts the definition lines that the reads of this volume give to those `rule`
@@ -650,9 +651,11 @@ impl Volume {
         self.alias_lines.is_some()
     }
 
-    /// Whether the reads of this volume remove definition lines: a list's rule, the alias files'
-    /// id lists or the erasure of model lines.
-    fn filters_lines(&self) -> bool {
+    /// Whether the reads of this volume remove definition lines: a list's rule (any list erases
+    /// the lines without a Seq-id, a taxid list those of other taxids), the alias files' id lists
+    /// or the erasure of model lines. Each may leave a sequence without a line
+    /// (`SeqDb::drops_lineless_hits`).
+    pub(super) fn filters_lines(&self) -> bool {
         self.defline_rule.is_some() || self.alias_lines.is_some() || self.exclude_model
     }
 
@@ -665,7 +668,9 @@ impl Volume {
     // accession table of `makeblastdb -input_type blastdb`, or a FASTA id `gnl|BL_ORD_ID|n` of
     // `-parse_seqids`), so on a list of databases or a database of several volumes the OID it
     // found may keep no line, and a line with another id may be kept or removed by the sum
-    // (line DBID ordsl, DECISIONS 55).
+    // (line DBID ordsl, DECISIONS 55). The read adjusts every line before any test, under every
+    // list (a taxid list too): a string tag on a line that the list then erases ends the read
+    // (review 2 G1 of line RG D1c-1b).
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2023-2034
     // The search's list and the alias files' lists attached to the volume test each line's
     // Seq-ids as NCBI's filtered header read does (`filter::line_mask`): an exception of NCBI's
@@ -689,12 +694,19 @@ impl Volume {
         };
         let reads_seqids = alias.is_some() || user.is_some_and(|rule| rule.rule.reads_seqids());
         let adjusted;
-        let set = if volume_start > 0 && reads_seqids && super::has_ordinal_tag(set) {
+        let set = if volume_start > 0 && super::has_ordinal_tag(set) {
             let mut copy = set.clone();
-            super::adjust_ordinal_tags(&mut copy, volume_start)
-                .map_err(|error| error.error(&self.base, volume_start + oid))?;
-            adjusted = copy;
-            &adjusted
+            match super::adjust_ordinal_tags(&mut copy, volume_start) {
+                Ok(_) => {
+                    adjusted = copy;
+                    &adjusted
+                }
+                // A taxid rule compares no Seq-id: NCBI's sum past a signed 32-bit id raises no
+                // exception and changes none of its tests, and the reports adjust the kept lines
+                // again where they read them.
+                Err(super::OrdinalTagError::PastSigned32) if !reads_seqids => set,
+                Err(error) => return Err(error.error(&self.base, volume_start + oid)),
+            }
         } else {
             set
         };
@@ -785,39 +797,33 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the reads of the volume may leave a sequence without a line: its rule is a seqid
-    /// list's, positive or negative, an alias file's id list reaches it, or its `OID_MASK_TYPE`
-    /// erases model lines (`SeqDb::drops_lineless_hits`).
-    pub(super) fn may_drop_every_line(&self) -> bool {
-        self.exclude_model
-            || self.alias_lines.is_some()
-            || self
-                .defline_rule
-                .as_ref()
-                .is_some_and(|line_rule| line_rule.rule.reads_seqids())
-    }
-
-    /// Whether the volume's rule is a negative seqid list's with at least one id
-    /// (`SeqDb::excludes_lineless_at_fetch`).
-    pub(super) fn has_negative_seqid_ids(&self) -> bool {
+    /// Whether the volume's rule is a negative seqid list's, also one the version 5 processing
+    /// emptied (`SeqDb::excludes_lineless_at_fetch`).
+    pub(super) fn has_negative_seqid_list(&self) -> bool {
         self.defline_rule.as_ref().is_some_and(|line_rule| {
-            matches!(&*line_rule.rule, super::filter::DeflineRule::NegativeSeqids(ids) if !ids.is_empty())
+            matches!(
+                &*line_rule.rule,
+                super::filter::DeflineRule::NegativeSeqids(_)
+            )
         })
     }
 
     /// Whether the volume's reads keep a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none or the erasure of model
-    /// lines leaves none; the reader's error for a tag that NCBI's read cannot adjust (NCBI's
-    /// `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
-    pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
-        if !self.may_drop_every_line() {
-            return Ok(true);
+    /// `SeqDb::line_read`): false only where the list's rule or the alias files' lists keep none
+    /// or the erasure of model lines leaves none; the reader's error for a tag that NCBI's read
+    /// cannot adjust (NCBI's `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of
+    /// `filtered_mask`. With it, whether the record holds a UTF8String where a VisibleString is
+    /// expected (`DeflineSet::utf8`; false where the volume filters no line, which leaves the
+    /// record unread here).
+    pub(super) fn line_read(&self, oid: u32) -> Result<(bool, bool), SeqDbError> {
+        if !self.filters_lines() {
+            return Ok((true, false));
         }
-        let (record, path) = self.header_record(oid)?;
-        let set = decode_full(&record, path)?;
-        Ok(self
+        let set = self.with_header_record(oid, decode_full)?;
+        let kept = self
             .filtered_mask(oid, &set)?
-            .is_some_and(|mask| mask.contains(&true)))
+            .is_some_and(|mask| mask.contains(&true));
+        Ok((kept, set.utf8))
     }
 
     /// `decoded`, the definition lines of `record` (one sequence's header), without those
@@ -860,13 +866,14 @@ impl Volume {
     /// no list's rule and no erasure of model lines, as NCBI reads the volume searched bare
     /// (`SeqDb::read_stored_header_of_oid`).
     pub fn stored_header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        match decode_deflines_as(&record, path, oid, true) {
-            Err(error) if error.is_parsed_seqids() => {
-                decode_full(&record, path).map(VolumeHeader::Parsed)
+        self.with_header_record(oid, |record, path| {
+            match decode_deflines_as(record, path, oid, true) {
+                Err(error) if error.is_parsed_seqids() => {
+                    decode_full(record, path).map(VolumeHeader::Parsed)
+                }
+                read => read.map(VolumeHeader::Ordinal),
             }
-            read => read.map(VolumeHeader::Ordinal),
-        }
+        })
     }
 
     /// Whether the volume's reads remove a definition line of the sequence `oid`
@@ -879,8 +886,7 @@ impl Volume {
         if !self.filters_lines() {
             return Ok(false);
         }
-        let (record, path) = self.header_record(oid)?;
-        let set = decode_full(&record, path)?;
+        let set = self.with_header_record(oid, decode_full)?;
         let Some(mask) = self.list_mask(oid, &set)? else {
             return Ok(true);
         };
@@ -942,8 +948,9 @@ impl Volume {
     /// not applied (`SeqDb::has_parsed_seqids`, which checks the stored first header of each
     /// volume).
     pub(super) fn stored_deflines(&self, oid: u32) -> Result<Vec<Defline>, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        decode_deflines_as(&record, path, oid, false)
+        self.with_header_record(oid, |record, path| {
+            decode_deflines_as(record, path, oid, false)
+        })
     }
 
     /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid`, as NCBI's
@@ -951,13 +958,14 @@ impl Volume {
     /// taxids of the same decode). The reads of the stored titles (`deflines`, `visit_deflines_as`)
     /// decode the taxid; only `stored_deflines` skips it.
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
-        let (record, path) = self.header_record(oid)?;
-        self.kept_lines(
-            oid,
-            &record,
-            path,
-            decode_deflines_as(&record, path, oid, want_taxid),
-        )
+        self.with_header_record(oid, |record, path| {
+            self.kept_lines(
+                oid,
+                record,
+                path,
+                decode_deflines_as(record, path, oid, want_taxid),
+            )
+        })
     }
 
     /// The offsets in the sequence file of nucleotide `oid` (volume-relative): `(start of its
@@ -1026,8 +1034,8 @@ impl Volume {
                 message: format!("sequence {named}: the ambiguity offset lies outside its data"),
             });
         }
-        let last = file.read_range(amb_start - 1, amb_start)?;
-        let length = packed_length(start, amb_start, last[0]);
+        let last = file.with_range(amb_start - 1, amb_start, |last| last[0])?;
+        let length = packed_length(start, amb_start, last);
         if length > i32::MAX as u64 {
             return Err(SeqDbError::Format {
                 path: file.path().to_path_buf(),
@@ -1074,11 +1082,12 @@ impl Volume {
         let mut runs = Vec::new();
         if u64::from(amb_start) < u64::from(next) {
             let file = self.seq_file()?;
-            let words: Vec<u32> = file
-                .read_range(u64::from(amb_start), u64::from(next))?
-                .chunks_exact(4)
-                .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
-                .collect();
+            let words: Vec<u32> =
+                file.with_range(u64::from(amb_start), u64::from(next), |data| {
+                    data.chunks_exact(4)
+                        .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
+                        .collect()
+                })?;
             runs = decode_ambiguity_runs(&words).map_err(|message| SeqDbError::Format {
                 path: file.path().to_path_buf(),
                 message: format!("sequence {named}: {message}"),

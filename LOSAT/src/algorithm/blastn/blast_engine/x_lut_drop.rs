@@ -50,7 +50,9 @@ static DROPPED: AtomicU64 = AtomicU64::new(0);
 
 /// The end of a batch's preliminary stage: the batch's tables are dropped here, where NCBI's
 /// traceback stage drops its table, and the keep of the loop's last batch (`last_keep`: no build
-/// follows) frees its table.
+/// follows, `BatchStage::x_last_tables`) frees its table. That keep was closed to `qs` when these
+/// tables were built (EXPERIMENT LOSAT_X_CSRQSKEEP, `Keep::close_qs` in `search_query_batch`), so a
+/// last CSR frees its own `qs` when its table drops here, as before the switch.
 pub(super) fn after_prelim(tables: LookupTables, last_keep: Option<&Keep>) {
     if tables.two_stage_lookup.is_some()
         || tables.pv_direct_lookup.is_some()

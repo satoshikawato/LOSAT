@@ -29,6 +29,7 @@ fn the_title_joins_the_later_deflines_with_their_ids() {
             defline(text_ids("emb|X00001.2|"), None),
             defline(vec![], Some("no ids")),
         ],
+        utf8: false,
     };
     assert_eq!(
         set.bioseq_title(),
@@ -60,6 +61,7 @@ fn the_short_header_has_three_forms() {
     let header = |ids: Vec<ParsedSeqId>, range, minus| {
         let set = DeflineSet {
             deflines: vec![defline(ids, Some("title"))],
+            utf8: false,
         };
         let config = Config {
             strand_minus: minus,
@@ -90,6 +92,31 @@ fn the_short_header_has_three_forms() {
         header(text_ids("gi|654321|gb|AB000002.3|"), Some((4, 19)), true),
         ">AB000002.3:c20-5 title\n"
     );
+}
+
+/// A front line without Seq-ids (an edited header; NCBI's `ProcessFastaDeflines` finds no first
+/// id) gives no header line at all; a later one only adds its title (line RG D1c-1c-b).
+#[test]
+fn a_front_line_without_ids_writes_no_short_header() {
+    let set = DeflineSet {
+        deflines: vec![
+            defline(vec![], Some("delta1")),
+            defline(text_ids("ref|NP_000006.1|"), Some("delta2")),
+        ],
+        utf8: false,
+    };
+    let mut out = Vec::new();
+    short_header(&set, None, &Config::default(), &mut out).unwrap();
+    assert!(out.is_empty());
+    let set = DeflineSet {
+        deflines: vec![
+            defline(text_ids("ref|NP_000002.1|"), Some("beta1")),
+            defline(vec![], Some("beta2")),
+        ],
+        utf8: false,
+    };
+    short_header(&set, None, &Config::default(), &mut out).unwrap();
+    assert_eq!(out, b">NP_000002.1 beta1 beta2\n");
 }
 
 #[test]

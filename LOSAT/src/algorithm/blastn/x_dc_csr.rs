@@ -155,29 +155,54 @@ pub struct Csr {
     x_bits: Vec<u64>,
     qs: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the batch loop's keep that takes `offsets` back when the CSR
-    /// is dropped, with `Keep::take_buffer`'s length and written elements (`x_kept`).
-    x_keep: Option<(std::sync::Arc<super::x_mb_lut_keep::Keep>, usize, usize)>,
+    /// is dropped, with `Keep::take_buffer`'s length and written elements (`x_kept`), and
+    /// whether it is offered `qs` too (LOSAT_X_CSRQSKEEP, `x_kept_with_qs`).
+    x_keep: Option<(
+        std::sync::Arc<super::x_mb_lut_keep::Keep>,
+        usize,
+        usize,
+        bool,
+    )>,
 }
 
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): `offsets` goes back to the batch loop's keep when the build
-// took its buffer from it (`x_kept`).
+// took its buffer from it (`x_kept`); EXPERIMENT (LOSAT_X_CSRQSKEEP) then, for a discontiguous
+// build (`x_kept_with_qs`), `qs` (with the switch off, or once the keep is closed for the loop's
+// last tables, it stays here and is freed with the CSR, as before).
+// No NCBI counterpart (memory only): where the CSR's arrays go when its batch drops it.
 impl Drop for Csr {
     fn drop(&mut self) {
-        if let Some((keep, length, dirty)) = self.x_keep.take() {
+        if let Some((keep, length, dirty, qs_back)) = self.x_keep.take() {
             keep.give_back_buffer(std::mem::take(&mut self.offsets), length, dirty);
+            if qs_back {
+                keep.give_back_qs(&mut self.qs);
+            }
         }
     }
 }
 
 impl Csr {
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the CSR whose `offsets` goes back to `keep` when it is
-    /// dropped (`take` = `Keep::take_buffer`'s length and written elements).
+    /// dropped (`take` = `Keep::take_buffer`'s length and written elements). Its `qs` is freed
+    /// with it (a contiguous build, `x_bn_csr`).
     pub(super) fn x_kept(
         mut self,
         keep: &std::sync::Arc<super::x_mb_lut_keep::Keep>,
         take: (usize, usize),
     ) -> Self {
-        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1));
+        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1, false));
+        self
+    }
+
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_kept` for a discontiguous build, which took the kept `qs`
+    /// (`Keep::take_qs`): its `qs` goes back to `keep` after its `offsets` (`Keep::give_back_qs`).
+    /// No NCBI counterpart (memory only).
+    pub(super) fn x_kept_with_qs(
+        mut self,
+        keep: &std::sync::Arc<super::x_mb_lut_keep::Keep>,
+        take: (usize, usize),
+    ) -> Self {
+        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1, true));
         self
     }
 
@@ -235,6 +260,49 @@ impl Csr {
     fn qs(&self) -> &[u32] {
         &self.qs
     }
+
+    /// No NCBI counterpart (tests only): whether the two CSRs hold the same arrays (`offsets`,
+    /// packed head bits and `qs`, each to its length).
+    #[cfg(test)]
+    pub(super) fn x_same_arrays(&self, other: &Csr) -> bool {
+        self.offsets == other.offsets && self.x_bits == other.x_bits && self.qs == other.qs
+    }
+
+    /// No NCBI counterpart (tests only, LOSAT_X_CSRQSKEEP): the address of `qs`'s buffer.
+    #[cfg(test)]
+    pub(super) fn x_qs_ptr(&self) -> *const u32 {
+        self.qs.as_ptr()
+    }
+}
+
+/// No NCBI counterpart (tests only, LOSAT_X_CSRQSKEEP): `build` (one CSR build, given the kept `qs`
+/// it passes to `x_mb_lut_keep::qs_buffer`) on a kept `qs` of stale values with exactly the room
+/// that `fresh` (the same build given `None`) allocated, which it takes, and on one an element
+/// shorter, which it frees for a fresh one: both give `fresh`'s arrays (a build that allocated
+/// nothing, with no words, gets the keep's empty vector only). Panics on a difference.
+#[cfg(test)]
+pub(super) fn x_assert_same_on_a_kept_qs(
+    fresh: &Csr,
+    mut build: impl FnMut(Option<Vec<u32>>) -> Csr,
+    what: &str,
+) {
+    const STALE: u32 = 0xA5A5_A5A5;
+    let room = fresh.qs.capacity();
+    if room == 0 {
+        assert!(
+            build(Some(Vec::new())).x_same_arrays(fresh),
+            "{what}: none kept"
+        );
+        return;
+    }
+    let kept = vec![STALE; room];
+    let ptr = kept.as_ptr();
+    let on_kept = build(Some(kept));
+    assert!(on_kept.x_same_arrays(fresh), "{what}: on a kept qs");
+    assert_eq!(on_kept.qs.as_ptr(), ptr, "{what}: the kept qs taken");
+    let short = build(Some(vec![STALE; room - 1]));
+    assert!(short.x_same_arrays(fresh), "{what}: on a kept qs too small");
+    assert!(short.qs.capacity() >= room, "{what}: a fresh qs");
 }
 
 /// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the head of a CSR in one of
@@ -842,6 +910,7 @@ pub(super) fn build(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Option<Vec<u32>>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(!words.two_templates && cells.is_multiple_of(2048) && pv_array_bts >= 5);
@@ -891,7 +960,11 @@ pub(super) fn build(
     debug_assert_eq!(total as usize, n_words);
     // SAFETY: `cells < cells + 1`; `offsets[cells]` is no cell's end.
     unsafe { *ob.add(cells) = total };
-    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    // EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_qs` is the batch loop's kept `qs`, taken when it has room
+    // for the words, or `None`. No NCBI counterpart (memory only). The place pass below writes each
+    // of the places `0 .. n_words` once (the runs partition them) before anything reads one, so
+    // a kept `qs` needs no zeroing.
+    let mut qs: Vec<u32> = super::x_mb_lut_keep::qs_buffer(x_qs, n_words);
     let qb = qs.as_mut_ptr();
     each_word(words, |cell, index| {
         // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
@@ -1254,6 +1327,7 @@ pub(super) fn x_assert_runs_are_the_chains(
             pv_array_bts,
             &mut helper2,
             Vec::new(),
+            None,
         );
         if serial.offsets != csr.offsets || serial.qs != csr.qs || pv2 != pv || helper2 != helper {
             diffs.push("pool build != serial build".to_string());

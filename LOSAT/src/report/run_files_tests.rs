@@ -1,6 +1,8 @@
 use super::*;
 use std::sync::Mutex;
 
+use crate::blastinput::ncbi_environment::TextPlace as Place;
+
 #[derive(Default)]
 struct Kept(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
 
@@ -355,4 +357,459 @@ fn the_standard_error_file_writes_to_the_standard_error() {
         unreachable!()
     };
     assert_eq!(bytes.into_inner().unwrap(), b"collected\n");
+}
+
+/// The names of `-export_search_strategy` of a receiver (LOSAT Web, line RG's F1w), read as the
+/// command line on Linux opens them for writing, the name as typed (`strategy_name`), on the host
+/// and as the user of the `-logfile` model: a file of the run where the user makes files, NCBI's
+/// error where the command line cannot open the name (a directory, a name ending in `/`, a name in
+/// a directory of root's, a component of 256 bytes), the standard output's refusal, no file for the
+/// null device and the standard input, and LOSAT Web's refusal of the standard error, of the
+/// devices whose writes fail or wait for a reader, and of procfs's and mqueue's files.
+#[test]
+fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
+    use StrategyTarget as T;
+    let target = |name: &str| RunFiles::strategy_target(OsStr::new(name), &[]);
+    let long_component = "a".repeat(256);
+    let component_255 = "a".repeat(255);
+    for (name, read) in [
+        ("s.asn", T::File),
+        ("out/s.asn", T::File),
+        ("./s.asn", T::File),
+        (" s.asn", T::File),
+        ("../s.asn", T::File),
+        ("a/b/../s.asn", T::File),
+        ("/tmp/s.asn", T::File),
+        ("/dev/shm/s.asn", T::File),
+        ("/var/lock/s.asn", T::File),
+        ("/home/me/s.asn", T::File),
+        ("/proc/self/cwd/s.asn", T::File),
+        ("/proc/thread-self/cwd/s.asn", T::File),
+        (component_255.as_str(), T::File),
+        ("", T::Inaccessible),
+        (".", T::Inaccessible),
+        ("..", T::Inaccessible),
+        ("out/", T::Inaccessible),
+        ("out/.", T::Inaccessible),
+        ("/tmp", T::Inaccessible),
+        ("/tmp/", T::Inaccessible),
+        ("/s.asn", T::Inaccessible),
+        ("//s.asn", T::Inaccessible),
+        ("/etc/s.asn", T::Inaccessible),
+        ("/data/s.asn", T::Inaccessible),
+        ("/root/s.asn", T::Inaccessible),
+        ("/root/../tmp/s.asn", T::Inaccessible),
+        ("/dev/s.asn", T::Inaccessible),
+        ("/dev/kmsg", T::Inaccessible),
+        ("/dev/null/", T::Inaccessible),
+        ("/dev/null/s.asn", T::Inaccessible),
+        ("/proc/self/status", T::Inaccessible),
+        ("/proc/self/cwd", T::Inaccessible),
+        ("/sys/s.asn", T::Inaccessible),
+        (long_component.as_str(), T::Inaccessible),
+        ("/dev/stdout", T::StandardOutput),
+        ("/dev/fd/1", T::StandardOutput),
+        ("/proc/self/fd/1", T::StandardOutput),
+        ("/proc/thread-self/fd/1", T::StandardOutput),
+        ("/dev/null", T::Nowhere),
+        ("//dev/null", T::Nowhere),
+        ("/dev/zero", T::Nowhere),
+        ("/dev/random", T::Nowhere),
+        ("/dev/urandom", T::Nowhere),
+        ("/dev/stdin", T::Nowhere),
+        ("/proc/self/fd/0", T::Nowhere),
+        ("/dev/stderr", T::System),
+        ("/dev/fd/2", T::System),
+        ("/dev/full", T::System),
+        ("/dev/ptmx", T::System),
+        ("/dev/fuse", T::System),
+        ("/dev/net/tun", T::System),
+        ("/proc/self/comm", T::System),
+        ("/dev/mqueue/q", T::System),
+    ] {
+        assert_eq!(target(name), read, "{name:?}");
+    }
+}
+
+/// A strategy name that is the file of another option of the run, as the system resolves both
+/// (`-query`, `-subject` and `-window_masker_db` as typed, `-logfile` as NCBI reads it), with
+/// either name climbing more: LOSAT Web's refusal names the option. The standard input (`-`) and
+/// NCBI's special log names are no file of the run.
+#[test]
+fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
+    use StrategyTarget as T;
+    let target = |name: &str, others: &[(&'static str, &str)]| {
+        let others: Vec<RunFileName<'_>> = others
+            .iter()
+            .map(|&(option, name)| RunFileName {
+                option,
+                name: OsStr::new(name),
+            })
+            .collect();
+        RunFiles::strategy_target(OsStr::new(name), &others)
+    };
+    for (name, others, read) in [
+        ("q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
+        ("./q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
+        (
+            "/proc/self/cwd/q.fa",
+            vec![("query", "q.fa")],
+            T::OtherFile("query"),
+        ),
+        ("q.fa", vec![("query", "../x/../w/q.fa")], T::File),
+        (
+            "../w/q.fa",
+            vec![("query", "../x/../w/q.fa")],
+            T::OtherFile("query"),
+        ),
+        (
+            "../../a/q.fa",
+            vec![("query", "../../a/q.fa")],
+            T::OtherFile("query"),
+        ),
+        ("../a/q.fa", vec![("query", "../../a/q.fa")], T::File),
+        ("q.fa.asn", vec![("query", "q.fa")], T::File),
+        (
+            "/tmp/s.fa",
+            vec![("query", "q.fa"), ("subject", "/tmp/s.fa")],
+            T::OtherFile("subject"),
+        ),
+        ("./-", vec![("query", "-")], T::File),
+        (
+            "run.log",
+            vec![("logfile", "run.log")],
+            T::OtherFile("logfile"),
+        ),
+        (
+            "run.log",
+            vec![("logfile", " run.log")],
+            T::OtherFile("logfile"),
+        ),
+        ("logs", vec![("logfile", "logs/")], T::OtherFile("logfile")),
+        (
+            "../run.log",
+            vec![("logfile", "../run.log")],
+            T::OtherFile("logfile"),
+        ),
+        ("run.log", vec![("logfile", "../run.log")], T::File),
+        ("./-", vec![("logfile", "-")], T::File),
+        (
+            "wm.obinary",
+            vec![("window_masker_db", "wm.obinary")],
+            T::OtherFile("window_masker_db"),
+        ),
+    ] {
+        assert_eq!(target(name, &others), read, "{name:?} {others:?}");
+    }
+}
+
+/// The output file names of a receiver (`RunFiles::create`, `output_name`; line NP WW3a,
+/// 2026-11-22): a file in the run's working directory, also in a folder that the run's directory
+/// has; no file in a folder that it does not have or in a file of it, for a directory, a name in a
+/// directory of root's or one past a directory that a user cannot search; the standard output's
+/// names; the lost writes of the null device, of `/dev/zero`, of the random devices and of the
+/// standard input (the null device of LOSAT Web's run), and the failed ones of `/dev/full`; the
+/// names that LOSAT Web does not write (the standard error, the other devices that a user opens, the
+/// files of procfs and the queues of `/dev/mqueue`) and an existing file of the run's directory,
+/// which the command line empties; a file of that name outside the working directory where a user
+/// makes files.
+#[test]
+fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
+    let entry = |path: &[u8]| match path {
+        b"sub" | b"sub/deep" => Entry::Directory,
+        b"in.fa" | b"sub/f" => Entry::File,
+        _ => Entry::Missing,
+    };
+    let name = |name: &str| output_name(name.as_bytes(), &entry);
+    let long = "a".repeat(256);
+    for (given, expected) in [
+        ("c.counts", OutputName::File),
+        (" c.counts", OutputName::File),
+        ("sub/c.counts", OutputName::File),
+        ("sub/deep/c.counts", OutputName::File),
+        ("sub/../c.counts", OutputName::File),
+        ("./sub/./c.counts", OutputName::File),
+        ("../c.counts", OutputName::File),
+        ("/proc/self/cwd/c.counts", OutputName::File),
+        ("/tmp/c.counts", OutputName::File),
+        ("/home/me/c.counts", OutputName::File),
+        ("/etc/default/../../tmp/c.counts", OutputName::File),
+        ("nodir/c.counts", OutputName::Unopened),
+        ("nodir/../c.counts", OutputName::Unopened),
+        ("in.fa/c.counts", OutputName::Unopened),
+        ("/proc/self/cwd/nodir/c.counts", OutputName::Unopened),
+        ("sub", OutputName::Unopened),
+        ("sub/", OutputName::Unopened),
+        (".", OutputName::Unopened),
+        ("..", OutputName::Unopened),
+        ("sub/..", OutputName::Unopened),
+        ("/proc/self/cwd", OutputName::Unopened),
+        ("/tmp", OutputName::Unopened),
+        ("/c.counts", OutputName::Unopened),
+        ("/etc/c.counts", OutputName::Unopened),
+        ("/data/c.counts", OutputName::Unopened),
+        ("/root/../tmp/c.counts", OutputName::Unopened),
+        ("/proc/self/status", OutputName::Unopened),
+        ("/dev/fd/3", OutputName::Unopened),
+        ("/dev/kmsg", OutputName::Unopened),
+        ("", OutputName::Unopened),
+        (long.as_str(), OutputName::Unopened),
+        ("in.fa", OutputName::Existing),
+        ("sub/f", OutputName::Existing),
+        ("/proc/self/cwd/in.fa", OutputName::Existing),
+        ("/dev/stdout", OutputName::Stdout),
+        ("/dev/fd/1", OutputName::Stdout),
+        ("/proc/self/fd/1", OutputName::Stdout),
+        ("/proc/thread-self/fd/1", OutputName::Stdout),
+        ("/dev/stdin", OutputName::Discard),
+        ("/dev/null", OutputName::Discard),
+        ("//dev/null", OutputName::Discard),
+        ("/dev/zero", OutputName::Discard),
+        ("/dev/urandom", OutputName::Discard),
+        ("/dev/full", OutputName::Full),
+        ("/dev/stderr", OutputName::Special),
+        ("/dev/fd/2", OutputName::Special),
+        ("/dev/ptmx", OutputName::Special),
+        ("/proc/self/comm", OutputName::Special),
+        ("/dev/mqueue/q", OutputName::Special),
+    ] {
+        assert_eq!(name(given), expected, "{given:?}");
+    }
+}
+
+/// A receiver's output files (`OpenFiles::create`) in the working directory of this test (the
+/// crate's): a new name is a file in memory, which goes to the receiver under its whole name when
+/// the run's files end; a file of the directory is refused and a folder of it does not open, nor
+/// does a name in a folder that it does not have; the standard output's name is the run's, the
+/// null device's writes are lost and `/dev/full`'s fail. `Disk` makes the file on the file system.
+#[test]
+fn a_receiver_s_output_file_goes_to_the_receiver_when_the_run_ends() {
+    let kept = Arc::new(Kept::default());
+    let files = OpenFiles::new(&RunFiles::Receiver(kept.clone()));
+    let name = "ww3a-receiver-test.counts";
+    assert!(!std::path::Path::new(name).exists());
+    let Ok(Created::File(mut file)) = files.create(name) else {
+        panic!("a file in memory");
+    };
+    file.write_all(b"counts ").unwrap();
+    file.write_all(b"bytes").unwrap();
+    file.flush().unwrap();
+    drop(file);
+    assert!(
+        kept.0.lock().unwrap().is_empty(),
+        "nothing before the run's files end"
+    );
+    assert!(matches!(
+        files.create("Cargo.toml"),
+        Ok(Created::Refused(_))
+    ));
+    assert_eq!(files.create("src").err(), Some(Unopened));
+    assert_eq!(files.create("ww3a-no-such-folder/c").err(), Some(Unopened));
+    assert!(matches!(files.create("/dev/stdout"), Ok(Created::Stdout)));
+    let Ok(Created::File(mut null)) = files.create("/dev/null") else {
+        panic!("the null device");
+    };
+    assert_eq!(null.write(b"lost").unwrap(), 4);
+    let Ok(Created::File(mut full)) = files.create("/dev/full") else {
+        panic!("/dev/full");
+    };
+    assert_eq!(
+        full.write_all(b"x").unwrap_err().kind(),
+        io::ErrorKind::StorageFull
+    );
+    drop((null, full, files));
+    assert_eq!(
+        *kept.0.lock().unwrap(),
+        vec![(name.as_bytes().to_vec(), b"counts bytes".to_vec())],
+        "one file, none of the devices"
+    );
+    assert!(!std::path::Path::new(name).exists(), "no file on the disk");
+    // The command line's and the library's files are the file system's.
+    let directory = crate::utils::test_dir::temp_dir().join(format!(
+        "ww3a-disk-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("c.counts");
+    let disk = OpenFiles::new(&RunFiles::Disk);
+    let Ok(Created::File(mut file)) = disk.create(path.to_str().unwrap()) else {
+        panic!("a file of the file system");
+    };
+    file.write_all(b"on disk").unwrap();
+    drop(file);
+    assert_eq!(std::fs::read(&path).unwrap(), b"on disk");
+    assert_eq!(
+        disk.create(directory.join("no/c.counts").to_str().unwrap())
+            .err(),
+        Some(Unopened)
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// A receiver that takes its files as they are written (`FileReceiver::open`): the events of each
+/// file in order, `open`, each write at its offset, each change of length, `end` (line NP WW3a,
+/// D-WW3-6 and D-WW3-9).
+#[derive(Default)]
+struct Streamed(Arc<Mutex<Vec<String>>>);
+
+struct StreamedFile(String, Arc<Mutex<Vec<String>>>);
+
+impl FileStream for StreamedFile {
+    fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<()> {
+        let text = String::from_utf8_lossy(bytes);
+        self.1
+            .lock()
+            .unwrap()
+            .push(format!("{} @{offset} {text}", self.0));
+        Ok(())
+    }
+
+    fn set_len(&mut self, length: u64) -> io::Result<()> {
+        self.1
+            .lock()
+            .unwrap()
+            .push(format!("{} length {length}", self.0));
+        Ok(())
+    }
+}
+
+impl Drop for StreamedFile {
+    fn drop(&mut self) {
+        self.1.lock().unwrap().push(format!("{} end", self.0));
+    }
+}
+
+impl FileReceiver for Streamed {
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> io::Result<()> {
+        panic!("a whole file: {}", String::from_utf8_lossy(name));
+    }
+
+    fn open(&self, name: &[u8]) -> Option<Box<dyn FileStream>> {
+        let name = String::from_utf8_lossy(name).into_owned();
+        self.0.lock().unwrap().push(format!("{name} opened"));
+        Some(Box::new(StreamedFile(name, self.0.clone())))
+    }
+}
+
+/// A receiver that opens its files takes the bytes of an output file and of the file of
+/// `-logfile` as they are written, each at its offset, and the files end when the run's files end
+/// (the run's `OpenFiles` and every opening dropped), in the order they opened; the names that
+/// open no file stay as they are. A receiver that does not open them gets each whole, and the
+/// search's `RunFiles::log_target` keeps its file in memory (the files of a search, unchanged).
+#[test]
+fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
+    let streamed = Streamed::default();
+    let events = streamed.0.clone();
+    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(streamed)));
+    let Ok(Created::File(mut file)) = files.create("ww3a-streamed.counts") else {
+        panic!("a streamed file");
+    };
+    file.write_all(b"one").unwrap();
+    let log = files.log_target(Some(OsStr::new("ww3a-streamed.log")));
+    assert!(matches!(log, DiagTarget::Stream(_)));
+    assert_eq!(log.place(), Place::LogFile);
+    log.write_text(b"message", &mut io::sink());
+    file.write_all(b"two").unwrap();
+    drop(file);
+    assert!(matches!(files.create("/dev/stdout"), Ok(Created::Stdout)));
+    assert_eq!(files.create("src").err(), Some(Unopened));
+    assert!(matches!(
+        files.log_target(Some(OsStr::new("-"))),
+        DiagTarget::Stderr
+    ));
+    assert_eq!(events.lock().unwrap().len(), 5, "no end before the run's");
+    drop((log, files));
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "ww3a-streamed.counts opened",
+            "ww3a-streamed.counts @0 one",
+            "ww3a-streamed.log opened",
+            "ww3a-streamed.log @0 message",
+            "ww3a-streamed.counts @3 two",
+            "ww3a-streamed.counts end",
+            "ww3a-streamed.log end",
+        ]
+    );
+    assert!(!std::path::Path::new("ww3a-streamed.counts").exists());
+    // The default: whole files, from memory; a search's log in memory.
+    let kept = RunFiles::Receiver(Arc::new(Kept::default()));
+    assert!(matches!(
+        kept.log_target(Some(OsStr::new("ww3a-kept.log"))),
+        DiagTarget::Memory(_)
+    ));
+}
+
+/// A run that opens one file twice (`-logfile x` and then `-out x`, or `./x`) has one file, which
+/// the system shares between the openings (POSIX; NCBI BLAST+ 2.17.0 and LOSAT's command line on
+/// Linux, line NP WW3a's review M2, D-WW3-9, 2026-11-23): the output's opening empties it and
+/// writes from its own position, from 0, and the log's writes go to the file's end, so a message
+/// posted before the output's bytes is written over and one posted after them follows them. The
+/// receiver that streams gets the change of length and each write at its offset; the one that
+/// takes files whole gets one file with the same bytes.
+#[test]
+fn a_file_opened_twice_is_one_file_with_the_system_s_offsets() {
+    let streamed = Streamed::default();
+    let events = streamed.0.clone();
+    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(streamed)));
+    let log = files.log_target(Some(OsStr::new("ww3a-twice.out")));
+    log.write_text(b"pass 1\n", &mut io::sink());
+    let Ok(Created::File(mut out)) = files.create("./ww3a-twice.out") else {
+        panic!("the same file");
+    };
+    log.write_text(b"pass 2\n", &mut io::sink());
+    out.write_all(b"counts:").unwrap();
+    out.write_all(b"0123456789").unwrap();
+    log.write_text(b"done\n", &mut io::sink());
+    drop((out, log, files));
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "ww3a-twice.out opened",
+            "ww3a-twice.out @0 pass 1\n",
+            "ww3a-twice.out length 0",
+            "ww3a-twice.out @0 pass 2\n",
+            "ww3a-twice.out @0 counts:",
+            "ww3a-twice.out @7 0123456789",
+            "ww3a-twice.out @17 done\n",
+            "ww3a-twice.out end",
+        ]
+    );
+    // Whole: the same bytes, once.
+    let kept = Arc::new(Kept::default());
+    let files = OpenFiles::new(&RunFiles::Receiver(kept.clone()));
+    let log = files.log_target(Some(OsStr::new("ww3a-twice.out")));
+    log.write_text(b"pass 1\n", &mut io::sink());
+    let Ok(Created::File(mut out)) = files.create("ww3a-twice.out") else {
+        panic!("the same file");
+    };
+    log.write_text(b"a long message\n", &mut io::sink());
+    out.write_all(b"short").unwrap();
+    drop((out, log, files));
+    assert_eq!(
+        *kept.0.lock().unwrap(),
+        vec![(b"ww3a-twice.out".to_vec(), b"shortg message\n".to_vec())]
+    );
+}
+
+/// The path that names one file of a run (`file_key`): every name of the same path in the
+/// working directory, by the output's reading and by `-logfile`'s (which NCBI trims), and the
+/// same place above the working directory whatever the name's depth; other places differ.
+#[test]
+fn the_names_of_one_path_are_one_file() {
+    let out = |name: &str| output_key(name.as_bytes()).unwrap();
+    let log = |name: &str| log_key(name.as_bytes()).unwrap();
+    for same in ["./x", "sub/../x", "a/b/../../x", "/proc/self/cwd/x", ".//x"] {
+        assert_eq!(out(same), out("x"), "{same}");
+    }
+    assert_eq!(log("x"), out("x"));
+    assert_eq!(log(" ./x"), out("x"));
+    assert_eq!(out("../x"), out("a/../../x"));
+    assert_eq!(out("../../x"), out("../a/../../x"));
+    assert_ne!(out("../x"), out("x"));
+    assert_ne!(out("../x"), out("../../x"));
+    assert_ne!(out("sub/x"), out("x"));
+    assert_eq!(out("/tmp/x"), log("/tmp/x"));
+    assert_eq!(out("/var/lock/x"), out("/run/lock/x"));
+    assert_ne!(out("/tmp/x"), out("x"));
 }

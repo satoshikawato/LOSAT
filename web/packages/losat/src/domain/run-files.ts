@@ -1,7 +1,8 @@
 // The files of NCBI's application start and end that are not inputs or outputs of a search (line RG
 // item E1w-3b; docs/web/abi_v2.md §4, §5): the registry file of `-conffile`, which a host gives the
 // engine (`file_begin` kind 2), and the files that a run makes besides its outputs (stream 8: the file
-// of `-logfile NAME`), which the engine sends after the run as a ZIP archive of stored entries.
+// of `-logfile NAME` and, line RG item F1w, the search strategy file of `-export_search_strategy NAME`),
+// which the engine sends after the run as a ZIP archive of stored entries.
 
 /**
  * The registry file of `-conffile`: the file, under the name that the argv gives (the engine's
@@ -24,16 +25,49 @@ export interface DirectoryFile {
   readonly file: Blob;
 }
 
-/** A file that a run made besides its outputs (stream 8): the file of `-logfile NAME`, named NAME. */
+/**
+ * A file that a run made besides its outputs (stream 8): the file of `-logfile NAME` or of
+ * `-export_search_strategy NAME`, named NAME.
+ */
 export interface RunFile {
   readonly name: string;
   /** The bytes as the engine wrote them. */
   readonly bytes: Uint8Array;
+  /**
+   * The option that named the file (`runFileOption`): absent for the file of `-logfile`, as the
+   * runs kept before line RG item F1w have it.
+   */
+  readonly option?: RunFileOption;
+}
+
+/** The options whose files a run makes besides its outputs (stream 8), without the hyphen. */
+export type RunFileOption = 'logfile' | 'export_search_strategy';
+
+/** The option that named a file of a run (`RunFile.option`; `logfile` where it is absent). */
+export function runFileOption(file: RunFile): RunFileOption {
+  return file.option ?? 'logfile';
+}
+
+/**
+ * The files of a run (stream 8) with the option that named each, which the engine's *start* of the
+ * argv gives (ABI v2 §9: `log_file`, `strategy_file`): a file of a name that both give is the file
+ * of `-logfile`, as the engine refuses a strategy file that is the file of `-logfile`. A file that
+ * neither names is an error of the engine.
+ */
+export function namedRunFiles(
+  files: readonly RunFile[],
+  start: { readonly logFile: string | null; readonly strategyFile: string | null },
+): RunFile[] {
+  return files.map((file) => {
+    if (file.name === start.logFile) return { name: file.name, bytes: file.bytes };
+    if (file.name === start.strategyFile) return { name: file.name, bytes: file.bytes, option: 'export_search_strategy' };
+    throw new Error(`the engine's archive of the run's files (ABI v2 stream 8) has a file that the argv does not name: ${JSON.stringify(file.name)}`);
+  });
 }
 
 /**
  * What a run prints in place of a search, as the command line does (ABI v2 §5, stream 11; the *start*
- * field `prints`, §9): its help (`-h`, `-help`, `-help-full`, `--help`, and the XML of `-xmlhelp`), or its
+ * field `prints`, §9): its help (`-h`, `-help`, `-help-full`, and the XML of `-xmlhelp`), or its
  * version (`-version`, `-version-full`, `-version-full-xml`, `-version-full-json`). Such a run needs no
  * inputs and searches nothing. Line WQA's D14, 2026-11-20.
  */

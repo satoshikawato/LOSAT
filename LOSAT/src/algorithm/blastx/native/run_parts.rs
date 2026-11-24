@@ -89,16 +89,10 @@ impl RunSetup {
         archive_slot.clone_from(&archive);
         // The search strategy's request, with the archive's options handle.
         let strategy = strategy_file.map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            crate::report::archive::strategy::StrategyExport::for_args(
+                args,
                 file,
-                archive::option_inputs(args),
                 choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs.map(|count| count as usize),
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.db.as_deref().map(crate::seqdb::db_argument_name),
                 &options_handle,
             )
         });
@@ -275,6 +269,7 @@ impl ArchiveBatch<'_> {
                         results,
                         options.gapped,
                         ReportedAsks::default(),
+                        &mut *diagnostics,
                     )? {
                         None => ReportedSubjects::default(),
                         Some(titles) => ReportedSubjects::for_batch(

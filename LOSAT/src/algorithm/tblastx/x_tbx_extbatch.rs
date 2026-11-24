@@ -249,8 +249,9 @@ unsafe fn apply<M: TbxScore>(
         usize,
     ),
 ) {
-    // [C] if (right_extend) { flag = 1; last_hit = s_last_off - (wordsize - 1) + diag_offset; }
-    // [C] else { last_hit = subject_offset + diag_offset; }  (flag stays 0)
+    // On a right extension, set `flag` to 1 and `last_hit` to the extension end `s_last_off`
+    // less `wordsize - 1`, biased by `diag_offset`; otherwise `last_hit` is the subject offset
+    // biased by `diag_offset` and `flag` stays 0.
     let raw = if right_extend {
         FLAG_BIT | ((s_last_off_u as i32 - (h.wordsize - 1) + h.diag_offset) as u32 & LAST_HIT_BITS)
     } else {
@@ -360,7 +361,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
     loop {
         // SAFETY: as above, for every read and write of `entry` below.
         let raw = unsafe { (*entry).raw_bits() };
-        // [C] if (diag_array[diag_coord].flag)
+        // Check whether the diagonal cell's `flag` bit is set.
         if raw & FLAG_BIT != 0 {
             let last_hit = raw & LAST_HIT_BITS;
             if last_hit < BATCH as u32 {
@@ -369,14 +370,14 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
                 unsafe { resolve_early::<_, SENT>(b, last_hit as usize, diag_ptr, h) };
                 continue;
             }
-            // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
+            // Skip the hit if the offset-adjusted subject position precedes `last_hit`
+            // (signed `Int4` comparison in NCBI; Rust compares unsigned).
             let subject_plus_offset = subject_offset.wrapping_add(diag_offset as u32);
             // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             if subject_plus_offset < unsafe { (*entry).last_hit() } as u32 {
                 return;
             }
-            // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
-            // [C] diag_array[diag_coord].flag = 0;
+            // Otherwise record the new offset-adjusted `last_hit` and clear `flag`.
             // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             unsafe {
                 (*entry).set_last_hit(subject_plus_offset as i32);
@@ -384,12 +385,12 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
             }
             return;
         }
-        // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
+        // Recover the previous hit's subject offset by subtracting `diag_offset`.
         // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
         let last_hit = unsafe { (*entry).last_hit() } - diag_offset;
-        // [C] diff = subject_offset - last_hit;
+        // Compute the subject distance from `last_hit` to `subject_offset`.
         let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
-        // [C] if (diff >= window)
+        // Outside the two-hit window: record this hit as the new `last_hit` and return.
         if diff >= window {
             // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             unsafe {
@@ -397,15 +398,15 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
             };
             return;
         }
-        // [C] if (diff < wordsize)
+        // Overlapping word hit: ignore without updating `last_hit`.
         if diff < wordsize {
             return;
         }
-        // [C] curr_context = BSearchContextInfo(query_offset, query_info);
+        // Look up the query context containing `query_offset` (as `BSearchContextInfo`).
         let ctx_idx = h.context_of(query_offset);
         // SAFETY: context_of returns an index below num_contexts == contexts.len().
         let ctx = unsafe { h.contexts.get_unchecked(ctx_idx) };
-        // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
+        // Reject hits whose earlier partner lies before the start of the current query context.
         let q_minus_diff = query_offset.wrapping_sub(diff as u32);
         if q_minus_diff < ctx.frame_base as u32 {
             // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
@@ -415,7 +416,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
             return;
         }
         let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32);
-        // [C] cutoffs = word_params->cutoffs + curr_context;
+        // Load the X-dropoff parameter for the current query context.
         // SAFETY: ctx_idx < contexts.len() == x_dropoff_per_context.len().
         let x_drop = unsafe { *h.x_dropoff_per_context.get_unchecked(ctx_idx) };
         // The extension's first reads: the word at the second hit and the residues before it in
@@ -510,7 +511,7 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
         len: usize,
     ) -> (u64, u64) {
-        self.scan_unit_batched_hits::<S, PF, false, 0>(unit, inp, scratch, init_hsps, len)
+        self.scan_unit_batched_hits::<S, PF, false, false, 0>(unit, inp, scratch, init_hsps, len)
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -525,6 +526,7 @@ impl<M: TbxScore> XPairPar<M> {
         S: XInitSink,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -537,10 +539,10 @@ impl<M: TbxScore> XPairPar<M> {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (x_pair_par.rs
         // module doc), as in `scan_unit_hits`.
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF, SENT>(
+            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF, STEP, SENT>(
                 unit, inp, scratch, init_hsps, len, 0,
             ),
-            Some(mask) => self.scan_unit_batched_masked::<S, PF, BF, SENT>(
+            Some(mask) => self.scan_unit_batched_masked::<S, PF, BF, STEP, SENT>(
                 unit, inp, scratch, init_hsps, len, mask,
             ),
         }
@@ -550,7 +552,13 @@ impl<M: TbxScore> XPairPar<M> {
     // `scan_unit_masked`.
     /// `scan_unit_batched_cells` with `XMasked`.
     #[inline(never)]
-    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool, const SENT: usize>(
+    fn scan_unit_batched_masked<
+        S: XInitSink,
+        const PF: bool,
+        const BF: bool,
+        const STEP: bool,
+        const SENT: usize,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -559,7 +567,7 @@ impl<M: TbxScore> XPairPar<M> {
         len: usize,
         mask: u32,
     ) -> (u64, u64) {
-        self.scan_unit_batched_cells::<S, XMasked, PF, BF, SENT>(
+        self.scan_unit_batched_cells::<S, XMasked, PF, BF, STEP, SENT>(
             unit, inp, scratch, init_hsps, len, mask,
         )
     }
@@ -574,6 +582,7 @@ impl<M: TbxScore> XPairPar<M> {
         C: XCells,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -690,7 +699,7 @@ impl<M: TbxScore> XPairPar<M> {
                     // SAFETY: as in `scan_unit_hits`; every candidate's cell is a cell of this
                     // unit's table.
                     unsafe {
-                        x_tbx_hitbf::x_hits_bf::<C, PF>(
+                        x_tbx_hitbf::x_hits_bf::<C, PF, STEP>(
                             diag_ptr,
                             offset_pairs_ptr,
                             hits as usize,

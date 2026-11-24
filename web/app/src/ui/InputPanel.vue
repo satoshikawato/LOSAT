@@ -23,12 +23,14 @@ import {
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { programById, residueUnit, sequenceKind } from '../domain/programs';
 import HelpTip from './HelpTip.vue';
+import { searchFormModel } from './form-model';
 import LosatLoader from './LosatLoader.vue';
 import ParameterField from './ParameterField.vue';
 import RegionPicker from './RegionPicker.vue';
 import SourceCard from './SourceCard.vue';
 
 const props = defineProps<{ draft: SearchDraft; state: DraftState; role: InputRole }>();
+const formModel = computed(() => searchFormModel(props.draft, props.state));
 const title = computed(() => (props.role === 'query' ? 'Query' : 'Subject'));
 const roleState = computed(() => props.state[props.role]);
 const program = computed(() => programById(props.state.program));
@@ -306,7 +308,7 @@ function onDrop(event: DragEvent): void {
       </div>
     </div>
 
-    <ParameterField v-for="field in codeFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
+    <ParameterField v-for="field in codeFields" :key="field.flag" :model="formModel" :field="field" />
     <p v-if="subjectCodeNote" class="note" data-testid="subject-gencode-note">
       Results with this code can differ from NCBI BLAST+, which translates local subjects otherwise (approved LOSAT exception).
     </p>

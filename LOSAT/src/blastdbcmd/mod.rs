@@ -52,6 +52,9 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: Some("blastdbcmd"),
     components: &[],
+    help_full: None,
+    short_description: None,
+    write_failure: None,
     dry_run: None,
 };
 
@@ -93,7 +96,7 @@ fn run_body(
         Err(reason) => return diag.refuse(&refusal(reason)),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
-    let mut out = match args.output_file("out", out) {
+    let mut out_file = match args.output_file("out", out) {
         Ok(out) => out,
         Err(error) => {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
@@ -103,16 +106,24 @@ fn run_body(
             return 1;
         }
     };
-    // NCBI's `ostream` of `-out` for every mode: a failed write drops the later ones, and a
-    // closed pipe ends the program where SIGPIPE ends NCBI's (`files::Ostream`).
-    let mut out = Ostream::new(&mut out);
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
+    // `-out` is opened, before the database (windowmasker's and makeprofiledb's place and words).
+    if let Some(reason) = out_file.refusal() {
+        return diag.refuse(&output_refusal(reason));
+    }
+    // NCBI's `ostream` of `-out` for every mode but `-metadata`, which takes `out_file` itself
+    // (`metadata::metadata`): a failed write drops the later ones, and a closed pipe ends the
+    // program where SIGPIPE ends NCBI's (`files::Ostream`).
+    let mut out = Ostream::new(&mut out_file);
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,
         Err(error) => return database_error(diag, error),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
     if args.given("show_blastdb_search_path") {
-        let _ = writeln!(out, "{}", path.as_str());
+        // NCBI inserts the path and ends the line with a flush, so the line goes out in one
+        // write.
+        let _ = out.write_all(format!("{}\n", path.as_str()).as_bytes());
         let _ = out.flush();
         return 0;
     }
@@ -163,7 +174,7 @@ fn run_body(
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, args, &path, diag, &mut out);
+            return metadata::metadata(&db, name, args, &path, diag, out_file);
         }
         if args.given("tax_info") {
             return taxonomy::tax_info(&db, args, diag, &mut out);
@@ -218,6 +229,12 @@ fn run_body(
 /// LOSAT's refusal of a database (`algorithm::common::database::refusal`).
 fn refusal(reason: &str) -> String {
     crate::algorithm::common::database::refusal(reason, PROGRAM).to_string()
+}
+
+/// LOSAT's refusal of a `-out` that LOSAT Web does not write (`OutputFile::Refused`), in the words
+/// of the other programs' refusal of it (`seqmasks_io::run::unsupported`), not a database's.
+fn output_refusal(reason: &str) -> String {
+    crate::seqmasks_io::run::unsupported(reason, PROGRAM)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153

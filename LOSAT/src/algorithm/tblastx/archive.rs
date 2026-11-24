@@ -44,6 +44,23 @@ use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 
+/// What a TBLASTX run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for TblastxArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs,
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
+
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
@@ -326,6 +343,7 @@ fn for_each_batch(
                 search_space,
                 length_adjustment,
                 searched_space: batch_searched_space(searched, stats),
+                round: None,
             };
             each(span, &batch)
         })?;
@@ -345,12 +363,12 @@ pub(super) fn write_tblastx_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
-        rps: false,
         db_title: match data.subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: false,
+        program_type: None,
     };
     for_each_batch(data, |span, batch| {
         for index in span.clone() {
@@ -359,9 +377,9 @@ pub(super) fn write_tblastx_archives(
         let mut aligns = TblastxAligns {
             run: RunRecord {
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             data,
             span,

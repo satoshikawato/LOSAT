@@ -498,13 +498,9 @@ impl HspStream {
 
     /// The lists of the closed stream, in their order, as `cut` leaves them (`Runtime::batch_end`:
     /// without the subjects that the fetches of the redo or the traceback exclude).
-    pub fn retain_closed<E>(
-        &mut self,
-        cut: impl FnOnce(&mut Vec<HspList>) -> Result<(), E>,
-    ) -> Result<(), E> {
-        match self.sorted.as_mut() {
-            Some(sorted) => cut(sorted),
-            None => Ok(()),
+    pub fn retain_closed(&mut self, cut: impl FnOnce(&mut Vec<HspList>)) {
+        if let Some(sorted) = self.sorted.as_mut() {
+            cut(sorted);
         }
     }
 
@@ -743,6 +739,24 @@ impl CompoHeap {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
+    /// The heap as `common::database::redo_fetches` reads it at a match's turn, `before` telling
+    /// whether a record's subject came before the match in the redo.
+    pub fn redo_heap(
+        &self,
+        before: impl Fn(usize) -> bool,
+    ) -> crate::algorithm::common::database::RedoHeap {
+        crate::algorithm::common::database::RedoHeap {
+            ecutoff: self.cutoff,
+            heap_threshold: self.threshold,
+            inserted_before: self
+                .entries
+                .iter()
+                .filter(|entry| entry.list.best_evalue <= self.cutoff && before(entry.list.oid))
+                .count(),
+            ends_early: true,
+        }
+    }
+
     pub fn early(e: f64, heaps: &[Self]) -> bool {
         heaps
             .iter()

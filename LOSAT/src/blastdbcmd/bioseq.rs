@@ -100,17 +100,11 @@ impl DbBioseq {
         if made {
             source.post_bioseq_texts(oid, &set, target.as_ref(), out)?;
         }
-        let shown = kept.as_ref().unwrap_or(&set);
-        let Some(defline) = shown.deflines.first() else {
-            return Ok(());
-        };
-        if defline.ids.is_empty() {
-            return Err(Stop::Refused(format!(
-                "a definition line without Seq-ids is not supported by LOSAT's {}",
-                super::PROGRAM
-            )));
-        }
-        if !made {
+        // A front line without Seq-ids (makeblastdb writes none; an edited header) makes a Bioseq
+        // of no ids, as NCBI's: each formatter reads it as NCBI's does (`fasta::short_header`
+        // writes no header line, a range or a mask of it throws, `%b` writes the empty list;
+        // line RG D1c-1c-b).
+        if !made || kept.as_ref().unwrap_or(&set).deflines.is_empty() {
             return Ok(());
         }
         let bioseq = DbBioseq {
@@ -135,6 +129,7 @@ fn target_set(set: &DeflineSet, target_id: &ParsedSeqId) -> Result<DeflineSet, S
     };
     Ok(DeflineSet {
         deflines: vec![set.deflines[index].clone()],
+        utf8: set.utf8,
     })
 }
 

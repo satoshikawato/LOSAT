@@ -38,6 +38,23 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
 use crate::utils::seg::SegParams;
 
+/// What a TBLASTN run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for TblastnArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs,
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
+
 /// The recorded options of a TBLASTN run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). A run of `-in_pssm` is PSI-TBLASTN's
@@ -280,6 +297,9 @@ pub(super) struct ArchiveData<'a> {
     pub seg: Option<&'a SegParams>,
     pub mask_lowercase: bool,
     pub ranges: &'a ReportRanges<'a>,
+    /// The run's program type (`RunRecord::program_type`, `in_pssm::program_type`): PSI-TBLASTN's
+    /// results carry no query masks (`report::record::carries_query_masks`).
+    pub program_type: Option<crate::report::record::ProgramType>,
 }
 
 /// Calls `each` with the queries and the archive of each batch of `spans`, in order
@@ -301,8 +321,8 @@ fn for_each_batch(
         let first = span.start;
         let searched = !data.query_batch_skipped[first];
         // Only a searched batch has results masks (the search made them): they are computed per
-        // batch.
-        let masks = if searched {
+        // batch; a PSSM search's results have none.
+        let masks = if searched && crate::report::record::carries_query_masks(data.program_type) {
             query_record_masks(records, first, data.seg, data.mask_lowercase, data.ranges)
         } else {
             Vec::new()
@@ -360,6 +380,7 @@ fn for_each_batch(
                     &data.queries[first],
                     data.query_validity[first],
                 ),
+                round: None,
             };
             each(span, &batch)
         })?;
@@ -380,11 +401,11 @@ pub(super) fn write_tblastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,
-        rps: false,
         db_title: data.shown.db_title(),
         // NCBI's `CBlastFormatUtil`/`CBlastSeqalign` builds Std-seg diagonals for an ungapped
         // translated search (`report::serial::seqalign`).
         gapped: data.gapped.is_some(),
+        program_type: None,
     };
     for_each_batch(data, render.spans, |span, batch| {
         for index in span.clone() {
@@ -394,9 +415,9 @@ pub(super) fn write_tblastn_archives(
         let mut aligns = TblastnAligns {
             run: RunRecord {
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             queries: data.queries,
             first,

@@ -9,6 +9,7 @@
 //! makeblastdb on files made by a fuzzer.
 
 use super::*;
+use crate::report::serial::asn_types::Post;
 use crate::seqid::model::{Dbtag, IdPat, ObjectId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId};
 use crate::writedb::WriteDbError;
 use std::collections::BTreeMap;
@@ -577,13 +578,13 @@ fn posts_equal_what_makeblastdb_posts() {
             let mut warned = false;
             let mut post = |reader: &mut MaskFileReader| {
                 for post in reader.take_posts() {
-                    if matches!(post, MaskPost::Utf8Tag(_)) {
+                    if matches!(post, Post::Utf8Tag(_)) {
                         if warned {
                             continue;
                         }
                         warned = true;
                     }
-                    posted.extend_from_slice(&post.line());
+                    posted.extend_from_slice(&post.line(Some("makeblastdb")));
                 }
             };
             let complete = |list: &MaskList| {
@@ -1608,4 +1609,27 @@ fn text_files_read_one_byte_per_read() {
             );
         }
     }
+}
+
+/// The members and variants that the reader's builder takes by position are the table's, in the
+/// table's module order, and the values of `Blast-filter-program` in the table are LOSAT's one
+/// list of them (`seqdb::mask::FILTER_PROGRAMS`).
+#[test]
+fn the_builder_takes_the_tables_members_and_values() {
+    use crate::report::serial::asn_types::table::named;
+    use crate::report::serial::asn_types::{members, resolved, Kind};
+    for (ty, names) in super::reader::MEMBER_ORDER {
+        let table: Vec<&str> = members(ty).iter().map(|m| m.name()).collect();
+        assert_eq!(table, names, "{ty}");
+    }
+    let Kind::Enumerated { integer, values } = resolved(named::BLAST_FILTER_PROGRAM).kind else {
+        panic!("Blast-filter-program is an INTEGER with named values")
+    };
+    assert!(integer);
+    let table: Vec<(&str, i32)> = values
+        .values()
+        .iter()
+        .map(|value| (value.name(), value.value))
+        .collect();
+    assert_eq!(table, crate::seqdb::mask::FILTER_PROGRAMS);
 }

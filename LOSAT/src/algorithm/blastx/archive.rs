@@ -35,6 +35,23 @@ use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
 
+/// What a BLASTX run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for BlastxArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs.map(|count| count as usize),
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
+
 /// The recorded options of a BLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
@@ -421,6 +438,7 @@ fn with_batch(
                 search_space: first.search_space,
                 length_adjustment: first.length_adjustment,
                 searched_space: batch_searched_space(call.batches, options),
+                round: None,
             })
         },
     )
@@ -437,12 +455,17 @@ pub(crate) fn write_blastx_archive(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
-        rps: call.batch.options.rpstblastn.is_some(),
         db_title: match &call.names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: call.batch.options.gapped,
+        program_type: call
+            .batch
+            .options
+            .rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn),
     };
     // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
     // of a subject with HSPs of letters in two, and makes alignments without scores of a subject

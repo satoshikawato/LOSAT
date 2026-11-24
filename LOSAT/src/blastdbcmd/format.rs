@@ -422,12 +422,10 @@ impl DeflineFields {
         }
         if wants(b"ai") {
             let Some(best) = find_best(&defline.ids, text_score) else {
-                // NCBI dereferences the null choice (it crashes on a definition line
-                // without Seq-ids).
-                return Err(Stop::Refused(format!(
-                    "a definition line without Seq-ids is not supported by LOSAT's {}",
-                    super::PROGRAM
-                )));
+                // NCBI dereferences the null choice of a definition line without Seq-ids: its
+                // request posts the exception's message, after the records before it (line RG
+                // D1c-1c-b).
+                return Err(super::retrieve::null_pointer());
             };
             fasta(best, &mut fields.seq_id);
             bare(best, &mut fields.accession);

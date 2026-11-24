@@ -8,15 +8,17 @@
 // its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles). A run that printed the command line's help or
 // version in place of a search has that text as its one output, "Help" or "Version" (PrintedText; line WQA's D14, 2026-11-20).
 import { computed, ref, useId, watch } from 'vue';
-import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
-import { OutputReader } from '../application/outputs';
+import { OutputReader, OutputSaver } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
 import { commandWords } from '../domain/argv';
+import { fromText } from '../domain/input-parts';
 import { isBinaryOutput, outfmtOf } from '../domain/output-format';
 import CommandText from './CommandText.vue';
 import { placeParts } from './message-place-text';
 import PlaceWords from './PlaceWords.vue';
+import OptionName from './OptionName.vue';
 import OutputText from './OutputText.vue';
 import PrintedText from './PrintedText.vue';
 import RunFiles from './RunFiles.vue';
@@ -85,7 +87,7 @@ const tabs = computed(() => [
     : [
         {
           value: FILES as Tab,
-          label: `-logfile ${runFiles.value.map((file) => file.name).join(', ')}`,
+          label: runFiles.value.map((file) => `-${runFileOption(file)} ${file.name}`).join(', '),
           testid: 'format-run-files',
           id: `${ids}-tab-${FILES}`,
           panel: `${ids}-panel`,
@@ -94,6 +96,19 @@ const tabs = computed(() => [
       ]),
 ]);
 const reader = new OutputReader(props.coordinator);
+/**
+ * The query and subject that are files of LOSAT's (pasted text, several files, records left out): the command names them, and the
+ * user needs them to run it. A failed run keeps its inputs too, so its Outputs offer them as well (line WQA's D22, 2026-11-23;
+ * the failed run: its review of round 5, L1).
+ */
+const madeInputs = computed(() =>
+  (['query', 'subject'] as const).flatMap((role) => {
+    const input = props.run.snapshot[role];
+    return input.from !== undefined ? [{ role, name: input.name, from: fromText(input.from) }] : [];
+  }),
+);
+const inputSaver = new OutputSaver(props.coordinator);
+const inputProblem = useStore(inputSaver.problem);
 const output = useStore(reader.state);
 // The reader keeps the latest choice: a later one may be read first.
 // A run that printed a text in place of a search has no output to read.
@@ -121,6 +136,12 @@ watch(
         <!-- The command as Run details shows it: a line does not break after an option's leading hyphen (line WQA's sweep, D7, 2026-11-20). -->
         Command: <code data-testid="result-command"><CommandText :words="commandWords(run.snapshot.argv, format)" /></code>
       </p>
+      <!-- Where the command names a file that LOSAT made, the user needs it to run the command (line WQA's D22, 2026-11-23). -->
+      <p v-for="made in madeInputs" :key="made.role" class="command" :data-testid="`outputs-${made.role}-file`">
+        <OptionName :name="`-${made.role}`" /> {{ made.name }} is {{ made.from }}.
+        <button type="button" class="link" :data-testid="`outputs-${made.role}-download`" @click="inputSaver.saveInput(run, made.role)">Download {{ made.name }}</button>
+      </p>
+      <p v-if="inputProblem" class="results-message error" role="alert" data-testid="outputs-input-problem">{{ inputProblem }}</p>
       <p v-if="notWritten !== undefined" class="results-message" data-testid="outputs-not-written">
         outfmt {{ outfmtOf(run.snapshot.argv, format) }} could not be written: its error is <PlaceWords :parts="notWritten" />.
       </p>

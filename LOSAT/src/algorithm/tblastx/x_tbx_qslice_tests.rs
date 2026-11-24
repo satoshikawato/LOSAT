@@ -158,27 +158,30 @@ fn scan_sliced_variant<S: XInitSink, M: TbxScore, const SENT: usize>(
     got: &mut S,
 ) {
     match variant {
-        0 => pp
-            .scan_unit_sliced_hits::<_, false, false, false, SENT>(sliced, unit, inp, scratch, got),
-        1 => {
-            pp.scan_unit_sliced_hits::<_, false, true, false, SENT>(sliced, unit, inp, scratch, got)
-        }
-        2 => {
-            pp.scan_unit_sliced_hits::<_, true, false, false, SENT>(sliced, unit, inp, scratch, got)
-        }
-        3 => {
-            pp.scan_unit_sliced_hits::<_, true, true, false, SENT>(sliced, unit, inp, scratch, got)
-        }
-        4 => {
-            pp.scan_unit_sliced_hits::<_, false, false, true, SENT>(sliced, unit, inp, scratch, got)
-        }
-        5 => {
-            pp.scan_unit_sliced_hits::<_, false, true, true, SENT>(sliced, unit, inp, scratch, got)
-        }
-        6 => {
-            pp.scan_unit_sliced_hits::<_, true, false, true, SENT>(sliced, unit, inp, scratch, got)
-        }
-        _ => pp.scan_unit_sliced_hits::<_, true, true, true, SENT>(sliced, unit, inp, scratch, got),
+        0 => pp.scan_unit_sliced_hits::<_, false, false, false, false, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        1 => pp.scan_unit_sliced_hits::<_, false, true, false, false, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        2 => pp.scan_unit_sliced_hits::<_, true, false, false, false, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        3 => pp.scan_unit_sliced_hits::<_, true, true, false, false, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        4 => pp.scan_unit_sliced_hits::<_, false, false, true, true, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        5 => pp.scan_unit_sliced_hits::<_, false, true, true, true, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        6 => pp.scan_unit_sliced_hits::<_, true, false, true, true, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
+        _ => pp.scan_unit_sliced_hits::<_, true, true, true, true, SENT>(
+            sliced, unit, inp, scratch, got,
+        ),
     }
 }
 
@@ -310,7 +313,7 @@ fn slices_check<M: TbxScore>(sc: M, seed: u64) {
                 if pp.groups[g].lookup.longest_chain <= 0 {
                     continue;
                 }
-                let unit = XUnit { f, k: 0, chunk, g };
+                let unit = pp.x_unit(&inp, f, 0, chunk, g);
                 let mut reference: Vec<InitHSP> = Vec::new();
                 pp.scan_unit::<_, _, false>(
                     &unit,
@@ -404,7 +407,7 @@ fn slices_check<M: TbxScore>(sc: M, seed: u64) {
                     &mut compact,
                 );
                 let mut compact_bf: Vec<XUnitHsp> = Vec::new();
-                pp.scan_unit_sliced_hits::<_, true, false, true, 0>(
+                pp.scan_unit_sliced_hits::<_, true, false, true, true, 0>(
                     &pp.sliced.as_ref().unwrap()[g],
                     &unit,
                     &inp,

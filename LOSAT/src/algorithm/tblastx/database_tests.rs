@@ -124,7 +124,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
     let text = |database: &TblastxDatabase, ordinals: &[u32]| -> String {
         let ordered: Vec<TblastxHsp> = ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
         let mut titles = DatabaseTitles::new();
-        read_titles(database, &ordered, 0, &mut titles).unwrap();
+        read_titles(database, &ordered, 0, Default::default(), &mut titles).unwrap();
         String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
     };
     let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
@@ -315,6 +315,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
                         descriptions,
                         alignments,
                     },
+                    html: false,
                 };
                 assert_eq!(
                     pairwise_read_order(&ordered, &titles, reading),

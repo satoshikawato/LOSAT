@@ -279,4 +279,22 @@ describe('Back and Forward between the Search and Results tabs', () => {
     expect(seen.scrollRestoration).toBe('manual');
     expect(tab.page!.shown).toBe('search');
   });
+
+  it('switching between Search and WindowMasker stays on the form entry, and Back from Results returns to WindowMasker', () => {
+    const tab = new FakeTab();
+    tab.page!.choose('windowmasker');
+    expect(tab.own()).toEqual([null]);
+    expect(tab.index).toBe(1);
+    tab.run();
+    expect(tab.own()).toEqual([null, results(1)]);
+    tab.go(-1);
+    expect(tab.page!.shown).toBe('windowmasker');
+    tab.go(+1);
+    expect(tab.page!.shown).toBe('results');
+    tab.page!.choose('search');
+    tab.settle();
+    expect(tab.page!.shown).toBe('search');
+    tab.go(-1);
+    expect(tab.left).toBe(true);
+  });
 });

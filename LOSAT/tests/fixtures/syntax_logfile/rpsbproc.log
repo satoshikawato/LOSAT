@@ -1,0 +1,2 @@
+Error: Unknown argument: "bogus"
+Error:  (CArgException::eInvalidArg) Unknown argument: "bogus"

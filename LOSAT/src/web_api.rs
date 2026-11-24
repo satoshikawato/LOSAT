@@ -79,7 +79,7 @@ impl FastaStore {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
-// catch (const std::exception& e) { LOG_POST(Error << "Error: " << e.what()); }
+// Catch standard exceptions and report their message through `LOG_POST`.
 // Preserve the Rust engine context and its underlying cause across the ABI.
 fn engine_error(err: anyhow::Error) -> String {
     format!("{err:#}")
@@ -179,7 +179,8 @@ fn take_search_space_arg(
     searchsp: &mut Option<i64>,
     dbsize: &mut Option<i64>,
 ) -> Result<bool, String> {
-    use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+    use crate::blastinput::value_parsers::ncbi_int8;
+    use crate::web_v1_argv::nonnegative_ncbi_int8;
     let flag = args[*index];
     let (name, joined) = match flag.split_once('=') {
         Some((name, value)) => (name, Some(value)),
@@ -249,7 +250,8 @@ fn parse_blastn_args(
         penalty: None,
         gap_open: None,
         gap_extend: None,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48
+        // Default DUST settings: `kDustLevel` 20, `kDustWindow` 64, `kDustLinker` 1.
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
@@ -336,14 +338,14 @@ fn parse_blastn_args(
         } else if flag == "-evalue" {
             // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
             args.evalue = Some(
-                crate::blastinput::value_parsers::blastn_evalue(next_arg(
+                crate::blastinput::value_parsers::ncbi_double(next_arg(
                     extra_args, &mut index, flag,
                 )?)
                 .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = Some(
-                crate::blastinput::value_parsers::blastn_evalue(value)
+                crate::blastinput::value_parsers::ncbi_double(value)
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else {
@@ -379,7 +381,7 @@ fn parse_tblastx_args(
     let mut args = tblastx::TblastxArgs {
         query,
         subject: Some(subject),
-        // A database search is not part of LOSAT Web yet (DB-7).
+        // The frozen web ABI v1 (plan TD-1) has no database search.
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
@@ -410,7 +412,8 @@ fn parse_tblastx_args(
         html_links: None,
         max_hsps: None,
         qcov_hsp_perc: None,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85
+        // Default SEG parameters from `kSegWindow`, `kSegLocut`, and `kSegHicut`.
         seg: "yes".to_string(),
         soft_masking: None,
         sum_stats: None,

@@ -8,14 +8,16 @@
 // finished shows its status here (RunStatus) until it completes. Every view follows one
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
-import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
-import type { Coordinator, RunView } from '../application/coordinator';
+import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
+import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionCountsEntry } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
+import { fromText, inputLabel, leavesOut } from '../domain/input-parts';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
+import { windowMaskerStageById } from '../domain/tools';
 import { withUnit } from '../domain/units';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -36,13 +38,18 @@ import RunStatus from './RunStatus.vue';
 import { vScrollFocus } from './scroll-focus';
 import SubjectTable from './SubjectTable.vue';
 import TabList from './TabList.vue';
+import ToolRunView from './ToolRunView.vue';
 import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly RunView[] }>();
-/** "Run a search" of the empty results page: the Search tab. */
-const emit = defineEmits<{ search: [] }>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[] }>();
+/** "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts"). */
+const emit = defineEmits<{
+  search: [];
+  'use-in-blastn': [file: File];
+  'mask-with-counts': [entry: SessionCountsEntry];
+}>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
@@ -71,7 +78,8 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 /**
  * "Download All" lists the outputs of the run, as NCBI's lists its formats, by BLAST+'s names of
  * them (its -outfmt help), the output of the run's own -outfmt with its value (W10, W11), then the
- * files that the run made besides its outputs (the file of -logfile; line RG E1w-3b); the one
+ * files that the run made besides its outputs (the file of -logfile; line RG E1w-3b), and the query and subject that are
+ * files of LOSAT's, which the command names (pasted, combined, or with records left out; line WQA's D22); the one
  * chosen is saved as one file (WA-RS-05). The list opens in the page's flow, under the run's line,
  * so that it fits a phone's width; an output that is not saved says why there, until the next
  * download or another run (WA2-BR-01).
@@ -79,6 +87,7 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 type DownloadItem = { readonly key: string; readonly label: string; readonly testid: string } & (
   | { readonly format: RunOutput }
   | { readonly runFile: number }
+  | { readonly input: 'query' | 'subject' }
   | { readonly printed: true }
 );
 const downloads = computed(() => {
@@ -95,8 +104,13 @@ const downloads = computed(() => {
     const name = FORMAT_NAMES[formatNumber(custom) ?? 0];
     items.push({ key: 'format-custom', format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
   }
+  // The file of a query or subject that is not a file of the user's as given, which the run's command names (line WQA's D22).
+  for (const role of ['query', 'subject'] as const) {
+    const input = prints === undefined ? loaded.value?.run.snapshot[role] : undefined;
+    if (input?.from !== undefined) items.push({ key: `input-${role}`, input: role, label: `${input.name} (-${role})`, testid: `results-download-${role}` });
+  }
   (loaded.value?.run.record.runFiles ?? []).forEach((file, index) =>
-    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-logfile)`, testid: `results-download-run-file-${index}` }),
+    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-${runFileOption(file)})`, testid: `results-download-run-file-${index}` }),
   );
   return items;
 });
@@ -115,6 +129,7 @@ function download(item: DownloadItem): void {
   if (run === undefined) return;
   if ('format' in item) void saver.save(run, item.format);
   else if ('printed' in item) void saver.savePrinted(run);
+  else if ('input' in item) void saver.saveInput(run, item.input);
   else void saver.saveRunFile(run, item.runFile);
 }
 
@@ -154,6 +169,8 @@ defineExpose({ showHeading });
 /** Every run of the working session, newest first: a run without results says why. */
 const choices = computed(() => [...props.runs].reverse());
 const selected = computed(() => props.runs.find((run) => run.snapshot.runId === state.value.runId));
+const selectedSearch = computed(() => (selected.value !== undefined && !isToolRun(selected.value) ? selected.value : undefined));
+const selectedTool = computed(() => (selected.value !== undefined && isToolRun(selected.value) ? selected.value : undefined));
 const loaded = computed(() => state.value.loaded);
 /** The selected run waits or searches: its status is shown in place of its results. */
 const active = computed(() => selected.value !== undefined && !isTerminal(selected.value.status));
@@ -164,21 +181,34 @@ watch([() => state.value.runId, () => state.value.phase], () => {
   saver.reset();
 });
 
-// With no run chosen, show the newest completed one.
+// With no run chosen, show the newest completed run (or failed tool run that wrote outputs).
 watch(
-  () => props.runs.filter((run) => run.status === 'completed').at(-1)?.snapshot.runId,
+  () =>
+    props.runs
+      .filter((run) => run.status === 'completed' || (isToolRun(run) && run.record.exitStatus !== undefined))
+      .at(-1)?.snapshot.runId,
   (runId) => {
     if (runId !== undefined && state.value.runId === undefined) void props.results.open(runId);
   },
   { immediate: true },
 );
 
-function runLabel(run: RunView): string {
+function runLabel(run: AnyRunView): string {
+  if (isToolRun(run)) {
+    const { number, stage } = run.snapshot;
+    const status =
+      run.status === 'completed'
+        ? ''
+        : run.status === 'failed' && run.record.exitStatus !== undefined
+          ? ` (exit status ${run.record.exitStatus})`
+          : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
+    return `Run ${number} · WindowMasker · ${windowMaskerStageById(stage).label}${status}`;
+  }
   const { number, program, query, subject, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
-  // The inputs are named as the user gave them (a compressed file by its own name). A run that prints the command line's help
+  // The inputs are named as the user gave them (a compressed file by its own name), a file that LOSAT made by what it is made of. A run that prints the command line's help
   // or version reads none, so it names none (line WQA's D21, the review of D20's F2, 2026-11-23).
-  const files = prints === undefined ? ` · ${query.name} vs ${subject.name}` : '';
+  const files = prints === undefined ? ` · ${inputLabel(query)} vs ${inputLabel(subject)}` : '';
   return `Run ${number} · ${programById(program).label}${files}${status}`;
 }
 
@@ -192,7 +222,7 @@ function options(run: RunView): readonly string[] {
 
 /** The program and the task that the search used (the argv's, or the engine's default once the run is read). */
 const programText = computed(() => {
-  const run = selected.value;
+  const run = selectedSearch.value;
   if (run === undefined) return '';
   const task = loaded.value?.run.snapshot.runId === run.snapshot.runId ? loaded.value.task : undefined;
   const label = programById(run.snapshot.program).label;
@@ -200,7 +230,7 @@ const programText = computed(() => {
   return task === undefined || run.snapshot.prints !== undefined ? label : `${label} (task ${task})`;
 });
 const units = computed(() => {
-  const program = selected.value === undefined ? undefined : programById(selected.value.snapshot.program);
+  const program = selectedSearch.value === undefined ? undefined : programById(selectedSearch.value.snapshot.program);
   return program === undefined ? { query: '', subject: '' } : { query: residueUnit(program.query), subject: residueUnit(program.subject) };
 });
 const plural = (count: number, one: string) => `${formatCount(count)} ${count === 1 ? one : `${one}s`}`;
@@ -224,9 +254,9 @@ async function toAlignments(id: HspId): Promise<void> {
     <template v-else>
       <div class="results-top">
         <dl class="results-summary" data-testid="results-summary">
-          <template v-if="selected?.snapshot.title">
+          <template v-if="selectedSearch?.snapshot.title">
             <dt>Job Title</dt>
-            <dd class="results-title" data-testid="results-job-title">{{ selected.snapshot.title }}</dd>
+            <dd class="results-title" data-testid="results-job-title">{{ selectedSearch.snapshot.title }}</dd>
           </template>
           <dt>Run</dt>
           <dd class="results-run">
@@ -250,7 +280,7 @@ async function toAlignments(id: HspId): Promise<void> {
               </select>
             </label>
             <button
-              v-if="state.phase === 'ready'"
+              v-if="state.phase === 'ready' && loaded"
               ref="downloadsButton"
               type="button"
               class="link"
@@ -261,16 +291,29 @@ async function toAlignments(id: HspId): Promise<void> {
             >
               Download All
             </button>
-            <ul v-if="state.phase === 'ready' && downloadsOpen" :id="downloadsId" ref="downloadsList" class="download-list" data-testid="results-download-menu">
+            <ul v-if="state.phase === 'ready' && loaded && downloadsOpen" :id="downloadsId" ref="downloadsList" class="download-list" data-testid="results-download-menu">
               <li v-for="item in downloads" :key="item.key">
                 <button type="button" :data-testid="item.testid" @click="download(item)">{{ item.label }}</button>
               </li>
             </ul>
-            <p v-if="state.phase === 'ready' && downloadProblem" class="results-message error" role="alert" data-testid="results-download-problem">
+            <p v-if="state.phase === 'ready' && loaded && downloadProblem" class="results-message error" role="alert" data-testid="results-download-problem">
               {{ downloadProblem }}
             </p>
           </dd>
-          <template v-if="selected">
+          <template v-if="selectedTool">
+            <dt>Tool</dt>
+            <dd class="results-program">
+              <span data-testid="results-program">WindowMasker · {{ windowMaskerStageById(selectedTool.snapshot.stage).label }}</span>
+            </dd>
+            <dt>Options</dt>
+            <dd class="run-inputs" data-testid="results-run-options">
+              <CommandText :words="selectedTool.snapshot.argv.slice(1)" :takes-value="state.grammar?.takesValue" />
+              <template v-if="selectedTool.snapshot.group">
+                · group run {{ selectedTool.snapshot.group.position }} of {{ selectedTool.snapshot.group.size }}
+              </template>
+            </dd>
+          </template>
+          <template v-else-if="selectedSearch">
             <dt>Mode</dt>
             <dd class="results-program">
               <span data-testid="results-program">{{ programText }}</span>
@@ -278,30 +321,37 @@ async function toAlignments(id: HspId): Promise<void> {
             </dd>
             <dt>Options</dt>
             <dd class="run-inputs" data-testid="results-run-options">
-              <CommandText v-if="options(selected).length > 0" :words="options(selected)" :takes-value="state.grammar?.takesValue" />
+              <CommandText v-if="options(selectedSearch).length > 0" :words="options(selectedSearch)" :takes-value="state.grammar?.takesValue" />
               <template v-else>defaults</template>
-              <template v-if="selected.snapshot.group">
-                · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
+              <template v-if="selectedSearch.snapshot.group">
+                · group run {{ selectedSearch.snapshot.group.position }} of {{ selectedSearch.snapshot.group.size }}
               </template>
             </dd>
-            <!-- A run that printed the command line's help or version read no input (line WQA's D20, S3-1, 2026-11-23). -->
-            <template v-if="selected.snapshot.prints === undefined">
-              <template v-if="selected.snapshot.query.records.length === 1">
-                <dt>Query ID</dt>
-                <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>
-                <dt>Query Length</dt>
-                <dd data-testid="results-query-length">{{ withUnit(formatCount(selected.snapshot.query.records[0]!.length), units.query) }}</dd>
+            <!-- Records that the run's file leaves out, which its command and its name say no more of (line WQA's D22, 2026-11-23). -->
+            <template v-for="role in ['query', 'subject'] as const" :key="role">
+              <template v-if="leavesOut(selectedSearch.snapshot[role].from)">
+                <dt>{{ role === 'query' ? 'Query' : 'Subject' }} from</dt>
+                <dd :data-testid="`results-${role}-from`">{{ fromText(selectedSearch.snapshot[role].from!) }}</dd>
               </template>
-              <template v-if="selected.snapshot.subject.records.length === 1">
+            </template>
+            <!-- A run that printed the command line's help or version read no input (line WQA's D20, S3-1, 2026-11-23). -->
+            <template v-if="selectedSearch.snapshot.prints === undefined">
+              <template v-if="selectedSearch.snapshot.query.records.length === 1">
+                <dt>Query ID</dt>
+                <dd data-testid="results-query-id">{{ recordName(selectedSearch.snapshot.query.records[0]!.id, 'query', 0, selectedSearch.record.shownIds) }}</dd>
+                <dt>Query Length</dt>
+                <dd data-testid="results-query-length">{{ withUnit(formatCount(selectedSearch.snapshot.query.records[0]!.length), units.query) }}</dd>
+              </template>
+              <template v-if="selectedSearch.snapshot.subject.records.length === 1">
                 <dt>Subject ID</dt>
-                <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0, selected.record.shownIds) }}</dd>
+                <dd data-testid="results-subject-id">{{ recordName(selectedSearch.snapshot.subject.records[0]!.id, 'subject', 0, selectedSearch.record.shownIds) }}</dd>
                 <dt>Subject Length</dt>
-                <dd data-testid="results-subject-length">{{ withUnit(formatCount(selected.snapshot.subject.records[0]!.length), units.subject) }}</dd>
+                <dd data-testid="results-subject-length">{{ withUnit(formatCount(selectedSearch.snapshot.subject.records[0]!.length), units.subject) }}</dd>
               </template>
               <template v-else>
                 <dt>Subjects</dt>
                 <dd data-testid="results-subjects">
-                  {{ selected.snapshot.subject.name }}, {{ plural(selected.snapshot.subject.records.length, 'record') }}
+                  {{ inputLabel(selectedSearch.snapshot.subject) }}, {{ plural(selectedSearch.snapshot.subject.records.length, 'record') }}
                 </dd>
               </template>
             </template>
@@ -331,30 +381,40 @@ async function toAlignments(id: HspId): Promise<void> {
       <!-- A failed run keeps the output that the command line leaves before its error, as the Outputs of a completed
            run show it (line WQA's sweep, D15, 2026-11-20). -->
       <section
-        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && selected.result !== undefined && keptOutputsWritten(selected)"
+        v-if="state.phase === 'unavailable' && selectedSearch?.status === 'failed' && selectedSearch.result !== undefined && keptOutputsWritten(selectedSearch)"
         class="results-group failed-outputs"
         data-testid="results-failed-outputs"
       >
         <h3>Outputs</h3>
-        <OutputsView :key="selected.snapshot.runId" :coordinator="coordinator" :run="selected" :files="false" />
+        <OutputsView :key="selectedSearch.snapshot.runId" :coordinator="coordinator" :run="selectedSearch" :files="false" />
       </section>
       <!-- A failed run keeps the warnings that it wrote to the command line's standard error before its
            error (NCBI's "Subject sequence contains no data" before "The average subject length is too
            short"), as the engine wrote them (line WQA's sweep, D3, 2026-11-19). -->
       <section
-        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && selected.record.diagnostics?.trim()"
+        v-if="state.phase === 'unavailable' && selectedSearch?.status === 'failed' && selectedSearch.record.diagnostics?.trim()"
         class="results-group failed-warnings"
         data-testid="results-failed-warnings"
       >
         <h3>Warnings</h3>
-        <pre v-scroll-focus="'Warnings'" class="output" data-testid="results-failed-diagnostics">{{ selected.record.diagnostics }}</pre>
+        <pre v-scroll-focus="'Warnings'" class="output" data-testid="results-failed-diagnostics">{{ selectedSearch.record.diagnostics }}</pre>
       </section>
       <!-- A failed run keeps the file of its -logfile (TBLASTX's holds NCBI's error; line RG E1w-3b). -->
       <RunFiles
-        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && (selected.record.runFiles?.length ?? 0) > 0"
-        :key="selected.snapshot.runId"
+        v-if="state.phase === 'unavailable' && selectedSearch?.status === 'failed' && (selectedSearch.record.runFiles?.length ?? 0) > 0"
+        :key="selectedSearch.snapshot.runId"
         :coordinator="coordinator"
-        :run="selected"
+        :run="selectedSearch"
+      />
+
+      <ToolRunView
+        v-if="state.phase === 'ready' && state.toolRun"
+        :key="state.toolRun.snapshot.runId"
+        :coordinator="coordinator"
+        :run="state.toolRun"
+        :takes-value="state.grammar?.takesValue"
+        @use-in-blastn="emit('use-in-blastn', $event)"
+        @mask-with-counts="emit('mask-with-counts', $event)"
       />
 
       <template v-if="state.phase === 'ready' && loaded">

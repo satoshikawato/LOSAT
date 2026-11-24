@@ -21,8 +21,9 @@
 //! The cases of the column `losat` other than `same`: `refuse` (two algorithms that would write
 //! one GI-mask data file at the same time, which LOSAT refuses at the record that would open it:
 //! exit status 1, and what an error of NCBI's `SetMaskData` leaves, `REFUSED_LEFTOVERS`) and
-//! `parser` (an argument rule that LOSAT's parser checks: exit status 2 and no file, where
-//! makeblastdb prints its usage; LOSAT's message holds the sentence of makeblastdb's).
+//! `parser` (an argument rule of NCBI's argument reader, which LOSAT's makeblastdb reads with:
+//! makeblastdb's usage and posts, exit status 1 and no file, compared as `same`; line RG item
+//! K4i-2b).
 //!
 //! The expectations of a single-volume database built with `-gi_mask` are NCBI's run with the one
 //! change of PD-LOSAT-NCBI-DEFECTS approved exception 25 (`single_volume_exception` of the
@@ -495,29 +496,10 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
                 }
                 problems
             }
+            // NCBI's argument reader's error: makeblastdb's bytes, as `same`.
             "parser" => {
                 counts[2] += 1;
-                let files = listing(&case_dir, &put);
-                let mut problems = Vec::new();
-                if got.0 != 2 || !got.1.is_empty() || !files.is_empty() {
-                    problems.push(format!("not a parser error: {got:?}, files {files:?}"));
-                }
-                // makeblastdb's sentence of a dependency, in LOSAT's message.
-                let frozen =
-                    std::fs::read(dir.join("expected").join(format!("{}.stderr", case.name)))
-                        .unwrap();
-                let frozen = String::from_utf8_lossy(&losat::wording::losat_output_bytes(&frozen))
-                    .into_owned();
-                let sentence = frozen
-                    .lines()
-                    .find_map(|line| line.split_once("(CArgException::eConstraint) "))
-                    .map(|(_, sentence)| sentence);
-                if let Some(sentence) = sentence {
-                    if !got.2.contains(sentence) {
-                        problems.push(format!("not makeblastdb's sentence {sentence:?}: {got:?}"));
-                    }
-                }
-                problems
+                compare(&case, &case_dir, &put, got, started, &before)
             }
             other => vec![format!("unknown column {other:?}")],
         };
@@ -572,10 +554,10 @@ fn losat(dir: &Path, command: &str) -> (i32, String, String) {
 
 /// The database of one volume that `losat makeblastdb -gi_mask` writes opens (its alias file
 /// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 25), and LOSAT's
-/// programs that read sequences stop on its `MASKLIST` with LOSAT's refusal, before they print
-/// anything: they do not read GI masks yet (line NP item M4c-2).
+/// readers read its GI masks (line NP item M4c-2; `gi_mask_read.rs` compares their output with
+/// NCBI's on the same database).
 #[test]
-fn readers_refuse_the_gi_masks_of_a_single_volume_database() {
+fn readers_read_the_gi_masks_of_a_single_volume_database() {
     let inputs = fixtures().join("in");
     let tmp = TempDir::new("readers");
     for name in ["nucl.fa", "dust_nucl.asnb"] {
@@ -590,15 +572,21 @@ fn readers_refuse_the_gi_masks_of_a_single_volume_database() {
     let alias = std::fs::read_to_string(tmp.0.join("db.nal")).unwrap();
     assert!(alias.ends_with("\nDBLIST db\nMASKLIST gm1 \n"), "{alias:?}");
     assert!(tmp.0.join("db.njs").is_file());
-    let refusal = "unsupported database: alias file key MASKLIST is not supported";
+    let info = losat(&tmp.0, "blastdbcmd -db db -info");
+    assert_eq!((info.0, info.2.as_str()), (0, ""), "{info:?}");
+    assert!(
+        info.1.contains(
+            "\n0            dust                                    window=64; level=20; linker=1"
+        ),
+        "{info:?}"
+    );
     for command in [
-        "blastdbcmd -db db -info",
         "blastdbcmd -db db -entry all -outfmt %m0",
         "blastn -query nucl.fa -db db -db_soft_mask 0 -outfmt 6",
     ] {
         let got = losat(&tmp.0, command);
         assert!(
-            got.0 == 1 && got.1.is_empty() && got.2.contains(refusal),
+            got.0 == 0 && got.2.is_empty() && !got.1.is_empty(),
             "{command}: {got:?}"
         );
     }

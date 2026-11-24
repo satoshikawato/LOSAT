@@ -68,7 +68,7 @@ pub(crate) use super::extension::{
     convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with, QueryBatch,
 };
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
-pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};
+pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_frame, x_tbx_sent_subject};
 #[cfg(test)]
 pub(crate) use super::lookup::build_ncbi_lookup;
 pub(crate) use super::lookup::QueryContext;
@@ -167,6 +167,10 @@ pub(crate) struct TblastxBatch {
     /// batch pipe keeps here for the batch loop to print when it takes the batch; empty
     /// otherwise (the block is printed at the end of the search). No NCBI counterpart.
     pub x_timing: Vec<String>,
+    /// The first of the batch's re-evaluation fetches (`check_oid_exclusion`) that read a header
+    /// with a UTF8String where a VisibleString is expected (`FetchExcluded::excludes`, in
+    /// increasing ordinal): NCBI's warning comes there, before its Seq-aligns' reads.
+    pub fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
 pub(crate) struct WorkerState<S> {
@@ -271,7 +275,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:686-688
         let cutoff = cutoff_scores[hit.ctx_idx as usize];
 
-        // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
+        // Start of this context's residues in the query buffer (`query_blk->sequence` offset by `query_info->contexts[context].query_offset`).
         // query->sequence points past the leading NULLB sentinel.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315, c++/src/algo/blast/core/blast_util.c:112-116.
         let query_full = &ctx.aa_seq;
@@ -279,7 +283,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         let subject_full = &s_frame_scoring.aa_seq;
         let subject = &subject_full[1..subject_full.len() - 1];
 
-        // NCBI: query = query_start + hsp->query.offset (0-based offsets)
+        // Context-relative 0-based query and subject start offsets (`hsp->query.offset`).
         let qs = hit.q_aa_start as usize;
         let ss = hit.s_aa_start as usize;
         let len_u = (hit.q_aa_end as usize).saturating_sub(hit.q_aa_start as usize);

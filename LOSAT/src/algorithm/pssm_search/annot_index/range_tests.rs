@@ -108,6 +108,7 @@ fn map(text: &str, mode: Mode) -> HandleRangeMap {
 fn map_in(text: &str, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
     let value = location(text);
     HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, handles)
+        .expect("no element stated as NULL")
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (cited at

@@ -1,7 +1,7 @@
 // Runs the contract suites (tests/contract) against the implementations that work in Node.
 // The OPFS store and the cross-worker channel run the same suites in a browser
 // (tests/e2e/contracts.spec.ts).
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { RunOutputWriter, sha256Hex } from 'losat';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -87,4 +87,17 @@ describe('Engine input contract: FakeEngine', () => {
       }),
     );
   }
+});
+
+// The fake's argument error names an unknown option as NCBI's reader does: without its first dash
+// and without a value joined by `=` (line RG item K4i-2b round 2, T-L2).
+describe('FakeEngine argument errors', () => {
+  it('names -foo=3 as "foo", as NCBI splits the word at its first =', async () => {
+    const engine = new FakeEngine();
+    for (const [word, named] of [['-foo=3', 'foo'], ['-foo', 'foo'], ['--foo=3', '-foo']] as const) {
+      const result = await engine.validate(['blastp', '-evalue', '1', word]);
+      expect(result.ok, word).toBe(false);
+      expect(result.ok ? '' : result.message, word).toContain(`Error: Unknown argument: "${named}"\nError:  Unknown argument: "${named}"\n`);
+    }
+  });
 });

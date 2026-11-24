@@ -7,6 +7,7 @@
 use super::html_ids::HtmlHeading;
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi};
 use super::serial::asn_text::itoa_i32;
+use super::serial::seqalign::{AlignRow, RowRangeError};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
@@ -201,16 +202,18 @@ impl PairwiseView {
     }
 
     /// How a report of this view reads its subjects (`PairwiseReading`): `sort` as it reads it
-    /// (`report_sort`) and what it shows of each query (`shown`, `-num_descriptions` and
-    /// `-num_alignments`).
+    /// (`report_sort`), what it shows of each query (`shown`, `-num_descriptions` and
+    /// `-num_alignments`) and whether it is the `-html` report (`html`).
     pub fn reading(
         self,
         sort: super::hit_sort::ReportSort,
         shown: crate::report::db_subject::Shown,
+        html: bool,
     ) -> PairwiseReading {
         PairwiseReading {
             sort: self.report_sort(sort),
             shown,
+            html,
         }
     }
 
@@ -230,13 +233,15 @@ impl PairwiseView {
 
 /// How a pairwise report (outfmt 0 to 4) reads the subjects of each query, for the models of its
 /// reads made before it is written (`x_pairwise_par::QueryGroup::read_order`): the order of its
-/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`) and what it
-/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`), as its view's writer reads
-/// them (`PairwiseView::reading`).
+/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`), what it
+/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`) and whether it is the
+/// `-html` report (`html`, whose description lines end the run at a subject whose load throws:
+/// `db_subject::PairwiseReads::html`), as its view's writer reads them (`PairwiseView::reading`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PairwiseReading {
     pub sort: super::hit_sort::ReportSort,
     pub shown: crate::report::db_subject::Shown,
+    pub html: bool,
 }
 
 impl PairwiseConfig {
@@ -248,9 +253,9 @@ impl PairwiseConfig {
 
 /// `write_prolog`'s `html` of a report of `-html` links `links` (`None`: the plain report): the
 /// links and the sink of the report's posts (`QueryWarnings::html_posts_sink`: the run's
-/// diagnostics), which a `-html` pairwise report gets at any place among the run's formats
-/// (`query_warnings::report_posts`). One without them is LOSAT's internal error (its posts would
-/// be lost).
+/// diagnostics), which a `-html` report of outfmt 0 to 4 gets at any place among the run's
+/// formats (`query_warnings::report_posts`, `ReportFormat::writes_html_links`). One without them
+/// is LOSAT's internal error (its posts would be lost).
 pub(crate) fn html_with_diagnostics<'w>(
     links: Option<&'w super::html_ids::HtmlLinks>,
     warnings: Option<&'w mut super::query_warnings::QueryWarnings<'_>>,
@@ -362,16 +367,70 @@ impl PairwiseHit {
                 self.hit.sort_query_end as i64,
             )
     }
+
+    /// What `CSeq_align::GetSeqRange` of the row finds on the HSP's Seq-align as the engine made it
+    /// (`serial::seqalign::std_seg_row_range`): the empty rows of `rows_empty`, or the row that a
+    /// translated search's Smith-Waterman alignment starts with a gap in (RPSTBLASTN's
+    /// `-use_sw_tback`). The hits that keep their Seq-align's offsets (`has_sort_offsets`: BLASTX,
+    /// TBLASTN and TBLASTX) have Std-segs; the others' Dense-seg has a range in every row.
+    pub(crate) fn row_range(&self, row: AlignRow) -> Option<RowRangeError> {
+        if !self.hit.has_sort_offsets {
+            return None;
+        }
+        super::serial::seqalign::std_seg_row_range(
+            self.hit.sort_query_offset as i64,
+            self.hit.sort_query_end as i64,
+            self.hit.gap_info.as_deref().unwrap_or_default(),
+            row,
+        )
+    }
+}
+
+/// What `CSeq_align::GetSeqRange` of the row finds on the Seq-align of `hit`, of the subject whose hits are
+/// `hits`, as NCBI's formatters read it (`PairwiseHit::row_range`): `-subject`'s Seq-loc mapper
+/// (`remaps`) rewrites the empty query row of a subject with rows of letters into one nucleotide
+/// (`mapper_rewrites`; the empty subject row stays), and leaves out a first segment with a gap row
+/// (`serial::seqalign::std_seg_kept`).
+fn seen_row_range(
+    remaps: bool,
+    hits: &[&PairwiseHit],
+    hit: &PairwiseHit,
+    row: AlignRow,
+) -> Option<RowRangeError> {
+    let error = hit.row_range(row)?;
+    let seen = match (error, row) {
+        (RowRangeError::Empty, AlignRow::Query) => !mapper_rewrites(remaps, hits),
+        (RowRangeError::Empty, AlignRow::Subject) => true,
+        (RowRangeError::SeqidsNotConsistent, _) => !remaps,
+    };
+    seen.then_some(error)
+}
+
+/// The first exception of `GetSeqRange` where a formatter reads the ranges of `row` of every HSP of
+/// the subjects `oids` (their hits in `grouped`), in their order (`seen_row_range`).
+fn read_row_range<'a>(
+    remaps: bool,
+    mut oids: impl Iterator<Item = &'a u32>,
+    grouped: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
+    row: AlignRow,
+) -> Option<RowRangeError> {
+    oids.find_map(|oid| {
+        let hits = &grouped[oid];
+        hits.iter()
+            .find_map(|hit| seen_row_range(remaps, hits, hit, row))
+    })
 }
 
 /// Where `write_blastx_pairwise_report` stopped a query's report at an HSP with empty rows
-/// (`PairwiseHit::rows_empty`), as the error of its writes: which of NCBI's exceptions ends the
-/// report there (`algorithm::blastx::empty_rows`).
+/// (`PairwiseHit::rows_empty`) or a row that starts with a gap (`PairwiseHit::row_range`), as the
+/// error of its writes: which of NCBI's exceptions ends the report there
+/// (`algorithm::blastx::empty_rows`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EmptyRowsStop {
-    /// `CSeq_align::GetSeqRange(): Row is empty` (Seq_align.cpp:227): the description table, or a
-    /// sort's comparator, reads an empty row (after the query's `Length=`).
-    RowIsEmpty,
+    /// `CSeq_align::GetSeqRange`'s exception (`Row is empty`, Seq_align.cpp:227; `Row seqids not
+    /// consistent`, Seq_align.cpp:186): the description table, or a sort's comparator, reads a
+    /// row whose range it cannot take (after the query's `Length=`).
+    RowRange(RowRangeError),
     /// `CreateDensegFromStdseg(): Std-seg segment lengths not accurate!` (Seq_align.cpp:801): a
     /// sort's comparator or the alignment section makes a Dense-seg of `-subject`'s mapped
     /// Std-seg (before anything of the HSP), also the query-anchored section of outfmt 1 to 4
@@ -388,60 +447,55 @@ pub(crate) enum EmptyRowsStop {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4334-4335
 /// The exception at which NCBI's sorts of outfmt 0 (`-sorthits`, `-sorthsps` above 0, before the
 /// description table) stop a query's report whose hit list (`order`, the subjects' hits in
-/// `grouped`) holds an HSP with empty rows; `remaps`: `-subject`, whose Seq-loc mapper gives that
-/// HSP a query row of one nucleotide in a subject with rows of letters (`mapper_rewrites`; the
-/// rows of a subject of empty rows only stay as `-db`'s). `std::list::sort` compares every
-/// element of a list of two or more, so a comparator that reads an HSP's ranges reaches it:
+/// `grouped`) holds an HSP with a row whose range they cannot take (`seen_row_range`: empty rows,
+/// a row that starts with a gap); `remaps`: `-subject`, whose Seq-loc mapper gives an HSP of length
+/// 0 a query row of one nucleotide in a subject with rows of letters (`mapper_rewrites`; the rows
+/// of a subject of empty rows only stay as `-db`'s). `std::list::sort` compares every element of a
+/// list of two or more, so a comparator that reads an HSP's ranges reaches it:
 /// - the subjects by percent identity (`-sorthits 3`: `GetSeqAlignSetCalcPercentIdent` makes a
 ///   Dense-seg of every HSP, `GetAlignmentLength`): `-subject`'s mapped Std-seg throws (801), the
 ///   raw empty rows of `-db` give a length of 0;
-/// - the subjects by query coverage (`-sorthits 4`: `GetMasterCoverage`): `-db`'s empty query row
-///   (227), `-subject`'s nucleotide is not empty;
+/// - the subjects by query coverage (`-sorthits 4`: `GetMasterCoverage`): the query row (`-db`'s
+///   empty one, 227; one that starts with a gap, 186), `-subject`'s nucleotide is not empty;
 /// - then each subject's HSPs, a list of two or more: by query start (`-sorthsps 2`,
-///   `GetSeqStart` of row 0) the empty query row of `-db` (227); by percent identity (`-sorthsps 3`)
-///   `-subject`'s Dense-seg (801); by subject start (`-sorthsps 4`, `GetSeqStart` of row 1) the empty
-///   subject row of both (227).
+///   `GetSeqStart` of row 0) the query row as `-sorthits 4`; by percent identity (`-sorthsps 3`)
+///   `-subject`'s Dense-seg (801); by subject start (`-sorthsps 4`, `GetSeqStart` of row 1) the
+///   subject row (the empty one of both, 227; one that starts with a gap, 186).
 ///
 /// The scores' sorts (`-sorthits 1` and `2`, `-sorthsps 1`) read no range. Probes: survey set K
-/// (`X/SURVEY_X2g_formats.md` 6).
+/// (`X/SURVEY_X2g_formats.md` 6), and line PS item PS12d's (`PR/ps12d/scripts/gcmp.sh`).
 fn sort_stop(
     sort: super::hit_sort::ReportSort,
     remaps: bool,
     order: &[u32],
     grouped: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
 ) -> Option<EmptyRowsStop> {
-    // Whether the subject holds an HSP with empty rows that the mapper rewrote (`Some(true)`),
-    // left as made (`Some(false)`), or either (`None`).
-    let holds = |oid: &u32, mapped: Option<bool>| {
+    // Whether the subject holds an HSP with empty rows that the mapper rewrote: its Dense-seg
+    // throws.
+    let mapped_empty = |oid: &u32| {
         let hits = &grouped[oid];
-        hits.iter().any(|hit| hit.rows_empty())
-            && mapped.is_none_or(|mapped| mapper_rewrites(remaps, hits) == mapped)
+        hits.iter().any(|hit| hit.rows_empty()) && mapper_rewrites(remaps, hits)
     };
-    let hit_stop = match sort.hits {
-        Some(3) => Some((EmptyRowsStop::StdSegLengths, Some(true))),
-        Some(4) => Some((EmptyRowsStop::RowIsEmpty, Some(false))),
-        _ => None,
-    };
-    if let Some((stop, mapped)) = hit_stop {
-        if order.len() >= 2 && order.iter().any(|oid| holds(oid, mapped)) {
-            return Some(stop);
+    if order.len() >= 2 {
+        match sort.hits {
+            Some(3) if order.iter().any(mapped_empty) => return Some(EmptyRowsStop::StdSegLengths),
+            Some(4) => {
+                if let Some(error) = read_row_range(remaps, order.iter(), grouped, AlignRow::Query)
+                {
+                    return Some(EmptyRowsStop::RowRange(error));
+                }
+            }
+            _ => {}
         }
     }
-    let hsp_stop = match sort.hsps {
-        Some(2) => Some((EmptyRowsStop::RowIsEmpty, Some(false))),
-        Some(3) => Some((EmptyRowsStop::StdSegLengths, Some(true))),
-        Some(4) => Some((EmptyRowsStop::RowIsEmpty, None)),
-        _ => None,
+    let listed = || order.iter().filter(|oid| grouped[*oid].len() >= 2);
+    let row = match sort.hsps {
+        Some(2) => AlignRow::Query,
+        Some(3) if listed().any(mapped_empty) => return Some(EmptyRowsStop::StdSegLengths),
+        Some(4) => AlignRow::Subject,
+        _ => return None,
     };
-    if let Some((stop, mapped)) = hsp_stop {
-        if order
-            .iter()
-            .any(|oid| grouped[oid].len() >= 2 && holds(oid, mapped))
-        {
-            return Some(stop);
-        }
-    }
-    None
+    read_row_range(remaps, listed(), grouped, row).map(EmptyRowsStop::RowRange)
 }
 
 /// Whether `-subject`'s Seq-loc mapper (`remaps`) rewrote the empty rows of the subject whose
@@ -1407,7 +1461,10 @@ fn write_hsp_identities<W: Write>(
     } else if config.program == "blastn" {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1805,2131-2141
         // The displayed counts come from the two rows (before the lowercase masking of
-        // the display), and the gaps are the gap columns of both rows.
+        // the display), and the gaps are the gap columns of the alignment (`x_GetNumGaps`'s
+        // chunks): `gaps` above, the hit's count of its edit script's gaps, which BLASTN's rows
+        // always give (`algorithm::blastn::pairwise::Rows`; a query letter past the query's
+        // record shows the gap character too, remaining-gaps X1b-p).
         let (query_row, subject_row) = (
             hit.query_seq.as_deref().unwrap_or_default().as_bytes(),
             hit.subject_seq.as_deref().unwrap_or_default().as_bytes(),
@@ -1417,11 +1474,6 @@ fn write_hsp_identities<W: Write>(
             .iter()
             .zip(subject_row)
             .filter(|(q, s)| q.eq_ignore_ascii_case(s))
-            .count();
-        let gaps = query_row
-            .iter()
-            .chain(subject_row)
-            .filter(|&&residue| residue == b'-')
             .count();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:310-320
         // The query is always shown on its plus strand (showalign.cpp:1852-1858).
@@ -1549,9 +1601,16 @@ fn write_alignment_with_sequences<W: Write>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1570-1573
     let nucleotide = config.program == "blastn";
     // The rows' end gaps (`end_gap_span`; a `-` that is a residue, the query's gap residue or a
-    // gap stored in the subject, is a residue).
-    let [query_span, subject_span] = [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
-        .map(|(row, stored)| end_gap_span(row, stored));
+    // gap stored in the subject, is a residue). A BLASTN alignment (X-drop or greedy) starts and
+    // ends with a substitution and has none: a `-` at the end of its query row fills a segment
+    // past the query's end, the gap character (alnvec.cpp:288-297, cited at `end_gap_span`;
+    // `algorithm::blastn::pairwise::context_letters`).
+    let [query_span, subject_span] = if nucleotide {
+        [(0, q_chars.len()), (0, s_chars.len())]
+    } else {
+        [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
+            .map(|(row, stored)| end_gap_span(row, stored))
+    };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155
     // The rows may carry lowercase masking, which NCBI applies only when it prints a
@@ -1925,8 +1984,8 @@ fn row_string<'a>(
     chars: &[char],
     span: (usize, usize),
 ) -> std::borrow::Cow<'a, [u8]> {
-    if text.is_ascii() && span == (0, chars.len()) {
-        return std::borrow::Cow::Borrowed(text.as_bytes());
+    if text.is_ascii() {
+        return ascii_row_string(text.as_bytes(), span);
     }
     let mut row = String::with_capacity(text.len());
     for (column, &letter) in chars.iter().enumerate() {
@@ -1939,6 +1998,30 @@ fn row_string<'a>(
     std::borrow::Cow::Owned(row.into_bytes())
 }
 
+/// The row `row` of ASCII letters as NCBI's row string (`row_string`): its columns outside `span`
+/// (`end_gap_span`) a space.
+fn ascii_row_string(row: &[u8], span: (usize, usize)) -> std::borrow::Cow<'_, [u8]> {
+    if span == (0, row.len()) {
+        return std::borrow::Cow::Borrowed(row);
+    }
+    let mut owned = row.to_vec();
+    owned[..span.0].fill(b' ');
+    owned[span.1..].fill(b' ');
+    std::borrow::Cow::Owned(owned)
+}
+
+/// The rows `[query, subject]` of ASCII letters of a translated program's HSP (BLASTX's,
+/// TBLASTN's) as NCBI's row strings (`ascii_row_string`), `stored` the columns of each row whose
+/// `-` is a residue (`PairwiseHit::query_stored_gaps`, `PairwiseHit::subject_stored_gaps`): a
+/// Smith-Waterman alignment that starts with a gap (RPSTBLASTN's `-use_sw_tback`, line PS item
+/// PS12d) shows it as spaces, as the end gaps of BLASTP's rows (`write_alignment_with_sequences`).
+fn ascii_row_strings<'a>(
+    rows: [&'a [u8]; 2],
+    stored: [&[u32]; 2],
+) -> [std::borrow::Cow<'a, [u8]>; 2] {
+    [0, 1].map(|row| ascii_row_string(rows[row], end_gap_span(rows[row], stored[row])))
+}
+
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:362-370 (`GetWholeAlnSeqString`)
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1209-1216
@@ -1948,12 +2031,15 @@ fn row_string<'a>(
 /// its first residue and after its last, which NCBI's alignment strings fill with the end
 /// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
 /// inner gap is `-`. `stored` holds the columns (sorted) whose `-` is a residue: a gap character
-/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman alignment has end gaps (rpsblast's
-/// `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path
-/// may start with a gap); an X-drop alignment starts and ends with a substitution. The `-` that
+/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman
+/// alignment has end gaps (rpsblast's `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman
+/// start over a rectangle whose best path may start with a gap); an X-drop alignment starts and
+/// ends with a substitution. The `-` that
 /// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
 /// mapped row of BLASTX, which the tables write as it is (`tabular::TabularHsp::end_gaps`) and
-/// outfmt 0 refuses (decision X2g-5 of line RG).
+/// outfmt 0 refuses (decision X2g-5 of line RG), and BLASTN's query row of an HSP that NCBI keeps
+/// outside its query context (`algorithm::blastn::pairwise::context_letters`), whose rows the
+/// tables and outfmt 0 write without this span (remaining-gaps X1b-p).
 pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
     row: &[T],
     stored: &[u32],
@@ -2018,6 +2104,8 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
         &crate::report::db_subject::HitLoads,
     )>,
+    // Where the rows' ranges throw (`write_description_table`).
+    rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -2038,6 +2126,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             parsed,
             loads,
         }),
+        rows_throw,
     )
 }
 
@@ -2249,8 +2338,8 @@ pub(crate) fn blastp_family_program(program: &str) -> &str {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:125-138
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5088-5340 (WrapIt, fWrap_FlatFile)
-// enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
-// if (score >= best_score && score_pos > pos0) { best_pos = score_pos; best_score = score; }
+// Breakpoint priority (`EScore`): forced < punctuation < comma < space < newline;
+// keep the rightmost candidate position past the line start with score at least the best seen.
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:288-293
 // `NStr::Wrap` measures the `std::string` in bytes, so a line can end inside a UTF-8
 // sequence (`\xe6\xbc` and `\xa2` on two lines). Each line and its newline are NCBI's
@@ -2350,8 +2439,8 @@ pub(crate) fn write_flatfile_wrapped_with<W: Write + ?Sized>(
                 column += 1;
             }
             // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
-            // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
-            // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
+            // When the remaining bytes fit on the line, extend the break to the end and mark
+            // backspace processing so backspaces erase their preceding characters.
             if best_score != 4 && column <= width && best != bytes.len() {
                 best = bytes.len();
                 has_backspace = true;
@@ -2575,7 +2664,7 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
 fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
-    // m_Outfile << "\n\n" << "***** " << kNoHitsFound << " *****\n\n\n";
+    // Write `kNoHitsFound` between `"***** "` and `" *****"`, after two newlines and followed by three newlines.
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer, "***** No hits found *****")?;
@@ -3125,19 +3214,26 @@ fn tblastx_row_segments(
     )
 }
 
-/// Whether the description table of the subjects `descriptions` (their hits in `grouped`) reads
-/// an HSP with empty rows (`PairwiseHit::rows_empty`): it reads the query and subject ranges of
-/// every HSP of each described subject before its first line (`x_InitDeflineTable` ->
-/// `GetSeqAlignSetCalcParams` -> `s_ProcessAlignSet`), which throw `Row is empty` on such an HSP.
+/// The exception at which the description table of the subjects `descriptions` (their hits in
+/// `grouped`; `remaps`: `-subject`) stops: it reads the query and then the subject range of every
+/// HSP of each described subject before its first line (`x_InitDeflineTable` ->
+/// `GetSeqAlignSetCalcParams` -> `s_ProcessAlignSet`), which throw on a row whose range they cannot
+/// take (`seen_row_range`): `Row is empty` on an HSP with empty rows, `Row seqids not consistent` on
+/// one that starts with a gap (RPSTBLASTN's `-use_sw_tback`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2913-2921
-fn describes_empty_rows(
+fn described_row_range(
+    remaps: bool,
     descriptions: &[u32],
     grouped: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-) -> bool {
-    descriptions
-        .iter()
-        .any(|oid| grouped[oid].iter().any(|hit| hit.rows_empty()))
+) -> Option<RowRangeError> {
+    descriptions.iter().find_map(|oid| {
+        let hits = &grouped[oid];
+        hits.iter().find_map(|hit| {
+            seen_row_range(remaps, hits, hit, AlignRow::Query)
+                .or_else(|| seen_row_range(remaps, hits, hit, AlignRow::Subject))
+        })
+    })
 }
 
 /// Whether a BLASTX subject's HSPs `hits` hold one with empty rows whose Std-seg `-subject`'s
@@ -3149,7 +3245,7 @@ fn blastx_mapped_empty_rows(remaps: bool, hits: &[&PairwiseHit]) -> bool {
 
 /// Where NCBI BLAST+'s report of a BLASTX query whose hits are `group` (`BlastxSections`' group) in
 /// the query-anchored view of `config` stops at an HSP with empty rows, in the order it meets them:
-/// its sorts (`sort_stop`), its description table (`describes_empty_rows`), the Dense-segs of its
+/// its sorts (`sort_stop`), its description table (`described_row_range`), the Dense-segs of its
 /// aligned subjects (`blastx_mapped_empty_rows`, with `-subject`, `remaps`), all of which throw
 /// (`write_blastx_pairwise_report` writes NCBI's report up to there and its exception), and the
 /// merge of its section, which frees a segment that it still reads
@@ -3171,8 +3267,12 @@ fn blastx_anchored_stop(
     if let Some(stop) = sort_stop(config.sort, remaps, order, grouped) {
         return Ok(Some(stop));
     }
-    if describes_empty_rows(&order[..order.len().min(options.num_descriptions)], grouped) {
-        return Ok(Some(EmptyRowsStop::RowIsEmpty));
+    if let Some(error) = described_row_range(
+        remaps,
+        &order[..order.len().min(options.num_descriptions)],
+        grouped,
+    ) {
+        return Ok(Some(EmptyRowsStop::RowRange(error)));
     }
     if aligned
         .iter()
@@ -3386,7 +3486,8 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         if self.config.program == "psiblast" {
             writeln!(writer, "Results from round 1")?;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
+        // Emit two blank lines before the query header.
         writeln!(writer)?;
         writeln!(writer)?;
         // The title's bytes by query index (`query_name` is BLASTX's).
@@ -3457,6 +3558,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 parsed: self.parsed_subjects,
                 loads: self.loads,
             }),
+            None,
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
         writeln!(writer)
@@ -3681,6 +3783,9 @@ fn write_description_table<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
     html: Option<HtmlRows<'_>>,
+    // Where the table's read of its rows' ranges throws (BLASTX's HSPs with empty rows,
+    // `described_row_range`): that exception; `None` for every other table.
+    rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1070
     // An `-html` table reads `./.ncbirc` first (`x_InitDeflineTable`), also one without rows
@@ -3691,6 +3796,15 @@ fn write_description_table<W: Write>(
             super::query_warnings::ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc),
             writer,
         )?;
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1080-1100
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:225-228
+    // Then its rows' scores read the ranges of every HSP of each described subject
+    // (`x_GetScoreInfoForTable`), where an empty row throws (`Row is empty`), before the table's
+    // bytes and after that read (line RG T4b review a B2).
+    if let Some(stop) = rows_throw {
+        writer.flush()?;
+        return Err(io::Error::other(stop));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:513-514
     // c++/src/objtools/align_format/showdefline.cpp:757,848: with `-num_descriptions 0`
@@ -3946,6 +4060,27 @@ fn subject_skipped_id(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
+/// The Seq-id text of the Seq-align id of the `-subject` record `s_idx` without and with its
+/// version (`CSeq_id::GetSeqIdString` with false and true, `x_pairwise_par::QuerySections::
+/// alignment_id_texts`): `subject_skipped_id`, and with the version the label of a parsed id
+/// (`seqid::label::content`); the local id `Subject_N` of a record without one has no version.
+fn record_alignment_id_texts(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> [Vec<u8>; 2] {
+    let id = subject_skipped_id(parsed, None, s_idx);
+    let versioned = match parsed.get(s_idx as usize).and_then(Option::as_deref) {
+        Some(subject) => {
+            let mut text = Vec::new();
+            crate::seqid::label::content(subject.alignment_id(), true, &mut text);
+            text
+        }
+        None => id.clone(),
+    };
+    [id, versioned]
+}
+
 /// A description line's label in NCBI's two parts (`x_DisplayDeflineTableBody`): the id text
 /// (`gi|N|` and the id, the `line_length` that NCBI counts before the title; under `-html` the
 /// text of the sequence's link) and the title (`line_component`: the defline, after two spaces
@@ -4179,6 +4314,7 @@ fn write_blastn_description_table<W: Write>(
             parsed,
             loads,
         }),
+        None,
     )
 }
 
@@ -4599,8 +4735,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
 }
 
 /// The query-anchored section (`query_anchored::write_section`) of query `q_idx` in the view of
-/// `config` (outfmt 1 to 4), of the HSPs that `hsps_of` makes with the report's sequences
-/// `anchored` (`QuerySections::alignments` of each program).
+/// `config` (outfmt 1 to 4; with `-html`, `PairwiseConfig::html`, the rows' mask spans), of the
+/// HSPs that `hsps_of` makes with the report's sequences `anchored` (`QuerySections::alignments`
+/// of each program).
 fn write_anchored_section<W: Write>(
     writer: &mut W,
     config: &PairwiseConfig,
@@ -4617,7 +4754,11 @@ fn write_anchored_section<W: Write>(
     };
     super::query_anchored::write_section(
         writer,
-        super::query_anchored::View { identity, anchored },
+        super::query_anchored::View {
+            identity,
+            anchored,
+            html: config.html.is_some(),
+        },
         config.line_length,
         &hsps_of(sequences),
         &super::query_anchored::OfQuery { sequences, q_idx },
@@ -5368,7 +5509,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
+        // Emit two blank lines before the query header.
         writeln!(writer)?;
         writeln!(writer)?;
         write_blastp_query_header(
@@ -5526,14 +5668,14 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3578-3604,2122-2149:
-// out << " Identities = ..." << " Positives = ..." << " Gaps = ...";
+// Format the identities, positives, and gaps summary line.
 // TBLASTN reports one translated subject frame, without a query frame.
 fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Result<()> {
     let h = &hit.hit;
     let bits = format_bitscore_ncbi(h.bit_score);
     let evalue = format_evalue_ncbi(h.e_value);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3599-3604:
-    // else if (comp_adj_method == 2) out << ", Method: Compositional matrix adjust.";
+    // Append the composition-adjustment method suffix for methods 1 and 2.
     let method = match hit.comp_adjust_method {
         Some(1) => ", Method: Composition-based stats.",
         Some(2) => ", Method: Compositional matrix adjust.",
@@ -5609,12 +5751,13 @@ fn write_tblastn_alignment<W: Write>(
         ));
     }
     let width = coordinate_width(&hit.hit);
+    let rows = ascii_row_strings([q, s], [&hit.query_stored_gaps, &hit.subject_stored_gaps]);
     write_hsp_rows(
         writer,
         |segments| tblastn_row_segments(hit, segments),
         [1, 3],
         config.line_length,
-        [q, s],
+        [&rows[0], &rows[1]],
         masks,
         width,
         |writer, columns| {
@@ -5900,12 +6043,11 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         // highest bit score and that HSP's E-value, for the first `m_NumDescriptions` subjects;
         // the last one is NCBI's "last hit" when every subject fits.
         let descriptions = group.described(self.options.num_descriptions);
-        // The table reads the ranges of every HSP of each described subject first: an HSP with
-        // empty rows stops the report after the query's `Length=` (`describes_empty_rows`).
-        if describes_empty_rows(descriptions, grouped) {
-            writer.flush()?;
-            return Err(io::Error::other(EmptyRowsStop::RowIsEmpty));
-        }
+        // The table reads the ranges of every HSP of each described subject (after its `-html`
+        // read of `./.ncbirc`): a row whose range it cannot take stops the report after the
+        // query's `Length=` (`described_row_range`).
+        let rows_throw =
+            described_row_range(self.remaps(), descriptions, grouped).map(EmptyRowsStop::RowRange);
         write_subject_summary_table_with_sum_n(
             writer,
             descriptions,
@@ -5922,6 +6064,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
                 };
                 (report, parsed, self.loads)
             }),
+            rows_throw,
         )?;
         writeln!(writer)
     }
@@ -5976,9 +6119,10 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     }
 
     // Each HSP's Dense-seg is made after its subject's read, before the section's first byte and
-    // outside its `try`: the Std-seg of an HSP with empty rows that `-subject`'s Seq-loc mapper
-    // rewrote throws there (`EmptyRowsStop::StdSegLengths`, as outfmt 0's alignments).
-    fn merged_subject<W: Write>(
+    // outside its `try` (with `-html` in outfmt 0, before the first alignment): the Std-seg of an
+    // HSP with empty rows that `-subject`'s Seq-loc mapper rewrote throws there
+    // (`EmptyRowsStop::StdSegLengths`, as outfmt 0's plain alignments at the HSP).
+    fn subject_densegs<W: Write>(
         &self,
         writer: &mut W,
         group: &super::x_pairwise_par::QueryGroup<'_>,
@@ -5989,6 +6133,13 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
         }
         Ok(())
+    }
+
+    // Only `-subject`'s Dense-segs throw (`remaps`, the test of `subject_densegs`), so a `-db`
+    // report gives no texts and makes none: where `subject_densegs` throws, this gives texts.
+    fn alignment_id_texts(&self, s_idx: u32) -> Option<[Vec<u8>; 2]> {
+        self.remaps()
+            .then(|| record_alignment_id_texts(self.records_parsed, s_idx))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
@@ -6173,19 +6324,20 @@ fn write_blastx_alignment(
     );
     // The query's translated row (width 3: three nucleotides per residue, in the direction of its
     // frame) and the subject's row of letters, whose stored gap characters are residues of the
-    // Dense-seg (`write_hsp_rows`).
+    // Dense-seg (`write_hsp_rows`); their end gaps are spaces (`ascii_row_strings`).
     if q.len() != s.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "BLASTX alignment string lengths differ",
         ));
     }
+    let rows = ascii_row_strings([q, s], [&hit.query_stored_gaps, &hit.subject_stored_gaps]);
     write_hsp_rows(
         writer,
         |segments| blastx_row_segments(hit, segments),
         [3, 1],
         config.line_length,
-        [q, s],
+        [&rows[0], &rows[1]],
         masks,
         width,
         |writer, columns| {

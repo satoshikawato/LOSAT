@@ -21,11 +21,12 @@
 // filters) are the files of the instance's working directory for that run (run-directory.ts), which the
 // engine opens by name and reads in place; a run of -db takes no subject (line WQA D12a, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
-import { readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
-import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
+import { namedRunFiles, readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
+import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase, type StartInfo, type ToolValidation } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
+import { ownedFrame, type ToolFrame } from '../../domain/tool-frames.js';
 import {
   discardSignal,
   DISCARD_STREAM,
@@ -49,7 +50,16 @@ import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
 import type { MainLinks } from './link.js';
-import type { RuntimePath, WorkerCounts, WorkerInput, WorkerRun, WorkerRunResult } from './protocol.js';
+import type {
+  RuntimePath,
+  WorkerCounts,
+  WorkerInput,
+  WorkerRun,
+  WorkerRunResult,
+  WorkerTool,
+  WorkerToolResult,
+  WorkerToolValidate,
+} from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
 
@@ -70,6 +80,15 @@ export interface RuntimeOptions {
   readonly beforeOutput?: () => void;
   /** Test builds only: called at the start of each use of the threaded instance (a search, a warm-up). */
   readonly onUse?: () => void;
+}
+
+/**
+ * Where a tool run's streams go as the tool writes them (`EngineRuntime.tool`). Each chunk is a copy that the receiver owns
+ * (the Engine worker transfers its buffer), and a frame of bytes holds its own copy.
+ */
+export interface ToolPosts {
+  chunk(stream: 'stdout' | 'stderr', bytes: Uint8Array): void;
+  file(frame: ToolFrame): void;
 }
 
 interface Retained {
@@ -99,6 +118,8 @@ interface Loaded {
   counts: HeldCounts | undefined;
   /** The argvs (without -num_threads) of the searches and warm-ups that ran on this instance. */
   readonly ran: Set<string>;
+  /** A serial instance that a check of a tool's words loaded because none was loaded, which nothing else has used (`unused`). */
+  checkOnly: boolean;
 }
 
 /** Why this worker cannot run the threaded module, or undefined if it may. */
@@ -176,6 +197,71 @@ export class EngineRuntime {
       return this.search(loaded, request, fallbackReason, phase, windowMasker, registry);
     } finally {
       use?.leave();
+    }
+  }
+
+  /**
+   * Runs a tool (ABI v2 `losat_web2_tool`, version 13) on the serial instance, in the run's working directory that
+   * `request.files` makes (as a search of -db has it), and gives its standard output, standard error and the frames of its
+   * files to `posts` as the engine emits them: nothing of them is held here (D-WW3-6). The instance's retained subject and
+   * counts file are released first, so that the memory and the names of the instance are the tool's, and the files go
+   * back to nothing after the run. Resolves with the exit status, which the engine returns for every status; an error is
+   * the engine's (a name that is not a tool) or a stop of the instance, which the next run starts again.
+   */
+  async tool(request: WorkerTool, posts: ToolPosts): Promise<WorkerToolResult> {
+    const loaded = await this.load('serial');
+    const abi = loaded.instance.abi;
+    try {
+      this.releaseRetained(loaded);
+      this.releaseCounts(loaded, undefined);
+      loaded.directory.open(request.files ?? []);
+      // The engine's standard error of this run only, for a stop message.
+      loaded.instance.wasi.clear();
+      const linearBytesBefore = abi.memoryBytes();
+      const status = abi.tool(request.argv, {
+        stdout: (bytes) => posts.chunk('stdout', bytes.slice()),
+        stderr: (bytes) => posts.chunk('stderr', bytes.slice()),
+        file: (frame) => posts.file(ownedFrame(frame)),
+      });
+      loaded.runs++;
+      return {
+        status,
+        memory: { linearBytesBefore, linearBytesAfter: abi.memoryBytes(), instanceRuns: loaded.runs },
+        ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
+      };
+    } finally {
+      // The run's files are let go (as after a search); a stopped instance is loaded again by the next run.
+      if (abi.stoppedBy === undefined) loaded.directory.open([]);
+      else this.dispose();
+    }
+  }
+
+  /**
+   * The check of a tool's words (`losat_web2_validate` with a tool's name as `argv[0]`) on the instance that is loaded, with the
+   * files of the run's directory opened as `tool` opens them: the check reads the run's registry files (`-conffile`,
+   * `.ncbirc`, `windowmasker.ini`) as the command line does. Both modules export it, so a threaded runtime that the searches
+   * use stays as it is (its thread workers, the subject and the counts file that it retains, its warm-up): the check takes
+   * none of it and needs no memory of its own, and the files go afterwards. The serial instance is loaded only when none is.
+   * The calls into a threaded instance are a use, as a search's are. A stopped instance is handled as after a search: the
+   * serial one is loaded again by the next call, and the threaded one is ended with its worker by the Gateway (`search`).
+   */
+  async validateTool(request: WorkerToolValidate): Promise<ToolValidation> {
+    const held = this.loaded;
+    const none = held === undefined || held.instance.abi.stoppedBy !== undefined;
+    const loaded = none ? await this.load('serial') : held;
+    // The check made this instance: a preparation for a threaded search may replace it (`prepare`).
+    if (none) loaded.checkOnly = true;
+    const abi = loaded.instance.abi;
+    const use = loaded.path === 'threaded' ? this.options.use : undefined;
+    try {
+      return inUse(use, () => {
+        loaded.directory.open(request.files ?? []);
+        loaded.instance.wasi.clear();
+        return abi.validateTool(request.argv);
+      });
+    } finally {
+      if (abi.stoppedBy === undefined) loaded.directory.open([]);
+      else if (loaded.path === 'serial') this.dispose();
     }
   }
 
@@ -288,9 +374,9 @@ export class EngineRuntime {
         // stop does neither (the chunks before a trap are discarded, ABI v2 §4).
         if (abi.stoppedBy !== undefined) throw error;
         writer.fail();
-        throw failedWithFiles(error, archive);
+        throw failedWithFiles(error, archive, started.start);
       }
-      const runFiles = readRunFiles(archive);
+      const runFiles = readRunFiles(archive, started.start);
       if (messages === undefined) throw new Error(`the engine did not say where the messages of the run go (stream ${MESSAGES_STREAM})`);
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
@@ -334,16 +420,20 @@ export class EngineRuntime {
    * and, for the threaded module, its thread workers. With the search's `argv` (program
    * first, without -num_threads), it then runs that search once on one thread on built-in
    * sequences (warm-up.ts) unless one like it ran on the instance. It never ends a working
-   * instance of the other module: a queued search may still use it and the subject it holds.
+   * instance of the other module: a queued search may still use it and the subject it holds (a serial instance that only a check
+   * loaded does not count: `unused`).
    * A failure is thrown; `run` loads and prepares again and handles it as before. The Engine
    * worker calls `prepare` and `run` one after another, never together.
    */
   async prepare(threads: number, argv?: readonly string[]): Promise<void> {
     const path: RuntimePath = threads > 1 && this.threadedUnavailable === undefined ? 'threaded' : 'serial';
     const current = this.loaded;
-    if (current !== undefined && current.path !== path && current.instance.abi.stoppedBy === undefined) return;
+    // A serial instance that only a check of a tool's words loaded (none was loaded) holds nothing that a queued search
+    // needs: the preparation for a threaded search replaces it.
+    if (current !== undefined && current.path !== path && current.instance.abi.stoppedBy === undefined && !unused(current)) return;
     if (path === 'serial') {
       const loaded = await this.load('serial');
+      loaded.checkOnly = false;
       if (argv !== undefined) this.warmUp(loaded, argv);
       return;
     }
@@ -473,7 +563,7 @@ export class EngineRuntime {
     if (path === 'serial') {
       const directory = new RunDirectory();
       const instance = await instantiateSerial(await this.options.serial(), directory);
-      this.loaded = { path, instance, directory, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
+      this.loaded = { path, instance, directory, runs: 0, retained: undefined, counts: undefined, ran: new Set(), checkOnly: false };
       return this.loaded;
     }
     const unsupported = threadedSupport();
@@ -489,13 +579,18 @@ export class EngineRuntime {
     const threads = new ThreadHost({ module, memory, maximumPages, main: this.options.main, use, directory });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn, directory);
-      this.loaded = { path, instance, directory, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
+      this.loaded = { path, instance, directory, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set(), checkOnly: false };
       return this.loaded;
     } catch (error) {
       threads.terminate();
       throw error;
     }
   }
+}
+
+/** Whether a serial instance was loaded by a check and has run nothing and holds no subject, counts file or warm-up since. */
+function unused(loaded: Loaded): boolean {
+  return loaded.checkOnly && loaded.runs === 0 && loaded.ran.size === 0 && loaded.retained === undefined && loaded.counts === undefined;
 }
 
 /** A runtime that the Gateway ends starts nothing and makes no call into its threaded instance. */
@@ -560,8 +655,11 @@ function joined(chunks: readonly Uint8Array[]): Uint8Array {
   return bytes;
 }
 
-/** The files of a run's archive (stream 8, in chunks); none when the run sent none. */
-function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
+/**
+ * The files of a run's archive (stream 8, in chunks), each with the option that named it in the
+ * argv's *start* `start` (`namedRunFiles`); none when the run sent none.
+ */
+function readRunFiles(chunks: readonly Uint8Array[], start: StartInfo): RunFile[] {
   if (chunks.length === 0) return [];
   const archive = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
   let offset = 0;
@@ -569,7 +667,7 @@ function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
     archive.set(chunk, offset);
     offset += chunk.length;
   }
-  return readStoredZip(archive);
+  return namedRunFiles(readStoredZip(archive), start);
 }
 
 /**
@@ -577,12 +675,12 @@ function readRunFiles(chunks: readonly Uint8Array[]): RunFile[] {
  * (`withRunOutputFailed`), with the files that the run made (`withRunFiles`). An archive that cannot
  * be read is told after the run's error, which stays the run's.
  */
-function failedWithFiles(error: unknown, chunks: readonly Uint8Array[]): unknown {
+function failedWithFiles(error: unknown, chunks: readonly Uint8Array[], start: StartInfo): unknown {
   if (!(error instanceof Error)) return error;
   const failed = withRunOutputFailed(error);
   let runFiles: RunFile[];
   try {
-    runFiles = readRunFiles(chunks);
+    runFiles = readRunFiles(chunks, start);
   } catch (unreadable) {
     failed.message = `${failed.message} (${messageOf(unreadable)})`;
     return failed;

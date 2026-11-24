@@ -603,19 +603,22 @@ pub(crate) trait ReplacedSink {
 
 /// The post of a byte that a VisibleString of a hand grammar held by the frame `at` read as `#`
 /// (`Reader::string`): its line, the byte and the piece that holds it, with the stack trace of
-/// `at` below the document's type `root`, given to `posts` when it is made, as NCBI posts it.
+/// `at` below the document's type `root`, given to `posts` when it is made, as NCBI posts it. The
+/// trace is made at the string's first post (`trace`), which every post of the string names.
 #[cold]
 #[inline(never)]
 fn post_replaced<K: ReplacedSink + ?Sized>(
     posts: &mut K,
+    trace: &mut Option<String>,
     root: &'static str,
     at: &Frame<'_>,
     line: usize,
     byte: u8,
     piece: &[u8],
 ) {
+    let trace = trace.get_or_insert_with(|| object_stack_trace(root, at.steps()));
     posts.replaced(ReplacedChar {
-        trace: object_stack_trace(root, at.steps()),
+        trace: trace.clone(),
         byte,
         position: StreamPosition::Line(line as u64),
         string: piece.into(),
@@ -1624,11 +1627,14 @@ impl<S: AsnSource> Reader<S> {
         posts: &mut K,
     ) -> Result<Vec<u8>> {
         let mut out = Vec::new();
+        let mut trace = None;
         self.visible_string(
             &mut out,
             true,
             false,
-            &mut move |root, line, byte, piece| post_replaced(posts, root, at, line, byte, piece),
+            &mut move |root, line, byte, piece| {
+                post_replaced(posts, &mut trace, root, at, line, byte, piece)
+            },
         )?;
         Ok(out)
     }

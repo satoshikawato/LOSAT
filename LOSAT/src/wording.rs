@@ -315,22 +315,30 @@ const MAPPED: [&[u8]; 8] = [
     XMLHELP_PROGRAM,
 ];
 
-/// The bytes that start a text of [`MAPPED`].
-const MAPPED_FIRST: [bool; 256] = {
-    let mut first = [false; 256];
+/// The texts of [`MAPPED`] that each byte starts, as bits (bit `k`: `MAPPED[k]`).
+const MAPPED_FIRST: [u8; 256] = {
+    let mut first = [0u8; 256];
     let mut i = 0;
     while i < MAPPED.len() {
-        first[MAPPED[i][0] as usize] = true;
+        first[MAPPED[i][0] as usize] |= 1 << i;
         i += 1;
     }
     first
 };
 
-/// Whether `text` holds a text of [`MAPPED`]: one pass over its bytes, the texts compared only
-/// where a byte starts one (a post of many quoted bytes is read once, not once per text).
+/// Whether `text` holds a text of [`MAPPED`]: one pass over its bytes, where a byte starts texts
+/// only those are compared (a post of many quoted bytes is read once, not once per text).
 fn maps(text: &[u8]) -> bool {
     text.iter().enumerate().any(|(i, &b)| {
-        MAPPED_FIRST[b as usize] && MAPPED.iter().any(|mapped| text[i..].starts_with(mapped))
+        let mut starts = MAPPED_FIRST[b as usize];
+        while starts != 0 {
+            let k = starts.trailing_zeros() as usize;
+            if text[i..].starts_with(MAPPED[k]) {
+                return true;
+            }
+            starts &= starts - 1;
+        }
+        false
     })
 }
 

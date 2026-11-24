@@ -1642,7 +1642,9 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             unkept,
             ..
         } = self;
-        let post = &mut |post: StringPost<'_>| posted(post, frames, outer, utf8_once, posts);
+        let mut trace = None;
+        let post =
+            &mut |post: StringPost<'_>| posted(post, frames, outer, utf8_once, posts, &mut trace);
         if skip {
             inp.skip_string(kind, post)?;
             return Ok(Vec::new());
@@ -1712,7 +1714,8 @@ fn stack_trace(
 // `asn_input::utf8_tag_message`)
 /// What reading a string posted (`TypedReader::string`), given to `posts` with the stack trace of
 /// `frames` (below `outer`) that NCBI's message names; the warning of a UTF8String tag only the
-/// first time (`utf8_once`).
+/// first time (`utf8_once`). The trace is made at the string's first post (`trace`), which every
+/// post of the string names.
 #[cold]
 #[inline(never)]
 fn posted(
@@ -1721,21 +1724,27 @@ fn posted(
     outer: &Option<(&'static str, Vec<StackStep<'static>>)>,
     utf8_once: &mut Utf8TagOnce,
     posts: &mut dyn PostSink,
+    trace: &mut Option<String>,
 ) {
+    let mut stack = || {
+        trace
+            .get_or_insert_with(|| stack_trace(frames, outer))
+            .clone()
+    };
     match post {
         StringPost::BadChar {
             position,
             byte,
             string,
         } => posts.post(Post::BadChar(ReplacedChar {
-            trace: stack_trace(frames, outer),
+            trace: stack(),
             byte,
             position,
             string: string.into(),
         })),
         StringPost::Utf8Tag => {
             if utf8_once.first() {
-                posts.post(Post::Utf8Tag(stack_trace(frames, outer)));
+                posts.post(Post::Utf8Tag(stack()));
             }
         }
     }

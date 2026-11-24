@@ -541,15 +541,21 @@ pub(crate) fn post_line_in(
     message: &[u8],
     failed: bool,
 ) -> Vec<u8> {
-    let mut line = match severity {
-        Severity::Warning => b"Warning: ".to_vec(),
-        Severity::Error => b"Error: ".to_vec(),
+    let header: &[u8] = match severity {
+        Severity::Warning => b"Warning: ",
+        Severity::Error => b"Error: ",
     };
-    if let Some(id) = id {
-        line.extend_from_slice(format!("({id}) ").as_bytes());
-    }
-    if let Some(prefix) = prefix {
-        line.extend_from_slice(format!("[{prefix}] ").as_bytes());
+    // One buffer of the line's length (a run of many posts makes no growth of each).
+    let length = |part: Option<&str>| part.map_or(0, |part| part.len() + 3);
+    let mut line =
+        Vec::with_capacity(header.len() + length(id) + length(prefix) + message.len() + 1);
+    line.extend_from_slice(header);
+    for (part, open, close) in [(id, b'(', b')'), (prefix, b'[', b']')] {
+        if let Some(part) = part {
+            line.push(open);
+            line.extend_from_slice(part.as_bytes());
+            line.extend_from_slice(&[close, b' ']);
+        }
     }
     if !failed {
         line.extend_from_slice(message);

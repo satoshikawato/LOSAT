@@ -277,11 +277,16 @@ impl ReplacedChar {
     /// (the hex digits in upper case without padding, `NumericToString` of `c` in base 16) and the
     /// string when there is one.
     pub fn message(&self) -> Vec<u8> {
-        let mut message = format!(
+        use std::io::Write;
+        // One buffer of the message's length (the text between the trace and the string, with a
+        // position of 20 digits, is under 64 bytes).
+        let mut message = Vec::with_capacity(self.trace.len() + 64 + self.string.len());
+        write!(
+            message,
             "{}\nBad char [0x{:X}] in string at {}",
             self.trace, self.byte, self.position
         )
-        .into_bytes();
+        .expect("a write to a Vec");
         if !self.string.is_empty() {
             message.push(b'\n');
             message.extend_from_slice(&self.string);

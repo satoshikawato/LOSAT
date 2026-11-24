@@ -1010,7 +1010,8 @@ fn xml_results_show_and_join_the_queries_whose_seq_ids_match() {
         assert_eq!(xml_shows(span, vpair3c, 1), (vec![NO, (None, true), NO], 2));
     }
     // A shown query keeps its own names, the second of `vpair3c` too, which the third shows
-    // (NCBI: `Iteration_query-def` `second`); the second of `vpair3a` shows the first's alone.
+    // (NCBI: `Iteration_query-def` `second`); the third of `vpair3c` and the second of `vpair3a`
+    // show an earlier query's names alone.
     let unshown = |fasta: &[u8]| {
         let records = parsed_records(fasta);
         let mut scopes = super::QueryScopes::new(Run, "BLASTP");
@@ -1021,7 +1022,7 @@ fn xml_results_show_and_join_the_queries_whose_seq_ids_match() {
             .map(|query| super::QueryScopes::xml_show(Some(&scopes), query).names_unshown())
             .collect::<Vec<_>>()
     };
-    assert_eq!(unshown(vpair3c), [false, false, false]);
+    assert_eq!(unshown(vpair3c), [false, false, true]);
     assert_eq!(unshown(vpair3a), [false, true, false]);
     // A call that starts at a later batch numbers the label and the held report's start as it
     // numbers its queries.

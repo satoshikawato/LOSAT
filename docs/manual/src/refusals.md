@@ -276,6 +276,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
 | An empty or inconsistent `.rps` or `.loo` file, or an inconsistent `.aux` file | Refused. NCBI reads past its buffers or crashes. |
+| A hit on a profile whose consensus letters in `.psq` are more or fewer than its score columns in `.rps`, where NCBI's traceback then reads past the profile's rows, composition tables, copy of the consensus or score matrix, or starts an alignment past the consensus | Refused, for the query batch of that hit. NCBI crashes or reads memory it does not own. Other hits on such a profile are searched as NCBI searches them. `makeprofiledb` writes such a profile from a scored profile whose sequence is nucleotide-coded or of another length. |
 | `rpsblast` in the library API and the Web engine | Refused. |
 | The profile-database cases named in Alias files above | Refused. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics (the default of `rpsblast`) | Refused, as in `blastp`. |
@@ -299,6 +300,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` with a profile whose Smith-Waterman redo NCBI repeats without end | Refused, for a window of a query frame: the e-value of a score of 0 passes `-evalue`, the window holds two or more of the profile's preliminary HSPs, and the profile's first position scores the window's first letter above 0. With `-strand minus` NCBI's redo reads a search space of 0, so every score passes `-evalue`. The refusal comes with the query batch that holds the profile, after the reports of the batches before it (in `-outfmt 0` after the header that NCBI writes before its first batch). |
 | `-use_sw_tback` with a profile whose Smith-Waterman alignment starts with a gap in the query's row | Refused, at the same place. No search has been found that gives one, so there is no NCBI output to follow. An alignment that starts with a gap in the profile's row is written as NCBI writes it: the warning that the sequence data could not be pre-fetched, and `-outfmt 0` to `5` and `13` to `16` stop where NCBI's do. |
 | The database refusals of `rpsblast` above, with its alias-file cases | Refused. |
+| `-comp_based_stats 0` with a hit on a profile whose consensus letters in `.psq` are fewer than its score columns, where an alignment starts at or past those letters | Refused, for the query batch of that hit. NCBI prints alignments there whose positions, scores and identities disagree, or crashes when such an alignment then meets a letter of 28 or more. |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come before the first byte of output, as `rpsblast`'s do, also for queries without a valid frame, which NCBI does not search.
 

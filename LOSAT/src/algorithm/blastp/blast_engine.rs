@@ -4395,11 +4395,6 @@ pub fn run(
             ))
         })
         .transpose()?;
-    // psiblast `-phi_pattern`: what psiblast sets in the options handle after each batch
-    // (`phi_hooks::note_handle_sets`).
-    if args.phi.is_some() {
-        phi_hooks::note_handle_sets(&options)?;
-    }
     // LOSAT's thread capability is checked before any input or output, as for BLASTN.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -4764,6 +4759,17 @@ fn open_search_database(
         }
         None => None,
     };
+    // psiblast `-phi_pattern`: what psiblast sets in the options handle after each batch
+    // (`phi_hooks::note_handle_sets`), with `-db` and with `-subject`.
+    if let (Some(_), Some(handle)) = (
+        resolved.phi.as_deref(),
+        args.archive
+            .as_ref()
+            .map(crate::report::archive::ArchiveHandle::options)
+            .or_else(|| args.strategy.as_ref().map(|strategy| strategy.options())),
+    ) {
+        phi_hooks::note_handle_sets(handle)?;
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-133
     // A custom tabular field list that looks every taxid up (the plural names of the taxonomy
     // database, the organism report) asks whether `taxdb.bti` is on the search path: the plural

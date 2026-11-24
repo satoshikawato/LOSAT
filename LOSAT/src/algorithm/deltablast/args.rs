@@ -390,9 +390,10 @@ impl DeltablastArgs {
             #[command(flatten)]
             args: RpsblastArgs,
         }
-        let command = DomainCommand::try_parse_from(["domain", "--db", rpsdb]).map_err(|error| {
-            anyhow::anyhow!("LOSAT internal error: the domain search's options: {error}")
-        })?;
+        let command =
+            DomainCommand::try_parse_from(["domain", "--db", rpsdb]).map_err(|error| {
+                anyhow::anyhow!("LOSAT internal error: the domain search's options: {error}")
+            })?;
         let mut args = command.args.into_blastp_args()?;
         args.evalue = Some(if ethresh > 0.0 { ethresh } else { 10.0 });
         args.lcase_masking = lcase_masking;

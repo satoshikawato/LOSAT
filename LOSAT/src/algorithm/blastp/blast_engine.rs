@@ -5718,15 +5718,19 @@ fn psiblast_stop_at_invalid_query(
     // give no Karlin-Altschul parameters crashes NCBI before, below); a sequence file that cannot
     // be opened stops the first batch when its query and `kbp_psi` are valid (the first read of the
     // preliminary search; volumes in the order NCBI reads them).
+    // deltablast's first batch stops at its domain search before (`delta_hooks`) where its query's
+    // context is not valid.
     let read_stop = match (&read_failure, contexts.first()) {
         (Some(failure), Some(context)) if failure.precedes_setup_checks() => {
-            args.psi_search.is_none() || context.is_valid
+            (args.psi_search.is_none() && args.delta.is_none()) || context.is_valid
         }
         (Some(_), Some(context)) => context.is_valid && kbp_psi_valid(context),
         _ => false,
     };
     let first_stop = if read_stop {
         Some(0)
+    } else if args.delta.is_some() {
+        None
     } else {
         contexts
             .iter()
@@ -6188,7 +6192,7 @@ fn search(
                 query_scopes,
             )
         }
-        BlastpApp::Psiblast | BlastpApp::Deltablast => psiblast_stop_at_invalid_query(
+        BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
             &args,
             &searched_queries,
             database,
@@ -6197,6 +6201,22 @@ fn search(
                 &searched_queries,
                 &query_input,
                 reading,
+                query_scopes,
+            ),
+        ),
+        // deltablast's batches are NCBI's (`read_deltablast_query_batches`); a query whose letters
+        // give no Karlin-Altschul parameters stops its batch at its domain search
+        // (`delta_hooks`), so only the first read of the database stops a batch here.
+        BlastpApp::Deltablast => psiblast_stop_at_invalid_query(
+            &args,
+            &searched_queries,
+            database,
+            crate::blastinput::query_batch::read_deltablast_query_batches(
+                query_records,
+                &searched_queries,
+                &query_input,
+                reading,
+                batch_size,
                 query_scopes,
             ),
         ),

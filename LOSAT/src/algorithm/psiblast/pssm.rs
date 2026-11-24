@@ -406,9 +406,10 @@ pub(crate) fn query_pssm(
 // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:101-130 (`s_AddSeqTitleToPssm`)
 /// The files of deltablast's PSSM of the conserved domains (`CPssmEngine::Run` of a
 /// `CCddInputData`, `x_PSIMatrix2Asn1` without the ancillary data): its ASN.1 text carries the
-/// query's Bioseq with the descriptors `s_AddSeqTitleToPssm` adds when `-out_pssm` is given (the
-/// FASTA reader's `DefLine` user object, `defline` as read, then the title), the pseudocount 0 and
-/// the matrix's name; the ASCII PSSM is the one of a PSSM file (`in_pssm_files::ascii_pssm`).
+/// query's Bioseq, with the descriptors `s_AddSeqTitleToPssm` adds only when `-out_pssm` is given
+/// (the FASTA reader's `DefLine` user object, `defline` as read, then the title; `CCddInputData`
+/// itself is given no title, deltablast.cpp:116-125), the pseudocount 0 and the matrix's name; the
+/// ASCII PSSM is the one of a PSSM file (`in_pssm_files::ascii_pssm`).
 pub(crate) fn cdd_query_pssm(
     request: &PssmRequest,
     pssm: PsiPssm,
@@ -418,16 +419,15 @@ pub(crate) fn cdd_query_pssm(
     matrix_name: &str,
 ) -> Result<QueryPssm> {
     let object = (request.asn_path.is_some() || request.ascii_path.is_some()).then(|| {
-        let mut descr = Vec::new();
-        if request.asn_path.is_some() {
-            descr.push(fasta_defline_descriptor(defline));
-            descr.push(Seqdesc::Title(query.title.to_vec()));
-        } else {
-            descr.push(Seqdesc::Title(query.title.to_vec()));
-        }
+        let descr = request.asn_path.is_some().then(|| {
+            vec![
+                fasta_defline_descriptor(defline),
+                Seqdesc::Title(query.title.to_vec()),
+            ]
+        });
         let entry = SeqEntry::Seq(Box::new(PssmQuery {
             ids: vec![query.id.clone()],
-            descr: Some(descr),
+            descr,
             inst: SeqInst::new(
                 ("raw", 2),
                 ("aa", 3),
@@ -867,13 +867,19 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
                 .as_ref()
                 .expect(REQUESTED),
         }),
-        &[
-            ("Standard Ungapped    ", ancillary.ungapped),
-            ("Standard Gapped      ", ancillary.gapped),
-            ("PSI Ungapped         ", ancillary.psi_ungapped),
-            ("PSI Gapped           ", ancillary.psi_gapped),
-        ],
+        &ancillary_blocks(ancillary),
     )
+}
+
+/// The Karlin-Altschul blocks that `PrintAsciiPssm` prints of a search's ancillary data, with
+/// their labels, in its order.
+pub(crate) fn ancillary_blocks(ancillary: PssmAncillary) -> [(&'static str, KarlinBlk); 4] {
+    [
+        ("Standard Ungapped    ", ancillary.ungapped),
+        ("Standard Gapped      ", ancillary.gapped),
+        ("PSI Ungapped         ", ancillary.psi_ungapped),
+        ("PSI Gapped           ", ancillary.psi_gapped),
+    ]
 }
 
 /// The columns that the long form of `PrintAsciiPssm` prints (a PSSM with its information

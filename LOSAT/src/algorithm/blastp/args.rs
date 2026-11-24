@@ -59,7 +59,10 @@ impl BlastpApp {
 
     /// The program's name in NCBI's messages (`Warning: [psiblast] ...`) and reports
     /// (`# PSIBLAST 2.17.0+` in upper case): its application's name
-    /// (`options::RequestKind::application`, the one table of the names).
+    /// (`options::RequestKind::application`, the table of the names), except deltablast's: its
+    /// options handle is psiblast's (`request_kind`), its name its own. The archive and the search
+    /// strategy of deltablast, which LOSAT refuses, will need a `RequestKind` of their own
+    /// (item PS15b-3); until then `request_kind().application()` is not deltablast's name.
     pub fn ncbi_name(self) -> &'static str {
         match self {
             BlastpApp::Deltablast => "deltablast",
@@ -784,7 +787,18 @@ impl ResolvedBlastpArgs {
     pub fn query_batch_size(&self) -> Result<u32> {
         match self.app {
             BlastpApp::Blastp => crate::blastinput::app::query_batch_size(10000),
-            BlastpApp::Psiblast | BlastpApp::Deltablast => Ok(1),
+            BlastpApp::Psiblast => Ok(1),
+            // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:236-242
+            // deltablast reads `BATCH_SIZE` (an error of its value stops every run) and searches
+            // batches of one query only with more than one round (`-num_iterations` 0 too reads
+            // batches of the size).
+            BlastpApp::Deltablast => {
+                let size = crate::blastinput::app::query_batch_size(10000)?;
+                Ok(match self.psi_rounds.as_ref() {
+                    Some(plan) if plan.num_iterations > 1 => 1,
+                    _ => size,
+                })
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
             // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
             BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size(10000),

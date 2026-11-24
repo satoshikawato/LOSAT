@@ -275,6 +275,14 @@ pub(crate) struct PsiRoundIo {
     /// deltablast's round 1 writes the PSSM files of the domains' PSSM there
     /// (`deltablast_app.cpp:353`, `:405`). Taken by the first call that reaches it.
     pub(crate) before_report: std::sync::Mutex<Option<BeforeReport>>,
+    /// deltablast: the letters of the next PSSM's query, the query of the domains' PSSM (the
+    /// record's with the lower case of `-lcase_masking` as X, `delta_hooks::CddPssm`); `None` for
+    /// psiblast (the record's).
+    pub(crate) pssm_letters: Option<Vec<u8>>,
+    /// deltablast from round 2 on: round 1's ancillary data (of the first query of the batch),
+    /// with which NCBI makes the last PSSM of `-save_pssm_after_last_round`
+    /// (deltablast_app.cpp:569-577 reads the function's round-1 result, `results_1st_query`).
+    pub(crate) first_round_ancillary: Option<super::pssm::PssmAncillary>,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 
@@ -305,6 +313,16 @@ pub(crate) struct RoundOutcome {
     /// come after the round's report, before the PSSM's error.
     pub(crate) next_warnings: super::pssm::PssmReadMessages,
     pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
+    /// deltablast: the round's ancillary data (`PsiRoundIo::first_round_ancillary` of the later
+    /// rounds, and the data that the ASCII PSSM after the last PSSM prints).
+    pub(crate) ancillary: Option<super::pssm::PssmAncillary>,
+    /// deltablast from round 2 on, where another round follows and the last PSSM is saved: the
+    /// last PSSM that NCBI saves if the next round has no alignments (this round's Seq-aligns
+    /// with round 1's ancillary data), with its messages.
+    pub(crate) last: Option<(
+        Result<super::pssm::QueryPssm>,
+        super::pssm::PssmReadMessages,
+    )>,
 }
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's

@@ -1084,6 +1084,35 @@ pub(crate) fn read_psiblast_query_batches(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:236-242
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:83-91
+/// deltablast's query batches (`read_query_batches` with deltablast's batch size: NCBI's 10000
+/// letters or `BATCH_SIZE`, 1 with `-num_iterations` above 1). The domain search, an RPS-BLAST
+/// search of the whole batch, comes first: its query splitter, then its set-up, which fails where
+/// a query of the batch has no letters (`deltablast_batch_error`).
+pub(crate) fn read_deltablast_query_batches(
+    input_records: &[FastaRecord],
+    searched: &[FastaRecord],
+    input: &crate::blastinput::seq_range::QueryInput,
+    reading: QueryReading,
+    batch_size: u32,
+    query_scopes: Option<QueryScopes>,
+) -> QueryBatches {
+    read_batches(
+        input_records,
+        searched,
+        input,
+        reading,
+        batch_size,
+        &|batch| {
+            crate::blastinput::app::check_query_split_environment(false, true)
+                .err()
+                .or_else(|| deltablast_batch_error(batch))
+        },
+        query_scopes,
+    )
+}
+
 /// `read_query_batches`, where the batch errors after those of NCBI's batch reader (a reader
 /// error, `Empty CBlastQueryVector`) are `batch_error` of the batch's searched queries.
 fn read_batches(
@@ -1218,6 +1247,25 @@ fn no_data_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
         }
         .into(),
     )
+}
+
+/// The error of a deltablast batch with a query without letters (`read_deltablast_query_batches`):
+/// where every query has none, blastp's (`no_data_batch_error`); where others have letters, the
+/// domain search's set-up fails with `Bad argument to function detected` (exit 3; NCBI 2.17.0,
+/// probes `e1s`, `e2_0`, `ees`, `see` of line PS item PS13a's fix round 1).
+fn deltablast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
+    if !batch.iter().any(|record| record.seq().is_empty()) {
+        return None;
+    }
+    no_data_batch_error(batch).or_else(|| {
+        Some(
+            crate::cli::NativeError {
+                exit: 3,
+                message: format!("{ENGINE_ERROR} Bad argument to function detected\n").into(),
+            }
+            .into(),
+        )
+    })
 }
 
 /// The error of a psiblast batch that `CPsiBlast` does not take (`read_psiblast_query_batches`).

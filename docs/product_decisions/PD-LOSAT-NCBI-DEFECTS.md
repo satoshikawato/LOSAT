@@ -658,9 +658,10 @@
   the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
   1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
   at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
-  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17, a holder that
-  NCBI's scope or data loader gives for the id, and a weak match of another sequence that a report
-  of such a batch reads; line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17 and a holder
+  that NCBI's scope or data loader gives for the id, and the batch's other sequences are refused as
+  where the prefetch is off (a Seq-align id that an id of another sequence of the database matches
+  weakly, or that a version 5 database cannot list; review 1 of item pf7, M1); line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07; numbered after 1.102 on origin/dev (line RG
   item KC-11d's 1.100, exception 30's 1.101, psiblast line item PS10e's 1.102); first 1.101)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the

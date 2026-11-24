@@ -892,7 +892,7 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
         fix_bioseq_deltas(delta(2)).unwrap(),
         (3, Some(SeqData::Ncbi4na(vec![0x1f, 0xf0])), None)
     );
-    // NCBI converts the `TSeqPos` of `int length = seq8na.size()`, the sum modulo 2^32, letters
+    // NCBI converts as many letters as the `TSeqPos` of the size of `seq8na`, the sum modulo 2^32,
     // and makes it the length; LOSAT makes only those letters.
     assert_eq!(
         fix_bioseq_deltas(delta((1 << 32) + 1)).unwrap(),

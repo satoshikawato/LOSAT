@@ -277,7 +277,7 @@ fn extract_title(
 /// codes of a literal are those of its letters (`pack::append_ncbi8na`).
 ///
 /// NCBI appends every piece to `seq8na`, a gap as that many NCBI8na 15 and a gap of unknown
-/// length as one, and takes `int length = seq8na.size()` as the `TSeqPos` of the letters it
+/// length as one, and takes its size, an `int` (`length`), as the `TSeqPos` of the letters it
 /// converts and of `Seq-inst.length`: the sum of the pieces modulo 2^32 (an `int` that is
 /// negative there is the same `TSeqPos`). Past 2^32 letters (gaps that wrapped NCBI's
 /// `TSeqPos`) that is fewer than the pieces hold, and it can differ from `Seq-inst.length`

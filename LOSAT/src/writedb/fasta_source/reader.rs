@@ -1025,7 +1025,7 @@ impl RecordState {
             }
             pos += 1;
         }
-        // `m_SeqData.resize(m_CurrentPos)` with the `TSeqPos` position (fasta.cpp:985): past
+        // NCBI resizes `m_SeqData` to the `TSeqPos` position `m_CurrentPos` (fasta.cpp:985): past
         // 2^32 residues the string keeps those written since the position last wrapped.
         if self.seq_data.len() as u64 >= self.seq_pos_modulus {
             self.wrap_seq_data();
@@ -1331,7 +1331,7 @@ impl RecordState {
             self.parse_title(&title.text, warn);
         }
 
-        // `GetCurrentPos(ePosWithGaps)`, `m_CurrentPos` plus `m_TotalGapLength`: the record's
+        // `GetCurrentPos` with `ePosWithGaps`, `m_CurrentPos` plus `m_TotalGapLength`: the record's
         // length modulo 2^32, which makeblastdb tests and the `Seq-inst` takes.
         let current = self.seq_data.len() as u64 % modulus;
         let total_gap_length = self.total_gap_length % modulus;
@@ -1376,8 +1376,8 @@ impl RecordState {
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
-        // The pieces between the gaps, at the gaps' wrapped positions; a piece is `TStr(m_SeqData,
-        // pos, len)`, which `CTempString` cuts to the residues (empty from a position at or past
+        // The pieces between the gaps, at the gaps' wrapped positions; a piece is a `TStr` of
+        // `m_SeqData` from its position for its length, which `CTempString` cuts to the residues (empty from a position at or past
         // their end), and the length after the last gap is a `TSeqPos` difference. The residues
         // of a protein are one NCBIeaa literal each (gaps stay a protein's only when their sum
         // wraps to 0).
@@ -1473,7 +1473,7 @@ impl RecordState {
 
     /// `AssembleSeq` without `fParseGaps` (protein input, and every input of the mask readers):
     /// the `>?` gaps become runs of `X` (protein) or `N` (nucleotide), and the record's residues
-    /// are the first `length` letters (`GetCurrentPos(ePosWithGaps)`) of the string that this
+    /// are the first `length` letters (`GetCurrentPos` with `ePosWithGaps`) of the string that this
     /// builds, of which `keep` are stored (`length`, or 0 for a record that ends before its data
     /// are used). Its letters before a gap are appended where the gap's (wrapped) position is past
     /// the last one, cut to the residues; an append from a position past them throws

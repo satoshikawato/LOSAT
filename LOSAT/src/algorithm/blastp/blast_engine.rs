@@ -6939,7 +6939,8 @@ fn search(
             // messages; so do LOSAT's refusals of a step where NCBI's search of the batch stops or
             // never ends or crashes (`redo_run::sw_endless`, `redo_run::sw_batch_failed` where the
             // batch's first query holds a redone match, a query chunk split again or without a
-            // query in `search_split_query_batches`), as TBLASTX's and TBLASTN's
+            // query in `search_split_query_batches`, a compressed table that fills NCBI's overflow
+            // banks, `banks_filled_refusal`), as TBLASTX's and TBLASTN's
             // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
             // batches before are searched again alone. A failure that the first search meets
             // before its redo (unified P-values refused for a batch,

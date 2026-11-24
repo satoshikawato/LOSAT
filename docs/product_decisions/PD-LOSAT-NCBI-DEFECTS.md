@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.98
+- Version: 1.99
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -650,7 +650,13 @@
   merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
   of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
   of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
-  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96))
+  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
+  1.99 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
+  whose neighbouring words fill NCBI's overflow banks (decision D3) comes in the search of the query
+  batch whose table fills them (of a split batch, its chunk's table), after the reports of the
+  query batches before, as TBLASTN's of 1.97 (it came before the run's first byte); the three
+  builders of the table name the first of NCBI's tables that fills them; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.98)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -889,7 +895,8 @@ Explicit rejections (rule 3):
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  exhaust its overflow bank (in BLASTP since version 1.99, as in TBLASTN since 1.97, in the query
+  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 

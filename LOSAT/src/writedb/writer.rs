@@ -14,7 +14,7 @@ use super::convert::{
 };
 pub use super::files::DbVersion;
 use super::files::OffsetArrays;
-use super::header::{defline_set, encode_defline_set, BadChar, BadTitleChar};
+use super::header::{bad_title_chars, defline_set, encode_defline_set, BadChar, BadTitleChar};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
@@ -263,12 +263,13 @@ impl WriteDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
     // The call serializes the definition line once (writedb_impl.cpp:887-893,
     // with the sequence's own id), which posts the diagnostics of its title;
-    // the bytes are not kept.
+    // the bytes are not kept, so only the diagnostics are computed
+    // (`header::bad_title_chars`, the offsets that the serialization reports).
     /// `CWriteDB::ExtractBioseqDeflines` as far as it is visible: the
     /// diagnostics of the title.
     pub fn extract_bioseq_deflines(&mut self, bioseq: &Bioseq) {
         let mut bad = Vec::new();
-        defline_set(&bioseq.title, 0, 0, &mut bad);
+        bad_title_chars(&bioseq.title, &mut bad);
         post_bad_title_chars(&mut self.diagnostics, &bioseq.title, &bad);
     }
 

@@ -1,6 +1,7 @@
 //! Header record of one sequence (`.phr` / `.nhr`): the BER encoding of a
 //! `Blast-def-line-set`. Without `-parse_seqids` it has one definition line
-//! with the title, the id `gnl|BL_ORD_ID|n` and the taxid 0 (`defline_set`);
+//! with the title, the id `gnl|BL_ORD_ID|n` and the taxid 0 (`defline_set`; the
+//! diagnostics of its title alone: `bad_title_chars`);
 //! with it, the definition lines of the sequence with every Seq-id alternative
 //! (`encode_defline_set`). `crate::seqdb::header` and `crate::seqid::ber`
 //! decode the same bytes.
@@ -82,6 +83,41 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
     out.extend_from_slice(rest);
 }
 
+/// The bytes of `defline_set`'s record besides its title: at most 77 (eleven tags with indefinite
+/// lengths and their eleven ends, the title's tag and a length of up to 9 bytes, `BL_ORD_ID` with
+/// its tag and length, and two integers of up to 6 bytes), so that the record is written into its
+/// buffer without growing it (LOSAT's speed).
+const DEFLINE_SET_OVERHEAD: usize = 80;
+
+/// The prefix of `defline_set`'s record before its title's bytes: the tags of
+/// `Blast-def-line-set`, `Blast-def-line` and the `title` member, and the VisibleString's tag and
+/// length.
+fn title_prefix(out: &mut Vec<u8>, title: &[u8]) {
+    open(out, TAG_SEQUENCE);
+    open(out, TAG_SEQUENCE);
+    open(out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TITLE);
+    out.push(TAG_VISIBLE_STRING);
+    write_length(out, title.len());
+}
+
+/// The bytes of `title` that `defline_set` writes as `#`, with the stream offsets that it reports,
+/// without writing the record. The title is the record's first string, so its offsets do not
+/// depend on the oid or the taxid. `ExtractBioseqDeflines` serializes the definition line only for
+/// these diagnostics (cited at `WriteDb::extract_bioseq_deflines`); computing them alone gives the
+/// same diagnostics (LOSAT's speed).
+pub(crate) fn bad_title_chars(title: &[u8], bad: &mut Vec<BadTitleChar>) {
+    let mut prefix = Vec::with_capacity(16);
+    title_prefix(&mut prefix, title);
+    let mut at = 0;
+    while let Some(found) = find_first(&title[at..], |byte| !(b' '..=b'~').contains(&byte)) {
+        bad.push(BadTitleChar {
+            byte: title[at + found],
+            stream_offset: prefix.len() + at + found,
+        });
+        at += found + 1;
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:130-136
 // Without `-taxid` the best taxid is 0 (taxid_set.cpp:84-90, 123-128: the unset global id
@@ -92,7 +128,7 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
 /// the title that a VisibleString cannot hold are written as `#` and
 /// appended to `bad`.
 pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(64 + title.len());
+    let mut out = Vec::with_capacity(DEFLINE_SET_OVERHEAD + title.len());
     // Outer `Blast-def-line-set` sequence of `Blast-def-line` entries.
     open(&mut out, TAG_SEQUENCE);
     // Single `Blast-def-line` sequence.

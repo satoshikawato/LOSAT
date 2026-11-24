@@ -1431,10 +1431,11 @@ impl FetchedUtf8 {
 /// NCBI's fetch reads the header of every subject it fetches (`GetSeqIDs`), so a header that
 /// cannot be read ends NCBI's search there (exit 255 in the traceback, `BLAST engine error`
 /// in the ungapped re-evaluation) even where the subject would not be reported; LOSAT refuses
-/// such a search there (`refusal`). The composition-based redo fetches only the matches that
-/// its early termination test leaves (blast_kappa.c:3525-3540), so LOSAT, which checks every
-/// subject of the preliminary hit lists, may refuse a search with such a header that NCBI ends
-/// without reading it.
+/// such a search there (`refusal`). The composition-based redo (and the Smith-Waterman redo)
+/// fetches only the matches that its early termination test leaves (blast_kappa.c:3525-3540):
+/// a stream's list whose header cannot be read stays in it (`marks_noting`,
+/// `FetchedReads::unreadable`), and the redo's program refuses the search only where NCBI's redo
+/// fetches it (`refusal_at`, found as the reads of a UTF8String header are: `first_redo_fetch`).
 pub(crate) struct FetchExcluded<'a> {
     check: LineCheck<'a>,
     /// The first of the reads of `excludes` that took a UTF8String for a VisibleString, in the
@@ -1450,6 +1451,11 @@ impl<'a> FetchExcluded<'a> {
             check: LineCheck::new(db),
             utf8: Default::default(),
         })
+    }
+
+    /// The database whose fetches this checks.
+    pub(crate) fn db(&self) -> &'a SeqDb {
+        self.check.db
     }
 
     /// Whether the fetch of `ordinal` excludes it; the reader's error where its header cannot
@@ -1471,7 +1477,7 @@ impl<'a> FetchExcluded<'a> {
         let read = self
             .check
             .read(ordinal)
-            .map_err(|error| self.read_error(ordinal, error))?;
+            .map_err(|error| read_error(self.check.db, ordinal, error))?;
         if read.utf8 {
             reads.note_ordinal(self.check.db, u128::from(ordinal), ordinal);
         }
@@ -1501,85 +1507,125 @@ impl<'a> FetchExcluded<'a> {
         items: &mut Vec<T>,
         ordinal: impl Fn(&T) -> Option<u32>,
     ) -> Result<Vec<FetchedUtf8>, (u32, SeqDbError)> {
-        self.retain_noting(items, ordinal, |_| ())
-            .map(|fetched| fetched.into_iter().map(|(read, ())| read).collect())
+        // The traceback fetches every subject: the first header that cannot be read ends it.
+        let (marks, reads) = self.read_marks(items, ordinal, |_| (), false)?;
+        marks.retain(items);
+        Ok(reads.utf8.into_iter().map(|(read, ())| read).collect())
     }
 
-    /// `retain`, each `FetchedUtf8` with `noted(item)` of its item (what its redo's order and
-    /// early termination test read of it, `redo_fetches`).
+    /// `retain` of the lists of a composition-based redo's stream (which its fetches read in
+    /// the stream's order), each `FetchedUtf8` with `noted(item)` of its item (what its redo's
+    /// order and early termination test read of it, `redo_fetches`): a list whose header cannot
+    /// be read stays (`FetchedReads::unreadable`), and its program refuses the search where the
+    /// redo fetches it (`refusal_at`).
     pub(crate) fn retain_noting<T, N>(
         &self,
         items: &mut Vec<T>,
         ordinal: impl Fn(&T) -> Option<u32>,
         noted: impl Fn(&T) -> N,
-    ) -> Result<Vec<(FetchedUtf8, N)>, (u32, SeqDbError)> {
-        let (marks, utf8) = self.marks_noting(items, ordinal, noted)?;
-        let mut index = 0;
-        items.retain(|_| {
-            index += 1;
-            !marks.excluded(index - 1)
-        });
-        Ok(utf8)
+    ) -> FetchedReads<N> {
+        let (marks, reads) = self.marks_noting(items, ordinal, noted);
+        marks.retain(items);
+        reads
     }
 
     /// Which of `items` (the preliminary hit lists of a redo's stream, in the stream's order)
     /// are on a subject the fetch excludes (`FetchMarks`); `ordinal` names an item's subject
-    /// (`None`: fetched). The first header that cannot be read, in the order of `items`, is the
-    /// error (with its ordinal), as `retain`'s. The items whose header holds a UTF8String where a
-    /// VisibleString is expected come with them, as `retain_noting` returns them: the one read
-    /// of the items' headers for both.
+    /// (`None`: fetched). The items whose header holds a UTF8String where a VisibleString is
+    /// expected and those whose header cannot be read come with them (`FetchedReads`, each with
+    /// `noted(item)`), as `retain_noting` returns them: the one read of the items' headers for
+    /// all. A list whose header cannot be read is neither kept nor excluded by NCBI's fetch,
+    /// which ends the search where its redo reaches it; it stays in the stream (marked as kept),
+    /// so that the redo tests its early termination as NCBI's does.
     pub(crate) fn marks_noting<T, N>(
         &self,
         items: &[T],
         ordinal: impl Fn(&T) -> Option<u32>,
         noted: impl Fn(&T) -> N,
-    ) -> Result<(FetchMarks, Vec<(FetchedUtf8, N)>), (u32, SeqDbError)> {
+    ) -> (FetchMarks, FetchedReads<N>) {
+        match self.read_marks(items, ordinal, noted, true) {
+            Ok(marks) => marks,
+            Err(_) => unreachable!("a deferred read error is noted, not returned"),
+        }
+    }
+
+    /// `marks_noting`; with `defer` false, the first header that cannot be read, in the order
+    /// of `items`, is the error (with its ordinal) instead (a fetch of every item: `retain`).
+    fn read_marks<T, N>(
+        &self,
+        items: &[T],
+        ordinal: impl Fn(&T) -> Option<u32>,
+        noted: impl Fn(&T) -> N,
+        defer: bool,
+    ) -> Result<(FetchMarks, FetchedReads<N>), (u32, SeqDbError)> {
         let mut excluded = Vec::with_capacity(items.len());
-        let mut utf8 = Vec::new();
+        let mut reads = FetchedReads {
+            utf8: Vec::new(),
+            unreadable: Vec::new(),
+        };
         let mut kept = 0;
         for (index, item) in items.iter().enumerate() {
             let keeps = match ordinal(item) {
-                Some(ordinal) => {
-                    let read = self
-                        .check
-                        .read(ordinal)
-                        .map_err(|error| (ordinal, self.read_error(ordinal, error)))?;
-                    if read.utf8 {
-                        utf8.push((
+                Some(ordinal) => match self.check.read(ordinal) {
+                    Ok(read) => {
+                        if read.utf8 {
+                            reads.utf8.push((
+                                FetchedUtf8 {
+                                    index,
+                                    kept: read.kept,
+                                    before: kept,
+                                    ordinal,
+                                },
+                                noted(item),
+                            ));
+                        }
+                        read.kept
+                    }
+                    Err(error) if !defer => {
+                        return Err((ordinal, read_error(self.check.db, ordinal, error)));
+                    }
+                    Err(_) => {
+                        reads.unreadable.push((
                             FetchedUtf8 {
                                 index,
-                                kept: read.kept,
+                                kept: true,
                                 before: kept,
                                 ordinal,
                             },
                             noted(item),
                         ));
+                        true
                     }
-                    read.kept
-                }
+                },
                 None => true,
             };
             kept += usize::from(keeps);
             excluded.push(!keeps);
         }
-        Ok((FetchMarks(excluded), utf8))
+        Ok((FetchMarks(excluded), reads))
     }
 
-    /// The error of the read of `ordinal`'s header for `refusal`: a record that NCBI's read
-    /// fails on (`SeqDbError::Ncbi`, the text of NCBI's exception, which names no file) is named
-    /// by its header file, as the reader's other errors are.
+    /// LOSAT's refusal (in `program`'s name) of a search of `db` whose redo fetches the sequence
+    /// `ordinal`, whose header cannot be read (`FetchedReads::unreadable`): `refusal` of the
+    /// error of a new read of it.
     #[cold]
     #[inline(never)]
-    fn read_error(&self, ordinal: u32, error: SeqDbError) -> SeqDbError {
-        if !matches!(error, SeqDbError::Ncbi(_)) {
-            return error;
-        }
-        match self.check.db.header_file(ordinal) {
-            Some(path) => SeqDbError::Format {
-                path,
-                message: error.to_string(),
-            },
-            None => error,
+    pub(crate) fn refusal_at(db: &SeqDb, ordinal: u32, program: &str) -> anyhow::Error {
+        match db.line_read(ordinal) {
+            Err(error) => Self::refusal((ordinal, read_error(db, ordinal, error)), program),
+            // Not met: the reader keeps no state between two reads of a header.
+            Ok(_) => FetchRefusal(
+                refusal(
+                    &format!(
+                        "under the negative seqid list NCBI reads the definition lines of each \
+                         sequence that its search aligns again, and those of sequence {ordinal} \
+                         cannot be read"
+                    ),
+                    program,
+                )
+                .to_string(),
+            )
+            .into(),
         }
     }
 
@@ -1642,17 +1688,70 @@ impl FetchMarks {
         items: &[T],
         ordinal: impl Fn(&T) -> Option<u32>,
         noted: impl Fn(&T) -> N,
-    ) -> Result<(Self, Vec<(FetchedUtf8, N)>), (u32, SeqDbError)> {
+    ) -> (Self, FetchedReads<N>) {
         match excluded {
             Some(excluded) => excluded.marks_noting(items, ordinal, noted),
-            None => Ok((Self::default(), Vec::new())),
+            None => (Self::default(), FetchedReads::default()),
         }
+    }
+
+    /// `items` (those the marks were made of) without the excluded ones, in their order.
+    fn retain<T>(&self, items: &mut Vec<T>) {
+        let mut index = 0;
+        items.retain(|_| {
+            index += 1;
+            !self.excluded(index - 1)
+        });
     }
 
     /// Whether the fetch excludes the subject of the stream's item `index`.
     #[inline(always)]
     pub(crate) fn excluded(&self, index: usize) -> bool {
         self.0.get(index).copied().unwrap_or(false)
+    }
+}
+
+/// What the one read of the headers of a stream's lists (`FetchExcluded::marks_noting`) found
+/// beyond the marks, each subject with its item's note (`FetchedUtf8`, and what its caller's
+/// redo reads of the item).
+#[derive(Debug)]
+pub(crate) struct FetchedReads<N> {
+    /// The subjects whose header holds a UTF8String where a VisibleString is expected: the first
+    /// that NCBI's fetches read posts its warning.
+    pub(crate) utf8: Vec<(FetchedUtf8, N)>,
+    /// The subjects whose header cannot be read as NCBI's read adjusts it (a string `BL_ORD_ID`
+    /// tag in a volume after the first, a record NCBI's read fails on) or that LOSAT refuses
+    /// where it reads it (`seqdb::Volume::filtered_mask`, whose warning or error NCBI gives at
+    /// that read): their lists stay in the stream, and where NCBI's redo fetches one (found as the first fetched UTF8String read is,
+    /// `first_redo_fetch`) its search ends; LOSAT refuses it there
+    /// (`FetchExcluded::refusal_at`). Their `kept` is true.
+    pub(crate) unreadable: Vec<(FetchedUtf8, N)>,
+}
+
+impl<N> Default for FetchedReads<N> {
+    fn default() -> Self {
+        FetchedReads {
+            utf8: Vec::new(),
+            unreadable: Vec::new(),
+        }
+    }
+}
+
+/// The error of the read of `ordinal`'s header of `db` for `FetchExcluded::refusal`: a record
+/// that NCBI's read fails on (`SeqDbError::Ncbi`, the text of NCBI's exception, which names no
+/// file) is named by its header file, as the reader's other errors are.
+#[cold]
+#[inline(never)]
+fn read_error(db: &SeqDb, ordinal: u32, error: SeqDbError) -> SeqDbError {
+    if !matches!(error, SeqDbError::Ncbi(_)) {
+        return error;
+    }
+    match db.header_file(ordinal) {
+        Some(path) => SeqDbError::Format {
+            path,
+            message: error.to_string(),
+        },
+        None => error,
     }
 }
 

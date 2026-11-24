@@ -157,9 +157,11 @@ fn before_the_epilog<'a>(alone: &'a [u8], outfmt: &str, epilog: &str) -> &'a [u8
     let text = String::from_utf8_lossy(alone);
     match outfmt {
         "0" => &alone[..text.rfind(epilog).expect("the epilog")],
-        "5" => &alone[..text
-            .rfind("\n</BlastOutput_iterations>")
-            .expect("the end of the document")],
+        "5" => {
+            &alone[..text
+                .rfind("\n</BlastOutput_iterations>")
+                .expect("the end of the document")]
+        }
         "7" => &alone[..text.rfind("# BLAST processed").expect("the count line")],
         _ => alone,
     }
@@ -389,8 +391,9 @@ fn a_header_the_fetch_cannot_read_fails_the_batch_after_the_batches_before() {
                     String::from_utf8_lossy(&alone.stderr)
                 );
                 for path in PATHS {
-                    let case =
-                        format!("ungapped {ungapped}, outfmt {outfmt}, threads {threads}, {path:?}");
+                    let case = format!(
+                        "ungapped {ungapped}, outfmt {outfmt}, threads {threads}, {path:?}"
+                    );
                     let one_batch = search(path, &qb);
                     assert_fetch_refused(&one_batch, &format!("{case}: qb alone"));
                     assert_bytes(

@@ -17,10 +17,10 @@
 //! batch's outputs before it is returned, as it did in `search_query_batch`.
 
 use super::{
-    context_lengths, database, database_search_error, prolog_with_report, reborrow_outputs,
-    write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage, BlastnArgs,
-    after_batch_reports, ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching,
-    QueryContext, SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
+    after_batch_reports, context_lengths, database, database_search_error, prolog_with_report,
+    reborrow_outputs, write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage,
+    BlastnArgs, ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching, QueryContext,
+    SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::scoring::{
     check_greedy_gap_costs, check_greedy_matrix_only, context_blocks, context_blocks_ungapped,

@@ -8781,27 +8781,29 @@ fn run_in_pool(
         };
         let batch = match searched {
             Ok(batch) => batch,
-            Err(error) => match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
-                // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-318
-                // The reports of the batches before are written (for the first batch, the
-                // prologs that come with them), then the batch's title warnings (it was read
-                // before its search) and the error, which skips `PrintEpilog` (the outfmt 0
-                // footer and outfmt 7's last line): `after_batch_reports`.
-                Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => fail_batch!(error),
-                // The warnings of the batches read so far, in NCBI's order (the outfmt 0
-                // prolog of a Karlin-Altschul error of the first batch is written).
-                // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
-                // with their reports, which a refusal of LOSAT's in a later batch follows (the
-                // traceback's of ambiguity data that it cannot decode, `x_rpt_stream`); the off
-                // path writes no report here.
-                Err(error) => {
-                    let written = if stream.acting() { start } else { 0 };
-                    for query_warnings in &warnings[written..=start] {
-                        query_warnings.write(&mut *outputs.diagnostics, archive)?;
+            Err(error) => {
+                match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-318
+                    // The reports of the batches before are written (for the first batch, the
+                    // prologs that come with them), then the batch's title warnings (it was read
+                    // before its search) and the error, which skips `PrintEpilog` (the outfmt 0
+                    // footer and outfmt 7's last line): `after_batch_reports`.
+                    Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => fail_batch!(error),
+                    // The warnings of the batches read so far, in NCBI's order (the outfmt 0
+                    // prolog of a Karlin-Altschul error of the first batch is written).
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
+                    // with their reports, which a refusal of LOSAT's in a later batch follows (the
+                    // traceback's of ambiguity data that it cannot decode, `x_rpt_stream`); the off
+                    // path writes no report here.
+                    Err(error) => {
+                        let written = if stream.acting() { start } else { 0 };
+                        for query_warnings in &warnings[written..=start] {
+                            query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                        }
+                        return Err(error);
                     }
-                    return Err(error);
                 }
-            },
+            }
         };
         // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
         // search strategy request holds.
@@ -10397,12 +10399,12 @@ fn refused_batch_setup_error(
             query_keep,
         )
     };
-    set_up
-        .err()
-        .map(|error| match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+    set_up.err().map(|error| {
+        match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
             Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => error,
             Err(error) => error,
-        })
+        }
+    })
 }
 
 /// Searches one query batch against the subjects, with the query block, lookup table and

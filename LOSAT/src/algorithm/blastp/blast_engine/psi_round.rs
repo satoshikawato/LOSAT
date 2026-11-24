@@ -215,6 +215,37 @@ fn app_mode(mode: BlastpCompositionMode) -> CompositionMode {
 // `in_pssm::setup_messages`: a PSSM search of mode 2 or 3 sets the options to 1, so a later
 // round of the query neither runs 2 or 3 nor warns again)
 #[allow(clippy::too_many_arguments)]
+/// deltablast's refusals that the inputs decide before any search, made before the run writes
+/// anything: `-num_iterations 0` with a query batch of several queries (NCBI BLAST+ searches the
+/// rounds after the first of the batch's first query only: deltablast_app.cpp `DoPsiBlastIterations`
+/// with a batch of NCBI's 10000 letters), and a subject set (`-subject`) of more records than
+/// `-max_target_seqs` (the round-1 search below).
+fn refuse_before_output(
+    args: &ResolvedBlastpArgs,
+    plan: &PsiRoundPlan,
+    batches: &QueryBatches,
+    subject_source: BlastpSubjectSource<'_>,
+) -> Result<()> {
+    if plan.num_iterations == 0
+        && batches
+            .starts
+            .iter()
+            .any(|&(_, first_query)| batches.searched_span(first_query).len() > 1)
+    {
+        bail!(
+            "-num_iterations 0 with a query batch of several queries (NCBI BLAST+ searches the later rounds of the batch's first query only) is not supported by LOSAT's DELTABLAST"
+        );
+    }
+    let subjects = subject_source.fasta_records().len();
+    if subject_source.database().is_none() && subjects > 1 && subjects > args.max_target_seqs {
+        bail!(
+            "-subject with more records than -max_target_seqs ({}) is not supported by LOSAT's DELTABLAST (NCBI BLAST+ keeps the best subjects of the set in its first search)",
+            args.max_target_seqs
+        );
+    }
+    Ok(())
+}
+
 fn run_queries(
     args: &ResolvedBlastpArgs,
     plan: &PsiRoundPlan,
@@ -249,6 +280,9 @@ fn run_queries(
     // searches reset (`delta_hooks`); its batches are NCBI's (`read_deltablast_query_batches`).
     let delta = args.delta.as_deref();
     let first_pssm_round = if delta.is_some() { 1 } else { 2 };
+    if delta.is_some() {
+        refuse_before_output(args, plan, batches, subject_source)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:127-146
     // deltablast's `m_AncillaryData`: the Karlin-Altschul blocks that the ASCII PSSM of the first
     // query of a batch prints, taken from that PSSM where it is empty, set by each PSSM made from
@@ -296,11 +330,6 @@ fn run_queries(
             outputs
                 .diagnostics
                 .write_all(&batches.warnings[first_query])?;
-            if plan.num_iterations == 0 && batch_queries.len() > 1 {
-                bail!(
-                    "-num_iterations 0 with a query batch of several queries (NCBI BLAST+ searches the later rounds of the batch's first query only) is not supported by LOSAT's DELTABLAST"
-                );
-            }
             if plan.num_iterations != 1 {
                 carried_ascii = None;
             }
@@ -589,7 +618,8 @@ fn run_queries(
                 // reads the statistics of the whole set. LOSAT searches each subject in a call of its
                 // own that reads those statistics (`ResolvedBlastpArgs::whole_subject_set`). The
                 // preliminary stage of NCBI's one search keeps the best `-max_target_seqs` subjects
-                // of the set only, which separate searches do not: a larger set is LOSAT's refusal.
+                // of the set only, which separate searches do not: a larger set is LOSAT's refusal,
+                // made before the run writes anything (`refuse_before_output`).
                 let subject_records = subject_source.fasta_records();
                 let results =
                     if delta.is_some() && round == 1 && subject_source.database().is_none() {
@@ -597,12 +627,6 @@ fn run_queries(
                     } else {
                         1
                     };
-                if results > 1 && results > args.max_target_seqs {
-                    bail!(
-                    "-subject with more records than -max_target_seqs ({}) is not supported by LOSAT's DELTABLAST (NCBI BLAST+ keeps the best subjects of the set in its first search)",
-                    args.max_target_seqs
-                );
-                }
                 let whole_subject_set = (results > 1).then(|| {
                     (
                         subject_records

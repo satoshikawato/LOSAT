@@ -225,7 +225,7 @@ impl DeltaRun {
         };
         // The search's matrix gives the query Karlin-Altschul parameters where the domain search's
         // did (above); a matrix where it does not is LOSAT's refusal, not reached with NCBI's
-        // matrices.
+        // matrices (`tests::every_letter_set_gives_a_karlin_block_under_every_matrix_or_none`).
         if query_ungapped_block(matrix, &letters).is_none() {
             bail!(
                 "a query whose letters give Karlin-Altschul parameters with the domain search's matrix but not with -matrix is not supported by LOSAT's DELTABLAST"
@@ -409,3 +409,7 @@ impl DomainSide {
         Ok(opened)
     }
 }
+
+#[cfg(test)]
+#[path = "delta_hooks_tests.rs"]
+mod tests;

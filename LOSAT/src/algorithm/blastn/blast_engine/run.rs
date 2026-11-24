@@ -744,9 +744,9 @@ fn next_hard_chunk(hard: &mut HardSplitState, chunk_overlap: usize) -> SubjectCh
         None => SubjectChunkStatus::Done,
         Some(chunk) => SubjectChunkStatus::Ok(SubjectChunk {
             offset: chunk.offset,
-            length: chunk.length,
+            length: chunk.letters(),
             seq_ranges: SeqRanges::Inline {
-                range: (chunk.residual as i32, chunk.length as i32),
+                range: (chunk.residual as i32, chunk.length),
             },
             masked: true,
             overlap: chunk.overlap,
@@ -6184,22 +6184,14 @@ pub fn run(
     )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // The search strategy's request, with the archive's options handle.
-    args.strategy = strategy_file
-        .map(|file| {
-            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                file,
-                archive::option_inputs(&args, args.dust_filtering.as_deref()),
-                choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs,
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.database_name(),
-                &options,
-            ))
-        })
-        .transpose()?;
+    args.strategy = strategy_file.map(|file| {
+        crate::report::archive::strategy::StrategyExport::for_args(
+            &args,
+            file,
+            choice.number(),
+            &options,
+        )
+    });
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -6815,18 +6807,18 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
 }
 
 /// The report of the CLI's `-outfmt`, read as NCBI reads it before its option handlers run
-/// (`run`; `blastinput/app.rs` `parse_formatting_string`, `report_format`). A format that
+/// (`run`; `blastinput/app.rs` `app::early_format_choice`, `report_format`). A format that
 /// NCBI itself rejects later has no report: the run stops at NCBI's error, the formatting
 /// handler's in `process_options` (AIRR rearrangement, FASTA) or the XInclude formats' in
-/// `search` (13 and 14 to standard output).
+/// `search` (13 and 14 to standard output). Nor has a value that does not parse where the argv
+/// names a search strategy file (`strategy`): the formatting handler reads it again
+/// (`process_options`) and fails there, after the query options.
 fn cli_output_formats(
     outfmt: &str,
     out: Option<&std::path::Path>,
+    strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    output_formats_of(
-        &app::EarlyFormat::Parsed(app::parse_formatting_string(outfmt)?),
-        out,
-    )
+    output_formats_of(&app::early_format_choice(outfmt, strategy)?, out)
 }
 
 /// The report of the choice `choice` that `app::early_format_choice` read (`cli_output_formats`):
@@ -6845,18 +6837,19 @@ fn output_formats_of(
 }
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
-/// `-outfmt` (`cli_output_formats`): NCBI's parse and LOSAT's refusals, before `-out` is opened. A
-/// format without a report (`app::report_format`: one that NCBI rejects later) is left out, as on
-/// the command line: NCBI's formatting handler rejects it after `-out` is opened
-/// (`process_options`), or `search` (the XInclude formats without a file). `out`: the file of
-/// `api::run_to_file`, or the `-out` of the caller's receiver of the side files of a format
-/// (`FormatOutput::side_out`).
+/// `-outfmt` (`cli_output_formats`; `strategy`: the argv names a search strategy file): NCBI's
+/// parse and LOSAT's refusals, before `-out` is opened. A format without a report
+/// (`app::report_format`: one that NCBI rejects later) is left out, as on the command line: NCBI's
+/// formatting handler rejects it after `-out` is opened (`process_options`), or `search` (the
+/// XInclude formats without a file). `out`: the file of `api::run_to_file`, or the `-out` of the
+/// caller's receiver of the side files of a format (`FormatOutput::side_out`).
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = (&'a str, Option<&'a std::path::Path>)>,
+    strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
     let mut output_formats = Vec::new();
     for (outfmt, out) in formats {
-        output_formats.extend(cli_output_formats(outfmt, out)?);
+        output_formats.extend(cli_output_formats(outfmt, out, strategy)?);
     }
     Ok(output_formats)
 }
@@ -6917,24 +6910,24 @@ pub fn run_local(
         app::parse_formatting_string(format.outfmt)
             .is_ok_and(|choice| choice.number == app::output_format::ARCHIVE_FORMAT)
     });
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
         args.archive = archive::handle_for(
             &args,
             args.dust_filtering.as_deref(),
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, query_end, subject_records, view)
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(args, query_records, query_end, subject_records, outputs)
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(args, query_records, query_end, subject_records, outputs)
+    })
 }
 
 fn run_local_formats(
@@ -6945,15 +6938,15 @@ fn run_local_formats(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // `run_local` searches subject records (the library, `api::run`; the WebAssembly adapter,
-    // `web/adapter`; ABI v1, which refuses `-db` before in `web_api.rs`, `parse_blastn_args`);
+    // `web/adapter`; ABI v1, which refuses `-db` earlier: `parse_blastn_args` in `web_api.rs`);
     // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is run by run_local_database, not run_local");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     // The counts file of `-window_masker_db` is read through the caller's counts source
     // (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter` gives
     // its registered counts files); a caller of `run_local` that sets none has no counts
-    // source; ABI v1 refuses `-window_masker_db` before (`web_api.rs`, `parse_blastn_args`).
+    // source; ABI v1 refuses `-window_masker_db` earlier (`parse_blastn_args` in `web_api.rs`).
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
             "-window_masker_db (a WindowMasker counts file) needs its counts source set before calling run_local (BlastnArgs::window_masker_counts)"
@@ -6963,8 +6956,8 @@ fn run_local_formats(
     // registry (`BlastnArgs::window_masker_registry`, from the run's settings) and counts
     // source (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter`
     // gives its registered counts files); a caller of `run_local` that omits either cannot
-    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` before (`web_api.rs`,
-    // `parse_blastn_args`).
+    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` earlier (`parse_blastn_args` in
+    // `web_api.rs`).
     if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
         && (args.window_masker_registry.is_none() || args.window_masker_counts.is_none())
     {
@@ -6975,7 +6968,7 @@ fn run_local_formats(
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
     // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
     // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
-    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
+    // no repeat search; ABI v1 refuses the option earlier (`parse_blastn_args` in `web_api.rs`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
             "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
@@ -6988,6 +6981,7 @@ fn run_local_formats(
             .formats
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
+        args.export_search_strategy.is_some(),
     )?;
     // The thread count is checked before the inputs are read, as on the command line (`run`).
     crate::utils::threading::validate_threads(args.num_threads)?;
@@ -7056,32 +7050,23 @@ pub fn run_local_database(
             .formats
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
+        args.export_search_strategy.is_some(),
     )?;
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     args.archive = archive::handle_for(
         &args,
         args.dust_filtering.as_deref(),
         output_formats.contains(&BlastnOutputFormat::Archive),
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(
-                    args,
-                    query_records,
-                    query_end,
-                    output_formats,
-                    settings,
-                    view,
-                    None,
-                )
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(
             args,
             query_records,
             query_end,
@@ -7089,8 +7074,8 @@ pub fn run_local_database(
             settings,
             outputs,
             None,
-        ),
-    }
+        )
+    })
 }
 
 /// The repeat search of blastn's `-filtering_db` (`repeat_filter`): `args` (the search's options,
@@ -7153,7 +7138,7 @@ pub(crate) fn repeat_search_hits(
             hits: Some(&mut on_hits),
             observer: None,
         };
-        parse_output_formats(std::iter::once(("6", None))).and_then(|output_formats| {
+        parse_output_formats(std::iter::once(("6", None)), false).and_then(|output_formats| {
             search_database(
                 args,
                 query_records,
@@ -8065,7 +8050,8 @@ enum BatchStage<'a> {
     ///
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
-    /// (`x_lut_drop::after_prelim`).
+    /// (`x_lut_drop::after_prelim`), and its `qs` (LOSAT_X_CSRQSKEEP) once the batch's tables are
+    /// built (`BatchStage::x_last_tables`).
     ///
     /// `setup_only`: the set-up of the batch alone, up to its checks of the subjects
     /// (`context_statistics`), which ends with `SetUpOnly` where they pass: the set-up of a batch
@@ -8083,13 +8069,29 @@ enum BatchStage<'a> {
     /// spaces of the batch's contexts.
     ///
     /// EXPERIMENT (LOSAT_X_CSRQSKEEP) `x_last`: the last chunk of the batch loop's last batch, after
-    /// whose tables no build follows, so the loop's keep takes no `qs` back when they drop
+    /// whose tables no build follows (`BatchStage::x_last_tables`), so the loop's keep frees the
+    /// `qs` it holds once they are built and takes none back when they drop
     /// (`x_mb_lut_keep::Keep::close_qs`).
     ChunkPrelim {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
         x_last: bool,
     },
+}
+
+impl BatchStage<'_> {
+    /// Whether the batch loop builds no lookup table after this call's (EXPERIMENT
+    /// LOSAT_X_MBLUTKEEP, LOSAT_X_CSRQSKEEP; no NCBI counterpart, memory only): the loop's last
+    /// batch (`Search`'s `last`; a split one builds none of its own, after its chunks') or the last
+    /// chunk of a split last batch (`ChunkPrelim`'s `x_last`). The one test of it for the loop's
+    /// keep: it closes the keep to `qs` once these tables are built and frees its table after the
+    /// last batch's preliminary stage.
+    fn x_last_tables(self) -> bool {
+        matches!(
+            self,
+            BatchStage::Search { last: true, .. } | BatchStage::ChunkPrelim { x_last: true, .. }
+        )
+    }
 }
 
 /// The end of a batch's set-up alone (`BatchStage::Search::setup_only`) whose checks pass: no
@@ -8407,6 +8409,12 @@ fn run_in_pool(
         // the prologs that come with them), before the batch's messages and its error.
         macro_rules! write_reports_before {
             () => {{
+                // EXPERIMENT (LOSAT_X_CSRQSKEEP): the loop builds no table after this, so its keep
+                // frees the `qs` it holds before the reports are written (`Keep::close_qs`;
+                // nothing with the switch off). No NCBI counterpart (memory only).
+                if let Some(keep) = &x_lut_keep {
+                    keep.close_qs();
+                }
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                 // written when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8782,6 +8790,11 @@ fn run_in_pool(
                 // The reports of the batches before are written, then the error, which
                 // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
                 Ok(ErrorAfterInvalidBatches(error)) => {
+                    // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees
+                    // the `qs` it holds first. No NCBI counterpart (memory only).
+                    if let Some(keep) = &x_lut_keep {
+                        keep.close_qs();
+                    }
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                     // written when the loop took them.
                     let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8931,6 +8944,11 @@ fn run_in_pool(
         if let Err(error) = crate::blastinput::app::check_prefetch_environment(
             outputs.only_archive() || args.hits_only,
         ) {
+            // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees the `qs`
+            // it holds first. No NCBI counterpart (memory only).
+            if let Some(keep) = &x_lut_keep {
+                keep.close_qs();
+            }
             write_before_failed_batch(
                 &args,
                 queries.before(&kept, start),
@@ -10825,6 +10843,14 @@ fn search_query_batch<const UNGAPPED: bool>(
             // without an index, `partial`, and never reads it: every OID is the index's.)
             split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
+    // EXPERIMENT (LOSAT_X_CSRQSKEEP): the loop builds no table after these
+    // (`BatchStage::x_last_tables`), so its keep frees the `qs` it still holds (these tables are
+    // chains, which take none) before their scan, and takes none back from here on: a last CSR took
+    // the kept `qs` and frees its `qs` when its tables drop, as before the switch. No NCBI
+    // counterpart (memory only).
+    if let (true, Some(keep)) = (stage.x_last_tables(), x_keep) {
+        keep.close_qs();
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
     // Cutoff scores are computed per subject in the main loop; no global map needed.
@@ -11208,14 +11234,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
     subject_space_overflow.check()?;
-    if let BatchStage::ChunkPrelim { x_last, .. } = stage {
-        // EXPERIMENT (LOSAT_X_CSRQSKEEP): the last chunk of the loop's last batch: no build
-        // follows, so its CSR frees its `qs` when its tables drop at this return, as before the
-        // switch (`x_lut_drop::after_prelim` for a batch that is not split). No NCBI counterpart
-        // (memory only).
-        if let (true, Some(keep)) = (x_last, x_keep) {
-            keep.close_qs();
-        }
+    if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
@@ -11224,9 +11243,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // The keep of LOSAT_X_MBLUTKEEP frees its table too when no later batch builds one on it.
     x_lut_drop::after_prelim(
         lookup_tables,
-        x_keep
-            .filter(|_| matches!(stage, BatchStage::Search { last: true, .. }))
-            .map(|keep| &**keep),
+        x_keep.filter(|_| stage.x_last_tables()).map(|keep| &**keep),
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
     // NCBI frees the initial (ungapped) hit list at the end of its preliminary search. No NCBI

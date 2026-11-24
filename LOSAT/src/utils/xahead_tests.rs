@@ -16,15 +16,15 @@ fn value_of(index: usize) -> u64 {
 }
 
 #[cfg(feature = "parallel")]
-fn ordered_sum(n: usize, window: usize, helpers: usize, leave: bool) -> (u64, Vec<usize>) {
+fn ordered_sum(n: usize, window: usize, helpers: usize, form: &str) -> (u64, Vec<usize>) {
     let compute = |index: usize, scratch: &mut u64| -> u64 {
         *scratch += 1;
         value_of(index)
     };
-    let ahead = if leave {
-        Ahead::x_new_leaving(window)
-    } else {
-        Ahead::new(window)
+    let ahead = match form {
+        "leaving" => Ahead::x_new_leaving(window),
+        "napping" => Ahead::x_new_napping(window),
+        _ => Ahead::new(window),
     };
     let mut kept: Vec<usize> = Vec::new();
     let mut sum = 0u64;
@@ -54,7 +54,7 @@ fn ordered_sum(n: usize, window: usize, helpers: usize, leave: bool) -> (u64, Ve
     });
     let (evaluated, taken) = ahead.counts();
     assert!(taken <= evaluated);
-    eprintln!("window {window} helpers {helpers} leave {leave}: evaluated ahead {evaluated}, taken {taken}, kept {}", kept.len());
+    eprintln!("window {window} helpers {helpers} form {form}: evaluated ahead {evaluated}, taken {taken}, kept {}", kept.len());
     (sum, kept)
 }
 
@@ -75,9 +75,11 @@ fn x_ahead_owner_result_is_independent_of_helpers() {
     };
     for &(window, helpers) in &[(2, 1), (8, 1), (64, 1), (64, 3), (5, 2), (256, 7)] {
         for _ in 0..3 {
-            assert_eq!(ordered_sum(5000, window, helpers, false), serial);
+            assert_eq!(ordered_sum(5000, window, helpers, "staying"), serial);
             // Helpers that leave once every index is claimed (the owner takes the rest).
-            assert_eq!(ordered_sum(5000, window, helpers, true), serial);
+            assert_eq!(ordered_sum(5000, window, helpers, "leaving"), serial);
+            // And whose waits nap (BLASTX's composition redo).
+            assert_eq!(ordered_sum(5000, window, helpers, "napping"), serial);
         }
     }
 }

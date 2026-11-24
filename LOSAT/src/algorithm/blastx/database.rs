@@ -228,15 +228,24 @@ impl BlastxDatabase {
         )
     }
 
-    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`), for
+    /// a search with the options `options` (its word and window).
     pub(crate) fn check_mask_limits(
         &self,
         mask: &crate::blastinput::db_mask::ResolvedMask,
+        options: &super::args::ResolvedOptions,
     ) -> Result<()> {
         mask.check_losat_limits(
             &self.db,
             self.program,
-            crate::blastinput::db_mask::HardScan::Protein,
+            // LOSAT's translation gives no residue 0 (a codon with a base it does not know is
+            // X, `utils::genetic_code::GeneticCode::get`), so the lookup table holds no word
+            // with it.
+            crate::blastinput::db_mask::HardScan::Protein {
+                word: options.word_size,
+                window: options.window_size,
+                zero_words: false,
+            },
         )
     }
 

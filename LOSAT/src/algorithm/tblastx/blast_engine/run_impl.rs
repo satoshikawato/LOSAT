@@ -892,22 +892,14 @@ pub fn run(
     )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // The search strategy's request, with the archive's options handle.
-    args.strategy = strategy_file
-        .map(|file| {
-            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                file,
-                super::super::archive::option_inputs(&args),
-                choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs,
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.database_name(),
-                &options,
-            ))
-        })
-        .transpose()?;
+    args.strategy = strategy_file.map(|file| {
+        crate::report::archive::strategy::StrategyExport::for_args(
+            &args,
+            file,
+            choice.number(),
+            &options,
+        )
+    });
     let archive = args.archive.clone();
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;
@@ -1261,23 +1253,32 @@ fn check_ncbi_options(
 }
 
 /// The `-outfmt` of the command line (`check_ncbi_options`), as `app::early_format_choice` reads
-/// it: with a search strategy file a value that does not parse is `check_ncbi_options`' to
-/// reject, at its formatting handler.
+/// it: where the argv names a search strategy file a value that does not parse is
+/// `check_ncbi_options`' to reject, at its formatting handler (the command line's run has made the
+/// file then; the checks of the options alone, `check_options`, read the argv as that run).
 fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::EarlyFormat; 1]> {
     Ok([crate::blastinput::app::early_format_choice(
         &args.outfmt,
-        args.strategy.is_some(),
+        args.export_search_strategy.is_some(),
     )?])
 }
 
-/// The requested formats as NCBI parses `-outfmt` (`check_ncbi_options`).
-fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::app::EarlyFormat>> {
+/// The requested formats as NCBI parses `-outfmt` (`check_ncbi_options`), as the command line's
+/// (`cli_outfmts`): where the argv names a search strategy file a value that does not parse is
+/// left to the formatting handler, which reads the arguments' `-outfmt` again (LOSAT Web gives
+/// such a value as the run's one format and as the arguments' `-outfmt`).
+fn output_choices(
+    outputs: &ReportOutputs<'_>,
+    args: &TblastxArgs,
+) -> Result<Vec<crate::blastinput::app::EarlyFormat>> {
     outputs
         .formats
         .iter()
         .map(|format| {
-            crate::blastinput::app::parse_formatting_string(format.outfmt)
-                .map(crate::blastinput::app::EarlyFormat::Parsed)
+            crate::blastinput::app::early_format_choice(
+                format.outfmt,
+                args.export_search_strategy.is_some(),
+            )
         })
         .collect()
 }
@@ -1502,14 +1503,14 @@ pub fn run_local(
     // The command line checks `-strand` at parsing (clap), before anything else; a caller of
     // `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
-    // The host has no database files; LOSAT Web searches the records it gives.
+    // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`), with LOSAT's refusals; `check_ncbi_options` and `search` check the formats
     // again, after `-out` is opened, as on the command line.
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
     // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1517,21 +1518,32 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested && args.archive.is_none() {
         args.archive = super::super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local(args, query_records, query_end, subject_records, view)
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(args, query_records, query_end, subject_records, outputs)
+    })
+}
+
+/// `run_local` from the thread count on, with its archive and its search strategy set up.
+fn run_local_formats(
+    mut args: TblastxArgs,
+    query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
+    subject_records: &[FastaRecord],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
     // The thread count is checked before the inputs are read, as on the command line (`run`).
     crate::utils::threading::validate_threads(args.num_threads)?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
@@ -1545,7 +1557,7 @@ pub fn run_local(
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts, html_links) =
-        check_ncbi_options(&args, &output_choices(outputs)?, outputs.diagnostics)?;
+        check_ncbi_options(&args, &output_choices(outputs, &args)?, outputs.diagnostics)?;
     args.report_counts = counts;
     args.html_links = html_links;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
@@ -1591,28 +1603,26 @@ pub fn run_local_database(
     args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run, with LOSAT's refusals;
     // `check_ncbi_options` and `search` check the formats again, after `-out` is opened.
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     args.archive = super::super::archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, query_end, settings, view)
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(args, query_records, query_end, settings, outputs),
-    }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(args, query_records, query_end, settings, outputs)
+    })
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -1630,7 +1640,7 @@ fn search_database(
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts, html_links) =
-        check_ncbi_options(&args, &output_choices(outputs)?, outputs.diagnostics)?;
+        check_ncbi_options(&args, &output_choices(outputs, &args)?, outputs.diagnostics)?;
     args.report_counts = counts;
     args.html_links = html_links;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
@@ -1646,16 +1656,18 @@ fn search_database(
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its TBLASTX does not write (`app::report_format`): the command
-/// line's checks before it opens `-out` (`run`). NCBI's formatting handler comes after
-/// (`check_ncbi_options`, `check_report_formats`).
-fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(&choice, app::Program::Tblastx, format.side_out(out))?;
-    }
-    Ok(())
+/// rejection of a format that its TBLASTX does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run`). NCBI's formatting handler comes after
+/// (`check_ncbi_options`, `check_report_formats`), and so does the error of a value left to it
+/// with a search strategy file.
+fn report_formats(outputs: &ReportOutputs<'_>, args: &TblastxArgs) -> Result<()> {
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Tblastx,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a

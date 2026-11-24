@@ -121,7 +121,7 @@ impl Volume {
         mode: XDbIdxRead,
     ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
-        let index_file = DbFile::open(&index_path)?;
+        let index_file = DbFile::open(&index_path)?.read_in_order();
         let index = match mode {
             XDbIdxRead::Off => IndexFile::parse(&index_file.read_all()?, seqtype, &index_path)?,
             XDbIdxRead::On => IndexFile::open(index_file, seqtype)?,
@@ -182,7 +182,8 @@ impl Volume {
         if let Some(file) = slot.get() {
             return Ok(file);
         }
-        let file = DbFile::open(&with_extension(&self.base, self.index.seqtype, ext))?;
+        let file =
+            DbFile::open(&with_extension(&self.base, self.index.seqtype, ext))?.read_in_order();
         // Two threads may both open the file; the first one stored is used.
         Ok(slot.get_or_init(|| file))
     }

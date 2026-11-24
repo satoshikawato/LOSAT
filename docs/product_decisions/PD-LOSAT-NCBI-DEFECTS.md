@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.96
+- Version: 1.99
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -618,7 +618,48 @@
   line item PS10c's 1.84 and line RG item D1c-1's 1.85, then psiblast line item PS10d's 1.86, line
   NP item O4b2-2's 1.87, line NP item M4b-3c's 1.88 and line NP item M4b-T2's 1.89, then line RG
   item T5d's 1.90 and line PS item PS12d's 1.91, then line NP item O4b2-4's 1.92, then line RG item
-  D1c-1c's 1.93, then line NP item M4c-2's 1.94, then line NP item M4b-3b's 1.95)
+  D1c-1c's 1.93, then line NP item M4c-2's 1.94, then line NP item M4b-3b's 1.95);
+  1.97 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
+  of a query batch crashes, does not finish or stops come after the reports of the query
+  batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
+  Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops (also
+  on a database left without a subject, whose batch LOSAT reported before) and, with `-in_pssm`,
+  that of a query whose letters give no Karlin-Altschul parameters, which came before the run's
+  first byte; and moves D13's rejection of a negative `CHUNK_SIZE` whose wrapped ranges leave gaps
+  between them (NCBI searches on) to the same place, where the search of the batch's first chunk
+  with a valid context would read its subjects (after that chunk's setup checks and the reads of
+  the database that fail before it; without a subject in hand nothing is lost and the batch is
+  reported); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96), at the merge of dev of 2026-11-24 that brought them;
+  first 1.52, then 1.53 at the merge of dev of 2026-11-18, then 1.72 and 1.74 at the merges of dev
+  of 2026-11-22, then 1.76, 1.77, 1.82, 1.86, 1.89 and 1.91 at the merges of dev of 2026-11-23, then 1.93 at
+  the merge of dev of 2026-11-24 that brought 1.92, then 1.94 at the merge of dev of 2026-11-24
+  that brought 1.93, then 1.95 at the merge of dev of 2026-11-24
+  that brought 1.94, then 1.97 at the merge of dev of 2026-11-24
+  that brought 1.95 and 1.96);
+  1.98 2026-11-23 (BLASTP and psiblast, line RG item X-bpgap: D13's rejection of a negative
+  `CHUNK_SIZE` whose wrapped ranges leave gaps between them moved to TBLASTN's step of 1.97, where
+  the search of the batch's first chunk with a valid context would read subjects in hand (a batch
+  without a subject in hand or without such a chunk is reported, as NCBI 2.17.0 reports it), and
+  the stops of a split batch's chunks before the errors of the database and of the subject length
+  that NCBI meets later, through one owner of the steps of a split batch that BLASTP, psiblast and
+  TBLASTN share; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.97; first 1.85, then 1.87 at the merge of dev that brought 1.82 to 1.85, then 1.90 at the
+  merge of dev that brought 1.86 to 1.88, then 1.92 at the merge of dev that brought 1.89 and 1.90,
+  then 1.93 at the merge of dev that brought 1.91, line PS item PS12d, then 1.94 at the
+  merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
+  of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
+  of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
+  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
+  1.99 2026-11-24 (approved exception 20 also for a short query against one short subject:
+  TBLASTX's, TBLASTN's `-ungapped` and BLASTX's `-ungapped` linking against one subject whose
+  expected length is 0 or less, where NCBI's big-gap cutoff is `INT_MIN + 1` as for a batch
+  averaging 0 and NCBI crashes in its first linking call; LOSAT's sums in 64 bits, and the cutoff
+  of a negative expected length taken as NCBI's `INT_MIN + 1` (LOSAT computed 1 there); its rows
+  equal NCBI's own output for the nearest search it completes in every probed case; the Owner's
+  answer of 2026-11-24 to question Q-XT1 of line RG item X-short-tbx-link, 「Q-XT1=A」; and the
+  same for several subjects on the route of a negative expected length, the Owner's answer of
+  2026-11-24 to question Q-XT2, 「A」; numbered after 1.98; first 1.97)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -822,11 +863,39 @@ Explicit rejections (rule 3):
   rows `db.x4.chunk.neg.*`). A negative pair whose wrapped ranges leave gaps between chunks
   that all hold a query and are not split again is not a failure of NCBI's: NCBI searches on
   with the hits in the gaps lost (exit status 0), and the maintainer kept that setting rejected
-  (version 1.1, rule 2). BLASTP's rejection comes where the batch's search would start, after
-  the reports of the query batches before (version 1.53, review 3 of X4: the form of 1.40 for a
-  rejection in the middle of a run; row `db.x4.chunk.neg.gap.6`, whose bytes are NCBI's report
-  of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
-  `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
+  (version 1.1, rule 2). BLASTP's rejection comes after the reports of the query batches before
+  (version 1.53, review 3 of X4: the form of 1.40 for a rejection in the middle of a run; row
+  `db.x4.chunk.neg.gap.6`, whose bytes are NCBI's report of the batch before, row
+  `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and `db.x4.chunk.again.*` hold NCBI's
+  bytes of the other two stops), at TBLASTN's step since version 1.98 (below).
+  TBLASTN refuses where NCBI stops in the batch's search (a chunk without a query, also where the
+  first range of a negative `CHUNK_SIZE` covers the batch, at which `CQuerySplitter::Split` stops
+  before any chunk is searched, and a chunk split again, at which the search of that chunk stops
+  (at more than one thread NCBI logs that null pointer, reports the batch without that chunk's
+  hits and exits 0; LOSAT refuses at every thread count, as NCBI does at `-num_threads 1`); also on
+  a database left without a subject: a seqid list that keeps none, an alias over volumes without
+  sequences) after the reports of the batches before, in NCBI's order with the setup of each
+  chunk's search and its read of the database (version 1.97), and so does the rejection of a
+  negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on: where
+  the search of the batch's first chunk with a valid context would read its subjects, after that
+  chunk's setup checks and the reads of the database that fail before it, with subjects in hand
+  (a batch searched without a subject is reported as NCBI reports it: nothing is lost) (version
+  1.97; before, before the run's first byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are
+  NCBI's report of the batch before, row `db.xs.tblastn.bat.qa.6`). Since version 1.98 BLASTP
+  and psiblast take the same steps, through the one owner of the steps of a split batch that
+  TBLASTN's search uses (line RG item X-bpgap, NCBI 2.17.0 probes): the rejection of the gaps comes
+  where the search of the batch's first chunk with a valid context would read subjects in hand,
+  and a batch searched without a subject in hand (a seqid list that keeps none) or whose chunks
+  have no valid context is reported as NCBI reports it (rows `db.x4.chunk.neg.gap.nosub.*`,
+  `db.x4.chunk.neg.gapvalid.*`); the stops of the chunks come before the errors of the database
+  and of the subject length that NCBI meets later, in the setup of a chunk or its search (NCBI
+  stops at the null pointer first); a batch of invalid queries only, which NCBI does not search,
+  is not split and meets no stop; and a split batch whose chunks have no valid context ends with
+  NCBI's `Traceback failed` (exit status 3) where the traceback's own setup of the batch fails the
+  subject-length check, and reads nothing where the database's sequence file cannot be read (exit
+  status 0), in BLASTP, psiblast and TBLASTN. A refused batch of two queries with one id that NCBI splits
+  gives NCBI's error where its chunks reach the setup's failure, and the refusal where a chunk
+  stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
@@ -3177,10 +3246,35 @@ file would differ, and NCBI's programs still could not open the database).
   are translated (rows `db.xs.tblastn.*`). With `-subject` and a `-db_gencode` other than 1, LOSAT
   translates in the selected code (the approved deviation PD-TLOSAN-LOCAL-GENCODE-32, whose
   reference is NCBI's `-db` search) and refuses where NCBI's `-db` search crashes, although NCBI's
-  `-subject` search, translating in code 1, may find nothing there. LOSAT's TBLASTN refusals write
-  no report, also where NCBI has written the reports of the query batches before when it crashes
-  (but for what its output buffer still holds; 20,000 query letters a batch by default, or
-  `BATCH_SIZE`; open for this refusal, line RG item X-short-bat, version 1.51 below).
+  `-subject` search, translating in code 1, may find nothing there. A refusal in a later query batch
+  (`BATCH_SIZE`, or queries whose letters fill a batch) comes after the reports of the batches
+  before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it searches the
+  next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold each query's report until
+  the next query's results arrive, as NCBI's do, so the last query before the refused batch is left
+  out), for the first batch the prologs, and leaves the epilog out (version 1.97, 2026-11-18, line
+  RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`). TBLASTN's other rejections of a
+  step where NCBI's search of a batch crashes, does not finish or stops take the same form,
+  TBLASTX's (version 1.40): two `-window_size 0` one-hit alignments at the end of their subject
+  chunk or past it, which NCBI's interval tree splits without end; the overflow banks of the seed
+  search; a query chunk split again or holding no query (the latter also where a negative
+  `CHUNK_SIZE`'s first wrapped range covers the batch; both also on a database left without a subject: a
+  seqid list that keeps none, an alias over volumes without sequences; D13); and with `-in_pssm` (one batch: the prologs) a
+  query whose letters give no Karlin-Altschul parameters (one that `-seg` masks completely: NCBI's
+  `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc` did not
+  make, in the setup of its preliminary search, `psiblast_aux_priv.cpp:90-93`; refused before the
+  run's first byte until this version, line PS DECISIONS 35 Q5), a window past the PSSM (1.18), a
+  gapped start past the subject's translation (1.48) and a traceback that starts past its frame's
+  NULLB (1.44). LOSAT writes what NCBI has formatted before the failing step; what NCBI's crash
+  loses from its output buffer is not imitated (NCBI's file lacks the end of the text that buffer
+  held: 21 bytes of the `-in_pssm` prolog reach it in the probe of 2026-11-18; decision S1 (a) of
+  line RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07). The refusal of a negative `CHUNK_SIZE` whose wrapped ranges leave gaps between
+  them, which NCBI searches on (D13), comes after the same reports, where the search of the
+  batch's first chunk with a valid context would read its subjects (after that chunk's setup
+  checks and the reads of the database that fail before it). Before the run's
+  first byte stays the refusal of a reported column of that NULLB (1.44), whose alignment NCBI
+  reports.
 
 - TBLASTX, HSPs on a subject (or its `-subject_loc` range) of fewer than 12 bases that reach the
   ungapped re-evaluation (version 1.51, 2026-11-17, line RG item X-short-tbx, Owner-delegated,
@@ -3217,7 +3311,7 @@ file would differ, and NCBI's programs still could not open the database).
   printed the query batches before; LOSAT's TBLASTX refusal there now comes after the same reports,
   in the form below (`subject_loop::x_fetch_keeps`; before this version LOSAT wrote none of them).
   The other programs' fetch refusals still come before any report: open (line RG item
-  X-short-bat). The refusal is the error of the earliest such subject at every
+  X-short-bat-2). The refusal is the error of the earliest such subject at every
   `-num_threads`, and the run writes what it writes for the X2c refusal above, as after an NCBI
   error of a batch: the reports of the query batches before, whole and without the epilog, or,
   when the first batch fails, its prologs (`-outfmt 0`'s, and the first lines of the XML2 and JSON
@@ -3228,20 +3322,20 @@ file would differ, and NCBI's programs still could not open the database).
   output ended a few bytes into that report's footer (50,001 bytes), and in one batch it wrote
   nothing with `-outfmt 6` and the first 18 bytes of the prolog with `-outfmt 0`. Those cuts are
   NCBI's buffer, not a result: LOSAT writes the reports and prologs whole. LOSAT's TBLASTN refusal
-  of the same read (the item above) writes no report, although NCBI's TBLASTN searches and prints
-  each query batch before it reads the next (`tblastn_app.cpp:275-304`, as TBLASTX's
-  `tblastx_app.cpp:176-207`) and so has formatted the reports of the batches before when it dies
-  (line RG X-short review 1: with `BATCH_SIZE=1`, NCBI wrote the first query's 43-byte row before
-  its SIGSEGV, LOSAT nothing); that difference is open (line RG item X-short-bat). With `-subject`
+  of the same read (the item above) comes after the same reports (version 1.97, line RG item
+  X-short-bat): NCBI's TBLASTN searches and prints each query batch before it reads the next
+  (`tblastn_app.cpp:275-304`, as TBLASTX's `tblastx_app.cpp:176-207`) and so has formatted the
+  reports of the batches before when it dies (line RG X-short review 1: with `BATCH_SIZE=1`, NCBI
+  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.97). With `-subject`
   and a `-db_gencode` other than 1, LOSAT translates in the selected code
   (PD-TBLASTX-LOCAL-SUBJECT-GENCODE) and refuses where those HSPs reach the re-evaluation. TBLASTX
-  translates the query whole before the search, so a short query reaches no such read; but in our
-  probes a query of 10 or 11 bases against a subject of 12 to 14 bases, a query of 11 or 12 bases
-  against a subject of 11 bases, and 9 bases against 12 or 13 at `-word_size 2` make NCBI die
-  earlier, in its first linking call (`BLAST_LinkHsps` under `s_BlastSearchEngineCore`, gdb on ws,
-  2026-11-17 and 2026-11-18). Against 12 to 14 bases LOSAT writes rows; against 11 bases LOSAT
-  refuses with this item's message, at a later step than NCBI's. Both are open (line RG item
-  X-short-tbx-link).
+  translates the query whole before the search, so a short query reaches no such read; but a
+  short query against a short subject (the probes of exception 20's paragraph on them) makes NCBI
+  die earlier, in its first linking call (`BLAST_LinkHsps` under `s_BlastSearchEngineCore`, gdb on ws,
+  2026-11-17 and 2026-11-18): their big-gap cutoff is `INT_MIN + 1`, approved exception 20 (since
+  version 1.99, a short query against one short subject). LOSAT links them with its sums in 64
+  bits; against 12 bases or more it writes rows, and against fewer than 12 bases it refuses with
+  this item's message at the re-evaluation that follows the linking.
 
 - TBLASTN with `-db_soft_mask`, a gapped search of a chunk that saves an initial alignment starting
   before the chunk (version 1.89, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
@@ -3856,6 +3950,60 @@ request that added it.
     both strands, so the sets and their e-values differ: with `-searchsp 1000000` in both runs, 6
     of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
     average of 0 to 1 and wrote the rows of other cutoffs here.
+
+    **A short query against one short subject (version 1.99, line RG item X-short-tbx-link;
+    the Owner's answer of 2026-11-24 to question Q-XT1, 「Q-XT1=A」).** The same cutoff comes from another
+    input: NCBI's expected length (`BLAST_Nint(log(K * q * s) / H)`, with the average query length
+    `q` and the subject's length `s` in protein letters) is 0 when `K q s` is near 1, and negative
+    below about `e^{-H/2}`; the subject's length less the expected length is then the subject's or
+    longer, and where the database's length in protein letters is not above it
+    (`blast_parameters.c:1046`) `y_variable` is the logarithm of the subject's length over it. At
+    an expected length of 0 that takes one subject (other subjects of fewer than 3 bases in all
+    count as none, as above): `y_variable` and `x_variable` are 0 and the logarithm -inf, as above.
+    Below 0, `y_variable` and `x_variable` are negative and the logarithm is NaN, which NCBI's
+    x86-64 conversion also takes to `INT_MIN` (`blast_parameters.c:1036-1072`); there other
+    subjects whose length in all, in protein letters, is not above minus the expected length keep
+    the database short enough (the several-subject case below). On aarch64, whose conversion
+    instruction takes a NaN to 0, NCBI's build would link with a cutoff of 1 there (not run; LOSAT
+    follows the x86-64 build, `ncbi_int4_from_double`). In both the big-gap cutoff is
+    `INT_MIN + 1`, the linking's
+    `maxscore` (`-cutoff[1]`) is `INT_MAX`, no sum that overflows `Int4` reaches it, and NCBI reads
+    the chain it never found (`link_hsps.c:694,868,931-932`; gdb on 2.17.0: a read at address 0x2a
+    in `BLAST_LinkHsps` under `s_BlastSearchEngineCore`). This takes short inputs. In our probes
+    with one subject (TBLASTX and BLASTX with `-window_size 0`): TBLASTX queries of 9 to 11 bases
+    against subjects of 11 to 14 bases and of 12 to 14 bases against 11 bases; at `-word_size 2
+    -threshold 1`, 6 to 8 bases against 8 to 20 bases, 9 to 11 against 8 to 14, 12 to 14 against 8
+    to 11 and 15 or 16 against 8; TBLASTN `-ungapped` `WWWW` against 12 to 14 bases at `-word_size
+    2 -threshold 1`; BLASTX `-ungapped` at `-word_size 2 -threshold 1`, queries of 6 to 8 bases
+    against 2 to 6 residues, 9 to 11 bases against 2 to 4, 12 to 14 against 2 or 3 and 15 or 16
+    against 2 (with the two-hit word finder no HSP of these reached BLASTX's linking). NCBI dies in
+    every probed run whose subject list reaches the linking with an HSP (89 of 418 TBLASTX runs of
+    `TGG` repeats, 42 of 600 runs of random short sequences, the TBLASTN one and 32 of 132 BLASTX
+    runs). LOSAT links with the same cutoff and its sums in 64 bits, as above; before this version
+    it took Rust's conversion of the NaN, 0, a cutoff of 1. NCBI's nearest completed run is the
+    subject with a second one that has no hits (12 N, or 300 N where 12 leave the database's length
+    in protein letters under the subject's length less the expected length; 4 X for BLASTX), which
+    makes the database longer and the cutoff finite, and `-dbsize` of the subject's length. In
+    every probed run it wrote LOSAT's one-subject bytes: all 45 TBLASTX runs above with subjects of
+    12 bases or more, all 42 random ones, the TBLASTN one and all 32 BLASTX ones. That is not a
+    property of the inputs: with a finite cutoff NCBI's linking can choose other chains where a
+    frame offers competing ones, as for the batches averaging 0; the frames of these probes, of a
+    few letters, offer almost none. The cases `link.q11_s12`, `link.q8_s12_ws2` and
+    `link.rq76_rs76_ws2` of `tblastx_regression_fixtures.py` (NCBI's arguments in its
+    `ORACLE_ARGV`), `tests/tblastn_ungapped_short_link.rs` and
+    `tests/blastx_ungapped_short_link.rs` keep them; the unit tests of
+    `core::link_hsps::calculate_link_hsp_cutoffs` keep the cutoff of both routes. With a TBLASTX
+    subject of fewer than 12 bases the next step of such a search is the re-evaluation that the
+    TBLASTX item of version 1.51 refuses (rule 3), so LOSAT refuses there, after the linking.
+
+    *Several subjects (found after the decision of Q-XT1; the Owner's answer of 2026-11-24 to
+    question Q-XT2 of line RG item X-short-tbx-link, 「A」, its option A: exception 20 covers every
+    ungapped linking whose big-gap cutoff is NCBI's `INT_MIN + 1`, whatever the number of
+    subjects).* On the NaN route other subjects whose length in all is not
+    above minus the expected length leave the cutoff at `INT_MIN + 1`, and NCBI dies the same way:
+    10 of the 42 random TBLASTX runs above died with the subject and a second subject of 12 N.
+    LOSAT computes the same cutoff and writes rows there (as it did before this version, with its
+    cutoff of 1).
 
 ## Approved exception 22 (`losat windowmasker`, an empty id in a list matched as text, version 1.75)
 

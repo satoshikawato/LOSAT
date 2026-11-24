@@ -563,7 +563,7 @@ fn partitioned_in(
         };
         let mut hits = Vec::new();
         let stats = if let Some(piece_seeds) = pieces {
-            rebuild(scratch, hash, parts, true);
+            rebuild(scratch, hash, parts, true, None);
             let occ0 = hash.occupancy;
             piece::seed_stage_pieces(
                 cuts.len() - 1,
@@ -587,7 +587,11 @@ fn partitioned_in(
                 ahead,
                 hash,
                 &mut hits,
-                FoldPart { scratch, parts },
+                FoldPart {
+                    scratch,
+                    parts,
+                    latest: None,
+                },
                 &scan,
                 lists.then_some(&scan_lists),
                 &fold,
@@ -1074,6 +1078,7 @@ fn a_panicking_participant_ends_the_stage() {
                         FoldPart {
                             scratch: &mut scratch,
                             parts: threads,
+                            latest: None,
                         },
                         &scan,
                         None::<&NoLists>,
@@ -1166,7 +1171,7 @@ fn a_panicking_participant_ends_the_stage_in_pieces() {
                         st.counts.seeds += seeds.len() as u64;
                     };
                     let mut hits = Vec::new();
-                    rebuild(&mut scratch, &hash, threads, true);
+                    rebuild(&mut scratch, &hash, threads, true, None);
                     let occ0 = hash.occupancy;
                     piece::seed_stage_pieces(
                         strips,

@@ -134,6 +134,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("makeprofiledb") {
         std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:704-707
+    // `losat blastdb_aliastool` too.
+    if let Some(start) = started("blastdb_aliastool") {
+        std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv
@@ -236,6 +241,7 @@ fn run_main_entry() -> Result<()> {
         &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
+        &crate::report::run_files::OpenFiles::disk(),
     );
     let args = match read {
         Ok(args) => args,
@@ -282,6 +288,25 @@ fn run_main_entry() -> Result<()> {
             ));
         }
         return Ok(());
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:784-793 (cited at
+    // `ncbi_environment::WriteVerification`)
+    // The BLAST XML report (outfmt 5) of every search program changes under a
+    // `SERIAL_VERIFY_DATA_WRITE` of `ALWAYS` or `DEFVALUE_ALWAYS`: LOSAT refuses such a run here,
+    // before any output, with its other refusals of the settings (the settings that each program
+    // refuses come first, in its own arm below).
+    if let Ok(settings) = start.settings() {
+        let number = search_outfmt(&cli.command)
+            .and_then(|outfmt| crate::blastinput::app::parse_formatting_string(outfmt).ok())
+            .map(|choice| choice.number);
+        if let Some(refusal) =
+            crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
+                settings.write_verification.as_ref(),
+                number.into_iter(),
+            )
+        {
+            return Err(anyhow::Error::msg(refusal));
+        }
     }
     // The messages of tblastx's, rpsblast's and rpstblastn's runs go where the diagnostics go
     // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
@@ -492,6 +517,21 @@ fn run_main_entry() -> Result<()> {
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
+/// The `-outfmt` value of a search program's command line; `None` for the other programs.
+fn search_outfmt(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Blastx(args) => Some(&args.outfmt),
+        Commands::Blastn(args) => Some(&args.outfmt),
+        Commands::Blastp(args) => Some(&args.outfmt),
+        Commands::Tblastx(args) => Some(&args.outfmt),
+        Commands::Tblastn(args) => Some(&args.outfmt),
+        Commands::Psiblast(args) => Some(&args.outfmt),
+        Commands::Rpsblast(args) => Some(&args.outfmt),
+        Commands::Rpstblastn(args) => Some(&args.outfmt),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
+    }
+}
+
 fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     match outcome {
         crate::rpsbproc::Outcome::Exit(0) => {}

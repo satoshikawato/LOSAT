@@ -1,0 +1,26 @@
+Blast4-request ::= {
+  body queue-search {
+    program "blastp",
+    service "psi",
+    queries pssm {
+      pssm {
+        isProtein TRUE,
+        numRows 28,
+        numColumns 30,
+        byRow FALSE,
+        query seq {
+          id {
+            local str "Query_1"
+          },
+          descr {
+            title "rnd random"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 30,
+            seq-data ncbistdaa '0C1414080E0A0F031610140D0C0806140F030E16100714
+120C080A14160F'H,
+            hist {
+              replaces {
+                ids {

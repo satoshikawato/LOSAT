@@ -1,0 +1,57 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries pssm {
+        pssm {
+          isProtein TRUE,
+          numRows 28,
+          numColumns 30,
+          byRow FALSE,
+          query seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              title "rnd random"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 30,
+              seq-data ncbistdaa '0C1414080E0A0F031610140D0C0806140F030E161007
+14120C080A14160F'H,
+              hist {
+                replaces {
+                  ids {
+                    local str "old"Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (802.5) [psiblast] CObjectOStream: error at line 29:
+ Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.inst.his
+t.replaces.ids.E: cannot write unassigned member NULL element while writing
+ container"
+    },
+    {
+      code 2,
+      message "Error: NCBI C++ Exception: T0 ""/home/coremake/release_build/bu
+ild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRele
+ase_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp
+"", line 597: Error: (CUnassignedMember::eWrite)
+ ncbi::CObjectOStreamAsn::WriteContainer() - line 29: cannot write unassigned
+ member NULL element while writing container ( at
+ Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.inst.his
+t.replaces.ids.[].[])"
+    }
+  }
+}

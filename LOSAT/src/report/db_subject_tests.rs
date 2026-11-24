@@ -3370,3 +3370,38 @@ fn the_loaders_ids_keep_the_1000_most_recently_used_handles() {
     ids.register([7], b);
     assert_eq!(ids.held(7), Held::Present(Registrant::of(b)));
 }
+
+#[test]
+fn an_id_that_resolved_to_nothing_stays_unresolved_in_its_scope() {
+    // Review 1 of line DBID holdrec, `ahA1`: A's lookup gives Y, whose line does not hold A's
+    // Seq-align id (no blob), before Z, whose second line holds it, registers the handle.
+    let a = sequence(vec![gb("AAA00001", 1)], 1)
+        .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(0))));
+    let z = lines(vec![vec![gb("ZZZ00002", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(2));
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&a), HitLoad::Loaded);
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    // The scope keeps A's id unresolved: the read after gets nothing, not Z (NCBI warns).
+    assert_eq!(walk.load(&a), HitLoad::Loaded);
+    // Z first: its line registers the handle, and A's load gives Z.
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
+    // A record: a note of A alone keeps it unresolved for the batch's scope (psiblast's rounds
+    // of a query), not for another batch's.
+    let before = recorded(Some(0), &[&a], Some(0), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    assert_eq!(walk.load(&a), HitLoad::Loaded);
+    let before = recorded(Some(0), &[&a], Some(1), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    walk.enter(Some(1));
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
+    // A note where Z registers the handle too: the order of the note's loads decides, which
+    // LOSAT does not know, so the later read asks the loader (`m_Ids` holds Z).
+    let before = recorded(Some(0), &[&a, &z], Some(0), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    assert_ne!(walk.load(&a), HitLoad::Loaded);
+}

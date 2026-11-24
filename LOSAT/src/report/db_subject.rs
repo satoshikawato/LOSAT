@@ -562,6 +562,11 @@ enum Resolved {
     Blob(DbSequence, ShownBy),
     Unknown(Option<DbSequence>, ShownBy),
     Throws,
+    /// No Bioseq (the loader gave none: the lookup found nothing, or a sequence whose lines do
+    /// not hold the id), which the scope keeps as unresolved: a later load of the id in the
+    /// scope gets none either, without asking the loader again (`Nothing` is kept in the cache
+    /// only; [`ScopeWalk::resolve`] answers it as `None`).
+    Nothing,
 }
 
 /// How a load came to another sequence than the subject ([`ShownInstead`]): the words of LOSAT's refusal.
@@ -707,6 +712,14 @@ impl ScopePlaces {
 /// with no more blob ids in the run, no blob is dropped and loaded again.
 const BLOBS_KEPT: usize = 10;
 
+/// A walk's scope in the run's record ([`ScopeRecord::scope`]): its loads and the notes that
+/// made them.
+#[derive(Clone, Debug)]
+struct RecordedScope {
+    loads: std::ops::Range<u32>,
+    notes: std::ops::Range<u32>,
+}
+
 /// What a run loaded before a walk of its reports' loads ([`LoadsBefore`], kept by
 /// `common::database::TaxdbRun::note_loaded`, the one producer), as one record that only grows,
 /// so that a walk reads it as it was at its start (`LoadsBefore`: the notes and loads before):
@@ -730,8 +743,12 @@ pub struct ScopeRecord {
     places: ScopePlaces,
     /// The loads by the handle of the Seq-align id that each was loaded by (the scope's cache).
     by_id: std::collections::HashMap<HandleKey, Vec<u32>>,
-    /// The first load of each batch, in order.
-    batches: Vec<(usize, u32)>,
+    /// The first load and the first note of each batch, in order.
+    batches: Vec<(usize, u32, u32)>,
+    /// The handles of Seq-align ids that resolved to no Bioseq (the lookup gives no blob, and
+    /// no blob of the run may have registered the handle), each with its notes: the scope keeps
+    /// them unresolved ([`ScopeWalk::resolve`]).
+    unresolved: std::collections::HashMap<HandleKey, Vec<u32>>,
     notes: u32,
 }
 
@@ -740,20 +757,33 @@ impl ScopeRecord {
     /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
     /// the blob that it gives ([`ParsedSubject::loaded_blob`]), whose lines register every
     /// handle where its blob id is new (where it is not, and the run has more than
-    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it.
+    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
+    /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq where no blob of the run may have registered its
+    /// handle (where one may have, the order of the note's loads decides, which LOSAT does not
+    /// know: a later read asks the loader).
     pub fn note<'p>(
         &mut self,
         batch: Option<usize>,
-        loads: impl IntoIterator<Item = &'p ParsedSubject>,
+        subjects: impl IntoIterator<Item = &'p ParsedSubject>,
     ) {
-        let loads: Vec<(&ParsedSubject, std::sync::Arc<BlobKeys>, usize)> = loads
-            .into_iter()
-            .filter_map(|subject| {
-                let (keys, line) = subject.loaded_blob()?;
-                Some((subject, keys, line))
-            })
-            .collect();
-        if loads.is_empty() {
+        let mut loads: Vec<(&ParsedSubject, std::sync::Arc<BlobKeys>, usize)> = Vec::new();
+        let mut unresolved: Vec<HandleKey> = Vec::new();
+        for subject in subjects {
+            match subject.loaded_blob() {
+                Some((keys, line)) => loads.push((subject, keys, line)),
+                None if !matches!(
+                    subject.resolution.found,
+                    Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
+                ) =>
+                {
+                    unresolved.extend(subject.id_keys().handle);
+                }
+                None => {}
+            }
+        }
+        // Neither before the note nor after it may `m_Ids` hold the handle.
+        unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
+        if loads.is_empty() && unresolved.is_empty() {
             return;
         }
         let note = self.notes;
@@ -784,9 +814,20 @@ impl ScopeRecord {
         let Some(batch) = batch else {
             return;
         };
+        unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
+        if loads.is_empty() && unresolved.is_empty() {
+            return;
+        }
         let first = u32::try_from(self.places.loads.len()).unwrap_or(u32::MAX);
-        if self.batches.last().is_none_or(|&(last, _)| last != batch) {
-            self.batches.push((batch, first));
+        if self
+            .batches
+            .last()
+            .is_none_or(|&(last, _, _)| last != batch)
+        {
+            self.batches.push((batch, first, note));
+        }
+        for handle in unresolved {
+            self.unresolved.entry(handle).or_default().push(note);
         }
         for (subject, keys, line) in loads {
             let at = u32::try_from(self.places.loads.len()).unwrap_or(u32::MAX);
@@ -802,39 +843,54 @@ impl ScopeRecord {
         self.blob_ids.get(&id).is_some_and(|&note| note < notes)
     }
 
-    /// The loads of the scope of the reports of the query batch `batch` (`None`: of the record's
-    /// last batch) among the first `loads` loads: every one where the run keeps one scope
-    /// (`keeps_scope`), else those of the record's last batch where it is `batch`.
+    /// The scope of the reports of the query batch `batch` (`None`: of the record's last batch)
+    /// in the record as it was at `(notes, loads)` ([`ScopeRecord::now`]): every note where the
+    /// run keeps one scope (`keeps_scope`), else those of the record's last batch where it is
+    /// `batch`.
     fn scope(
         &self,
         batch: Option<usize>,
         keeps_scope: bool,
-        loads: u32,
-    ) -> Option<std::ops::Range<u32>> {
+        (notes, loads): (u32, u32),
+    ) -> Option<RecordedScope> {
         if keeps_scope {
-            return Some(0..loads);
+            return Some(RecordedScope {
+                loads: 0..loads,
+                notes: 0..notes,
+            });
         }
-        let &(last, first) = self
+        let &(last, first, note) = self
             .batches
             .iter()
             .rev()
-            .find(|&&(_, first)| first < loads)?;
+            .find(|&&(_, _, note)| note < notes)?;
         batch
             .is_none_or(|batch| batch == last)
-            .then_some(first..loads)
+            .then_some(RecordedScope {
+                loads: first..loads,
+                notes: note..notes,
+            })
     }
 
-    /// The scope's cache (`m_Seq_idMap`) of `handle` among the loads `range`: the sequence its
-    /// loads gave, `Unknown` where they gave several (a note is a set).
-    fn cached(&self, handle: HandleKey, range: &std::ops::Range<u32>) -> Option<Resolved> {
+    /// The scope's cache (`m_Seq_idMap`) of `handle` in the record's scope `scope`: the sequence
+    /// its loads gave, `Unknown` where they gave several (a note is a set), `Nothing` where it
+    /// resolved to no Bioseq (`unresolved`), and `Unknown` where both.
+    fn cached(&self, handle: HandleKey, scope: &RecordedScope) -> Option<Resolved> {
+        let unresolved = self
+            .unresolved
+            .get(&handle)
+            .is_some_and(|notes| notes.iter().any(|note| scope.notes.contains(note)));
         let mut found = self
             .by_id
-            .get(&handle)?
-            .iter()
-            .filter(|at| range.contains(at))
+            .get(&handle)
+            .into_iter()
+            .flatten()
+            .filter(|at| scope.loads.contains(at))
             .map(|&at| self.places.sequence(at));
-        let first = found.next()?;
-        Some(if found.all(|sequence| sequence == first) {
+        let Some(first) = found.next() else {
+            return unresolved.then_some(Resolved::Nothing);
+        };
+        Some(if !unresolved && found.all(|sequence| sequence == first) {
             Resolved::Blob(first, ShownBy::Holder)
         } else {
             Resolved::Unknown(None, ShownBy::Order)
@@ -1123,12 +1179,13 @@ impl ScopeWalk {
     /// The record's loads of the current scope ([`ScopeRecord::scope`]): every recorded load
     /// where the run keeps one scope, the record's last batch's where the current scope is that
     /// batch's (or names no batch).
-    fn recorded_scope(&self) -> Option<std::ops::Range<u32>> {
+    fn recorded_scope(&self) -> Option<RecordedScope> {
         if !self.keeps_scope && !self.in_record {
             return None;
         }
+        let now = (self.before.notes, self.before.loads);
         self.before
-            .read(|record| record.scope(self.batch, self.keeps_scope, self.before.loads))
+            .read(|record| record.scope(self.batch, self.keeps_scope, now))
     }
 
     /// Step 1: the cache of the current scope.
@@ -1136,8 +1193,8 @@ impl ScopeWalk {
         if let Some(&resolved) = self.scope.cache.get(&handle) {
             return Some(resolved);
         }
-        let range = self.recorded_scope()?;
-        self.before.read(|record| record.cached(handle, &range))
+        let scope = self.recorded_scope()?;
+        self.before.read(|record| record.cached(handle, &scope))
     }
 
     /// Whether the run has loaded more than [`BLOBS_KEPT`] blob ids, so that NCBI may have dropped
@@ -1173,12 +1230,12 @@ impl ScopeWalk {
     /// record's before the walk's; among the record's, which LOSAT holds as sets, one where they
     /// are the same sequence, else `Unknown`).
     fn scope_match(&self, keys: &IdKeys) -> Option<Resolved> {
-        let range = self.recorded_scope();
+        let scope = self.recorded_scope();
         for exact in [true, false] {
-            if let Some(range) = &range {
+            if let Some(scope) = &scope {
                 let found = self
                     .before
-                    .read(|record| record.scope_match(keys, exact, range));
+                    .read(|record| record.scope_match(keys, exact, &scope.loads));
                 if found.is_some() {
                     return found;
                 }
@@ -1447,6 +1504,9 @@ impl ScopeWalk {
         let keys = subject.id_keys();
         if let Some(handle) = keys.handle {
             if let Some(resolved) = self.cached(handle) {
+                if resolved == Resolved::Nothing {
+                    return None;
+                }
                 self.relock(Some(resolved));
                 return Some(resolved);
             }
@@ -1466,9 +1526,20 @@ impl ScopeWalk {
             }
             None => self.loader(subject, keys),
         };
-        if let (Some(handle), Some(resolved)) = (keys.handle, resolved) {
-            if resolved != Resolved::Throws {
-                self.scope.cache.insert(handle, resolved);
+        // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3300-3330
+        // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2200-2218
+        // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1115-1125
+        // NCBI reference (598d8ae6): c++/include/objmgr/impl/scope_info.hpp:569-572
+        // A Seq-id that the loader gives no Bioseq for is kept unresolved in the scope's cache,
+        // and only a new data source (none in a BLAST run) makes the scope resolve it again
+        // (review 1 of line DBID holdrec, `ahA1`: A's lookup gives Y, whose lines do not hold
+        // A's id, before Z registers that id; the PSSM's read of A then gets nothing, and NCBI
+        // warns).
+        if let Some(handle) = keys.handle {
+            if resolved != Some(Resolved::Throws) {
+                self.scope
+                    .cache
+                    .insert(handle, resolved.unwrap_or(Resolved::Nothing));
             }
         }
         resolved
@@ -1477,7 +1548,7 @@ impl ScopeWalk {
     /// The reports' answer of `resolved` for `subject` ([`ScopeWalk::load`]).
     fn answer(subject: &ParsedSubject, resolved: Option<Resolved>) -> HitLoad {
         match resolved {
-            None => HitLoad::Loaded,
+            None | Some(Resolved::Nothing) => HitLoad::Loaded,
             Some(Resolved::Throws) => HitLoad::Throws,
             Some(Resolved::Blob(sequence, _)) if subject.mine(sequence) => HitLoad::Loaded,
             Some(Resolved::Blob(sequence, by)) => HitLoad::Shown(ShownInstead {
@@ -1679,6 +1750,8 @@ impl ScopeWalk {
             .iter()
             .flat_map(|(_, changed, _)| changed.iter().copied())
             .collect();
+        // The ties that another's uses may have given another answer.
+        let mut moved = vec![false; group.len()];
         for (index, &(key, subject)) in group.iter().enumerate() {
             let resolved = results[index].0;
             let mut answer = Self::answer(subject, resolved);
@@ -1698,6 +1771,7 @@ impl ScopeWalk {
                     );
                     if later != answer {
                         answer = Self::either(answer, later);
+                        moved[index] = true;
                     }
                 }
             }
@@ -1706,10 +1780,15 @@ impl ScopeWalk {
         let loaded = self.scope.loads.len();
         for (index, &(_, subject)) in group.iter().enumerate() {
             let (resolved, _, scope) = &results[index];
-            if let (Some(handle), Some(resolved)) = (subject.id_keys().handle, resolved) {
-                if *resolved != Resolved::Throws {
-                    self.scope.cache.entry(handle).or_insert(*resolved);
-                }
+            // A tie that resolved to nothing alone, where another may have registered its
+            // handle before it, is not known to be unresolved: a later read asks the loader.
+            let kept = match resolved {
+                Some(Resolved::Throws) => None,
+                None if moved[index] => None,
+                _ => Some(resolved.unwrap_or(Resolved::Nothing)),
+            };
+            if let (Some(handle), Some(kept)) = (subject.id_keys().handle, kept) {
+                self.scope.cache.entry(handle).or_insert(kept);
             }
             for (keys, line) in &scope.loads[loaded..] {
                 self.scope.add(keys, *line);
@@ -2114,10 +2193,16 @@ impl ParsedSubject {
     /// The keys by which NCBI's places can find the blob that a load of this subject loads
     /// ([`ParsedSubject::loaded_blob`]: each line's exact handles, and the scope's keys of the
     /// line of its Bioseq), each with that blob's ordinal id (`held`), and those by which a load of
-    /// its Seq-align id looks for one (`sought`): one key space, so that a key held by a blob that
-    /// is neither the subject's nor its lookup's means that a load may give another sequence
-    /// (a key of 64 bits: two keys that share one only make the check refuse more).
-    pub fn place_keys(&self, held: &mut Vec<(u64, u32)>, sought: &mut Vec<u64>) {
+    /// its Seq-align id looks for one: its handle in `m_Ids` (`sought`), and the keys of the
+    /// scope's index (`scope_sought`, which only a load one by one reads, `ScopeWalk::bulk`): one
+    /// key space, so that a key held by a blob that is neither the subject's nor its lookup's
+    /// means that a load may give another sequence (a key of 64 bits: two keys that share one only
+    /// make the check refuse more).
+    pub fn place_keys(
+        &self,
+        held: &mut Vec<(u64, u32)>,
+        (sought, scope_sought): (&mut Vec<u64>, &mut Vec<u64>),
+    ) {
         fn tagged(tag: u64, key: u64) -> u64 {
             key.rotate_left(17 * tag as u32) ^ tag.wrapping_mul(0x9e37_79b9_7f4a_7c15)
         }
@@ -2140,8 +2225,8 @@ impl ParsedSubject {
         }
         let keys = self.id_keys();
         sought.extend(keys.handle.map(|h| tagged(0, h as u64)));
-        sought.extend(keys.scope.iter().map(|&k| tagged(1, k)));
-        sought.extend(keys.weak.iter().map(|&k| tagged(2, k)));
+        scope_sought.extend(keys.scope.iter().map(|&k| tagged(1, k)));
+        scope_sought.extend(keys.weak.iter().map(|&k| tagged(2, k)));
     }
 
     /// The ordinal id of the sequence that the lookup of this subject's Seq-align id gives

@@ -150,9 +150,10 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
 // Line DBID, ID4t fix 2b: the loop writes each query batch's reports when it takes the batch
 // only where no report of any sequence of the database can be refused (`report_stream`): a
 // sequence that NCBI's formatters do not find by its Seq-align id (nrefuse_v5) refuses the
-// tabular formats and outfmt 0, and so do two sequences whose Seq-align ids match (njoined, in
-// two volumes): a load of either's id can give the other's blob (line DBID hr-1, the keys of
-// NCBI's places, `ParsedSubject::place_keys`), read on one thread and on four.
+// tabular formats and outfmt 0, and two sequences whose Seq-align ids match (njoined, in two
+// volumes) refuse outfmt 0 only; where a batch may read its subjects one by one, the scope's
+// index can give either for the other's id (a weak match; line DBID hr-1, the keys of NCBI's
+// places, `ParsedSubject::place_keys`), which refuses both. Read on one thread and on four.
 #[test]
 #[cfg_attr(
     not(feature = "parallel"),
@@ -176,15 +177,22 @@ fn a_report_of_any_sequence_that_could_be_refused_is_found() {
         ..ParsedShown::default()
     };
     let answers = |pool: &crate::utils::threading::SearchPool<'_>| {
-        ["nucl_v5", "nucl_v4", "nrefuse_v5", "njoined"].map(|name| {
+        [
+            ("nucl_v5", false),
+            ("nucl_v4", false),
+            ("nrefuse_v5", false),
+            ("njoined", false),
+            ("njoined", true),
+        ]
+        .map(|(name, one_by_one)| {
             let database = open(name);
             (
-                database.reports_may_refuse(tabular, false, None, pool),
-                database.reports_may_refuse(pairwise, false, None, pool),
+                database.reports_may_refuse(tabular, (false, one_by_one), None, pool),
+                database.reports_may_refuse(pairwise, (false, one_by_one), None, pool),
             )
         })
     };
-    use shared::ReportRefusal::Headers;
+    use shared::ReportRefusal::{Headers, Joined};
     let serial = answers(&crate::utils::threading::SearchPool::x_serial());
     assert_eq!(
         serial,
@@ -192,6 +200,7 @@ fn a_report_of_any_sequence_that_could_be_refused_is_found() {
             (None, None),
             (None, None),
             (Some(Headers), Some(Headers)),
+            (None, Some(Joined)),
             (Some(Headers), Some(Headers)),
         ]
     );

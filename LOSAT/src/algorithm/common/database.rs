@@ -4242,29 +4242,37 @@ pub(crate) enum ReportRefusal {
 /// every one of a sequence with parsed Seq-ids, as `prefetch_messages` reads them) and no lookup
 /// of them may be refused (`taxids_may_refuse`). Under `-parse_deflines` no sequence may have the
 /// id of a query of `queries` (`refuse_id_of_a_query`; the scope of every query of the run, a
-/// superset of each batch's). A reader error is a refusal too. The headers are read in `pool`;
-/// nothing is written and no state of the run changes. `None`: no report of any sequence can be
-/// refused.
+/// superset of each batch's). No load may be given another sequence by NCBI's places
+/// (`ParsedSubject::place_keys`): the data loader's `m_Ids` always, the scope's index only where a
+/// batch may read its subjects one by one (`one_by_one`: [`prefetch_may_be_off`] of the first
+/// format) or after a prefetch that fails (`ParsedSubject::prefetch_fails`), since the prefetch
+/// resolves its ids without that index and the reports' loads then find them in the scope's
+/// cache (`report::db_subject::ScopeWalk::bulk`). A reader error is a refusal too. The headers are
+/// read in `pool`; nothing is written and no state of the run changes. `None`: no report of any
+/// sequence can be refused.
 pub(crate) fn reports_may_refuse(
     db: &SeqDb,
     shown: ParsedShown,
     protein: bool,
     taxdb_found: bool,
-    prefetch: bool,
+    (prefetch, one_by_one): (bool, bool),
     queries: Option<&crate::blastinput::query_batch::QueryScope>,
     pool: &crate::utils::threading::SearchPool<'_>,
     program: &str,
 ) -> Option<ReportRefusal> {
-    /// What the pass keeps: the join keys with their sequence, the prefetch's taxids, and the
-    /// keys of NCBI's places (`ParsedSubject::place_keys`: those that each loaded blob holds, by
-    /// its ordinal id, and those that each subject's load looks for, with its own ordinal id and
-    /// the one its lookup gives).
+    /// What the pass keeps: the join keys with their sequence, the prefetch's taxids, the keys
+    /// of NCBI's places (`ParsedSubject::place_keys`: those that each loaded blob holds, by its
+    /// ordinal id, and those that each subject's load looks for in `m_Ids` and in the scope's
+    /// index, with its own ordinal id and the one its lookup gives), and whether a subject's
+    /// prefetch fails.
     #[derive(Default)]
     struct Kept {
         keys: Vec<(u64, u32)>,
         taxids: Vec<i32>,
         held: Vec<(u64, u32)>,
         sought: Vec<(u64, u32, u32)>,
+        scope_sought: Vec<(u64, u32, u32)>,
+        prefetch_fails: bool,
     }
     impl Kept {
         #[cfg(all(
@@ -4276,6 +4284,8 @@ pub(crate) fn reports_may_refuse(
             self.taxids.append(&mut other.taxids);
             self.held.append(&mut other.held);
             self.sought.append(&mut other.sought);
+            self.scope_sought.append(&mut other.scope_sought);
+            self.prefetch_fails |= other.prefetch_fails;
             Ok(self)
         }
     }
@@ -4364,11 +4374,14 @@ pub(crate) fn reports_may_refuse(
                 }
                 // NCBI's places may give another loaded sequence for a subject (a hold, which the
                 // reports refuse; `report::db_subject::ScopeWalk`): kept for the check below.
-                let mut sought = Vec::new();
-                subject.place_keys(&mut kept.held, &mut sought);
+                let (mut sought, mut scope_sought) = (Vec::new(), Vec::new());
+                subject.place_keys(&mut kept.held, (&mut sought, &mut scope_sought));
                 let gives = subject.lookup_gives_ordinal().unwrap_or(ordinal);
                 kept.sought
                     .extend(sought.into_iter().map(|key| (key, ordinal, gives)));
+                kept.scope_sought
+                    .extend(scope_sought.into_iter().map(|key| (key, ordinal, gives)));
+                kept.prefetch_fails |= subject.prefetch_fails();
                 if prefetch {
                     match prefetch_reads(db, ordinal, &subject, true, program) {
                         Ok(Ok(Some(blob))) if blob == ordinal => {
@@ -4427,19 +4440,26 @@ pub(crate) fn reports_may_refuse(
     // load of some run can be given that sequence (a hold, `ParsedSubject::fetched`).
     kept.held.sort_unstable();
     kept.held.dedup();
-    let held_by_other = kept.sought.iter().any(|&(key, own, gives)| {
-        let start = kept.held.partition_point(|&(held, _)| held < key);
-        kept.held[start..]
-            .iter()
-            .take_while(|&&(held, _)| held == key)
-            .any(|&(_, holder)| holder != own && holder != gives)
-    });
+    let scope_index = one_by_one || kept.prefetch_fails;
+    let scope_sought = kept.scope_sought.iter().filter(|_| scope_index);
+    let held_by_other = kept
+        .sought
+        .iter()
+        .chain(scope_sought)
+        .any(|&(key, own, gives)| {
+            let start = kept.held.partition_point(|&(held, _)| held < key);
+            kept.held[start..]
+                .iter()
+                .take_while(|&&(held, _)| held == key)
+                .any(|&(_, holder)| holder != own && holder != gives)
+        });
     if held_by_other {
         return Some(ReportRefusal::Headers);
     }
     drop((
         std::mem::take(&mut kept.held),
         std::mem::take(&mut kept.sought),
+        std::mem::take(&mut kept.scope_sought),
     ));
     kept.keys.sort_unstable();
     let headers = HeaderReader::new(db, false);

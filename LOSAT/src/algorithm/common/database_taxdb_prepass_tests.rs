@@ -2304,7 +2304,7 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
                     shown(pairwise),
                     false,
                     found,
-                    false,
+                    (false, false),
                     None,
                     &pool,
                     "TBLASTX",

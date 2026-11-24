@@ -160,12 +160,13 @@ impl TblastxDatabase {
     }
 
     /// Whether a report that names any sequence of the database could be refused by LOSAT
-    /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
-    /// prefetch `prefetch`), read in `pool`.
+    /// (`common::database::reports_may_refuse`, with the reports `shown`, the batches' prefetch
+    /// of the taxonomy database `prefetch`, and whether a batch may read its subjects one by one,
+    /// `one_by_one`), read in `pool`.
     pub(crate) fn reports_may_refuse(
         &self,
         shown: ParsedShown,
-        prefetch: bool,
+        prefetch: (bool, bool),
         queries: Option<&crate::blastinput::query_batch::QueryScope>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Option<shared::ReportRefusal> {

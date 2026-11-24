@@ -1118,9 +1118,14 @@ fn alias_oid_lists_select_ncbis_oids() {
     let db = open("u").unwrap();
     assert_eq!(oids(&db), [0, 2, 3, 4, 5, 9]);
     assert_eq!(db.ncbi_num_seqs(), 6);
-    // A missing file is the constructor's error when it scans.
+    // A missing file is the constructor's error when it scans. Its path is the directory of the
+    // first volume, which NCBI names with its links followed (seqdbalias.cpp:851-862, 2001-2005).
     write("x.pal", b"DBLIST prot_v4\nOIDLIST none.msk\n");
-    let missing = dir.join("none.msk").to_str().unwrap().to_string();
+    let missing = ncbi_dir(&dir)
+        .join("none.msk")
+        .to_str()
+        .unwrap()
+        .to_string();
     let text = format!("To be memory mapped the file must exist: '{missing}'");
     let error = open("x").unwrap_err();
     assert!(
@@ -1214,10 +1219,11 @@ fn oid_lists_over_unions_of_ranges_keep_ncbis_oids() {
     let db = SeqDb::open(dir.join("pb").to_str().unwrap(), SeqType::Protein).unwrap();
     let error = db.build_oid_list().unwrap_err();
     assert!(error.ncbi_crashes(), "{error}");
+    // The alias file under the name NCBI resolves it to, its links followed (`ncbi_dir`).
     assert!(
         error
             .to_string()
-            .starts_with(&format!("{}:", dir.join("pb.pal").display())),
+            .starts_with(&format!("{}:", ncbi_dir(&dir).join("pb.pal").display())),
         "{error}"
     );
     write("pa.pal", b"DBLIST c3 c4\nFIRST_OID 10\nLAST_OID 10\n");
@@ -1277,9 +1283,11 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
     }
     std::fs::write(dir.join("np.pal"), b"DBLIST prot_v4\nOIDLIST np.msk\n").unwrap();
     let error = SeqDb::open(dir.join("np").to_str().unwrap(), SeqType::Protein).unwrap_err();
+    // The list beside the alias file, in the directory NCBI names with its links followed
+    // (seqdbalias.cpp:325-335, 2001-2005).
     let text = format!(
         "CMemoryFile: Cannot memory map file '{}':Permission denied",
-        mask.display()
+        ncbi_dir(&dir).join("np.msk").display()
     );
     assert_eq!(error.ncbi_request_message().unwrap(), text.as_bytes());
     assert_eq!(
@@ -1399,6 +1407,23 @@ fn temp_dir(tag: &str) -> PathBuf {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:325-335
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
+// `NormalizePath` with `eFollowLinks` reads the symbolic link of each component on Unix only; the
+// reader names the databases it opens (and with them their alias files' lists) and the
+// directories of its search path (`BLASTDB`) through it.
+/// The directory `dir` as NCBI's reader names it: its symbolic links followed on Unix, as it is on
+/// Windows. On macOS the temporary directory lies under `/var`, a link to `private/var`, so NCBI
+/// and LOSAT name its files under `/private/var`.
+pub(super) fn ncbi_dir(dir: &Path) -> PathBuf {
+    if cfg!(unix) {
+        dir.canonicalize().unwrap()
+    } else {
+        dir.to_path_buf()
+    }
 }
 
 fn copy_database(name: &str, exts: &[&str], dir: &Path) {

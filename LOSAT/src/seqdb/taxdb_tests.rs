@@ -975,17 +975,20 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
             return;
         }
         let search = path_of(&dir);
+        // The file in the directory of the search path, `BLASTDB` with its links followed
+        // (seqdbcommon.cpp:378-392, `crate::seqdb::tests::ncbi_dir`).
+        let named = crate::seqdb::tests::ncbi_dir(&dir).join(file);
         let expect = |error: SeqDbError| match error {
             SeqDbError::TaxdbThrows {
                 path: failed,
                 reason,
                 exception,
             } => {
-                assert_eq!(failed, path, "{file}");
+                assert_eq!(failed, named, "{file}");
                 assert_eq!(reason, "Permission denied", "{file}");
                 let message = format!(
                     "CMemoryFile: Cannot memory map file '{}':Permission denied",
-                    path.display()
+                    named.display()
                 );
                 assert_eq!(exception.get_msg(), message.as_bytes(), "{file}");
                 let error = SeqDbError::TaxdbThrows {
@@ -1004,7 +1007,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
                 );
                 assert_eq!(
                     error.to_string(),
-                    format!("{} cannot be opened: Permission denied", path.display())
+                    format!("{} cannot be opened: Permission denied", named.display())
                 );
             }
             other => panic!("{file}: {other:?}"),

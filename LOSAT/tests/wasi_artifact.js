@@ -52,10 +52,6 @@ function prepareArtifact(bytes, expected, module = new WebAssembly.Module(bytes)
   if (reactor && !["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc", "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"].every(x => names.has(x))) {
     throw new Error("reactor is missing direct API exports");
   }
-  // The command line carries no Web ABI (v1's `losat_web_*`, v2's `losat_web2_*`): only the Web's
-  // modules do (LOSAT's feature `web-abi-v1`, web/adapter; line RG item K4i-3d).
-  const web = [...names].filter(x => x.startsWith("losat_web"));
-  if (command && web.length) throw new Error(`command exports the Web ABI: ${web.slice(0, 3).join(", ")}`);
   if (memories.length !== 1 || !exports.some(x => x.name === "memory" && x.kind === "memory")) throw new Error("artifact must export its single memory");
   if (threaded && (!names.has("wasi_thread_start") || !memories[0].shared || !memories[0].imported || memories[0].module !== "env" || memories[0].name !== "memory")) {
     throw new Error("threaded artifact requires wasi_thread_start and imported shared memory");
@@ -69,6 +65,16 @@ function prepareArtifact(bytes, expected, module = new WebAssembly.Module(bytes)
 // Preserve the metadata-only API and CLI JSON; validation errors still propagate.
 function inspectArtifact(bytes, expected) {
   return prepareArtifact(bytes, expected).identity;
+}
+// LOSAT's WASI command line carries no Web ABI (v1's `losat_web_*`, v2's `losat_web2_*`): LOSAT
+// builds its commands with the feature `no-web-abi-v1` (line RG item K4i-3d). Checked where
+// LOSAT records an artifact that it built (this file's command line: build_wasi_artifacts.py,
+// build_reactors.py, the release preparation), not by the runners, which also run commands built
+// before that.
+function refuseWebAbiInCommand(identity) {
+  const web = identity.exports.filter(x => x.kind === "function" && x.name.startsWith("losat_web")).map(x => x.name);
+  if (identity.kind.endsWith("-command") && web.length) throw new Error(`command exports the Web ABI: ${web.slice(0, 3).join(", ")}`);
+  return identity;
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Host compatibility only. A Wasm i32 reaches JavaScript as a signed number, so a
@@ -150,8 +156,8 @@ function createSharedMemory(initial, maximum, stepDown, create = descriptor => n
   throw failure;
 }
 
-module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory };
+module.exports = { inspectArtifact, prepareArtifact, refuseWebAbiInCommand, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory };
 if (require.main === module) {
-  try { console.log(JSON.stringify(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3]), null, 2)); }
+  try { console.log(JSON.stringify(refuseWebAbiInCommand(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3])), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }
 }

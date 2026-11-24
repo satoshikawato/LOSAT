@@ -87,7 +87,7 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // options; generic FASTA handles never cache translated or masked search state.
 #[cfg_attr(
     not(losat_web_abi_v1),
-    expect(dead_code, reason = "called only by the web ABI (`web_api`, `web-abi-v1`)")
+    expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
 )]
 pub(crate) fn run_pair(
     args: BlastxArgs,

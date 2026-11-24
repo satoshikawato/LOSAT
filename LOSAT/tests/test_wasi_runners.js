@@ -371,12 +371,6 @@ test("artifact preparation preserves validation and ABI rejection", () => {
       /exactly one of _start or _initialize/);
     assert.throws(() => inspect(command({ threaded: false, aliases: ["_initialize", ...api] })),
       /exactly one of _start or _initialize/);
-    for (const threaded of [false, true]) {
-      assert.throws(() => inspect(command({ threaded, aliases: ["losat_web_run_pair"] })),
-        /command exports the Web ABI: losat_web_run_pair/);
-      assert.throws(() => inspect(command({ threaded, aliases: ["losat_web2_tool"] })),
-        /command exports the Web ABI: losat_web2_tool/);
-    }
     assert.throws(() => inspect(command({ threaded: false, exportMemory: false })),
       /must export its single memory/);
     assert.throws(() => inspect(command({ threaded: false, memoryLimits: [1, 1, 2, 1] })),
@@ -391,6 +385,27 @@ test("artifact preparation preserves validation and ABI rejection", () => {
     assert.throws(() => inspect(command({ threaded: true, worker: "missing-export" })),
       /requires wasi_thread_start/);
   }
+});
+
+// A command that LOSAT builds carries no Web ABI (feature `no-web-abi-v1`, line RG item K4i-3d):
+// the check of the artifacts LOSAT records refuses one that does; the runners still run it (a
+// command built before the feature), and reactors keep their exports.
+test("a recorded command with Web ABI exports is refused; the runners still prepare it", () => {
+  const { prepareArtifact, inspectArtifact, refuseWebAbiInCommand } = require("./wasi_artifact");
+  for (const threaded of [false, true]) {
+    const kind = `${threaded ? "threaded" : "serial"}-command`;
+    for (const name of ["losat_web_run_pair", "losat_web2_tool"]) {
+      const bytes = command({ threaded, aliases: [name] });
+      assert.equal(prepareArtifact(bytes, kind).identity.kind, kind);
+      assert.throws(() => refuseWebAbiInCommand(inspectArtifact(bytes, kind)),
+        new RegExp(`command exports the Web ABI: ${name}`));
+    }
+    assert.equal(refuseWebAbiInCommand(inspectArtifact(command({ threaded }), kind)).kind, kind);
+  }
+  const api = ["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc",
+    "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
+  const reactor = inspectArtifact(command({ threaded: false, entry: "_initialize", aliases: api }), "serial-reactor");
+  assert.equal(refuseWebAbiInCommand(reactor).kind, "serial-reactor");
 });
 
 // Unset, the guard cache is in the user's cache directory; 0 turns it off; a default

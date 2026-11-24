@@ -591,7 +591,7 @@ enum RunIo<'a> {
         not(any(losat_web_abi_v1, test)),
         expect(
             dead_code,
-            reason = "made only by `run_in_memory`, for the web ABI (`web-abi-v1`) and tests"
+            reason = "made only by `run_in_memory`, for the web ABI (wasm32) and tests"
         )
     )]
     Memory {

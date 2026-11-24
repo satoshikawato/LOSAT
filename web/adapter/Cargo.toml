@@ -15,8 +15,7 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# `web-abi-v1`: the modules also carry ABI v1 (`losat_web_*`, docs/web/abi_v1.md), which gbdraw calls.
-losat = { path = "../../LOSAT", default-features = false, features = ["web-abi-v1"] }
+losat = { path = "../../LOSAT", default-features = false }
 # The SHA-256 of a named input file (`files.rs`), counted over its chunks as they come.
 sha2 = { version = "0.10", default-features = false }
 

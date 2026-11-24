@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.93
+- Version: 1.94
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -509,14 +509,15 @@
   and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
   header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
   there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.93 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 28, a mask file whose
+  1.94 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 28, a mask file whose
   Seq-locs nest deeper than NCBI's stack holds, read to any depth, rule 1, as approved exception 15
   reads a PSSM; its approval pending the Owner's answer to question Q-MDEPTH (asked 2026-11-23); the
-  refusal of nests deeper than 400 object frames removed; numbered after 1.92; first 1.77 (exception
+  refusal of nests deeper than 400 object frames removed; numbered after 1.93, which line NP item
+  M4c-2 took after dev's 1.92; first 1.77 (exception
   24), then 1.81 (exception 25) at the merge of dev that brought 1.76 to 1.80 (line RG items X4b-2,
   D3c-3a and D5b-5, line NP item O4c, line PS item PS12c), then 1.92 (exception 28) at the merge of
   dev that brought 1.81 to 1.91 and exceptions 25 to 27, then 1.93 at the merge of dev that
-  brought line NP item O4b2-4's 1.92)
+  brought line NP item O4b2-4's 1.92, then 1.94)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1229,11 +1230,11 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 
-## Exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.93), pending
+## Exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.94), pending
 
 pending: question Q-MDEPTH, ad-M4a-15 2026-11-22
 
-Version 1.93, line NP item M (b). Approval: pending the Owner's answer to question Q-MDEPTH (asked
+Version 1.94, line NP item M (b). Approval: pending the Owner's answer to question Q-MDEPTH (asked
 2026-11-23). Built under the maintainer's standing delegation (standing instruction 2026-09-29,
 restated 2026-10-07) as that question's recommended option B, the form of approved exception 15, in
 a pull request that stays a draft until the Owner answers. Not taken: option A, refusing the depths

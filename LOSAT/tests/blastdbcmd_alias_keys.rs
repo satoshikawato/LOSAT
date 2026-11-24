@@ -14,7 +14,9 @@
 //! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22; review 1 of D1c-1: string tags of
 //! `PIG` and `BL_ORD_ID` under a list, TI and GI ISAMs NCBI does not initialise, a `SEQIDLIST`
 //! over two volumes, A382-A389), and (D1c-1b, 2026-11-23) `-taxids -target_only` over headers
-//! whose lines the list erases (A390-A394, A395). The
+//! whose lines the list erases (A390-A394, A395), and (D1c-1c-b, 2026-11-24) sequences with lines
+//! without a Seq-id in a database without a list (`idlist/ln`, `lnn`, `lm`: the FASTA headers, and
+//! NCBI's null pointer of a range, a mask, `%a` or `%i` of such a line, A420-A446). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -586,6 +588,33 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A392", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-outfmt", "%o|%a|%T|%t"], 0),
     ("A393", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
     ("A394", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A420", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all"], 0),
+    ("A421", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-ctrl_a"], 0),
+    ("A422", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-long_seqids"], 0),
+    ("A423", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-target_only"], 0),
+    ("A424", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%f"], 0),
+    ("A425", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1"], 0),
+    ("A426", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1", "-target_only"], 0),
+    ("A427", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1", "-range", "1-10"], 1),
+    ("A428", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000002.1", "-range", "1-10"], 0),
+    ("A429", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-range", "1-10"], 1),
+    ("A430", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A431", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%i"], 1),
+    ("A432", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%t|%g"], 0),
+    ("A433", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 0),
+    ("A434", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000002.1", "-outfmt", "%o %a %t"], 1),
+    ("A435", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1", "-long_seqids"], 0),
+    ("A436", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-range", "200-300"], 0),
+    ("A437", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all"], 0),
+    ("A438", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-strand", "minus"], 0),
+    ("A439", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-range", "1-10"], 1),
+    ("A440", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-long_seqids"], 0),
+    ("A441", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A442", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "all", "-mask_sequence_with", "21"], 1),
+    ("A443", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "NP_000006.1", "-mask_sequence_with", "21"], 1),
+    ("A444", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "NP_000006.1", "-mask_sequence_with", "21", "-target_only"], 0),
+    ("A445", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "NP_000002.1", "-mask_sequence_with", "21"], 0),
+    ("A446", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "all", "-mask_sequence_with", "21", "-long_seqids"], 1),
 ];
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits

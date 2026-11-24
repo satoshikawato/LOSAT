@@ -95,7 +95,7 @@ pub(super) fn bx_two_hit<S: BxScoring>(
     scoring: S,
     query: &[u8],
     subject: &[u8],
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -238,17 +238,80 @@ impl Diagonals {
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// [`Diagonals::finish_chunk`] after a subject of `length` letters.
     pub fn finish_subject(&mut self, length: usize) -> Result<()> {
+        self.finish_chunk(i32::try_from(length)?)
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    /// `Blast_ExtendWordExit` after a subject, or a hard chunk of a `-db_hard_mask` sequence
+    /// (`search_db_masked.rs`), whose length is NCBI's `Int4` (`core::subject_split::HardChunk::
+    /// length`: negative between overlapping masks): the table cleared where the offset reached
+    /// INT4_MAX / 4, else the offset moved by the length and the window. The one owner of that
+    /// update.
+    pub(crate) fn finish_chunk(&mut self, length: i32) -> Result<()> {
         if self.offset >= i32::MAX / 4 {
-            self.offset = self.window;
-            self.entries.fill(DiagStruct::clear(self.window));
+            self.clear();
         } else {
             self.offset = self
                 .offset
-                .checked_add(i32::try_from(length)?)
+                .checked_add(length)
                 .and_then(|v| v.checked_add(self.window))
                 .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
         }
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// Clears the table and sets the offset to the window (`s_BlastDiagClear`): where the offset
+    /// reached INT4_MAX / 4 (`finish_chunk`), and in a `-db_hard_mask` search between two
+    /// sequences where moving the offset to keep them apart would take it there
+    /// (`search_db_masked.rs`, `common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`).
+    pub(crate) fn clear(&mut self) {
+        self.offset = self.window;
+        self.entries.fill(DiagStruct::clear(self.window));
+    }
+    /// The diagonal offset of the next subject.
+    pub(crate) fn offset(&self) -> i32 {
+        self.offset
+    }
+    /// The entries, the mask of a diagonal's index and the diagonal offset, which the two-hit test
+    /// of a hard chunk's one word reads (`common::hard_chunk_scan::OneWord::test`).
+    pub(crate) fn table(&mut self) -> (&mut [DiagStruct], i32, i32) {
+        let (mask, offset) = (self.entries.len() as i32 - 1, self.offset);
+        (self.entries.as_mut_slice(), mask, offset)
+    }
+}
+
+// The search with `-db_hard_mask` moves the table between its sequences
+// (`common::hard_chunk_walk::TableStart::apply`, `TableEnd::apply`; `search_db_masked.rs`).
+impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
+    type Error = anyhow::Error;
+
+    fn ncbi_table(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::NcbiStart,
+        window: i32,
+    ) {
+        debug_assert_eq!(window, self.window);
+        self.offset = start.offset;
+        let entry = if start.cleared {
+            DiagStruct::clear(self.window)
+        } else {
+            DiagStruct::default()
+        };
+        self.entries.fill(entry);
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        debug_assert_eq!(window, self.window);
+        self.clear();
+    }
+
+    fn move_offset(&mut self, by: i32) -> Result<()> {
+        self.offset = self
+            .offset
+            .checked_add(by)
+            .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
         Ok(())
     }
 }
@@ -1004,15 +1067,21 @@ pub(super) fn word_finder_over<S: BxScoring>(
                 }
                 context = context_of(q);
                 let p = &parameters[context];
-                if q - diff < batch.contexts[context].offset as i32 {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 566-573
+                // The scan's query offset is unsigned: the context test subtracts the distance in
+                // unsigned arithmetic, and a distance past the query's start (an entry of an
+                // earlier hard chunk of the sequence, series NP, M4b-3b) passes it.
+                if (q.wrapping_sub(diff) as u32) < batch.contexts[context].offset as u32 {
                     entry.set_last_hit(s.wrapping_add(diagonals.offset));
                     continue;
                 }
+                // The first hit's end is signed: negative where it lies before a hard chunk's
+                // start.
                 let Some(result) = bx_two_hit(
                     scoring,
                     query,
                     subject,
-                    (previous + word) as usize,
+                    previous + word,
                     s as usize,
                     q as usize,
                     p.word_xdrop,
@@ -1045,6 +1114,15 @@ pub(super) fn word_finder_over<S: BxScoring>(
     };
     scan(&mut each);
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
+    sort_initial_hits(&mut hits);
+    Ok(hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
+/// The order of a subject's initial hits for its gapped stage (by score, then the subject's start,
+/// the length and the query's start): the reference word finder's (`word_finder`) and a hard
+/// chunk's one word's (`search_db_masked.rs`).
+pub(crate) fn sort_initial_hits(hits: &mut [InitHsp]) {
     hits.sort_by(|a, b| {
         b.score
             .cmp(&a.score)
@@ -1052,7 +1130,6 @@ pub(super) fn word_finder_over<S: BxScoring>(
             .then(b.length.cmp(&a.length))
             .then(a.q_start.cmp(&b.q_start))
     });
-    Ok(hits)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107

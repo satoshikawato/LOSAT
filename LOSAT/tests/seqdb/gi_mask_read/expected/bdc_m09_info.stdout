@@ -1,0 +1,18 @@
+Database: pt
+	5 sequences; 912 total residues
+
+Date: Nov 20, 2026  8:20 PM	Longest sequence: 220 residues
+
+BLASTDB Version: 5
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            seg                                     window=12; locut=2.2; hicut=2.5         
+
+Volumes:
+	<R>/m09/db.00
+	<R>/m09/db.01
+	<R>/m09/db.02
+	<R>/m09/db.03
+	<R>/m09/db.04

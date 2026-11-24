@@ -15,8 +15,10 @@ use super::SeqDbError;
 // `CMemoryFileMap` throws this text for a path that is not an existing file (a directory has the
 // length -1, ncbifile.cpp:5886-5890), and `CSeqDBFileMemMap::Init` makes it the message of a
 // `CSeqDBException` of the code `eMemoryMappingFailure` (`SeqDbError::MemoryMap`).
-/// The message of NCBI's error for an OID list file that is not a file.
-fn not_a_file(path: &[u8]) -> Vec<u8> {
+/// The message of NCBI's error for a file it maps that is not a file: an OID list file, or the
+/// GI-mask data file of a volume that is not found, which NCBI maps by the empty name
+/// (`gi_mask::GiMaskFiles::open`).
+pub(super) fn not_a_file(path: &[u8]) -> Vec<u8> {
     [
         b"To be memory mapped the file must exist: '".as_slice(),
         path,

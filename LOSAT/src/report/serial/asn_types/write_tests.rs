@@ -192,7 +192,13 @@ fn a_delayed_member_read_from_binary_is_written_by_its_values() {
     ];
     let write = |bytes: &[u8]| {
         let (value, posts) = super::read::read_ber_value(bytes, named::AUTH_LIST);
-        assert!(posts.is_empty(), "{posts:?}");
+        // (The UTF8String tag below is posted by this read, which keeps the bytes.)
+        assert!(
+            posts
+                .iter()
+                .all(|post| matches!(post, super::read::Post::Utf8Tag(_))),
+            "{posts:?}"
+        );
         let value = value.expect("read");
         assert!(matches!(
             &value,
@@ -213,9 +219,32 @@ fn a_delayed_member_read_from_binary_is_written_by_its_values() {
             None
         )
     );
+    // A byte that the read replaces: posted (803.7) under the read's own frames at its offset in
+    // the buffer, with the string, before the member is written with `#` (`delayed_posts`); the
+    // encoder alone reports it as a replaced byte of its own.
     let mut bad = bytes.to_vec();
     bad[10] = 0xe9;
-    assert!(matches!(write(&bad).1, Some(SerialError::Unwritten(_))));
+    assert_eq!(write(&bad).1, Some(SerialError::NonVisibleChar(0xe9)));
+    let (value, _) = super::read::read_ber_value(&bad, named::AUTH_LIST);
+    let mut out = Vec::new();
+    let mut enc = crate::report::serial::encoder::Traced::new(AsnTextEncoder::new(&mut out), 0);
+    write_document(&mut enc, named::AUTH_LIST, &value.expect("read"));
+    assert_eq!(enc.error(), None);
+    let posted = enc.take_replaced_chars();
+    drop(enc);
+    assert_eq!(
+        String::from_utf8(out).expect("ASCII"),
+        "Auth-list ::= {\n  names str {\n    \"#\"\n  },\n  affil str \"a\"\n}\n"
+    );
+    assert_eq!(
+        posted,
+        vec![crate::report::serial::encoder::ReplacedChar {
+            trace: "Auth-list.names.str.E".into(),
+            byte: 0xe9,
+            position: crate::report::serial::encoder::StreamPosition::Byte(7),
+            string: b"\xe9".to_vec().into(),
+        }]
+    );
     // A UTF8String tag for the name's VisibleString: the read that kept the bytes posts 803.10
     // (once per run, `Utf8TagOnce`), so the re-read before the write posts nothing and the name
     // is written as NCBI's `CDelayBuffer::Update` writes it.
@@ -275,6 +304,7 @@ fn a_nest_of_any_depth_is_written_without_recursion() {
         fn null_element(&mut self) {}
         fn utf8_str(&mut self, _: &[u8]) {}
         fn delayed(&mut self, _: &[u8]) {}
+        fn unread_delayed(&mut self) {}
         fn error(&self) -> Option<SerialError> {
             None
         }
@@ -301,18 +331,22 @@ fn a_nest_of_any_depth_is_written_without_recursion() {
         .expect("written");
 }
 
-/// The streams other than ASN.1 text do not write the values only a PSSM file's members hold.
+/// The binary stream writes NULL and copies a delay buffer of its own format (the bytes after the
+/// member's tag); the JSON stream, whose format no buffer has, writes no delayed member.
 #[test]
-fn other_streams_refuse_what_only_a_pssm_file_holds() {
+fn the_binary_stream_copies_its_own_delay_buffers_and_json_writes_none() {
     let mut out = Vec::new();
     let mut enc = crate::report::serial::asn_ber::AsnBinaryEncoder::new(&mut out);
     enc.null();
+    enc.delayed(&[0xa0, 0x80, 0x00, 0x00]);
     assert_eq!(enc.error(), None);
-    enc.delayed(b"std { }");
+    drop(enc);
+    assert_eq!(out, [0x05, 0x00, 0xa0, 0x80, 0x00, 0x00]);
+    let mut out = Vec::new();
+    let mut enc = crate::report::serial::json::JsonEncoder::new(&mut out);
+    enc.unread_delayed();
     assert_eq!(
         enc.error(),
         Some(SerialError::Unwritten("a member read into a delay buffer"))
     );
-    drop(enc);
-    assert_eq!(out, [0x05, 0x00]);
 }

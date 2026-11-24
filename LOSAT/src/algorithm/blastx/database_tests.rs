@@ -181,9 +181,14 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
         let longest = database.x_check_stores().unwrap();
         let stream = super::super::x_db_stream::XStreamDb::new(&database.db, longest);
         let mut batches = one_query(lists);
-        let titles =
-            ReportedSubjects::read_titles(database, &batches, true, false, Default::default())
-                .unwrap();
+        let titles = ReportedSubjects::read_titles(
+            database,
+            &batches,
+            true,
+            false,
+            (Default::default(), true),
+        )
+        .unwrap();
         let reported = ReportedSubjects::for_batch(
             database,
             Subjects::Stream(super::super::x_db_stream::XStream {
@@ -205,7 +210,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             false,
             false,
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None),
+            (crate::report::db_subject::FormatThrow::Unread, None, 0),
         )
         .unwrap();
         let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -259,9 +264,14 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
         let mut second = one_query(&[(1, 50), (0, 40)]);
         second[0].query_ordinal = 1;
         batches.append(&mut second);
-        let titles =
-            ReportedSubjects::read_titles(&database, &batches, true, false, Default::default())
-                .unwrap();
+        let titles = ReportedSubjects::read_titles(
+            &database,
+            &batches,
+            true,
+            false,
+            (Default::default(), true),
+        )
+        .unwrap();
         let mut reported = ReportedSubjects::for_batch(
             &database,
             Subjects::Stream(super::super::x_db_stream::XStream {
@@ -283,7 +293,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             false,
             false,
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None),
+            (crate::report::db_subject::FormatThrow::Unread, None, 0),
         )
         .unwrap();
         for hsp in batches
@@ -294,7 +304,21 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             hsp.identity = identities;
         }
         reported
-            .fetch_by_query(&database, &batches, true, rows, false, false, None)
+            .fetch_by_query(
+                &database,
+                &batches,
+                true,
+                (
+                    rows,
+                    crate::algorithm::common::database::PrefetchFormat::of(
+                        6,
+                        crate::report::archive::options::RequestKind::Blastx,
+                    ),
+                ),
+                false,
+                false,
+                None,
+            )
             .unwrap();
         [
             reported.query_fetches(0).to_vec(),

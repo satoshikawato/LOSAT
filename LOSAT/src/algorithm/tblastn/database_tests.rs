@@ -134,7 +134,14 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
     let of = |letters: bool| {
         let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
         let mut titles = DatabaseTitles::new();
-        read_titles(&database, &hitlists, 0, Default::default(), &mut titles).unwrap();
+        read_titles(
+            &database,
+            &hitlists,
+            0,
+            (Default::default(), true),
+            &mut titles,
+        )
+        .unwrap();
         reported_subjects(
             &database,
             &titles,
@@ -142,7 +149,7 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
             SubjectLetters::Stream(&stream),
             letters,
             &[],
-            &[],
+            (&[], false),
             None,
             &[],
             true,
@@ -192,7 +199,14 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
         let mut hitlists: Vec<KappaResultHitList> =
             queries.iter().map(|&lists| hitlist(lists)).collect();
         let mut titles = DatabaseTitles::new();
-        read_titles(database, &hitlists, 0, Default::default(), &mut titles).unwrap();
+        read_titles(
+            database,
+            &hitlists,
+            0,
+            (Default::default(), true),
+            &mut titles,
+        )
+        .unwrap();
         let reported = reported_subjects(
             database,
             &titles,
@@ -200,7 +214,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             SubjectLetters::Stream(&stream),
             true,
             &[],
-            &[],
+            (&[], false),
             None,
             &[],
             true,

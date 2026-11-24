@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "epP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "epP",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T08:09:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49628,
+  "bytes-to-cache": 230,
+  "files": [
+    "epP.pdb",
+    "epP.phr",
+    "epP.pin",
+    "epP.pnd",
+    "epP.pni",
+    "epP.pog",
+    "epP.pos",
+    "epP.pot",
+    "epP.psq",
+    "epP.ptf",
+    "epP.pto"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "gnpF",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "gnpF",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T17:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49561,
+  "bytes-to-cache": 238,
+  "files": [
+    "gnpF.pdb",
+    "gnpF.phr",
+    "gnpF.pin",
+    "gnpF.pog",
+    "gnpF.pos",
+    "gnpF.pot",
+    "gnpF.psq",
+    "gnpF.ptf",
+    "gnpF.pto"
+  ]
+}

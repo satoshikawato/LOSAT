@@ -10978,6 +10978,11 @@ fn prefetch_call<'a>(
     )?;
     let titles = listed_titles.map(database::ListedTitles::held);
     let utf8 = reads.into_held();
+    // Owned contexts only: borrowed ones are the call's own (`contexts`), held below.
+    let report_contexts = match report_contexts {
+        std::borrow::Cow::Owned(contexts) => Some(contexts),
+        std::borrow::Cow::Borrowed(_) => None,
+    };
     let searched = SearchedCall {
         args,
         requested_formats,
@@ -11014,10 +11019,7 @@ fn prefetch_call<'a>(
     };
     let prefetched = CallPrefetch {
         record_titles,
-        report_contexts: match report_contexts {
-            std::borrow::Cow::Owned(contexts) => Some(contexts),
-            std::borrow::Cow::Borrowed(_) => None,
-        },
+        report_contexts,
         engine_counts,
         psi_found_before,
         psiblast_hits_found,

@@ -16,6 +16,7 @@
 //!   knows it: [`NcbiException::site`] is [`ThrowSite::generated`] otherwise) or LOSAT's refusal
 //!   (`Refused`, a noun phrase that the program completes).
 
+use crate::blastinput::ncbi_environment::DatabaseSettings;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
@@ -100,17 +101,18 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 
 impl MaskBdbReader {
     /// A new `CSeqDB` of `name` and the molecule, on the search path of the environment and
-    /// `registry` (the `[BLAST] BLASTDB` of the configuration: `ApplicationSettings::blastdb`,
-    /// `Err` when LOSAT does not read the entry as NCBI does). `program` names LOSAT's program in a
-    /// refusal.
+    /// the registry of `database` (the `[BLAST] BLASTDB` of the configuration:
+    /// `ApplicationSettings::blastdb`, `Err` when LOSAT does not read the entry as NCBI does),
+    /// whose definition lines are read under the checks of `database`
+    /// (`SeqDb::refuse_unchecked_reads`). `program` names LOSAT's program in a refusal.
     pub(crate) fn open(
         name: &str,
         molecule: SeqType,
-        registry: Result<Option<&str>, &str>,
+        database: DatabaseSettings<'_>,
         title_printed: bool,
         program: &'static str,
     ) -> Result<Self, BdbError> {
-        let registry = registry.map_err(|reason| {
+        let registry = database.registry.map_err(|reason| {
             BdbError::Refused(
                 crate::algorithm::common::database::refusal(reason, program).to_string(),
             )
@@ -118,8 +120,9 @@ impl MaskBdbReader {
         let path = SearchPath::from_environment(registry)
             .map_err(|error| database_error(error, program))?;
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
-        let db = SeqDb::open_every_oid_in(name, molecule, &path)
+        let mut db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
+        db.refuse_unchecked_reads(database.read_verification);
         Ok(MaskBdbReader {
             db,
             molecule,

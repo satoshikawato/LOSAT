@@ -53,7 +53,7 @@ fn run_words(words: &[String], date: &str, dirs: &[&Path]) -> Output {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),

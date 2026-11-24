@@ -153,7 +153,7 @@ fn run_body(
             }
             Ok(())
         };
-        let (db, _) = match open_database(name, dbtype, &path, &restrict) {
+        let (db, _) = match open_database(name, dbtype, &path, settings, &restrict) {
             Ok(opened) => opened,
             Err(error) => return database_error(diag, error),
         };
@@ -168,7 +168,7 @@ fn run_body(
             dbtype_protein,
         );
     }
-    let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
+    let (db, volumes) = match open_database(name, dbtype, &path, settings, &|_| Ok(())) {
         Ok(opened) => opened,
         Err(error) => return database_error(diag, error),
     };
@@ -242,7 +242,8 @@ fn output_refusal(reason: &str) -> String {
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). With `guess`, an exception of NCBI's reader
+/// constructor applies), its reads of the definition lines under the checks of `settings`
+/// (`SeqDb::refuse_unchecked_reads`). With `guess`, an exception of NCBI's reader
 /// (`SeqDbError::is_seqdb_exception`) moves on to the nucleotide database, and the nucleotide
 /// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
 /// protein database.
@@ -250,6 +251,7 @@ fn open_database(
     name: &str,
     dbtype: &str,
     path: &SearchPath,
+    settings: &ApplicationSettings,
     prepare: &dyn Fn(&mut SeqDb) -> Result<(), SeqDbError>,
 ) -> Result<(SeqDb, Vec<String>), SeqDbError> {
     let types: &[SeqType] = match dbtype {
@@ -266,6 +268,7 @@ fn open_database(
         // `-target_only` moves (`SeqDb::check_alias_values`).
         let opened = SeqDb::open_search_in(name, seqtype, path).and_then(|mut db| {
             let volumes = SeqDb::info_volumes(name, seqtype, path)?;
+            db.refuse_unchecked_reads(&settings.read_verification);
             prepare(&mut db)?;
             db.check_alias_values()?;
             Ok((db, volumes))

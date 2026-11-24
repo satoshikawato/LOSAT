@@ -10,6 +10,9 @@ use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
+// `ThrowUnassigned`, the getter of a member that is not set: the get check that
+// `SERIAL_VERIFY_DATA_GET` turns off (the refusal of `super::index_entry`).
+use crate::report::serial::object_frame::UNASSIGNED_MEMBER as UNASSIGNED;
 use crate::utils::lower_bound::lower_bound_by;
 
 /// A good feature table's `num-rows` above which NCBI's index depends on the machine's memory
@@ -46,15 +49,6 @@ const fn initialize_site(line: u32) -> ThrowSite {
         function: Some("ncbi::objects::CSeqTableInfo::x_Initialize"),
     }
 }
-
-// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-307 (`ThrowUnassigned`, the getter
-// of a member that is not set; the report names no function)
-const UNASSIGNED: ThrowSite = ThrowSite {
-    file: "src/serial/serialobject.cpp",
-    line: 306,
-    kind: "CUnassignedMember::eGet",
-    function: None,
-};
 
 // The generated `ThrowInvalidSelection` of the two CHOICEs (datatool's code in NCBI's build tree;
 // NCBI BLAST+ 2.17.0 reports these places: probes `t30`, `t37`, `t17`, `t74`).

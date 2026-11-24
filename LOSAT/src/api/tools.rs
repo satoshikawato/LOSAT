@@ -320,7 +320,7 @@ pub fn run_makeblastdb(
     let now = LocalTime::now();
     let status = makeblastdb::run_with(
         &args,
-        makeblastdb::registry_blastdb(&settings),
+        &settings,
         now.as_ref(),
         Platform::host(),
         input,

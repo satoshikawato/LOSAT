@@ -128,7 +128,17 @@ pub(crate) struct PssmReader<'a> {
     pub(crate) write_verification:
         Option<&'a crate::blastinput::ncbi_environment::WriteVerification>,
     pub(crate) out_pssm: bool,
+    /// The run's `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` (`None`: NCBI's
+    /// default checks): a PSSM whose read or whose query's feature table fails a check that the
+    /// setting turns off is refused where the check would stop the run
+    /// (`ncbi_environment::ReadVerification::refused`).
+    pub(crate) read_verification: Option<&'a crate::blastinput::ncbi_environment::ReadVerification>,
 }
+
+/// The input of `-in_pssm` in LOSAT's refusal of a setting that turns a check of NCBI's off
+/// (`ReadVerification::refused`): the PSSM file's read, the getters of its query's feature table.
+const IN_PSSM: &str = "a PSSM (-in_pssm)";
+const IN_PSSM_ANNOT: &str = "a feature table of a PSSM's query (-in_pssm)";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
 /// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
@@ -156,6 +166,7 @@ impl PssmReader<'static> {
         archive: None,
         write_verification: None,
         out_pssm: false,
+        read_verification: None,
     };
 }
 
@@ -267,11 +278,21 @@ pub(crate) fn read_in_pssm(
     posts.write(diagnostics, reader.archive)?;
     let pssm = match read.result {
         Ok(pssm) => pssm,
-        Err(PssmReadError::Ncbi(ReadError::Serial(_))) => {
+        Err(PssmReadError::Ncbi(ReadError::Serial(exception))) => {
+            // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+            // A mandatory member that the file skips, which a `SERIAL_VERIFY_DATA_READ` that turns
+            // the check off lets NCBI read on (`ReadVerification`): LOSAT's refusal, before any
+            // output, as NCBI's error would be.
+            if let Some(refused) = reader
+                .read_verification
+                .and_then(|setting| setting.refused(&exception, IN_PSSM))
+            {
+                return Err(reader.refuse(refused));
+            }
             return Err(crate::blastinput::app::options_error(&format!(
                 "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
                 path.display()
-            )))
+            )));
         }
         Err(PssmReadError::Ncbi(ReadError::Exception(exception))) => {
             return Err(crate::cli::NativeError::exception(&exception).into())
@@ -577,7 +598,16 @@ pub(crate) fn psi_search_and_object_of(
     // prolog before the refusal, as a crash is not reproduced (D3c-3c IMPL_DONE D1). With `-db` no
     // other sequence is in NCBI's scope before the query (`PssmReader::database`).
     let program = reader.program.to_ascii_lowercase();
-    let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
+    // The getter of an unset member that the index reads (a feature table column's
+    // `field-name`) throws by default; a `SERIAL_VERIFY_DATA_GET` that turns the check off lets
+    // NCBI's object manager read on, which LOSAT refuses at that place (`ReadVerification`).
+    let get_refusal = |exception: &NcbiException| {
+        let refused = reader
+            .read_verification?
+            .refused(exception, IN_PSSM_ANNOT)?;
+        Some(reader.refuse(refused).to_string())
+    };
+    let mut annot = super::annot_index::index_entry(&program, entry, reader.database, &get_refusal)
         .unwrap_or_else(|refusal| {
             super::annot_index::AnnotOutcome::refused(reader.refuse(refusal.text()).to_string())
         });

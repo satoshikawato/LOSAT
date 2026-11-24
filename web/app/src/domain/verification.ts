@@ -41,12 +41,13 @@ export interface VerificationTable {
 }
 
 /**
- * Flags that do not belong to a profile: the inputs, the outputs and the threads, and the file of
- * `-logfile`, which names a file of the run's messages as `-out` names its output: the search's
- * outputs do not change with it (line RG E1w-3b). `-conffile` and `-dryrun` change what the run
- * reads or does, and stay options (no record compares them).
+ * Flags that do not belong to a profile: the inputs, the outputs and the threads, the file of
+ * `-logfile`, which names a file of the run's messages as `-out` names its output, and the search
+ * strategy file of `-export_search_strategy`, a file of the run's requests: the search's outputs do
+ * not change with either (line RG E1w-3b; line RG F1w). `-conffile` and `-dryrun` change what the
+ * run reads or does, and stay options (no record compares them).
  */
-const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_threads', '-logfile']);
+const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_threads', '-logfile', '-export_search_strategy']);
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';

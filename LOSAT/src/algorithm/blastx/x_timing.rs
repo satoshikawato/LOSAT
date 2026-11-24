@@ -60,14 +60,16 @@
 //!   `batch_end` is the end of the batch (`runtime::Runtime::batch_end`); `sum` is the whole
 //!   batch, so `sum` minus the stages is what lies between them.
 //! - `[TIMING] blastx_batch_end_<mode>: init .. read .. kappa_spec .. kappa_serial .. loop ..
-//!   finish .. (matches=N reused=N serial=N)`: `init` and `finish` in `batch_end`, the others
-//!   in its composition-based redo (`runtime::kappa_batch`, `Runtime::kappa_redo_batch`).
+//!   finish .. (matches=N reused=N serial=N ahead=N)`: `init` and `finish` in `batch_end`, the
+//!   others in its composition-based redo (`runtime::kappa_batch`, `Runtime::kappa_redo_batch`).
 //!   `init` is up to the composition state, `read` takes the matches from the stream, `loop` is
 //!   the in-order loop over the matches, of which `kappa_spec` is the parallel redo made ahead
-//!   (2+ threads) and `kappa_serial` the redo of the matches done in the loop itself; `finish` is
-//!   from the heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
-//!   `matches` counts the matches, `reused` those whose redo was made ahead and `serial` those
-//!   redone in the loop.
+//!   (2+ threads; with `LOSAT_X_BXREDOFLOW` the loop's wait for the results of the flow, during
+//!   which it redoes other matches ahead) and `kappa_serial` the redo of the matches done in the
+//!   loop itself; `finish` is from the heaps to the batch's results (hit lists, culling, sorting,
+//!   the copy of the batch). `matches` counts the matches, `reused` those whose redo was made
+//!   ahead, `serial` those redone in the loop and `ahead` those the flow redid ahead (0 without
+//!   it).
 //! - `[TIMING] blastx_diag: mode=.. subjects=N cells=N batched_hits=N candidates=N`: with
 //!   `LOSAT_X_BXDIAG`, the fused seed loop's cell test and counts (`seed/x_seed_diag.rs`).
 
@@ -175,8 +177,11 @@ pub(crate) enum End {
     Matches,
     Reused,
     Serial,
+    /// Matches the flow of `LOSAT_X_BXREDOFLOW` redid ahead (on a helper, or on the loop's thread
+    /// while it waited for another).
+    Ahead,
 }
-const END_LEN: usize = End::Serial as usize + 1;
+const END_LEN: usize = End::Ahead as usize + 1;
 
 // No NCBI counterpart: the counters (nanoseconds or counts); the batch counters per mode
 // (0 = side by side, 1 = alone).
@@ -458,7 +463,7 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
         let e = |stage: End| &END[m][stage as usize];
         writeln!(
             out,
-            "[TIMING] blastx_batch_end_{name}: init {:.3}s read {:.3}s kappa_spec {:.3}s kappa_serial {:.3}s loop {:.3}s finish {:.3}s (matches={} reused={} serial={})",
+            "[TIMING] blastx_batch_end_{name}: init {:.3}s read {:.3}s kappa_spec {:.3}s kappa_serial {:.3}s loop {:.3}s finish {:.3}s (matches={} reused={} serial={} ahead={})",
             s(e(End::Init)),
             s(e(End::Read)),
             s(e(End::KappaSpec)),
@@ -468,6 +473,7 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
             n(e(End::Matches)),
             n(e(End::Reused)),
             n(e(End::Serial)),
+            n(e(End::Ahead)),
         )?;
     }
     super::seed::x_seed_diag::x_write_timing(out)?;

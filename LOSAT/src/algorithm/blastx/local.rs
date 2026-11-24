@@ -10,8 +10,8 @@ use super::{
     input::FastaRecord,
     input_source::{from_shared_ref, BatchCutter, CutSettings},
     native::{
-        archive_error, database_search_error, engine, options_error, output_error, report_error,
-        reported_batch, run_query_batches, write_empty_subject_warnings, ReportedAsks,
+        archive_error, database_search_error, engine, options_error, report_error, reported_batch,
+        run_query_batches, write_empty_subject_warnings, ReportedAsks,
     },
     query_setup::BATCH_SIZE,
     report::{self, LocalReport, RecordsParsed, ShownSubjects},
@@ -143,7 +143,7 @@ fn search_records(
         options.query_range = query_range;
     }
     // The taxonomy database of the reports, where the command line asks (`native::run`).
-    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref());
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
@@ -239,17 +239,15 @@ fn search_records(
 pub(super) fn subject_taxonomy(
     resolved: &mut [ResolvedOptions],
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTX",
         resolved.iter().filter_map(|options| options.tabular),
-    )?;
+    );
     for options in resolved {
         options.taxdb_found = taxonomy.found.unwrap_or(false);
         options.subject_taxdb = taxonomy.taxdb.clone();
     }
-    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
@@ -704,11 +702,9 @@ fn write_run(
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
-            writer.write_all(&start).map_err(output_error)?;
+            writer.write_all(&start)?;
         }
-        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-            writer.flush().map_err(output_error)?;
-        }
+        writer.flush()?;
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -968,7 +964,7 @@ fn write_run(
                     &mut shared,
                 )
                 .map_err(archive_error)
-                .and_then(|()| writer.flush().map_err(output_error));
+                .and_then(|()| writer.flush().map_err(Into::into));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
@@ -1004,7 +1000,7 @@ fn write_run(
                 }),
             )
             .map_err(report_error)
-            .and_then(|()| writer.flush().map_err(output_error));
+            .and_then(|()| writer.flush().map_err(Into::into));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
             let written = refusal.check(rendered)?;
@@ -1088,7 +1084,7 @@ fn write_run(
             xml_matrix,
         )
         .map_err(report_error)
-        .and_then(|()| writer.flush().map_err(output_error));
+        .and_then(|()| writer.flush().map_err(Into::into));
         // An error of the format's epilog fails the call, or this format alone (`FormatRefusal`).
         refusal.check(ended)?;
     }

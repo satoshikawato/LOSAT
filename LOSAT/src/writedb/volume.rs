@@ -67,9 +67,9 @@ struct VolumeIndices {
 /// `CWriteDB_Volume`.
 #[derive(Debug)]
 pub(crate) struct Volume {
-    dbname: String,
+    dbname: Vec<u8>,
     protein: bool,
-    vol_name: String,
+    vol_name: Vec<u8>,
     index: u32,
     idx: IndexFile,
     hdr: HeaderFile,
@@ -95,7 +95,7 @@ impl Volume {
     /// type, `scratch` the index memory of the previous volume (`take_index_scratch`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         title: &[u8],
         date: &[u8],
@@ -149,7 +149,7 @@ impl Volume {
             }
         });
         Ok(Self {
-            dbname: dbname.to_string(),
+            dbname: dbname.to_vec(),
             protein,
             vol_name: make_short_name(dbname, index),
             index,
@@ -208,7 +208,7 @@ impl Volume {
     }
 
     /// `GetVolumeName`: the path of the volume without extension.
-    pub(crate) fn volume_name(&self) -> &str {
+    pub(crate) fn volume_name(&self) -> &[u8] {
         &self.vol_name
     }
 
@@ -456,8 +456,8 @@ impl Volume {
         self.seq.file_mut().rename_file_index(num_digits);
         if self.index == 0 || orig_num_digits(self.index) < num_digits {
             let index_filename = self.idx.file().filename();
-            if let Some(t) = index_filename.rfind('.') {
-                self.vol_name = index_filename[..t].to_string();
+            if let Some(t) = index_filename.iter().rposition(|&c| c == b'.') {
+                self.vol_name = index_filename[..t].to_vec();
             }
         }
         if let Some(indices) = &mut self.indices {
@@ -486,10 +486,10 @@ impl Volume {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:461-465
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:467-490
-    pub(crate) fn list_files(&self, files: &mut Vec<String>) {
-        files.push(self.idx.file().filename().to_string());
-        files.push(self.hdr.file().filename().to_string());
-        files.push(self.seq.file().filename().to_string());
+    pub(crate) fn list_files(&self, files: &mut Vec<Vec<u8>>) {
+        files.push(self.idx.file().filename().to_vec());
+        files.push(self.hdr.file().filename().to_vec());
+        files.push(self.seq.file().filename().to_vec());
         if let Some(indices) = &self.indices {
             if let Some(acc) = &indices.acc {
                 acc.list_files(files);
@@ -504,10 +504,10 @@ impl Volume {
             if let Some(hash) = &indices.hash {
                 hash.list_files(files);
             }
-            files.push(indices.gi_index.filename().to_string());
+            files.push(indices.gi_index.filename().to_vec());
         }
         if let Some(models) = &self.excluded_models {
-            files.push(models.filename().to_string());
+            files.push(models.filename().to_vec());
         }
         for column in &self.columns {
             column.list_files(files);

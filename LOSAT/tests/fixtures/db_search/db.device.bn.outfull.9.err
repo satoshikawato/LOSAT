@@ -1,0 +1,3 @@
+Error: (802.4) [blastn] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+Error: (802.4) [blastn] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output

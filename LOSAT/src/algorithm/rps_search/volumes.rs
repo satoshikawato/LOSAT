@@ -14,8 +14,8 @@ use crate::seqdb::rps::{canonical_volume_path, RpsOpenError, RpsVolumeFault, Rps
 /// NCBI's own errors of a volume's files, which its search of a query batch raises (`BLAST
 /// engine error`, exit status 3).
 pub(crate) enum RpsVolumeError {
-    /// NCBI's text of a missing, short or unreadable file.
-    Files(String),
+    /// NCBI's bytes of a missing, short or unreadable file (its path as the system's bytes).
+    Files(Vec<u8>),
     /// An `.aux` without a matrix name (`RpsVolumeFault::NoMatrix`): NCBI's score block fails for
     /// each query of the batch ("Unknown error code -1").
     NoMatrix,
@@ -910,7 +910,7 @@ pub(crate) struct RpsVolumeSetup {
     /// buckets in order and regrouped (`RpsVolumeFiles::is_regrouped`; series PR, item PS12m):
     /// `reopen` regroups them again without reading every hit. This set-up is the one owner of the
     /// fact: a run that reopens volumes keeps the set-up that checked them.
-    regrouped: std::collections::BTreeSet<String>,
+    regrouped: std::collections::BTreeSet<Vec<u8>>,
     /// The `-db` value of a database of one volume, which NCBI's error of a missing `.freq`
     /// names (`with_database`); `None`: each volume's path.
     database_name: Option<String>,

@@ -14,6 +14,24 @@ fn the_encoders_refusal_gets_no_error_archive() {
     assert!(archive::error_lines(&engine_error, false).is_some());
 }
 
+/// Line RG T3c review 3 N4: an internal error of a formatter carried as an `io::Error`
+/// (`report::query_anchored::internal`) is LOSAT's own error, not NCBI's "BLAST failed to
+/// write output" (exit status 6): that is the report stream's failure alone
+/// (`ReportStream::finish`), which passes through.
+#[test]
+fn only_the_report_streams_failure_is_the_output_error() {
+    let internal = report_error(
+        io::Error::other("LOSAT internal error: a query-anchored segment without a row").into(),
+    );
+    assert!(internal.downcast_ref::<NativeError>().is_none());
+    assert!(internal.downcast_ref::<io::Error>().is_some());
+    let stream =
+        report_error(io::Error::other(crate::report::ostream::ReportWriteFailure::thrown()).into());
+    assert!(stream
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the
 // subjects' `GetAllSeqs` turns `eNoDefline` into a `CInputException`; its text ends with the
 // NUL of `ends`, which the error archive does not keep); a query keeps the reader's error.
@@ -187,12 +205,12 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
     assert_eq!(error.chain().count(), 1);
     // Without `-sorthits` the table is written (the score column takes the total's width).
     assert!(write(None).is_ok());
-    // An error of the output stream stays NCBI's write failure.
-    let failure = report_error(io::Error::other("disk full").into());
-    assert_eq!(
-        failure.downcast_ref::<NativeError>().map(|e| e.exit),
-        Some(6)
-    );
+    // The output stream's failure stays the stream's (NCBI's end, `ReportStream::finish`).
+    let failure =
+        report_error(io::Error::other(crate::report::ostream::ReportWriteFailure::thrown()).into());
+    assert!(failure
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure));
 }
 
 // Line DBID pfoff-1: `CATCH_ALL`'s report of a `CSeqDBException` that an outfmt 13 or 14

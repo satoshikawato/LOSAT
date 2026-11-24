@@ -57,14 +57,6 @@ fn database_error(kept: anyhow::Error) -> anyhow::Error {
         Err(refusal) => refusal,
     }
 }
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-pub(super) fn output_error(_: io::Error) -> anyhow::Error {
-    NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
-}
 /// The error of writing one batch's archive: the encoder's refusal of a byte NCBI writes as `#`
 /// (`SerialError`; a document with such a byte is written through `Traced`, `write_archive`, so
 /// only a string that its check does not see reaches it) is LOSAT's refusal, not an error of
@@ -108,11 +100,14 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
             || (e.exit == 3 && e.message.starts_with(ENGINE_ERROR.as_bytes()))
             || (e.exit == 2 && e.message.starts_with(DATABASE_ERROR.as_bytes()))
             || e.exit == 255
+            || e.exit == 0
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-202
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
-        // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
+        // write to one that fails (`framing::side_file_write_error`; on the command line NCBI's
+        // write fault, which `CATCH_ALL` swallows: exit status 0, `ostream::write_side_file`),
+        // NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
@@ -122,6 +117,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
         // not an engine error.
         error
+    } else if error
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure)
+    {
+        // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
+        error
     } else if let Some(native) = NativeError::of_writer_exception(&error) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
         // An exception of NCBI's that a report's writer raised (`NcbiException::into_io_error`:
@@ -130,10 +131,11 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // `CException` report, exit status 255 (as every program's `NativeError::of_writer`), not
         // a failed write.
         native.into()
-    } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
-        NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
-    } else if let Some(e) = error.downcast_ref::<io::Error>() {
-        output_error(io::Error::new(e.kind(), e.to_string()))
+    } else if error.downcast_ref::<io::Error>().is_some() {
+        // Any other error carried as an `io::Error` is LOSAT's own error (an internal error of a
+        // formatter, `report::query_anchored::internal`): only the report stream's failure (a
+        // closed pipe's too) is NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
+        error
     } else {
         engine(error)
     }
@@ -206,7 +208,6 @@ fn run_inner(
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
-    let tax_report = choice.number() == Some(18);
     let mut stderr: Box<dyn Write + '_> = match &archive {
         Some(handle) => {
             archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
@@ -290,35 +291,33 @@ fn run_inner(
     // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
-    let stream = match out_file {
-        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?, strategy.as_ref()),
-        None if tax_report => crate::cli::NcbiOstream::standard_output(strategy.as_ref()),
-        out_file => {
-            let destination: Box<dyn Write> = crate::report::archive::strategy::hold_report(
-                strategy.as_ref(),
-                match out_file {
-                    None => Box::new(io::stdout().lock()),
-                    Some(path) => Box::new(create(path)?),
-                },
-            );
-            crate::cli::NcbiOstream::buffered(match structured_xml {
-                true => Box::new(
-                    held.insert(super::blast_xml::HeldOutput::new(
-                        destination,
-                        side_files.clone(),
-                    ))
-                    .clone(),
-                ),
-                false => destination,
-            })
+    let device = crate::cli::ReportStream::of_cli(
+        out_file.map(create).transpose()?,
+        program.lower,
+        &args.outfmt,
+        strategy.as_ref(),
+    );
+    let stream = match structured_xml {
+        true => {
+            let report = device.handle();
+            crate::cli::NcbiOstream::before_report(
+                held.insert(
+                    super::blast_xml::HeldOutput::new(Box::new(device), side_files.clone())
+                        .with_report(report.clone()),
+                )
+                .clone(),
+                report,
+            )
         }
+        false => crate::cli::NcbiOstream::report(device),
     };
     // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
     // document gets the texts written in the meantime where NCBI writes them. The structured
-    // formats write no BLAST archive, so the run's standard error is the process's.
+    // formats write no BLAST archive, so the run's standard error is the process's, tied to the
+    // report on standard output (`cli::CliStderr`).
     if let Some(held) = &held {
         debug_assert!(archive.is_none());
-        stderr = Box::new(held.stderr(Box::new(io::stderr())));
+        stderr = Box::new(held.stderr(Box::new(crate::cli::CliStderr::process())));
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
@@ -422,7 +421,7 @@ fn run_inner(
             Some(&crate::algorithm::common::database::TaxdbSetting::of(
                 &settings,
             )),
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -711,14 +710,11 @@ fn run_inner(
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.document_mut().start(&mut start);
-        writer.write_all(&start).map_err(output_error)?;
+        writer.write_all(&start)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
-    // batch come after it when both streams go to one place (a plain report: dev's flush;
-    // `pairwise::flushes_after_prolog`).
-    if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-        writer.flush().map_err(output_error)?;
-    }
+    // batch come after it when both streams go to one place.
+    writer.flush()?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
     // The database's sequences, read in blocks where they are searched and checked where they are
@@ -929,7 +925,7 @@ fn run_inner(
             queries_before,
             pool,
         )?;
-        writer.flush().map_err(output_error)
+        writer.flush().map_err(Into::into)
     };
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
@@ -970,7 +966,7 @@ fn run_inner(
         xml_failing,
     )
     .map_err(report_error)?;
-    writer.flush().map_err(output_error)?;
+    writer.flush()?;
     // The document a hold kept: written at the end of the run, with the epilog.
     if let Some(held) = &held {
         held.release().map_err(report_error)?;
@@ -2325,6 +2321,11 @@ pub fn run(
     let result = run_inner(args, settings, &mut output, &mut archive, &mut strategy);
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = match output.as_ref().and_then(|output| output.report_handle()) {
+        Some(report) => report.finish(result),
+        None => result,
+    };
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {
@@ -2346,8 +2347,9 @@ pub fn run(
 }
 
 /// The error archive of a run that stopped in `Run` before its output was opened (the taxid or
-/// seqid list, the files of `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
-/// cannot be opened (NCBI's call swallows that).
+/// seqid list, the files of `-subject` and `-query`, the subjects): into the run's report stream
+/// (`-out`, or standard output), as the other programs write it; nothing when `-out` cannot be
+/// opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &BlastxArgs,
     archive: Option<&crate::report::archive::ArchiveHandle>,
@@ -2363,22 +2365,18 @@ fn write_run_error_archive(
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };
-    let destination: Option<Box<dyn Write>> =
-        match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-            Some(path) => crate::cli::create_out_file(path, None)
-                .ok()
-                .map(|file| Box::new(file) as Box<dyn Write>),
-            None => Some(Box::new(io::stdout().lock())),
-        };
-    if let Some(mut destination) = destination {
-        let _ = crate::report::archive::write_error_archive_after_post(
-            handle,
-            error,
-            &lines,
-            &mut destination,
-        );
-        let _ = destination.flush();
-    }
+    let out_file = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
+        Some(path) => match crate::cli::create_out_file(path, None) {
+            Ok(file) => Some(file),
+            Err(_) => return,
+        },
+        None => None,
+    };
+    let mut report =
+        crate::cli::ReportStream::of_cli(out_file, args.program().lower, &args.outfmt, None);
+    let _ =
+        crate::report::archive::write_error_archive_after_post(handle, error, &lines, &mut report);
+    let _ = report.finish(Ok(()));
 }
 /// NCBI searches a reader batch as a whole: it is not searched only when none of its contexts is
 /// valid. The units of a batch are searched on their own, so a unit without a valid context is

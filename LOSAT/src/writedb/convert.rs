@@ -212,6 +212,51 @@ const NA4_TO_NA2: [u8; 16] = [
     0xFF, 0, 1, 0xFF, 2, 0xFF, 0xFF, 0xFF, 3, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 ];
 
+/// The number of input bytes of `ncbi4na_to_binary` that are taken at once where none of their
+/// bases is ambiguous (LOSAT's speed).
+const NCBI4NA_BLOCK: usize = 64;
+
+/// Whether an NCBI4na base (a value below 16) is one of `A`, `C`, `G`, `T` (1, 2, 4, 8): those
+/// whose `NA4_TO_NA2` is a code rather than 0xFF.
+const fn is_unambiguous_ncbi4na(base: u8) -> bool {
+    (base != 0) & ((base & base.wrapping_sub(1)) == 0)
+}
+
+/// `NA4_TO_NA2` of a base that `is_unambiguous_ncbi4na`: 1, 2, 4, 8 give 0, 1, 2, 3.
+const fn ncbi4na_code(base: u8) -> u8 {
+    (base >> 1) - (base >> 3)
+}
+
+/// The loop body of `WriteDB_Ncbi4naToBinary` for the input byte `i` (`inp`): its two bases into
+/// the output byte `i / 2`, an ambiguous one through `check` (cited at `ncbi4na_to_binary`).
+fn ncbi4na_byte_to_binary(
+    seq: &mut [u8],
+    ambiguities: &mut AmbigDataBuilder,
+    i: usize,
+    inp: u8,
+    base_length: u32,
+) {
+    let mut b1 = inp >> 4;
+    let mut b2 = inp & 0xF;
+    let c1 = NA4_TO_NA2[usize::from(b1)];
+    let c2 = NA4_TO_NA2[usize::from(b2)];
+    let mut half = 0u8;
+    if (c1 | c2) & 0x80 == 0 {
+        half = (c1 << 2) | c2;
+    } else {
+        if b1 == 0 {
+            b1 = 0xF;
+        }
+        let second = (i as u32) * 2 + 1;
+        if b2 == 0 && second < base_length {
+            b2 = 0xF;
+        }
+        half |= ambiguities.check(b1, second - 1) << 2;
+        half |= ambiguities.check(b2, second);
+    }
+    seq[i / 2] |= if i & 1 == 1 { half } else { half << 4 };
+}
+
 /// The bytes of one sequence in the sequence file, and its ambiguity data.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BinarySequence {
@@ -246,26 +291,42 @@ pub(crate) fn ncbi4na_to_binary(
         cout.extend_from_slice(format!("ib={inp_bytes},n4sz={byte_length}\n").as_bytes());
     }
     let mut seq = vec![0u8; blast_bytes];
-    for (i, &inp) in ncbi4na.iter().enumerate().take(inp_bytes) {
-        let mut b1 = inp >> 4;
-        let mut b2 = inp & 0xF;
-        let c1 = NA4_TO_NA2[usize::from(b1)];
-        let c2 = NA4_TO_NA2[usize::from(b2)];
-        let mut half = 0u8;
-        if (c1 | c2) & 0x80 == 0 {
-            half = (c1 << 2) | c2;
+    let read = &ncbi4na[..inp_bytes.min(ncbi4na.len())];
+    // A block of input bytes none of whose bases is ambiguous gives its output bytes at once,
+    // without a branch a byte (LOSAT's speed). Any other block, and the bytes after the last
+    // block, go through the loop of NCBI a byte at a time, so that the ambiguity data and the
+    // random bases are those of the same calls in the same order.
+    let (blocks, _) = read.as_chunks::<NCBI4NA_BLOCK>();
+    for (index, block) in blocks.iter().enumerate() {
+        let start = index * NCBI4NA_BLOCK;
+        let unambiguous = block.iter().fold(true, |all, &inp| {
+            all & is_unambiguous_ncbi4na(inp >> 4) & is_unambiguous_ncbi4na(inp & 0xF)
+        });
+        if unambiguous {
+            let mut halves = [0u8; NCBI4NA_BLOCK];
+            for (half, &inp) in halves.iter_mut().zip(block) {
+                *half = (ncbi4na_code(inp >> 4) << 2) | ncbi4na_code(inp & 0xF);
+            }
+            // The half of the even byte in the high four bits, that of the odd byte below it.
+            let out = &mut seq[start / 2..(start + NCBI4NA_BLOCK) / 2];
+            for (byte, two) in out.iter_mut().zip(halves.as_chunks::<2>().0) {
+                let pair = u16::from_le_bytes(*two);
+                *byte = ((pair << 4) | (pair >> 8)) as u8;
+            }
         } else {
-            if b1 == 0 {
-                b1 = 0xF;
+            for (offset, &inp) in block.iter().enumerate() {
+                ncbi4na_byte_to_binary(
+                    &mut seq,
+                    &mut ambiguities,
+                    start + offset,
+                    inp,
+                    base_length,
+                );
             }
-            let second = (i as u32) * 2 + 1;
-            if b2 == 0 && second < base_length {
-                b2 = 0xF;
-            }
-            half |= ambiguities.check(b1, second - 1) << 2;
-            half |= ambiguities.check(b2, second);
         }
-        seq[i / 2] |= if i & 1 == 1 { half } else { half << 4 };
+    }
+    for (i, &inp) in read.iter().enumerate().skip(blocks.len() * NCBI4NA_BLOCK) {
+        ncbi4na_byte_to_binary(&mut seq, &mut ambiguities, i, inp, base_length);
     }
     seq[last_byte] &= 255 - 3;
     seq[last_byte] |= remainder;

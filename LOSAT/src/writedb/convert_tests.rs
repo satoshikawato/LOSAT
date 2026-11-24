@@ -457,3 +457,92 @@ fn short_nucleotide_data_is_found_at_each_boundary() {
     assert_eq!(short(SeqData::Ncbieaa(Vec::new()), 22), None);
     assert_eq!(short(SeqData::Other, 22), None);
 }
+
+// The loop of `ncbi4na_to_binary` before its pairs: every input byte through the loop body.
+fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySequence {
+    let inp_bytes = base_length.div_ceil(2) as usize;
+    let blast_bytes = (base_length / 4 + 1) as usize;
+    let last_byte = blast_bytes - 1;
+    let mut ambiguities = AmbigDataBuilder::new(base_length);
+    let mut seq = vec![0u8; blast_bytes];
+    for (i, &inp) in ncbi4na.iter().enumerate().take(inp_bytes) {
+        ncbi4na_byte_to_binary(&mut seq, &mut ambiguities, i, inp, base_length);
+    }
+    seq[last_byte] &= 255 - 3;
+    seq[last_byte] |= (base_length & 3) as u8;
+    BinarySequence {
+        seq,
+        ambig: ambiguities.get_ambig(),
+    }
+}
+
+#[test]
+fn ncbi4na_codes_are_the_table() {
+    for base in 0..16u8 {
+        let code = NA4_TO_NA2[usize::from(base)];
+        assert_eq!(is_unambiguous_ncbi4na(base), code & 0x80 == 0, "{base}");
+        if code & 0x80 == 0 {
+            assert_eq!(ncbi4na_code(base), code, "{base}");
+        }
+    }
+}
+
+#[test]
+fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
+    let check = |ncbi4na: &[u8], base_length: u32| {
+        let byte_length = base_length.div_ceil(2) as usize;
+        assert_eq!(
+            ncbi4na_to_binary(ncbi4na, byte_length, base_length, &mut Vec::new()),
+            ncbi4na_to_binary_byte_by_byte(ncbi4na, base_length),
+            "{ncbi4na:02x?} of {base_length} bases"
+        );
+    };
+    // Every byte at every place of the first two blocks of unambiguous bytes, with lengths that
+    // end in a block, after it and inside the last byte.
+    let clean: Vec<u8> = (0..200)
+        .map(|i| [0x12, 0x48, 0x84, 0x21, 0x14][i % 5])
+        .collect();
+    for place in 0..2 * NCBI4NA_BLOCK + 1 {
+        for byte in 0..=u8::MAX {
+            let mut data = clean.clone();
+            data[place] = byte;
+            for base_length in [256, 259, 300, 2 * place as u32 + 1, 2 * place as u32 + 2] {
+                check(&data, base_length);
+            }
+        }
+    }
+    // Lengths of every remainder, with data of the bytes read, fewer and more; bases unambiguous,
+    // each of the sixteen codes now and then, and runs of ambiguity.
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for round in 0..3000u32 {
+        let base_length = round % 1500 + 1;
+        let bytes = base_length.div_ceil(2) as usize;
+        let rare = (next() % 5) as u32;
+        let data: Vec<u8> = (0..bytes + 3)
+            .map(|_| {
+                let r = next();
+                let nibble = |shift: u32| {
+                    let roll = ((r >> shift) & 0x3FF) as u32;
+                    if roll < rare * rare {
+                        ((r >> (shift + 10)) & 0xF) as u8
+                    } else {
+                        [1u8, 2, 4, 8][((r >> (shift + 14)) & 3) as usize]
+                    }
+                };
+                (nibble(0) << 4) | nibble(16)
+            })
+            .collect();
+        check(&data[..bytes], base_length);
+        check(&data, base_length);
+        check(
+            &data[..bytes.saturating_sub(1 + round as usize % 3)],
+            base_length,
+        );
+    }
+}

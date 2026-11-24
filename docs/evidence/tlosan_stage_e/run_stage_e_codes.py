@@ -32,7 +32,7 @@ def calibrate_pairwise(raw: bytes) -> bytes:
     """Apply the pinned CLI's default showdefline coverage flag to API output.
 
     NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:505-524 enables the cover column only when
-    m_HitsSortOption >= 0. The oracle requests -1, but the separately
+    `m_HitsSortOption` is non-negative. The oracle requests -1, but the separately
     distributed formatter library still emits that optional column.
     Calibration removes only that column; code-1 raw/adjusted checks below
     guard the entire search and formatter output on every fixture.

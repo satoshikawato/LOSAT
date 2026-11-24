@@ -727,7 +727,7 @@ fn newton_step<V: LaneVec>(st: &mut LaneState<V>, step: &[bool; MAX_LANES], _rou
             }
         }
     }
-    // ---- SolveReNewtonSystem(resids_x, resids_z)
+    // ---- `SolveReNewtonSystem` over `resids_x` and `resids_z`
     let mut s39 = st.resids_z[M - 1];
     for i in 0..N {
         let base = i * N;
@@ -762,7 +762,7 @@ fn newton_step<V: LaneVec>(st: &mut LaneState<V>, step: &[bool; MAX_LANES], _rou
             }
             let step_k = r.mul(st.dinv[k]);
             st.resids_x[k] = step_k;
-            // ---- Nlm_StepBound(x, 400, resids_x, 1 / 0.95), element k
+            // ---- Step bound (`Nlm_StepBound` on `x` and `resids_x` with initial cap 1 / 0.95), element k
             let alpha_k = st.x[k].neg().div(step_k);
             let smaller = alpha_k.ge(zero).and(alpha_k.lt(alpha));
             if smaller.any() {
@@ -893,7 +893,7 @@ fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
         // ---- grads, values[1], DualResiduals and MultiplyByAtranspose, as in x_newton_exact.
         let eta = st.z[M - 1];
         let mut values1 = zero;
-        // Nlm_EuclideanNorm(resids_x) runs element by element as resids_x[k] is formed (k in order).
+        // The Euclidean norm of `resids_x` (`Nlm_EuclideanNorm`) runs element by element as `resids_x[k]` is formed (k in order).
         let mut norm_sum = one;
         let mut norm_scale = zero;
         for i in 0..N {

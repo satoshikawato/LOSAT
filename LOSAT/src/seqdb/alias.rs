@@ -1598,7 +1598,7 @@ pub(super) enum UserList {
 }
 
 impl UserList {
-    /// Whether the volumes translate an alias file's list (`m_UserList.Empty() || mixed_ids`).
+    /// Whether the volumes translate an alias file's list (`m_UserList` empty or `mixed_ids` set).
     fn translates(self) -> bool {
         match self {
             UserList::None => true,

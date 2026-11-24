@@ -842,19 +842,19 @@ fn fold_two_hit_on<const PT: bool, const LEAN: bool, T: FoldTable>(
                     s_range,
                     word_length,
                     lut_word_length,
-                    true, // check_double = TRUE
+                    true, // check for double-word extension
                     &mut is_seed_masked,
                 )
             };
             q_off = q_off_adj;
             s_off = s_off_adj;
 
-            // NCBI: if (!word_type) return 0;
+            // Skip this seed when `word_type` is zero (non-word).
             if word_type == 0 {
                 continue;
             }
 
-            // NCBI: s_end += extended; s_end_pos += extended;
+            // Advance `s_end` and `s_end_pos` by `extended`.
             s_end += extended;
             s_end_pos += extended;
 
@@ -912,7 +912,7 @@ fn fold_two_hit_on<const PT: bool, const LEAN: bool, T: FoldTable>(
                     s_range,
                     word_length,
                     lut_word_length,
-                    false, // check_double = FALSE (not in two-hit block)
+                    false, // skip double-word check (not in two-hit block)
                     &mut is_seed_masked,
                 )
             };
@@ -1580,19 +1580,19 @@ fn fold_two_hit_array<const LEAN: bool>(
                     s_range,
                     word_length,
                     lut_word_length,
-                    true, // check_double = TRUE
+                    true, // check for double-word extension
                     &mut is_seed_masked,
                 )
             };
             q_off = q_off_adj;
             s_off = s_off_adj;
 
-            // NCBI: if (!word_type) return 0;
+            // Skip this seed when `word_type` is zero (non-word).
             if word_type == 0 {
                 continue;
             }
 
-            // NCBI: s_end += extended; s_end_pos += extended;
+            // Advance `s_end` and `s_end_pos` by `extended`.
             s_end += extended;
             s_end_pos += extended;
 
@@ -1666,7 +1666,7 @@ fn fold_two_hit_array<const LEAN: bool>(
                     s_range,
                     word_length,
                     lut_word_length,
-                    false, // check_double = FALSE (not in two-hit block)
+                    false, // skip double-word check (not in two-hit block)
                     &mut is_seed_masked,
                 )
             };

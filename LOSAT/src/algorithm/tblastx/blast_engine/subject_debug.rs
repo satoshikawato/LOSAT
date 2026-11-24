@@ -237,8 +237,8 @@ pub(super) fn trace_hsp_masks<S: TbxScore>(sc: S, trace: &MaskTrace<'_>) {
     // LOSAT_TRACE_HSP and LOSAT_TRACE_HSP_MASKS are set.
     if let Some(target) = trace_hsp_target() {
         if trace_match_target(target, q_start, q_end, s_start, s_end) {
-            // NCBI uses query_nomask = query_blk->sequence_nomask + query_offset,
-            // with sequence_nomask pointing past the leading NULLB.
+            // NCBI advances `sequence_nomask` on `query_blk` by `query_offset`,
+            // with `sequence_nomask` pointing past the leading `NULLB`.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381-1382, c++/src/algo/blast/core/blast_util.c:112-116.
             let q_seq_nomask_full: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
             let q_seq_nomask = &q_seq_nomask_full[1..q_seq_nomask_full.len() - 1];

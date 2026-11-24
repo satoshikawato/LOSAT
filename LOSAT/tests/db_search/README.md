@@ -117,7 +117,10 @@ FASTA files:
   `x2g_f3147_s.faa` and `x2g_f1144_s.faa` there (cases of the line's format survey: an HSP of length 0 in frame
   -2, in frame +1 at query offset 0, at subject offset 0), `x2g_ms` the two subjects `x2g_ms.faa` (with the two
   queries `x2g_mq.fna`, the second's HSP of length 0) and `x2g_rk` the two subjects `x2g_rk.faa` (the one
-  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
+  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`); `x2g_rk_ver.faa` and `x2g_rk_lcl.faa` there are its
+  letters under the ids `gb|AAA00001.1|` and `gb|AAA00001.2|`, and `lcl|AAA00001` and `gb|AAA00001.1|` (written by hand
+  for the rows `db.html.bx.x2g.rk.ver.subj.pd.f0` and `db.html.bx.x2g.rk.lcl.subj.pd.f0`: two versions of one accession,
+  and a local id before a versioned one). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
   subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
   one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
   one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.
@@ -768,8 +771,53 @@ and dustmasker rows `db_t5c_taxid_*`): `t5/make_t5.py NCBI_BIN --taxid-only` wri
 `ids/pdup.faa` and `ids/ndup.fna`) and rewrites the `taxid [2]` of the first record (and the header offsets of the
 index): `app42` (the application INTEGER tag `0x42`) and `sx9` (nine content bytes, seven of them sign extension),
 which NCBI's `ReadInt4` reads as 9606, and `big5` (2^31 in five bytes), on which NCBI fails (`eOverflow`: `TTaxId` is
-an `int`) wherever it reads the header: exit 255 in the reports of the record (LOSAT's `losat-rejection` rows, exit 1),
-`Error: [blastdbcmd] error while reading taxid` (exit 1). Probe: `remaining-gaps-20261112/T/taxid_t5c.md`.
+an `int`) wherever it reads the header: exit 255 in the reports of the record (since line RG item T5d NCBI's rows
+`db.t5.taxid.*.big5.*`, which LOSAT refused), `Error: [blastdbcmd] error while reading taxid` (exit 1). Probe:
+`remaining-gaps-20261112/T/taxid_t5c.md`.
+
+Header records that NCBI's read fails on (line RG item T5d; rows `db.t5d.*`, blastdbcmd cases `T523`, `T524`, `T527`, `T528`, `T541` and `T542` (`T525` and `T526` before the merge with item T5c), segmasker and
+dustmasker rows `db_t5d_*`): `t5/make_t5.py NCBI_BIN --header-only` writes `t5/hd.faa` and `t5/hd.fna` (three records, the
+nucleotides the codons of the proteins), the queries `t5/hd_q.*` (query n hits record n) and `t5/hd_q1.*` (record 1 alone), and
+the version 4 databases `t5/phd_<name>` and `t5/nhd_<name>` (`-taxid 9606`) whose record of OID 1 is edited: `vstr` (the taxid's
+tag a VisibleString), `extra` (data where the taxid's end is expected), `prim` (the taxid's tag primitive), `big5` (2^31), `title`
+(the title's tag an OctetString), `cut` (the record without its last four bytes), `seqid` (`-parse_seqids`, `lcl|hd<n>`: the tag of
+the local id's string); `title_z` edits OID 0, which `hd_q1.*` never reports. NCBI writes its exception after the outfmt 0
+prolog and the reports of the batches before (`BATCH_SIZE=1` rows); `title_z` exits 0. Survey:
+`remaining-gaps-20261112/T/SURVEY_T5d.md`. Records that NCBI reads (fix 1 of item T5d, `make_t5.py NCBI_BIN --header-only utf8
+utf8id long longx`): `utf8` (the title a UTF8String; `utf8_z` at OID 0), `utf8id` (`-parse_seqids`, the local id's string a
+UTF8String), read with NCBI's warning `(803.10) ... UTF8String data for VisibleString member <member>` once per run, where the
+Seq-aligns of a batch first read the record (the `BATCH_SIZE=1` rows: in the second batch; `utf8_z` with `hd_q1.*`: none);
+`long` (the title's member tag in the long form, `bf 00`), read with no message; `longx` (`bf 20`), NCBI's unexpected member. `eof`
+(the record of OID 1 cut after its first byte): NCBI's `CEofException`, which the programs' `CATCH_ALL` takes as a
+`CIOException` without a post, so the run ends there with exit status 0.
+Probe: `remaining-gaps-20261112/T/fix1_t5d.md`. NCBI's other reads of a UTF8String header (fix 2 of item T5d, rows
+`db.t5d.*.fx*`, blastdbcmd cases `T534`-`T537`): `make_t5.py NCBI_BIN --fetch-only` writes the version 5 databases
+`pfx_utf8`, `pfx_utf8r`, `nfx_utf8`, `pfx_copy` and `nfx_copy` (`-parse_seqids`; hd0, which `hd_q0.*` matches, a weak
+match with a UTF8String title (hd2, a chance alignment of E-value about 6, or a weaker copy of hd0), hd1), the negative seqid
+lists `*fx_neg1.txt` and `*fx_neg2.txt`, and the version 4 database `pva_utf8` (`gb|HDA<n>.1|`, the UTF8String title at
+OID 1) with `pva_batch.txt`: under a negative seqid list with ids NCBI's traceback and composition-based redo read the
+header of every subject they fetch (the redo only those its early termination test leaves), and blastdbcmd's version check
+of `HDA1.2` reads HDA1.1's. Probe: `remaining-gaps-20261112/T/fix2_t5d.md`. NCBI's scope's read of another sequence
+that holds a reported sequence's Seq-align id (fix 3 of item T5d, rows `db.t5d.*.dup*`, blastdbcmd cases `T538`-`T540`):
+`make_t5.py NCBI_BIN --dup-only` writes the version 5 databases `pds`, `pda` (the subject `gb|DUP00001.1|`, hd0),
+`pdo_same` (that record, its title a UTF8String), `pdo_none` (`gb|DUP00001.1|`, hd1, a UTF8String title), their
+nucleotide `nds`, `ndo_same`, `ndo_none`, the version 4 `pds4` and `pdo4_same`, and `dup_batch.txt`. NCBI orders a
+list's volumes by path: `pdo_* pds` puts the other sequence first, whose header the data loader reads (`x_GetOid`)
+wherever the scope resolves the subject's id, with the warning; `pda pdo_none` the subject first, whose other holder
+is not read. Probe: `remaining-gaps-20261112/T/fix3_t5d.md`. Rows `db.t5d.*.dup.same.pf0.*` (fix 4 of item T5d): with
+`PRE_FETCH_SEQS_LIMIT=0` the warning comes inside the report, where it reads the subject (a tabular row, outfmt 0's
+description line, a JSON `Hit`; psiblast's PSSM before the first round's report where the report reads nothing),
+`db.t5d.blastp.dup.same.15` at the JSON prefetch, `db.t5d.blastp.dup.none.magic.6e` (`BLASTDB=../seqdb/taxdb/bad_magic`)
+before the taxonomy database's texts of opening of the same load. Probe: `remaining-gaps-20261112/T/fix4_t5d.md`.
+Rows `db.t5d.*.dup5*` (fix 5 of item T5d): `make_t5.py NCBI_BIN --dup5-only` writes `pdo5_same`, `pds5`
+(`gb|DUP00005.1|`, hd0, the copy's title a UTF8String), `ppig1` (`gnl|PIG|x001`, hd1: its lookup throws, and its
+Seq-id handle, packed 1, loads before DUP00005's, packed 5), `ppig5` (`gnl|PIG|x005`, one packed number with
+DUP00005's), `pdo5b_same`, `pdo5b_id`, `pds5b` (`gb|DUQ00005.1|`, hd2, the copy's title or accession a UTF8String),
+`pgo5`, `pgs5` (`gi|5`, hd0, the copy's title a UTF8String), `pplain` (no `-parse_seqids`: a list's lookup of a text
+id stops NCBI's prefetch), the nucleotide `ndo5_same`, `nds5`, `npig1`, and the queries `hd_q10.*` (q1, q0, q0b) and
+`hd_q02.*` (q0, q2). A prefetch whose loads end at the throwing lookup writes `Error pre-fetching sequence data` and
+no warning, which the next batch's prefetch writes; the reject rows are orders that NCBI takes from the addresses of
+its Seq-id infos and a report that reads the throwing subject. Probe: `remaining-gaps-20261112/T/fix5_t5d.md`.
 
 Rewritten ends that NCBI cannot decode (merge 4 of line RG item T5c with item T7; rows `db.t5.sfu.*`, `db.t5.sfux.*`):
 `t5/make_t5.py NCBI_BIN --sfu-only` writes `t5/psfu_100009` (version 4 without `-parse_seqids`, `-taxid 100009`; the
@@ -1116,7 +1164,19 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   (run in this directory). `tm_cache150` holds the taxids 99990, 150, 99990: 150 takes the slot of 99990 (`99990 & 255`) in
   NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
-  database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
+  database or an absolute `BLASTDB`). NCBI's prefetch loads the batch's subjects in the order of their Seq-id handles; the
+  mapper does not pack these local ids, so the order is that of the handles' addresses, and LOSAT refuses the run (line NP
+  item O4b2-3). `tm_cache151` (151 instead of 150) is the control: once.
+- `tm_cache_gi.faa` and `tm_cache_gi.map` (line NP item O4b2-3): 12 copies of the protein of `tm_cache.faa` with the ids
+  `gi|7`, `gi|3`, `gi|12`, `gi|1`, `gi|9`, `gi|5`, `gi|11`, `gi|2`, `gi|8`, `gi|4`, `gi|10`, `gi|6` (in this OID order) and the
+  taxids 99990 and 150 (the map), built with
+
+      makeblastdb -in tm_cache_gi.faa -dbtype prot -out tm_cache_gi -title "tm cache gi" \
+          -parse_seqids -taxid_map tm_cache_gi.map
+
+  NCBI's mapper packs gi ids, so its prefetch loads the batch's subjects in the order of their gi numbers, where the taxids
+  alternate from gi 1 to gi 10: the offset error comes six times (the order of the OIDs would give it once). Rows
+  `db.tm.bp.cachegi.*`.
 
 Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
 NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of
@@ -1943,6 +2003,9 @@ only the report sums can make BLASTX's library hold its XML2 start before the re
   `db.ps.q1.in.*`.
 - `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
   by hand (rows `db.ps.q1.in.id5.*`).
+- `tests/fixtures/pssm/ps15b_rnd_id0.asn.gz` and `ps15b_rnd_idmax.asn.gz`: `tests/fixtures/db_search/db.ps.asn.rnd.6.asn`
+  with its query's `local str "Query_1"` replaced by `local id 0` and `local id 2147483647` by hand (gzip -n -9; rows
+  `db.ps15b.fix.id0.*` and `db.ps15b.fix.idmax.*`: the Seq-aligns keep the integer Object-id).
 
 Query-anchored inputs (rows `db.of1.bp.*`, line RG T3a: BLASTP `-outfmt 1` to `4`), in `of1/`, from the
 survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made records):
@@ -2503,6 +2566,13 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
   and H alone, from which NCBI computes no ungapped Karlin-Altschul parameters (a query batch without a valid
   context, which NCBI reports with a warning and does not search), then the five G of `nohit.faa`.
 
+`x1bp/`: rows `db.x1bp.*` (line RG, item X1b-p). `d3m`, `rs` and `d3` are `makeblastdb -dbtype nucl` (NCBI BLAST+
+2.17.0, run from `LOSAT/`) of `tests/fasta/outfmt0/x1bp_d3m_s.fna`, `x1bo_R_short_s.fna` and `x1bo_d3_s.fna`: subjects
+on which `-ungapped -xdrop_ungap 1e10` (and megablast for `rs`) keeps an HSP outside its query context. Fix 2 (review 1
+M1 and S1): `qpa` and `r3` the same of `x1bp_qpA_s.fna` and `x1bo_r3_s.fna`; `d3t` of `x1bo_d3_s.fna` with
+`-taxid 9606 -blastdb_version 4`, for the prefetch of row `db.x1bp.d3t.db.6.rej`, whose
+`BLASTDB=tests/seqdb/taxdb/bad_magic` makes NCBI's prefetch write a message.
+
 ## Where some inputs come from (provenance)
 
 - `tm_psi_rhx.faa`, `tm_psi_rhy.faa` (commit eb27ebee4, 2026-11-04): the FASTA of the databases above; origin of the letters
@@ -2524,7 +2594,7 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
 
 ## `html/`: inputs of the `-html` rows (line RG, item T4a2)
 
-Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 and 18 with `-db`, and the registry
+Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 to 4 and 18 with `-db` (formats 1 to 4: line RG T4b), and the registry
 and environment cases of NCBI's HTML formatter. The inputs are those of the survey T4 of line RG
 (`remaining-gaps-20261112/T/t4`, written by its `scripts/gen.py` and `in2/gen2.py`), copied byte for byte so that the
 frozen bytes can be compared with the survey's runs. The rows also use `of18/ps_ids`, `of18/ns_ids`, `of18/ps_plain`,

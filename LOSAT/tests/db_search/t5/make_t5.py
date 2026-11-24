@@ -73,9 +73,36 @@ only the records of group A (K5_A), so that `BATCH_SIZE=1` with `PRE_FETCH_SEQS_
 turns q1's prefetch off and q2's on. makeblastdb stores a title byte outside 0x20..0x7E as `#`, so
 these bytes reach a database title only through the name at its rewritten end.
 
+With `--header-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --header-only`, line RG item
+T5d) it writes the version 4 databases `phd_<name>` and `nhd_<name>` of HEADER_EDITS (`-taxid
+9606`; the three records of `hd.faa` / `hd.fna`, the nucleotides the codons of the proteins, so
+that every program searches them with `hd_q.faa` / `hd_q.fna`, whose query n hits record n): the
+header record of OID 1 (OID 0 for the `_z` databases, which the queries `hd_q1.*` of record 1
+alone never report) edited where NCBI's read of it fails (a taxid tag, data where the taxid's end
+is expected, the taxid's tag primitive, 2^31 as the taxid, the title's tag, the record cut before
+its last four bytes; with `-parse_seqids` and `lcl|hd<n>` ids, the tag of the first string of
+the Seq-ids; a member tag in the long form of no member) or where NCBI reads it (the title or
+that string a UTF8String, with NCBI's warning; the title's member tag in the long form), and the
+record cut after its first byte (`eof`, which the searches end on with exit status 0). NCBI's
+reports of them: `remaining-gaps-20261112/T/SURVEY_T5d.md` and `T/fix1_t5d.md` of line RG. The
+names after `--header-only` build only those edits (the other databases keep their dates).
+
+With `--fetch-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --fetch-only`, fix 2 of line RG item
+T5d) it writes the databases of NCBI's other reads of a UTF8String header (`fetch_main`): the fetches of the
+traceback and of the composition-based redo under a negative seqid list, and blastdbcmd's version check.
+
+With `--dup-only` (fix 3 of line RG item T5d) it writes the databases of NCBI's scope's read of another
+sequence that holds a reported sequence's Seq-align id (`dup_main`); with `--dup5-only` (fix 5) those of the
+order of such a load to a lookup that throws on its id and to another such load (`dup5_main`). With
+`--sw-only` (merge 6 of T5d) it writes the databases of the reads of the composition-based redo's fetches
+before its Smith-Waterman redo fails a batch (`sw_main`); with `--nsw-only` (merge 12) TBLASTN's copies of
+line RG item X4b-1's `../x4b/excl` with a UTF8String title (`nsw_main`, no makeblastdb); with `--bnsw-only`
+(merge 15) BLASTX's copies of line RG item X4b-2's `../x4b2/excl` (`bnsw_main`).
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -347,6 +374,458 @@ def taxid_main(ncbi_bin):
             if os.path.exists(f"{out}.{ext}js"):
                 os.remove(f"{out}.{ext}js")
             patch_first_taxid(out, ext, inner)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+# The edits of `phd_<name>` / `nhd_<name>` (line RG item T5d): each takes the header record (a
+# `Blast-def-line-set` of one line as makeblastdb writes it) and gives the edited record; `parsed`
+# databases are made with `-parse_seqids`.
+def with_first_tag(record, inner_of, old, new):
+    """`record` with the tag byte `old` that first follows the member tag `inner_of` set to `new`."""
+    at = record.index(inner_of)
+    at = record.index(bytes([old]), at + len(inner_of))
+    return record[:at] + bytes([new]) + record[at + 1:]
+
+
+def with_long_tag(record, member, number):
+    """`record` with the first member tag `member` in the long form: 0xBF, then `number` (one byte)."""
+    at = record.index(member)
+    return record[:at] + b"\xbf" + bytes([number]) + record[at + 1:]
+
+
+def with_primitive_taxid(record):
+    """`record` with the taxid `[2]` as the primitive tag 0x82 before the INTEGER."""
+    at = 4
+    while record[at] != 0xA2:
+        at = tlv_end(record, at)
+    end = tlv_end(record, at)
+    return record[:at] + b"\x82" + record[at + 2:end - 2] + record[end:]
+
+
+HEADER_EDITS = {
+    # NCBI: `unexpected tag: VisibleString (26), should be: Integer (2)`, `error while reading taxid`.
+    "vstr": (False, lambda r: with_taxid(r, "1a024142")),
+    # NCBI: `EndOfContentsByte expected` at the taxid's end (one exception).
+    "extra": (False, lambda r: with_taxid(r, "02022586020105")),
+    # NCBI: `unexpected tag: contextspecific/2 (130), should be contextspecific/constructed/0 (160)`.
+    "prim": (False, with_primitive_taxid),
+    # NCBI: `overflow error` (eOverflow).
+    "big5": (False, lambda r: with_taxid(r, "02050080000000")),
+    # NCBI: `unexpected tag: OctetString (4), should be: VisibleString (26)`, `error while reading title`.
+    "title": (False, lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x04)),
+    # NCBI: the end of the record in the taxid's member frame (`HandleEOF`, eEOF).
+    "cut": (False, lambda r: r[:-4]),
+    # NCBI: the string of `local str` (`( at [].[].local.str)`), `error while reading seqid`.
+    "seqid": (True, lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x04)),
+    # Records that NCBI reads (RG-T5d fix 1): the title a UTF8String, which NCBI reads as the
+    # VisibleString with `Warning: (803.10) [<prog>] CObjectIStreamAsnBinary: UTF8String data for
+    # VisibleString member Blast-def-line-set.E.title, ...` once per process (none in the maskers);
+    "utf8": (False, lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)),
+    # the string of `local str` a UTF8String (`Blast-def-line-set.E.seqid.E.local.str`);
+    "utf8id": (True, lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x0C)),
+    # the title's member tag in the long form (`bf 00`, NCBI's `PeekLongTag`), with no message.
+    "long": (False, lambda r: with_long_tag(r, b"\xa0\x80", 0x00)),
+    # NCBI: a member tag in the long form whose number is no member's (`bf 20`: `unexpected
+    # member: [32]` at the tag's first byte).
+    "longx": (False, lambda r: with_long_tag(r, b"\xa0\x80", 0x20)),
+    # NCBI: the record cut after its first byte, before the set's elements: the `CEofException`
+    # that `HandleEOF` rethrows, which the search programs' `CATCH_ALL` does not post (exit 0).
+    "eof": (False, lambda r: r[:1]),
+}
+# The edits of OID 0 too (`<kind>hd_<name>_z`).
+HEADER_EDITS_Z = ("title", "utf8")
+HEADER_SEEDS = (11, 22, 33)
+
+
+def header_letters():
+    """The three proteins of `hd.faa` (120 letters each, a linear congruential stream of each seed)
+    and their nucleotides, one codon per letter."""
+    amino = "ACDEFGHIKLMNPQRSTVWY"
+    codon = dict(zip(amino, ["GCT", "TGT", "GAT", "GAA", "TTT", "GGT", "CAT", "ATT", "AAA", "CTG",
+                             "ATG", "AAT", "CCG", "CAG", "CGT", "AGC", "ACC", "GTG", "TGG", "TAT"]))
+    proteins = []
+    for seed in HEADER_SEEDS:
+        state, letters_ = seed, []
+        for _ in range(120):
+            state = (state * 1103515245 + 12345) % 2 ** 31
+            letters_.append(amino[(state >> 16) % 20])
+        proteins.append("".join(letters_))
+    return proteins, ["".join(codon[c] for c in p) for p in proteins]
+
+
+def patch_record(base, ext, oid, edit):
+    """Rewrites the header file of the version 4 database `base` with the record of `oid` edited
+    by `edit`, and the header offsets of its index file."""
+    index = bytearray(open(f"{base}.{ext}in", "rb").read())
+    version, = struct.unpack(">I", index[0:4])
+    assert version == 4, version
+    at = 8
+    for _ in range(2):  # title, date
+        at += 4 + struct.unpack(">I", index[at:at + 4])[0]
+    count, = struct.unpack(">I", index[at:at + 4])
+    at += 4 + 8 + 4  # count, total length, longest sequence
+    offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
+    headers = open(f"{base}.{ext}hr", "rb").read()
+    records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
+    records[oid] = edit(records[oid])
+    offsets = [0]
+    for record in records:
+        offsets.append(offsets[-1] + len(record))
+    index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
+    open(f"{base}.{ext}hr", "wb").write(b"".join(records))
+    open(f"{base}.{ext}in", "wb").write(bytes(index))
+
+
+def header_main(ncbi_bin, only=()):
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    for kind, seqs in (("p", proteins), ("n", nucleotides)):
+        ext = "faa" if kind == "p" else "fna"
+        with open(os.path.join(here, f"hd.{ext}"), "w") as f:
+            for n, seq in enumerate(seqs):
+                f.write(f">hd{n} record {n} of the T5d databases\n{seq}\n")
+        with open(os.path.join(here, f"hd_q.{ext}"), "w") as f:
+            for n, seq in enumerate(seqs):
+                f.write(f">q{n}\n{seq}\n")
+        with open(os.path.join(here, f"hd_q1.{ext}"), "w") as f:
+            f.write(f">q1\n{seqs[1]}\n")
+        with open(os.path.join(work, f"hdp.{ext}"), "w") as f:
+            for n, seq in enumerate(seqs):
+                f.write(f">lcl|hd{n} record {n} of the T5d databases\n{seq}\n")
+    for kind, dbtype, ext in (("p", "prot", "p"), ("n", "nucl", "n")):
+        fext = "faa" if kind == "p" else "fna"
+        for name, (parsed, edit) in HEADER_EDITS.items():
+            if only and name not in only:
+                continue
+            for suffix, oid in (("", 1), ("_z", 0)):
+                if suffix and name not in HEADER_EDITS_Z:
+                    continue
+                fasta = os.path.join(work, f"hdp.{fext}") if parsed else os.path.join(here, f"hd.{fext}")
+                out = os.path.join(here, f"{kind}hd_{name}{suffix}")
+                makeblastdb(ncbi_bin, fasta, dbtype, 9606, out, parsed)
+                patch_record(out, ext, oid, edit)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def patch_record_any(base, ext, oid, edit):
+    """`patch_record` of a database of either version (version 5's index holds the LMDB file's name
+    after the title)."""
+    index = bytearray(open(f"{base}.{ext}in", "rb").read())
+    version, = struct.unpack(">I", index[0:4])
+    at = 8 + (4 if version == 5 else 0)
+    for _ in range(3 if version == 5 else 2):  # title, (LMDB name,) date
+        at += 4 + struct.unpack(">I", index[at:at + 4])[0]
+    count, = struct.unpack(">I", index[at:at + 4])
+    at += 4 + 8 + 4
+    offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
+    headers = open(f"{base}.{ext}hr", "rb").read()
+    records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
+    records[oid] = edit(records[oid])
+    offsets = [0]
+    for record in records:
+        offsets.append(offsets[-1] + len(record))
+    index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
+    open(f"{base}.{ext}hr", "wb").write(b"".join(records))
+    open(f"{base}.{ext}in", "wb").write(bytes(index))
+
+
+def fetch_main(ncbi_bin):
+    """`--fetch-only` (line RG item T5d fix 2): the databases of NCBI's other reads of a header with a
+    UTF8String title. The version 5 databases `pfx_utf8`, `pfx_utf8r` and `nfx_utf8` with `-parse_seqids`
+    (`NSW0.1` the protein hd0 of `hd.faa`, which the query `hd_q0.faa` matches, `NSW1.1` hd2, whose chance
+    alignment with it has an E-value of about 6, with the UTF8String title, and `NSW2.1` hd1; `pfx_utf8r` the
+    first two in the other order; `nfx_utf8` their codons as `NSWN<n>.1`; `pfx_copy` and `nfx_copy` with
+    `NSC1.1` / `NSCN1.1` a weaker copy of hd0 instead, every sixth letter changed, which the redo fetches),
+    and the negative seqid lists `fx_neg1.txt` (the weak sequence) and `fx_neg2.txt` (another; `nfx_*`,
+    `cfx_*` and `ncfx_*` of the other databases): under them NCBI's
+    traceback and composition-based redo read the header of each subject they fetch, the redo only those its
+    early termination test leaves (`BlastCompo_EarlyTermination`: with `-max_target_seqs 1` the strong match
+    fills the heap, and the weak one is not fetched where the redo takes it after). The version 4 database
+    `pva_utf8` with `-parse_seqids` (`gb|HDA<n>.1|`, the UTF8String title at OID 1) and `pva_batch.txt`:
+    blastdbcmd's version check of `HDA1.2` reads HDA1.1's header."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    for ext, seqs in (("faa", proteins), ("fna", nucleotides)):
+        with open(os.path.join(here, f"hd_q0.{ext}"), "w") as f:
+            f.write(f">q0\n{seqs[0]}\n")
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    amino = "ACDEFGHIKLMNPQRSTVWY"
+    # A weaker copy of hd0: every sixth letter the next of the alphabet (83 % identity), and its codons.
+    copy = "".join(amino[(amino.index(c) + 1) % 20] if i % 6 == 3 else c for i, c in enumerate(proteins[0]))
+    codons = {c: nucleotides[0][3 * i:3 * i + 3] for i, c in enumerate(proteins[0])}
+    for k, c in enumerate(proteins[1] + proteins[2]):
+        codons.setdefault(c, (nucleotides[1] + nucleotides[2])[3 * k:3 * k + 3])
+    copied = "".join(codons[c] for c in copy)
+    for name, kind, order, prefix, weak in (("pfx_utf8", "p", (0, 2, 1), "NSW", None),
+                                             ("pfx_utf8r", "p", (2, 0, 1), "NSW", None),
+                                             ("nfx_utf8", "n", (0, 2, 1), "NSWN", None),
+                                             ("pfx_copy", "p", (0, 2, 1), "NSC", copy),
+                                             ("nfx_copy", "n", (0, 2, 1), "NSCN", copied)):
+        seqs = list(proteins if kind == "p" else nucleotides)
+        if weak is not None:
+            seqs[2] = weak
+        fasta = os.path.join(work, f"{name}.fa")
+        names = {0: "0.1 strong", 2: "1.1 weak", 1: "2.1 other"}
+        with open(fasta, "w") as f:
+            for k in order:
+                f.write(f">{prefix}{names[k]}\n{seqs[k]}\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot" if kind == "p" else "nucl",
+               "-blastdb_version", "5", "-taxid", "9606", "-title", name, "-out", out, "-parse_seqids"]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        patch_record_any(out, kind, order.index(2), utf8)
+    for kind, prefix in (("", "NSW"), ("n", "NSWN"), ("c", "NSC"), ("nc", "NSCN")):
+        for k in (1, 2):
+            with open(os.path.join(here, f"{kind}fx_neg{k}.txt"), "w") as f:
+                f.write(f"{prefix}{k}.1\n")
+    fasta = os.path.join(work, "pva.fa")
+    with open(fasta, "w") as f:
+        for n, seq in enumerate(proteins):
+            f.write(f">gb|HDA{n}.1| record {n} of the T5d databases\n{seq}\n")
+    out = os.path.join(here, "pva_utf8")
+    makeblastdb(ncbi_bin, fasta, "prot", 9606, out, True)
+    patch_record(out, "p", 1, utf8)
+    with open(os.path.join(here, "pva_batch.txt"), "w") as f:
+        f.write("HDA1.2\nHDA2.1\n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def sw_main(ncbi_bin):
+    """`--sw-only` (merge 6 of line RG item T5d, with the rows of line RG item X4-excl): the version 5
+    databases `psw_utf8` and `psw_utf8x` with `-parse_seqids` of the records of `../x4excl/rev`
+    (sx_strong, `gnl|ti|7100`, which `../x4excl/neg.txt` keeps without a definition line, so the fetch of
+    the composition-based redo excludes it, then sfail, whose Smith-Waterman redo against tks_W of
+    `tests/fasta/rps/tks_w.faa` fails at the batch's last match), the title of sfail's record (`psw_utf8`,
+    OID 1) or of sx_strong's (`psw_utf8x`, OID 0) a UTF8String: under the list NCBI's redo reads the header
+    of each subject it fetches, both before its failure (`BLAST engine error: Traceback failed`), so its
+    warning comes before its error."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+
+    def records_of(path):
+        seqs, name = {}, None
+        for line in open(path):
+            line = line.strip()
+            if line.startswith(">"):
+                name = line[1:].split()[0]
+                seqs[name] = ""
+            elif name:
+                seqs[name] += line
+        return seqs
+
+    tks_w = records_of(os.path.join("tests", "fasta", "rps", "tks_w.faa"))["tks_W"]
+    sfail = records_of(os.path.join("tests", "fasta", "x4", "sw_subjects.faa"))["sfail"]
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    for name, oid in (("psw_utf8", 1), ("psw_utf8x", 0)):
+        fasta = os.path.join(work, f"{name}.fa")
+        with open(fasta, "w") as f:
+            f.write(f">gnl|ti|7100 sx_strong tks_W itself\n{tks_w}\n")
+            f.write(f">dbj|BAA200102.1| sfail tks_M with D first, twice\n{sfail}\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+               "-blastdb_version", "5", "-title", name, "-out", out]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        patch_record_any(out, "p", oid, utf8)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def nsw_main(ncbi_bin):
+    """`--nsw-only` (merge 12 of line RG item T5d, with the rows of line RG item X4b-1): copies of
+    `../x4b/excl` (sok1_nt, sfail_rc and sx_rc, which `../x4b/neg.txt` keeps without a definition line, so the
+    fetch of TBLASTN's redo excludes it after sfail_rc's match and clears the failure of sfail_rc's
+    Smith-Waterman redo) in `nsw_first`, `nsw_kept` and `nsw_excl`, the title of OID 0, 1 or 2 a UTF8String:
+    NCBI's redo reads the header of each subject it fetches, kept or excluded, so the first of them posts its
+    warning, in the stream's order of the redo (by score with composition-based statistics, by OID
+    without). The copies keep the database's name (`excl`, which the index names its LMDB file by). And
+    `nsw_fail`: the same three records with sx_rc first (OID 0, its title a UTF8String), so that without
+    composition-based statistics (the redo's stream in OID order) its fetch, which excludes it, comes before
+    sfail_rc's failed redo at the batch's last match: the warning, then NCBI's `Traceback failed`."""
+    here = os.path.join("tests", "db_search", "t5")
+    source = os.path.join("tests", "db_search", "x4b")
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    for name, oid in (("nsw_first", 0), ("nsw_kept", 1), ("nsw_excl", 2)):
+        out = os.path.join(here, name)
+        os.makedirs(out, exist_ok=True)
+        for file in sorted(os.listdir(source)):
+            if file.startswith("excl."):
+                shutil.copyfile(os.path.join(source, file), os.path.join(out, file))
+        patch_record_any(os.path.join(out, "excl"), "n", oid, utf8)
+    # make_x4b.py's records: its constants and functions, read from its source (it runs makeblastdb when
+    # imported).
+    import ast
+    tree = ast.parse(open(os.path.join(source, "make_x4b.py")).read())
+    names = {"CODON", "COMP", "BODY", "SOK1", "SFAIL"}
+    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+             or (isinstance(node, ast.Assign) and {getattr(t, "id", "") for t in node.targets} <= names)]
+    x4b = {}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), "make_x4b.py", "exec"), x4b)
+    nt, rc = x4b["nt"], x4b["rc"]
+    records = [("gnl|ti|9003 sx_rc sfail's first half with 8 substitutions in frame -1",
+                rc(nt(x4b["weaker"]("D" + x4b["BODY"])))),
+               ("dbj|AB300001.1| sok1_nt sok1 in frame +1", nt(x4b["SOK1"])),
+               ("dbj|AB300002.1| sfail_rc sfail in frame -1", rc(nt(x4b["SFAIL"])))]
+    fasta = os.path.join(here, "nsw_fail.fna")
+    with open(fasta, "w") as f:
+        for name, seq in records:
+            f.write(f">{name}\n{seq}\n")
+    out = os.path.join(here, "nsw_fail")
+    cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
+           "-blastdb_version", "5", "-title", "nsw_fail", "-out", out]
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+    os.remove(fasta)
+    patch_record_any(out, "n", 0, utf8)
+
+
+
+def bnsw_main(ncbi_bin):
+    """`--bnsw-only` (merge 15 of line RG item T5d, with the rows of line RG item X4b-2): BLASTX's copies of
+    `../x4b2/excl` (sok1, sfail and sx, which `../x4b2/neg.txt` keeps without a definition line, so the fetch of
+    BLASTX's Smith-Waterman redo excludes it after sfail's match and clears the failure of sfail's redo) in
+    `bnsw_first`, `bnsw_kept` and `bnsw_excl`, the title of OID 0, 1 or 2 a UTF8String: NCBI's redo reads the
+    header of each subject it fetches, kept or excluded, so the first of them posts its warning, in the redo's
+    order (BLASTX's stream is by subject). The copies keep the database's name (`excl`). And `bnsw_fail`: the
+    same three records with sx first (OID 0, its title a UTF8String), so that its fetch, which excludes it, comes
+    before sfail's failed redo at the batch's last match: the warning, then NCBI's `Traceback failed`."""
+    here = os.path.join("tests", "db_search", "t5")
+    source = os.path.join("tests", "db_search", "x4b2")
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    for name, oid in (("bnsw_first", 0), ("bnsw_kept", 1), ("bnsw_excl", 2)):
+        out = os.path.join(here, name)
+        os.makedirs(out, exist_ok=True)
+        for file in sorted(os.listdir(source)):
+            if file.startswith("excl."):
+                shutil.copyfile(os.path.join(source, file), os.path.join(out, file))
+        patch_record_any(os.path.join(out, "excl"), "p", oid, utf8)
+    # make_x4b2.py's records: its constants and functions, read from its source.
+    import ast
+    tree = ast.parse(open(os.path.join(source, "make_x4b2.py")).read())
+    names = {"CODON", "COMP", "BODY", "SOK1", "SFAIL"}
+    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+             or (isinstance(node, ast.Assign) and {getattr(t, "id", "") for t in node.targets} <= names)]
+    x4b2 = {}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), "make_x4b2.py", "exec"), x4b2)
+    records = [("gnl|ti|9003 sx sfail's first half with 8 substitutions", x4b2["weaker"]("D" + x4b2["BODY"])),
+               ("dbj|AB300001.1| sok1 BDT63546.1 of PajaWSV", x4b2["SOK1"]),
+               ("dbj|AB300002.1| sfail tks_M with D first, twice", x4b2["SFAIL"])]
+    fasta = os.path.join(here, "bnsw_fail.faa")
+    with open(fasta, "w") as f:
+        for name, seq in records:
+            f.write(f">{name}\n{seq}\n")
+    out = os.path.join(here, "bnsw_fail")
+    cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+           "-blastdb_version", "5", "-title", "bnsw_fail", "-out", out]
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+    os.remove(fasta)
+    patch_record_any(out, "p", 0, utf8)
+
+
+def dup_main(ncbi_bin):
+    """`--dup-only` (line RG item T5d fix 3): databases whose lists hold `gb|DUP00001.1|` twice. `pds` and
+    `pda` (version 5, protein, `-parse_seqids`): the subject `gb|DUP00001.1| subject record`, hd0 of `hd.faa`
+    (which `hd_q0.faa` matches); `pdo_same`: that record with its title a UTF8String; `pdo_none`:
+    `gb|DUP00001.1| other record`, hd1 (no match), with its title a UTF8String. NCBI orders a list's volumes by
+    path, so `pdo_* pds` puts the other sequence at OID 0, whose header NCBI's scope reads where it resolves the
+    subject's Seq-align id (the data loader's `SeqidToOid` gives it first), and `pda pdo_*` the subject first.
+    `nds`, `ndo_same` and `ndo_none`: the same with their codons (nucleotide); `pds4` and `pdo4_same`: the
+    protein ones of version 4. `dup_batch.txt`: `DUP00001.1` (blastdbcmd `-entry_batch`)."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    subject = ("gb|DUP00001.1| subject record", 0)
+    for name, (title, letters), version, edit in (
+            ("pds", subject, 5, None), ("pda", subject, 5, None), ("pdo_same", subject, 5, utf8),
+            ("pdo_none", ("gb|DUP00001.1| other record", 1), 5, utf8),
+            ("nds", subject, 5, None), ("ndo_same", subject, 5, utf8),
+            ("ndo_none", ("gb|DUP00001.1| other record", 1), 5, utf8),
+            ("pds4", subject, 4, None), ("pdo4_same", subject, 4, utf8)):
+        kind = name[0]
+        fasta = os.path.join(work, f"{name}.fa")
+        with open(fasta, "w") as f:
+            f.write(f">{title}\n{(proteins if kind == 'p' else nucleotides)[letters]}\n")
+        out = os.path.join(here, name)
+        if version == 4:
+            makeblastdb(ncbi_bin, fasta, "prot", 9606, out, True)
+        else:
+            cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot" if kind == "p" else "nucl",
+                   "-blastdb_version", "5", "-taxid", "9606", "-title", name, "-out", out, "-parse_seqids"]
+            env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        if edit is not None:
+            patch_record_any(out, kind, 0, edit)
+    with open(os.path.join(here, "dup_batch.txt"), "w") as f:
+        f.write("DUP00001.1\n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def dup5_main(ncbi_bin):
+    """`--dup5-only` (line RG item T5d fix 5): version 5 databases (`-parse_seqids`, taxid 9606) whose
+    lists hold a reported sequence's Seq-align id twice, the copy first (NCBI orders a list's volumes by
+    path), beside a sequence whose id NCBI's lookup throws on (`SeqDB_SimplifyAccession` of a `PIG` string
+    tag; NCBI's prefetch catches it with `Error pre-fetching sequence data`). `pdo5_same` and `pds5`:
+    `gb|DUP00005.1| subject record`, hd0 (which `q0` matches), the copy with its title a UTF8String;
+    `ppig1`: `gnl|PIG|x001 throwing record`, hd1 (`q1`), whose Seq-id handle (packed number 1) NCBI's
+    prefetch loads before DUP00005's (5); `ppig5`: `gnl|PIG|x005 throwing tie`, hd1, one packed number
+    with DUP00005's (NCBI orders the two handles by the addresses of their infos); `pdo5b_same`,
+    `pdo5b_id` and `pds5b`: `gb|DUQ00005.1| subject record`, hd2 (`q2`), packed 5 too, the copies with
+    their title or their accession a UTF8String; `pgo5` and `pgs5`: `gi|5 gi subject record`, hd0, the
+    copy's title a UTF8String (a gi's lookup reads no accession table; packed 5 too), and `pplain` (hd2,
+    without `-parse_seqids`), whose list's lookup of a text id stops NCBI's prefetch (`DB contains no
+    accession info`). `nds5`, `ndo5_same` and `npig1`: the same with their codons (nucleotide). Queries `hd_q10.faa` (`q1`, `q0`, `q0b`: hd1, hd0, hd0) and `hd_q02.faa` (`q0`,
+    `q2`), and their codons (`.fna`)."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    title = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    accession = lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x0C)
+    dup = "gb|DUP00005.1| subject record"
+    duq = "gb|DUQ00005.1| subject record"
+    for name, header, letters, edit in (
+            ("pdo5_same", dup, 0, title), ("pds5", dup, 0, None),
+            ("ppig1", "gnl|PIG|x001 throwing record", 1, None), ("ppig5", "gnl|PIG|x005 throwing tie", 1, None),
+            ("pdo5b_same", duq, 2, title), ("pdo5b_id", duq, 2, accession), ("pds5b", duq, 2, None),
+            ("pgo5", "gi|5 gi subject record", 0, title), ("pgs5", "gi|5 gi subject record", 0, None),
+            ("pplain", "plain record", 2, None),
+            ("ndo5_same", dup, 0, title), ("nds5", dup, 0, None),
+            ("npig1", "gnl|PIG|x001 throwing record", 1, None)):
+        kind = name[0]
+        fasta = os.path.join(work, f"{name}.fa")
+        with open(fasta, "w") as f:
+            f.write(f">{header}\n{(proteins if kind == 'p' else nucleotides)[letters]}\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot" if kind == "p" else "nucl",
+               "-blastdb_version", "5", "-taxid", "9606", "-title", name, "-out", out]
+        cmd += [] if name == "pplain" else ["-parse_seqids"]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        if edit is not None:
+            patch_record_any(out, kind, 0, edit)
+    for ext, seqs in (("faa", proteins), ("fna", nucleotides)):
+        with open(os.path.join(here, f"hd_q10.{ext}"), "w") as f:
+            f.write(f">q1\n{seqs[1]}\n>q0\n{seqs[0]}\n>q0b\n{seqs[0]}\n")
+        with open(os.path.join(here, f"hd_q02.{ext}"), "w") as f:
+            f.write(f">q0\n{seqs[0]}\n>q2\n{seqs[2]}\n")
     for name in os.listdir(work):
         os.remove(os.path.join(work, name))
     os.rmdir(work)
@@ -632,6 +1111,20 @@ if __name__ == "__main__":
         stored_main(sys.argv[1], "pword", WORD_STORED)
     elif "--taxid-only" in sys.argv[2:]:
         taxid_main(sys.argv[1])
+    elif "--fetch-only" in sys.argv[2:]:
+        fetch_main(sys.argv[1])
+    elif "--sw-only" in sys.argv[2:]:
+        sw_main(sys.argv[1])
+    elif "--nsw-only" in sys.argv[2:]:
+        nsw_main(sys.argv[1])
+    elif "--bnsw-only" in sys.argv[2:]:
+        bnsw_main(sys.argv[1])
+    elif "--dup-only" in sys.argv[2:]:
+        dup_main(sys.argv[1])
+    elif "--dup5-only" in sys.argv[2:]:
+        dup5_main(sys.argv[1])
+    elif "--header-only" in sys.argv[2:]:
+        header_main(sys.argv[1], [name for name in sys.argv[2:] if not name.startswith("--")])
     elif "--sfu-only" in sys.argv[2:]:
         sfu_main(sys.argv[1])
     elif "--k5-only" in sys.argv[2:]:

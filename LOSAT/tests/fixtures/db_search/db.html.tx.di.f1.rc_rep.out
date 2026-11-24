@@ -1,0 +1,381 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/ns_ids.fna
+           11 sequences; 4,830 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+<a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nucltop&blast_rank=1&RID=" >XM_000101.1 </a>subject one two HSPs                                      <a href=#XM_000101.1>372</a>     4e-177  2
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>288</a>     1e-81   1
+<a title="Show report for XM_000111.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000111.1?report=genbank&log$=nucltop&blast_rank=3&RID=" >XM_000111.1 </a>subject eleven strong then planted weak HSP               <a href=#XM_000111.1>249</a>     1e-71   2
+<a title="Show report for XM_000109.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000109.1?report=genbank&log$=nucltop&blast_rank=4&RID=" >XM_000109.1 </a>subject nine                                              <a href=#XM_000109.1>199</a>     7e-55   1
+<a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nucltop&blast_rank=5&RID=" >CAA00102.2 </a>subject two                                                <a href=#CAA00102.2>185</a>     9e-51   1
+testdb:tag_s8 subject eight                                           <a href=#testdb:tag_s8>176</a>     7e-48   1
+<a title="Show report for AB000106.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000106.1?report=genbank&log$=nucltop&blast_rank=7&RID=" >AB000106.1 </a>subject six                                                <a href=#AB000106.1>170</a>     5e-46   1
+s7_not_in_taxdb_long_label subject seven taxid not in taxdb           <a href=#s7_not_in_taxdb_long_label>167</a>     2e-45   1
+<a title="Show report for AB000104.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000104.1?report=genbank&log$=nucltop&blast_rank=9&RID=" >AB000104.1 </a>subject four                                               <a href=#AB000104.1>165</a>     1e-44   1
+<a title="Show report for XM_000105.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000105.1?report=genbank&log$=nucltop&blast_rank=10&RID=" >XM_000105.1 </a>subject five &lt;@score@&gt; s &lt;@evalue@&gt; e &lt;@acc_hd@&gt; a &lt;@...  <a href=#123457>156</a>     6e-42   1
+<a title="Show report for AB000110.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000110.1?report=genbank&log$=nucltop&blast_rank=11&RID=" >AB000110.1 </a>subject ten                                                <a href=#AB000110.1>115</a>     2e-29   1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1                     1     CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+XM_000101.1                 1     ............................................................  180
+s3_local_identifier         1                                                       ........DL  30
+XM_000111.1                 1     ............................................................  180
+XM_000109.1                 1                                   .......T...P..........P.......  90
+CAA00102.2                  1     ..T...V...GIR.A.V......FS.Q...YC....G.T.NL............LAA...  180
+tag_s8                      1     ....N....D.V......L..YC..R......P.....E.TQL.......Q..F..F..G  180
+XM_000105.1                 1     ................GDI..E...A....D.A..V....T.....Y...PV........  180
+
+Query_1                     181   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+XM_000101.1                 181   ............................................................  360
+s3_local_identifier         31    ..A........V........P......S...................I....S.....S.  210
+XM_000111.1                 181   ........................................                      300
+XM_000109.1                 91    .....V....DA...N....N.........T.......C..NG............V....  270
+CAA00102.2                  181   .....S..V.....C.KY..L.....VVW......S....ADR.....Y.VT..SLL.L.  360
+tag_s8                      181   .......L..L.......V...TWDN............R.                      300
+AB000106.1                  1                                             .......H.S....I.P...  60
+XM_000105.1                 181   .......K....A.......                                          240
+
+Query_1                     361   VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  540
+XM_000101.1                 361   ..............................PP.                             459
+XM_000101.1                 904                                  .............A....Y....CDIA.P  990
+s3_local_identifier         211   A...............K.......Q....H......RR.........Q......L....G  390
+XM_000109.1                 271   .....TTT..                                                    300
+AB000106.1                  61    .R.AC...C....S..D..I...............R......P.........SP......  240
+s7_not_in_taxdb_long_label  1                                   ........D....T..M.....R......A  90
+
+Query_1                     541   AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  720
+XM_000101.1                 991   .....TR.....D.P...I.......D.................RA..L..I.VS.D...  1170
+s3_local_identifier         391   ..S.....SP.P.S......                                          450
+XM_000111.1                 690                                              .Y.AKQA.*....S.AV  740
+XM_000111.1                 592                    .FD..........D.                              636
+AB000106.1                  241   ...L..P..N.S.FF.G..                                           297
+s7_not_in_taxdb_long_label  91    ......PL...I.IDN..NFVK...R.M.G....L..R.T.......H......GS.A..  270
+AB000104.1                  16                             ....G...L.GTQ.G..H.......E....NQ...  120
+AB000110.1                  1                         ..I.FL..........G..P.........A......S...  120
+
+Query_1                     721   SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  900
+XM_000101.1                 1171  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  1350
+XM_000111.1                 741   .                                                             743
+s7_not_in_taxdb_long_label  271   .Q.......                                                     297
+AB000104.1                  121   ..L......L....Y.GK........S....R.....R.......ER...R.S.DA...   297
+AB000110.1                  121   ...C..VD.P..........                                          180
+
+For reading frame +2 of query sequence:
+
+Query_1                     2     ASIIKARALFLCIHCV*HRTHSQRYLVE*KDQ*GGDWH**TCVIESPMHVVTSLTSWQDV  181
+XM_000101.1                 2     ................*...........*...*.....**....................  181
+s3_local_identifier         2                                                       ........IY  31
+XM_000111.1                 2     ................*...........*...*.....**....................  181
+XM_000109.1                 2                                   ..*...*L**.H..........H....P..  91
+CAA00102.2                  2     ..L...L..LGYDQL.S.....HLVFR.*NIA*..EAQP*IYA...........LPL...  181
+tag_s8                      2     ....M....T......*.*..IA.*G..*..HL....QK*RSY.......K..F..S.EA  181
+XM_000105.1                 2     ................AT*.Q...*R..*.I.R..F..**P.....I...Q*........  181
+
+Query_1                     182   LPVRL*LGAYATPFHPILSLYVGVEETILSNTCFSRDYFARPKMWNPGLVRT*LCERLLK  361
+XM_000101.1                 182   .....*..............................................*.......  361
+s3_local_identifier         32    ..P..*.....L...L...FH......H...................S....L.....A.  211
+XM_000111.1                 182   .....*..................................                      301
+XM_000109.1                 92    .....*...*TL..QT....T.........R.......V..TV.........*.WL....  271
+CAA00102.2                  182   .....R..W.....V.SI.FC.D...*CG.....RV....LTE.....I.            331
+tag_s8                      182   .....*.*..Y...........RGIM............                        295
+AB000106.1                  2                                             .......I.L..*.FDQ...  61
+XM_000105.1                 182   .....*.K....Q......                                           238
+
+Query_1                     362   YLHMTSPLKQVTILMEVCASATKAM*LLYQVV*VPHLLILYVTPCN*KCHHASLLVILT*  541
+XM_000101.1                 890                             .VK.W.*...........P.*.SI....ATLP.P  991
+XM_000101.1                 362   .........................*...                                 448
+s3_local_identifier         212   L...............R.......K*...T..*..QGG........CR......C....G  391
+XM_000109.1                 272   .....                                                         286
+AB000106.1                  62    *EQPV..FV....P..T..Y.....*......*..V......L...*.....RP.....*  241
+s7_not_in_taxdb_long_label  2                                   ..*A....T......K*...QEE......Q  91
+
+Query_1                     542   RL*KVLDLRGLQNITAVVLILDVAYSSLNLRLGIPVECKYHSPRLGATVVW*HRSRIIVH  721
+XM_000101.1                 992   ..*..PG.....T.R...S.......T......T..........EP..C.LSQSP.T...  1171
+s3_local_identifier         392   ..R...EAHHF.KV.....                                           448
+XM_000111.1                 593                    ..T..........TSAR.                           646
+AB000106.1                  242   ..Y*.FR..IFR.FF.G..                                           298
+s7_not_in_taxdb_long_label  92    ..*..FLC...LKLIT..IS*N...VRWKE....L..D.L.......I...*..VVTR..  271
+AB000104.1                  2                         .F.SR...KE...C..HS.V..T.......K*...TS...  121
+AB000110.1                  2                         .ES.F*..........V.NR.........H.L....H...  121
+
+Query_1                     722   QSLESHDTRVT*FGLTLY*YVTPLGGTCASAREGQSTINSHPQNFPAPHG*TSLL*IIR  898
+XM_000101.1                 1172  .RP..QL...S*LT....*....A..R..........V.....G.....PW*Q.**...  1348
+s7_not_in_taxdb_long_label  272   H........                                                    298
+AB000104.1                  122   ..*......*.*.VT.AN*.......A....D.....V......LNV...G.L.MP..   295
+AB000110.1                  122   ...A.QL..P.*......*                                          178
+
+For reading frame +3 of query sequence:
+
+Query_1                     3     LRLSRQGLYFYVFIAFDIEPIPRDI**SRKTNEGATGIDRRAS*SPLCMW*RVSHRGRTS  182
+XM_000101.1                 3     .........................**................*......*.........  182
+s3_local_identifier         3                                                       *.......ST  32
+XM_000111.1                 3     .........................**................*......*.........  182
+XM_000109.1                 3                                   ......DF..PT.*......*PI.......  92
+CAA00102.2                  3     .H...RW..WDTISSCH.....I*FSE..ILH...RRNHKFTP*......*...C.C...  182
+tag_s8                      3     ...*W...*LC......T...L..KE*....T*....RNNA.T*.....SR....LR.RP  182
+XM_000105.1                 3     ...............WRHK.RA..SE*..RSS..GS...N...*.L...SS.........  182
+
+Query_1                     183   CPSDFDSERTPHHFTRSFLCM*V*KRLFYPIHASAETTSPVRKCGIRDLCEPSYASGC*S  362
+XM_000101.1                 183   .....................*.*..................................*.  362
+s3_local_identifier         33    .RP.......RY...*...S.*.*...I..................HH...LC....*Q.  212
+XM_000111.1                 183   .....................*.*...............                       299
+XM_000109.1                 93    ....CN...RRY..K....*L*.*.....HV......M..E.*...........GC..*.  272
+CAA00102.2                  183   .......GG....LSQV..SVSM*.SSVD.....E*...R*Q.....V..D..         341
+tag_s8                      183   ......F..IT......C...Y.G**............T                       299
+AB000106.1                  3                                             ......PYF.....STS.*.  62
+XM_000105.1                 183   ......*K...RN......                                           239
+
+Query_1                     363   ICI*LRR*NK*RF*WRCVRARQKLCDSYTKWFEYPIC*SCTSRHAIESAITPRCLLYSPS  542
+XM_000101.1                 363   ...*...*..*..*...............                                 449
+XM_000101.1                 909                                   .....*.....RP...LF...LRHCP.R  992
+s3_local_identifier         213   F..*...*..*..*.KG......PS....Q.....KEE........AG.....SV...RG  392
+XM_000109.1                 273   ...*                                                          284
+AB000106.1                  63    KSSLF..LY.*..R..R.HT...............F.*....C........LAR......  242
+s7_not_in_taxdb_long_label  3                                   ...H...*P...H..N....KKS.....R.  92
+
+Query_1                     543   GFKRSWISEAYRI*PL*YSFWTWPIRA*IYAWGSQ*SANTTHRD*VQQSFGNTDHELLYI  722
+XM_000101.1                 993   ....YPV.....LSA.*.P.......P*.....P.*.......ESL.PASYHSL.G....  1172
+s3_local_identifier         393   ..E...KLTTS.K*..*..                                           449
+XM_000111.1                 603                       .......*.                                 629
+AB000106.1                  243   ..T..SV..SFG.                                                 281
+s7_not_in_taxdb_long_label  93    .....SFA...                                                   125
+s7_not_in_taxdb_long_label  183                                 ....**KT.S....*.P*.....G**RV..  272
+AB000104.1                  6                          SF.V..*RN..VARYT.RS.P..*....*S...QPV...  122
+AB000110.1                  3                         .NRLF..*.......WC.TA....*...CI.Y...VI...  122
+
+Query_1                     723   KV*RATTLV*LSSG*RYIDM*LR*GVPVQALARDRVP*IHILRIFQPPMDEPHSCKLSE  899
+XM_000101.1                 1173  .DQ..SS..C..*R*.....*.QQ..A.........Q*.....V....IHGDNFS....  1349
+s7_not_in_taxdb_long_label  273   T.*.....                                                     296
+AB000104.1                  123   .AK......E...LQ.Q...*..*.E....PT.....*......*TS..E.LY*.Q..   296
+AB000110.1                  123   ..L..S*.AQ....*....                                          179
+
+For reading frame -1 of query sequence:
+
+Query_1                     900   ILIIYKSEVHPWGAGKF*GCEFMVLCPSRALAQVPPSGVTYQYNVNPN*VTRVSWLSRL*  721
+XM_000101.1                 1350  .....*.CH.G.....P*....T..........R..A.........V.*D.......G.*  1171
+s7_not_in_taxdb_long_label  297                                                      ........*  271
+AB000104.1                  297    ...GI.R.P...TF..*....T.....S....A........FA.VT.*.Q......*.*  121
+AB000110.1                  180                                           ........*.G..N..A..*  121
+
+Query_1                     720   CTIIRDRCYQTTVAPSLGEWYLHSTGIPKRRFRLE*ATSRMSTTAVIFCKPRRSKTF*SR  541
+XM_000101.1                 1170  ...V.GD.DK.Q..G...........V......V.*.....D...R.V.....PG..*..  991
+s3_local_identifier         450                                           ......T.W.W*A....R..  391
+XM_000111.1                 630                                 .....*....VK.                   592
+AB000106.1                  297                                            ..P.KK.R.I..R..**..  241
+s7_not_in_taxdb_long_label  270   ..RVTT......M.......S.S..K....S.H.T*..FYEI..VIN.N...QR...*..  91
+AB000104.1                  120   ...LV....F.......V..T.LC..Q...S....RE.K.                      1
+AB000110.1                  120   ...*....N.C.........R..T..........*K.D..                      1
+
+Query_1                     540   *VSITSSEA*WHFQLHGVTYKINKWGTQTTWYKSHIAFVALAHTSIKIVTCFNGEVICRY  361
+XM_000101.1                 462                             .ERW..............................  361
+XM_000101.1                 990   G.GNVA...*ID...G.............                                 904
+s3_local_identifier         390   P....Q...*..L.........PP......V....L.......L...............S  211
+XM_000109.1                 300                                                     ..GRS.....  271
+tag_s8                      156                                                  VL..IGDSM*L..  118
+AB000106.1                  240   *.....GR.*.......R......T...............Y..V..G....T...TG.S.  61
+s7_not_in_taxdb_long_label  90    C......SS*...H.......V....A...                                1
+
+Query_1                     360   FNNRSHN*VRTSPGFHIFGRAK*SRLKHVLDRIVSSTPTYKERIG*NGVAYAPSQSRTGR  181
+XM_000101.1                 360   .......*..............*......................*..............  181
+s3_local_identifier         210   .A.....R....D.........*.........*......W....R*..N........G..  31
+XM_000111.1                 300                       ..*......................*..............  181
+XM_000109.1                 270   ....N..*.........TV..T*......R.........V....V*..SV....Y.....  91
+CAA00102.2                  360   .E.K*A.*GH.I.....SVS..*.T......PHY...S.Q..IL.T.....H..R.....  181
+tag_s8                      300                       .S*...........IIPR...D...*...*..Q.......  181
+tag_s8                      117   .                                                             115
+AB000106.1                  60    ...W.N.*..R.M.......                                          1
+XM_000105.1                 240                                           .....*.C....F.......  181
+
+Query_1                     180   TSCHDVRLVTTCIGDSMTHVYQCQSPPHWSFYSTKYLWEWVRCQTQ*IHRNKALALIIEA  1
+XM_000101.1                 180   ..............................................*.............  1
+s3_local_identifier         30    *I........                                                    1
+XM_000111.1                 180   ..............................................*.............  1
+XM_000111.1                 482                                   .V...FKGP..SSR                441
+XM_000109.1                 90    ..G....W..........W...S.......                                1
+CAA00102.2                  180   ...SGK...........A*I.G.A....AI...L.TK......D.S*SYP...N...S..  1
+tag_s8                      180   A..E..K..L.......*LR.F.....R......P..AI..Q....*...V....I....  1
+XM_000105.1                 180   ........YW...I.....G....N..R.I....R...L..YVA..*.............  1
+
+For reading frame -2 of query sequence:
+
+Query_1                     899   F**FTRVRFIHGGLENSEDVNLWYSVPRERLHRYPLAELHINITLTRTKLHECRGSLDFD  720
+XM_000101.1                 1349  .**..K.VTMD.....P.....L.........SD..L.........S..T..*A...V..  1170
+s7_not_in_taxdb_long_label  296                                                      .......C.  270
+AB000104.1                  296    **LAS.E.L...RS.......R.....R....L........LP.*...FN......S..  120
+AB000110.1                  179                                           ..........G.ST..Q...  120
+
+Query_1                     719   VQ*FVIGVTKRLLHLVSVSGICTLLGSPSVDSGSNRPRPE*VLQRLYSVSLGDPRPFK<font color="#000000">aa</font>  540
+XM_000101.1                 1169  ..*S.ET.IR.R.QAL........................WI...G*......RV.....  990
+s3_local_identifier         449                                           *.....L.G.GEL....E    396
+XM_000111.1                 629                                 ..........SK..SPQ.A.EH.K.       555
+s7_not_in_taxdb_long_label  269   .HALLP......W.......V.L..R....P.I.R...FTKL..LSI.I...KG....    96
+AB000104.1                  119   ..YWL....S.......W..P.CVP.N...P....GK.                        6
+XM_000105.1                 139                                               ...DAR.SM.E.      104
+AB000110.1                  119   ..YD.....NA.........G..P..........KK.I.                       3
+
+Query_1                     539   <font color="#000000">r*v*qaar</font>RDGTFNCMA*RTRLTNGVLKPLGIRVT*LLSRSHTPPSKSLLVLTAKSYADT  360
+XM_000101.1                 989   GWAMSQ...E*...WA.*.........R.                                 903
+XM_000101.1                 449                                 .....*........................  360
+s3_local_identifier         362            ...C....*...FLL......C....W.......F..............EA  210
+XM_000109.1                 299                                                     ..VVV.....  270
+AB000106.1                  212            ........G.....KR..........*....M..S..E....Q...QA.L.  60
+s7_not_in_taxdb_long_label  62             ....I..V*...S.......                                 3
+
+Query_1                     359   LTTARITRFAQVPDSTFSDGRSSLG*SMYWIE*SLLHLHTKKGSGEMVWRTLRVKVGRAG  180
+XM_000101.1                 359   .........................*......*...........................  180
+s3_local_identifier         209   .L.....E....M............*.....DE......G........T........A..  30
+XM_000111.1                 299                       .....*......*...........................  180
+XM_000109.1                 269   ....T...........LPF..H...*...V..*.....QL....F...AS....T.....  90
+CAA00102.2                  359   .R.SKL..VT.Y.....LSA....L*.....HTT...R.R..YL.Q.....T..E.....  180
+tag_s8                      299                       .R...*......*..S.V...T......CN..K.......  180
+AB000106.1                  59    ...G......E.W......                                           3
+XM_000105.1                 239                                           ......IA....L.......  180
+
+Query_1                     179   RPATM*DSSPHA*GTL*RTSINASRPLIGLSTLLNISGNGFDVKRNEYIEIKPLP**SK  3
+XM_000101.1                 179   .....*......*...*......................................**..  3
+s3_local_identifier         29    .S...*...                                                    3
+XM_000111.1                 179   .....*......*...*......................................**..  3
+XM_000109.1                 89    .....*.G....*...*.G..KV......                                3
+CAA00102.2                  179   ...AAR......*...W.KFMV.P...MQY...*KLN......T.ADR.P...T.**V.  3
+tag_s8                      179   P..K.*N..*..*...CSCV.S.....G......L..QY..S......T.S....L*..  3
+XM_000105.1                 179   .....*..TG..**..*..V...RT..A.S....A...S..MSP...........**..  3
+
+For reading frame -3 of query sequence:
+
+Query_1                     898   SDNLQE*GSSMGGWKILRM*IYGTLSLASACTGTP*RSYISI*R*PELSYTSVVAL*TLM  719
+XM_000101.1                 1348  ....LKLSPW.....T...*..C.........A..CW.....*.*RQ.RH..EL..WS..  1169
+s7_not_in_taxdb_long_label  295                                                      .....*.V.  269
+AB000104.1                  298   A..WHQ*S....DVQ....*.......VG....S.*......C.CN...S......LA..  119
+AB000110.1                  178                                           ..*.*....WA.QL.RK...  119
+
+Query_1                     718   YNNS*SVLPNDCCT*SR*VVFALYWDPQA*IQARIGHVQNEYYSGYIL*ASEIQDLLKPL  539
+XM_000101.1                 1132              .RL..*.......G...*..G.......G...ADS.*...TGY....R  989
+XM_000101.1                 1168  ..S                                                           1160
+s3_local_identifier         448                                           ......F.EVVSF...S..P  389
+XM_000111.1                 628                                 .........SQNS.RHNQL..M.KE       554
+AB000106.1                  268                                                     ..TE..V...  239
+s7_not_in_taxdb_long_label  268   .TRYYP.....YG.*..*.E.VF.*....FLPSHV...LRN...YQFQ*..AKE......  89
+AB000104.1                  118   ..TG*...LH....*..G.DL.V.RAT..FL...T.N                         8
+AB000110.1                  118   ..MT*..*.MH...*..*.AV.HH.....*...                             20
+
+Query_1                     538   GEYNKQRGVMALSIAWRDVQD*QMGYSNHLV*ESHSFCRARTHLHQNRYLF*RRSHMQIL  359
+XM_000101.1                 451                                V.*...................*........  359
+XM_000101.1                 988   .GQCRK...NR...GR.....*.....DP.                                899
+s3_local_identifier         388   R...TE.....PA........SSL.....C.*..LG......PF.......*......K.  209
+XM_000109.1                 283                                                          .....  269
+AB000106.1                  238   .....RAS........Q....*.N.......*.......VC.R..R....YK..NRLLL.  59
+s7_not_in_taxdb_long_label  88    R.....LFL....F..C...GQ...C...                                 2
+
+Query_1                     358   *QPLA*LGSHKSRIPHFRTGEVVSAEACIG*NSLFYTYIQRKDRVKWCGVRSESKSDGQD  179
+XM_000101.1                 358   *....*........................*.............................  179
+s3_local_identifier         208   C*...*QS...*W.................*M......ME...Q...*R.......GR.V  29
+XM_000111.1                 298                       ..........*.............................  179
+XM_000109.1                 268   *..QP*..........Y.S.DI......T**.......S*....L..*RL...LQ.....  89
+CAA00102.2                  358   *EQVS*....NT.....CQR...YS.....STL...IDTE.NTWD.....PP........  179
+tag_s8                      295                        .........*..HYP.....Q......VI..K......G  179
+AB000106.1                  58    *.LVE*...Q.YG......                                           2
+XM_000105.1                 238                                           ......LR...F*.......  179
+
+Query_1                     178   VLPRCETRHHMHRGLYDARLSMPVAPSLVFLLY*ISLGMGSMSNAMNT*K*SPCLDNRS  2
+XM_000101.1                 178   .................................*..............*.*........  2
+s3_local_identifier         28    D........                                                    2
+XM_000111.1                 178   .................................*..............*.*........  2
+XM_000109.1                 88    .R....MG.........VG..KS......                                2
+CAA00102.2                  178   ..Q.Q...........GVN.WLRL...CNI..SEN*M.....*HELIVSQ*.QR..     11
+tag_s8                      178   L.R.....LD......V.A.FL....*V.....SL.RN...V......QSQ...HY...  2
+XM_000105.1                 178   .......LLD..NR.........EP...DL...SL..AL.LCRH....*.*........  2
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 375889
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+<a title="Show report for XM_000101.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/XM_000101.1?report=genbank&log$=nucltop&blast_rank=1&RID=" >XM_000101.1 </a>subject one two HSPs                                      <a href=#XM_000101.1>21.2</a>    0.027  1
+<a title="Show report for AB000104.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AB000104.1?report=genbank&log$=nucltop&blast_rank=2&RID=" >AB000104.1 </a>subject four                                               <a href=#AB000104.1>20.8</a>    0.037  1
+<a title="Show report for CAA00102.2" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00102.2?report=genbank&log$=nucltop&blast_rank=3&RID=" >CAA00102.2 </a>subject two                                                <a href=#CAA00102.2>16.6</a>    0.64   1
+s3_local_identifier subject three with a title that is longer tha...  <a href=#s3_local_identifier>13.9</a>    4.1    1
+
+
+
+For reading frame +2 of query sequence:
+
+Query_2     32   LHRAKRAEVH  61
+AB000104.1  209  ...LPL..L.  180
+
+For reading frame -1 of query sequence:
+
+Query_2      120   LNSDSTLGRPFFCKNRRTELCTSARLALCKPAH  22
+XM_000101.1  1228                     I.N.S.GS...     1260
+AB000104.1   178                      I.N...GS...     210
+CAA00102.2   34    IR.ARVTSN..PFSFQ.V.Y.MRG.G.TINLR.  132
+
+For reading frame -2 of query sequence:
+
+Query_2              65   SCALRH  48
+s3_local_identifier  327  ..TS..  344
+
+For reading frame -3 of query sequence:
+
+Query_2      94   PILL*EPPHGAVHFGTFGSMQAC  26
+XM_000101.1  479  .L.R*I.Y.VTMF.V...EL     538
+AB000104.1   235               Y..LSLVG..  206
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 32729
+
+
+  Database: in/ns_ids.fna
+    Posted date:  Nov 13, 2026  12:42 PM
+  Number of letters in database: 4,830
+  Number of sequences in database:  11
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

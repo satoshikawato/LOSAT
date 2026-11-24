@@ -67,7 +67,7 @@ fn x_erfc_memo_keeps_the_reference_bits_as_it_grows() {
 // LOSAT_X_ERFABSORB (graduated 2026-10-26): the reference ErfC is 2.0 for every z < -6, and
 // `erfc_ncbi`, which does not call it there, has the reference's bits everywhere.
 // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:58-59
-// The argument of `erfc_ncbi` bounds ErfImpl(-z, TRUE) below 2.2e-17 for z <= -6; this
+// The argument of `erfc_ncbi` bounds `ErfImpl` at -z with `invert` set below 2.2e-17 for z <= -6; this
 // checks the reference on a grid of [-28.5, -6], on random arguments below -6 (dense next to
 // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi`
 // equals `erf_impl_ncbi` on random arguments in [-40, 40]. A reference call costs about

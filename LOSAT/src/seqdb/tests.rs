@@ -1650,31 +1650,29 @@ fn header_records_are_decoded() {
             .unwrap_err()
             .is_parsed_seqids());
     }
-    // A damaged record with such an id is a parsed one here; its error comes from the decoder of
-    // every Seq-id (`decode_full`), when a report reads it, as for any other parsed Seq-id.
+    // A record with bytes after the set and such an id is a parsed one here; the bytes after the
+    // set are not read, as NCBI's `EndOfRead` does not (line RG item T5d).
     let mut trailing = defline_record(b"title", &bl_ord_id(&[5]));
     trailing.push(0);
     assert!(decode_defline_set(&trailing, path, 0)
         .unwrap_err()
         .is_parsed_seqids());
-    assert!(matches!(
-        decode_defline_set(&trailing, path, 5),
-        Err(SeqDbError::Format { .. })
-    ));
+    assert!(decode_defline_set(&trailing, path, 5).is_ok());
     // A negative ordinal id, a cut record, bytes after the record.
     assert!(matches!(
         decode(&defline_record(b"title", &bl_ord_id(&[0xff]))),
         Err(SeqDbError::Format { .. })
     ));
+    // A cut record is NCBI's error of its stream's end (`HandleEOF`, line RG item T5d).
     for cut in 1..first.len() {
         assert!(
-            matches!(decode(&first[..cut]), Err(SeqDbError::Format { .. })),
+            matches!(decode(&first[..cut]), Err(SeqDbError::Ncbi(_))),
             "record cut at {cut}"
         );
     }
     let mut trailing = first.clone();
     trailing.push(0);
-    assert!(matches!(decode(&trailing), Err(SeqDbError::Format { .. })));
+    assert_eq!(decode(&trailing).unwrap(), decode(&first).unwrap());
 }
 
 #[test]
@@ -1693,7 +1691,8 @@ fn every_filtering_alias_key_is_rejected() {
         let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
         assert!(
             matches!(&error, SeqDbError::MemoryMap(message)
-                if String::from_utf8_lossy(message).ends_with("/1'")),
+                if String::from_utf8_lossy(message)
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR))),
             "{key}: {error}"
         );
     }
@@ -2113,18 +2112,20 @@ fn header_members_lengths_and_bytes() {
     assert_eq!(deflines[0].title, b"t");
     assert_eq!(deflines[0].volume_ordinal, 3);
 
-    // Members out of order, and values nested too deeply in a skipped member.
+    // Members out of order, and values nested too deeply in a skipped member: NCBI's read of the
+    // record stops before them, at the taxid that follows no seqid (line RG item T5d).
     let mut out_of_order = vec![0x30, 0x80, 0x30, 0x80, 0xa2, 0x80, 0x02, 0x01, 0x00, 0, 0];
     out_of_order.extend_from_slice(&[0xa0, 0x80, 0x1a, 0x01, b't', 0, 0]);
     assert!(matches!(
         decode(&out_of_order),
-        Err(SeqDbError::Format { .. })
+        Err(SeqDbError::Ncbi(exception))
+            if exception.text() == b"byte 6: member seqid expected ( at Blast-def-line-set.[].[].taxid)"
     ));
     let mut deep = vec![0x30, 0x80, 0x30, 0x80, 0xa2, 0x80];
     deep.extend(std::iter::repeat_n([0x30u8, 0x80], 100_000).flatten());
     assert!(matches!(
         decode(&deep),
-        Err(SeqDbError::Format { message, .. }) if message.contains("nested too deeply")
+        Err(SeqDbError::Ncbi(exception)) if exception.get_msg() == b"byte 6: member seqid expected"
     ));
 
     // Bytes outside ' ' ..= '~' in a title are read as '#', as NCBI reads them.

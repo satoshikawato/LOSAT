@@ -81,7 +81,7 @@ pub(super) struct RedoParamsBuilder<'a> {
     pub(super) ideal_ungapped_lambda: f64,
     pub(super) x_drop_gapped_final: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2228-2236
-    //                              self->startFreqRatios, self->ungappedLambda);
+    // Initializes `Blast_MatrixInfo` from `startFreqRatios` and `ungappedLambda`.
     // This non-position-based initial matrix is invariant within this search.
     // Initialize at the existing first params request, preserving no-hit/error
     // boundaries, and clone completed values into independently mutable params.
@@ -144,8 +144,9 @@ impl RedoParamsBuilder<'_> {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3584-3690
             score_divisor: local_scaling_factor,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
-            // `-use_sw_tback` (item X4): the one-thread loop redoes each match with NCBI's
-            // Smith-Waterman redo (`one_thread_redo`).
+            // `-use_sw_tback` (item X4): each match is redone with NCBI's Smith-Waterman redo, by
+            // the one-thread loop (`one_thread_redo`) or, at more than one thread, by the windows
+            // of `x_redo_par` (item X4-mt).
             smith_waterman: args.use_sw_tback,
             near_identical_cutoff: blastp_redo_near_identical_cutoff(scaled_gapped_lambda),
             position_based: false,
@@ -239,9 +240,14 @@ pub(super) struct RedoInputs<'a, P> {
     pub(super) build_redo_align_params: &'a P,
     /// The marks of the lists that the redo reaches and its fetch excludes, by query and place
     /// (`database::exclude_fetched`; empty without a database or a negative seqid list): only the
-    /// status of the Smith-Waterman redo reads them (`one_thread_redo`); the X-drop redo has no
-    /// status, so its paths read the lists without them.
+    /// status of the Smith-Waterman redo reads them (`one_thread_redo`, and the windows of
+    /// `x_windows_redo`); the X-drop redo has no status, so its paths read the lists without
+    /// them.
     pub(super) fetch_excluded: &'a [super::database::FetchExcludedMatch],
+    /// The notes of the call's fetches that read a header with a UTF8String: the error of a
+    /// batch whose Smith-Waterman redo fails or does not end comes after NCBI's warning of the
+    /// first of them that the batch made before (`FetchNotes::fetched_before_failure`).
+    pub(super) fetch_notes: &'a super::database::FetchNotes<'a>,
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
     #[cfg(all(
@@ -291,9 +297,11 @@ pub(super) enum RedoPath {
 /// NCBI chooses only the number of threads of its one loop (`actual_num_threads`); it has no
 /// counterpart of the choice among LOSAT's paths, each of which gives the output of the one loop.
 ///
-/// With `-use_sw_tback` (item X4) the one-thread loop runs: the Smith-Waterman redo of a match
-/// asks the query's heap before its first alignment (`BlastCompo_HeapWouldInsert`), so a match's
-/// redo reads the heap that the matches before it in the loop's order leave.
+/// With `-use_sw_tback` (item X4) the Smith-Waterman redo of a match asks the query's heap before
+/// its first alignment (`BlastCompo_HeapWouldInsert`), so a match's redo reads the heap that the
+/// matches before it in the loop's order leave: the windows replay that test in order where a job
+/// could not answer it (item X4-mt, `x_redo_par.rs`); the query- and match-parallel paths of
+/// `LOSAT_X_BPREDOPAR=0` do not, and leave such a search to the one-thread loop.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3079-3082
 pub(super) fn plan_redo_and_expand_lists<P>(
@@ -391,7 +399,8 @@ pub(super) fn plan_redo_and_expand_lists<P>(
     // of all queries between its threads. With the switch, more than one thread and at least two
     // matches, the matches run on the pool in jobs of up to four matches of one query, and the
     // early termination test, the heap insertions and the error that ends the redo are replayed
-    // in the order of the one-thread loop below; it replaces both parallel paths
+    // in the order of the one-thread loop below (with `-use_sw_tback` also the heap tests that a
+    // job could not answer and the batches' status); it replaces both parallel paths
     // (`x_redo_par.rs`).
     #[cfg(all(
         feature = "parallel",
@@ -403,7 +412,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let x_redo_par_on = x_redo_par_switch
-        && !args.use_sw_tback
         && blastp_should_parallelize_stage(
             "kappa-redo-par",
             args.num_threads,
@@ -516,6 +524,8 @@ where
         kappa_query_batches,
         evalue_adjust_contexts,
         build_redo_align_params,
+        fetch_excluded,
+        fetch_notes,
         x_win_expand,
         blastp_num_threads,
         timing_enabled,
@@ -538,6 +548,9 @@ where
         build_redo_align_params,
         timing: timing_enabled,
         engine_positives: needs.seqalign,
+        // The excluded lists of `one_thread_redo`'s Smith-Waterman batches, read with its own
+        // reader (`query_fetch_excluded_reached`) when the replay passes each query.
+        sw_excluded: fetch_excluded,
     };
     // The parallel paths read the expanded lists of all queries (`plan_redo_and_expand_lists`
     // expands them before the paths), or the windows expand the compact lists as they reach them.
@@ -547,6 +560,8 @@ where
         preliminary_hit_lists,
         x_win_expand.then_some(&mut x_compact_hit_lists[..]),
         redone_matches,
+        // The warning that the one-thread loop gives a Smith-Waterman batch's error.
+        fetch_notes,
     )?;
     *x_prelim_freed += released;
     Ok(())
@@ -989,7 +1004,11 @@ where
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-457
 #[cold]
 #[inline(never)]
-fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::Error {
+pub(in crate::algorithm::blastp) fn sw_batch_failed(
+    batch_start: usize,
+    first_query: &BlastCompoHeap,
+    utf8: Option<super::database::Utf8Read>,
+) -> anyhow::Error {
     let error = crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
         "blastp",
         first_query.n > 0,
@@ -997,6 +1016,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
     super::database::HeaderReadError {
         query: batch_start,
         error,
+        utf8,
     }
     .into()
 }
@@ -1012,9 +1032,13 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 /// are written"). Exit status 1, its message.
 #[cold]
 #[inline(never)]
-fn sw_endless(batch_start: usize) -> anyhow::Error {
+pub(in crate::algorithm::blastp) fn sw_endless(
+    batch_start: usize,
+    utf8: Option<super::database::Utf8Read>,
+) -> anyhow::Error {
     super::database::HeaderReadError {
         query: batch_start,
+        utf8,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
     }
     .into()
@@ -1052,11 +1076,13 @@ pub(super) fn sw_ungapped_check(
 #[cold]
 #[inline(never)]
 fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
+    // NCBI crashes at the redo's set-up, before its fetches read a header of the batch.
     super::database::HeaderReadError {
         query: batch_start,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(
             "blastp",
         ),
+        utf8: None,
     }
     .into()
 }
@@ -1092,10 +1118,11 @@ fn fetch_excluded_reached(
 /// With no such redo the query changed no heap, and every excluded list goes through it.
 ///
 /// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
-/// is NCBI's one-thread status of the batch.
+/// is NCBI's one-thread status of the batch. The replay of the windows reads each query's marks
+/// with it too, when it passes the query (`x_redo_par.rs`, `XSwBatch::pass`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
-fn query_fetch_excluded_reached(
+pub(in crate::algorithm::blastp) fn query_fetch_excluded_reached(
     marks: &[super::database::FetchExcludedMatch],
     status_position: Option<usize>,
     batch_heaps: &[BlastCompoHeap],
@@ -1143,6 +1170,7 @@ where
         evalue_adjust_contexts,
         build_redo_align_params,
         fetch_excluded,
+        fetch_notes,
         ..
     } = *redo;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
@@ -1178,6 +1206,7 @@ where
 
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
+        // A batch's status starts at 0.
         if batch.start == q_idx {
             sw_status = SwBatchStatus::default();
         }
@@ -1200,7 +1229,16 @@ where
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_status.failed() && q_idx + 1 == batch.end {
-                return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
+                return Err(sw_batch_failed(
+                    batch.start,
+                    &redone_matches[batch.start],
+                    fetch_notes.fetched_before_failure(
+                        redone_matches,
+                        batch.clone(),
+                        q_idx,
+                        usize::MAX,
+                    ),
+                ));
             }
             continue;
         };
@@ -1300,9 +1338,25 @@ where
                     &mut kappa_subject_range_cache,
                     needs.seqalign,
                     sw_scratch,
-                    &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
+                    None,
+                    &mut |evalue, score| {
+                        kappa::smith_waterman::SwHeapAnswer::Known(
+                            redone_match.would_insert(evalue, score, s_idx),
+                        )
+                    },
+                    &mut None,
                 );
-                let Some(postprocessed) = sw_status.redone(redone, || sw_endless(batch.start))?
+                let Some(postprocessed) = sw_status.redone(redone, || {
+                    sw_endless(
+                        batch.start,
+                        fetch_notes.fetched_before_failure(
+                            redone_matches,
+                            batch.clone(),
+                            q_idx,
+                            x_match_position,
+                        ),
+                    )
+                })?
                 else {
                     x_status_position = Some(x_match_position);
                     continue;
@@ -1353,7 +1407,16 @@ where
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_status.failed() && q_idx + 1 == batch.end {
-            return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
+            return Err(sw_batch_failed(
+                batch.start,
+                &redone_matches[batch.start],
+                fetch_notes.fetched_before_failure(
+                    redone_matches,
+                    batch.clone(),
+                    q_idx,
+                    usize::MAX,
+                ),
+            ));
         }
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as

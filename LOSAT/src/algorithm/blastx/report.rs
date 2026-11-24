@@ -536,7 +536,8 @@ impl ShownSubjects<'_> {
 /// already. `stops`: the run stops after this batch (a later batch fails before its search), so
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
-/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
+/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run, at the
+/// run's query of `QueryScopes::xml_failing_query`).
 /// `pool`: the run's pool where no search runs on it while the batch is written
 /// (`native::BatchRender`), whose threads format the pairwise reports (`x_pairwise_par::write`).
 pub(crate) fn render_queries(
@@ -550,7 +551,7 @@ pub(crate) fn render_queries(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     render_queries_with(
@@ -670,7 +671,7 @@ pub(super) fn render_queries_with(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
@@ -1121,9 +1122,10 @@ fn write_pairwise(
     Ok(())
 }
 
-/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0
-/// (`EmptyRowsStop`) is NCBI's exception, `Row is empty` where the sorts or the description table
-/// read the HSP's empty rows (after the query's `Length=`), `CreateDensegFromStdseg` where they or
+/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
+/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
+/// where the sorts or the description table read such a row (after the query's `Length=`;
+/// `empty_rows::row_range_exception`), `CreateDensegFromStdseg` where they or
 /// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
 /// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
@@ -1134,8 +1136,8 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
         .get_ref()
         .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
     {
-        Some(EmptyRowsStop::RowIsEmpty) => {
-            NativeError::exception(&super::empty_rows::row_is_empty()).into()
+        Some(EmptyRowsStop::RowRange(error)) => {
+            NativeError::exception(&super::empty_rows::row_range_exception(*error)).into()
         }
         Some(EmptyRowsStop::StdSegLengths) => {
             NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
@@ -1249,19 +1251,14 @@ pub(super) fn pairwise_hits(
                             {
                                 None
                             }
-                            // The library's `Hit::subject_title` (no report reads it): the title
-                            // after its first word, `protein product` of an empty one.
+                            // The library's `Hit::subject_title` (no report reads it),
+                            // `protein product` of an empty title.
                             ShownSubjects::Fasta { .. } if subject.title.is_empty() => {
                                 Some("protein product".to_owned())
                             }
-                            ShownSubjects::Fasta { .. } => subject
-                                .title
-                                .iter()
-                                .position(|&byte| byte == b' ')
-                                .map(|space| {
-                                    String::from_utf8_lossy(&subject.title[space + 1..])
-                                        .into_owned()
-                                }),
+                            ShownSubjects::Fasta { .. } => {
+                                crate::blastinput::fasta_reader::hit_subject_title(&subject.title)
+                            }
                             ShownSubjects::Database { .. } => None,
                         },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
@@ -1505,7 +1502,7 @@ pub(crate) fn write_epilog(
     shown: &ShownSubjects<'_>,
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`)
@@ -1541,12 +1538,24 @@ pub(crate) fn write_epilog(
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, None)?;
+        super::blast_xml::write_xml_epilog(
+            writer,
+            diagnostics,
+            options.program().lower,
+            queries,
+            None,
+        )?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(
+            writer,
+            diagnostics,
+            options.program().lower,
+            queries,
+            xml2,
+        )?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).

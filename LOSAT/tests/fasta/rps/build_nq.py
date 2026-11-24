@@ -33,6 +33,7 @@ No NCBI counterpart: test inputs. Usage: python3 build_nq.py [OUT_DIR] (default:
 - nest_p.fna and nest_m.fna (series PR, item PS12c, review B1): nest.faa (the first profile's source twice, nested;
   rpsblast's rows `db.rps.mini.sw.nest.*`) back-translated (seed 31, no flanks), on the plus and on the minus strand.
   With `-use_sw_tback` its second Smith-Waterman alignment starts with a gap in the profile's row.
+- nest_pm.fna (series PR, item PS12d): nest_p.fna's record and nest_m.fna's, two queries of one batch.
 """
 
 import random
@@ -195,6 +196,7 @@ def main() -> int:
     nest_p, nest_m = nest(read_fasta(HERE / "nest.faa"))
     (out / "nest_p.fna").write_text(nest_p)
     (out / "nest_m.fna").write_text(nest_m)
+    (out / "nest_pm.fna").write_text(nest_p + nest_m)
     return 0
 
 

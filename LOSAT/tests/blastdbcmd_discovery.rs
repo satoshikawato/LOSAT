@@ -11,18 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result (as
-/// `blastdbcmd_retrieve.rs`).
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::canonical;
 
 fn run_dir() -> PathBuf {
     canonical(
@@ -281,14 +270,50 @@ const CASES: &[Case] = &[
     // NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, the T5b fix 3 subagent of ad-RG-T5-5.
     ("T5B609", Some("../db_search/t5b/taxdb/zero_kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%K"], 0),
     ("T5B610", Some("../db_search/t5b/taxdb/zero_kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%f"], 0),
+    // Line RG item T5d: header records that NCBI's read fails on (`make_t5.py --taxid-only` and
+    // `--header-only`): `Error: [blastdbcmd] ` and the message of NCBI's exception (`GetMsg()`),
+    // exit 1, after the records before (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-16;
+    // T541 and T542 were T525 and T526 before the merge with item T5c, whose cases took those
+    // numbers).
+    ("T523", None, false, &["-db", "../db_search/t5/ptx_big5", "-entry", "all", "-outfmt", "%o %T %t"], 1),
+    ("T524", None, false, &["-db", "../db_search/t5/ntx_big5", "-entry", "all", "-outfmt", "%o %T %t"], 1),
+    ("T527", None, false, &["-db", "../db_search/t5/phd_seqid", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T528", None, false, &["-db", "../db_search/t5/nhd_cut", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T541", None, false, &["-db", "../db_search/t5/phd_vstr", "-entry", "all", "-outfmt", "%o %t"], 1),
+    ("T542", None, false, &["-db", "../db_search/t5/phd_extra", "-entry", "all"], 1),
+    // Fix 1 of line RG item T5d: header records that NCBI reads (`make_t5.py --header-only utf8
+    // utf8id long longx`): a UTF8String where a VisibleString is expected, read as the
+    // VisibleString with `Warning: (803.10) [blastdbcmd] CObjectIStreamAsnBinary: UTF8String data
+    // for VisibleString member ...` once, before the record's text; a member tag in the long form,
+    // read with no message, or of no member (NCBI's `unexpected member: [32]`). Frozen from NCBI
+    // BLAST+ 2.17.0 blastdbcmd, 2026-11-17.
+    ("T529", None, false, &["-db", "../db_search/t5/phd_utf8", "-entry", "all", "-outfmt", "%o %t"], 0),
+    ("T530", None, false, &["-db", "../db_search/t5/nhd_utf8", "-entry", "all"], 0),
+    ("T531", None, false, &["-db", "../db_search/t5/phd_utf8id", "-entry", "all", "-outfmt", "%o %a %t"], 0),
+    ("T532", None, false, &["-db", "../db_search/t5/phd_long", "-entry", "all", "-outfmt", "%o %t"], 0),
+    ("T533", None, false, &["-db", "../db_search/t5/phd_longx", "-entry", "all", "-outfmt", "%o %t"], 1),
+    // RG-T5d fix 2 (review 2 D2): the version check of an accession reads each candidate's header
+    // (`x_CheckVersions`), and HDA1.1's UTF8String title writes NCBI's warning before the lookup's
+    // own message; the stored version reads the header only for the record's text.
+    ("T534", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.2", "-outfmt", "%a %t"], 1),
+    ("T535", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.2,HDA2.1", "-outfmt", "%a %t"], 1),
+    ("T536", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry_batch", "../db_search/t5/pva_batch.txt", "-outfmt", "%a %t"], 1),
+    ("T537", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.1", "-outfmt", "%a %t"], 0),
+    // RG-T5d fix 3 (`make_t5.py --dup-only`): a list that holds `gb|DUP00001.1|` twice, the other
+    // sequence's title a UTF8String. `-entry` writes both, with NCBI's warning at the other's
+    // read; `-entry_batch` without `-get_dups` of a version 5 list writes the lookup's last
+    // (`AccessionsToOids`): the other one (`pda pdo_none`, with the warning) or the subject
+    // (`pdo_none pds`, none).
+    ("T538", None, false, &["-db", "../db_search/t5/pdo_none ../db_search/t5/pds", "-entry", "DUP00001.1", "-outfmt", "%o %a %t"], 0),
+    ("T539", None, false, &["-db", "../db_search/t5/pda ../db_search/t5/pdo_none", "-entry_batch", "../db_search/t5/dup_batch.txt", "-outfmt", "%o %a %t"], 0),
+    ("T540", None, false, &["-db", "../db_search/t5/pdo_none ../db_search/t5/pds", "-entry_batch", "../db_search/t5/dup_batch.txt", "-outfmt", "%o %a %t"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,
 /// nothing written): NCBI's exception that names its source files (`-taxids` with an empty id,
 /// a date `CTime` does not read), NCBI's protein letters written reversed (a taxid list on a
-/// protein database read with `-dbtype guess` and `-strand minus`), the OID that NCBI's
-/// `-ipg` never sets on a database without PIG files, and a first record whose taxid is outside
-/// an `int` (`make_t5.py --taxid-only`: NCBI's `error while reading taxid`, exit 1, at that record).
+/// protein database read with `-dbtype guess` and `-strand minus`), and the OID that NCBI's
+/// `-ipg` never sets on a database without PIG files.
 #[rustfmt::skip]
 const REFUSED: &[(&str, &[&str])] = &[
     ("J101", &["-db", "j/lst/p5", "-taxids", "4840,,4841", "-no_taxid_expansion", "-outfmt", "%a %T"]),
@@ -296,8 +321,6 @@ const REFUSED: &[(&str, &[&str])] = &[
     ("J189", &["-db", "j/jd/feb30", "-metadata"]),
     ("J190", &["-db", "j/jd/bad", "-metadata"]),
     ("J204", &["-db", "j/lst/p5", "-ipg", "5"]),
-    ("T523", &["-db", "../db_search/t5/ptx_big5", "-entry", "all", "-outfmt", "%o %T %t"]),
-    ("T524", &["-db", "../db_search/t5/ntx_big5", "-entry", "all", "-outfmt", "%o %T %t"]),
 ];
 
 #[test]

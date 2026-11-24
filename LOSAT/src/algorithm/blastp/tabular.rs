@@ -31,9 +31,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
-    TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
+    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -56,6 +56,9 @@ pub(super) struct BlastpTabular<'a> {
     pub searched_lengths: &'a [usize],
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
+    /// An ungapped search (`-ungapped`), whose Seq-aligns are Dense-diags (`qcovhsp`,
+    /// `report::tabular::QueryCoveragePerHsp`).
+    pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
     pub database: &'a str,
     pub subjects: TabularSubjects<'a>,
@@ -752,6 +755,13 @@ fn write_tabular_rows<const RPS: bool>(
                 .as_ref()
                 .zip(table_rows.last_found())
                 .map(|(values, kept)| values.subject(tab.names, -1, kept));
+            // The subject's `qcovhsp` rule: its rows only divide.
+            let qcovhsp = QueryCoveragePerHsp::of_subject(
+                tab.ungapped,
+                hsp_list.hsps.len(),
+                searched_length as i32,
+                query_length as i32,
+            );
             for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
                 if let Some(coding) = tab.query_other_coding.filter(|_| spec.reads_sequences()) {
                     return Err(crate::report::tabular::query_sequence_end(
@@ -764,6 +774,15 @@ fn write_tabular_rows<const RPS: bool>(
                     (q_idx as u32, list_index as u32, index_in_list as u32),
                     hsp.num_ident,
                 );
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // A row that reads the subject loads it first where the query's batch did not
+                // prefetch it: the texts of its taxonomy lookups follow the rows before it
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(seqalign_num_ident) {
+                        warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
+                    }
+                }
                 // A row that reads a subject whose load throws outside the subject block ends
                 // the run (`TabularWriter::ends_run`).
                 if let Some(exception) = table.ends_run(
@@ -781,18 +800,6 @@ fn write_tabular_rows<const RPS: bool>(
                             }
                         },
                     ));
-                }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-                // A row that reads the subject loads it first where the query's batch did not
-                // prefetch it: the texts of its taxonomy lookups follow the rows before it
-                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx)
-                        && fetch.reads(seqalign_num_ident)
-                        && !subject.throws()
-                    {
-                        warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
-                    }
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
@@ -816,7 +823,7 @@ fn write_tabular_rows<const RPS: bool>(
                     None => None,
                 };
                 row_index += 1;
-                let mut row = tabular_hsp(hsp, searched_length, rows.map(|(rows, _)| rows));
+                let mut row = tabular_hsp(hsp, qcovhsp, rows.map(|(rows, _)| rows));
                 if let Some((_, stored_gaps)) = rows {
                     row.stored_gaps = stored_gaps;
                 }
@@ -891,7 +898,7 @@ fn hsp_rows<'r>(
 }
 
 /// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// `rows` when a field shows them.
+/// its `qcovhsp` by its subject's rule `coverage`, `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1094
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
@@ -901,7 +908,7 @@ fn hsp_rows<'r>(
 /// sequences: the frames are 1.
 fn tabular_hsp<'r>(
     hsp: &BlastpHsp,
-    searched_length: usize,
+    coverage: QueryCoveragePerHsp,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
     TabularHsp {
@@ -919,10 +926,13 @@ fn tabular_hsp<'r>(
         q_frame: 1,
         s_frame: 1,
         rows,
-        // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
         stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end + 1 - hsp.q_start) as i32, searched_length as i32),
+        // The HSP's query letters, in its context and in its Seq-align.
+        qcovhsp: {
+            let span = (hsp.q_end + 1 - hsp.q_start) as i32;
+            coverage.of_hsp(span, span)
+        },
     }
 }
 

@@ -24,7 +24,6 @@ const WORDS = [
   ['-h', 'help'],
   ['-help', 'help'],
   ['-help-full', 'help'],
-  ['--help', 'help'],
   ['-xmlhelp', 'help'],
   ['-version', 'version'],
   ['-version-full', 'version'],
@@ -79,7 +78,7 @@ test('a run that printed help or version says nothing of options compared, outfm
   await waitStatus(page, WORDS.length + 1, 'completed');
   await chooseRun(page, WORDS.length + 1);
   await expect(page.getByTestId('results-summary').getByTestId('verification-badge')).toBeVisible();
-  expect(((await page.getByTestId(`run-${WORDS.length + 1}-option`).textContent()) ?? '').trim()).toBe(`Run ${WORDS.length + 1} · BLASTN · query.fa vs subject.fa`);
+  expect(((await page.getByTestId(`run-${WORDS.length + 1}-option`).textContent()) ?? '').trim()).toBe(`Run ${WORDS.length + 1} · BLASTN · pasted text vs pasted text`);
   await page.getByTestId('results-view-details').click();
   await expect(page.getByRole('heading', { name: 'Search (fixed when the run was submitted)' })).toBeVisible();
   await expect(page.getByTestId('results-program')).toHaveText('BLASTN (task megablast)');

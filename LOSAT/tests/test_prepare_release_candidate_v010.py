@@ -91,7 +91,7 @@ class ReleaseCandidateTests(unittest.TestCase):
             else:
                 self.assertRegex(historical_hash, r"^[0-9a-f]{64}$")
 
-    # NCBI api/blast_options_handle.cpp:381-387: Create(eBlastp, locality).
+    # NCBI api/blast_options_handle.cpp:381-387 (`Create` for `eBlastp` and locality).
     # The unreleased v0.1.0 contract exposes only the ordinary BLASTP task.
     def test_contract_exposes_only_ordinary_blastp(self) -> None:
         contract = release.load_contract(REPO_ROOT)

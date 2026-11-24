@@ -414,18 +414,46 @@ fn x_soft_chunk<'a>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831. A shorter frame takes the ranges
 // of the longest frame of its strand, so the last word NCBI scans can end on the NULLB after the
 // frame (blast_util.c:438-453, BLAST_GetAllTranslations).
-/// The letters the scan reads: `subject`, and the sentinel after it with `x_soft` ranges.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,
+// c++/src/algo/blast/core/blast_aascan.c:76-77 and c++/src/algo/blast/core/aa_ungapped.c:499-500
+// NCBI's scan reads the subject's buffer wherever a range points: before the chunk for a later
+// range of masks stored out of order, and past its last letter for a first range raised to one
+// word at its left (the frame's next letters there, on a chunk that is not the frame's last).
+/// The letters the scan of a chunk reads, and how many of them lie before the chunk: `subject`
+/// alone; with `x_soft` ranges the frame from `common::translated_chunks::scan_lead` letters
+/// before the chunk, to `wordsize - 1` letters (at least 1) after it, or to the sentinel after the
+/// frame. The extensions of the hits read the same letters (`word_finder::ChunkCx`).
 #[inline(always)]
 fn x_soft_scan_letters<'a>(
     x_soft: Option<&[(i32, i32)]>,
     subject: &'a [u8],
     subject_full: &'a [u8],
     chunk: &SubjectChunk,
-) -> &'a [u8] {
+    wordsize: usize,
+) -> (&'a [u8], usize) {
     match x_soft {
-        Some(_) => &subject_full[1 + chunk.offset..=1 + chunk.offset + chunk.length],
-        None => subject,
+        Some(ranges) => {
+            let lead = crate::algorithm::common::translated_chunks::scan_lead(ranges);
+            let end = (1 + chunk.offset + chunk.length + wordsize.saturating_sub(1).max(1))
+                .min(subject_full.len());
+            (&subject_full[1 + chunk.offset - lead..end], lead)
+        }
+        None => (subject, 0),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:76-77 and :110
+// NCBI scans from a range's left, which can lie before the chunk, and keeps each hit's offset
+// from the chunk's first letter.
+/// The ranges of a chunk as the scan of its letters from `lead` letters before it reads them
+/// (`x_soft_scan_letters`): each moved by `lead`.
+#[inline(always)]
+fn x_scan_ranges(ranges: &[(i32, i32)], lead: usize) -> Vec<(i32, i32)> {
+    let lead = lead as i32;
+    ranges
+        .iter()
+        .map(|&(left, right)| (left + lead, right + lead))
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:190-192
@@ -761,26 +789,30 @@ fn frame_subject_besthit(frame_hits: &mut Vec<UngappedHit>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3051 (`Blast_HSPListAdjustOffsets`)
-// For every TBLASTX chunk list; the subject end is NCBI's `Int4` (`UngappedHit::s_end_int4`: an
-// HSP of the one-hit word finder of length 0 or less may end before its start, below 0 in a
-// frame's first chunk).
+// For every TBLASTX chunk list; the subject's offset, end and seed are NCBI's `Int4`
+// (`UngappedHit::s_start_int4`, `s_end_int4`, `s_seed_int4`): an HSP or a seed before its chunk
+// (masks stored out of order) starts below 0, and an HSP of the one-hit word finder of length 0 or
+// less may end before its start, below 0 in a frame's first chunk. Such a start lies in the frame
+// (a range starts at the frame's first letter or after it), so the moved start is 0 or more.
 fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize) {
     if offset == 0 {
         return;
     }
     let offset_int4 = i32::try_from(offset)
         .expect("a subject chunk's offset fits i32 (NCBI's BlastSeg offset is Int4)");
+    let moved = |chunk_offset: i32, what: &str| -> i32 {
+        chunk_offset
+            .checked_add(offset_int4)
+            .unwrap_or_else(|| panic!("{what}: a subject offset fits i32 (NCBI's Int4)"))
+    };
     for hit in hits {
         let q_end = hit.q_end_int4();
-        let s_end = hit
-            .s_end_int4()
-            .checked_add(offset_int4)
-            .expect("s_aa_end: a subject end fits i32 (NCBI's BlastSeg end is Int4)");
-        hit.s_aa_start = u32::try_from(hit.s_aa_start as usize + offset)
-            .expect("s_aa_start: a subject offset fits u32 (NCBI's BlastSeg offset is Int4)");
+        let s_end = moved(hit.s_end_int4(), "s_aa_end");
+        hit.s_aa_start = u32::try_from(moved(hit.s_start_int4(), "s_aa_start"))
+            .expect("s_aa_start: an HSP starts in its frame (NCBI's BlastSeg offset)");
         hit.set_int4_ends(q_end, s_end);
-        hit.s_seed_off = u32::try_from(hit.s_seed_off as usize + offset)
-            .expect("s_seed_off: a subject offset fits u32 (NCBI's gapped_start is Int4)");
+        hit.s_seed_off = u32::try_from(moved(hit.s_seed_int4(), "s_seed_off"))
+            .expect("s_seed_off: a seed lies in its frame (NCBI's gapped_start)");
     }
 }
 
@@ -1169,7 +1201,6 @@ fn check_ncbi_options(
     for choice in choices {
         let choice = choice.at_formatting_handler(&args.outfmt)?;
         formatting_handler_check(&choice, Program::Tblastx)?;
-        crate::blastinput::app::html_format_check(choice.number, Program::Tblastx, args.html)?;
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report
@@ -3344,6 +3375,7 @@ fn run_batch_loop(
             scopes
         }
         .with_refusal(args.scope_refusal.clone())
+        .with_xml_matrix_failure(reports.xml_matrix_failure(outputs))
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
@@ -3400,6 +3432,7 @@ fn run_batch_loop(
         &outputs.formats,
         args.formatting.report_sort(),
         args.report_counts,
+        args.html,
     );
     let pairwise_first = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
@@ -3544,9 +3577,11 @@ fn run_batch_loop(
         // batch's request.)
         let mut scope_refusal = None;
         if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) =
-                scopes.add_batch(&query_runs.input_records[input_start..input_end], start)
-            {
+            if let Err(refusal) = scopes.add_batch(
+                &query_runs.input_records[input_start..input_end],
+                &input.skipped[input_start..input_end],
+                start,
+            ) {
                 scope_refusal = Some(refusal);
             }
         }
@@ -3622,8 +3657,8 @@ fn run_batch_loop(
         // One message per query of the batch (`TSearchMessages::ToString` above, after
         // `RemoveDuplicates` in each query's list), `Error: ` first (`GetMessage`).
         // A query without letters keeps its own message (`Sequence contains no data`,
-        // blast_setup_cxx.cpp:631-638, id = the query's index) after the error (id
-        // kBlastMessageNoContext = -1), which `RemoveDuplicates` sorts first
+        // blast_setup_cxx.cpp:631-638, id is the query's index) after the error (context id
+        // `kBlastMessageNoContext`, -1), which `RemoveDuplicates` sorts first
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
@@ -3642,30 +3677,44 @@ fn run_batch_loop(
         // The batch of LOSAT's refusal (`scope_refusal` above): NCBI's error of the set-up of its
         // records that are first in the scope (`set_up`, which ends before the search; the
         // database's kept read error where its sequences could not be read, as `take` fails such a
-        // batch below), or the refusal.
+        // batch below), else the batch's search where that set-up passes and the run's XML failure
+        // for its matrix name takes the refusal (`ScopeRefusal::xml_takes`; the failure comes
+        // below), else the refusal.
         if let Some(refusal) = scope_refusal.take() {
-            let error =
-                crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
+            use crate::blastinput::query_batch::BatchSetUp;
+            let refused = crate::blastinput::query_batch::refused_batch_error(
+                refusal,
+                false,
+                |first| {
                     let records: Vec<FastaRecord> = (start..end)
                         .filter(|&query| first[input.ordinal(query) - input_start])
                         .map(|query| query_records[query].clone())
                         .collect();
                     match set_up(&records) {
-                        Ok(_) => None,
+                        Ok(batch) if batch.searched => BatchSetUp::Searched,
+                        Ok(_) => BatchSetUp::Unknown,
                         Err(error) if error.is::<SubjectsUnreadable>() => stores_error
-                            .take()?
-                            .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
-                            .ok()
-                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0)),
+                            .take()
+                            .and_then(|error| {
+                                error
+                                    .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
+                                    .ok()
+                            })
+                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0))
+                            .into(),
                         Err(error) => error
                             .downcast::<ErrorAfterBatchReports>()
                             .ok()
-                            .map(|ErrorAfterBatchReports(error)| error),
+                            .map(|ErrorAfterBatchReports(error)| error)
+                            .into(),
                     }
-                });
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
-            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            return Err(error);
+                },
+            );
+            if let Err(error) = refused {
+                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                return Err(error);
+            }
         }
         warnings[start].append(&batch_warnings);
         let mut batch = match take(start..end) {
@@ -3728,22 +3777,52 @@ fn run_batch_loop(
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            super::super::database::drop_unaligned(database, &mut batch.hits);
+            let aligned = super::super::database::drop_unaligned(database, &mut batch.hits);
+            let earlier = crate::algorithm::common::database::EarlierUtf8::of_batch(
+                start,
+                batch.fetched_utf8,
+                aligned,
+            );
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
                 database,
                 ordered,
                 start,
+                earlier,
                 &mut reports.titles.borrow_mut(),
             );
-            if let Err(error) = read {
-                match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
-                    Ok(failure) => {
-                        reports.write_before_failed_batch(outputs, done, &warnings)?;
-                        batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                        return Err(failure.error);
+            match read {
+                // NCBI's warning of its first read of a UTF8String header follows the batch's
+                // reader messages and request posts (`warnings[start]`), before its prefetch.
+                Ok(read) => {
+                    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                        read.as_ref(),
+                        &database.db,
+                        "tblastx",
+                    ) {
+                        warnings[start].append(&posts);
+                        batch_warnings.append(&posts);
                     }
-                    Err(error) => return Err(error),
+                }
+                Err(error) => {
+                    match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                        Ok(failure) => {
+                            reports.write_before_failed_batch(outputs, done, &warnings)?;
+                            batch_warnings
+                                .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            if let Some(posts) =
+                                crate::algorithm::common::database::Utf8Read::post_of(
+                                    failure.utf8.as_ref(),
+                                    &database.db,
+                                    "tblastx",
+                                )
+                            {
+                                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            }
+                            return Err(failure.error);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
@@ -3839,18 +3918,31 @@ fn run_batch_loop(
                     }
                 }};
             }
+            let off = crate::algorithm::common::database::prefetch_off(
+                super::super::database::seq_aligns_of(ordered),
+            );
+            if xml2_prefetch && !run_loads.ended() && off {
+                let (titles, mut reads) = (reports.titles.borrow(), reports.reads.borrow_mut());
+                super::super::database::scope_utf8_hit_reads(
+                    database,
+                    ordered,
+                    &titles,
+                    start,
+                    run_loads.answer().run(),
+                    &mut reads,
+                );
+            }
             if xml2_prefetch
                 && !run_loads.ended()
                 && database.parsed_seqids()
                 && !ordered.is_empty()
-                && !crate::algorithm::common::database::prefetch_off(
-                    super::super::database::seq_aligns_of(ordered),
-                )
+                && !off
             {
                 let scope = || batch_scope(input_start..input_end);
-                // The batches before: their queries (`done.spans`, in the numbering of
-                // `done.hits`), for what their reports load (`database::batch_prefetch_stop`).
-                if let Err(error) = super::super::database::batch_prefetch_stop(
+                // The stop, or the warning of a UTF8String header that a load's lookup reads. The
+                // batches before: their queries (`done.spans`, in the numbering of `done.hits`),
+                // for what their reports load (`database::batch_prefetch_stop`).
+                match super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
                     done.searched.len(),
@@ -3871,7 +3963,8 @@ fn run_batch_loop(
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                         .after_unrecorded_calls(unrecorded_calls),
                 ) {
-                    prefetch_failed!(error);
+                    Ok(warning) => warnings[start].lines(&warning),
+                    Err(error) => prefetch_failed!(error),
                 }
             }
             if prefetches && !run_loads.ended() && (taxdb_found || database.parsed_seqids()) {
@@ -3891,8 +3984,9 @@ fn run_batch_loop(
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-                    if taxdb_found {
+                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up, but
+                    // a lookup that reads a UTF8String header posts a warning (`load_read_texts`).
+                    if taxdb_found || database.db.scope_utf8_seen() {
                         debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
                         let stores = reports.stores.borrow();
                         for query in 0..(end - start) as u32 {
@@ -3911,8 +4005,9 @@ fn run_batch_loop(
                             // The first HSP of each subject whose row reads it, in report order (a
                             // subject's HSPs follow each other): the engine's identities are counted
                             // only for `nident` alone, until one of the subject's rows reads it.
-                            // Not a subject whose load throws, nor one that no report reaches
-                            // after it (`database::report_loads`, after the reports before it).
+                            // Not a subject that no report reaches after one whose load throws
+                            // (`HitLoads::reached`; `database::report_loads`, after the reports
+                            // before it).
                             let loads = super::super::database::report_loads(
                                 &run_loads,
                                 &ordered[from..to],
@@ -3923,7 +4018,7 @@ fn run_batch_loop(
                             let shown: Vec<&TblastxHsp> = match rows {
                                 SubjectFetch::Every => ordered[from..to]
                                     .iter()
-                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize))
+                                    .filter(|hsp| loads.reached(hsp.hit.s_idx as usize))
                                     .collect(),
                                 SubjectFetch::Never => Vec::new(),
                                 SubjectFetch::WithIdentities => {
@@ -3931,7 +4026,7 @@ fn run_batch_loop(
                                     ordered[from..to]
                                         .iter()
                                         .filter(|hsp| {
-                                            loads.loaded(hsp.hit.s_idx as usize)
+                                            loads.reached(hsp.hit.s_idx as usize)
                                                 && !read.contains(&hsp.hit.s_idx)
                                                 && identities(hsp) > 0
                                                 && read.insert(hsp.hit.s_idx)
@@ -4046,21 +4141,30 @@ fn run_batch_loop(
         // found by the name as typed with `strcmp`)
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205 (cited above: the
         // batch's prefetch, then `PrintOneResultSet` of each of its results)
-        // NCBI fails where it formats the batch of the run's first searched query, or of its
-        // second where the report is held (`BatchReports::xml_matrix_failure`;
-        // `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
-        // LOSAT refuses two queries of one id first, above): after the batch's
+        // NCBI fails where it formats the batch of the run's first searched query, or where the
+        // report is held of NCBI's next query of another Seq-id (`BatchReports::xml_matrix_failure`;
+        // `XmlMatrixFailure::SecondQueryOrEnd`, of the batches' scopes so far:
+        // `QueryScopes::xml_failing_query`): after the batch's
         // search, the read of its titles (and LOSAT's refusal of two queries of one id, above) and
         // its prefetch, whose errors come first. It writes nothing of the batch's reports or of
         // the batches' before (the XML2 and JSON documents only their start, `PrintProlog`): the
         // reader messages and posts of the batches before (`write_before_failed_batch`), then
-        // those of this batch up to the failing query, with its prefetch's messages. A run of one
-        // searched query whose report is held fails after the loop. TBLASTX writes each batch's
+        // those of this batch up to the failing query, with its prefetch's messages. A run whose
+        // held report has no such query fails after the loop. TBLASTX writes each batch's
         // search strategy request at the batch's start (above), so no request follows the
         // failing batch's.
-        if let Some(failure) = xml_matrix_failure.filter(|failure| failure.fails_in(start..end)) {
+        let failing = xml_matrix_failure
+            .and_then(|failure| {
+                crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+                    query_scopes.as_ref(),
+                    failure,
+                )
+                .query()
+            })
+            .filter(|query| (start..end).contains(query));
+        if let Some(failing) = failing {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            for posts in &warnings[start..=failure.query()] {
+            for posts in &warnings[start..=failing] {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
             return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
@@ -4149,10 +4253,16 @@ fn run_batch_loop(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`: `PrintEpilog` makes the held report of the run's one
     // query)
-    // A run of one searched query whose report is held fails at its end, instead of the epilog,
-    // after what the batch loop wrote before a failing batch (the prologs, the batches' reader
-    // messages and posts).
-    if xml_matrix_failure.is_some_and(|failure| failure.fails_at_end(done.searched.len())) {
+    // A run whose held report has no query of another Seq-id fails at its end, instead of the
+    // epilog, after what the batch loop wrote before a failing batch (the prologs, the batches'
+    // reader messages and posts).
+    if xml_matrix_failure.is_some_and(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            query_scopes.as_ref(),
+            failure,
+        )
+        .fails_at_end(done.searched.len())
+    }) {
         reports.write_before_failed_batch(outputs, done, &warnings)?;
         return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
@@ -4319,6 +4429,7 @@ impl BatchReports<'_> {
                             &outputs.formats,
                             self.args.formatting.report_sort(),
                             self.args.report_counts,
+                            self.args.html,
                         ),
                     ),
                     &|hsp| {
@@ -4592,8 +4703,9 @@ fn search_query_batch<S: TbxScore>(
     // (tblastx/x_work_board.rs).
     x_board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
     // The set-up of the batch alone, up to its checks of the subjects (`context_cutoffs`): a batch
-    // that passes them returns unsearched. The set-up of a batch that LOSAT refuses
-    // (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+    // that passes them with a valid context returns without hits, `searched` (NCBI searches it).
+    // The set-up of a batch that LOSAT refuses (`query_batch::refused_batch_error`; line WQA D10
+    // round 5, 2026-11-20).
     setup_only: bool,
 ) -> Result<TblastxBatch> {
     // The search's flags, threads, genetic codes, window and word size, and the ungapped block of
@@ -4666,6 +4778,7 @@ fn search_query_batch<S: TbxScore>(
             searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     let t_read_subjects = t_phase_read_subjects.elapsed();
@@ -4695,12 +4808,12 @@ fn search_query_batch<S: TbxScore>(
     // TBLASTX is explicitly ungapped-only (blast_options.c line 869-873):
     //   "Gapped search is not allowed for tblastx"
     //
-    // For bit score and E-value calculation, NCBI uses sbp->kbp (ungapped):
-    //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-    //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
+    // For bit score and E-value calculation, NCBI uses the ungapped `kbp` table on `sbp`:
+    //   blast_hits.c line 1833 selects `kbp_gap` when gapped or `kbp` when ungapped;
+    //   blast_hits.c line 1918 follows the same selection in `Blast_HSPListGetBitScores`.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:768
-    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // For tblastx, `gapped_calculation` is false, so `kbp_ptr` points to the ungapped `kbp` table on `sbp`.
     // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
     //
     // (the contexts' blocks, `QueryContext::karlin_params`).
@@ -4829,7 +4942,7 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
     // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
-    // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+    // When total database length is zero, NCBI updates parameters per subject via `BLAST_OneSubjectUpdateParameters`.
     // The set's numbers are read once per run (`SubjectSetNumbers`: the records' sums, or the
     // database index's numbers).
     let db_length_nucl = numbers.total;
@@ -4838,7 +4951,7 @@ fn search_query_batch<S: TbxScore>(
     // (`SubjectSetNumbers::link_total`).
     let link_db_length_nucl = numbers.link_total;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:535-560
-    // if (valid_context_found) { return 0; } else { return 1; }
+    // NCBI returns success only when at least one valid query context exists.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-178,206-208
     // A batch without a valid context is not searched; each of its queries is reported
     // with the `-1` statistics.
@@ -4848,6 +4961,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
@@ -4895,12 +5009,14 @@ fn search_query_batch<S: TbxScore>(
         debug_cutoffs_all,
         query_frames: &query_frames,
     })?;
+    // The set-up passed with a valid context: NCBI searches the batch (`searched`).
     if setup_only {
         return Ok(TblastxBatch {
             hits: Vec::new(),
-            searched: false,
+            searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
 
@@ -5085,13 +5201,13 @@ fn search_query_batch<S: TbxScore>(
         };
         x_lap.lap(XStage::Translate);
 
-        // [C] BlastOffsetPair *offset_pairs
+        // Reusable buffer for scanned word offset pairs (NCBI `BlastOffsetPair`).
         let offset_pairs = &mut st.offset_pairs;
 
-        // [C] DiagStruct *diag_array = diag->hit_level_array;
+        // Diagonal tracking array for hit extension (NCBI `diag->hit_level_array`).
         let diag_array = &mut st.diag_array;
 
-        // [C] diag_offset = diag->offset;  (reset to window per-subject)
+        // Diagonal offset for this subject (NCBI `diag->offset`, reset to `window` per subject).
         let mut diag_offset: i32 = st.diag_offset;
 
         // The subject's linking parameters (`subject_link::subject_linking_params`), computed once
@@ -5107,7 +5223,8 @@ fn search_query_batch<S: TbxScore>(
         );
 
         // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491 BlastInitHitListReset(init_hitlist)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491
+        // Resets `init_hitlist` via `BlastInitHitListReset` between frames.
         // After each frame, init_hsps are converted and merged into combined_ungapped_hits.
 
         // Statistics for HSP saving analysis (long sequences only)
@@ -5119,8 +5236,8 @@ fn search_query_batch<S: TbxScore>(
         let stats_hsp_filtered_by_hsp_test = 0usize;
         let mut stats_score_distribution: Vec<i32> = Vec::new();
 
-        // NCBI: Combined HSP list across all subject frames
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438 BlastHSPList* combined_hsp_list
+        // NCBI: Combined HSP list across all subject frames (`combined_hsp_list`).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
 
         // EXPERIMENT (PAIRPAR), dispatch points 2 and 3 (per subject): the unit path, when the
@@ -5450,6 +5567,9 @@ fn search_query_batch<S: TbxScore>(
         searched: true,
         queries: query_stats,
         x_timing,
+        fetched_utf8: fetch_excluded
+            .as_ref()
+            .and_then(crate::algorithm::common::database::FetchExcluded::take_utf8),
     })
 }
 

@@ -23,3 +23,94 @@ fn merges_take_the_linker_as_an_unsigned_sum() {
     insert_merge(&mut list, (40, 50), 1);
     assert_eq!(list, vec![(0, 30), (40, 50)]);
 }
+
+/// The letter-by-letter count of NCBI's `s_FindSegmentWithLongNs` (`Uint4` position and
+/// length), which `long_n_runs` gives block by block.
+fn long_n_runs_by_letter(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
+    let mut runs = Vec::new();
+    let (mut pos, mut ns) = (0u32, 0u32);
+    for &letter in seq {
+        if letter == b'N' {
+            ns = ns.wrapping_add(1);
+        } else {
+            if ns > 0 {
+                if ns > max_ns || pos == 0 {
+                    runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
+                }
+                pos = pos.wrapping_add(ns);
+                ns = 0;
+            }
+            pos = pos.wrapping_add(1);
+        }
+    }
+    if ns > 0 {
+        runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
+    }
+    runs
+}
+
+#[test]
+fn runs_found_block_by_block_are_those_counted_letter_by_letter() {
+    // Runs and gaps of every length around the 16-letter blocks, at every offset, from a fixed
+    // linear congruential sequence.
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = |bound: u64| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        (state >> 33) % bound
+    };
+    for _ in 0..4000 {
+        let mut seq = Vec::new();
+        let pieces = next(8);
+        for _ in 0..pieces {
+            let letter = if next(2) == 0 {
+                b'N'
+            } else {
+                // Bytes next to `N`'s (0x4e) in value or by its high bit, for the byte test.
+                b"ACGTnOM\xce"[next(8) as usize]
+            };
+            let length = [0, 1, 2, 3, 5, 7, 15, 16, 17, 31, 32, 33, 40][next(13) as usize];
+            seq.extend(std::iter::repeat_n(letter, length));
+        }
+        for max_ns in (0..=17).chain([64, u32::MAX]) {
+            assert_eq!(
+                long_n_runs(max_ns, &seq),
+                long_n_runs_by_letter(max_ns, &seq),
+                "{max_ns} {:?}",
+                String::from_utf8_lossy(&seq)
+            );
+        }
+    }
+}
+
+#[test]
+fn every_block_of_16_letters_gives_the_runs_counted_letter_by_letter() {
+    // Every pattern of `N` in the second block, after a block of `N` (a run that comes in from
+    // position 0), of `A`, or of 10 `A` and 6 `N` (a run that comes in from position 10); then no
+    // letter, `N`, `A`, or a last block of 5 letters with runs in it. Every `max_ns` that gives
+    // `RunTest` its own shifts, and two that no run inside a block reaches.
+    let befores: [&[u8]; 3] = [
+        b"NNNNNNNNNNNNNNNN",
+        b"AAAAAAAAAAAAAAAA",
+        b"AAAAAAAAAANNNNNN",
+    ];
+    let afters: [&[u8]; 4] = [b"", b"N", b"A", b"ANNAN"];
+    for pattern in 0..=u16::MAX {
+        for before in befores {
+            for after in afters {
+                let mut seq = before.to_vec();
+                seq.extend((0..16).map(|k| if pattern >> k & 1 == 1 { b'N' } else { b'C' }));
+                seq.extend_from_slice(after);
+                for max_ns in (0..=17).chain([64, u32::MAX]) {
+                    assert_eq!(
+                        long_n_runs(max_ns, &seq),
+                        long_n_runs_by_letter(max_ns, &seq),
+                        "{max_ns} {pattern:#06x} {:?}",
+                        String::from_utf8_lossy(&seq)
+                    );
+                }
+            }
+        }
+    }
+}

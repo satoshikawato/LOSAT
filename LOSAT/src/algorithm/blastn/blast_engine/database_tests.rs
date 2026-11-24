@@ -1042,10 +1042,14 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
-    let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let mut db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     db.read_name_records(path.to_str().unwrap(), false).unwrap();
     let parsed_seqids = db.has_parsed_seqids().unwrap();
     BlastnDatabase {

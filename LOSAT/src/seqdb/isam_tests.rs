@@ -75,7 +75,7 @@ struct Fixture {
 
 fn fixture(name: &str, protein: bool) -> Fixture {
     let base = ids_dir().join(name);
-    let isam = StringIsam::open_volume(base.to_str().unwrap(), protein).unwrap();
+    let isam = StringIsam::open_volume(&base, protein).unwrap();
     let ext = if protein { "psd" } else { "nsd" };
     let data = std::fs::read(base.with_extension(ext)).unwrap();
     Fixture {
@@ -364,7 +364,7 @@ fn headers_and_bounds_of_the_fixtures() {
         );
         assert!(!isam.out_of_bounds(&low), "{name}");
         assert!(!isam.out_of_bounds(&high), "{name}");
-        assert!(StringIsam::index_exists(f.base.to_str().unwrap(), protein));
+        assert!(StringIsam::index_exists(&f.base, protein));
     }
     // prot_v4 is the fixture of several pages.
     assert!(fixture("prot_v4", true).isam.num_samples() >= 3);
@@ -372,13 +372,16 @@ fn headers_and_bounds_of_the_fixtures() {
 
 #[test]
 fn file_names_and_missing_files() {
-    let (index, data) = StringIsam::file_names("/x/db", true).unwrap();
+    let (index, data) = StringIsam::file_names(Path::new("/x/db"), true).unwrap();
     assert_eq!((index, data), ("/x/db.psi".into(), "/x/db.psd".into()));
-    let (index, data) = StringIsam::file_names("db", false).unwrap();
+    let (index, data) = StringIsam::file_names(Path::new("db"), false).unwrap();
     assert_eq!((index, data), ("db.nsi".into(), "db.nsd".into()));
-    assert!(StringIsam::file_names("", true).is_err());
-    assert!(!StringIsam::index_exists("/nonexistent/none", true));
-    let error = StringIsam::open_volume("/nonexistent/none", true).unwrap_err();
+    assert!(StringIsam::file_names(Path::new(""), true).is_err());
+    assert!(!StringIsam::index_exists(
+        Path::new("/nonexistent/none"),
+        true
+    ));
+    let error = StringIsam::open_volume(Path::new("/nonexistent/none"), true).unwrap_err();
     assert_eq!(
         error.ncbi_message().unwrap(),
         b"Error: Could not open input file (/nonexistent/none.psi//nonexistent/none.psd)"
@@ -397,7 +400,7 @@ fn rejected_headers_leave_the_index_uninitialised() {
     let open = |name: &str, index: &[u8], data: &[u8]| {
         std::fs::write(dir.0.join(format!("{name}.nsi")), index).unwrap();
         std::fs::write(dir.0.join(format!("{name}.nsd")), data).unwrap();
-        StringIsam::open_volume(dir.0.join(name).to_str().unwrap(), false).unwrap()
+        StringIsam::open_volume(&dir.0.join(name), false).unwrap()
     };
     let mut version = index.clone();
     version[3] = 2;
@@ -478,7 +481,7 @@ fn damaged_headers_are_format_errors() {
         let name = format!("bad{field}_{value}");
         std::fs::write(dir.0.join(format!("{name}.nsi")), &bad).unwrap();
         std::fs::write(dir.0.join(format!("{name}.nsd")), &data).unwrap();
-        let result = StringIsam::open_volume(dir.0.join(&name).to_str().unwrap(), false);
+        let result = StringIsam::open_volume(&dir.0.join(&name), false);
         assert!(
             matches!(result, Err(SeqDbError::Format { .. })),
             "{what}: {result:?}"
@@ -488,7 +491,7 @@ fn damaged_headers_are_format_errors() {
     let short = &index[..40 + 4 * 3];
     std::fs::write(dir.0.join("short.nsi"), short).unwrap();
     std::fs::write(dir.0.join("short.nsd"), &data).unwrap();
-    let result = StringIsam::open_volume(dir.0.join("short").to_str().unwrap(), false);
+    let result = StringIsam::open_volume(&dir.0.join("short"), false);
     assert!(
         matches!(result, Err(SeqDbError::Format { .. })),
         "{result:?}"

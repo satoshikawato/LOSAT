@@ -413,7 +413,7 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
     use crate::writedb::writer::{DbVersion, Indices, WriteDb};
 
     let mut db = WriteDb::new(
-        base,
+        base.as_bytes(),
         true,
         b"T",
         b"Nov 21, 2026  9:00 AM",

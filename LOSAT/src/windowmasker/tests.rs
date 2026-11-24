@@ -129,9 +129,7 @@ fn the_counts_modes_refuse_what_ncbi_gives_no_one_result_for() {
 
 // What -convert refuses (review of line NP item M5b, 2026-11-21): the optimized formats of units
 // of 0 letters (NCBI's search for its table size never ends), units of 17 letters or more (NCBI's
-// reverse complement shifts past 32 bits), a ##pct: word that C++ libraries read differently; and
-// -mk_counts -infmt blastdb with a -fa_list line that is not UTF-8 (LOSAT opens databases by
-// names of text).
+// reverse complement shifts past 32 bits) and a ##pct: word that C++ libraries read differently.
 #[test]
 fn the_convert_mode_refuses_what_ncbi_gives_no_one_result_for() {
     let refusal = |what: &str| format!("Error: {what} is not supported by LOSAT's WINDOWMASKER\n");
@@ -197,9 +195,34 @@ fn the_convert_mode_refuses_what_ncbi_gives_no_one_result_for() {
             )
         )
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// A -fa_list line of -mk_counts -infmt blastdb names a database by its bytes, as NCBI's string
+// does (line RG item K10a): a copy of `db_search/xb_n` under the name `\xffxb` counts as the
+// original. Not on macOS, whose APFS refuses such a file name (as `tests/non_utf8_names.rs`).
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn a_fa_list_database_name_is_read_by_its_bytes() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-windowmasker-fa-list-bytes-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for extension in ["nhr", "nin", "nsq"] {
+        let mut name = b"\xffxb.".to_vec();
+        name.extend_from_slice(extension.as_bytes());
+        std::fs::copy(
+            format!("tests/db_search/xb_n.{extension}"),
+            dir.join(std::ffi::OsStr::from_bytes(&name)),
+        )
+        .unwrap();
+    }
     let list = dir.join("list.txt");
-    std::fs::write(&list, b"tests/windowmasker/db/wm\n\xffwm\n").unwrap();
-    assert_eq!(
+    let count = |lines: &[u8]| {
+        std::fs::write(&list, lines).unwrap();
         run_words(&[
             "-mk_counts",
             "-infmt",
@@ -207,13 +230,17 @@ fn the_convert_mode_refuses_what_ncbi_gives_no_one_result_for() {
             "-fa_list",
             "T",
             "-in",
-            list.to_str().unwrap()
-        ]),
-        (
-            1,
-            String::new(),
-            refusal("-infmt blastdb with a -fa_list line (a database name) that is not UTF-8 text")
-        )
+            list.to_str().unwrap(),
+        ])
+    };
+    let mut by_bytes = b"tests/db_search/xb_n\n".to_vec();
+    by_bytes.extend_from_slice(dir.as_os_str().as_bytes());
+    by_bytes.extend_from_slice(b"/\xffxb\n");
+    let by_bytes = count(&by_bytes);
+    assert_eq!(by_bytes.0, 0, "{by_bytes:?}");
+    assert_eq!(
+        by_bytes,
+        count(b"tests/db_search/xb_n\ntests/db_search/xb_n\n")
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -302,7 +329,10 @@ fn the_keys_read_as_ncbi_s() {
     assert_eq!(args.double("t_low_pct"), None);
     assert_eq!(args.integer("window"), Some(20));
     assert_eq!(args.integer("dust_level"), Some(20));
-    assert_eq!(args.value("outfmt"), Some("interval"));
+    assert_eq!(
+        args.bytes("outfmt").as_deref(),
+        Some(b"interval".as_slice())
+    );
     assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-window", "0"])).is_err());
     assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-t_low_pct", "100.5"])).is_err());
     assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-dust", "maybe"])).is_err());

@@ -245,9 +245,13 @@ impl Tally {
 /// searches and of `blastdbcmd`.
 fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut Tally) {
     // `blastdbcmd -info` and the metadata read the alias files again, without the volumes.
-    let path = SearchPath::new(dir, None, None).unwrap();
-    tally.check(SeqDb::info_volumes(name, seqtype, &path));
-    tally.check(SeqDb::volume_and_alias_paths(name, seqtype, &path));
+    let path = SearchPath::new(dir, None, None);
+    tally.check(SeqDb::info_volumes(name.as_bytes(), seqtype, &path));
+    tally.check(SeqDb::volume_and_alias_paths(
+        name.as_bytes(),
+        seqtype,
+        &path,
+    ));
     let Some(db) = tally.check(SeqDb::open(name, seqtype)) else {
         return;
     };

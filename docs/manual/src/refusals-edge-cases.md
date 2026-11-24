@@ -281,7 +281,6 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - `-convert` of an `ascii` counts file with units of 17 letters or more is refused. NCBI converts it without an error, but its reverse complement of each unit shifts the 32-bit unit past its width, which is undefined.
 - `-convert` of an `ascii` counts file whose unit size line is 0 (or a multiple of 256, which NCBI reads as 0) to `oascii` or `obinary` is refused. NCBI's search for the size of its hash table never ends. The `ascii` and `binary` outputs of such a file are written as NCBI writes them.
 - A `binary` or `obinary` counts file whose `##pct:` line names 4294967295 or more as its largest count is refused. NCBI then reads past its table of percentages.
-- `-mk_counts -infmt blastdb -fa_list T` with a line of the list that is not UTF-8 text is refused. NCBI opens the database by those bytes; LOSAT opens databases by names of text.
 - The database and serial-writer refusals of `dustmasker` apply to `windowmasker` too.
 
 ## segmasker

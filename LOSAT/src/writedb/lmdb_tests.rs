@@ -82,7 +82,7 @@ fn write(c: &Content, dir: &Path) -> Result<(), crate::writedb::WriteDbError> {
         }
         tax.insert_entries(taxids, oid as u32);
     }
-    let names: Vec<String> = c.volumes.iter().map(|v| v.0.clone()).collect();
+    let names: Vec<&[u8]> = c.volumes.iter().map(|v| v.0.as_bytes()).collect();
     let counts: Vec<u32> = c.volumes.iter().map(|v| v.1).collect();
     lmdb.insert_volumes_info(&names, &counts)?;
     lmdb.close()?;

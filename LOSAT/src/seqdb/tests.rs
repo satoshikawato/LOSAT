@@ -906,9 +906,9 @@ fn alias_value_errors_come_in_ncbis_order() {
     let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
     assert!(what(error).contains("'n1'"));
     let mut db = SeqDb::open_search_in(
-        &name,
+        name.as_bytes(),
         SeqType::Protein,
-        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None),
     )
     .unwrap();
     db.x_keep_oids(|oid| oid < 3);
@@ -920,9 +920,9 @@ fn alias_value_errors_come_in_ncbis_order() {
     .unwrap();
     // The ranges come first, at the open.
     let error = SeqDb::open_search_in(
-        &name,
+        name.as_bytes(),
         SeqType::Protein,
-        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None),
     )
     .unwrap_err();
     assert!(what(error).contains("'f1'"));
@@ -932,9 +932,9 @@ fn alias_value_errors_come_in_ncbis_order() {
     )
     .unwrap();
     let mut db = SeqDb::open_search_in(
-        &name,
+        name.as_bytes(),
         SeqType::Protein,
-        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None),
     )
     .unwrap();
     db.x_keep_oids(|oid| oid < 3);
@@ -1026,9 +1026,9 @@ fn alias_oid_ranges_select_ncbis_oids() {
     // With a list the constructor's scan of the totals follows that loop over the listed OIDs,
     // and the search reads every listed OID (the constructor sets the range back).
     let mut db = SeqDb::open_search_in(
-        &names("r", "prot_v4"),
+        names("r", "prot_v4").as_bytes(),
         SeqType::Protein,
-        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None),
     )
     .unwrap();
     db.x_keep_oids(|oid| [0, 4, 8].contains(&oid));
@@ -1150,8 +1150,8 @@ fn alias_oid_lists_select_ncbis_oids() {
     write("an.pal", b"DBLIST x\nNSEQ 1\n");
     assert!(matches!(open("an"), Err(SeqDbError::MemoryMap(_))));
     // The scan's error comes after a list (`restrict`), else before the walks of the counts.
-    let path = SearchPath::new(&dir, None, None).unwrap();
-    let db = SeqDb::open_search_in("x", SeqType::Protein, &path).unwrap();
+    let path = SearchPath::new(&dir, None, None);
+    let db = SeqDb::open_search_in(b"x", SeqType::Protein, &path).unwrap();
     assert!(matches!(
         db.check_alias_values(),
         Err(SeqDbError::MemoryMap(_))
@@ -1835,8 +1835,12 @@ fn one_name_is_not_a_list() {
         let db = SeqDb::open_one_name(&path, SeqType::Protein).unwrap();
         assert_eq!(db.num_seqs(), 10, "{name}");
         let (volumes, alias_files) =
-            super::alias::find_volume_paths(&path, SeqType::Protein).unwrap();
-        assert_eq!((volumes, alias_files), (vec![path], Vec::new()), "{name}");
+            super::alias::find_volume_paths(path.as_bytes(), SeqType::Protein).unwrap();
+        assert_eq!(
+            (volumes, alias_files),
+            (vec![path.into_bytes()], Vec::new()),
+            "{name}"
+        );
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 }
@@ -1867,23 +1871,30 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
     let name = path(&sub, "db");
 
     let read = super::alias::resolve_one_name(
-        &name,
+        name.as_bytes(),
         SeqType::Protein,
-        super::alias::LocalCopy::Dir(here.to_str().unwrap()),
-        &SearchPath::current_dir().unwrap(),
+        super::alias::LocalCopy::Dir(here.to_str().unwrap().as_bytes()),
+        &SearchPath::current_dir(),
         super::alias::MaskList::Refuse,
     )
     .unwrap();
-    assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);
+    assert_eq!(
+        read.volumes,
+        [path(&here, "db.00"), path(&sub, "db.01")].map(String::into_bytes)
+    );
 
-    let (volumes, alias_files) = super::alias::find_volume_paths(&name, SeqType::Protein).unwrap();
-    assert_eq!(volumes, [path(&sub, "db.00"), path(&sub, "db.01")]);
-    assert_eq!(alias_files, [path(&sub, "db.pal")]);
+    let (volumes, alias_files) =
+        super::alias::find_volume_paths(name.as_bytes(), SeqType::Protein).unwrap();
+    assert_eq!(
+        volumes,
+        [path(&sub, "db.00"), path(&sub, "db.01")].map(String::into_bytes)
+    );
+    assert_eq!(alias_files, [path(&sub, "db.pal").into_bytes()]);
 
     // A volume that is missing beside the alias file is not looked for
     // elsewhere: the database cannot be listed, and nothing is removed.
     std::fs::remove_file(sub.join("db.00.pin")).unwrap();
-    let error = super::alias::find_volume_paths(&name, SeqType::Protein).unwrap_err();
+    let error = super::alias::find_volume_paths(name.as_bytes(), SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message) if message
             == format!("Could not find volume or alias file (db.00) referenced in alias file ({name}).").as_bytes()),
@@ -2330,9 +2341,8 @@ fn row_search_path(cwd: &Path, blastdb: &str, registry: &str) -> SearchPath {
     SearchPath::new(
         cwd,
         (blastdb != "<unset>").then(|| std::ffi::OsStr::new(blastdb)),
-        (registry != "<none>").then_some(registry),
+        (registry != "<none>").then_some(registry.as_bytes()),
     )
-    .unwrap()
 }
 
 /// Compares what LOSAT does with one row with what NCBI did.
@@ -2352,7 +2362,7 @@ fn check_search_path_row(
     // search program reads the first header of each volume right after it opens the
     // database (`algorithm::common::database::check_seqids`).
     let name = db_argument_name(name);
-    let opened = SeqDb::open_in(name, SeqType::Protein, search)
+    let opened = SeqDb::open_in(name.as_bytes(), SeqType::Protein, search)
         .and_then(|db| db.has_parsed_seqids().map(|parsed| (db, parsed)));
     // A database with parsed Seq-ids, which the search programs read (line DBID); NCBI's
     // outcome is that of its formatters (an `other` row).
@@ -2418,8 +2428,12 @@ fn check_search_path_row(
                 *sequences,
                 "{id}: sequences"
             );
-            let listed = super::alias::info_volumes(name, SeqType::Protein, search).unwrap();
-            let expected: Vec<String> = volumes.split(" | ").map(place).collect();
+            let listed =
+                super::alias::info_volumes(name.as_bytes(), SeqType::Protein, search).unwrap();
+            let expected: Vec<Vec<u8>> = volumes
+                .split(" | ")
+                .map(|v| place(v).into_bytes())
+                .collect();
             assert_eq!(listed, expected, "{id}: volumes");
         }
         "error" => {
@@ -2508,10 +2522,11 @@ fn files_that_cannot_be_opened_give_ncbis_errors() {
             continue;
         }
         let search = row_search_path(&root.join(cwd), &place(blastdb), "<none>");
-        let first_error = SeqDb::open_in(&place(name), SeqType::Protein, &search).and_then(|db| {
-            db.read_sequence(0)?;
-            db.deflines(0).map(|_| db.num_seqs())
-        });
+        let first_error = SeqDb::open_in(place(name).as_bytes(), SeqType::Protein, &search)
+            .and_then(|db| {
+                db.read_sequence(0)?;
+                db.deflines(0).map(|_| db.num_seqs())
+            });
         if let Some(text) = losat.strip_prefix("search:") {
             // The sequence file: NCBI's search stage reports the failure in
             // its own words and with exit status 3.
@@ -2553,31 +2568,30 @@ fn files_that_cannot_be_opened_give_ncbis_errors() {
 fn the_search_path_string_and_its_errors() {
     let cwd = std::env::current_dir().unwrap();
     let cwd_str = cwd.to_str().unwrap();
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     // The directory is the one the operating system reports; its spelling
     // is compared on Unix only (the Windows rules of NCBI's path
     // normalisation are ported from the source and have no oracle run).
     if cfg!(unix) {
-        assert_eq!(search.as_str(), format!("{cwd_str}::"));
+        assert_eq!(search.as_bytes(), format!("{cwd_str}::").as_bytes());
     }
     // The path of the process starts with the same directory, whatever
     // `BLASTDB` holds.
     assert!(SearchPath::from_environment(None)
-        .unwrap()
-        .as_str()
-        .starts_with(cwd_str));
+        .as_bytes()
+        .starts_with(cwd_str.as_bytes()));
     // A registry entry adds its value and a separator, also when it is empty.
-    let with_entry = SearchPath::new(&cwd, None, Some("")).unwrap();
-    let separator = if cfg!(windows) { ';' } else { ':' };
+    let with_entry = SearchPath::new(&cwd, None, Some(b"".as_slice()));
+    let separator = if cfg!(windows) { b';' } else { b':' };
     assert_eq!(
-        with_entry.as_str(),
-        format!("{}{separator}", search.as_str())
+        with_entry.as_bytes(),
+        [search.as_bytes(), &[separator]].concat()
     );
 
     // `CSeqDB::CSeqDB` (seqdb.cpp:155-165) and `x_ExpandAliases` on an empty
     // list (seqdbalias.cpp:740-754).
     let message = |name: &str| {
-        SeqDb::open_in(name, SeqType::Protein, &search)
+        SeqDb::open_in(name.as_bytes(), SeqType::Protein, &search)
             .unwrap_err()
             .ncbi_message()
     };
@@ -2594,7 +2608,7 @@ fn the_search_path_string_and_its_errors() {
     assert_eq!(db_argument_name(" \t db one\r\n\x0b\x0c "), "db one");
     assert_eq!(db_argument_name(" \t "), "");
     assert_eq!(db_argument_name("\u{a0}db"), "\u{a0}db");
-    let error = SeqDb::open_in("no_such_database", SeqType::Nucleotide, &search).unwrap_err();
+    let error = SeqDb::open_in(b"no_such_database", SeqType::Nucleotide, &search).unwrap_err();
     assert_eq!(
         error.ncbi_message(),
         Some(
@@ -2602,7 +2616,7 @@ fn the_search_path_string_and_its_errors() {
                 "No alias or index file found for nucleotide database [no_such_database] in \
                  search path [{}]. Please verify the spelling of the BLAST database and its \
                  molecule type.",
-                search.as_str()
+                String::from_utf8_lossy(search.as_bytes())
             )
             .into_bytes()
         )
@@ -2937,9 +2951,9 @@ fn open_probe() {
         other => panic!("unknown sequence type {other}"),
     };
     let registry = std::env::var("LOSAT_SEQDB_OPEN_PROBE_REGISTRY").ok();
-    let outcome = SearchPath::from_environment(registry.as_deref())
-        .and_then(|search| SeqDb::open_in(db_argument_name(name), seqtype, &search))
-        .and_then(|db| {
+    let search = SearchPath::from_environment(registry.as_deref().map(str::as_bytes));
+    let outcome =
+        SeqDb::open_in(db_argument_name(name).as_bytes(), seqtype, &search).and_then(|db| {
             for ordinal in 0..db.num_seqs() {
                 db.read_sequence(ordinal)?;
                 db.deflines(ordinal)?;

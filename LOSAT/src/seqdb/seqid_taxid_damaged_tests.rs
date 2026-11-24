@@ -741,7 +741,7 @@ const TAXDB_TAXIDS: [i32; 11] = [
 /// The taxonomy name files on the search path, read by the lookups of the taxonomy columns
 /// (`names`) and of the checks before a search (`offset_error_taxid`, `any_lookup_faults`, `any_lookup_may_fail`).
 fn read_taxdb(dir: &Path, trace: &mut Trace) {
-    let search = SearchPath::new(dir, Some(dir.as_os_str()), None).unwrap();
+    let search = SearchPath::new(dir, Some(dir.as_os_str()), None);
     match TaxDb::open(&search) {
         // A database that NCBI treats as missing.
         Ok(db) if db.is_missing() => trace.note(db.open_messages()),

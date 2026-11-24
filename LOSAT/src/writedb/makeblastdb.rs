@@ -1114,9 +1114,9 @@ fn open_new_database(
     .map_err(|exception| MakedbError::Build(WriteDbError::Exception(exception)))?;
     // The name of a database makeblastdb built is not empty (`build_lmdb_file_name`'s error).
     let lmdb: Vec<std::path::PathBuf> = version5
-        .then(|| build_lmdb_file_name(new_db, is_protein).ok())
+        .then(|| build_lmdb_file_name(new_db.as_bytes(), is_protein).ok())
         .flatten()
-        .map(std::path::PathBuf::from)
+        .map(crate::utils::os_bytes::path_from_bytes)
         .into_iter()
         .collect();
     let (bytes_total, bytes_to_cache, files) = db_files_metadata(

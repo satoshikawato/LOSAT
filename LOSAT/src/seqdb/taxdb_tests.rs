@@ -57,7 +57,7 @@ impl std::ops::Deref for Searching {
 /// A search path whose only useful directory is `dir` (`BLASTDB`), run from an empty current directory.
 fn path_of(dir: &Path) -> Searching {
     let cwd = temp_dir("cwd");
-    let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None);
     Searching { search, _cwd: cwd }
 }
 
@@ -333,21 +333,25 @@ fn the_index_path_decides_and_the_data_file_is_its_sibling() {
     let nobtd = fixture_dir().join("no_btd");
     let joined = joined_paths([&nobtd, &good]);
     let cwd = temp_dir("cwd");
-    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None);
     assert!(TaxDb::open(&search).unwrap().is_missing());
     let joined = joined_paths([&fixture_dir().join("no_bti"), &good]);
-    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None);
     assert!(!TaxDb::open(&search).unwrap().is_missing());
     // The current directory comes before BLASTDB.
-    let search = SearchPath::new(&good, Some(nobtd.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&good, Some(nobtd.as_os_str()), None);
     assert!(!TaxDb::open(&search).unwrap().is_missing());
     // The registry value comes after BLASTDB.
-    let search = SearchPath::new(&cwd, Some(nobtd.as_os_str()), good.to_str()).unwrap();
+    let search = SearchPath::new(
+        &cwd,
+        Some(nobtd.as_os_str()),
+        good.to_str().map(str::as_bytes),
+    );
     assert!(TaxDb::open(&search).unwrap().is_missing());
-    let search = SearchPath::new(&cwd, None, good.to_str()).unwrap();
+    let search = SearchPath::new(&cwd, None, good.to_str().map(str::as_bytes));
     assert!(!TaxDb::open(&search).unwrap().is_missing());
     // No directory at all.
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     assert!(TaxDb::open(&search).unwrap().is_missing());
 }
 

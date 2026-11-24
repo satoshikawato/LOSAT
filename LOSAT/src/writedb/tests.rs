@@ -220,7 +220,7 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
         let date = stored_date(&fixtures.join("db").join(index_file), SeqType::Protein);
         let tmp = TempDir::new(fixture);
         let mut db = WriteDb::new(
-            &tmp.base(fixture),
+            tmp.base(fixture).as_bytes(),
             true,
             title.as_bytes(),
             date.as_bytes(),
@@ -254,7 +254,7 @@ fn the_platform_reaches_the_index_header_and_the_lmdb_files() {
     for platform in [LINUX, windows] {
         let tmp = TempDir::new("platform");
         let mut db = WriteDb::new(
-            &tmp.base("db"),
+            tmp.base("db").as_bytes(),
             true,
             b"prot.faa",
             b"Oct 12, 2026  9:00 PM",
@@ -1363,7 +1363,7 @@ fn an_existing_directory_without_write_permission_stops_the_build_before_the_log
 fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     let tmp = TempDir::new("volumes");
     let mut db = WriteDb::new(
-        &tmp.base("db"),
+        tmp.base("db").as_bytes(),
         true,
         b"t",
         b"Oct 12, 2026  9:00 PM",

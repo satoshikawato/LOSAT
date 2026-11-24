@@ -17,6 +17,13 @@ byte 0xE9, and a `-matrix` name of 1,000 `a` and 30
 `é` that NCBI's 1,024-byte message buffer cuts inside a character, after its byte 0xC3 (`R9`). Frozen on 2026-11-20 by line LIB-B (`R4` on 2026-11-20 22:56 JST, added 2026-11-21)
 (`make_fixtures.py --ncbi-bin "$NCBI_BIN"`, which writes `expected/<case>.stdout`, `.stderr` and
 `.rc`, the case's directory as `{D}`); the same cases on the workstation's 2.17.0 gave the same
-bytes (line LIB, survey 2 of the API messages). `R6a` (`-list_outfmt '%f %t'`) is LOSAT's
-refusal: the database reader keeps the names of database files as UTF-8 strings, so the letters
-that open a listed database refuse a name that is not UTF-8; NCBI's bytes are kept as the record.
+bytes (line LIB, survey 2 of the API messages).
+
+The `K10_*` cases (line RG item K10a, frozen on 2026-11-24 with the same command, `R6a` again
+with them) are the values of dustmasker (`dm`), segmasker (`sm`), windowmasker (`wm`),
+makembindex (`mi`), convert2blastmask (`cb`), blastdbcmd (`bd`) and makeprofiledb (`mp`) with the
+byte 0xE9: names of input files, databases (`-infmt blastdb`, `-db`, a `-fa_list` line, `-list`),
+output files and prefixes, missing ones, `BLASTDB` of the environment and of `.ncbirc`, and words
+that name a format, an algorithm, its options, an entry, a range, a mask or a taxid. NCBI reads
+each as the bytes of its `std::string`; `R6a` (`-list_outfmt '%f %t'`), once LOSAT's refusal, is
+now NCBI's bytes too.

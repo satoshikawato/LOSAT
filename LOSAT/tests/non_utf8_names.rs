@@ -3,13 +3,14 @@
 //! that `blastdbcmd -list` finds, a directory of `NCBI_CONFIG_PATH` and the LMDB file named in a
 //! version 5 volume (missing, and listed by `blastdbcmd -metadata`), each with the byte 0xE9
 //! (`é` of Latin-1), and a member name of a text `-mask_data` file of makeblastdb that NCBI's
-//! exception report quotes (`R4`). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
+//! exception report quotes (`R4`); and the values of dustmasker, segmasker, windowmasker,
+//! makembindex, makeprofiledb, convert2blastmask and blastdbcmd (`K10_*`, line RG item K10a: names
+//! of files and databases, `BLASTDB` of the environment and of `.ncbirc`, and words that name a
+//! format, an algorithm, an entry or a range). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
-//! `Building a new DB, current time: ` is not compared (as `dropin_corpus.py`). A case of kind
-//! `refused` is LOSAT's explicit refusal (its frozen NCBI bytes are the record of what NCBI does).
-//! `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
+//! `Building a new DB, current time: ` is not compared (as `dropin_corpus.py`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
 //! survey left open.
 //!
 //! Unix only, and not macOS: a file name there is the system's bytes, and APFS refuses a name that
@@ -195,15 +196,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
                     && without_time(&output.stdout) == expected(case, "stdout", &db)
                     && output.stderr == expected(case, "stderr", &db)
             }
-            // LOSAT keeps the names of database files as UTF-8 strings (`SearchPath::new`): the
-            // letters that open a listed database refuse a name that is not UTF-8.
-            "refused" => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                output.status.code() == Some(1)
-                    && output.stdout.is_empty()
-                    && stderr.contains("the name of the database is not valid UTF-8")
-                    && stderr.contains("this database is not supported by LOSAT's BLASTDBCMD")
-            }
             other => panic!("kind {other}"),
         };
         if !ok {
@@ -215,6 +207,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 24, "the cases of cases.tsv");
+    assert_eq!(ran, 83, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

@@ -51,7 +51,6 @@ None that change the output of a normal run. A byte outside visible ASCII in `-m
 
 `convert2blastmask` runs every option of `-help`. It stops with an error in these cases:
 
-- A value that is not UTF-8 of any option but `-out` and `-logfile`, after NCBI's own argument errors and `-dryrun` (NCBI reads the bytes).
 - Masking information that LOSAT's writer cannot write as NCBI does.
 - A failed write of a `maskinfo_*` output. A failed write of `interval` goes on silently, as in NCBI.
 

@@ -1239,8 +1239,9 @@ fn a_database_without_mask_data_has_no_column_files() {
         db.close().unwrap();
         for file in db.list_files() {
             assert!(
-                !file.ends_with("aa") && !file.ends_with("ab") && !file.ends_with("ac"),
-                "{file}"
+                !file.ends_with(b"aa") && !file.ends_with(b"ab") && !file.ends_with(b"ac"),
+                "{}",
+                String::from_utf8_lossy(&file)
             );
         }
         let written = files_named(&tmp.0, "db.");

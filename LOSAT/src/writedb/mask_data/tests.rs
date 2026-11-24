@@ -420,7 +420,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
 /// A protein database of `version` in the platform of the expected files.
 pub(super) fn new_db(base: &str, date: &[u8], max_file_size: u64, version: DbVersion) -> WriteDb {
     WriteDb::new(
-        base,
+        base.as_bytes(),
         true,
         b"t",
         date,

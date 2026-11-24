@@ -1410,7 +1410,7 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
 fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::column::Column {
     let base = dir.name("edge");
     let mut column = crate::writedb::column::Column::new(
-        &base,
+        base.as_bytes(),
         false,
         0,
         0,

@@ -33,7 +33,7 @@ fn super_headers_and_volume_counts_read_as_ncbi() {
         num_seq: 6,
         num_vol: 2,
     };
-    header.save(shd.to_str().unwrap());
+    header.save(shd.to_str().unwrap().as_bytes());
     assert_eq!(SuperHeader::load(&shd), Some(header));
     let mut bytes = std::fs::read(&shd).unwrap();
     bytes[4] = 2;

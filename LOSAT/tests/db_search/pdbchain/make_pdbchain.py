@@ -51,6 +51,10 @@ Each line has its own taxid (`-taxid_map`: 100001 for `B`, 100002 for `A`). Its 
 `q_norm0.faa` is the query of the letters of `pdbnorm`'s first record (`1ab6`, which has no Bioseq): its alignment comes
 first, before that of `1AB8`, whose label NCBI's BLAST XML cannot write.
 
+`q_pdb1ab1.faa` is the query `pdb|1AB1|A` of the duplicated record's letters (decision KB-12-1 of line RG-KB item 12): read
+with `-parse_deflines`, its Bioseq holds the id of the handle of `1AB1` chain 321 (chain 65), so NCBI's scope finds the
+query for that sequence in `pdbonly` and `pdbtwo`.
+
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
 `CPDB_seq_id` forms the chain of a Seq-id without a chain-id), lower case, the keys the search looks
@@ -278,6 +282,8 @@ def main(ncbi_bin, names):
     seq = letters(PDUP)
     with open(os.path.join(HERE, "q_norm0.faa"), "w") as f:
         f.write(">qn0 the letters of pdbnorm's first record\n" + record_letters(seq, 0) + "\n")
+    with open(os.path.join(HERE, "q_pdb1ab1.faa"), "w") as f:
+        f.write(">pdb|1AB1|A query title\n" + seq + "\n")
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
         if db == "pdbtwo":

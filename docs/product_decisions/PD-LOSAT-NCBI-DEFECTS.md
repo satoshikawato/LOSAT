@@ -3136,9 +3136,13 @@ file would differ, and NCBI's programs still could not open the database).
   (`common::database::refuse_id_of_a_query`, PD-LOSAT-DATABASE-SEARCH) covers it, since review 2
   (N1) only in the formats in which NCBI's scope looks the sequence up by its Seq-align id (a
   report that reads its Bioseq, or the batch's prefetch; psiblast every format). The Seq-annots
-  and the archive (outfmt 8, 9, 11, 12) write NCBI's bytes, as on dev; the organism report and the
-  field lists that read the subject's Bioseq stay refused: NCBI shows the query's Bioseq for the
-  sequence there (`6 sseqid stitle` of probe `c321`: `pdb|1AB1|A` and `N/A`).
+  and the archive (outfmt 8, 9, 11, 12) write NCBI's bytes, as on dev. NCBI shows the query's
+  Bioseq for the sequence in the reports that read it (`6 sseqid stitle` of probe `c321`:
+  `pdb|1AB1|A` and `N/A`), and since decision KB-12-1 (2026-11-25) so does LOSAT, from one owner
+  of the run's query Bioseqs (`report::query_bioseq`) that the tables and the organism report
+  read, for every sequence with the id of a query (PD-LOSAT-DATABASE-SEARCH): the query's ids,
+  `stitle` `N/A`, the query's length as `slen`, no taxonomy, and the query's line in the organism
+  report. The fields and formats that read the found Bioseq's letters keep the refusal.
 - makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
   length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the

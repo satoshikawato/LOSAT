@@ -325,6 +325,7 @@ fn for_each_batch(
                 search_space,
                 length_adjustment,
                 searched_space: batch_searched_space(searched, stats),
+                round: None,
             };
             each(span, &batch)
         })?;
@@ -344,12 +345,12 @@ pub(super) fn write_tblastx_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
-        rps: false,
         db_title: match data.subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: false,
+        program_type: None,
     };
     for_each_batch(data, |span, batch| {
         for index in span.clone() {
@@ -358,9 +359,9 @@ pub(super) fn write_tblastx_archives(
         let mut aligns = TblastxAligns {
             run: RunRecord {
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             data,
             span,

@@ -28,7 +28,6 @@ mod query;
 mod segset;
 mod sites;
 
-pub(crate) use args::alias_word;
 pub use args::RpsbprocArgs;
 
 use std::ffi::{OsStr, OsString};
@@ -57,7 +56,7 @@ use sites::{MotifError, MotifState};
 const E_OK: i32 = 0;
 const E_DATA_LOAD_ERROR: i32 = 2;
 const E_INPUT_FILE_OPEN_ERROR: i32 = 3;
-const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
+pub(crate) const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
 const E_INPUT_DATA_ERROR: i32 = 5;
 
 /// `CRpsbProcApp::COORDSBASE`: the printed coordinates count from 1.
@@ -335,7 +334,7 @@ pub(crate) fn write_stderr_bytes(bytes: &[u8]) {
 /// Writes `text` (help or version) to standard output; a failed write ends LOSAT as a failed
 /// write of the report does (exception 9).
 pub(crate) fn write_stdout(text: &str) {
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = crate::cli::standard_output();
     if let Err(error) = stdout
         .write_all(text.as_bytes())
         .and_then(|()| stdout.flush())
@@ -748,7 +747,7 @@ fn init(
         }
     };
     header.extend_from_slice(b"\n#Output data file:");
-    let mut out: Box<dyn Write> = Box::new(std::io::stdout());
+    let mut out: Box<dyn Write> = Box::new(crate::cli::standard_output());
     if let Some(outfile) = &args.outfile {
         match std::fs::File::create(outfile) {
             Ok(file) => {

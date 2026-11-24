@@ -118,11 +118,13 @@ impl SubjectRead {
 /// What the load of a read's subject looks up, as far as it decides the texts: NCBI's lookups write
 /// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
 /// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
-/// (`TaxDb::offset_error_taxid`; a volume whose cache would ask again is refused,
-/// `TaxdbRun::cache_collision`), nothing else. The model of the reads gives each text to the load
-/// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
-/// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
-/// to NCBI's next load that makes the same ask (`LoadTexts`).
+/// (`TaxDb::offset_error_taxid`; on a database with a volume whose cache can ask again,
+/// `TaxdbRun::cache_collision`, at each lookup that misses the slot of that taxid), nothing else.
+/// The model of the reads gives each text to the load that makes the ask, assuming every load it
+/// models happens; a load that NCBI does not make (a BLAST XML `Iteration` or `Hit` that the stream
+/// leaves out, `ReadCursor::cut`) leaves its texts to NCBI's next load that makes the same ask
+/// (`LoadTexts`), and is LOSAT's refusal where it takes that slot on such a database
+/// (`cut_refusal`: the model followed the slot through it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadLoad {
     /// The run's texts of the loads left out (shared by every read of the run).
@@ -143,7 +145,46 @@ pub struct ReadLoad {
     /// Whether the lookup of the load's Seq-align id reads such a header: the load takes the
     /// warning that a load NCBI does not make left (`left_out`).
     pub scope_utf8: bool,
+    /// LOSAT's refusal where NCBI does not make this load (`left_out`), whose lookups take the
+    /// slot of the offset error's taxid on a database whose volume holds that taxid and another of
+    /// its slot (`common::database::TaxdbRun::cache_collision`): the model of the later loads
+    /// followed the slot through this one. `None` for any other load.
+    pub cut_refusal: Option<std::sync::Arc<str>>,
 }
+
+/// LOSAT's refusal of a load that NCBI's BLAST XML stream leaves out where LOSAT's model of the
+/// taxonomy cache's slot followed the slot through it ([`ReadLoad::cut_refusal`]): no error of
+/// NCBI's output stream. It travels as the `io::Error` of the report's writes
+/// ([`CutRefusal::error`]), and a program that turns its report's write errors into NCBI's takes
+/// it out as LOSAT's refusal ([`CutRefusal::of`]), which drops what the run holds.
+#[derive(Debug)]
+pub(crate) struct CutRefusal(std::sync::Arc<str>);
+
+impl CutRefusal {
+    /// The refusal `text` as the error of the report's writes.
+    fn error(text: &std::sync::Arc<str>) -> io::Error {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            CutRefusal(std::sync::Arc::clone(text)),
+        )
+    }
+
+    /// The refusal's text, where `error` is a [`CutRefusal`] of the report's writes.
+    pub(crate) fn of(error: &io::Error) -> Option<&str> {
+        error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<CutRefusal>())
+            .map(|refusal| &*refusal.0)
+    }
+}
+
+impl std::fmt::Display for CutRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CutRefusal {}
 
 impl ReadLoad {
     /// The load of a subject whose Seq-align id's lookup reads a header with a UTF8String where a
@@ -158,6 +199,7 @@ impl ReadLoad {
             lead: 0,
             opening: 0,
             scope_utf8: true,
+            cut_refusal: None,
         }
     }
 
@@ -230,8 +272,13 @@ impl ReadLoad {
 
     /// NCBI does not make this load, whose text in the model is `text`: its warning of a
     /// UTF8String header goes to the next load whose lookup reads such a header, its texts of
-    /// opening and its offset error to the next load that makes those asks (`placed`).
-    pub fn left_out(&self, text: &[u8]) {
+    /// opening and its offset error to the next load that makes those asks (`placed`). `Err`:
+    /// LOSAT's refusal where the model followed the taxonomy cache's slot through this load
+    /// (`cut_refusal`).
+    pub fn left_out(&self, text: &[u8]) -> io::Result<()> {
+        if let Some(refusal) = &self.cut_refusal {
+            return Err(CutRefusal::error(refusal));
+        }
         let (lead, text) = text.split_at(self.lead.min(text.len()));
         let (opening, offset) = text.split_at(self.opening.min(text.len()));
         let mut pending = self.texts.pending.lock().expect("the texts of the loads");
@@ -249,6 +296,7 @@ impl ReadLoad {
                 None => pending.offsets.push((self.volume, offset.to_vec())),
             }
         }
+        Ok(())
     }
 }
 
@@ -308,7 +356,7 @@ impl LoadTexts {
         cut: &dyn Fn(usize) -> bool,
         prefetched: &dyn Fn(usize) -> Option<&'p Posts>,
         query: usize,
-    ) -> std::sync::Arc<LoadTexts> {
+    ) -> io::Result<std::sync::Arc<LoadTexts>> {
         let left = std::sync::Arc::new(LoadTexts::default());
         let mut cursor = ReadCursor::in_ledger(reads, &left);
         // Nothing is written: the model keeps the ledger only.
@@ -324,15 +372,14 @@ impl LoadTexts {
             )
             .expect("a model writes to no stream");
             if cut(before) {
-                cursor
-                    .cut(before, &mut report, &mut sink)
-                    .expect("a model writes to no stream");
+                // The only error of a model: LOSAT's refusal of a load left out (`left_out`).
+                cursor.cut(before, &mut report, &mut sink)?;
             }
         }
         cursor
             .before_query(query, &mut report, &mut sink)
             .expect("a model writes to no stream");
-        left
+        Ok(left)
     }
 }
 
@@ -530,8 +577,8 @@ impl<'a> ReadCursor<'a> {
         let reads = reads_of(self.reads, query);
         for read in &reads[self.next.min(reads.len())..] {
             match (&read.load, &self.ledger) {
-                (Some(load), Some(ledger)) => load.in_ledger(ledger).left_out(&read.text),
-                (Some(load), None) => load.left_out(&read.text),
+                (Some(load), Some(ledger)) => load.in_ledger(ledger).left_out(&read.text)?,
+                (Some(load), None) => load.left_out(&read.text)?,
                 (None, _) => {}
             }
         }
@@ -902,10 +949,12 @@ pub const HTML_POSTS_WITHOUT_WARNINGS: &str =
 /// exceptions of their streams, `write_hit_posts`, and the taxonomy database's messages at their
 /// `Hit`s), the BLAST archive (NCBI's posts, which it saves as messages) and the Seq-annots of
 /// outfmt 8, 9 and 12 (the posts of the bytes that NCBI's stream replaces,
-/// `serial::seqalign::write_query_to`), and the pairwise report of a run with `-html` (`html`: the
-/// posts of its reads of NCBI's formatter registries, `ReportPlace::Html`). A writer that posts
-/// without warnings is LOSAT's internal error (`write_hit_posts`, `x_pairwise_par::at_place`), not
-/// a silent loss.
+/// `serial::seqalign::write_query_to`), and the pairwise and query-anchored reports (outfmt 0 to 4,
+/// `ReportFormat::writes_html_links`) of a run with `-html` (`html`: the posts of their reads of
+/// NCBI's formatter registries, `ReportPlace::Html`; line RG T4b fix 1: outfmt 1 to 4 at a later
+/// place among a library call's formats posted without them). A writer that posts without
+/// warnings is LOSAT's internal error (`write_hit_posts`, `x_pairwise_par::at_place`), not a
+/// silent loss.
 pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: bool) -> bool {
     use crate::blastinput::app::ReportFormat;
     matches!(
@@ -921,7 +970,7 @@ pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: 
                 | ReportFormat::AsnBinary
                 | ReportFormat::JsonSeqalign
         )
-    ) || (html && format == Some(ReportFormat::Pairwise))
+    ) || (html && format.is_some_and(ReportFormat::writes_html_links))
 }
 
 /// Writes `text` to `sink` after `report` is flushed (nothing for an empty text): LOSAT's flush,
@@ -1447,9 +1496,26 @@ pub fn replaced_o_message(sequence: &[u8]) -> Option<String> {
 /// c++/include/algo/blast/api/blast_types.hpp:180-184 (`GetMessage` with true)
 pub fn invalid_residues_error(positions: &[usize]) -> Option<String> {
     let list = residue_positions(positions)?;
-    Some(format!(
-        "Warning: Invalid residues found at positions {list} "
-    ))
+    Some(setup_error(&format!(
+        "Invalid residues found at positions {list}"
+    )))
+}
+
+/// The set-up's error of a query whose descriptors hold an empty reference: NCBI's
+/// `CBlastQuerySourceBioseqSet::GetTitle` reads the variant of each, and the null-pointer exception
+/// (`ncbi_exception::NULL_POINTER`) is the query's warning, as `invalid_residues_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:344-372
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+pub fn null_descriptor_error() -> String {
+    setup_error(crate::ncbi_exception::NULL_POINTER)
+}
+
+/// The text of the set-up's error of one query whose one message is `message`: its severity
+/// (`Warning`) and a space after it (`TSearchMessages::ToString`, cited at
+/// `invalid_residues_error`).
+fn setup_error(message: &str) -> String {
+    format!("Warning: {message} ")
 }
 
 /// The list of residue positions of NCBI's `GetSequenceProtein` messages: the first, then up to

@@ -93,7 +93,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   oracle output. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
   run of the row's own query file with `<row_id>.out` as for any `ncbi` row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
-  (to a ` | ` or the end); the hash columns are empty. A refusal after reports that NCBI writes too has stdout
+  (to a ` | ` or the end), in the library's run (`check --library`) the text after `library-expect: ` where covers has
+  one: the library checks an argv before it knows the inputs (`api::validate`), so a refusal that comes from an input's
+  word on the command line (NCBI's exclusion of `-phi_pattern` by `-in_msa`) is the library's message of the argv
+  alone; the hash columns are empty. A refusal after reports that NCBI writes too has stdout
   cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
   outfmt (a near input that NCBI runs to its end, for example the copy row of the batches that LOSAT writes before it
   refuses, or line WQA D10's near input, whose refused batch NCBI's reader stops at), and with
@@ -145,9 +148,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `-in_pssm`, those with the alignment's master options and no `-in_msa`, those with `-export_search_strategy`, those
   with a standard-input query, and those with `cwd=` or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL_DEBUG, NCBI_DONT_USE_NCBIRC): the API's contract
   (`LOSAT/src/api/mod.rs:78-86`) names what a call reads of its process, and these formatter settings are not among
-  them; `-html` reaches the library's host, LOSAT Web, in T4b (line RG, decision T4-1).
+  them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
+  the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
 - `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
-  outfmt 0 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
+  outfmt 0 to 4 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
 - The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,
   `tblastn.tsv`, `tblastx.tsv`) and select their own rows, never a family file such as `<program>.html.tsv`;
   `check_manifest_sizes.py` checks the size of every file.

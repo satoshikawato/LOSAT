@@ -14,7 +14,9 @@ use crate::utils::winmask::{MaskerParams, PctSettings};
 
 use super::counts;
 use super::ids::{fill_id_list, IdLists, IdSet, SeqIdSet, TextMatchIds};
-use super::work::{self, config_exception, report, Failure, Options, CONFIG, INCONSISTENT};
+use super::work::{
+    self, config_exception, report, unsupported, Failure, Options, CONFIG, INCONSISTENT,
+};
 
 /// `CWinMaskApplication::Run` on `args`; the exit status.
 ///
@@ -38,19 +40,62 @@ pub(super) fn run(
         return counts::convert(args, out, diag);
     }
     if !args.given("ustat") {
-        let exception = config_exception(
-            273,
-            INCONSISTENT,
-            "ncbi::CWinMaskConfig::s_DetermineAppType",
-            "one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified",
-        );
-        return report(Failure::Ncbi(exception), diag);
+        return report(no_mode(), diag);
     }
     let options = options(args, settings);
     match masking_run(args, &options, stdin, out, diag) {
         Ok(status) => status,
         Err(failure) => report(failure, diag),
     }
+}
+
+/// The checks of `run` before it reads its input or opens a file, as `run` makes and reports
+/// them (LOSAT Web's validation of the words, `super::check_in`; line NP WW3a, D-WW3-10,
+/// 2026-11-23): the mode (`s_DetermineAppType`); for `-mk_counts` the id lists' exclusion
+/// (`exclusive_id_lists`) and, without an id list to read, its refusal of `-infmt seqids`
+/// (`counts::check_mk_counts`); for `-convert` its exception for `-in -`
+/// (`counts::check_convert`); nothing more for the masking, which opens `-in` first. 0 for an
+/// argv that passes them, as `run` goes on to open its files.
+pub(super) fn check(
+    args: &Args,
+    _settings: &ApplicationSettings,
+    _stdin: &mut Cin<'_>,
+    _out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
+    let checked = if args.flag("mk_counts") {
+        exclusive_id_lists(args).and_then(|()| {
+            let lists = ["ids", "exclude_ids"]
+                .iter()
+                .any(|name| !args.value(name).unwrap_or_default().is_empty());
+            if lists {
+                // `id_lists` reads the list before `mk_counts` refuses -infmt seqids.
+                Ok(())
+            } else {
+                counts::check_mk_counts(args)
+            }
+        })
+    } else if args.flag("convert") {
+        counts::check_convert(args)
+    } else if args.given("ustat") {
+        Ok(())
+    } else {
+        Err(no_mode())
+    };
+    match checked {
+        Ok(()) => 0,
+        Err(failure) => report(failure, diag),
+    }
+}
+
+/// The error of an argv of no mode (`CWinMaskConfig::s_DetermineAppType`).
+fn no_mode() -> Failure {
+    Failure::Ncbi(config_exception(
+        273,
+        INCONSISTENT,
+        "ncbi::CWinMaskConfig::s_DetermineAppType",
+        "one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified",
+    ))
 }
 
 /// The masking settings of `CWinMaskConfig` (`eGenerateMasks` or `eGenerateMasksWithDuster`).
@@ -121,6 +166,10 @@ fn masking_run(
     };
     let mut source = work::reader(options, input)?;
     let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`).
+    if let Some(reason) = output.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
     let writer = work::writer(options.outfmt);
     let text_match = args
         .boolean("text_match")
@@ -132,6 +181,23 @@ fn masking_run(
         }
     }
     work::run(options, source, writer, &lists, &mut output, diag)
+}
+
+/// The exception of `-ids` with `-exclude_ids`, which `CWinMaskConfig` throws before it reads
+/// either list (`id_lists`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:412
+fn exclusive_id_lists(args: &Args) -> Result<(), Failure> {
+    let given = |name| !args.value(name).unwrap_or_default().is_empty();
+    if given("ids") && given("exclude_ids") {
+        return Err(Failure::Ncbi(config_exception(
+            412,
+            INCONSISTENT,
+            CONFIG,
+            "only one of -ids or -exclude_ids can be specified",
+        )));
+    }
+    Ok(())
 }
 
 /// The id lists of `-ids` and `-exclude_ids` (`CIdSet_TextMatch`, or `CIdSet_SeqId` with
@@ -148,16 +214,9 @@ fn id_lists(
     text_match: bool,
     diag: &mut Diag,
 ) -> Result<IdLists, Failure> {
+    exclusive_id_lists(args)?;
     let ids = args.value("ids").unwrap_or_default();
     let exclude_ids = args.value("exclude_ids").unwrap_or_default();
-    if !ids.is_empty() && !exclude_ids.is_empty() {
-        return Err(Failure::Ncbi(config_exception(
-            412,
-            INCONSISTENT,
-            CONFIG,
-            "only one of -ids or -exclude_ids can be specified",
-        )));
-    }
     let mut list = |name: &str, line: u32| -> Result<Option<IdSet>, Failure> {
         if name.is_empty() {
             return Ok(None);

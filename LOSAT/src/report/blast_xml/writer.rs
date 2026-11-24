@@ -756,22 +756,18 @@ pub(crate) fn count_hsp(
     );
     let (identity, positive) = recount(hsp.qrow, hsp.srow, positives, &mut scratch.midline);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:238-241
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:225-230, 258-260
     // The gaps of the Seq-align's segments (also for a translated search, lines 259-260): the
     // columns of the edit script's gaps, not the `-` letters of the rows, which a stored gap
-    // character of a protein subject also is. Without an edit script, the `-` letters.
-    let gaps = match hsp.ops {
-        Some(ops) => ops
-            .iter()
+    // character of a protein subject also is. Without an edit script (an ungapped HSP: BLASTN's
+    // `-ungapped` Dense-diag, which counts none, and TBLASTX's Std-seg, whose one Dense-seg segment
+    // has no gap), none (remaining-gaps X1b-p).
+    let gaps = hsp.ops.map_or(0, |ops| {
+        ops.iter()
             .filter(|op| !op.is_sub())
             .map(|op| op.num() as usize)
-            .sum::<usize>() as i32,
-        None => hsp
-            .qrow
-            .iter()
-            .chain(hsp.srow)
-            .filter(|&&letter| letter == b'-')
-            .count() as i32,
-    };
+            .sum::<usize>() as i32
+    });
     HspCounts {
         identity,
         positive,

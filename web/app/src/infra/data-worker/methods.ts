@@ -3,7 +3,7 @@
 // `describe` / `start` / `validate` of the engine, which its serial reactor answers
 // (web/packages/losat/src/infra/reactor/control.ts), and the name of the lock by which the page learns that it ended.
 // The compile-time checks below keep the lists complete.
-import type { EngineControl } from 'losat';
+import type { EngineControl, ToolControl } from 'losat';
 import type { WholeFileInflater } from 'losat/ports';
 import type { CountsStore } from '../../ports/counts';
 import type { DataGateway } from '../../ports/data';
@@ -29,6 +29,11 @@ export const DATA_GATEWAY_METHODS = [
   'deleteRun',
   'storageInfo',
   'checkStoredResults',
+  'openToolRun',
+  'readToolOutputRange',
+  'getToolOutputFile',
+  'inflateToSessionFile',
+  'dropSessionFile',
 ] as const satisfies readonly (keyof DataGateway)[];
 
 export const EXAMPLE_STORE_METHODS = ['readExample', 'saveExample', 'deleteExample'] as const satisfies readonly (keyof ExampleStore)[];
@@ -44,7 +49,12 @@ export const COUNTS_STORE_METHODS = [
 
 export const INFLATE_METHODS = ['inflateFile'] as const satisfies readonly (keyof WholeFileInflater)[];
 
-export const ENGINE_CONTROL_METHODS = ['describe', 'start', 'validate'] as const satisfies readonly (keyof EngineControl)[];
+export const ENGINE_CONTROL_METHODS = [
+  'describe',
+  'describeTool',
+  'start',
+  'validate',
+] as const satisfies readonly (keyof (EngineControl & ToolControl))[];
 
 /** How the page learns that the Data worker ended (gateway.ts; line WQA's sweep, D2). */
 export interface DataWorkerLife {
@@ -55,7 +65,13 @@ export interface DataWorkerLife {
 export const LIFE_METHODS = ['lifeLock'] as const satisfies readonly (keyof DataWorkerLife)[];
 
 /** Everything the Data worker serves. */
-export type DataWorkerApi = DataGateway & ExampleStore & CountsStore & WholeFileInflater & EngineControl & DataWorkerLife;
+export type DataWorkerApi = DataGateway &
+  ExampleStore &
+  CountsStore &
+  WholeFileInflater &
+  EngineControl &
+  ToolControl &
+  DataWorkerLife;
 export const DATA_WORKER_METHODS = [
   ...DATA_GATEWAY_METHODS,
   ...EXAMPLE_STORE_METHODS,

@@ -73,6 +73,8 @@ use std::io::{self, IoSlice, Seek, SeekFrom, Write};
 use std::ops::BitOr;
 use std::path::Path;
 
+use crate::report::run_files::OpenedFile;
+
 /// `BUFSIZ` of the Linux x64 build: the file buffer's size. Its put area is one byte shorter.
 pub(crate) const BUFSIZ: usize = 8192;
 
@@ -112,59 +114,101 @@ pub(crate) trait RawFile: Sized {
     fn close(self) -> io::Result<()>;
 }
 
-/// A file on disk.
-pub(crate) struct DiskFile(File);
+/// `close(2)` of a file on disk (`RawFile::close`).
+#[cfg(unix)]
+fn close_disk_file(file: File) -> io::Result<()> {
+    use std::os::fd::IntoRawFd;
+    let fd = file.into_raw_fd();
+    // SAFETY: `fd` was just taken out of the `File`, which no longer owns it, and nothing
+    // else closes it.
+    unsafe { rustix::io::try_close(fd) }.map_err(io::Error::from)
+}
 
-impl RawFile for DiskFile {
+/// Other targets close by dropping the file and never see a close error.
+#[cfg(not(unix))]
+fn close_disk_file(file: File) -> io::Result<()> {
+    drop(file);
+    Ok(())
+}
+
+/// The stream's file: a file on disk (`OpenedFile::Disk`, the one `open` makes and the one an
+/// `eOutputFile` argument opened on the file system), with one `write` or `writev` per call,
+/// `lseek` and `close(2)`; or LOSAT Web's file of an `eOutputFile` argument (`Shared`,
+/// `Discard`, `Full`), which takes every segment of a call through its `Write` (`/dev/full`'s
+/// fails), has no position to seek to, and closes without an error (its drop delivers the file).
+impl RawFile for OpenedFile {
     fn open(path: &Path) -> io::Result<Self> {
         OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(path)
-            .map(DiskFile)
+            .map(OpenedFile::Disk)
     }
 
     fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize> {
-        match segments {
-            [one] => self.0.write(one),
-            [a, b] => self.0.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
-            _ => unreachable!("the stream writes one or two segments"),
+        if let OpenedFile::Disk(file) = self {
+            return match segments {
+                [one] => file.write(one),
+                [a, b] => file.write_vectored(&[IoSlice::new(a), IoSlice::new(b)]),
+                _ => unreachable!("the stream writes one or two segments"),
+            };
         }
+        let mut taken = 0;
+        for segment in segments {
+            Write::write_all(self, segment)?;
+            taken += segment.len();
+        }
+        Ok(taken)
     }
 
     fn seek(&mut self, pos: u64) -> io::Result<()> {
-        self.0.seek(SeekFrom::Start(pos)).map(|_| ())
+        match self {
+            OpenedFile::Disk(file) => file.seek(SeekFrom::Start(pos)).map(|_| ()),
+            _ => Err(io::Error::from(io::ErrorKind::Unsupported)),
+        }
     }
 
-    #[cfg(unix)]
     fn close(self) -> io::Result<()> {
-        use std::os::fd::IntoRawFd;
-        let fd = self.0.into_raw_fd();
-        // SAFETY: `fd` was just taken out of the `File`, which no longer owns it, and nothing
-        // else closes it.
-        unsafe { rustix::io::try_close(fd) }.map_err(io::Error::from)
-    }
-
-    #[cfg(not(unix))]
-    fn close(self) -> io::Result<()> {
-        drop(self.0);
-        Ok(())
+        match self {
+            OpenedFile::Disk(file) => close_disk_file(file),
+            mut other => {
+                let _ = Write::flush(&mut other);
+                drop(other);
+                Ok(())
+            }
+        }
     }
 }
 
+/// What a stream asks of its stream buffer (`sputn`, `sputc`, `pubsync`): whether the buffer
+/// took the bytes (held or written), and whether its `sync` wrote what it held.
+pub(crate) trait StreamBuf {
+    /// `sputn` of `data`.
+    fn put_bytes(&mut self, data: &[u8]) -> bool;
+    /// `sputc` of `byte`.
+    fn put_byte(&mut self, byte: u8) -> bool;
+    /// `pubsync`.
+    fn sync(&mut self) -> bool;
+    /// Whether a write found a pipe closed where that ends NCBI's process by SIGPIPE
+    /// (`crate::ncbi_app::files::ends_like_sigpipe`).
+    fn closed_pipe(&self) -> bool;
+}
+
 /// The file buffer: the held bytes and the file.
-struct FileBuf<F: RawFile> {
+pub(crate) struct FileBuf<F: RawFile> {
     file: Option<F>,
     /// The bytes held; `len()` is `b` of the rules.
     held: Vec<u8>,
+    /// A write failed as on a closed pipe (`StreamBuf::closed_pipe`).
+    closed_pipe: bool,
 }
 
 impl<F: RawFile> FileBuf<F> {
     /// Writes all of `segments` (the first call as given, the calls after a short count with
     /// the segments the count finished dropped). `false` when a call fails; the file keeps the
     /// bytes the earlier calls took.
-    fn write_all(file: &mut F, segments: &mut [&[u8]]) -> bool {
+    fn write_all(file: &mut F, segments: &mut [&[u8]], closed_pipe: &mut bool) -> bool {
         let mut segments = segments;
         loop {
             if segments.iter().all(|s| s.is_empty()) {
@@ -175,7 +219,10 @@ impl<F: RawFile> FileBuf<F> {
                 Ok(0) => return false,
                 Ok(n) => n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return false,
+                Err(e) => {
+                    *closed_pipe |= crate::ncbi_app::files::ends_like_sigpipe(&e);
+                    return false;
+                }
             };
             while let Some(first) = segments.first() {
                 if taken < first.len() || segments.len() == 1 {
@@ -199,7 +246,7 @@ impl<F: RawFile> FileBuf<F> {
             self.held.extend_from_slice(data);
             return true;
         }
-        if FileBuf::write_all(file, &mut [&self.held, data]) {
+        if FileBuf::write_all(file, &mut [&self.held, data], &mut self.closed_pipe) {
             self.held.clear();
             true
         } else {
@@ -218,7 +265,7 @@ impl<F: RawFile> FileBuf<F> {
         if !overflow {
             return true;
         }
-        if FileBuf::write_all(file, &mut [&self.held]) {
+        if FileBuf::write_all(file, &mut [&self.held], &mut self.closed_pipe) {
             self.held.clear();
             true
         } else {
@@ -234,7 +281,7 @@ impl<F: RawFile> FileBuf<F> {
         if self.held.is_empty() {
             return true;
         }
-        if FileBuf::write_all(file, &mut [&self.held]) {
+        if FileBuf::write_all(file, &mut [&self.held], &mut self.closed_pipe) {
             self.held.clear();
             true
         } else {
@@ -264,14 +311,68 @@ impl<F: RawFile> FileBuf<F> {
     }
 }
 
-/// An output-only `std::ofstream` of makeblastdb 2.17.0 (Linux x64).
-pub(crate) struct Stream<F: RawFile> {
-    state: IoState,
-    buf: FileBuf<F>,
+impl<F: RawFile> StreamBuf for FileBuf<F> {
+    fn put_bytes(&mut self, data: &[u8]) -> bool {
+        FileBuf::put_bytes(self, data)
+    }
+    fn put_byte(&mut self, byte: u8) -> bool {
+        FileBuf::put_byte(self, byte)
+    }
+    fn sync(&mut self) -> bool {
+        FileBuf::sync(self)
+    }
+    fn closed_pipe(&self) -> bool {
+        self.closed_pipe
+    }
 }
 
-/// The stream on a file on disk, as the writer uses it.
-pub(crate) type OfStream = Stream<DiskFile>;
+impl<F: RawFile> Drop for FileBuf<F> {
+    /// The destructor of the stream closes its file.
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+/// An output-only stream (`std::ostream`) over the buffer `B`: its state and its output functions
+/// (the `sentry` and the calls on the buffer). makeblastdb 2.17.0's `std::ofstream` is the stream
+/// over a file buffer (`Stream`); NCBI's `cout` is the one over standard output's buffer
+/// (`super::cout`).
+pub(crate) struct BasicStream<B> {
+    state: IoState,
+    buf: B,
+}
+
+/// An output-only `std::ofstream` of makeblastdb 2.17.0 (Linux x64).
+pub(crate) type Stream<F> = BasicStream<FileBuf<F>>;
+
+/// The stream on a file, as the writer uses it: on disk, or the file of an `eOutputFile`
+/// argument (LOSAT Web's too).
+pub(crate) type OfStream = Stream<OpenedFile>;
+
+impl OfStream {
+    /// The stream of the file `file`, open already: the `CNcbiOfstream` that an `eOutputFile`
+    /// argument opened (`crate::ncbi_app::files::open_output_file`).
+    pub(crate) fn of_file(file: OpenedFile) -> Self {
+        let mut stream = Self::new();
+        stream.open_with(|| Ok(file));
+        stream
+    }
+}
+
+impl<B> BasicStream<B> {
+    /// A stream in the good state over `buf`.
+    pub(crate) fn with_buf(buf: B) -> Self {
+        BasicStream {
+            state: IoState::GOOD,
+            buf,
+        }
+    }
+
+    /// The stream buffer.
+    pub(crate) fn rdbuf(&self) -> &B {
+        &self.buf
+    }
+}
 
 impl<F: RawFile> Stream<F> {
     /// A stream with no file.
@@ -281,6 +382,7 @@ impl<F: RawFile> Stream<F> {
             buf: FileBuf {
                 file: None,
                 held: Vec::with_capacity(BUFSIZ),
+                closed_pipe: false,
             },
         }
     }
@@ -312,7 +414,9 @@ impl<F: RawFile> Stream<F> {
             Err(_) => self.setstate(IoState::FAIL),
         }
     }
+}
 
+impl<B: StreamBuf> BasicStream<B> {
     pub(crate) fn rdstate(&self) -> IoState {
         self.state
     }
@@ -391,7 +495,9 @@ impl<F: RawFile> Stream<F> {
         self.put(b'\n');
         self.flush();
     }
+}
 
+impl<F: RawFile> Stream<F> {
     /// `seekp` to `pos`.
     pub(crate) fn seekp(&mut self, pos: u64) {
         if self.bad() {
@@ -420,12 +526,6 @@ impl<F: RawFile> std::fmt::Debug for Stream<F> {
             .field("open", &self.buf.file.is_some())
             .field("held", &self.buf.held.len())
             .finish()
-    }
-}
-
-impl<F: RawFile> Drop for Stream<F> {
-    fn drop(&mut self) {
-        self.buf.close();
     }
 }
 

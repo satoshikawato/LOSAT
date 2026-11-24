@@ -5,7 +5,7 @@
 const fs = require("fs");
 const { WASI } = require("wasi");
 const { prepareArtifact, unsignedWasiImports, blockingStdioWrite, endOnAbortTrap } = require("./wasi_artifact");
-const { sharedFileTable, sharedFileImports } = require("./wasi_files");
+const { sharedFileTable, sharedFileImports, directoryReads } = require("./wasi_files");
 
 // NCBI reference (598d8ae6):
 // c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -51,7 +51,8 @@ const wasi = new WASI({
   // to process.stderr, which can leave a piped descriptor 1 or 2 non-blocking. Descriptors 1 and 2
   // are not the table's, so the table's fd_write passes them to this one.
   const unsigned = unsignedWasiImports(wasi.wasiImport);
-  const local = { ...unsigned, fd_write: blockingStdioWrite(unsigned.fd_write) };
+  // A folder opened for reading fails its reads with EISDIR, as on Linux (directoryReads, wasi_files.js).
+  const local = directoryReads({ ...unsigned, fd_write: blockingStdioWrite(unsigned.fd_write) }, guestMemory, "/");
   const instance = await WebAssembly.instantiate(module, {
     // The serial memory has no declared maximum, so it can pass 2 GiB.
     wasi_snapshot_preview1: { ...local, ...sharedFileImports(sharedFileTable(), guestMemory, local) },

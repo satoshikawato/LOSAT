@@ -575,3 +575,74 @@ fn the_file_is_created_and_its_refusal_kept() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A panic (LOSAT's own failure; the release profile aborts) ends the run's strategy file as a
+/// refusal of LOSAT's ends it (`install_panic_hook`): an export whose sink cannot be cut is kept
+/// for the hook (`HOLDING`), whose writing gives that sink every request made, as a regular file
+/// has them, even while a request is being made; an export of a file that can be cut is not kept
+/// (its requests are in the file).
+#[test]
+fn a_panic_writes_the_requests_held_for_a_sink_that_cannot_be_cut() {
+    let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+    let made = |cut: bool| {
+        let sink = Sink::default();
+        let export = StrategyExport::new(
+            Box::new(Uncut(sink.clone(), cut)),
+            &OptionInputs::new(Program::Blastp, "blastp"),
+            Some("in/db/bp"),
+            OptionsHandle::default(),
+        );
+        for at in 0..3 {
+            export
+                .write_request(at..at + 1, &request(&queries, &[]))
+                .unwrap();
+            export.note_searched(at..at + 1, searched(5)).unwrap();
+        }
+        (export, sink)
+    };
+    let kept = |export: &StrategyExport| {
+        HOLDING
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|shared| shared.upgrade().is_some_and(|s| Arc::ptr_eq(&s, &export.0)))
+    };
+    let (strategy, sink) = made(false);
+    assert!(kept(&strategy));
+    assert_eq!(sink.text(), "");
+    // A panic while a request is made (the export's state locked): the requests made before it
+    // are written (the hook does not take that lock), the one being made is not held yet. Only
+    // this export: other tests' exports of the process stay as they are.
+    let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
+    strategy
+        .write_with(3..4, |write| {
+            write_held_of(&[Arc::downgrade(&strategy.0)]);
+            assert_eq!(sink.text(), all);
+            write(&request(&queries, &[]))
+        })
+        .unwrap();
+    assert_eq!(sink.text(), all);
+    // The run's end after it writes the request made since, and nothing twice.
+    let _ = end_run(Some(&strategy), Ok(()));
+    let all = [all, with_space(5)].concat();
+    assert_eq!(sink.text(), all);
+    // Every lock that the hook takes was given back (`hook_lock`): a panic after it waits for none
+    // that its own thread holds.
+    assert_eq!(HOOK_LOCKS.get(), 0);
+    let (file, _) = made(true);
+    assert!(!kept(&file));
+}
+
+/// The panic hook of a thread that holds one of the hook's locks (a panic inside such a step)
+/// returns at once instead of waiting for it (`write_held_at_panic`, `hook_lock`), and the count
+/// of such locks goes back to none when the lock is given back.
+#[test]
+fn the_panic_hook_does_not_wait_for_a_lock_its_own_thread_holds() {
+    let lock = Mutex::new(());
+    {
+        let _held = hook_lock(&lock);
+        assert_eq!(HOOK_LOCKS.get(), 1);
+        write_held_at_panic();
+    }
+    assert_eq!(HOOK_LOCKS.get(), 0);
+}

@@ -16,7 +16,8 @@
 //! whose copy did, and `the_chain_runs_change_no_report` compares it with `=0`. `LOSAT_X_LISTSTEP`
 //! (in the strict set) writes a block's candidate list several words a step in the AVX2 candidate
 //! stage; `steps=` counts the scan calls that did, and `the_list_steps_change_no_report` compares it
-//! with `=0`.
+//! with `=0`. The same searches check `LOSAT_X_TBNHITSTEP` (in the strict set), the two-hit loop of
+//! the units after the scan (`the_hit_steps_change_no_report`).
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (few candidate words, a sparse
 //! table) and all 115 of them (four query batches, no sparse table; the offset array fills, so the
@@ -136,6 +137,7 @@ fn avx2() -> bool {
 const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "0");
 const CHAINRUN_OFF: (&str, &str) = ("LOSAT_X_CHAINRUN", "0");
 const LISTSTEP_OFF: (&str, &str) = ("LOSAT_X_LISTSTEP", "0");
+const HITSTEP_OFF: (&str, &str) = ("LOSAT_X_TBNHITSTEP", "0");
 const PLAIN: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "2");
 const SPARSE: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "3");
 const RESUME_OFF: (&str, &str) = ("LOSAT_X_TBNSCANRESUME", "0");
@@ -312,6 +314,34 @@ fn the_list_steps_change_no_report() {
                 assert!(calls > 0, "{query:?}");
             } else {
                 assert!(steps.is_none_or(|[steps]| steps == 0), "{query:?}: no AVX2");
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (the tests of each hit
+// of the two-hit loop). The units' loop takes each hit's outcomes from one compare, two hits a step
+// (`LOSAT_X_TBNHITSTEP`, on by default; the unit tests of `tblastn/x_tbn_hitbf.rs` compare it with
+// the loop before and with the reference's statements on random tables): every search gives the
+// report of `=0`, at one and four threads, with the same scan calls.
+#[test]
+fn the_hit_steps_change_no_report() {
+    for query in queries() {
+        let (expected, stderr) = tblastn(query, 1, &[HITSTEP_OFF]);
+        assert!(
+            !expected.is_empty(),
+            "{query:?}: the search must report hits"
+        );
+        let off = byte_scans(&stderr).map(|(counts, _)| counts);
+        for threads in [1, 4] {
+            let (report, stderr) = tblastn(query, threads, &[]);
+            assert!(
+                report == expected,
+                "{query:?}: {threads} threads: LOSAT_X_TBNHITSTEP changed the report"
+            );
+            if threads == 1 {
+                let on = byte_scans(&stderr).map(|(counts, _)| counts);
+                assert_eq!(on, off, "{query:?}: the same scan units and calls");
             }
         }
     }

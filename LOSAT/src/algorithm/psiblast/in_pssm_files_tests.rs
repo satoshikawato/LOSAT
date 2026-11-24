@@ -191,7 +191,7 @@ fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
         &request(true, false),
     ))
     .unwrap();
-    let (asn, _, _) = input.files(&request(true, false)).unwrap();
+    let asn = input.files(&request(true, false)).unwrap().asn;
     let asn = String::from_utf8(asn.unwrap()).unwrap();
     assert!(
         asn.contains("comment \"x\"")
@@ -206,6 +206,18 @@ fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
     .unwrap_err()
     .to_string();
     assert!(error.contains("without params.rpsdbparams"), "{error}");
+    assert!(error.contains("with -out_pssm"), "{error}");
+    // The one owner of the condition, which the archive of `-outfmt 11` reads too: computed
+    // scores without the file's own `rpsdbparams`.
+    assert!(file(vec![], true, false).matrix_name_unwritable());
+    assert!(!file(vec![], false, false).matrix_name_unwritable());
+    assert!(!file(vec![], true, true).matrix_name_unwritable());
+    let archive = matrix_name_refusal("in the archive of -outfmt 11");
+    assert!(
+        archive.contains("rpsdbparams in the archive of -outfmt 11 (NCBI")
+            && archive.ends_with("is not supported by LOSAT's PSIBLAST"),
+        "{archive}"
+    );
     refusal(rounds_input(
         file(vec![], false, false),
         &request(true, false),

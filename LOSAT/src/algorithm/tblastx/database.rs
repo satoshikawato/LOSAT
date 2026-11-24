@@ -150,10 +150,10 @@ impl TblastxDatabase {
         self.parsed && self.db.num_oids() > max_sequences
     }
 
-    /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::prefetch_refused`), which turns the report stream off.
-    pub(crate) fn prefetch_refused(&self) -> bool {
-        self.taxdb.prefetch_refused(&self.db)
+    /// Whether a fetch of the run may be refused because of NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::cache_may_refuse`), which turns the report stream off.
+    pub(crate) fn cache_may_refuse(&self) -> bool {
+        self.taxdb.cache_may_refuse(&self.db)
     }
 
     /// Whether a report that names any sequence of the database could be refused by LOSAT
@@ -925,19 +925,20 @@ pub(crate) fn after_throw<'a>(
 
 /// How the pairwise reports of the formats `formats` read each query's subjects, as the first
 /// pairwise format's writer reads them (`PairwiseView::reading` of `-sorthits` and `-sorthsps`
-/// `sort` and the run's numbers `counts`; the formats of a run whose loads they make share one
-/// view's order, `FormatThrow::and`); `None` without one.
+/// `sort`, the run's numbers `counts` and `-html`, `html`; the formats of a run whose loads they
+/// make share one view's order, `FormatThrow::and`); `None` without one.
 pub(crate) fn pairwise_reading(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
     sort: crate::report::hit_sort::ReportSort,
     counts: crate::blastinput::report_counts::ReportCounts,
+    html: bool,
 ) -> Option<crate::report::pairwise::PairwiseReading> {
     let view = formats.iter().find_map(|format| {
         format
             .report_format()
             .and_then(crate::report::pairwise::PairwiseView::of)
     })?;
-    Some(view.reading(sort, counts.shown()))
+    Some(view.reading(sort, counts.shown(), html))
 }
 
 /// What one query's report of the hits `ordered` (in report order) loads where its batch's

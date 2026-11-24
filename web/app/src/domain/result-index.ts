@@ -2,8 +2,10 @@
 // each query grouped by subject in the engine's order, sorting and filtering with the
 // engine's values, the limits that a query may have reached, and the orientation of an
 // HSP. Nothing here computes or formats a BLAST value.
-import type { SequenceKind } from 'losat/domain';
+import type { ResolvedDefault, SequenceKind } from 'losat/domain';
+import { optionValue, runTask } from './argv';
 import type { HspTable } from './hsp-table';
+import { taskDefault } from './parameters';
 
 export interface SubjectGroup {
   /** 0-based record index of the subject in the run's subject input. */
@@ -214,17 +216,23 @@ export interface HitLimits {
 /** The parts of the engine's description of an option that the limits read. */
 export interface DescribedOption {
   readonly flag: string;
-  readonly help: string;
   readonly defaultValue?: string;
+  /** The values that the engine resolves for the option by task (`describe`'s `defaults`). */
+  readonly resolvedDefault?: Pick<ResolvedDefault, 'byTask'>;
 }
 
 const countOf = (text: string | undefined): number | undefined =>
   text !== undefined && /^\s*\+?\d+\s*$/.test(text) ? Number.parseInt(text, 10) : undefined;
 
-/** The default of an option from its description (its `default`, or the "default: N" of its help). */
-const describedDefaultOf = (described: readonly DescribedOption[], flag: string): number | undefined => {
+/**
+ * The default of an option for the run's task from its description (`taskDefault`, the search
+ * form's): the value that the engine resolves for the task, else NCBI's default. The hit list
+ * options have no default in NCBI's table (BLAST+ tells them given from not given), so the
+ * engine's resolution gives theirs (500, 250).
+ */
+const describedDefaultOf = (described: readonly DescribedOption[], flag: string, task: string): number | undefined => {
   const option = described.find((o) => o.flag === flag);
-  return countOf(option?.defaultValue ?? option?.help.match(/default:\s*(\d+)/i)?.[1]);
+  return countOf(option === undefined ? undefined : taskDefault(option, task));
 };
 
 /** Whether the argv gives `flag`, as `-flag value` or `-flag=value`. */
@@ -232,9 +240,9 @@ export const flagGiven = (argv: readonly string[], flag: string): boolean =>
   argv.some((word) => word === flag || word.startsWith(`${flag}=`));
 
 /**
- * The hit limits of a run from its argv; where the argv does not set -max_target_seqs,
- * from the default that the engine describes (its `default`, or the "default: N" of its
- * help text). A limit that cannot be read is left out, so nothing is claimed about it.
+ * The hit limits of a run from its argv (read as the engine reads it, `optionValue`); where the argv
+ * does not set -max_target_seqs, from the default that the engine describes for the run's task
+ * (`runTask`, `taskDefault`). A limit that cannot be read is left out, so nothing is claimed about it.
  *
  * The sizes follow BLAST+ (`blast_args.cpp:2894-2973`; the adapter searches once for each
  * distinct hit list size, abi_v2.md §7): the tabular formats keep -max_target_seqs, else
@@ -243,27 +251,20 @@ export const flagGiven = (argv: readonly string[], flag: string): boolean =>
  * -num_descriptions (500) and -num_alignments (250) where either is given, and shows the
  * alignments of the first -num_alignments subjects.
  */
-export function hitLimits(words: readonly string[], described: readonly DescribedOption[]): HitLimits {
-  // The adapter accepts `-flag=value` as the CLI does (the app writes `-flag value`).
-  const argv = words.flatMap((word) => {
-    const joined = /^(-[A-Za-z_][A-Za-z0-9_]*)=(.*)$/s.exec(word);
-    return joined === null ? [word] : [joined[1]!, joined[2]!];
-  });
-  const given = (flag: string): string | undefined => {
-    const at = argv.lastIndexOf(flag);
-    return at >= 0 ? argv[at + 1] : undefined;
-  };
+export function hitLimits(argv: readonly string[], described: readonly DescribedOption[]): HitLimits {
+  // The run's task ('' for a program without -task, as `defaults` keys it).
+  const task = runTask(argv, described) ?? '';
   const alignmentsGiven = flagGiven(argv, '-num_alignments') || flagGiven(argv, '-num_descriptions');
-  const maxTargetSeqs = countOf(given('-max_target_seqs'));
-  const numAlignments = countOf(given('-num_alignments'));
-  const numDescriptions = countOf(given('-num_descriptions'));
+  const maxTargetSeqs = countOf(optionValue(argv, '-max_target_seqs'));
+  const numAlignments = countOf(optionValue(argv, '-num_alignments'));
+  const numDescriptions = countOf(optionValue(argv, '-num_descriptions'));
   const byAlignments = maxTargetSeqs === undefined && numAlignments !== undefined;
-  const tabular = maxTargetSeqs ?? numAlignments ?? describedDefaultOf(described, '-max_target_seqs');
-  const maxHsps = countOf(given('-max_hsps'));
+  const tabular = maxTargetSeqs ?? numAlignments ?? describedDefaultOf(described, '-max_target_seqs', task);
+  const maxHsps = countOf(optionValue(argv, '-max_hsps'));
   let outfmt0: HitLimits['outfmt0'];
   if (alignmentsGiven && maxTargetSeqs === undefined) {
-    const descriptions = numDescriptions ?? describedDefaultOf(described, '-num_descriptions');
-    const alignments = numAlignments ?? describedDefaultOf(described, '-num_alignments');
+    const descriptions = numDescriptions ?? describedDefaultOf(described, '-num_descriptions', task);
+    const alignments = numAlignments ?? describedDefaultOf(described, '-num_alignments', task);
     const hitList = descriptions === undefined || alignments === undefined ? undefined : Math.max(descriptions, alignments);
     outfmt0 = {
       ...(alignments === undefined ? {} : { alignments }),

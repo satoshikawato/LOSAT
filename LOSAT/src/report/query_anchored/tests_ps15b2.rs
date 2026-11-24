@@ -2,9 +2,10 @@
 //! fix 1; `write_unreadable_section`): NCBI BLAST+ 2.17.0 merges the HSPs with the query's rows at the
 //! width of a nucleotide sequence, and its run stops where the merge fails: with an exception where two
 //! blocks of one subject row meet on a query row (`X_MERGE_START_ITERATOR`), where the rows order shared
-//! segments in two ways (`BUILD_INFINITE_LOOP`) or where a later pass finds no row of its HSP
-//! (`X_MERGE_PROPER_ROW`), and with SIGSEGV where a query letter against a gap of the subject opens a row
-//! of its own (`MixError::NcbiNullSecondRow`). Each expectation is NCBI's own run: the rows are NCBI's
+//! segments in two ways (`BUILD_INFINITE_LOOP`), where a later pass finds no row of its HSP
+//! (`X_MERGE_PROPER_ROW`) or where `Build` reads past the end of a row's starts
+//! (`MixError::NcbiReadsPastEnd`), and with SIGSEGV where a query letter against a gap of the subject
+//! opens a row of its own (`MixError::NcbiNullSecondRow`). Each expectation is NCBI's own run: the rows are NCBI's
 //! `-outfmt "6 sseqid qstart sstart btop"` rows (from the PSSM's molecule `aa` twin, whose search is the
 //! same), in their order, subjects numbered in order of first appearance, of psiblast with the review
 //! kit's molecule `other` PSSMs (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/rev15b2/inputs/`:
@@ -291,6 +292,31 @@ const IUPAC_ROUND_3: &[(u32, u32, u32, &str)] = &[
 fn the_rounds_of_ps6c_other_iupacaa_are_ncbis() {
     assert_eq!(rows_section(IUPAC_ROUND_2), line_feed());
     assert_eq!(rows_section(IUPAC_ROUND_3), Err(MergeFailure::Exception));
+}
+
+/// Round 2 of `tk_other_stdaa.asn -subject s.faa -num_iterations 2` of the differential corpus's
+/// case z147 (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/fix15b2_dz/cases_z/z147`, the
+/// PSSM's query with letters deleted and inserted): NCBI stops in `CAlnMixSegments::Build` with
+/// "CObject is corrupted" (exit status 255, 3 runs of 3); its round 1, the first HSP alone, is
+/// answered.
+const Z147_ROUND_2: &[(u32, u32, u32, &str)] = &[
+    (0, 195, 1, "119"),
+    (0, 11, 6, "MNAK1RKVLEVLVVLTE1PGMDFRAC4YQLA1NLILYLQTQNEK1"),
+    (0, 122, 65, "2GDTHSADAQHQLML2PAI-H-KNLRLWPEYVTCNSSK1VKKQ1"),
+    (0, 107, 1, "VI1RKLKAKDN3RLIV1ILAEAGLG1-R-C1TK1DT1"),
+];
+
+#[test]
+fn a_row_walked_past_its_end_is_ncbis_exception() {
+    assert_eq!(rows_section(&Z147_ROUND_2[..1]), line_feed());
+    let hsps = unreadable(Z147_ROUND_2);
+    let merged = merge_groups(&hsps);
+    assert!(
+        matches!(merged, Err(aln_mix::MixError::NcbiReadsPastEnd)),
+        "{:?}",
+        merged.err()
+    );
+    assert_eq!(section(&hsps), Err(MergeFailure::Exception));
 }
 
 /// xorshift64*: the cases of `random_sections_end_as_ncbis_merge_can`, the same in every run.

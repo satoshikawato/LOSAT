@@ -39,7 +39,9 @@
 //! two rows opened a row of the query opens a row whose first match has no second row, and NCBI
 //! writes through that null row (`MixError::NcbiNullSecondRow`). The matches of two rows come
 //! first (`SortByScore`), so where one of them throws, that exception is NCBI's end; `Build`
-//! comes after `x_Merge`. `super::write_unreadable_section` refuses each of them.
+//! comes after `x_Merge`, and where a segment's start on a row lies behind that row's walk at its
+//! end, NCBI reads past the end of the row's starts (`MixError::NcbiReadsPastEnd`).
+//! `super::write_unreadable_section` refuses each of them.
 //!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
@@ -170,6 +172,16 @@ pub(crate) enum MixError {
     /// `x_SetSeqFrame` gives it a new row (module doc). `super::write_unreadable_section` refuses
     /// the report there.
     NcbiNullSecondRow,
+    /// NCBI reads past the end of a row's starts: `Build` meets a segment of its stack whose start
+    /// on a row is not that row's `current`, and `current` has passed the row's last start (it is
+    /// `end()`), so the segment it pushes is read from the end of the row's map, which holds no
+    /// segment (`Mix::build`). Taking a reference to it finds no valid reference count, and
+    /// official NCBI BLAST+ 2.17.0 stops with `CObjectException` (`eCorrupted`, "CObject is
+    /// corrupted", exit 255; line PS, PS15b-2 fix 1: `PS/tmp/fix15b2_dz` case z147, whose throw
+    /// gdb caught in `CAlnMixSegments::Build`, `PS/tmp/fix15b2_z147/gdb.out`). Only a query read at
+    /// the width 3 whose letters are a protein's gets there (module doc);
+    /// `super::write_unreadable_section` refuses the report there.
+    NcbiReadsPastEnd,
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
@@ -1100,8 +1112,12 @@ impl Mix {
                     for &(row, at) in self.segs[top].start_its.values() {
                         let current = self.seqs[row].current;
                         if current != Some(at) {
-                            let left = self.seqs[row].starts[&current
-                                .ok_or(MixError::Internal("a row's segments ended early"))?];
+                            // NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:489-496
+                            // NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:785-805
+                            // (The push of `current`'s segment, alnsegments.cpp:161, cited above,
+                            // takes a reference to it: past the row's end, `NcbiReadsPastEnd`.)
+                            let left = self.seqs[row].starts
+                                [&current.ok_or(MixError::NcbiReadsPastEnd)?];
                             stack.push(left);
                             if !on_stack.insert(left) {
                                 // NCBI's throw (cited above), which only the query's own Bioseq

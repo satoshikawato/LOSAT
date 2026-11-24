@@ -750,6 +750,8 @@ fn unasked_merge_stop(error: aln_mix::MixError) -> io::Error {
         aln_mix::MixError::NcbiNullSecondRow => {
             internal("a section whose merge NCBI BLAST+ writes through a null row in")
         }
+        // As `NcbiNullSecondRow` (the text of the internal error that it was before).
+        aln_mix::MixError::NcbiReadsPastEnd => internal("a row's segments ended early"),
         aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
     }
 }
@@ -826,8 +828,10 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// (`pairwise::UnreadableQuery`), caught by the group's `try`: the section is that line feed.
 /// Where a merge fails (`Merge` is outside the `try`), NCBI's run ends there, before the
 /// section's first byte: with the merge's exception (`aln_mix::MixError::NcbiThrows`, exit status
-/// 255), or with SIGSEGV where it writes through a null row (`aln_mix::MixError::NcbiNullSecondRow`;
-/// its output then stops where its stream last flushed). That is an NCBI failure without a
+/// 255), with `CObjectException` where `Build` reads past the end of a row's starts
+/// (`aln_mix::MixError::NcbiReadsPastEnd`, exit status 255), or with SIGSEGV where it writes
+/// through a null row (`aln_mix::MixError::NcbiNullSecondRow`; its output then stops where its
+/// stream last flushed). That is an NCBI failure without a
 /// checkable valid result (AGENTS.md rule 3), so LOSAT refuses there (`UnreadableMergeRefusal`),
 /// after the bytes of the report before the section, which NCBI writes before its failure. The
 /// merge reads the HSPs' positions and lengths only (no `fCalcScore`), so the encoding of the
@@ -852,7 +856,9 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     };
     let (merged, num_distinct_frames) = match merge_groups(hsps) {
         Ok(merged) => merged,
-        Err(aln_mix::MixError::NcbiThrows(_)) => return refusal(MergeFailure::Exception),
+        Err(aln_mix::MixError::NcbiThrows(_) | aln_mix::MixError::NcbiReadsPastEnd) => {
+            return refusal(MergeFailure::Exception)
+        }
         Err(aln_mix::MixError::NcbiNullSecondRow) => return refusal(MergeFailure::Crash),
         Err(error) => return Err(unasked_merge_stop(error)),
     };
@@ -871,7 +877,9 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
 /// read fails (`write_unreadable_section`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MergeFailure {
-    /// An uncaught `CAlnException` (`aln_mix::MixError::NcbiThrows`; exit status 255).
+    /// An uncaught `CAlnException` (`aln_mix::MixError::NcbiThrows`), or `CObjectException`
+    /// where `Build` reads past the end of a row's starts (`aln_mix::MixError::NcbiReadsPastEnd`);
+    /// exit status 255.
     Exception,
     /// SIGSEGV (`aln_mix::MixError::NcbiNullSecondRow`).
     Crash,
@@ -947,9 +955,10 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
             }
             // Only a query read at the width 3 whose letters are a protein's gets there, and such
             // a query is never one of the subjects' Bioseqs (`write_unreadable_section`).
-            Err(error @ aln_mix::MixError::NcbiNullSecondRow) => {
-                return Err(unasked_merge_stop(error))
-            }
+            Err(
+                error
+                @ (aln_mix::MixError::NcbiNullSecondRow | aln_mix::MixError::NcbiReadsPastEnd),
+            ) => return Err(unasked_merge_stop(error)),
             Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
         }
     }
@@ -988,9 +997,10 @@ pub(crate) fn section_frees(hsps: &Hsps) -> io::Result<bool> {
             }
             // Only a query read at the width 3 whose letters are a protein's gets there, and its
             // program (psiblast) makes no segment of length 0 (`write_unreadable_section`).
-            Err(error @ aln_mix::MixError::NcbiNullSecondRow) => {
-                return Err(unasked_merge_stop(error))
-            }
+            Err(
+                error
+                @ (aln_mix::MixError::NcbiNullSecondRow | aln_mix::MixError::NcbiReadsPastEnd),
+            ) => return Err(unasked_merge_stop(error)),
             Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
         }
     }

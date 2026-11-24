@@ -40,11 +40,17 @@ pub(super) struct KappaBatch<'a> {
     pub(super) heaps: &'a mut [CompoHeap],
     pub(super) inactive_heaps: &'a mut [CompoHeap],
     /// The subjects of the stream whose header holds a UTF8String where a VisibleString is
-    /// expected (`FetchExcluded::retain_noting`: with the query of the list, its best E-value and
-    /// whether it has HSPs), the lists left in the stream (query and subject, in the stream's
-    /// order) where there is one, and the first that the redo fetches (`redo_fetched`; the
-    /// Smith-Waterman redo's, `sw_fetched`, which reads its own stream's).
-    pub(super) fetched: (&'a [FetchedRead], &'a [(usize, usize)], &'a mut Option<u32>),
+    /// expected and those whose header cannot be read (`FetchExcluded::retain_noting`: with the
+    /// query of the list, its best E-value and whether it has HSPs), the lists left in the stream
+    /// (query and subject, in the stream's order) where there is one, and the first of the former
+    /// that the redo fetches (`redo_fetched`; the Smith-Waterman redo's, `sw_fetched`, which reads
+    /// its own stream's). A fetch of one of the latter is LOSAT's refusal (`fetch_refused`).
+    pub(super) fetched: (
+        &'a [FetchedRead],
+        &'a [FetchedRead],
+        &'a [(usize, usize)],
+        &'a mut Option<u32>,
+    ),
 }
 
 /// A subject of the batch's lists whose header holds a UTF8String where a VisibleString is
@@ -116,6 +122,19 @@ fn redo_fetched(
 }
 
 impl Runtime<'_> {
+    /// LOSAT's refusal of the search whose redo fetches the sequence `ordinal`, whose header
+    /// cannot be read: NCBI's search ends there (`FetchExcluded::refusal_at`).
+    #[cold]
+    #[inline(never)]
+    fn fetch_refused(&self, ordinal: u32) -> anyhow::Error {
+        match self.subjects.seqdb() {
+            Some(db) => {
+                crate::algorithm::common::database::FetchExcluded::refusal_at(db, ordinal, "BLASTX")
+            }
+            None => anyhow::anyhow!("a fetch of sequence {ordinal} without a database"),
+        }
+    }
+
     /// `error`, which fails the batch after its Smith-Waterman redo fetched `fetched` (the first
     /// of the batch's fetches that read a header with a UTF8String where a VisibleString is
     /// expected, `sw_fetched`): NCBI posted its warning before the error (rows
@@ -173,7 +192,7 @@ impl Runtime<'_> {
             queries,
             heaps,
             inactive_heaps,
-            fetched: (fetched_reads, fetched_order, fetched_first),
+            fetched: (fetched_reads, fetched_unreadable, fetched_order, fetched_first),
         } = args;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
         let x_t = x_timing::lap();
@@ -187,7 +206,9 @@ impl Runtime<'_> {
         // The subjects whose header holds a UTF8String where a VisibleString is expected come
         // from the same read of the headers (`sw_reads`), with the stream's lists, where there is
         // one (`sw_stream`: query and subject, markers too).
-        let (marks, sw_reads, do_link_hsps) = if SW {
+        // Those whose header cannot be read stay in the stream (`sw_unreadable`): a fetch of one
+        // is LOSAT's refusal (`fetch_refused`).
+        let (marks, sw_reads, sw_unreadable, do_link_hsps) = if SW {
             let excluded = self
                 .subjects
                 .seqdb()
@@ -197,15 +218,12 @@ impl Runtime<'_> {
                 &matches,
                 |list| u32::try_from(list.oid).ok(),
                 |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
-            )
-            .map_err(|failed| {
-                crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
-            })?;
-            (marks, reads, state.do_link_hsps())
+            );
+            (marks, reads.utf8, reads.unreadable, state.do_link_hsps())
         } else {
-            (FetchMarks::default(), Vec::new(), false)
+            (FetchMarks::default(), Vec::new(), Vec::new(), false)
         };
-        let sw_stream: Vec<(usize, usize)> = if sw_reads.is_empty() {
+        let sw_stream: Vec<(usize, usize)> = if sw_reads.is_empty() && sw_unreadable.is_empty() {
             Vec::new()
         } else {
             matches
@@ -387,10 +405,15 @@ impl Runtime<'_> {
                     match sw_status
                         .redone(result, || sw_endless(do_link_hsps))
                         .map_err(|error| {
-                            self.sw_failed_after(
-                                error,
-                                sw_fetched(&sw_reads, &sw_stream, heaps, match_index),
-                            )
+                            // A fetch before this match that read a header that cannot be read
+                            // ended NCBI's search there.
+                            match sw_fetched(&sw_unreadable, &sw_stream, heaps, match_index) {
+                                Some(ordinal) => self.fetch_refused(ordinal),
+                                None => self.sw_failed_after(
+                                    error,
+                                    sw_fetched(&sw_reads, &sw_stream, heaps, match_index),
+                                ),
+                            }
                         })? {
                         Some(redone) => redone,
                         None => continue,
@@ -449,6 +472,17 @@ impl Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-464
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
         // The status of the last match the redo reached fails the batch.
+        // A fetch of the redo that read a header that cannot be read ended NCBI's search before.
+        let refused = if SW {
+            sw_fetched(&sw_unreadable, &sw_stream, heaps, usize::MAX)
+        } else if !fetched_unreadable.is_empty() {
+            redo_fetched(fetched_unreadable, fetched_order, heaps)
+        } else {
+            None
+        };
+        if let Some(ordinal) = refused {
+            return Err(self.fetch_refused(ordinal));
+        }
         if SW && sw_status.failed() {
             let error = sw_batch_failed(heaps.first().is_some_and(|heap| !heap.entries.is_empty()));
             return Err(

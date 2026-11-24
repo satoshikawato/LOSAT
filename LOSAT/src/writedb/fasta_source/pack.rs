@@ -82,8 +82,9 @@ const STEP_WIDE_FROM_NARROW: u8 = 4;
 /// (`SArrangement`) in blocks of 16 that they share up to their last common block; LOSAT
 /// keeps, for each boundary, which arrangement each of the two that end there continues
 /// (one byte), and reads the best one's codings back from the last boundary. The two
-/// make the same choices; LOSAT's take 1 byte for each segment, 16 fewer than a list of
-/// nodes (one coding and the index of the one before it, for each arrangement).
+/// make the same choices; with the boundary's position LOSAT keeps 5 bytes for each
+/// boundary, where a list of nodes (one coding and the index of the one before it, for
+/// each arrangement) and the codings read back from it took 21.
 struct Packer {
     /// `m_Boundaries`.
     boundaries: Vec<u32>,

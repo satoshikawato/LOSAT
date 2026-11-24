@@ -287,11 +287,12 @@ fn extract_title(
 /// pieces' letters first).
 ///
 /// The length of a delta is the one its gap lines state, up to 2,147,483,647 residues
-/// for a few bytes of input, and NCBI reserves `seq8na` for it at once. Where that
-/// allocation or the one of the NCBI4na copy fails, NCBI throws `std::bad_alloc`
-/// (makeblastdb: "BLAST ran out of memory"); here it is the error of this function,
-/// where an allocation that aborts the process would lose that outcome. The space is
-/// reserved for all letters, so that no later growth of the vector can fail.
+/// for a few bytes of input, and NCBI reserves `seq8na` for it at once, then its NCBI4na
+/// copy. Where an allocation fails, NCBI throws `std::bad_alloc` (makeblastdb: "BLAST ran
+/// out of memory"); LOSAT reserves only the NCBI4na bytes (half as many), and where that
+/// fails it is the error of this function, where an allocation that aborts the process
+/// would lose that outcome. The space is reserved for all letters, so that no later growth
+/// of the vector can fail.
 fn fix_bioseq_deltas(
     inst: SeqInst,
 ) -> Result<(u64, Option<SeqData>, Option<DeltaFix>), std::collections::TryReserveError> {

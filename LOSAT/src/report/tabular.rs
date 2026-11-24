@@ -2589,7 +2589,7 @@ pub fn union_length(ranges: &mut [(u64, u64)]) -> usize {
 /// length (`m_QueryLength`: the `-query_loc` range as given, tabular.cpp:786-790).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1447
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1308-1309
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1308-1309,1382-1383
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3162-3205
 /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:518-533
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747

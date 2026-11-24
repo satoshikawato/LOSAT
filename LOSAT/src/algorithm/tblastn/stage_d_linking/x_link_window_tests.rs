@@ -224,7 +224,7 @@ fn check(
     expected.hsps.iter().filter(|hsp| hsp.num > 1).count()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1414-1491 (s_LinkedHSPSetsAdmissible)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1482-1488 (s_LinkedHSPSetsAdmissible)
 // The chosen candidates give NCBI's links: on random lists and on lists of repeat copies
 // (many small sets over the whole subject, several contexts) the linked list (order, sets,
 // numbers, E-value bits, best E-value) is the one of the whole window, with

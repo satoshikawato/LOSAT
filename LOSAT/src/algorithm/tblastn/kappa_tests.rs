@@ -49,7 +49,7 @@ use crate::common::GapEditOp;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::BLASTAA_SIZE;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803,1896-1957,3577-3689
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:769-814,1898-1950,3577-3661
 #[test]
 fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
     use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
@@ -300,8 +300,8 @@ fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
     assert!(params.gapping_params.context.get().is_none());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1460-1466;
-// core/blast_kappa.c:1475-1552,3577-3736;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1462-1465;
+// core/blast_kappa.c:1474-1553,3577-3733;
 // composition_adjustment/compo_heap.c:252-275
 #[test]
 fn code32_local_api_subject_translation_redo_and_scores_match_ncbi() {
@@ -544,8 +544,8 @@ fn code32_local_api_subject_translation_redo_and_scores_match_ncbi() {
         (gapped.lambda / 32.0).to_bits(),
         redo[4].parse::<f64>().unwrap().to_bits()
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1219-1254;
-    // composition_adjustment/composition_adjustment.c:1414-1530
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1236-1251;
+    // composition_adjustment/composition_adjustment.c:1413-1531
     let comp_trace = std::fs::read_to_string(format!("{root}/code32_composition.trace")).unwrap();
     let query_composition = read_aa_composition(&query);
     for which in ["query", "subject"] {
@@ -694,7 +694,7 @@ fn code32_local_api_subject_translation_redo_and_scores_match_ncbi() {
     assert!(params.gapping_params.context.get().is_none());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3689;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:769-814,3577-3733;
 // composition_adjustment/redo_alignment.c:1101-1292
 #[test]
 fn multi_query_preliminary_hsps_redo_to_ncbi_alignment_order() {
@@ -1257,7 +1257,7 @@ fn postredo_containment_keeps_ncbi_score_frame_and_endpoint_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1924-1948;
-// core/gapinfo.h:44-65
+// c++/include/algo/blast/core/gapinfo.h:44-61
 #[test]
 fn kappa_traceback_matches_ncbi_saved_inputs_and_edit_scripts() {
     fn decode(hex: &str) -> Vec<u8> {
@@ -1646,8 +1646,8 @@ fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3577-3736;
-    // c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275,330-391,439-466
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2509-2511,3577-3733;
+    // c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276,329-400,443-468
     use crate::algorithm::tblastn::kappa_heap::{CompoHeap, CompoHeapRecord};
     use crate::algorithm::tblastn::stage_d_linking::score_compare;
     use crate::algorithm::tblastn::stage_d_results::{

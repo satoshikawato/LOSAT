@@ -33,8 +33,8 @@ pub(super) use besthit::PrelimBestHit;
 pub(super) struct KappaHspPayload {
     pub bit_score: f64,
     pub num_ident: i32,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526;
-    // c++/src/algo/blast/core/blast_hits.c:767-811,966-989:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:526-529;
+    // c++/src/algo/blast/core/blast_hits.c:745-836,965-991:
     // Alignment length and gap counts follow the same gap_info operation lengths.
     pub num_positives: usize,
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:971-1021,1090-1095:

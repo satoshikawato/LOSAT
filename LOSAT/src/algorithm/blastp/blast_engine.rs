@@ -213,7 +213,7 @@ impl InitHSP {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1350
 struct BlastpSubjectResult {
     subject_index: usize,
     // The lists with the compact element (`x_prelim_compact.rs`).
@@ -283,7 +283,7 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:216-227
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
     chaining_nodes: Vec<BlastpInitHspNode>,
@@ -503,7 +503,7 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
             chaining_nodes: Vec::new(),
@@ -1834,7 +1834,7 @@ impl BlastpOffsetPairScanMode {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:86-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:111-114
 #[inline(always)]
 fn blastp_visit_scanned_offset_pairs<F>(offset_pairs: &[OffsetPair], hits: i32, visit: &mut F)
 where
@@ -3742,7 +3742,7 @@ fn build_restricted_align_array_into(
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:153-156
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:145-150
 struct BlastpInitHspNode {
     init_index: usize,
     best_score: i32,
@@ -3971,7 +3971,7 @@ fn blastp_trace_init_hsp_overlaps_target(target: BlastpTraceHspTarget, init_hsp:
         && s_end <= target.s_end
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
 fn preliminary_score_compare(
     a: &BlastpPreliminaryHsp,
     b: &BlastpPreliminaryHsp,
@@ -7535,7 +7535,7 @@ fn x_each_batch_on<T: Send>(
 /// The words a block of the standard table may always hold: 2^22 (16 MiB of `Int4` offsets).
 const X_AA_BLOCK_WORDS_FLOOR: u64 = 1 << 22;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (BlastAaLookupFinalize:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:346-357 (BlastAaLookupFinalize:
 // a cell of at most AA_HITS_PER_CELL offsets keeps them in the backbone, a cell of more puts all of
 // its offsets in the overflow array)
 // EXPERIMENT (LOSAT_X_BPQBLOCK), item SC8b: the blocks of the standard table (`AaLookupTable`) closed

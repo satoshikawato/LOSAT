@@ -970,7 +970,7 @@ fn add_to_database(
             defline_field: Vec::new(),
             title_descr: None,
         }),
-        past_seq_pos: None,
+        delta_fix: None,
     };
     let added = output_db.add_sequence(bioseq);
     post_writer(diag, params.stdout, output_db);

@@ -43,7 +43,7 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 
 ### Speed and memory since v0.1.0
 
-Across all four search modes present in v0.1.0 (`blastn`, `tblastx`, `megablast`, and `blastp`), v0.2.0 runs `5.5×` to `45.5×` faster and uses `2.8×` to `50.3×` less peak resident memory at 16 threads while bringing `megablast` and `tblastx` into exact byte-for-byte parity with NCBI BLAST+ 2.17.0 (apart from the local `-subject` genetic-code difference noted above; in the benchmark both arms used genetic code 4, and `blastp` matched form for form — see [Threads, speed and memory](performance.md) for the full v0.2.0 benchmark suite):
+Across all four search modes present in v0.1.0 (`blastn`, `tblastx`, `megablast`, and `blastp`), v0.2.0 runs `5.5×` to `45.5×` faster using `2.0% (1/50.3)` to `35% (1/2.8)` of v0.1.0's peak resident memory at 16 threads while bringing `megablast` and `tblastx` into exact byte-for-byte parity with NCBI BLAST+ 2.17.0 (apart from the local `-subject` genetic-code difference noted above; in the benchmark both arms used genetic code 4, and `blastp` matched form for form — see [Threads, speed and memory](performance.md) for the full v0.2.0 benchmark suite):
 
 <img class="figure-for-light" src="images/fig6_v01_to_v02.png" alt="Wall time and peak memory of LOSAT v0.1.0, NCBI BLAST+ 2.17.0, and LOSAT v0.2.0 across all four v0.1.0 search modes at 16 threads" width="100%">
 <img class="figure-for-dark" src="images/fig6_v01_to_v02_dark.png" alt="Wall time and peak memory of LOSAT v0.1.0, NCBI BLAST+ 2.17.0, and LOSAT v0.2.0 across all four v0.1.0 search modes at 16 threads (dark theme)" width="100%">

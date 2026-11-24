@@ -72,7 +72,7 @@ impl<S: Source> FormatGuess<S> {
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:764-773
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2851-2943
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5503-5510
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:5503-5510
     /// `TestFormatRepeatMasker`. The header test trims the lines up to the first that is not blank in place: the
     /// later tests read them so.
     pub(super) fn test_format_repeat_masker(&mut self) -> bool {

@@ -172,7 +172,7 @@ pub(super) fn extend_offset_pairs<N: NegSteps>(
         form
     };
     if ext_first {
-        extend_pairs_in::<true>(
+        extend_pairs_in::<true, N>(
             scan,
             x,
             state,
@@ -182,7 +182,7 @@ pub(super) fn extend_offset_pairs<N: NegSteps>(
             track_scan_pause,
         );
     } else {
-        extend_pairs_in::<false>(
+        extend_pairs_in::<false, N>(
             scan,
             x,
             state,

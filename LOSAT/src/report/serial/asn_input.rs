@@ -164,12 +164,16 @@ impl Names {
         allocator: "NCBI's reader",
         own_serial_message: false,
     };
-    /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`).
+    /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`). The
+    /// import has no message of its own for a `CSerialException`: a value of another class
+    /// (`:name`) is LOSAT's refusal (`read::TypedReader::other_type`), as in the other files that
+    /// LOSAT reads without such a message.
     pub(crate) const STRATEGY: Names = Names {
         document: "search strategy",
         reader: "search strategy reader",
         input: "input",
         allocator: "NCBI's reader",
+        own_serial_message: false,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]

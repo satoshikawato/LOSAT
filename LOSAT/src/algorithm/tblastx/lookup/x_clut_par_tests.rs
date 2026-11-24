@@ -474,7 +474,8 @@ fn parallel_tables_of_each_matrix_equal_its_serial_tables() {
                         (XFlatBuild::Table(serial), Some(XFlatBuild::Table(built))) => {
                             x_assert_same_flat_tables(&built, serial)
                         }
-                        (XFlatBuild::Refused(got), Some(XFlatBuild::Refused(want))) if *got == want => {}
+                        (XFlatBuild::Refused(got), Some(XFlatBuild::Refused(want)))
+                            if *got == want => {}
                         _ => panic!("{what} n{threads}: the pool's outcome is not the serial one"),
                     }
                 }

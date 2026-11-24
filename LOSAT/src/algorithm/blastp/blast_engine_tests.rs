@@ -2579,7 +2579,11 @@ fn banks_filled_refusal_names_the_batch_of_the_table() {
         assert_eq!(named(&gapped, filled, false), Some(query), "table {filled}");
     }
     for filled in 0..4 {
-        assert_eq!(named(&ungapped, filled, false), Some(filled), "table {filled}");
+        assert_eq!(
+            named(&ungapped, filled, false),
+            Some(filled),
+            "table {filled}"
+        );
     }
     assert_eq!(named(&gapped, 0, true), Some(0));
 }

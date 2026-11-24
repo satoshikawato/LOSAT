@@ -61,11 +61,11 @@ pub struct MakedbArgs {
     /// Create index of sequence hash values.
     pub hash_index: bool,
     /// Taxonomy ID to assign to all sequences
-    // NCBI's integer and its constraint (`nonnegative_ncbi_integer`): `0x10` is 16 (NCBI BLAST+
-    // 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with `-dryrun`).
+    // NCBI's integer and its constraint, at least 0 (NCBI's reader, `ncbi_app::constraint`): `0x10`
+    // is 16 (NCBI BLAST+ 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with
+    // `-dryrun`).
     pub taxid: Option<i32>,
-    /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
-    #[allow(rustdoc::invalid_html_tags, reason = "NCBI's help text")]
+    /// Text file mapping sequence IDs to taxonomy IDs. Format: `<SequenceId> <TaxonomyId><newline>`
     pub taxid_map: Option<String>,
     /// Comma-separated list of input files containing masking data as produced by NCBI masking
     /// applications (e.g. dustmasker, segmasker, windowmasker)

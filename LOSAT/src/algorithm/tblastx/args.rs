@@ -8,9 +8,8 @@ use std::path::PathBuf;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:66-118 (CTblastxAppArgs argument set)
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
-// The single-dash lexical translation is owned by crate::cli.
-// The arguments are read with NCBI's grammar (`blastinput/value_parsers.rs`); the values
-// that NCBI checks after parsing (-seg, -threshold, -word_size, -evalue, -outfmt) are
+// The arguments are those that NCBI's argument reader read (`ncbi_app::args`, `from_args`); the
+// values that NCBI checks after parsing (-seg, -threshold, -word_size, -evalue, -outfmt) are
 // checked in NCBI's order by `blast_engine::check_options`.
 #[derive(Debug, Clone)]
 pub struct TblastxArgs {

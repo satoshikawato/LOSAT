@@ -61,7 +61,6 @@ impl QueryStrand {
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
 // Constrains `kArgMaxHSPsPerSubject` to integers >= 1 via `CArgAllowValuesGreaterThanOrEqual`,
 // and registers `kArgNumThreads` with its default integer value.
-// The single-dash lexical translation is owned by crate::cli.
 #[derive(Debug, Clone)]
 pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47

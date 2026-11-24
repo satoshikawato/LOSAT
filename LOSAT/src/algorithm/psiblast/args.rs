@@ -15,9 +15,9 @@ use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
 // `-phi_pattern` is refused by name after the reader (its rows of `ncbi_app::args::refusal`).
-// The values are
-// read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
-// after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
+// The values are those that NCBI's argument reader read (`ncbi_app::args`, `from_args`); the
+// checks that NCBI makes after reading them are blastp's (`BlastpArgs::check_options`, with
+// psiblast's program).
 #[derive(Debug, Clone)]
 pub struct PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427

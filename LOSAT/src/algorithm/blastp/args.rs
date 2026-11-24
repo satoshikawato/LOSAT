@@ -189,15 +189,13 @@ pub enum BlastpLookupTableType {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_advprot_options.cpp:48-66
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
-// The single-dash lexical translation is owned by crate::cli.
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-60
 /// BLASTP's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
 pub(crate) const BLASTP_TASK: TaskParser = task_parser("BLASTP", "blastp");
 
-// The values are read as NCBI's argument parser reads them (`value_parsers.rs`), with
+// The values are those that NCBI's argument reader read (`ncbi_app::args`, `from_args`), with
 // NCBI's declared constraints only; the checks that NCBI makes after reading the
-// arguments are in `check_options`, in NCBI's order. The single-dash lexical translation
-// is owned by crate::cli.
+// arguments are in `check_options`, in NCBI's order.
 #[derive(Debug, Clone)]
 pub struct BlastpArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427

@@ -15,10 +15,10 @@ use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 pub(crate) const TBLASTN_TASK: TaskParser = task_parser("TBLASTN", "tblastn");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/tblastn_options.cpp:54-85
-// The arguments are read with NCBI's grammar (`blastinput/value_parsers.rs`); the values
-// that NCBI checks after parsing are checked by `check_options`, in NCBI's order. The
-// NCBI options that LOSAT's TBLASTN does not implement are rejected by the parser
-// (`cli.rs`).
+// The arguments are those that NCBI's argument reader read (`ncbi_app::args`, `from_args`); the
+// values that NCBI checks after parsing are checked by `check_options`, in NCBI's order. The
+// NCBI options that LOSAT's TBLASTN does not implement are refused by name after the reader
+// (`ncbi_app::args::refusal`).
 #[derive(Debug, Clone)]
 pub struct TblastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:

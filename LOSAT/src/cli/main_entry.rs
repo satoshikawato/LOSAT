@@ -299,7 +299,7 @@ fn run_main_entry() -> Result<()> {
         _ => drop(target),
     }
     if startup_trace {
-        eprintln!("[startup] after clap parse");
+        eprintln!("[startup] after the options are read");
     }
     // The search programs write an error's text before its error archive, where NCBI's
     // `CATCH_ALL` posts it (`cli::post_native_error`).

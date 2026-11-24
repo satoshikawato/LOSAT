@@ -28,8 +28,10 @@ mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), on
 /// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), on 2026-10-22 `LOSAT_X_DIAGLV2` and
-/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), and on 2026-10-24 `LOSAT_X_BNDCONE`
-/// (perf/dc-one-thread), each `0`, the default before, unless the search sets it: every search
+/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), on 2026-10-24 `LOSAT_X_BNDCONE` (perf/dc-one-thread),
+/// and on 2026-11-23 `LOSAT_X_DCLATEST` (perf/dc-fold-latest: the strips stage without the
+/// diagonal hash, so without the memo), each `0`, the default before, unless the search sets it:
+/// every search
 /// here runs as it was written, with the switches off that it does not name (the default runs in
 /// `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
@@ -38,6 +40,7 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_DCLATEST", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_DIAGLV2", "0"),
     ("LOSAT_X_FOLDLEAN", "0"),

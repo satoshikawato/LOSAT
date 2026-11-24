@@ -1,0 +1,1 @@
+BLAST Database error: No alias or index file found for protein database [in/nope] in search path [<RUN>::]. Please verify the spelling of the BLAST database and its molecule type.

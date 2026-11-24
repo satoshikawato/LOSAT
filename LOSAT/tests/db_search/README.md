@@ -1688,15 +1688,21 @@ most 9 in BLOSUM62).
   really writes the offset error again (for `c1` after `b1`; `nz_nc`'s only 99990 is `sN`, whose entry NCBI keeps
   loaded, so it writes the message once there). `nz_rep_q.fna` holds `qN`, `qZ` and `qI`, the whole of `a1`, `b1` and
   `c1`, and `nz_rep_q.faa` their translations (`nz_repp.faa` holds those of `a1` to `d1`): NCBI writes the message 3 to
-  5 times in outfmt 15 / 16 and LOSAT refuses before any byte, as in outfmt 6 with `BATCH_SIZE=1` (twice).
+  5 times in outfmt 15 / 16, as in outfmt 6 with `BATCH_SIZE=1` (twice). LOSAT refused these runs before any byte
+  until line NP item O4b2-6, which follows the slot through the XML2 and JSON reports' loads (rows `*.off0.*`,
+  `db.nz.cq.x.bn.repo.*`, `db.nz.cq.x.b[npx].reppo.*`); a prefetch of `nz_rep`'s local ids, whose order NCBI takes from
+  addresses, stays refused (`*.reject`). `nz_rep_qdq.fna` is `qD` then `nz_rep_q.fna` (one batch whose first `Hit`,
+  `d1`, asks the taxonomy database nothing: `db.nz.cq.x.bn.repo.qd.16`), `nz_rep_qxn.faa` the proteins `qx` (of
+  `nz_qx.faa`) then `qN` (BLASTP's `db.nz.cq.x.bp.reppo.b1.qx.16`).
   `nz_rep_qd.*` (`qD`, the start of `d1`) and `nz_rep_qe.fna` (`qE`, the start of `e1`) hit `d1` or `e1` alone: no
   volume looks a positive taxid up, so their `ncbi` rows are not refused. `nz_repo` and `nz_reppo` hold `a1` to `d1`
   (nucleotide, protein) without parsed Seq-ids: their taxid is that of the definition line, a branch of its own
   (`db.nz.cq.x.bn.repo.*`: NCBI writes the message 4 times with `BATCH_SIZE=1`). `nz_rep_qxn.fna` is `nz_qx.fna`'s `qx`
-  then `qN`: BLASTX writes each batch's XML2 report before it searches the next, so on `nz_reppo` it holds the
-  document of a run with this refusal and drops it at `qN`'s batch (no byte of `qx`'s); `tm_cache_qx.fna` (`qx` then
-  the three records of `x16_bx_taxid_q.fna`) does the same on `tm_cache150`, whose parsed Seq-ids make BLASTX hold
-  anyway. BLASTP's search in blocks of query batches takes the search of all queries for such a run
+  then `qN`: BLASTX writes each batch's XML2 report before it searches the next, so on `nz_reppo` it held the
+  document of a run with this refusal and dropped it at `qN`'s batch (no byte of `qx`'s; since O4b2-6 it writes NCBI's
+  bytes, `db.nz.cq.x.bx.reppo.b1.qx.16`); `tm_cache_qx.fna` (`qx` then the three records of `x16_bx_taxid_q.fna`)
+  still does so on `tm_cache150`, whose prefetch of local ids NCBI orders by addresses and whose parsed Seq-ids make
+  BLASTX hold anyway. BLASTP's search in blocks of query batches takes the search of all queries for such a run
   (`tests/blastp_query_blocks.rs`, `nz_reppo`).
 - The sequences come from the line's probe script (kept outside the repository). The databases (version 4, every file
   makeblastdb writes; `nz_pc` and `nz_nc` alike with their maps), run from `LOSAT/`:

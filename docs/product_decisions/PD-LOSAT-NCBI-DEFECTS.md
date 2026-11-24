@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.99
+- Version: 1.101
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -651,19 +651,37 @@
   of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
   of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
   of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
-  1.99 2026-11-23 (rule-3 rejections of RPSBLAST and RPSTBLASTN at the traceback of a profile whose
+  1.99 2026-11-24 (approved exception 20 also for a short query against one short subject:
+  TBLASTX's, TBLASTN's `-ungapped` and BLASTX's `-ungapped` linking against one subject whose
+  expected length is 0 or less, where NCBI's big-gap cutoff is `INT_MIN + 1` as for a batch
+  averaging 0 and NCBI crashes in its first linking call; LOSAT's sums in 64 bits, and the cutoff
+  of a negative expected length taken as NCBI's `INT_MIN + 1` (LOSAT computed 1 there); its rows
+  equal NCBI's own output for the nearest search it completes in every probed case; the Owner's
+  answer of 2026-11-24 to question Q-XT1 of line RG item X-short-tbx-link, 「Q-XT1=A」; and the
+  same for several subjects on the route of a negative expected length, the Owner's answer of
+  2026-11-24 to question Q-XT2, 「A」; numbered after 1.98; first 1.97);
+  1.100 2026-11-24 (FASTA records past NCBI's 32-bit `TSeqPos`, line RG item KC-11d: rule 3 for a
+  nucleotide piece that NCBI's reader packs into 0 bytes and for `makembindex -old_style_index
+  true`'s chunk end past 2^32; `losat windowmasker` reads records of 4,294,967,296 letters or more
+  as NCBI's reader does instead of refusing them; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.99; first 1.94, then 1.97 at the merge of dev that brought
+  line NP item M4c-2's 1.94, line NP item M4b-3b's 1.95 and line DBID item pfoff-4's 1.96, then 1.99 at
+  the merge of dev that brought line RG items X-short-bat's 1.97 and X-bpgap's 1.98, then 1.100 at
+  the merge of dev that brought line RG item X-short-tbx-link's 1.99);
+  1.101 2026-11-23 (rule-3 rejections of RPSBLAST and RPSTBLASTN at the traceback of a profile whose
   `.psq` letters differ from its `.rps` columns, psiblast line item PS10e: such a profile is searched
   with its `.pin` length, and a query batch whose hit makes NCBI's traceback leave the profile's data
   is refused; the refusal at the volume's open narrowed to offsets that do not ascend; these
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; and one rule-2 rejection by
   the maintainer's decision of 2026-11-24 (the answer 「Q-PS10e=A」, psiblast `DECISIONS.md` 103),
   RPSTBLASTN without composition-based statistics on an alignment that starts past such a profile's
-  letters; numbered after 1.98; first 1.87, then 1.90 at the merge of dev
+  letters; numbered after 1.100; first 1.87, then 1.90 at the merge of dev
   that brought 1.86 to 1.89 (psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2), then 1.92
   at the merge of dev that brought line RG item T5d's 1.90 and line PS item PS12d's 1.91, then 1.93 at the merge of dev that
   brought line NP item O4b2-4's 1.92, then 1.97 at the merge of dev that brought line RG item
   D1c-1c's 1.93, line NP items M4c-2's 1.94 and M4b-3b's 1.95 and line DBID item pfoff-4's 1.96, then 1.99 at the merge of dev that brought line RG items
-  X-short-bat's 1.97 and X-bpgap's 1.98)
+  X-short-bat's 1.97 and X-bpgap's 1.98, then 1.101 at the merge of dev that brought line RG items
+  X-short-tbx-link's 1.99 and KC-11d's 1.100)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3333,13 +3351,13 @@ file would differ, and NCBI's programs still could not open the database).
   wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.97). With `-subject`
   and a `-db_gencode` other than 1, LOSAT translates in the selected code
   (PD-TBLASTX-LOCAL-SUBJECT-GENCODE) and refuses where those HSPs reach the re-evaluation. TBLASTX
-  translates the query whole before the search, so a short query reaches no such read; but in our
-  probes a query of 10 or 11 bases against a subject of 12 to 14 bases, a query of 11 or 12 bases
-  against a subject of 11 bases, and 9 bases against 12 or 13 at `-word_size 2` make NCBI die
-  earlier, in its first linking call (`BLAST_LinkHsps` under `s_BlastSearchEngineCore`, gdb on ws,
-  2026-11-17 and 2026-11-18). Against 12 to 14 bases LOSAT writes rows; against 11 bases LOSAT
-  refuses with this item's message, at a later step than NCBI's. Both are open (line RG item
-  X-short-tbx-link).
+  translates the query whole before the search, so a short query reaches no such read; but a
+  short query against a short subject (the probes of exception 20's paragraph on them) makes NCBI
+  die earlier, in its first linking call (`BLAST_LinkHsps` under `s_BlastSearchEngineCore`, gdb on ws,
+  2026-11-17 and 2026-11-18): their big-gap cutoff is `INT_MIN + 1`, approved exception 20 (since
+  version 1.99, a short query against one short subject). LOSAT links them with its sums in 64
+  bits; against 12 bases or more it writes rows, and against fewer than 12 bases it refuses with
+  this item's message at the re-evaluation that follows the linking.
 
 - TBLASTN with `-db_soft_mask`, a gapped search of a chunk that saves an initial alignment starting
   before the chunk (version 1.89, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
@@ -3614,8 +3632,8 @@ file would differ, and NCBI's programs still could not open the database).
     it and its loop reads past the table.
   - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
     checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
-    reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
-    positions NCBI counts in 32 bits.
+    reads past. (A FASTA record of 4,294,967,296 letters or more, refused here until version 1.100,
+    is read as NCBI's reader reads it, with its length modulo 2^32; see the packing item below.)
 - `losat makeprofiledb -dbtype rps` (version 1.82, 2026-11-22, psiblast line item PS10a, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): where NCBI's makeprofiledb 2.17.0 crashes,
   aborts, never ends or reads memory that is not its data. LOSAT refuses each (exit 1, "... is not
@@ -3768,7 +3786,7 @@ file would differ, and NCBI's programs still could not open the database).
   TBLASTN and TBLASTX refuse masks that overlap or are stored out of order (`Unsorted`), as before
   (line NP item M4b-3c); BLASTN is unchanged.
 - RPSBLAST and RPSTBLASTN on a profile whose `.psq` letters (its `.pin` length `L_pin`) differ from
-  its `.rps` columns `L_rps` (version 1.99, 2026-11-23, psiblast line item PS10e, line PS
+  its `.rps` columns `L_rps` (version 1.101, 2026-11-23, psiblast line item PS10e, line PS
   `DECISIONS.md` 97, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07).
   makeprofiledb writes such a profile for a scored `.smp` whose `seq-data` is nucleotide-coded or has
   more or fewer letters than its length (it reads no letter of a scored profile and checks only the
@@ -3832,6 +3850,29 @@ file would differ, and NCBI's programs still could not open the database).
   `s_ExtendRight` and `ALIGN_EX`). The preliminary tree's refusal of a concatenated length below the
   rows (line RG item D1a-4) names this further cause: profiles whose `.pin` lengths are below their
   `.rps` rows (N_AA1s_nqt2_c0, NCBI exit 4; row `db.rpstbn.rej.odd.aa1s.nqt2c0`).
+
+- A nucleotide FASTA record that NCBI's `CFastaReader` packs into a segment of 4294967293 to
+  4294967295 bases of NCBI2na, or of 4294967295 bases of NCBI4na, in `losat makeblastdb -dbtype
+  nucl`, `dustmasker`, `windowmasker`, `makembindex` and `convert2blastmask` (version 1.100,
+  2026-11-24, line RG item KC-11d, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07): `AssembleSeq` packs the record's pieces with `CDelta_ext::AddAndSplit`
+  (`fasta.cpp:1456-1458,1504`), whose `CDelta_ext_PackTarget::NewSegment` sizes a segment as
+  `(length + 3) / 4` or `(length + 1) / 2` bytes in a `TSeqPos` (`Delta_ext.cpp:163-164`); that
+  wraps to 0 and the conversion writes past it. Every program ends with SIGSEGV (exit status 139;
+  probes `remaining-gaps-20261112/K/kc/p11d/p2` s3n and s7n, through the `N` of `>?` gap lines,
+  and `p3` b4n and b5n, 4294967295 letters of `ACGT` and of `ACGTN`, in dustmasker and
+  makeblastdb). LOSAT refuses (exit 1, "... is not supported by LOSAT's <program>") at that
+  record, after the substitution's `std::out_of_range`, which NCBI throws first. A protein is
+  stored unpacked and meets no such segment.
+- `losat makembindex -old_style_index true` of a FASTA record of 4,294,914,101 letters or more,
+  counting the letters of its `>?` gap lines and modulo 2^32 (same version, line and delegation):
+  `CSubjectMap_Factory_TBase::AddSequenceChunk` takes a chunk's end as
+  `(TSeqPos)(chunk_start + chunk_size_)` (`dbindex_factory.cpp:724-725`), which wraps for a chunk
+  that starts 4,289,967,296 letters or more into the sequence (the chunks are 5,000,000 letters,
+  4,999,900 apart); the chunk's one valid interval is then 5,000,000 letters from its start, past
+  the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
+  letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
+  sequence.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
@@ -4019,6 +4060,60 @@ request that added it.
     both strands, so the sets and their e-values differ: with `-searchsp 1000000` in both runs, 6
     of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
     average of 0 to 1 and wrote the rows of other cutoffs here.
+
+    **A short query against one short subject (version 1.99, line RG item X-short-tbx-link;
+    the Owner's answer of 2026-11-24 to question Q-XT1, 「Q-XT1=A」).** The same cutoff comes from another
+    input: NCBI's expected length (`BLAST_Nint(log(K * q * s) / H)`, with the average query length
+    `q` and the subject's length `s` in protein letters) is 0 when `K q s` is near 1, and negative
+    below about `e^{-H/2}`; the subject's length less the expected length is then the subject's or
+    longer, and where the database's length in protein letters is not above it
+    (`blast_parameters.c:1046`) `y_variable` is the logarithm of the subject's length over it. At
+    an expected length of 0 that takes one subject (other subjects of fewer than 3 bases in all
+    count as none, as above): `y_variable` and `x_variable` are 0 and the logarithm -inf, as above.
+    Below 0, `y_variable` and `x_variable` are negative and the logarithm is NaN, which NCBI's
+    x86-64 conversion also takes to `INT_MIN` (`blast_parameters.c:1036-1072`); there other
+    subjects whose length in all, in protein letters, is not above minus the expected length keep
+    the database short enough (the several-subject case below). On aarch64, whose conversion
+    instruction takes a NaN to 0, NCBI's build would link with a cutoff of 1 there (not run; LOSAT
+    follows the x86-64 build, `ncbi_int4_from_double`). In both the big-gap cutoff is
+    `INT_MIN + 1`, the linking's
+    `maxscore` (`-cutoff[1]`) is `INT_MAX`, no sum that overflows `Int4` reaches it, and NCBI reads
+    the chain it never found (`link_hsps.c:694,868,931-932`; gdb on 2.17.0: a read at address 0x2a
+    in `BLAST_LinkHsps` under `s_BlastSearchEngineCore`). This takes short inputs. In our probes
+    with one subject (TBLASTX and BLASTX with `-window_size 0`): TBLASTX queries of 9 to 11 bases
+    against subjects of 11 to 14 bases and of 12 to 14 bases against 11 bases; at `-word_size 2
+    -threshold 1`, 6 to 8 bases against 8 to 20 bases, 9 to 11 against 8 to 14, 12 to 14 against 8
+    to 11 and 15 or 16 against 8; TBLASTN `-ungapped` `WWWW` against 12 to 14 bases at `-word_size
+    2 -threshold 1`; BLASTX `-ungapped` at `-word_size 2 -threshold 1`, queries of 6 to 8 bases
+    against 2 to 6 residues, 9 to 11 bases against 2 to 4, 12 to 14 against 2 or 3 and 15 or 16
+    against 2 (with the two-hit word finder no HSP of these reached BLASTX's linking). NCBI dies in
+    every probed run whose subject list reaches the linking with an HSP (89 of 418 TBLASTX runs of
+    `TGG` repeats, 42 of 600 runs of random short sequences, the TBLASTN one and 32 of 132 BLASTX
+    runs). LOSAT links with the same cutoff and its sums in 64 bits, as above; before this version
+    it took Rust's conversion of the NaN, 0, a cutoff of 1. NCBI's nearest completed run is the
+    subject with a second one that has no hits (12 N, or 300 N where 12 leave the database's length
+    in protein letters under the subject's length less the expected length; 4 X for BLASTX), which
+    makes the database longer and the cutoff finite, and `-dbsize` of the subject's length. In
+    every probed run it wrote LOSAT's one-subject bytes: all 45 TBLASTX runs above with subjects of
+    12 bases or more, all 42 random ones, the TBLASTN one and all 32 BLASTX ones. That is not a
+    property of the inputs: with a finite cutoff NCBI's linking can choose other chains where a
+    frame offers competing ones, as for the batches averaging 0; the frames of these probes, of a
+    few letters, offer almost none. The cases `link.q11_s12`, `link.q8_s12_ws2` and
+    `link.rq76_rs76_ws2` of `tblastx_regression_fixtures.py` (NCBI's arguments in its
+    `ORACLE_ARGV`), `tests/tblastn_ungapped_short_link.rs` and
+    `tests/blastx_ungapped_short_link.rs` keep them; the unit tests of
+    `core::link_hsps::calculate_link_hsp_cutoffs` keep the cutoff of both routes. With a TBLASTX
+    subject of fewer than 12 bases the next step of such a search is the re-evaluation that the
+    TBLASTX item of version 1.51 refuses (rule 3), so LOSAT refuses there, after the linking.
+
+    *Several subjects (found after the decision of Q-XT1; the Owner's answer of 2026-11-24 to
+    question Q-XT2 of line RG item X-short-tbx-link, 「A」, its option A: exception 20 covers every
+    ungapped linking whose big-gap cutoff is NCBI's `INT_MIN + 1`, whatever the number of
+    subjects).* On the NaN route other subjects whose length in all is not
+    above minus the expected length leave the cutoff at `INT_MIN + 1`, and NCBI dies the same way:
+    10 of the 42 random TBLASTX runs above died with the subject and a second subject of 12 N.
+    LOSAT computes the same cutoff and writes rows there (as it did before this version, with its
+    cutoff of 1).
 
 ## Approved exception 22 (`losat windowmasker`, an empty id in a list matched as text, version 1.75)
 
@@ -4235,7 +4330,7 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last five entries are not of these. The last (version 1.99, psiblast line item PS10e), the one
+would port. The last five entries are not of these. The last (version 1.101, psiblast line item PS10e), the one
 before it (version 1.81, line NP item M4c-1), the one before that (version 1.60, line RG item D5a)
 and the one before those (version 1.54, line RG item X5) say so themselves. The one before them (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
@@ -4327,7 +4422,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   (`make_gi_mask_fixtures.py`).
 
 - RPSTBLASTN without composition-based statistics, an alignment that starts at or past the `.psq`
-  letters of a profile whose letters are fewer than its `.rps` columns (version 1.99, 2026-11-23,
+  letters of a profile whose letters are fewer than its `.rps` columns (version 1.101, 2026-11-23,
   psiblast line item PS10e, the rule-3 entry of such profiles above; not of the database class
   above; decided by the maintainer on 2026-11-24, the answer 「Q-PS10e=A」 at 12:44 JST, psiblast
   `DECISIONS.md` 103). NCBI's rows

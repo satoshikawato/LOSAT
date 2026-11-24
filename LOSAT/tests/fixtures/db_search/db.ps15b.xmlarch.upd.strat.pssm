@@ -1,0 +1,8 @@
+
+Last position-specific scoring matrix computed
+           A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V
+    1 M   -1 -1 -2 -3 -2  0 -2 -3 -2  1  2 -1  6  0 -3 -2 -1 -2 -1  1 
+
+                      K         Lambda
+PSI Ungapped         0.1502     0.3242
+PSI Gapped           0.0460     0.2670

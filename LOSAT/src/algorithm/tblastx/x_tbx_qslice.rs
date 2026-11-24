@@ -544,7 +544,9 @@ impl<M: TbxScore> XPairPar<M> {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false, 0>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, false, false, 0>(
+            group, unit, inp, scratch, init_hsps,
+        );
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -559,6 +561,7 @@ impl<M: TbxScore> XPairPar<M> {
         const B: bool,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -674,7 +677,7 @@ impl<M: TbxScore> XPairPar<M> {
                         // below width = scratch.diag.len() as below; `fits` holds (the caller's
                         // rule); every candidate's cell is a cell of this unit's table.
                         unsafe {
-                            x_tbx_hitbf::x_hits_bf::<_, PF>(
+                            x_tbx_hitbf::x_hits_bf::<_, PF, STEP>(
                                 diag_ptr,
                                 offset_pairs_ptr,
                                 hits as usize,

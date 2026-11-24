@@ -272,6 +272,9 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
+        // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
+        // (`TblastnArgs::write_verification`).
+        args.write_verification = settings.write_verification.clone();
         // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
         // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
         // refuses it there (`args::check_search_limits`).
@@ -301,22 +304,14 @@ impl TblastnArgs {
         )
         .map(|handle| handle.with_outfmt_text(&args.outfmt));
         // The search strategy's request, with the archive's options handle.
-        args.strategy = strategy_file
-            .map(|file| {
-                anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                    file,
-                    super::archive::option_inputs(&args),
-                    choice.number(),
-                    crate::report::archive::strategy::HitlistArgs {
-                        max_target_seqs: args.max_target_seqs,
-                        num_descriptions: args.num_descriptions,
-                        num_alignments: args.num_alignments,
-                    },
-                    args.database_name(),
-                    &options,
-                ))
-            })
-            .transpose()?;
+        args.strategy = strategy_file.map(|file| {
+            crate::report::archive::strategy::StrategyExport::for_args(
+                &args,
+                file,
+                choice.number(),
+                &options,
+            )
+        });
         let archive = args.archive.clone();
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
@@ -734,7 +729,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -1118,11 +1114,11 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
-    // The host has no database files; LOSAT Web searches the records it gives.
+    // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
     // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1130,45 +1126,58 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run_io`).
     if archive_requested {
         args.archive = super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let no_query =
-                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, query_end, subject_records, view)
-            });
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(args, query_records, query_end, subject_records, outputs)
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(args, query_records, query_end, subject_records, outputs)
+    })
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its TBLASTN does not write (`app::report_format`): the command line's
-/// checks before it opens `-out` (`run_io`). The formatting handler's come after (`read_formats`).
-fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?;
-    }
-    Ok(())
+/// rejection of a format that its TBLASTN does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run_io`). The formatting handler's come after
+/// (`read_formats`), and so does the error of a value left to it with a search strategy file.
+fn report_formats(outputs: &ReportOutputs<'_>, args: &TblastnArgs) -> Result<()> {
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Tblastn,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
 /// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
-/// `FormatOutput::side_out`).
-fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
+/// `FormatOutput::side_out`). `strategy`: the argv names a search strategy file, with which a value
+/// that does not parse is left to the formatting handler of the options
+/// (`TblastnArgs::check_options_for_formats`, which reads the arguments' `-outfmt`: LOSAT Web gives
+/// such a value as the run's one format and as the arguments' `-outfmt`); it has no number here.
+fn read_formats(
+    outputs: &ReportOutputs<'_>,
+    out: Option<&std::path::Path>,
+    strategy: bool,
+) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
+        let Some(choice) = app::early_format_choice(format.outfmt, strategy)?
+            .parsed()
+            .cloned()
+        else {
+            continue;
+        };
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
         // the XInclude formats without a file come after `Query is Empty!`
         // (`ReportOutputs::xinclude_check`).
@@ -1203,29 +1212,27 @@ pub fn run_local_database(
     super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
-    report_formats(outputs, args.out.as_deref())?;
+    args.write_verification = settings.write_verification.clone();
+    report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run_io`).
     args.archive = super::archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let no_query =
-                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, query_end, settings, view)
-            });
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(args, query_records, query_end, settings, outputs),
-    }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(args, query_records, query_end, settings, outputs)
+    })
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -1243,7 +1250,11 @@ fn search_database(
     // `-out` (`run_to_file`) is made where the command line opens it (`run_io`); the formatting
     // handler's checks come after it.
     outputs.open_out()?;
-    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let outfmts = read_formats(
+        outputs,
+        args.out.as_deref(),
+        args.export_search_strategy.is_some(),
+    )?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     let joins_scope = resolved
         .pssm
@@ -1323,7 +1334,11 @@ fn run_local_formats(
     // `-out` (`run_to_file`) is made where the command line opens it (`run_io`); the formatting
     // handler's checks come after it.
     outputs.open_out()?;
-    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let outfmts = read_formats(
+        outputs,
+        args.out.as_deref(),
+        args.export_search_strategy.is_some(),
+    )?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
@@ -1509,9 +1524,9 @@ fn filter_final_hitlists(
 #[allow(clippy::too_many_arguments)]
 /// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
 /// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
-/// `-num_descriptions`, `-num_alignments` and `-html`; the formats of a run whose loads they
-/// make share one view's order, `FormatThrow::and`), for the loads of a subject whose lookup
-/// throws and the texts of its reads (line DBID item pfoff-3); `None` without one.
+/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
+/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
+/// texts of its reads (line DBID item pfoff-3); `None` without one.
 fn pairwise_reading(
     resolved: &ResolvedTblastnArgs,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
@@ -1527,7 +1542,6 @@ fn pairwise_reading(
             descriptions: resolved.num_descriptions,
             alignments: resolved.num_alignments,
         },
-        resolved.html.is_some(),
     ))
 }
 
@@ -1900,7 +1914,13 @@ fn search(
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
-        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
+        // The first format, whose prefetch each batch asks (`database::prefetch_format`).
+        let prefetch_format = super::database::prefetch_format(&outputs.formats);
+        let reads = super::database::CallReads::of(
+            database,
+            || query_input.batches(batch_size),
+            prefetch_format,
+        );
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2154,12 +2174,8 @@ fn search(
             .formats
             .first()
             .map(|format| super::stage_e_report::format_number(format.outfmt));
-        let first_prefetches = first_number.is_some_and(|number| {
-            crate::algorithm::common::database::prefetches_subjects(Some(match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            }))
-        });
+        let first_prefetches = first_number.is_some()
+            && crate::algorithm::common::database::prefetches_subjects(Some(prefetch_format));
         // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
         // taxonomy texts at each `Hit`: of the prefetch only its stop
         // (`shared::held_batch_prefetch_stop`).
@@ -2198,13 +2214,17 @@ fn search(
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
-            super::database::prefetch_stop(&titles, &results, &spans, resolved.gapped).filter(
-                |(span, _)| {
-                    failed
-                        .as_ref()
-                        .is_none_or(|(range, _)| span.start < range.start)
-                },
+            super::database::prefetch_stop(
+                &titles,
+                &results,
+                &spans,
+                (prefetch_format, resolved.gapped),
             )
+            .filter(|(span, _)| {
+                failed
+                    .as_ref()
+                    .is_none_or(|(range, _)| span.start < range.start)
+            })
         } else {
             None
         };
@@ -2340,7 +2360,7 @@ fn search(
                         hard_masked,
                     ),
                     &outputs.formats,
-                    outputs.other_outfmts,
+                    (outputs.other_outfmts, resolved.html.is_some()),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                     resolved.gapped,
@@ -2406,7 +2426,10 @@ fn search(
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
             let xml2_reads = (reported, &mut subject_reads);
-            let after = super::database::after_throw(&outputs.formats, outputs.other_outfmts);
+            let after = super::database::after_throw(
+                &outputs.formats,
+                (outputs.other_outfmts, resolved.html.is_some()),
+            );
             prefetch_posts.extend(reads.xml2(
                 first_xml2,
                 xml2_reads,
@@ -2467,7 +2490,8 @@ fn search(
                     // lookups are made here before any report is written, so the run's refusal
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
-                    if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns)
+                    {
                         // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
                             continue;
@@ -2528,6 +2552,7 @@ fn search(
                         super::database::LoadedBefore {
                             hits: &results[..span.start],
                             spans: &batch_spans,
+                            format: prefetch_format,
                             rows: first_rows,
                             cuts: xml_cuts,
                         },
@@ -2535,7 +2560,6 @@ fn search(
                         &crate::algorithm::common::database::PrefetchQueries::new(
                             span.start, &scope,
                         )
-                        .after_unrecorded_calls(args.first_query_ordinal > 0)
                         .after_xml_reports(xml_before.as_ref())
                         .where_reports_unchanged_by_load_throws(
                             crate::report::db_subject::unchanged_by_load_throws_outfmts(
@@ -2572,12 +2596,12 @@ fn search(
                 super::database::LoadedBefore {
                     hits: &results,
                     spans: &batch_spans,
+                    format: prefetch_format,
                     rows: first_rows,
                     cuts: xml_cuts,
                 },
                 &subjects,
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0)
                     .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
             );

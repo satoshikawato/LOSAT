@@ -1111,27 +1111,29 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
     let file = Some(std::path::Path::new("o.json"));
     for outfmt in ["13", "14", "19", "21"] {
         assert!(
-            cli_output_formats(outfmt, None).unwrap().is_empty(),
+            cli_output_formats(outfmt, None, false).unwrap().is_empty(),
             "{outfmt}"
         );
     }
-    assert!(cli_output_formats("13", Some(std::path::Path::new("-")))
-        .unwrap()
-        .is_empty());
+    assert!(
+        cli_output_formats("13", Some(std::path::Path::new("-")), false)
+            .unwrap()
+            .is_empty()
+    );
     // 13 and 14 to a file are written (OF5c part 1): the XML2 / JSON documents as files.
     for (outfmt, kind) in [
         ("13", crate::report::blast_xml2::Xml2Kind::Files13),
         ("14", crate::report::blast_xml2::Xml2Kind::Files14),
     ] {
         assert_eq!(
-            cli_output_formats(outfmt, file).unwrap(),
+            cli_output_formats(outfmt, file, false).unwrap(),
             [BlastnOutputFormat::Xml2(kind)],
             "{outfmt}"
         );
     }
     // Line RG T3b: the query-anchored formats 1 to 4, outfmt 0's report with another section.
     assert_eq!(
-        cli_output_formats("1", file).unwrap(),
+        cli_output_formats("1", file, false).unwrap(),
         [BlastnOutputFormat::Pairwise(
             crate::report::pairwise::PairwiseView::QueryAnchored {
                 identity: true,
@@ -1142,7 +1144,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
     // Outfmt 18, the organism report (line RG T2), rides the custom tabular report's hit
     // lists; NCBI keeps no field list for it.
     for outfmt in ["18", "18 qseqid"] {
-        let formats = cli_output_formats(outfmt, file).unwrap();
+        let formats = cli_output_formats(outfmt, file, false).unwrap();
         assert!(
             matches!(
                 formats.as_slice(),
@@ -1155,27 +1157,27 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
     }
     // SAM (OF6) reads its words and ignores the rest and a delimiter.
     assert_eq!(
-        cli_output_formats("17", file).unwrap(),
+        cli_output_formats("17", file, false).unwrap(),
         [BlastnOutputFormat::Sam(
             crate::report::sam::SamSpec::default()
         )]
     );
     assert_eq!(
-        cli_output_formats(" 17 delim=, SR SQ foo", None).unwrap(),
+        cli_output_formats(" 17 delim=, SR SQ foo", None, false).unwrap(),
         [BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
             subject_as_reference: true,
             sequence: true
         })]
     );
     assert_eq!(
-        cli_output_formats("0 qaccver", None).unwrap(),
+        cli_output_formats("0 qaccver", None, false).unwrap(),
         [BlastnOutputFormat::Pairwise(
             crate::report::pairwise::PairwiseView::Pairwise
         )]
     );
     // A field list, a delimiter, and outfmt 10 and 20 are the custom tabular report (line CLI
     // C2); the default 6 and 7 (`std` with a tab) keep their own writers.
-    let custom = |outfmt: &str| match cli_output_formats(outfmt, None).unwrap().as_slice() {
+    let custom = |outfmt: &str| match cli_output_formats(outfmt, None, false).unwrap().as_slice() {
         [BlastnOutputFormat::CustomTabular(spec)] => (*spec).clone(),
         other => panic!("{outfmt}: {other:?}"),
     };
@@ -1189,18 +1191,18 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         crate::report::tabular::TabularKind::CsvWithHeader
     );
     assert_eq!(
-        cli_output_formats("6 std", None).unwrap(),
+        cli_output_formats("6 std", None, false).unwrap(),
         [BlastnOutputFormat::Tabular]
     );
     // A tab given as `delim=` keeps the default writer; NCBI takes `delim=\t` as written, a
     // backslash and a `t`.
     assert_eq!(
-        cli_output_formats("7 delim=\t std", None).unwrap(),
+        cli_output_formats("7 delim=\t std", None, false).unwrap(),
         [BlastnOutputFormat::TabularWithComments]
     );
     assert_eq!(custom(r"7 delim=\t").delimiter, r"\t");
     assert_eq!(
-        native(cli_output_formats("22", None).unwrap_err()),
+        native(cli_output_formats("22", None, false).unwrap_err()),
         (
             255,
             "Error: Formatting choice is out of range\n".to_string()
@@ -1257,13 +1259,13 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
     // `search` (the XInclude formats without a file) raise their errors after `-out` is made.
     for outfmt in ["13", "14", "19", "21"] {
         assert_eq!(
-            parse_output_formats([("6", None), (outfmt, None)]).unwrap(),
+            parse_output_formats([("6", None), (outfmt, None)], false).unwrap(),
             [BlastnOutputFormat::Tabular],
             "{outfmt}"
         );
     }
     assert_eq!(
-        parse_output_formats([("0", None), ("6", None), ("07", None)]).unwrap(),
+        parse_output_formats([("0", None), ("6", None), ("07", None)], false).unwrap(),
         [
             BlastnOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
             BlastnOutputFormat::Tabular,
@@ -1271,7 +1273,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         ]
     );
     assert_eq!(
-        parse_output_formats([("17", None), ("17 SQ SR", None)]).unwrap(),
+        parse_output_formats([("17", None), ("17 SQ SR", None)], false).unwrap(),
         [
             BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
             BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
@@ -1771,7 +1773,7 @@ fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
         let scan = HardScan::Nucleotide {
             scanned_word: word as usize,
         };
-        let shape = HardMaskShape::of_scan(&stored, None, &|| Some(length as usize), scan);
+        let shape = HardMaskShape::of_scan(&stored, None, &|| Some(length as usize), scan, None);
         // The same shape from the bounds of the length that the index gives (the packed bytes
         // and 0 to 3 letters in the last one; review 2 S4).
         let low = (length - length % 4) as usize;
@@ -1780,7 +1782,8 @@ fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
                 &stored,
                 Some((low, low + 3)),
                 &|| Some(length as usize),
-                scan
+                scan,
+                None,
             ),
             shape,
             "{length} {masks:?} word {word}: bounds"

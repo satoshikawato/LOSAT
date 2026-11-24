@@ -117,3 +117,31 @@ QD43	-in in/l_QD43.lst -out db
 QD44	-in in/l_QD44.lst -out db
 QD45	-in in/l_QD45.lst -out db
 QD46	-in in/l_QD46.lst -out db
+NE00	-in in/l_zs.lst -out db
+NE01	-in in/l_zs_d1.lst -out db
+NE02	-in in/l_zs_d2.lst -out db
+NE03	-in in/l_zs_d0.lst -out db
+NE04	-in in/l_zs_zs_d1.lst -out db
+NE05	-in in/l_zs_d1_zs.lst -out db
+NE06	-taxid 5 -in in/l_zs_d1.lst -out db
+NE07	-blastdb_version 4 -in in/l_zs_d1.lst -out db
+NE08	-index false -in in/l_zs_d1.lst -out db
+NE09	-max_smp_vol 1 -in in/l_zs_zs_d1.lst -out db
+NE10	-in in/l_n_bh.lst -out db
+NE11	-taxid 5 -in in/l_n_bh.lst -out db
+NE12	-in in/l_n_bh0.lst -out db
+NE13	-in in/l_e_oss_empty_null.lst -out db
+NE14	-taxid 5 -in in/l_e_oss_empty_null.lst -out db
+NE15	-in in/l_e_bh_org_null.lst -out db
+NE16	-in in/l_e_bh_null_org.lst -out db
+NE17	-in in/l_zs_hist_ids.lst -out db
+NE18	-in in/l_zs_hist_asm.lst -out db
+NE19	-in in/l_zs_ext_seg.lst -out db
+NE20	-in in/l_zs_ext_delta.lst -out db
+NE21	-in in/l_zs_subtype.lst -out db
+NE22	-in in/l_zs_dbxref.lst -out db
+NE23	-in in/l_zs_qual.lst -out db
+NE24	-in in/l_zs_varset.lst -out db
+NE25	-in in/l_zs_pop.lst -out db
+NE26	-in in/l_zs_clin.lst -out db
+NE27	-in in/l_e_noid_oss_null.lst -out db

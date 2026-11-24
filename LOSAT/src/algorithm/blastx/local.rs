@@ -64,44 +64,38 @@ pub fn run_local(
     // A search of records reads no database: `run_local_database` searches the database of `-db`.
     // `check_options` (LOSAT Web's `validate`) checks `-db` as the command line does (line WQA D12a).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
+        bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
-    let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    let archive_requested = choices.iter().any(|choice| choice.number() == Some(11));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line
+    // (`native::RunSetup::open`).
     let archive = archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
-    match archive {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_records(
-                    &args,
-                    query_records,
-                    query_end,
-                    subject_records,
-                    (choices, resolutions),
-                    Some(&handle),
-                    view,
-                )
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_records(
-            &args,
-            query_records,
-            query_end,
-            subject_records,
-            (choices, resolutions),
-            None,
-            outputs,
-        ),
-    }
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(
+        args.strategy.as_ref(),
+        archive.as_ref(),
+        no_query,
+        |outputs| {
+            search_records(
+                &args,
+                query_records,
+                query_end,
+                subject_records,
+                (choices, resolutions),
+                archive.as_ref(),
+                outputs,
+            )
+        },
+    )
 }
 
 /// `run_local` from the reading of the subjects on.
@@ -110,7 +104,7 @@ fn search_records(
     query_records: &[fasta_reader::FastaRecord],
     query_end: &QueryEnd,
     subject_records: &[fasta_reader::FastaRecord],
-    (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
+    (choices, resolutions): ReadOptions,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -130,8 +124,9 @@ fn search_records(
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
             // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
             // (`x_soft_subject::x_set_subject_row_masks`), and the archive's Bioseqs.
-            let keep_whole =
-                archive.is_some() || (args.lcase_masking && !subject.lowercase_masks.is_empty());
+            let keep_whole = archive.is_some()
+                || args.strategy.is_some()
+                || (args.lcase_masking && !subject.lowercase_masks.is_empty());
             subject.cut_in_place(from, to_exclusive, keep_whole);
         }
         subjects.push(subject);
@@ -144,7 +139,8 @@ fn search_records(
     crate::api::local_blast::open_out(&mut outputs.formats)?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
-    let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
+    let (choices, mut resolved) =
+        check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
         options.query_range = query_range;
     }
@@ -167,7 +163,7 @@ fn search_records(
         args.lcase_masking,
         query_range,
         batch_size,
-        archive.is_some(),
+        archive.is_some() || args.strategy.is_some(),
         true,
         xml_matrix,
         args.parse_deflines,
@@ -228,6 +224,7 @@ fn search_records(
             scope_refusal: args.scope_refusal.as_ref(),
             database: None,
             archive,
+            strategy: args.strategy.as_ref(),
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,
@@ -289,6 +286,8 @@ struct RunReports<'a> {
     database: Option<DatabaseReports<'a>>,
     /// The BLAST archive (outfmt 11), when it is requested.
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    /// The search strategy file (`-export_search_strategy`, LOSAT Web's), when it is requested.
+    strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
     /// The file of `api::run_to_file`, next to which outfmt 13 and 14 write their side files.
     out: Option<&'a std::path::Path>,
     search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
@@ -687,6 +686,7 @@ fn write_run(
         scope_refusal,
         ref database,
         archive,
+        strategy,
         search_error,
         ref xml_scan,
         xml_matrix,
@@ -717,7 +717,6 @@ fn write_run(
         )
         .map(|scopes| scopes.with_refusal(scope_refusal.cloned()))
     }));
-    let scope_taken = std::cell::Cell::new(None);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
         let mut quiet = io::sink();
@@ -757,8 +756,10 @@ fn write_run(
     // The search's options are those of every format; the formats differ only in the counts of
     // the pairwise report (`run_report_counts`).
     let search_options = &resolved[0];
-    // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
-    let keep_whole = archive.is_some();
+    // The Bioseq of a cut record in the archive and the search strategy's request holds its whole
+    // letters (`FastaRecord::cut_in_place`), as the command line's reader keeps them
+    // (`native::run_inner`).
+    let keep_whole = archive.is_some() || strategy.is_some();
     // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
     // read into a query row (`empty_rows::query_letters_around`), as the command line's reader.
     let around = match database {
@@ -808,6 +809,21 @@ fn write_run(
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
     let asks = ReportedAsks::of_all(resolved, other_outfmts);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at
+    // `native::run_inner`'s `batch_take`)
+    // The loop's takes of a reader batch, as the command line's (`native::BatchTake`): the batch
+    // joins the scopes of the queries (line WQA D10 round 5, 2026-11-20) and, with LOSAT Web's
+    // `-export_search_strategy` (the library refuses the option, `api::search::file_options`), its
+    // request is written before the loop looks at the batch's search.
+    let batch_take = super::native::BatchTake::new(
+        &query_scopes,
+        strategy,
+        archive,
+        search_options,
+        search_subjects,
+        search_error,
+        database.is_none().then_some(subjects),
+    );
     // NCBI's scope of the query records at each batch's prefetch (`native::BatchScopes`).
     let batch_scopes =
         super::native::BatchScopes::new(xml, database.as_ref().map(|run| run.database));
@@ -817,6 +833,9 @@ fn write_run(
                       queries_before: usize,
                       pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
+        // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
+        // search strategy request holds (`take` below).
+        batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
@@ -1065,6 +1084,10 @@ fn write_run(
         }
         Ok(())
     };
+    let mut take = |diagnostics: &mut dyn Write,
+                    queries: &[FastaRecord],
+                    queries_before: usize|
+     -> Result<()> { batch_take.take(diagnostics, queries, queries_before) };
     let processed = run_query_batches(
         search_options,
         search_subjects,
@@ -1073,21 +1096,7 @@ fn write_run(
         &mut **diagnostics,
         search_error,
         &mut render,
-        // The library and LOSAT Web write no search strategy (`api::search::file_options`): the
-        // batch the loop takes joins the scopes of the queries (`native::add_batch_scope`), as the
-        // command line's (line WQA D10 round 5, 2026-11-20).
-        &mut |_, queries, queries_before| {
-            super::native::add_batch_scope(
-                &query_scopes,
-                &scope_taken,
-                queries,
-                queries_before,
-                false,
-                search_options,
-                search_subjects,
-                search_error,
-            )
-        },
+        &mut take,
     )
     .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
@@ -1148,40 +1157,34 @@ pub fn run_local_database(
     args.matrix_search = Some(settings.matrix_search.clone());
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
-    let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    let archive_requested = choices.iter().any(|choice| choice.number() == Some(11));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line
+    // (`native::RunSetup::open`).
     let archive = archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
-    match archive {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(
-                    &args,
-                    query_records,
-                    query_end,
-                    settings,
-                    (choices, resolutions),
-                    Some(&handle),
-                    view,
-                )
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(
-            &args,
-            query_records,
-            query_end,
-            settings,
-            (choices, resolutions),
-            None,
-            outputs,
-        ),
-    }
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(
+        args.strategy.as_ref(),
+        archive.as_ref(),
+        no_query,
+        |outputs| {
+            search_database(
+                &args,
+                query_records,
+                query_end,
+                settings,
+                (choices, resolutions),
+                archive.as_ref(),
+                outputs,
+            )
+        },
+    )
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -1190,7 +1193,7 @@ fn search_database(
     query_records: &[fasta_reader::FastaRecord],
     query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-    (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
+    (choices, resolutions): ReadOptions,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1206,7 +1209,8 @@ fn search_database(
     outputs.open_out()?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
-    let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
+    let (choices, mut resolved) =
+        check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
     let database = BlastxDatabase::open_restricted(
@@ -1221,7 +1225,7 @@ fn search_database(
     .after_calls(args.first_query_ordinal > 0);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
-        None,
+        args.strategy.as_ref(),
         &args.db_filter,
         database.list_taxids(),
         &database.statistics(),
@@ -1271,8 +1275,12 @@ fn search_database(
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
     // The formatter resolves the database masking before its other work (`native::run_inner`).
     if let Some(option) = args.db_mask.option() {
-        let mask =
-            database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
+        let mask = database.resolve_mask_option(
+            &option,
+            archive,
+            args.strategy.as_ref(),
+            &mut *outputs.diagnostics,
+        )?;
         if let Some(mask) = &mask {
             database.check_mask_limits(mask)?;
         }
@@ -1322,7 +1330,7 @@ fn search_database(
         args.lcase_masking,
         query_range,
         batch_size,
-        archive.is_some(),
+        archive.is_some() || args.strategy.is_some(),
         false,
         xml_matrix,
         args.parse_deflines,
@@ -1348,6 +1356,9 @@ fn search_database(
                 pairwise: &pairwise,
             }),
             archive,
+            // The search strategy file of LOSAT Web's run (`web_adapter::give_strategy`); the
+            // library writes none (`api::search::file_options`).
+            strategy: args.strategy.as_ref(),
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,
@@ -1404,10 +1415,7 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// records are read: LOSAT Web's refusals and LOSAT's fail here; NCBI's errors of the options
 /// (`SemanticOptionsError`) stay in the resolutions, which the command line reports after the
 /// subjects are read (`native::run_inner`).
-fn read_options(
-    args: &BlastxArgs,
-    outfmts: &[&str],
-) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
+fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
     // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
     // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
     // records that kept none, which also refused two empty inputs that the command line ends with
@@ -1420,25 +1428,34 @@ fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
     outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
+/// The output formats of a search of records as the command line's early reading reads them
+/// (`app::EarlyFormat`) and the options of each (`read_format_options`), whose NCBI errors
+/// `check_resolutions` reports where the command line does.
+type ReadOptions = (Vec<app::EarlyFormat>, Vec<Result<ResolvedOptions>>);
+
 /// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
 /// and 14 whose side files have no file name to go by get NCBI's error later, where the command
 /// line gives it (`ReportOutputs::xinclude_check`).
-fn read_format_options(
-    args: &BlastxArgs,
-    outfmts: &[&str],
-) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
-    // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
+fn read_format_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+    // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`);
+    // where the argv names a search strategy file a value that does not parse is left to the
+    // formatting handler (`app::early_format_choice`, `check_resolutions`).
     let mut choices = Vec::with_capacity(outfmts.len());
     for &outfmt in outfmts {
-        let choice = app::parse_formatting_string(outfmt)?;
-        app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+        let choice = app::early_format_choice(outfmt, args.export_search_strategy.is_some())?;
+        choice.report_format(Program::Blastx, args.out.as_deref())?;
         choices.push(choice);
     }
     ensure!(!choices.is_empty(), "no output format was requested");
     // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
-    // subjects are read (`native::run_inner`).
+    // subjects are read (`native::run_inner`). A value left to the formatting handler has none
+    // (its error comes there first), as the command line's (`native::RunSetup::open`).
     let mut resolutions = Vec::with_capacity(choices.len());
     for choice in &choices {
+        let Some(choice) = choice.parsed() else {
+            resolutions.push(Err(SemanticOptionsError::from(String::new()).into()));
+            continue;
+        };
         match args.resolve_with_format(choice) {
             Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
                 return Err(error)
@@ -1458,17 +1475,23 @@ fn read_format_options(
 }
 
 /// The checks of the options that the command line makes after the subjects are read, in its
-/// order: the formatting handler's, the hit list size (its warnings and those of an ignored
+/// order: the formatting handler's (a value that the early reading left to it, which LOSAT Web
+/// gives as the run's one format and as the arguments' `-outfmt`, is read again and fails, as the
+/// command line's `native::run_inner`), the hit list size (its warnings and those of an ignored
 /// -num_descriptions, the first format's, to `diagnostics`; formats that need different hit lists
-/// are refused, `run_report_counts`), then NCBI's errors of each format's options.
+/// are refused, `run_report_counts`), then NCBI's errors of each format's options. The formats'
+/// choices and their options.
 fn check_resolutions(
     args: &BlastxArgs,
-    choices: &[app::FormatChoice],
+    early: &[app::EarlyFormat],
     resolutions: Vec<Result<ResolvedOptions>>,
     diagnostics: &mut dyn Write,
-) -> Result<Vec<ResolvedOptions>> {
-    for choice in choices {
-        app::formatting_handler_check(choice, Program::Blastx)?;
+) -> Result<(Vec<app::FormatChoice>, Vec<ResolvedOptions>)> {
+    let mut choices = Vec::with_capacity(early.len());
+    for choice in early {
+        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        app::formatting_handler_check(&choice, Program::Blastx)?;
+        choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
@@ -1481,14 +1504,15 @@ fn check_resolutions(
         &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
-    resolutions
+    let resolved = resolutions
         .into_iter()
         .map(|resolution| {
             let mut options = resolution.map_err(options_error)?;
             options.html = html.clone();
             Ok(options)
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok((choices, resolved))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090

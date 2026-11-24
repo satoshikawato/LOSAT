@@ -798,6 +798,23 @@ fn run_inner(
             _ => Some(&subjects[..]),
         })
     });
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
+    // The search strategy's request of a reader batch (`-export_search_strategy`), which NCBI
+    // writes once its query factory is made, before its search: the loop takes each batch here
+    // before it looks at the batch's search (`run_query_batches`), so a batch whose search fails
+    // (a query without letters in a batch without a valid context, `Warning: Sequence contains no
+    // data`; the sequence file of `-db`) has one, and the file is apart from the reports. An empty
+    // batch has none: its `Empty CBlastQueryVector` comes before it. Each unit of a batch the
+    // search split takes it once (`StrategyExport::takes`).
+    let batch_take = BatchTake::new(
+        &query_scopes,
+        strategy.as_ref(),
+        archive.as_ref(),
+        &options,
+        search_subjects,
+        &search_error,
+        database.is_none().then_some(&subjects[..]),
+    );
     // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
     let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
@@ -809,12 +826,7 @@ fn run_inner(
      -> Result<()> {
         // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
         // search strategy request holds (`take` below).
-        if let Some(strategy) = &strategy {
-            strategy.note_searched(
-                queries_before..queries_before + queries.len(),
-                archive::batch_searched_space(results, &options),
-            )?;
-        }
+        batch_take.note_searched(queries, results, queries_before)?;
         if let (Some(handle), Some(archive_requests)) = (&archive, &archive_requests) {
             return ArchiveBatch {
                 handle,
@@ -950,47 +962,10 @@ fn run_inner(
         )?;
         writer.flush().map_err(output_error)
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264
-    // The search strategy's request of a reader batch (`-export_search_strategy`), which NCBI
-    // writes once its query factory is made, before its search: the loop takes each batch here
-    // before it looks at the batch's search (`run_query_batches`), so a batch whose search fails
-    // (a query without letters in a batch without a valid context, `Warning: Sequence contains no
-    // data`; the sequence file of `-db`) has one, and the file is apart from the reports. An empty
-    // batch has none: its `Empty CBlastQueryVector` comes before it. Each unit of a batch the
-    // search split takes it once (`StrategyExport::takes`).
-    let requests = strategy
-        .as_ref()
-        .map(|_| archive::requests(database.is_none().then_some(&subjects[..])));
-    // NCBI's posts of the bytes that its stream replaced in the request go to the run's
-    // diagnostics (`diagnostics`, where the loop takes the batch: after the batch's reader
-    // messages, before its search) and are messages of the archive (`StrategyExport::take_posts`).
-    // The batch that the loop takes joins the scopes of the queries first (`add_batch_scope`).
-    let scope_taken = std::cell::Cell::new(None);
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
                     queries_before: usize|
-     -> Result<()> {
-        add_batch_scope(
-            &query_scopes,
-            &scope_taken,
-            queries,
-            queries_before,
-            strategy.is_some(),
-            &options,
-            search_subjects,
-            &search_error,
-        )?;
-        let (Some(strategy), Some(requests)) = (&strategy, &requests) else {
-            return Ok(());
-        };
-        requests.write(
-            strategy,
-            queries_before,
-            queries,
-            queries.first().map(FastaRecord::placement),
-        )?;
-        Ok(strategy.write_posts(diagnostics, archive.as_ref())?)
-    };
+     -> Result<()> { batch_take.take(diagnostics, queries, queries_before) };
     // RPSTBLASTN's search of the query batches takes the place of BLASTX's, once per run
     // (`args::RpsTblastnSearch`, DECISIONS 38 D1).
     let processed = match &options.rpstblastn {
@@ -1816,6 +1791,98 @@ pub(super) fn add_batch_scope(
             }
         })
     })
+}
+
+/// What the query loop does where it takes a reader batch (`run_query_batches`' `take`) and where
+/// it reports one, for the command line's run (`run_inner`) and LOSAT Web's search of records
+/// (`local::render`), so that both keep one order of a batch's search strategy request: the batch
+/// joins the scopes of the queries first (`add_batch_scope`); with `-export_search_strategy` its
+/// request is written (`RunRequests::write`), and NCBI's posts of the bytes that its stream
+/// replaced in it go to the run's diagnostics, as messages of the archive
+/// (`StrategyExport::write_posts`); where the batch is reported, the search space that its set-up
+/// wrote is noted for the next request (`note_searched`).
+pub(super) struct BatchTake<'a> {
+    query_scopes: &'a std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+    scope_taken: std::cell::Cell<Option<usize>>,
+    strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
+    requests: Option<crate::report::archive::requests::RunRequests<'a>>,
+    archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    options: &'a super::args::ResolvedOptions,
+    subjects: Subjects<'a>,
+    search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
+}
+
+impl<'a> BatchTake<'a> {
+    /// The loop's takes of a run with the export `strategy`, the archive `archive` and, with
+    /// `-subject`, its records `request_subjects` (the requests' subjects).
+    pub(super) fn new(
+        query_scopes: &'a std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+        strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
+        archive: Option<&'a crate::report::archive::ArchiveHandle>,
+        options: &'a super::args::ResolvedOptions,
+        subjects: Subjects<'a>,
+        search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
+        request_subjects: Option<&'a [FastaRecord]>,
+    ) -> Self {
+        Self {
+            query_scopes,
+            scope_taken: std::cell::Cell::new(None),
+            strategy,
+            requests: strategy.map(|_| archive::requests(request_subjects)),
+            archive,
+            options,
+            subjects,
+            search_error,
+        }
+    }
+
+    /// Takes the reader batch `queries`, after the `queries_before` queries of the batches
+    /// before it.
+    pub(super) fn take(
+        &self,
+        diagnostics: &mut dyn Write,
+        queries: &[FastaRecord],
+        queries_before: usize,
+    ) -> Result<()> {
+        add_batch_scope(
+            self.query_scopes,
+            &self.scope_taken,
+            queries,
+            queries_before,
+            self.strategy.is_some(),
+            self.options,
+            self.subjects,
+            self.search_error,
+        )?;
+        let (Some(strategy), Some(requests)) = (self.strategy, &self.requests) else {
+            return Ok(());
+        };
+        requests.write(
+            strategy,
+            queries_before,
+            queries,
+            queries.first().map(FastaRecord::placement),
+        )?;
+        Ok(strategy.write_posts(diagnostics, self.archive)?)
+    }
+
+    /// The batch `queries` (after `queries_before` queries) is reported with the results
+    /// `results`: its set-up's `EffectiveSearchSpace`, which the next batch's request holds
+    /// (`StrategyExport::note_searched`).
+    pub(super) fn note_searched(
+        &self,
+        queries: &[FastaRecord],
+        results: &[BatchResults],
+        queries_before: usize,
+    ) -> Result<()> {
+        if let Some(strategy) = self.strategy {
+            strategy.note_searched(
+                queries_before..queries_before + queries.len(),
+                archive::batch_searched_space(results, self.options),
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against

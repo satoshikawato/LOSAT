@@ -1,0 +1,1234 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: t
+           12 sequences; 5,020 total letters
+
+
+
+Query= q1
+
+Length=280
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000001.1 one                                                        518     1e-150
+AB000008.1 eight                                                      113     7e-29 
+AB000005.1 five no gi                                                 113     7e-29 
+gi|1012 twelve gi only                                                111     3e-28 
+seq9 nine local id                                                    111     3e-28 
+AB000004.1 four above INT4_MAX                                        106     1e-26 
+AB000003.1 three                                                      97.1    7e-24 
+
+
+>AB000001.1 one
+Length=460
+
+ Score = 518 bits (280),  Expect = 1e-150
+ Identities = 280/280 (100%), Gaps = 0/280 (0%)
+ Strand=Plus/Plus
+
+Query  1    CATCGAAGTCTCCTTTACTTCTCTCAAGGCCCTGCGAGATATTATCCGGTGTCGGTTAGC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  CATCGAAGTCTCCTTTACTTCTCTCAAGGCCCTGCGAGATATTATCCGGTGTCGGTTAGC  180
+
+Query  61   ATCGACTTTTCACCAGATTCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  ATCGACTTTTCACCAGATTCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  240
+
+Query  121  AAAAAAAAAAAAAAAAAAAAACCGTTAAAATGCAGAAGGAATTCGTCTTAAAGTTTACGT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  AAAAAAAAAAAAAAAAAAAAACCGTTAAAATGCAGAAGGAATTCGTCTTAAAGTTTACGT  300
+
+Query  181  TACGCCCGTGGACAGAATTACTGGCCAAGTGTTTCGGGCTACCGGCGAATCGGGCGAAAG  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  TACGCCCGTGGACAGAATTACTGGCCAAGTGTTTCGGGCTACCGGCGAATCGGGCGAAAG  360
+
+Query  241  ACCTAACTCGTCTCGGCGTTTGGTTAGCTGTTACATGGAG  280
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  ACCTAACTCGTCTCGGCGTTTGGTTAGCTGTTACATGGAG  400
+
+
+ Score = 69.4 bits (37),  Expect = 2e-15
+ Identities = 37/37 (100%), Gaps = 0/37 (0%)
+ Strand=Plus/Plus
+
+Query  105  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||||||||
+Sbjct  201  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  237
+
+
+ Score = 69.4 bits (37),  Expect = 2e-15
+ Identities = 37/37 (100%), Gaps = 0/37 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  117
+            |||||||||||||||||||||||||||||||||||||
+Sbjct  225  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  261
+
+
+ Score = 58.4 bits (31),  Expect = 3e-12
+ Identities = 31/31 (100%), Gaps = 0/31 (0%)
+ Strand=Plus/Plus
+
+Query  111  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||
+Sbjct  201  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  231
+
+
+ Score = 58.4 bits (31),  Expect = 3e-12
+ Identities = 31/31 (100%), Gaps = 0/31 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  111
+            |||||||||||||||||||||||||||||||
+Sbjct  231  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  261
+
+
+>AB000008.1 eight
+ AB000009.1 eight-b
+Length=400
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  131  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  190
+
+Query  141  A  141
+            |
+Sbjct  191  A  191
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  132  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  191
+
+Query  141  A  141
+            |
+Sbjct  192  A  192
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  133  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  192
+
+Query  141  A  141
+            |
+Sbjct  193  A  193
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  134  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  193
+
+Query  141  A  141
+            |
+Sbjct  194  A  194
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  135  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  194
+
+Query  141  A  141
+            |
+Sbjct  195  A  195
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  136  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  195
+
+Query  141  A  141
+            |
+Sbjct  196  A  196
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  137  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  196
+
+Query  141  A  141
+            |
+Sbjct  197  A  197
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  138  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  197
+
+Query  141  A  141
+            |
+Sbjct  198  A  198
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  139  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  198
+
+Query  141  A  141
+            |
+Sbjct  199  A  199
+
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  140  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  199
+
+Query  141  A  141
+            |
+Sbjct  200  A  200
+
+
+ Score = 102 bits (55),  Expect = 2e-25
+ Identities = 57/58 (98%), Gaps = 0/58 (0%)
+ Strand=Plus/Plus
+
+Query  84   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || |||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  128  AATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  185
+
+
+ Score = 102 bits (55),  Expect = 2e-25
+ Identities = 55/55 (100%), Gaps = 0/55 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  135
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  146  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 91.6 bits (49),  Expect = 3e-22
+ Identities = 51/52 (98%), Gaps = 0/52 (0%)
+ Strand=Plus/Plus
+
+Query  90   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || |||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  128  AATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  179
+
+
+ Score = 91.6 bits (49),  Expect = 3e-22
+ Identities = 49/49 (100%), Gaps = 0/49 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  129
+            |||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  152  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 80.5 bits (43),  Expect = 7e-19
+ Identities = 45/46 (98%), Gaps = 0/46 (0%)
+ Strand=Plus/Plus
+
+Query  96   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || |||||||||||||||||||||||||||||||||||||||||||
+Sbjct  128  AATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  173
+
+
+ Score = 80.5 bits (43),  Expect = 7e-19
+ Identities = 43/43 (100%), Gaps = 0/43 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  123
+            |||||||||||||||||||||||||||||||||||||||||||
+Sbjct  158  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 69.4 bits (37),  Expect = 2e-15
+ Identities = 39/40 (98%), Gaps = 0/40 (0%)
+ Strand=Plus/Plus
+
+Query  102  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || |||||||||||||||||||||||||||||||||||||
+Sbjct  128  AATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  167
+
+
+ Score = 69.4 bits (37),  Expect = 2e-15
+ Identities = 37/37 (100%), Gaps = 0/37 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  117
+            |||||||||||||||||||||||||||||||||||||
+Sbjct  164  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 58.4 bits (31),  Expect = 3e-12
+ Identities = 33/34 (97%), Gaps = 0/34 (0%)
+ Strand=Plus/Plus
+
+Query  108  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || |||||||||||||||||||||||||||||||
+Sbjct  128  AATAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  161
+
+
+ Score = 58.4 bits (31),  Expect = 3e-12
+ Identities = 31/31 (100%), Gaps = 0/31 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  111
+            |||||||||||||||||||||||||||||||
+Sbjct  170  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+>AB000005.1 five no gi
+Length=400
+
+ Score = 113 bits (61),  Expect = 7e-29
+ Identities = 65/67 (97%), Gaps = 0/67 (0%)
+ Strand=Plus/Plus
+
+Query  74   CAGATTCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  133
+            || || ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  114  CACATGCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  173
+
+Query  134  AAAAAAA  140
+            |||||||
+Sbjct  174  AAAAAAA  180
+
+
+ Score = 111 bits (60),  Expect = 3e-28
+ Identities = 60/60 (100%), Gaps = 0/60 (0%)
+ Strand=Plus/Plus
+
+Query  82   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  180
+
+
+ Score = 100 bits (54),  Expect = 6e-25
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Plus
+
+Query  88   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  174
+
+
+ Score = 100 bits (54),  Expect = 6e-25
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  134
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  127  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  180
+
+
+ Score = 89.8 bits (48),  Expect = 1e-21
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Plus
+
+Query  94   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  168
+
+
+ Score = 89.8 bits (48),  Expect = 1e-21
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  128
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  133  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  180
+
+
+ Score = 78.7 bits (42),  Expect = 3e-18
+ Identities = 42/42 (100%), Gaps = 0/42 (0%)
+ Strand=Plus/Plus
+
+Query  100  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  162
+
+
+ Score = 78.7 bits (42),  Expect = 3e-18
+ Identities = 42/42 (100%), Gaps = 0/42 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  122
+            ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  139  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  180
+
+
+ Score = 67.6 bits (36),  Expect = 6e-15
+ Identities = 36/36 (100%), Gaps = 0/36 (0%)
+ Strand=Plus/Plus
+
+Query  106  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||
+Sbjct  121  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  156
+
+
+ Score = 67.6 bits (36),  Expect = 6e-15
+ Identities = 36/36 (100%), Gaps = 0/36 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  116
+            ||||||||||||||||||||||||||||||||||||
+Sbjct  145  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  180
+
+
+ Score = 56.5 bits (30),  Expect = 1e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Plus
+
+Query  112  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||
+Sbjct  121  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  150
+
+
+ Score = 56.5 bits (30),  Expect = 1e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  110
+            ||||||||||||||||||||||||||||||
+Sbjct  151  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  180
+
+
+>gi|1012 twelve gi only
+Length=400
+
+ Score = 111 bits (60),  Expect = 3e-28
+ Identities = 60/60 (100%), Gaps = 0/60 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 102 bits (55),  Expect = 2e-25
+ Identities = 55/55 (100%), Gaps = 0/55 (0%)
+ Strand=Plus/Plus
+
+Query  87   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  225
+
+
+ Score = 100 bits (54),  Expect = 6e-25
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  134
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  177  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 91.6 bits (49),  Expect = 3e-22
+ Identities = 49/49 (100%), Gaps = 0/49 (0%)
+ Strand=Plus/Plus
+
+Query  93   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  219
+
+
+ Score = 89.8 bits (48),  Expect = 1e-21
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  128
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  183  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 80.5 bits (43),  Expect = 7e-19
+ Identities = 43/43 (100%), Gaps = 0/43 (0%)
+ Strand=Plus/Plus
+
+Query  99   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  213
+
+
+ Score = 78.7 bits (42),  Expect = 3e-18
+ Identities = 42/42 (100%), Gaps = 0/42 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  122
+            ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  189  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 69.4 bits (37),  Expect = 2e-15
+ Identities = 37/37 (100%), Gaps = 0/37 (0%)
+ Strand=Plus/Plus
+
+Query  105  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  207
+
+
+ Score = 67.6 bits (36),  Expect = 6e-15
+ Identities = 36/36 (100%), Gaps = 0/36 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  116
+            ||||||||||||||||||||||||||||||||||||
+Sbjct  195  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 58.4 bits (31),  Expect = 3e-12
+ Identities = 31/31 (100%), Gaps = 0/31 (0%)
+ Strand=Plus/Plus
+
+Query  111  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            |||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  201
+
+
+ Score = 56.5 bits (30),  Expect = 1e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  110
+            ||||||||||||||||||||||||||||||
+Sbjct  201  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+>seq9 nine local id
+Length=400
+
+ Score = 111 bits (60),  Expect = 3e-28
+ Identities = 60/60 (100%), Gaps = 0/60 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  141  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 111 bits (60),  Expect = 3e-28
+ Identities = 60/60 (100%), Gaps = 0/60 (0%)
+ Strand=Plus/Plus
+
+Query  82   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  141  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 100 bits (54),  Expect = 6e-25
+ Identities = 56/57 (98%), Gaps = 0/57 (0%)
+ Strand=Plus/Plus
+
+Query  85   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  138  AAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  194
+
+
+ Score = 100 bits (54),  Expect = 6e-25
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  134
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  147  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 89.8 bits (48),  Expect = 1e-21
+ Identities = 50/51 (98%), Gaps = 0/51 (0%)
+ Strand=Plus/Plus
+
+Query  91   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  138  AAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  188
+
+
+ Score = 89.8 bits (48),  Expect = 1e-21
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  128
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  153  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 78.7 bits (42),  Expect = 3e-18
+ Identities = 44/45 (98%), Gaps = 0/45 (0%)
+ Strand=Plus/Plus
+
+Query  97   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  138  AAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  182
+
+
+ Score = 78.7 bits (42),  Expect = 3e-18
+ Identities = 42/42 (100%), Gaps = 0/42 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  122
+            ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  159  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 67.6 bits (36),  Expect = 6e-15
+ Identities = 38/39 (97%), Gaps = 0/39 (0%)
+ Strand=Plus/Plus
+
+Query  103  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || ||||||||||||||||||||||||||||||||||||
+Sbjct  138  AAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  176
+
+
+ Score = 67.6 bits (36),  Expect = 6e-15
+ Identities = 36/36 (100%), Gaps = 0/36 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  116
+            ||||||||||||||||||||||||||||||||||||
+Sbjct  165  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+ Score = 56.5 bits (30),  Expect = 1e-11
+ Identities = 32/33 (97%), Gaps = 0/33 (0%)
+ Strand=Plus/Plus
+
+Query  109  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            || ||||||||||||||||||||||||||||||
+Sbjct  138  AAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  170
+
+
+ Score = 56.5 bits (30),  Expect = 1e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  110
+            ||||||||||||||||||||||||||||||
+Sbjct  171  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  200
+
+
+>AB000004.1 four above INT4_MAX
+Length=405
+
+ Score = 106 bits (57),  Expect = 1e-26
+ Identities = 57/57 (100%), Gaps = 0/57 (0%)
+ Strand=Plus/Minus
+
+Query  80   CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  136
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  216  CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 104 bits (56),  Expect = 4e-26
+ Identities = 58/59 (98%), Gaps = 0/59 (0%)
+ Strand=Plus/Minus
+
+Query  84   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC  142
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGAC  157
+
+
+ Score = 104 bits (56),  Expect = 4e-26
+ Identities = 56/56 (100%), Gaps = 0/56 (0%)
+ Strand=Plus/Minus
+
+Query  83   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  138
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 104 bits (56),  Expect = 4e-26
+ Identities = 56/56 (100%), Gaps = 0/56 (0%)
+ Strand=Plus/Minus
+
+Query  82   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  137
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Minus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  130
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  209  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Minus
+
+Query  92   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  166
+
+
+ Score = 82.4 bits (44),  Expect = 2e-19
+ Identities = 44/44 (100%), Gaps = 0/44 (0%)
+ Strand=Plus/Minus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  124
+            ||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  203  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 82.4 bits (44),  Expect = 2e-19
+ Identities = 44/44 (100%), Gaps = 0/44 (0%)
+ Strand=Plus/Minus
+
+Query  98   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  172
+
+
+ Score = 71.3 bits (38),  Expect = 4e-16
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Minus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  118
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  197  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 71.3 bits (38),  Expect = 4e-16
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Minus
+
+Query  104  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  178
+
+
+ Score = 60.2 bits (32),  Expect = 1e-12
+ Identities = 32/32 (100%), Gaps = 0/32 (0%)
+ Strand=Plus/Minus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  112
+            ||||||||||||||||||||||||||||||||
+Sbjct  191  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  160
+
+
+ Score = 60.2 bits (32),  Expect = 1e-12
+ Identities = 32/32 (100%), Gaps = 0/32 (0%)
+ Strand=Plus/Minus
+
+Query  110  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||
+Sbjct  215  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  184
+
+
+>AB000003.1 three
+Length=400
+
+ Score = 97.1 bits (52),  Expect = 7e-24
+ Identities = 52/52 (100%), Gaps = 0/52 (0%)
+ Strand=Plus/Plus
+
+Query  79   TCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  130
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  179  TCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 95.3 bits (51),  Expect = 3e-23
+ Identities = 51/51 (100%), Gaps = 0/51 (0%)
+ Strand=Plus/Plus
+
+Query  92   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC  142
+            |||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC  231
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  82   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  131
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  83   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  132
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  84   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  133
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  85   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  134
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  86   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  135
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  87   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  136
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  88   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  137
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  89   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  138
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  90   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  139
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 93.5 bits (50),  Expect = 1e-22
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  91   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  140
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 82.4 bits (44),  Expect = 2e-19
+ Identities = 44/44 (100%), Gaps = 0/44 (0%)
+ Strand=Plus/Plus
+
+Query  98   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  224
+
+
+ Score = 82.4 bits (44),  Expect = 2e-19
+ Identities = 44/44 (100%), Gaps = 0/44 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  124
+            ||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  187  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 71.3 bits (38),  Expect = 4e-16
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  104  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  218
+
+
+ Score = 71.3 bits (38),  Expect = 4e-16
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  118
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  193  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+ Score = 60.2 bits (32),  Expect = 1e-12
+ Identities = 32/32 (100%), Gaps = 0/32 (0%)
+ Strand=Plus/Plus
+
+Query  110  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  141
+            ||||||||||||||||||||||||||||||||
+Sbjct  181  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  212
+
+
+ Score = 60.2 bits (32),  Expect = 1e-12
+ Identities = 32/32 (100%), Gaps = 0/32 (0%)
+ Strand=Plus/Plus
+
+Query  81   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  112
+            ||||||||||||||||||||||||||||||||
+Sbjct  199  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  230
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 1298688
+
+
+Query= q2
+
+Length=520
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000002.1 two                                                        961     0.0  
+
+
+>AB000002.1 two
+Length=520
+
+ Score = 961 bits (520),  Expect = 0.0
+ Identities = 520/520 (100%), Gaps = 0/520 (0%)
+ Strand=Plus/Plus
+
+Query  1    CCATCTTGCCATGGTACGGTGACGAAGTGACATCACAGCGAAACGAAATCCGCGGTTACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    CCATCTTGCCATGGTACGGTGACGAAGTGACATCACAGCGAAACGAAATCCGCGGTTACT  60
+
+Query  61   TAGGCTGCCATTGGTTGCGGAATGGCGACACGCTAGATCCACAAGGCACACCGAGGGCCC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TAGGCTGCCATTGGTTGCGGAATGGCGACACGCTAGATCCACAAGGCACACCGAGGGCCC  120
+
+Query  121  AACAGTACCTTTGGTTAACCGCGCGCGTGAATATATATATATATATATATATATATATAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AACAGTACCTTTGGTTAACCGCGCGCGTGAATATATATATATATATATATATATATATAT  180
+
+Query  181  ATATATATATATATATATATATATATATATCCGCCAAACGGTAGTCCTTGGATCTATCAG  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  ATATATATATATATATATATATATATATATCCGCCAAACGGTAGTCCTTGGATCTATCAG  240
+
+Query  241  GAATCACCGAATTCCACCGCTGGCGGGGACGCTTAACCCCAGAACCGAGTGCTGACGTAA  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  GAATCACCGAATTCCACCGCTGGCGGGGACGCTTAACCCCAGAACCGAGTGCTGACGTAA  300
+
+Query  301  GGACTATAGCCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCA  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  GGACTATAGCCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCA  360
+
+Query  361  GCAGCAGCAGCCCAAAAGTAAGCCAAACTCAGGGCAAACAGTGGCGTCTCTACGTGCGCG  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GCAGCAGCAGCCCAAAAGTAAGCCAAACTCAGGGCAAACAGTGGCGTCTCTACGTGCGCG  420
+
+Query  421  GGCTGGGCGACGCCTAGAAAACCCGTTCTTGAGAACATATCTACGGGCAGGATCTGTATC  480
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  421  GGCTGGGCGACGCCTAGAAAACCCGTTCTTGAGAACATATCTACGGGCAGGATCTGTATC  480
+
+Query  481  ATTCAAGACCTTGTGTGTAGTATTGCCTGAGACCTCGTTT  520
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  481  ATTCAAGACCTTGTGTGTAGTATTGCCTGAGACCTCGTTT  520
+
+
+ Score = 111 bits (60),  Expect = 5e-28
+ Identities = 60/60 (100%), Gaps = 0/60 (0%)
+ Strand=Plus/Minus
+
+Query  151  ATATATATATATATATATATATATATATATATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  210  ATATATATATATATATATATATATATATATATATATATATATATATATATATATATATAT  151
+
+
+ Score = 100 bits (54),  Expect = 1e-24
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Minus
+
+Query  151  ATATATATATATATATATATATATATATATATATATATATATATATATATATAT  204
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  204  ATATATATATATATATATATATATATATATATATATATATATATATATATATAT  151
+
+
+ Score = 100 bits (54),  Expect = 1e-24
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Minus
+
+Query  157  ATATATATATATATATATATATATATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  210  ATATATATATATATATATATATATATATATATATATATATATATATATATATAT  157
+
+
+ Score = 89.8 bits (48),  Expect = 2e-21
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Minus
+
+Query  151  ATATATATATATATATATATATATATATATATATATATATATATATAT  198
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  198  ATATATATATATATATATATATATATATATATATATATATATATATAT  151
+
+
+ Score = 89.8 bits (48),  Expect = 2e-21
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Minus
+
+Query  163  ATATATATATATATATATATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  210  ATATATATATATATATATATATATATATATATATATATATATATATAT  163
+
+
+ Score = 78.7 bits (42),  Expect = 5e-18
+ Identities = 42/42 (100%), Gaps = 0/42 (0%)
+ Strand=Plus/Minus
+
+Query  151  ATATATATATATATATATATATATATATATATATATATATAT  192
+            ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  192  ATATATATATATATATATATATATATATATATATATATATAT  151
+
+
+ Score = 78.7 bits (42),  Expect = 5e-18
+ Identities = 42/42 (100%), Gaps = 0/42 (0%)
+ Strand=Plus/Minus
+
+Query  169  ATATATATATATATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||||||||||||||
+Sbjct  210  ATATATATATATATATATATATATATATATATATATATATAT  169
+
+
+ Score = 67.6 bits (36),  Expect = 1e-14
+ Identities = 36/36 (100%), Gaps = 0/36 (0%)
+ Strand=Plus/Minus
+
+Query  151  ATATATATATATATATATATATATATATATATATAT  186
+            ||||||||||||||||||||||||||||||||||||
+Sbjct  186  ATATATATATATATATATATATATATATATATATAT  151
+
+
+ Score = 67.6 bits (36),  Expect = 1e-14
+ Identities = 36/36 (100%), Gaps = 0/36 (0%)
+ Strand=Plus/Minus
+
+Query  175  ATATATATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||||||||
+Sbjct  210  ATATATATATATATATATATATATATATATATATAT  175
+
+
+ Score = 63.9 bits (34),  Expect = 1e-13
+ Identities = 34/34 (100%), Gaps = 0/34 (0%)
+ Strand=Plus/Plus
+
+Query  177  ATATATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||||||
+Sbjct  151  ATATATATATATATATATATATATATATATATAT  184
+
+
+ Score = 63.9 bits (34),  Expect = 1e-13
+ Identities = 34/34 (100%), Gaps = 0/34 (0%)
+ Strand=Plus/Plus
+
+Query  151  ATATATATATATATATATATATATATATATATAT  184
+            ||||||||||||||||||||||||||||||||||
+Sbjct  177  ATATATATATATATATATATATATATATATATAT  210
+
+
+ Score = 56.5 bits (30),  Expect = 2e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Minus
+
+Query  151  ATATATATATATATATATATATATATATAT  180
+            ||||||||||||||||||||||||||||||
+Sbjct  180  ATATATATATATATATATATATATATATAT  151
+
+
+ Score = 56.5 bits (30),  Expect = 2e-11
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Minus
+
+Query  181  ATATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||||
+Sbjct  210  ATATATATATATATATATATATATATATAT  181
+
+
+ Score = 52.8 bits (28),  Expect = 3e-10
+ Identities = 28/28 (100%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  183  ATATATATATATATATATATATATATAT  210
+            ||||||||||||||||||||||||||||
+Sbjct  151  ATATATATATATATATATATATATATAT  178
+
+
+ Score = 52.8 bits (28),  Expect = 3e-10
+ Identities = 28/28 (100%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  151  ATATATATATATATATATATATATATAT  178
+            ||||||||||||||||||||||||||||
+Sbjct  183  ATATATATATATATATATATATATATAT  210
+
+
+ Score = 52.8 bits (28),  Expect = 3e-10
+ Identities = 28/28 (100%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  344  CAGCAGCAGCAGCAGCAGCAGCAGCAGC  371
+            ||||||||||||||||||||||||||||
+Sbjct  311  CAGCAGCAGCAGCAGCAGCAGCAGCAGC  338
+
+
+ Score = 52.8 bits (28),  Expect = 3e-10
+ Identities = 28/28 (100%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  311  CAGCAGCAGCAGCAGCAGCAGCAGCAGC  338
+            ||||||||||||||||||||||||||||
+Sbjct  344  CAGCAGCAGCAGCAGCAGCAGCAGCAGC  371
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 2455112
+
+
+Query= q6
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CAA00006.1 six                                                        333     3e-95
+
+
+>CAA00006.1 six
+Length=410
+
+ Score = 333 bits (180),  Expect = 3e-95
+ Identities = 180/180 (100%), Gaps = 0/180 (0%)
+ Strand=Plus/Plus
+
+Query  1    CAGTCTAAAAACTGGCACGACATTCAGATAATGAAGGACCATACTACTCCGCCAGTAAAG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  151  CAGTCTAAAAACTGGCACGACATTCAGATAATGAAGGACCATACTACTCCGCCAGTAAAG  210
+
+Query  61   GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  211  GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT  270
+
+Query  121  AGCGATCGATGCGAAACAGGTGGTGCTTCTGGTGGACCGGACGTAAACTAGCGATCCTAC  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  271  AGCGATCGATGCGAAACAGGTGGTGCTTCTGGTGGACCGGACGTAAACTAGCGATCCTAC  330
+
+
+ Score = 63.9 bits (34),  Expect = 5e-14
+ Identities = 34/34 (100%), Gaps = 0/34 (0%)
+ Strand=Plus/Plus
+
+Query  87   GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT  120
+            ||||||||||||||||||||||||||||||||||
+Sbjct  211  GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT  244
+
+
+ Score = 63.9 bits (34),  Expect = 5e-14
+ Identities = 34/34 (100%), Gaps = 0/34 (0%)
+ Strand=Plus/Plus
+
+Query  61   GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT  94
+            ||||||||||||||||||||||||||||||||||
+Sbjct  237  GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGT  270
+
+
+ Score = 52.8 bits (28),  Expect = 1e-10
+ Identities = 28/28 (100%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  93   GTGTGTGTGTGTGTGTGTGTGTGTGTGT  120
+            ||||||||||||||||||||||||||||
+Sbjct  211  GTGTGTGTGTGTGTGTGTGTGTGTGTGT  238
+
+
+ Score = 52.8 bits (28),  Expect = 1e-10
+ Identities = 28/28 (100%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  61   GTGTGTGTGTGTGTGTGTGTGTGTGTGT  88
+            ||||||||||||||||||||||||||||
+Sbjct  243  GTGTGTGTGTGTGTGTGTGTGTGTGTGT  270
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 812288
+
+
+  Database: t
+    Posted date:  Nov 20, 2026  8:20 PM
+  Number of letters in database: 5,020
+  Number of sequences in database:  12
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

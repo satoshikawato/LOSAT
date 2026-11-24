@@ -1,0 +1,14 @@
+Database: t
+	3 sequences; 110,120 total bases
+
+Date: Nov 20, 2026  8:20 PM	Longest sequence: 50,040 bases
+
+BLASTDB Version: 4
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            dust                                    wide                                    
+
+Volumes:
+	<R>/wide/db

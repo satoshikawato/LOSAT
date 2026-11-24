@@ -320,7 +320,7 @@ struct Built {
 /// its destructor; the exit status.
 pub(super) fn run(
     args: &Args,
-    _settings: &ApplicationSettings,
+    settings: &ApplicationSettings,
     input: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
@@ -336,7 +336,7 @@ pub(super) fn run(
         vol_names: Vec::new(),
         done: false,
     };
-    let status = match x_run(&mut params, &mut built, diag) {
+    let status = match x_run(&mut params, &mut built, settings, diag) {
         Ok(()) => 0,
         Err(error) => report(error, diag),
     };
@@ -476,7 +476,12 @@ fn smp_filenames(list: &[u8]) -> Result<Vec<&[u8]>, RunError> {
 // (`num_seqs` is the count divided by `m_NumOfVols`); a negative count
 // makes no volume, no alias file and exit status 0.
 /// `x_Run`.
-fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<(), RunError> {
+fn x_run(
+    params: &mut Params<'_>,
+    built: &mut Built,
+    settings: &ApplicationSettings,
+    diag: &mut Diag,
+) -> Result<(), RunError> {
     create_directories(&params.out_db_name)?;
     if delete_makeprofile_db(&params.out_db_name)? {
         let _ = params
@@ -526,7 +531,7 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
         }
     }
     if usize::try_from(num_of_vols).is_ok_and(|vols| vols == built.vol_names.len()) {
-        create_alias_file(params, built, diag)?;
+        create_alias_file(params, built, settings, diag)?;
         built.done = true;
     }
     Ok(())
@@ -534,16 +539,31 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1865-1876
 // The volumes are named by their file names (`SeqDB_RemoveDirName`), without a list
-// (`eNoAliasFilterType`); the reader opens the new alias file in the current directory.
+// (`eNoAliasFilterType`); the reader opens the new alias file on the database search path (the
+// current directory, `BLASTDB`, the registry's `[BLAST] BLASTDB`), whose registry value LOSAT
+// refuses where it does not read it, as its other database readers do.
 /// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line
 /// (`writedb::alias_file::create_alias_file`).
-fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Result<(), RunError> {
+fn create_alias_file(
+    params: &Params<'_>,
+    built: &Built,
+    settings: &ApplicationSettings,
+    diag: &mut Diag,
+) -> Result<(), RunError> {
     let names: Vec<String> = built
         .vol_names
         .iter()
         .map(|name| crate::seqdb::alias::base_name(name).to_string())
         .collect();
-    let created = crate::seqdb::SearchPath::current_dir()
+    let registry = match &settings.blastdb {
+        Ok(value) => value.as_deref(),
+        Err(reason) => {
+            return Err(RunError::Failed(
+                crate::algorithm::common::database::refusal(reason, super::PROGRAM).to_string(),
+            ))
+        }
+    };
+    let created = crate::seqdb::SearchPath::from_environment(registry)
         .map_err(AliasError::Reader)
         .and_then(|path| {
             alias_file::create_alias_file(

@@ -4,9 +4,6 @@
 //! (`seqdb::seqidlist::process_for_v5`), kept to those of a database when one is named, in the
 //! format that the readers of seqid lists read (`seqdb::seqidlist::write_binary`).
 
-use std::cmp::Ordering;
-use std::path::Path;
-
 use super::time::LocalTime;
 use crate::seqdb::alias::path_base_name;
 use crate::seqdb::seqidlist::{self, SeqidListInfo};
@@ -28,20 +25,17 @@ pub(crate) enum SeqidlistError {
     Clock,
 }
 
-/// What the list says of the database `db` (`GetVolumeLength`, the base names of
-/// `FindVolumePaths` with true joined by spaces, `GetDate`).
-fn database_info(db: &SeqDb, info: &mut SeqidListInfo) {
+/// What the list says of the database `db` whose volume paths are `volumes` (`GetVolumeLength`,
+/// the base names of `FindVolumePaths` with true joined by spaces, `GetDate`).
+fn database_info(db: &SeqDb, volumes: &[String], info: &mut SeqidListInfo) {
     info.db_vol_length = db
         .volumes()
         .iter()
         .map(|volume| volume.index().volume_length)
         .sum();
-    let mut bases: Vec<&Path> = db.volumes().iter().map(|volume| volume.base()).collect();
-    bases.sort_by(|a, b| SeqDb::compare_volume_paths(a, b));
-    bases.dedup_by(|a, b| SeqDb::compare_volume_paths(a, b) == Ordering::Equal);
-    let names: Vec<String> = bases
+    let names: Vec<&str> = volumes
         .iter()
-        .map(|base| path_base_name(&base.to_string_lossy()).to_string())
+        .map(|volume| path_base_name(volume))
         .collect();
     info.db_vol_names = names.join(" ").into_bytes();
     info.db_create_date = db.date().as_bytes().to_vec();
@@ -54,23 +48,24 @@ fn database_info(db: &SeqDb, info: &mut SeqidListInfo) {
 // (`kBlastDbDateFormat`).
 /// The bytes of the binary list of the text lines `idlist` with `title` (`WriteBlastSeqidlistFile`
 /// of the list, its title and the database `db`): the ids the database finds, with its length,
-/// date and volumes, when `db` is given.
+/// date and volumes, when `db` is given with its volume paths in NCBI's order
+/// (`SeqDb::volume_and_alias_paths`).
 pub(crate) fn seqidlist_bytes(
     idlist: &[Vec<u8>],
     title: &[u8],
-    db: Option<&SeqDb>,
+    db: Option<(&SeqDb, &[String])>,
 ) -> Result<Vec<u8>, SeqidlistError> {
     let mut info = SeqidListInfo {
         title: title.to_vec(),
         ..SeqidListInfo::default()
     };
-    if let Some(db) = db {
+    if let Some((db, volumes)) = db {
         if !db.is_version5() {
             return Err(SeqidlistError::SeqDb(
                 b"Seqidlist requires v5 database ".to_vec(),
             ));
         }
-        database_info(db, &mut info);
+        database_info(db, volumes, &mut info);
     }
     let mut ids = seqidlist::process_for_v5(idlist, &mut |_| {}).map_err(|invalid| {
         SeqidlistError::InvalidId {
@@ -81,7 +76,7 @@ pub(crate) fn seqidlist_bytes(
     if ids.is_empty() {
         return Err(SeqidlistError::Empty);
     }
-    if let Some(db) = db {
+    if let Some((db, _)) = db {
         let mut oids = Vec::new();
         db.id_lookup()
             .and_then(|lookup| lookup.accessions_to_oids(&ids, &mut oids))

@@ -7,7 +7,7 @@
 //! and `prf` ids in FASTA form, every other id as `CSeq_id::GetSeqIdString` with true (the
 //! upper-cased accession with its version when given), sorted and unique.
 
-use super::SearchPath;
+use super::{SearchPath, SeqDbError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::accguide::SeqIdWarning;
@@ -135,28 +135,38 @@ const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
     function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
 };
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1667-1692
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:121-129
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:122-130
 // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file that is not
 // there resolves to the empty name, whose memory map throws a `CFileException` (not a database
 // error): a search reports it as `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`),
-// `blastdb_aliastool -seqid_file_info` too.
+// `blastdb_aliastool -seqid_file_info` too. A file that is there but does not open (no permission)
+// throws `CMemoryFile`'s exception with its path and the system's text, reported the same way.
 /// The bytes of the seqid list file `name` as NCBI's readers map them (`CMemoryFile` of the path
 /// that `SeqDB_ResolveDbPath` gives for `name`): the first file of that name on the search path
-/// `path`; `Err` is the exception of the memory map of the empty name, when there is none (or it
-/// does not read).
-pub(crate) fn read_resolved(name: &str, path: &SearchPath) -> Result<Vec<u8>, NcbiException> {
-    path.resolve_file(name)
-        .and_then(|file| std::fs::read(&file).ok())
-        .ok_or_else(|| {
-            NcbiException::new(
-                MEMORY_MAP_MISSING,
-                "To be memory mapped the file must exist: ''",
-            )
-        })
+/// `path`. `Err`: NCBI's exception of the memory map ([`SeqDbError::Ncbi`]: of the empty name when
+/// there is no such file, or of the file that does not open), else the reader's error of a file
+/// that does not read without a system text for NCBI's message.
+pub(crate) fn read_resolved(name: &str, path: &SearchPath) -> Result<Vec<u8>, SeqDbError> {
+    let Some(file) = path.resolve_file(name) else {
+        return Err(SeqDbError::Ncbi(NcbiException::new(
+            MEMORY_MAP_MISSING,
+            "To be memory mapped the file must exist: ''",
+        )));
+    };
+    std::fs::read(&file).map_err(|source| {
+        let error = SeqDbError::Open {
+            path: std::path::PathBuf::from(&file),
+            source,
+        };
+        match error.memory_file_exception() {
+            Some(exception) => SeqDbError::Ncbi(exception),
+            None => error,
+        }
+    })
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/seqidlist_writer.cpp:129-163
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/seqidlist_writer.cpp:145-183
 // The lengths of the title, the dates and the volume names are NCBI's `Uint4` and `char` of the
 // strings' sizes (a date is never 256 bytes long); the database part is written when the list
 // names volumes, as `CSeqidlistRead` reads it when the total length is not 0.
@@ -208,8 +218,10 @@ pub fn info_text(bytes: &[u8]) -> Result<Vec<u8>, String> {
         return Err("Failed to map seqidlist file ".to_string());
     }
     let mut out = Vec::new();
+    // NCBI's test is of the count as an `int` (`GetSeqidlistInfo`'s `static_cast<int>`): a count
+    // of 2^31 or more whose low 32 bits are not a positive `int` prints the line of version 4.
     match read_header(bytes)? {
-        Some((info, _)) if info.num_ids > 0 => {
+        Some((info, _)) if (info.num_ids as i32) > 0 => {
             out.extend_from_slice(format!("Num of Ids: {}\nTitle: ", info.num_ids).as_bytes());
             out.extend_from_slice(&info.title);
             out.extend_from_slice(b"\nCreate Date: ");
@@ -226,8 +238,12 @@ pub fn info_text(bytes: &[u8]) -> Result<Vec<u8>, String> {
                 out.extend_from_slice(&info.db_create_date);
                 out.extend_from_slice(b"\n\tDB Vols: ");
                 // `NStr::Split` of the names at spaces, with its default flags: empty pieces
-                // between two spaces are kept.
-                for vol in info.db_vol_names.split(|&byte| byte == b' ') {
+                // between two spaces are kept, and empty names are no piece.
+                let vols = (!info.db_vol_names.is_empty())
+                    .then(|| info.db_vol_names.split(|&byte| byte == b' '))
+                    .into_iter()
+                    .flatten();
+                for vol in vols {
                     out.extend_from_slice(b"\n\t\t");
                     out.extend_from_slice(vol);
                 }

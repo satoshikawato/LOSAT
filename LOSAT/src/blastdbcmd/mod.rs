@@ -241,10 +241,7 @@ fn output_refusal(reason: &str) -> String {
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). With `guess`, an exception of NCBI's reader
-/// (`SeqDbError::is_seqdb_exception`) moves on to the nucleotide database, and the nucleotide
-/// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
-/// protein database.
+/// constructor applies). `guess` is NCBI's guess of the type (`SeqDb::open_guessing`).
 fn open_database(
     name: &str,
     dbtype: &str,
@@ -256,24 +253,15 @@ fn open_database(
         "nucl" => &[SeqType::Nucleotide],
         _ => &[SeqType::Protein, SeqType::Nucleotide],
     };
-    let mut types = types.iter().peekable();
-    loop {
-        let Some(&seqtype) = types.next() else {
-            unreachable!("at least one sequence type is tried");
-        };
+    SeqDb::open_guessing(types, |seqtype| {
         // The alias files' counts fail where NCBI's constructor reaches them, which the list of
         // `-target_only` moves (`SeqDb::check_alias_values`).
-        let opened = SeqDb::open_search_in(name, seqtype, path).and_then(|mut db| {
-            let volumes = SeqDb::info_volumes(name, seqtype, path)?;
-            prepare(&mut db)?;
-            db.check_alias_values()?;
-            Ok((db, volumes))
-        });
-        match opened {
-            Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
-            opened => return opened,
-        }
-    }
+        let mut db = SeqDb::open_search_in(name, seqtype, path)?;
+        let volumes = SeqDb::info_volumes(name, seqtype, path)?;
+        prepare(&mut db)?;
+        db.check_alias_values()?;
+        Ok((db, volumes))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:533-573

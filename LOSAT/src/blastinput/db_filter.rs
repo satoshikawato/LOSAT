@@ -275,8 +275,9 @@ impl DbFilterArgs {
     // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file
     // that is not there resolves to the empty name, whose memory map throws a
     // `CFileException` (not a database error): the search program reports it as
-    // `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`). The reader's own errors
-    // (an empty file, a damaged binary list) are `BLAST Database error: ...`, exit status 2.
+    // `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`), as is `CMemoryFile`'s exception
+    // of a file there that does not open. The reader's own errors (an empty file, a damaged binary
+    // list) are `BLAST Database error: ...`, exit status 2.
     /// `CSeqDBFileGiList(fn, eSiList)` of the `-seqidlist` / `-negative_seqidlist` file.
     fn resolve_seqid_list(
         &self,
@@ -285,8 +286,12 @@ impl DbFilterArgs {
         path: &SearchPath,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
-        let bytes = seqidlist::read_resolved(value, path)
-            .map_err(|exception| NativeError::exception(&exception))?;
+        let bytes = seqidlist::read_resolved(value, path).map_err(|error| {
+            match error.ncbi_exception() {
+                Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
+                None => anyhow::Error::msg(error.to_string()),
+            }
+        })?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,

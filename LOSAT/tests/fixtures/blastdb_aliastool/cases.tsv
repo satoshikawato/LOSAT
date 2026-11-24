@@ -176,3 +176,11 @@ S11	-db in/p4 -seqidlist in/ids_bad_gi.txt -out sbg
 S12	-db in/p4 -seqidlist in/ids_odd.txt -out sodd
 X12	-seqid_file_out c.bsl -dbtype prot
 X13	-seqid_file_info in/ids.bsl -dbtype prot
+R01	-db in/p4 -gilist in/self.p.gil -out in/self
+R02	-dblist_file in/dbs_vt.txt -dbtype prot -out ra -title T
+R03	-vdblist_file in/vdbs_vt.txt -dbtype nucl -title T -out rv
+R04	-seqid_file_info in/ids_n31.bsl
+R05	-seqid_file_info in/ids_n32.bsl
+R06	-seqid_file_info in/ids_n32p1.bsl
+R07	-seqid_file_info in/ids_dbnovol.bsl
+R08	-dblist_file in/dbs_ff.txt -dbtype prot -out rb -title T

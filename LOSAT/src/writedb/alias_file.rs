@@ -75,7 +75,7 @@ fn alias_extension(seqtype: SeqType) -> &'static str {
 }
 
 /// The header of an alias file made at `now` (the current `CTime` in its default format).
-fn header(now: &LocalTime) -> String {
+pub(crate) fn header(now: &LocalTime) -> String {
     format!("#\n# Alias file created {}\n#\n", now.log_time())
 }
 
@@ -88,12 +88,13 @@ pub(crate) fn dir_entry_name(path: &str) -> &str {
     path.rfind(separator).map_or(path, |at| &path[at + 1..])
 }
 
-/// Whether a reader error is one that NCBI's reader throws too (its own text, another exception of
-/// NCBI's, or one whose report LOSAT refuses: `SeqDbError::ncbi_throws`): the writer's catch of any
-/// exception then takes it for a database that does not open. LOSAT's other refusals go to the
+/// Whether a reader error is one that NCBI's reader throws too (a `CSeqDBException`:
+/// `SeqDbError::is_seqdb_exception`, its own text or a failed integrity check; another exception
+/// of NCBI's; or one whose report LOSAT refuses: `SeqDbError::ncbi_throws`): the writer's catch of
+/// any exception then takes it for a database that does not open. LOSAT's other refusals go to the
 /// caller.
 fn ncbi_error(error: &SeqDbError) -> bool {
-    error.ncbi_message().is_some() || error.ncbi_exception().is_some() || error.ncbi_throws()
+    error.is_seqdb_exception() || error.ncbi_exception().is_some() || error.ncbi_throws()
 }
 
 /// `NSEQ` and `LENGTH` of the database `name` as NCBI's reader opens it (`CSeqDB` of the name
@@ -192,7 +193,9 @@ pub(crate) fn create_volumes_alias_file(
     path: &SearchPath,
 ) -> Result<String, AliasError> {
     let width = num_digits(num_volumes as usize);
-    let mut volume_names = Vec::with_capacity(num_volumes as usize);
+    // NCBI makes the `num_volumes` empty names first (out of memory for a count of about 2^31);
+    // LOSAT gives the result NCBI gives with the memory for them, without holding them.
+    let mut volume_names = Vec::new();
     let mut concatenated = String::new();
     for i in 0..num_volumes {
         let vol_name = format!("{file_name}.{i:0width$}");

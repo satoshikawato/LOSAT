@@ -9,7 +9,7 @@ use crate::ncbi_app::args::{ArgException, Args};
 use crate::ncbi_app::files::{self, Cin, LineEnds};
 use crate::ncbi_app::{database_error, Diag};
 use crate::ncbi_exception::NcbiException;
-use crate::ncbi_str::string_to_int8;
+use crate::ncbi_str::{string_to_int8, truncate_spaces};
 use crate::seqdb::alias::{base_name, path_base_name};
 use crate::seqdb::{id_list, seqidlist, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR, USER_MANUAL_FOOTER};
@@ -89,7 +89,7 @@ pub(super) fn run(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:103-115
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:106-118
 /// The mode of `x_GetOperationMode` (its last test that holds wins), then its work.
 fn run_mode(
     args: &Args,
@@ -151,30 +151,36 @@ fn gi_ids(bytes: &[u8]) -> Vec<i64> {
         .collect()
 }
 
-/// `CNcbiOfstream` of `path` in binary mode and the write of `bytes`; a failure is not reported,
-/// as NCBI's stream does not report it.
-fn write_file(path: &Path, bytes: &[u8]) {
-    if let Ok(mut file) = std::fs::File::create(path) {
-        let _ = file.write_all(bytes);
+// The output (`CNcbiOfstream` in binary mode, whose failure is not reported) is made, or emptied,
+// after the input is opened and before it is read: an output that is the input leaves nothing to
+// read.
+/// `ConvertGiFile` of the opened input `input` into the binary GI list file `output`; the number
+/// of GIs.
+fn convert_gi_list(mut input: impl Read, output: &Path) -> usize {
+    let mut file = std::fs::File::create(output).ok();
+    let mut bytes = Vec::new();
+    // NCBI's loop ends at the stream's failure: the bytes read before it are the input.
+    let _ = input.read_to_end(&mut bytes);
+    let ids = gi_ids(&bytes);
+    if let Some(file) = &mut file {
+        let _ = file.write_all(&gi_list_bytes(&ids));
     }
+    ids.len()
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:634-648
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:634-651
 // `-gi_file_out` was made or emptied as the reader read it (`fPreOpen`); `Run` opens its name
 // again. `CFile::Exists` is true for a regular file.
 /// `-gi_file_in`: the binary GI list `-gi_file_out` (or `<gi_file_in>.bgl`) of the text list.
 fn convert_gi_file(args: &Args, stdin: &mut Cin<'_>, diag: &mut Diag) -> Result<(), Failure> {
-    let bytes = input_file(args, "gi_file_in", stdin)?;
+    let gi_file_in = args.value("gi_file_in").unwrap_or_default();
+    let input = files::open_input_file("gi_file_in", gi_file_in, stdin)?;
     let gi_file_out: PathBuf = match args.os_value("gi_file_out") {
         Some(name) => PathBuf::from(name),
-        None => PathBuf::from(format!(
-            "{}.bgl",
-            args.value("gi_file_in").unwrap_or_default()
-        )),
+        None => PathBuf::from(format!("{gi_file_in}.bgl")),
     };
-    let ids = gi_ids(&bytes);
-    write_file(&gi_file_out, &gi_list_bytes(&ids));
-    diag.post(&format!("Converted {} GIs into binary GI file", ids.len()));
+    let count = convert_gi_list(input, &gi_file_out);
+    diag.post(&format!("Converted {count} GIs into binary GI file"));
     if !gi_file_out.is_file() {
         return Err(Failure::SeqDb(
             [
@@ -210,22 +216,44 @@ fn split_names(text: &str) -> Vec<String> {
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:548-570
 // The file's lines are read by `getline` and their white space is cut (`NStr::TruncateSpaces`).
 /// `x_GetDbsToAggregate`: the names of `dbs` split at spaces, else the non-empty lines of the
-/// file `file`.
+/// file `file`, as bytes.
 fn names_to_aggregate(
     args: &Args,
     dbs: &str,
     file: &str,
     stdin: &mut Cin<'_>,
-) -> Result<Vec<String>, Failure> {
+) -> Result<Vec<Vec<u8>>, Failure> {
     if let Some(names) = args.value(dbs) {
-        return Ok(split_names(names));
+        return Ok(split_names(names)
+            .into_iter()
+            .map(String::into_bytes)
+            .collect());
     }
     let bytes = input_file(args, file, stdin)?;
     Ok(bytes
         .split(|&byte| byte == b'\n')
-        .map(|line| String::from_utf8_lossy(line.trim_ascii()).into_owned())
+        .map(truncate_spaces)
         .filter(|line| !line.is_empty())
+        .map(<[u8]>::to_vec)
         .collect())
+}
+
+/// The database names of `-dblist` or `-dblist_file` (`names_to_aggregate`) as text: a name that
+/// is not UTF-8 is LOSAT's refusal (NCBI writes its bytes into the alias file, which LOSAT's
+/// reader then opens by name).
+fn database_names(args: &Args, stdin: &mut Cin<'_>) -> Result<Vec<String>, Failure> {
+    names_to_aggregate(args, "dblist", "dblist_file", stdin)?
+        .into_iter()
+        .map(|name| {
+            String::from_utf8(name).map_err(|_| {
+                Failure::Refused(format!(
+                    "a line of -dblist_file is not UTF-8; NCBI BLAST+ writes the bytes of the \
+                     database name into the alias file, which is not supported by LOSAT's \
+                     {PROGRAM}"
+                ))
+            })
+        })
+        .collect()
 }
 
 /// Whether the argument `name` has a value (`HasValue`, also the `bool` of `args[name]`).
@@ -281,26 +309,29 @@ fn create_alias_file(
         if !Path::new(&gilist).is_file() {
             return Err(Failure::SeqDb(format!("{gilist} not found").into_bytes()));
         }
+        // NCBI maps the file with `CMemoryFile` outside the reader (`SeqDB_IsBinaryGiList`), whose
+        // exception reaches the application as it is.
         let bytes = std::fs::read(&gilist).map_err(|source| {
-            Failure::Reader(SeqDbError::Open {
+            let error = SeqDbError::Open {
                 path: PathBuf::from(&gilist),
                 source,
-            })
+            };
+            match error.memory_file_exception() {
+                Some(exception) => Failure::Exception(exception),
+                None => Failure::Reader(error),
+            }
         })?;
         let binary =
             id_list::is_binary_gi_list(&bytes).map_err(|text| Failure::SeqDb(text.into_bytes()))?;
         if !binary {
             let mol_type = args.as_string("dbtype")?.chars().next().unwrap_or('p');
             let ifname = std::mem::replace(&mut gilist, format!("{out}.{mol_type}.gil"));
-            let mut text = Vec::new();
-            if let Ok(mut input) = files::open_text_file(&ifname) {
-                let _ = input.read_to_end(&mut text);
-            }
-            let ids = gi_ids(&text);
-            write_file(Path::new(&gilist), &gi_list_bytes(&ids));
+            // An input that does not open reads as empty (`ifstream`).
+            let input =
+                files::open_text_file(&ifname).unwrap_or_else(|_| Box::new(std::io::empty()));
+            let count = convert_gi_list(input, Path::new(&gilist));
             diag.post(&format!(
-                "Converted {} GIs from {ifname} to binary format in {gilist}",
-                ids.len()
+                "Converted {count} GIs from {ifname} to binary format in {gilist}"
             ));
         }
     }
@@ -308,7 +339,7 @@ fn create_alias_file(
         SeqDb::open_in(dblist, seqtype, &search_path(settings)?).map_err(Failure::Reader)?;
     }
     let created = if has(args, "dblist") || has(args, "dblist_file") {
-        let databases = names_to_aggregate(args, "dblist", "dblist_file", stdin)?;
+        let databases = database_names(args, stdin)?;
         Some(alias_file::create_alias_file(
             out,
             &databases,
@@ -355,7 +386,7 @@ fn exclude_model(mask: i32) -> bool {
     (mask as u64) & crate::seqdb::oid_mask::EXCLUDE_MODEL != 0
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:461-494
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:461-500
 // `-db` is split at spaces as `-dblist` is (the overload of `CWriteDB_CreateAliasFile` with a
 // name, writedb.cpp:330-340). A `-seqidlist` or `-taxidlist` file must exist; the OID mask
 // database writes no log line.
@@ -411,19 +442,21 @@ fn add_vdbs(
     if vdbs.is_empty() {
         return Ok(());
     }
-    let mut text = String::new();
+    let mut text = Vec::new();
     if !append {
         let now = LocalTime::now().ok_or_else(|| Failure::Refused(CLOCK_ERROR.to_string()))?;
-        text.push_str(&format!("#\n# Alias file created {}\n#\n", now.log_time()));
+        text.extend_from_slice(alias_file::header(&now).as_bytes());
     }
     if !title.is_empty() {
-        text.push_str(&format!("TITLE {title}\n"));
+        text.extend_from_slice(format!("TITLE {title}\n").as_bytes());
     }
-    text.push_str("VDBLIST ");
+    text.extend_from_slice(b"VDBLIST ");
     for name in &vdbs {
-        text.push_str(&format!("\"{name}\" "));
+        text.push(b'"');
+        text.extend_from_slice(name);
+        text.extend_from_slice(b"\" ");
     }
-    text.push('\n');
+    text.push(b'\n');
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -431,7 +464,7 @@ fn add_vdbs(
         .truncate(!append)
         .open(filename);
     if let Ok(mut file) = file {
-        let _ = file.write_all(text.as_bytes());
+        let _ = file.write_all(&text);
     }
     Ok(())
 }
@@ -477,11 +510,16 @@ fn convert_seqid_file(
                 Some(_) => &[SeqType::Nucleotide],
                 None => &[SeqType::Protein, SeqType::Nucleotide],
             };
-            Some(open_guessed(name, types, &path).map_err(Failure::Reader)?)
+            let db = SeqDb::open_guessing(types, |seqtype| SeqDb::open_in(name, seqtype, &path))
+                .map_err(Failure::Reader)?;
+            let (volumes, _) = SeqDb::volume_and_alias_paths(name, db.seqtype(), &path)
+                .map_err(Failure::Reader)?;
+            Some((db, volumes))
         }
         None => None,
     };
-    match seqidlist_bytes(&seqid_list, title.as_bytes(), db.as_ref()) {
+    let db = db.as_ref().map(|(db, volumes)| (db, volumes.as_slice()));
+    match seqidlist_bytes(&seqid_list, title.as_bytes(), db) {
         Ok(list) => {
             if let Some(output) = &mut output {
                 let _ = output.write_all(&list);
@@ -502,21 +540,6 @@ fn convert_seqid_file(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
-// A protein database that does not open as one (a `CSeqDBException`) is tried as a nucleotide
-// one; that second error is reported.
-/// `CSeqDB` of `name` and the types `types` in order (both for `eUnknown`).
-fn open_guessed(name: &str, types: &[SeqType], path: &SearchPath) -> Result<SeqDb, SeqDbError> {
-    let mut types = types.iter().peekable();
-    loop {
-        let seqtype = *types.next().expect("at least one sequence type is tried");
-        match SeqDb::open_in(name, seqtype, path) {
-            Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
-            opened => return opened,
-        }
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:620-626
 /// `-seqid_file_info`: what the binary seqid list on the search path says of itself, on `out`.
 fn seqid_file_info(
@@ -526,7 +549,10 @@ fn seqid_file_info(
 ) -> Result<(), Failure> {
     let name = args.value("seqid_file_info").unwrap_or_default();
     let bytes =
-        seqidlist::read_resolved(name, &search_path(settings)?).map_err(Failure::Exception)?;
+        seqidlist::read_resolved(name, &search_path(settings)?).map_err(|error| match error {
+            SeqDbError::Ncbi(exception) => Failure::Exception(exception),
+            error => Failure::Reader(error),
+        })?;
     let text = seqidlist::info_text(&bytes).map_err(|text| Failure::SeqDb(text.into_bytes()))?;
     let _ = out.write_all(&text);
     let _ = out.flush();

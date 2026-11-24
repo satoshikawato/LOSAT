@@ -25,6 +25,11 @@ What they are: NCBI BLAST+ 2.17.0 `blastdb_aliastool` runs that `tests/blastdb_a
   `-vdblist_file`, `G` `-gi_file_in` and `-gi_file_out`, `C` `-seqid_file_in` and its options, `I`
   `-seqid_file_info`, `X` argument errors and conflicts. `-version` is not a row: its `Package:` line is LOSAT's
   (`tests/ncbi_toolkit_version.rs` covers it).
+- Rows `R01`-`R08` (review 1 of row RG-D2a, run the same way on 2026-11-24 20:5x, inputs from `add_review_inputs.py`,
+  same place): a text `-gilist` converted onto its own name (`self.p.gil`), `-dblist_file` and `-vdblist_file` lines
+  with `\v`, `\f` and a byte that is not UTF-8 (`dbs_vt.txt`, `vdbs_vt.txt`, `dbs_ff.txt`), and binary seqid lists
+  whose count of ids is 2^31, 2^32 and 2^32 + 1 (`ids_n31.bsl`, `ids_n32.bsl`, `ids_n32p1.bsl`, from `ids.bsl`) or
+  whose database part names no volume (`ids_dbnovol.bsl`, from `ids_db.bsl`).
 - Then `freeze.py` (same place) kept, per row, NCBI's standard output, standard error and exit status as written
   (`ncbi/<row>.{out,err,rc}`, the run directory's absolute path replaced by `<RUN>`; the test maps NCBI's words to
   LOSAT's with `losat::wording`) and `ncbi/<row>.files`: for each file the run made or changed (in `in/` too), its
@@ -37,3 +42,6 @@ The rows `S02`, `S03`, `S05`, `S07`, `S09`, `S10`, `T01`, `T02`, `T05` and `T06`
 taxid list over a version 5 database, which NCBI then opens to count its sequences. LOSAT's reader does not yet read
 such lists (line RG-D, item D1c-2), so there the test expects LOSAT's refusal and no alias file left
 (`AWAITING_V5_LISTS`); NCBI's frozen result stays for the day the reader reads them.
+
+The row `R08` names a database by a `-dblist_file` line that is not UTF-8, which NCBI writes into the alias file as
+it is; LOSAT refuses it (`NOT_UTF8_NAMES`), and NCBI's result is kept beside it.

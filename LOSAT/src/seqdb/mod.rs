@@ -1357,6 +1357,28 @@ impl SeqDb {
         alias::info_volumes(name, seqtype, path)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
+    /// NCBI's guess of a database's type (`CSeqDB` of `eUnknown`, the programs' `guess`): `open`
+    /// of each type of `types` in order. An exception of NCBI's reader
+    /// ([`SeqDbError::is_seqdb_exception`]) moves on to the next type, and the last type's error is
+    /// the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
+    /// database as the type it tried.
+    pub(crate) fn open_guessing<T>(
+        types: &[SeqType],
+        mut open: impl FnMut(SeqType) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        let mut types = types.iter().peekable();
+        while let Some(&seqtype) = types.next() {
+            match open(seqtype) {
+                Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
+                opened => return opened,
+            }
+        }
+        Err(SeqDbError::Internal(
+            "no sequence type to open the database as".to_string(),
+        ))
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-936
     /// `FindVolumePaths` (with `paths`, `alias` and true) of the database that [`SeqDb::open_in`]
     /// opens with the same arguments: every volume path (without extension) and every alias file

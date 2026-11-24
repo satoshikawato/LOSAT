@@ -37,6 +37,6 @@ For every option: `losat blastdb_aliastool -help`.
 
 ## Differences from NCBI BLAST+
 
-None in the files or the messages, apart from the date written into each file.
+None in the files or the messages, apart from the date written into each file, for the inputs LOSAT runs.
 
-An alias file of `-seqidlist` or `-taxidlist` over a version 5 database is not yet supported: LOSAT stops with its refusal and leaves no alias file (see [What LOSAT refuses](../refusals.md#blastdb_aliastool)). The same lists over a version 4 database, and every other mode, are supported.
+LOSAT refuses a value that is not UTF-8 of an option other than `-gi_file_out` and `-logfile`, and a line of `-dblist_file` that is not UTF-8 (NCBI writes such bytes as they are). An alias file of `-seqidlist` or `-taxidlist` over a version 5 database is not yet supported: LOSAT stops with its refusal and leaves no alias file (see [What LOSAT refuses](../refusals.md#blastdb_aliastool)). The same lists over a version 4 database, and every other mode, are supported.

@@ -283,13 +283,15 @@ fn every_argument_of_the_xml_is_in_its_table() {
         }
     }
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
-    // windowmasker's 16 and makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid).
-    assert_eq!(constraints, 169 + 6 + 16 + 4);
+    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid) and
+    // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
-    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3 and
-    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other).
+    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other) and blastdb_aliastool's 178
+    // (26 requirements, 76 exclusions each in both directions).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 2);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178);
 }
 
 /// Which class a constraint is.
@@ -708,7 +710,7 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
-    const LOWER: [&str; 23] = [
+    const LOWER: [&str; 24] = [
         "name",
         "kind",
         "default",
@@ -726,6 +728,7 @@ fn the_tables_hold_no_pointer() {
         "aliases",
         "dependencies",
         "refusals",
+        "pre_open",
         "with_32",
         "static",
         "true",

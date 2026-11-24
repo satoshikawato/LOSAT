@@ -3649,7 +3649,13 @@ hits into the list that NCBI frees.
     4, or none and stops with 134). Each of NCBI's own outputs of these rows (`ncbi/<row>.*`) is that
     whole list less hits in the volume that keeps the results, or a beginning of it before a crash
     (`ncbi_loses_seeds_after_the_first_search` of `LOSAT/tests/blastn_mb_index_fixtures.rs`).
-    RANDOM_EVIDENCE
+    Random comparison `remaining-gaps-20261112/D/d5/probe/d5c/rand_d5c.py` (596 random databases, 537
+    of them of 2 to 9 volumes with 1 to all but one of their `.shd` files removed; queries in several
+    query batches (`BATCH_SIZE` 1, 300, 1,000 or 2,500, or NCBI's own) in 405 runs and in query chunks
+    (`CHUNK_SIZE` 600 to 2,500, one-hit) in 132; 121 two-hit searches; nmer 8 to 12, 163 indexes of
+    `-legacy false` with a stride; 1 and 4 threads): each LOSAT run gave the oracle's rows (NCBI's
+    search with the index as one query batch, or for query chunks its search without the index);
+    NCBI's own run of the same command lost rows in 163 and stopped with 134 or 139 in 25.
 
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 

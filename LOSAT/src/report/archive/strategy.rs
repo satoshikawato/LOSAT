@@ -715,6 +715,15 @@ impl StrategyExport {
                 state.unreached.push_back((queries.start, state.written));
                 state.next_query = queries.end;
                 made_one = true;
+                // NCBI's stream threw while it wrote this request (an element stated as `NULL` in a
+                // PSSM query, `encoder::NullElement`): NCBI's error ends the run there, after the
+                // bytes its stream flushed, so the request is reached.
+                if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
+                    flushed?;
+                    state.reach_through(queries.start);
+                    shared.write_held(|at| at <= queries.start)?;
+                    return written;
+                }
                 written?;
                 flushed?;
                 Ok(())
@@ -733,13 +742,7 @@ impl StrategyExport {
     /// that cannot be cut gets them here.
     pub(crate) fn release_through(&self, first: usize) -> std::io::Result<()> {
         self.with_state(|state| {
-            while let Some(&(at, end)) = state.unreached.front() {
-                if at > first {
-                    break;
-                }
-                state.reached = end;
-                state.unreached.pop_front();
-            }
+            state.reach_through(first);
             self.0.write_held(|at| at <= first)
         })
     }
@@ -1019,6 +1022,18 @@ fn replaced_posts(
 }
 
 impl State {
+    /// The run reaches the batches whose first queries are at most `first`
+    /// (`StrategyExport::release_through`).
+    fn reach_through(&mut self, first: usize) {
+        while let Some(&(at, end)) = self.unreached.front() {
+            if at > first {
+                break;
+            }
+            self.reached = end;
+            self.unreached.pop_front();
+        }
+    }
+
     /// `StrategyExport::takes`.
     fn takes(&self, queries: &Range<usize>) -> bool {
         queries.end > self.next_query && queries.start < self.stop

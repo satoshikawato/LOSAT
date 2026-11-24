@@ -18,6 +18,7 @@ import {
   sha256Hex,
   type EngineControl,
   type ReactorAbi,
+  type ToolControl,
 } from 'losat';
 import type { FileInflater, InputChecker, RecordScanner, WholeFileInflater } from 'losat/ports';
 import type { CountsStore } from '../../ports/counts';
@@ -39,7 +40,7 @@ let scanner: RecordScanner;
 let inflater: FileInflater;
 let whole: WholeFileInflater;
 let checker: InputChecker;
-let control: EngineControl;
+let control: EngineControl & ToolControl;
 if (ENGINE_ASSETS === null) {
   // A build without the engine (build/reactors.ts): the development build's fakes. Without the
   // engine's decoders every source is read as it is, whatever its name, and a downloaded Example
@@ -50,6 +51,7 @@ if (ENGINE_ASSETS === null) {
   checker = new FakeInputChecker();
   control = {
     describe: () => Promise.reject(new Error('this build has no engine')),
+    describeTool: () => Promise.reject(new Error('this build has no engine')),
     start: () => Promise.reject(new Error('this build has no engine')),
     validate: () => Promise.reject(new Error('this build has no engine')),
   };
@@ -144,6 +146,7 @@ const endpoint = Promise.all([service, examples, counts]).then(
     ...delegate(savedCounts, COUNTS_STORE_METHODS),
     inflateFile: (file, maxBytes) => whole.inflateFile(file, maxBytes),
     describe: (program) => control.describe(program),
+    describeTool: (tool) => control.describeTool(tool),
     start: (argv) => control.start(argv),
     validate: (argv, registry) => control.validate(argv, registry),
     lifeLock: async () => (await started).lock,

@@ -29,13 +29,17 @@ import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type Fast
  *   the row of its `file` field and not as a field of its own. The value is `true` while the
  *   box is checked and the ID is not typed (the argv writes nothing, and the search cannot start),
  *   and the ID as typed once it is.
+ * - `file-text`: a tool option whose value is a file name typed in a text box or picked with
+ *   "Choose file…" (`-ids`, `-exclude_ids`).
  */
-export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file' | 'taxid';
+export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file' | 'taxid' | 'file-text';
 
 export interface ParameterField {
   readonly flag: string;
   readonly label: string;
   readonly kind: FieldKind;
+  /** For `boolean` fields: show as a select with NCBI's default spelling (`F`, `T`, `false`), writing `true`/`false`, instead of a checkbox. */
+  readonly select?: true;
   /** For `choice` and `radio` fields whose choices `describe` gives only in its help text. */
   readonly choices?: readonly string[];
   /** Names shown for choices (NCBI's words); the value written is the choice itself. */

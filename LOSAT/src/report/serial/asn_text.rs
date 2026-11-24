@@ -429,6 +429,19 @@ impl Encoder for AsnTextEncoder<'_> {
         Ok(())
     }
 
+    /// The document's bytes stop where NCBI's stream throws (`encoder::NullElement`): the
+    /// encoder's error; what it writes after is not NCBI's (`encoder::Traced` writes nothing).
+    fn null_element(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::NullElement);
+        }
+    }
+
+    /// `line N` of the bytes held (`line`).
+    fn position(&mut self) -> Option<StreamPosition> {
+        Some(StreamPosition::Line(self.line()))
+    }
+
     fn error(&self) -> Option<SerialError> {
         self.error
     }

@@ -398,7 +398,6 @@ name = "losat-web-adapter"
 version = "0.1.0"
 dependencies = [
  "bzip2",
- "clap",
  "flate2",
  "losat",
  "sha2",

@@ -159,7 +159,7 @@ impl RedoParamsBuilder<'_> {
                 local_scaling_factor,
             ),
             do_link_hsps,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:379-383
         })
     }
 }

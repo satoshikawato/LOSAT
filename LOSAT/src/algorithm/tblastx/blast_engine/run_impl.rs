@@ -297,7 +297,7 @@ fn tblastx_scan_interiors(
     interiors
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:281-308
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
 fn clip_tblastx_seq_ranges_for_scan_interior(
@@ -1501,8 +1501,8 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
@@ -1597,8 +1597,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
@@ -2683,7 +2683,7 @@ fn write_tblastx_outputs(
                             .expect("a Seq-annot writes its posts to the diagnostics"),
                     )?
                 }
-                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
                 // One BLAST archive per query batch (`archive`), from the Seq-aligns of outfmt 8.
                 report::TblastxOutputFormat::Archive => {
                     let handle = run

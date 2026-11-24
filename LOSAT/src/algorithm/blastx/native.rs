@@ -331,8 +331,8 @@ fn run_inner(
     // those of the composition-based statistics handler and of `Validate`, which come later.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // The query options handler comes before the genetic code and formatting handlers
-    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (clap's
-    // value parsers, `resolve`).
+    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (NCBI's
+    // argument reader, `cli::reader`, and `resolve`).
     // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
     // NCBI's error of `-seg` first (`local::check_filtering`).
     super::local::check_filtering(args)?;

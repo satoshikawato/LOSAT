@@ -346,8 +346,8 @@ fn x_letter_masks() -> &'static XLetterMasks {
 /// A letter of each ncbi4na mask: `base_mask(X_MASK_LETTERS[m]) == m`.
 const X_MASK_LETTERS: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424 (`s_CodonToAA`; the
-// quote is at `GeneticCode::get`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-425 (`s_CodonToAA`, which
+// `GeneticCode::get` ports)
 // `GeneticCode::get` reads a codon only through the masks of its three letters (`base_mask`;
 // its table read gives the loop's residue for single-bit masks), so the residue of a codon
 // is the residue of any codon with the same masks: here, of the letters `X_MASK_LETTERS`.

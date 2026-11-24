@@ -134,6 +134,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("makeprofiledb") {
         std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:704-707
+    // `losat blastdb_aliastool` too.
+    if let Some(start) = started("blastdb_aliastool") {
+        std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv
@@ -236,6 +241,7 @@ fn run_main_entry() -> Result<()> {
         &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
+        &crate::report::run_files::OpenFiles::disk(),
     );
     let args = match read {
         Ok(args) => args,

@@ -13,6 +13,7 @@ use crate::report::serial::asn_types::{Post, ReadError};
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::{BlastDefline, DeflineSet};
 use crate::utils::os_bytes::path_from_bytes;
+use crate::writedb::alias_file::{self, AliasError, FilterType, CLOCK_ERROR};
 use crate::writedb::bioseq::{self, Bioseq, ParsedIds};
 use crate::writedb::build_db::{create_directories, delete_blast_db};
 use crate::writedb::convert::{short_nucleotide_data, ShortNucleotideData};
@@ -532,62 +533,40 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1865-1876
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb.cpp:284-303,305-328,358-414
-// The totals are those of NCBI's reader opening the new alias file (`CSeqDB`): a database name
-// that the reader splits (a space) does not open, and the alias file is removed.
-/// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line.
+// The volumes are named by their file names (`SeqDB_RemoveDirName`), without a list
+// (`eNoAliasFilterType`); the reader opens the new alias file in the current directory.
+/// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line
+/// (`writedb::alias_file::create_alias_file`).
 fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Result<(), RunError> {
-    let now = LocalTime::now().ok_or_else(|| {
-        RunError::Failed("the clock cannot be read for the alias file's date".to_string())
-    })?;
-    let fname = format!("{}.pal", params.out_db_name);
-    let mut text = format!("#\n# Alias file created {}\n#\n", now.log_time()).into_bytes();
-    if !params.title.is_empty() {
-        text.extend_from_slice(format!("TITLE {}\n", params.title).as_bytes());
-    }
-    text.extend_from_slice(b"DBLIST ");
-    for name in &built.vol_names {
-        // `SeqDB_RemoveDirName`: the name after the platform's last path separator.
-        let base = name
-            .rsplit(std::path::MAIN_SEPARATOR)
-            .next()
-            .unwrap_or(name);
-        text.extend_from_slice(format!("\"{base}\" ").as_bytes());
-    }
-    text.extend_from_slice(b"\n");
-    let _ = std::fs::write(&fname, &text);
-    let totals = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::seqdb::alias::SearchPath::new(&cwd, None, None).ok())
-        .and_then(|search| {
-            crate::seqdb::SeqDb::open_in(
+    let names: Vec<String> = built
+        .vol_names
+        .iter()
+        .map(|name| crate::seqdb::alias::base_name(name).to_string())
+        .collect();
+    let created = crate::seqdb::SearchPath::current_dir()
+        .map_err(AliasError::Reader)
+        .and_then(|path| {
+            alias_file::create_alias_file(
                 &params.out_db_name,
+                &names,
                 crate::seqdb::SeqType::Protein,
-                &search,
+                "",
+                &params.title,
+                FilterType::None,
+                &path,
             )
-            .ok()
-        })
-        .map(|db| (db.num_seqs(), db.total_length()));
-    let Some((num_seqs, length)) = totals else {
-        crate::writedb::dir_entry::remove(Path::new(&fname));
-        return Err(RunError::SeqDb(
-            b"BLASTDB alias file creation failed.  Some referenced files may be missing".to_vec(),
-        ));
-    };
-    if num_seqs == 0 {
-        crate::writedb::dir_entry::remove(Path::new(&fname));
-        return Err(RunError::SeqDb(
-            b"No seqs in  were found in BLAST database".to_vec(),
-        ));
+        });
+    match created {
+        Ok(line) => {
+            diag.post(&line);
+            Ok(())
+        }
+        Err(AliasError::SeqDb(text)) => Err(RunError::SeqDb(text.into_bytes())),
+        Err(AliasError::Reader(error)) => Err(RunError::Failed(
+            crate::algorithm::common::database::losat_reader_error(&error, super::PROGRAM),
+        )),
+        Err(AliasError::Clock) => Err(RunError::Failed(CLOCK_ERROR.to_string())),
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&fname) {
-        let _ = write!(file, "NSEQ {num_seqs}\nLENGTH {length}\n");
-    }
-    diag.post(&format!(
-        "Created protein BLAST (alias) database {} with {num_seqs} sequences",
-        params.out_db_name
-    ));
-    Ok(())
 }
 
 /// A profile file read: the reader's posts written, its errors as makeprofiledb's handler

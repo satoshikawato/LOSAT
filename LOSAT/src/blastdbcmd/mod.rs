@@ -22,14 +22,13 @@ mod range;
 mod retrieve;
 mod taxonomy;
 
-use crate::wording::DATABASE_ERROR;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, Ostream};
-use crate::ncbi_app::{Diag, Tool};
+use crate::ncbi_app::{database_error, Diag, Tool};
 use crate::ncbi_str::{int_with_commas, with_commas};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
@@ -274,28 +273,6 @@ fn open_database(
             Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
             opened => return opened,
         }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-/// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
-/// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
-/// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
-/// refusal.
-fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
-    if let Some(exception) = error.ncbi_exception() {
-        diag.post_bytes(&[b"Error: ".as_slice(), &exception.what()].concat());
-        return 255;
-    }
-    match error.ncbi_message() {
-        Some(text) => {
-            diag.post_bytes(&[DATABASE_ERROR.as_bytes(), b" ", &text].concat());
-            2
-        }
-        None => diag.refuse(&crate::algorithm::common::database::losat_reader_error(
-            &error, PROGRAM,
-        )),
     }
 }
 

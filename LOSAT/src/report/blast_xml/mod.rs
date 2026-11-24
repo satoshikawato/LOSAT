@@ -23,8 +23,8 @@ pub use writer::{written_queries, BlastXmlWriter, DocumentPosts, StructuredXml};
 /// before it (`StructuredXml::query`'s output) and the program posts its message
 /// (`StructuredXml::caught_message`) and goes on. Raised by BLASTX's HSPs of length 0
 /// (`algorithm::blastx::empty_rows`) and by the `Hit` of a database sequence whose lookup throws
-/// where the `Hit` loads it (`subjects::HitNames::names` of `HitNames::Throws`, as
-/// `report::db_subject::HitLoads` decides it; XML2 and JSON only).
+/// where the `Hit` loads it (`XmlHit::lookup_throws`, as `report::db_subject::HitLoads` decides
+/// it; the XML2 and JSON documents' hit writer raises it, BLAST XML writes NCBI's `catch`).
 #[derive(Debug)]
 pub struct CaughtException(pub crate::ncbi_exception::NcbiException);
 

@@ -18,8 +18,9 @@ use std::sync::{
 use std::time::Instant;
 
 use crate::algorithm::blastn::blast_engine::QueryReading;
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::common::db_mask_search::SearchMask;
+use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart};
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
@@ -555,16 +556,62 @@ impl BlastpSubjectScratch {
         self.preliminary_interval_tree.reset();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// The table cleared (`s_BlastDiagClear`: every entry the window less than 0, the offset the
+    /// window): by `Blast_ExtendWordExit` where the offset reached INT4_MAX / 4 (`finish_chunk`),
+    /// and in a `-db_hard_mask` search between two sequences where moving the offset to keep them
+    /// apart would take it there (`db_masked.rs`, `common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`).
+    #[cold]
+    fn clear_table(&mut self, window: i32) {
+        self.diag_offset = window;
+        for diag in &mut self.diag_array {
+            *diag = DiagStruct::clear(window);
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:152-172
     fn finish_subject(&mut self, subject_length: usize, window: i32) {
+        self.finish_chunk(subject_length as i32, window);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    /// `Blast_ExtendWordExit` after a subject, or a hard chunk, of `length` letters (NCBI's
+    /// `Int4`: negative for a chunk between overlapping masks, `db_masked.rs`).
+    #[inline(always)]
+    fn finish_chunk(&mut self, length: i32, window: i32) {
         if self.diag_offset >= i32::MAX / 4 {
-            self.diag_offset = window;
-            for diag in &mut self.diag_array {
-                *diag = DiagStruct::clear(window);
-            }
+            self.clear_table(window);
         } else {
-            self.diag_offset += subject_length as i32 + window;
+            self.diag_offset += length + window;
         }
+    }
+}
+
+// The search with `-db_hard_mask` moves the table between its sequences
+// (`common::hard_chunk_walk::TableStart::apply`, `TableEnd::apply`; `db_masked.rs`).
+impl HardTable for BlastpSubjectScratch {
+    type Error = std::convert::Infallible;
+
+    fn ncbi_table(&mut self, start: NcbiStart, window: i32) {
+        self.diag_offset = start.offset;
+        let entry = if start.cleared {
+            DiagStruct::clear(window)
+        } else {
+            DiagStruct::default()
+        };
+        self.diag_array.fill(entry);
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        BlastpSubjectScratch::clear_table(self, window);
+    }
+
+    // Below INT4_MAX / 4 after the move (`DiagonalWalk::start`, `DiagonalWalk::after` clear the
+    // table instead), so it never passes Int4.
+    fn move_offset(&mut self, by: i32) -> Result<(), Self::Error> {
+        self.diag_offset += by;
+        Ok(())
     }
 }
 
@@ -1491,15 +1538,6 @@ pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518
-//
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:776-779
-#[inline]
-fn blastp_diag_coord(offset_delta: i32, diag_mask: i32) -> usize {
-    usize::try_from(offset_delta & diag_mask)
-        .expect("NCBI BLAST masked diagonal index must be non-negative")
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:358-372
 fn blastp_save_init_hsp(
     init_hsps: &mut Vec<InitHSP>,
@@ -2097,28 +2135,47 @@ impl BlastpReport {
         )
     }
 
+    /// The report as the first format of a run of `app` that NCBI's prefetch of each query batch
+    /// asks (`shared::PrefetchFormat`, the one owner of whether a batch prefetches).
+    fn prefetch_format(self, app: BlastpApp) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{
+            ARCHIVE_FORMAT, JSON, JSON_S, TABULAR, TABULAR_WITH_COMMENTS, XML, XML2, XML2_S,
+        };
+        use crate::report::blast_xml2::Xml2Kind;
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                BlastpReport::Pairwise(view) => view.outfmt(),
+                BlastpReport::Text(outfmt) => outfmt as i32,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy
+                // names come with the rows (`report::tabular::TabularNames`).
+                BlastpReport::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => TABULAR_WITH_COMMENTS,
+                    _ => TABULAR,
+                },
+                BlastpReport::Xml => XML,
+                BlastpReport::Seqalign(serial) => serial.outfmt(),
+                BlastpReport::Xml2(kind) => match kind {
+                    Xml2Kind::Single16 => XML2_S,
+                    Xml2Kind::Single15 => JSON_S,
+                    Xml2Kind::Files14 => XML2,
+                    Xml2Kind::Files13 => JSON,
+                },
+                BlastpReport::Archive => ARCHIVE_FORMAT,
+            },
+            app.request_kind(),
+        )
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
-    fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastpReport::Pairwise(view) => Some(view.outfmt()),
-            BlastpReport::Text(outfmt) => Some(outfmt as i32),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
-            // come with the rows (`report::tabular::TabularNames`).
-            BlastpReport::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            BlastpReport::Xml => Some(5),
-            BlastpReport::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            BlastpReport::Archive | BlastpReport::Xml2(_) => None,
-        })
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, and psiblast's archive 11,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings. The archive of the other
+    /// applications fetches nothing; XML2 and JSON write the messages at each `Hit`
+    /// (`TaxdbPrinter`).
+    fn prefetches_subjects(self, app: BlastpApp) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format(app)))
     }
 
     /// Whether the report reads the sequence that NCBI's formatters find by a subject's Seq-align
@@ -2991,14 +3048,7 @@ fn psiblast_pssms(
         let alignments: Vec<PssmAlignment<'_>> = hit_list.hsplist_array[..count]
             .iter()
             .flat_map(|hsp_list| &hsp_list.hsps)
-            .map(|hsp| PssmAlignment {
-                subject: hsp.s_idx,
-                e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
-                q_start: hsp.q_start - 1 + q_shift,
-                s_start: hsp.s_start - 1,
-                q_length: hsp.q_end + 1 - hsp.q_start,
-                ops: hsp.gap_info.as_deref(),
-            })
+            .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
             .collect();
         if alignments.is_empty() {
             continue;
@@ -4172,24 +4222,30 @@ pub(super) fn preliminary_hit_from_local_match_hsp(local_hsp: &BlastpHsp) -> Bla
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3975-4000
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 (cited at
+// `BlastIntervalTree::try_add_hsp`)
+/// The interval tree rebuilt from the HSPs `preliminary_hits` that the exact retry keeps: their
+/// count, or `None` where NCBI's insertion of one of them never ends (an HSP out of the tree's
+/// bounds, of a hard chunk shorter than the word: `BlastpPrelimKernel::one_word_gapped`).
 fn rebuild_preliminary_interval_tree_from_list(
     interval_tree: &mut BlastIntervalTree,
     preliminary_hits: &[BlastpPreliminaryHsp],
     contexts: &[QueryContext],
-) -> usize {
+) -> Option<usize> {
     interval_tree.reset();
     let mut inserted = 0usize;
     for preliminary_hsp in preliminary_hits {
         let context_idx = usize::try_from(preliminary_hsp.query_context)
             .expect("preliminary blastp query context must be non-negative");
-        interval_tree.add_hsp(
+        if !interval_tree.try_add_hsp(
             preliminary_tree_hsp(preliminary_hsp, contexts[context_idx].frame_base),
             contexts[context_idx].frame_base,
-            IndexMethod::QueryAndSubject,
-        );
+        ) {
+            return None;
+        }
         inserted += 1;
     }
-    inserted
+    Some(inserted)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3777-3786
@@ -4235,6 +4291,17 @@ fn blastp_get_start_for_gapped_alignment_int4_length(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4246-4258, 4262-4295
+// The left extension reads the subject's letters from its start to the gapped start, the right one
+// runs only where the gapped start lies before the subject's last letter, over the rest of its
+// length; a subject shorter than 90,000 letters (MAX_SUBJECT_OFFSET) is not shifted.
+/// The preliminary gapped alignment of `init_hsp` on the subject whose letters after the leading
+/// sentinel are `subject_sequence` (the sentinel after them included) and whose length is
+/// `subject_length` (NCBI's `subject->length`: the subject's letters, or the length of a hard chunk
+/// shorter than the word, `Int4`, whose seed lies in the stored letters past it,
+/// `BlastpPrelimKernel::one_word_gapped`). The alignment reads the letters up to the larger of
+/// that length and one past the gapped start, which gives NCBI's two extensions in both cases.
+#[allow(clippy::too_many_arguments)]
 fn extend_preliminary_blastp_hit(
     init_hsp: &mut InitHSP,
     s_idx: u32,
@@ -4242,6 +4309,7 @@ fn extend_preliminary_blastp_hit(
     ctx: &QueryContext,
     query_sequence: &[u8],
     subject_sequence: &[u8],
+    subject_length: i32,
     matrix: ScoringMatrix,
     gap_open: i32,
     gap_extend: i32,
@@ -4250,7 +4318,6 @@ fn extend_preliminary_blastp_hit(
     scratch: &mut GapAlignScratch,
 ) -> BlastpPreliminaryHsp {
     let query_raw = &query_sequence[..ctx.aa_len];
-    let subject_raw = &subject_sequence[..subject_sequence.len() - 1];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3905
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3945
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3945
@@ -4269,6 +4336,10 @@ fn extend_preliminary_blastp_hit(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3943-3945
     init_hsp.s_seed += gapped_q_start - init_hsp.q_seed_absolute;
     init_hsp.q_seed_absolute = gapped_q_start;
+    let s_seed = usize::try_from(init_hsp.s_seed)
+        .expect("NCBI BLAST preliminary gapped subject start must be non-negative");
+    let subject_raw =
+        &subject_sequence[..usize::try_from(subject_length).unwrap_or(0).max(s_seed + 1)];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3943-3949
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3949-3978
     let aligned = blastp_score_only_gapped_alignment_with_scratch(
@@ -4276,8 +4347,7 @@ fn extend_preliminary_blastp_hit(
         subject_raw,
         usize::try_from(gapped_q_start)
             .expect("NCBI BLAST preliminary gapped query start must be non-negative"),
-        usize::try_from(init_hsp.s_seed)
-            .expect("NCBI BLAST preliminary gapped subject start must be non-negative"),
+        s_seed,
         matrix,
         gap_open,
         gap_extend,
@@ -4314,6 +4384,9 @@ pub fn run(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
+    // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
+    // (`BlastpArgs::write_verification`).
+    args.write_verification = settings.write_verification.clone();
     use crate::blastinput::app;
     use crate::blastinput::input_files;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
@@ -4660,7 +4733,8 @@ fn open_search_database(
                 resolved.db_mask.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
@@ -4933,10 +5007,10 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTP_TASK.check(&mut args.task)?;
-    // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
-    // database is read from files by the command line only.
+    // `run_local` searches subject records (the library, `api::run`; LOSAT Web's adapter; ABI v1);
+    // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
+        bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     report_formats(&args, outputs)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
@@ -5276,6 +5350,7 @@ pub fn run_local_database(
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTP_TASK.check(&mut args.task)?;
     report_formats(&args, outputs)?;
+    args.write_verification = settings.write_verification.clone();
     let archive_requested = outputs
         .formats
         .iter()
@@ -6147,12 +6222,21 @@ fn search(
         ),
     };
     // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
-    // starts the search, after its checks.
+    // starts the search, after its checks. The lookup table can hold a word with the residue 0
+    // only where a query holds the gap `-` (`common::hard_chunk_walk::DiagonalWalk::new`; a
+    // query's masked letters are counted too, which can only refuse more). The FASTA reader drops
+    // `-` with NCBI's warning, so a query read from FASTA never holds it.
     if let (Some(database), Some(mask)) = (database, args.db_mask_resolved.as_ref()) {
         mask.check_losat_limits(
             database.seqdb(),
             args.app.name(),
-            crate::blastinput::db_mask::HardScan::Protein,
+            crate::blastinput::db_mask::HardScan::Protein {
+                word: args.word_size as i32,
+                window: args.window_size as i32,
+                zero_words: searched_queries
+                    .iter()
+                    .any(|record| record.sequence.contains(&b'-')),
+            },
         )?;
     }
     check_blastp_environment(args.app, database.is_none())?;
@@ -6559,7 +6643,12 @@ fn search(
                         crate::algorithm::common::database::seq_annots_prefetch(
                             crate::blastinput::app::parse_formatting_string(outfmt)
                                 .ok()
-                                .map(|choice| choice.number),
+                                .map(|choice| {
+                                    crate::algorithm::common::database::PrefetchFormat::of(
+                                        choice.number,
+                                        args.app.request_kind(),
+                                    )
+                                }),
                         )
                     })
                 {
@@ -8267,14 +8356,19 @@ impl<'a> CallRequests<'a> {
     /// it (every batch before the formats; the batch an NCBI error belongs to), so they are
     /// written now (`write_through`), before the output of the call's end, and the place is
     /// marked. NCBI's posts of the bytes that ASN.1 text replaced in them wait for the starts of
-    /// their batches (`take_posts`, `write_request_posts`).
+    /// their batches (`take_posts`, `write_request_posts`). A request whose stream throws (an
+    /// element stated as `NULL` in a PSSM query, `encoder::NullElement`) ends the call there too:
+    /// NCBI's error follows it, so the place is marked before the error returns (`release`).
     fn end_at(&self, through: usize) -> Result<()> {
-        self.write_through(through)?;
+        let written = self.write_through(through);
+        if matches!(&written, Err(error) if !error.is::<crate::cli::NativeError>()) {
+            return written;
+        }
         *self
             .through
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(through);
-        Ok(())
+        written
     }
 
     /// Takes NCBI's posts of the bytes replaced in the requests written of the call's batches,
@@ -9872,6 +9966,7 @@ fn run_call(
     // ungapped extensions and gapped half) with what it reads of the call; the preliminary stage
     // calls it with the subject's preliminary statistics `values` (`prelim_run::
     // run_preliminary_with`), alone or inside the masked kernels (`db_masked.rs`).
+    let tree_without_end = std::sync::atomic::AtomicBool::new(false);
     let kernel = prelim_kernel::BlastpPrelimKernel {
         args: &args,
         query_ids: &query_ids,
@@ -9893,21 +9988,18 @@ fn run_call(
         x_trace_query_base,
         timing_enabled,
         timing: &timing,
+        tree_without_end: &tree_without_end,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's
     // branch, into the hit lists and the culling writer; RPS-BLAST's gapped K and its volumes'
     // merge are read below.
     // `-db_soft_mask` and `-db_hard_mask` (`db_masked.rs`): a database search with either searches
-    // its sequences with the masked kernels below, chosen once here.
-    let db_masking = database
-        .zip(SearchMask::of(args.db_mask_resolved.as_ref()))
-        .map(|(database, mask)| db_masked::BlastpDbMasking {
-            db: database.seqdb(),
-            mask,
-            program: args.app.name(),
-            error: std::sync::Mutex::new(None),
-        });
+    // its sequences with the masked kernels below, chosen once here; with `-db_hard_mask` they
+    // start the sequences that NCBI's one-thread search reaches below their start on a new table
+    // (`ResolvedMask::hard_starts`, the walk that `check_losat_limits` ran).
+    let db_masking =
+        db_masked::BlastpDbMasking::of(database, &args, &query_batches, &contexts, query_chunk);
     let prelim_stage = prelim_run::PrelimRun {
         args: &args,
         query_records,
@@ -9993,6 +10085,9 @@ fn run_call(
             outputs,
         )?,
     };
+    if tree_without_end.load(std::sync::atomic::Ordering::Relaxed) {
+        anyhow::bail!("BLASTP: an interval tree insertion of a whole subject never ends");
+    }
     let no_alignment_set = no_alignment_sets(&query_batch_skipped, rps_multi_volume);
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
@@ -10376,7 +10471,11 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let reads = database::CallTitles::new(database, &query_batches);
+    let reads = database::CallTitles::new(
+        database,
+        &query_batches,
+        report_prep::prefetch_format(args.app, &requested_formats),
+    );
     let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
@@ -10385,6 +10484,7 @@ fn run_call(
     let (subject_records, subject_titles, shown_subjects) =
         report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);
     let report_prep::ReportValues {
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,
@@ -10551,6 +10651,7 @@ fn run_call(
         psiblast_hits_found: &psiblast_hits_found,
         filtered_empty,
         rps_multi_volume,
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,

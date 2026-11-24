@@ -1139,14 +1139,7 @@ fn next_pssm(
     let q_shift = ranges.query_input.placements.offset(0);
     let alignments: Vec<PssmAlignment<'_>> = hsps
         .iter()
-        .map(|hsp| PssmAlignment {
-            subject: hsp.s_idx,
-            e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
-            q_start: hsp.q_start - 1 + q_shift,
-            s_start: hsp.s_start - 1,
-            q_length: hsp.q_end + 1 - hsp.q_start,
-            ops: hsp.gap_info.as_deref(),
-        })
+        .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
         .collect();
     let ordinal = ranges.query_input.ordinal(0);
     let record = &ranges.input_records[ordinal];

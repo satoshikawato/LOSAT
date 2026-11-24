@@ -1,0 +1,8 @@
+BLAST Database error: Filtering algorithm ID -2 does not exist.
+
+Available filtering algorithm(s):
+
+Algorithm ID  Algorithm name                          
+    0         m1                                      
+    1         m2                                      
+

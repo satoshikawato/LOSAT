@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.95
+- Version: 1.96
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -514,7 +514,23 @@
   list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
   item O4b2-4's 1.92);
-  1.94 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
+  1.94 2026-11-23 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
+  databases reproduced, rule 2, in blastdbcmd, the five search programs, makeblastdb's copy and
+  makembindex, with the search programs' GI-indexed masks on more than one thread, where NCBI
+  stops or crashes in some runs, giving NCBI's `-num_threads 1` output as every `-db` search does
+  (PD-LOSAT-DATABASE-SEARCH, the Owner's decision DB-3 of 2026-10-13); the `.nog` read as NCBI's
+  mapping reads it, and the explicit rejections, rule 3, of an empty `.nog`, of a `.nog` entry
+  past its mapping and of a `MASKLIST` name that is not UTF-8 where the masks are read (review
+  round of 2026-11-24; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  numbered after 1.93; first
+  1.64, then 1.82 at the merge of line NP item M4c-1's final head, which brought dev's 1.64 to 1.80
+  and its own 1.81, then 1.85 at the merge of dev that brought 1.82 to 1.84 (psiblast line items PS10a
+  and PS10c, line NP item M4b-AX), then 1.91 at the merge of dev that brought 1.85 to 1.90 (line RG
+  items D1c-1 and T5d, psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2), then
+  1.92 at the merge of dev that brought psiblast line item PS12d's 1.91, then 1.93 at the merge of dev
+  that brought line NP item O4b2-4's 1.92, then 1.94 at the merge of dev e89f6237c that brought
+  line RG item D1c-1c's 1.93);
+  1.95 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
   of a query batch crashes, does not finish or stops come after the reports of the query
   batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
   Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops (also
@@ -525,23 +541,25 @@
   with a valid context would read its subjects (after that chunk's setup checks and the reads of
   the database that fail before it; without a subject in hand nothing is lost and the batch is
   reported); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  numbered after 1.93, line RG item D1c-1c, at the merge of dev of 2026-11-24 that brought it;
+  numbered after 1.94, line NP item M4c-2, at the merge of dev of 2026-11-24 that brought it;
   first 1.52, then 1.53 at the merge of dev of 2026-11-18, then 1.72 and 1.74 at the merges of dev
   of 2026-11-22, then 1.76, 1.77, 1.82, 1.86, 1.89 and 1.91 at the merges of dev of 2026-11-23, then 1.93 at
   the merge of dev of 2026-11-24 that brought 1.92, then 1.94 at the merge of dev of 2026-11-24
-  that brought 1.93);;
-  1.95 2026-11-23 (BLASTP and psiblast, line RG item X-bpgap: D13's rejection of a negative
-  `CHUNK_SIZE` whose wrapped ranges leave gaps between them moved to TBLASTN's step of 1.94, where
+  that brought 1.93, then 1.95 at the merge of dev of 2026-11-24
+  that brought 1.94);
+  1.96 2026-11-23 (BLASTP and psiblast, line RG item X-bpgap: D13's rejection of a negative
+  `CHUNK_SIZE` whose wrapped ranges leave gaps between them moved to TBLASTN's step of 1.95, where
   the search of the batch's first chunk with a valid context would read subjects in hand (a batch
   without a subject in hand or without such a chunk is reported, as NCBI 2.17.0 reports it), and
   the stops of a split batch's chunks before the errors of the database and of the subject length
   that NCBI meets later, through one owner of the steps of a split batch that BLASTP, psiblast and
   TBLASTN share; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.94; first 1.85, then 1.87 at the merge of dev that brought 1.82 to 1.85, then 1.90 at the
+  after 1.95; first 1.85, then 1.87 at the merge of dev that brought 1.82 to 1.85, then 1.90 at the
   merge of dev that brought 1.86 to 1.88, then 1.92 at the merge of dev that brought 1.89 and 1.90,
   then 1.93 at the merge of dev that brought 1.91, line PS item PS12d, then 1.94 at the
   merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
-  of 2026-11-24 that brought 1.93, line RG item D1c-1c)
+  of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
+  of 2026-11-24 that brought 1.94, line NP item M4c-2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -749,7 +767,7 @@ Explicit rejections (rule 3):
   (version 1.53, review 3 of X4: the form of 1.40 for a rejection in the middle of a run; row
   `db.x4.chunk.neg.gap.6`, whose bytes are NCBI's report of the batch before, row
   `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and `db.x4.chunk.again.*` hold NCBI's
-  bytes of the other two stops), at TBLASTN's step since version 1.95 (below).
+  bytes of the other two stops), at TBLASTN's step since version 1.96 (below).
   TBLASTN refuses where NCBI stops in the batch's search (a chunk without a query, also where the
   first range of a negative `CHUNK_SIZE` covers the batch, at which `CQuerySplitter::Split` stops
   before any chunk is searched, and a chunk split again, at which the search of that chunk stops
@@ -757,13 +775,13 @@ Explicit rejections (rule 3):
   hits and exits 0; LOSAT refuses at every thread count, as NCBI does at `-num_threads 1`); also on
   a database left without a subject: a seqid list that keeps none, an alias over volumes without
   sequences) after the reports of the batches before, in NCBI's order with the setup of each
-  chunk's search and its read of the database (version 1.94), and so does the rejection of a
+  chunk's search and its read of the database (version 1.95), and so does the rejection of a
   negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on: where
   the search of the batch's first chunk with a valid context would read its subjects, after that
   chunk's setup checks and the reads of the database that fail before it, with subjects in hand
   (a batch searched without a subject is reported as NCBI reports it: nothing is lost) (version
-  1.94; before, before the run's first byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are
-  NCBI's report of the batch before, row `db.xs.tblastn.bat.qa.6`). Since version 1.95 BLASTP
+  1.95; before, before the run's first byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are
+  NCBI's report of the batch before, row `db.xs.tblastn.bat.qa.6`). Since version 1.96 BLASTP
   and psiblast take the same steps, through the one owner of the steps of a split batch that
   TBLASTN's search uses (line RG item X-bpgap, NCBI 2.17.0 probes): the rejection of the gaps comes
   where the search of the batch's first chunk with a valid context would read subjects in hand,
@@ -1929,6 +1947,49 @@ file would differ, and NCBI's programs still could not open the database).
   (the rule-2 rejection of version 1.81 below covers the others). Fixtures `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
   `LOSAT/src/writedb/gi_mask_tests.rs`.
+- The readers of GI-indexed masks (version 1.94, 2026-11-23, line NP item M4c-2; review round
+  2026-11-24): `blastdbcmd` (`-info`, `-outfmt %m`, `-mask_sequence_with`), the search programs
+  `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` (`-db_soft_mask`, `-db_hard_mask`),
+  `makeblastdb -input_type blastdb` (the masks copied into the copy's mask column) and
+  `makembindex` (`-db_mask`, `-show_filters`) read the masks that an alias file's `MASKLIST` names
+  as NCBI's reader does
+  (`seqdbalias.cpp:117-139`, `seqdbgimask.cpp`), with its deterministic defects: the masks apply
+  only when `-db` is one name whose own alias file has `MASKLIST` (in an alias file over the
+  database or with several names they are passed over without a message); the mask files are
+  looked for from the current directory and `BLASTDB`, not from the database's directory
+  (`Could not open gi-mask index files.` from elsewhere); a sequence without a GI takes the masks
+  of GI 4294967295 when that GI is in the files (`(Uint4)` of `INVALID_GI`); with equal GIs the
+  record is the one NCBI's binary search reaches; a data volume that was never written gives
+  NCBI's memory-map text with the empty name (`To be memory mapped the file must exist: ''`);
+  the algorithm ids and names are those of `MASKLIST`, with NCBI's names table in the errors of
+  an unknown id or name; makembindex takes an id or a `MASKLIST` name, and its new-style index
+  opens each volume alone, which names no masks, so on a database of several volumes it stops
+  with `unrecognized filter algorithm id`, while an old-style index and a database of one volume
+  read them (`sequence_istream_bdb.cpp:62-96`, `mkindex_app.cpp:268-296`). The `.nog` of a volume
+  (the GI of each sequence), which NCBI reads through its mapping with no check of its length
+  (`seqdbvol.cpp:52-71`), reads as that mapping does: bytes past the end of the file read as zeros
+  to the end of its last page, so a file cut inside its header gives a count of 0 and every
+  sequence takes the first GI of its definition lines, as without the file; a cut-off entry is GI
+  0, which no mask has; a count below the volume's sends the sequences after it to their
+  definition lines. A protein in FASTA with such masks is approved difference 5 of
+  PD-LOSAT-BLASTDBCMD-DEVIATIONS, as with mask columns. blastdbcmd, makeblastdb and makembindex
+  read the masks on one thread (they have no `-num_threads`). The five search programs read the
+  masks of the sequences their threads fetch (`seqsrc_seqdb.cpp:316-321`,
+  `seqdbgimask.cpp:65-112`), and with `-db_soft_mask` or `-db_hard_mask` and more than one thread
+  NCBI stops in some runs with `BLAST engine error: Database memory map file error` (exit status
+  3) or crashes (SIGSEGV, and at 8 threads glibc's double-free or unaligned-chunk abort): in the
+  fixtures' masked searches, blastn failed in 4 to 18 of 60 runs at 2, 4 and 8 threads, and in the
+  probe of 2026-11-24 (review S1) tblastn in 3 of 60 runs at 4 threads and 10 of 30 at 8, blastp
+  in 3 and 2, blastx in 2 and 2, tblastx in 1 and 10, blastn in 8 and 4; the other runs gave the
+  one-thread bytes, and with one thread every run of each program (20 of 20), as with mask columns
+  at any thread count (60 of 60), gave the same bytes. LOSAT writes NCBI's `-num_threads 1` output
+  at every thread count in all five, as every `-db` search does (PD-LOSAT-DATABASE-SEARCH, DB-3).
+  The explicit rejections of an empty `.nog`, of a `.nog` entry past its mapping and of a
+  `MASKLIST` name that is not UTF-8 are in the rule-3 list. Fixtures
+  `LOSAT/tests/seqdb/gi_mask_read` (`make_gi_mask_read_fixtures.py`, NCBI BLAST+ 2.17.0: the rows
+  `bdc_wide_*` of a data file past 64 KiB, `bdc_sv4n*` and `bn_sv4n*` of the `.nog` cut or edited,
+  `mbi_*` of makembindex), tests `LOSAT/tests/gi_mask_read.rs` (each search row again with
+  `-num_threads 4`) and `LOSAT/src/seqdb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[n]` after the last chunk (version 1.83; version 1.82 and before named `[1]`; for a
@@ -2833,7 +2894,7 @@ file would differ, and NCBI's programs still could not open the database).
   before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it searches the
   next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold each query's report until
   the next query's results arrive, as NCBI's do, so the last query before the refused batch is left
-  out), for the first batch the prologs, and leaves the epilog out (version 1.94, 2026-11-18, line
+  out), for the first batch the prologs, and leaves the epilog out (version 1.95, 2026-11-18, line
   RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`). TBLASTN's other rejections of a
   step where NCBI's search of a batch crashes, does not finish or stops take the same form,
@@ -2904,11 +2965,11 @@ file would differ, and NCBI's programs still could not open the database).
   output ended a few bytes into that report's footer (50,001 bytes), and in one batch it wrote
   nothing with `-outfmt 6` and the first 18 bytes of the prolog with `-outfmt 0`. Those cuts are
   NCBI's buffer, not a result: LOSAT writes the reports and prologs whole. LOSAT's TBLASTN refusal
-  of the same read (the item above) comes after the same reports (version 1.94, line RG item
+  of the same read (the item above) comes after the same reports (version 1.95, line RG item
   X-short-bat): NCBI's TBLASTN searches and prints each query batch before it reads the next
   (`tblastn_app.cpp:275-304`, as TBLASTX's `tblastx_app.cpp:176-207`) and so has formatted the
   reports of the batches before when it dies (line RG X-short review 1: with `BATCH_SIZE=1`, NCBI
-  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.94). With `-subject`
+  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.95). With `-subject`
   and a `-db_gencode` other than 1, LOSAT translates in the selected code
   (PD-TBLASTX-LOCAL-SUBJECT-GENCODE) and refuses where those HSPs reach the re-evaluation. TBLASTX
   translates the query whole before the search, so a short query reaches no such read; but in our
@@ -3264,6 +3325,24 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+- The readers of GI-indexed masks, a damaged `.nog` or a `MASKLIST` name that is not UTF-8
+  (version 1.94, 2026-11-24, line NP item M4c-2, review S4 and N8; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI
+  reaches and LOSAT reproduces, rule 2, are in the list above). An empty `.nog` is mapped as a
+  null pointer: NCBI's blastdbcmd and blastn crash with SIGSEGV where a sequence's GI is read
+  (`-outfmt %m`, `-db_soft_mask`; 5 of 5 and 3 of 3 runs; `-info` reads no GI and completes).
+  LOSAT refuses it there (exit 1, "(NCBI crashes on it)"). An entry past the last 4 KiB page of
+  the file's mapping reads whatever memory follows it: in the probe a `.nog` cut to 100 bytes for
+  1,100 sequences, NCBI's blastdbcmd completed, the 84 sequences past the page taking GIs that
+  matched no mask, which depends on its memory map; LOSAT refuses it ("depend on its memory map").
+  A `MASKLIST` name that is not UTF-8 (the names are paths and the text of the names table) is
+  refused where the masks are read (`-info`, `%m`, `-mask_sequence_with`, `-db_soft_mask`,
+  `-db_hard_mask`, the copy, `-db_mask`); a search or a retrieval without masks reads the
+  database, as NCBI's reader reads the names only there. Rejected: reproducing the bytes past the
+  page (a model of NCBI's memory map) and the refusal of the name at the opening (it refused
+  searches NCBI completes). Tests: `LOSAT/src/seqdb/gi_mask_tests.rs`
+  (`the_nog_reads_as_ncbi_s_mapping_of_it`), `LOSAT/src/seqdb/tests.rs`
+  (`a_masklist_name_not_utf8_is_refused_where_the_masks_are_read`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

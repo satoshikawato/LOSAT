@@ -207,7 +207,12 @@ pub(super) fn write_tblastx_tabular(
     if needs.all_deflines {
         for (index, hsp) in hits.iter().enumerate() {
             if index == 0 || hits[index - 1].hit.s_idx != hsp.hit.s_idx {
-                subjects.values_for(hsp.hit.q_idx as usize, hsp.hit.s_idx as usize, spec, PROGRAM)?;
+                subjects.values_for(
+                    hsp.hit.q_idx as usize,
+                    hsp.hit.s_idx as usize,
+                    spec,
+                    PROGRAM,
+                )?;
             }
         }
     }

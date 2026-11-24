@@ -9026,12 +9026,9 @@ fn run_in_pool(
         if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
             let searched = batch_records.searched();
             let record = |query: usize| {
-                let record = searched.get(query.checked_sub(start)?)?;
-                Some(crate::report::query_bioseq::QueryRecordRef {
-                    believed: record.believed()?,
-                    title: &record.title,
-                    length: record.seq().len(),
-                })
+                crate::report::query_bioseq::QueryRecordRef::of(
+                    searched.get(query.checked_sub(start)?)?,
+                )
             };
             let run = crate::report::query_bioseq::SeenRun {
                 shows: output_formats

@@ -1492,8 +1492,7 @@ impl ReportedSubjects {
                     if !super::report::reported(list, gapped) {
                         continue;
                     }
-                    let Some(subject) = self.parsed.get(list.oid).and_then(Option::as_deref)
-                    else {
+                    let Some(subject) = self.parsed.get(list.oid).and_then(Option::as_deref) else {
                         continue;
                     };
                     let oid = self.oids[list.oid];

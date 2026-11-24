@@ -2260,11 +2260,11 @@ fn write_tblastx_outputs(
         ) {
             // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
             let row = |q_idx: usize, s_idx: usize| match &run.database {
-                Some(database) => database.seen.row(
-                    q_idx,
-                    database.reported.ordinals.get(s_idx).copied(),
-                    s_idx,
-                ),
+                Some(database) => {
+                    database
+                        .seen
+                        .row(q_idx, database.reported.ordinals.get(s_idx).copied(), s_idx)
+                }
                 None => s_idx,
             };
             let checked = crate::report::tabular::check_failed_lookups(
@@ -3894,12 +3894,9 @@ fn run_batch_loop(
                     .collect();
                 // The batch's searched queries (`start..end`), the scope's span.
                 let record = |query: usize| {
-                    let record = query_records.get(query).filter(|_| query < end)?;
-                    Some(crate::report::query_bioseq::QueryRecordRef {
-                        believed: record.believed()?,
-                        title: &record.title,
-                        length: record.seq().len(),
-                    })
+                    crate::report::query_bioseq::QueryRecordRef::of(
+                        query_records.get(query).filter(|_| query < end)?,
+                    )
                 };
                 let run = crate::report::query_bioseq::SeenRun {
                     shows: formats.iter().all(|format| format.shows_query_bioseqs())

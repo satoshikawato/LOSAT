@@ -22,13 +22,17 @@ fn keys(text: &str) -> Vec<u64> {
 }
 
 /// The run's searched queries `records` (ids, title, length) as `QueryBioseqs::note` reads them.
-fn records(records: &[(BelievedIds, &'static [u8], usize)]) -> impl Fn(usize) -> Option<QueryRecordRef<'_>> {
+fn records(
+    records: &[(BelievedIds, &'static [u8], usize)],
+) -> impl Fn(usize) -> Option<QueryRecordRef<'_>> {
     move |h| {
-        records.get(h).map(|(believed, title, length)| QueryRecordRef {
-            believed,
-            title,
-            length: *length,
-        })
+        records
+            .get(h)
+            .map(|(believed, title, length)| QueryRecordRef {
+                believed,
+                title,
+                length: *length,
+            })
     }
 }
 
@@ -40,17 +44,36 @@ fn notes_the_query_of_the_span_that_holds_the_id() {
     ];
     let mut seen = QueryBioseqs::default();
     assert!(seen.is_empty());
-    assert_eq!(seen.numbered_from(0).of(0, 7).map(QueryBioseq::length), None);
-    seen.note(0, 7, &keys("gb|AAQ00001.1|"), 0..usize::MAX, 0..usize::MAX, records(&queries), true)
-        .unwrap();
+    assert_eq!(
+        seen.numbered_from(0).of(0, 7).map(QueryBioseq::length),
+        None
+    );
+    seen.note(
+        0,
+        7,
+        &keys("gb|AAQ00001.1|"),
+        0..usize::MAX,
+        0..usize::MAX,
+        records(&queries),
+        true,
+    )
+    .unwrap();
     let found = seen.of(0, 7).unwrap();
     assert_eq!(found.length(), 179);
     assert_eq!(found.tabular_ids()[0], b"gb|AAQ00001.1|".to_vec());
     assert_eq!(found.tabular_ids()[2], b"AAQ00001.1".to_vec());
     assert_eq!(found.taxonomy().taxid, 0);
     // Another query of the span reports the same sequence: the same holder.
-    seen.note(1, 7, &keys("gb|AAQ00001.1|"), 0..usize::MAX, 0..usize::MAX, records(&queries), true)
-        .unwrap();
+    seen.note(
+        1,
+        7,
+        &keys("gb|AAQ00001.1|"),
+        0..usize::MAX,
+        0..usize::MAX,
+        records(&queries),
+        true,
+    )
+    .unwrap();
     assert!(std::ptr::eq(seen.of(0, 7).unwrap(), seen.of(1, 7).unwrap()));
     // By the call's queries: a call that starts at the run's query 1.
     let from = seen.numbered_from(1);
@@ -66,9 +89,20 @@ fn a_pdb_query_holds_the_chains_of_its_handle() {
     let queries = [(believed("pdb|1AB1|A"), &b"pdb query"[..], 46)];
     let mut seen = QueryBioseqs::default();
     // A sequence stored as pdb 1AB1 with another chain: the scope key is the handle.
-    seen.note(0, 3, &keys("pdb|1AB1|B"), 0..usize::MAX, 0..usize::MAX, records(&queries), true)
-        .unwrap();
-    assert_eq!(seen.of(0, 3).unwrap().tabular_ids()[0], b"pdb|1AB1|A".to_vec());
+    seen.note(
+        0,
+        3,
+        &keys("pdb|1AB1|B"),
+        0..usize::MAX,
+        0..usize::MAX,
+        records(&queries),
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        seen.of(0, 3).unwrap().tabular_ids()[0],
+        b"pdb|1AB1|A".to_vec()
+    );
     assert_eq!(seen.of(0, 3).unwrap().tax_deflines().len(), 1);
 }
 
@@ -82,7 +116,15 @@ fn keeps_the_refusal_where_the_holder_is_not_determined() {
     let mut seen = QueryBioseqs::default();
     // Two queries of the span hold the id.
     assert_eq!(
-        seen.note(0, 1, &key, 0..usize::MAX, 0..usize::MAX, records(&twice), true),
+        seen.note(
+            0,
+            1,
+            &key,
+            0..usize::MAX,
+            0..usize::MAX,
+            records(&twice),
+            true
+        ),
         Err(NotNoted::NoHolder)
     );
     // The caller does not have every query of the span.
@@ -95,7 +137,15 @@ fn keeps_the_refusal_where_the_holder_is_not_determined() {
     // No query of the span holds it (the next batch's query is not in the span).
     let mut seen = QueryBioseqs::default();
     assert_eq!(
-        seen.note(1, 1, &keys("gb|AAQ00009.1|"), 1..2, 0..usize::MAX, records(&twice), true),
+        seen.note(
+            1,
+            1,
+            &keys("gb|AAQ00009.1|"),
+            1..2,
+            0..usize::MAX,
+            records(&twice),
+            true
+        ),
         Err(NotNoted::NoHolder)
     );
     assert!(seen.is_empty());
@@ -113,12 +163,27 @@ fn tables_that_read_letters_keep_the_refusal() {
         )
         .expect("a field list")
     };
-    assert!(tabular_shows(Some(&spec("6 qseqid sseqid stitle slen staxids")), Program::Blastp));
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid sseqid stitle slen staxids")),
+        Program::Blastp
+    ));
     assert!(tabular_shows(Some(&spec("18")), Program::Blastp));
-    assert!(!tabular_shows(Some(&spec("6 qseqid sseqid sseq")), Program::Blastp));
-    assert!(!tabular_shows(Some(&spec("6 qseqid pident")), Program::Blastp));
-    assert!(tabular_shows(Some(&spec("6 qseqid pident")), Program::Blastn));
-    assert!(!tabular_shows(Some(&spec("6 qseqid sframe")), Program::Tblastx));
+    assert!(!tabular_shows(
+        Some(&spec("6 qseqid sseqid sseq")),
+        Program::Blastp
+    ));
+    assert!(!tabular_shows(
+        Some(&spec("6 qseqid pident")),
+        Program::Blastp
+    ));
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid pident")),
+        Program::Blastn
+    ));
+    assert!(!tabular_shows(
+        Some(&spec("6 qseqid sframe")),
+        Program::Tblastx
+    ));
     // The default fields: `pident` and `mismatch` read letters outside BLASTN.
     assert!(!tabular_shows(None, Program::Blastp));
     assert!(tabular_shows(None, Program::Blastn));

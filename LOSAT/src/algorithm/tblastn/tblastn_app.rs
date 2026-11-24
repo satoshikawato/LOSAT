@@ -2169,18 +2169,18 @@ fn search(
             if let (Some(database), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
                 // The batch's searched queries (`range`), the scope's span.
                 let record = |query: usize| {
-                    let record = queries.get(query).filter(|_| query < range.end)?;
-                    Some(crate::report::query_bioseq::QueryRecordRef {
-                        believed: record.believed()?,
-                        title: &record.title,
-                        length: record.seq().len(),
-                    })
+                    crate::report::query_bioseq::QueryRecordRef::of(
+                        queries.get(query).filter(|_| query < range.end)?,
+                    )
                 };
+                let shows = outputs
+                    .formats
+                    .iter()
+                    .all(|format| super::stage_e_report::shows_query_bioseqs(format.outfmt))
+                    && resolved.query_range.is_none()
+                    && !database.loads_write_texts();
                 let run = crate::report::query_bioseq::SeenRun {
-                    shows: outputs.formats.iter().all(|format| {
-                        super::stage_e_report::shows_query_bioseqs(format.outfmt)
-                    }) && resolved.query_range.is_none()
-                        && !database.loads_write_texts(),
+                    shows,
                     known: range.start..usize::MAX,
                     record: &record,
                     protein: true,

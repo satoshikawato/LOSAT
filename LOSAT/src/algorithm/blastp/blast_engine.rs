@@ -2217,6 +2217,19 @@ impl BlastpReport {
                 ))
     }
 
+    /// Whether the call reads its subjects' letters from NCBI's scope for a PSSM: psiblast's
+    /// `-in_pssm` (the archive of its rounds) or a round (`round`) that makes the PSSM of the next
+    /// round or the last one saved (`PsiRoundIo::may_make_next`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    fn psi_reads(
+        args: &ResolvedBlastpArgs,
+        round: Option<&crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    ) -> bool {
+        args.psi_pssm.is_some()
+            || round.is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next)
+    }
+
     /// Whether the call's reports `formats` of `app` show NCBI's bytes for a subject that the
     /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
     /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
@@ -10409,25 +10422,16 @@ fn run_call(
     );
     let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
-    // psiblast makes a PSSM from the round's Seq-aligns, reading the subjects' letters from the
-    // scope, only where another round follows or the last PSSM is saved.
-    let psi_reads = args.psi_pssm.is_some()
-        || reports
-            .psi_round
-            .is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next);
+    let psi_reads = BlastpReport::psi_reads(&args, reports.psi_round);
     if let (Some(titles), Some(scopes), true) = (
         listed_titles.as_mut(),
         reports.query_scopes,
         BlastpReport::resolve_subjects(&requested_formats, args.app, psi_reads),
     ) {
         let record = |query: usize| {
-            let record = query_records.get(query.checked_sub(scopes.first())?)?;
-            Some(crate::report::query_bioseq::QueryRecordRef {
-                believed: record.believed()?,
-                title: &record.title,
-                length: record.seq().len(),
-            })
+            crate::report::query_bioseq::QueryRecordRef::of(
+                query_records.get(query.checked_sub(scopes.first())?)?,
+            )
         };
         let run = crate::report::query_bioseq::SeenRun {
             shows: BlastpReport::shows_query_bioseqs(&requested_formats, &args, psi_reads)

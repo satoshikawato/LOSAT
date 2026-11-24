@@ -8,8 +8,8 @@ E2g (a case that expects `losat-rejects` still expects an explicit rejection by 
 those that the tasks change (E2I_EXPECT, from the first run against 90c5f0181) and those that
 the E2c runner's reading of NCBI in LOSAT's words and the ports since E2g changed (E2I_NOW, from
 the run against 2cd5a1906 on 2026-11-24). For the hit list sizes of approved exception 19, NCBI
-runs at the size whose output LOSAT gives (E2I_NEAR). The output is that of E2c and E2g. The `.short` variants of the audit15.small_evalue cases are left out:
-NCBI's blastn-short (word size 7, e-value 1000 by default) on the two full genomes of those cases
+runs at the size whose output LOSAT gives (E2I_NEAR). The output is that of E2c and E2g. The
+`.short` variants of the audit15.small_evalue cases are left out: NCBI's blastn-short (word size 7, e-value 1000 by default) on the two full genomes of those cases
 needs more than 14 GB of memory and exceeds the 60 s limit of the case runner.
 
 Usage: check_inputs.py --bin-dir DIR --losat LOSAT --work DIR

@@ -1,18 +1,21 @@
-//! Unit tests of the query-anchored section of a PSSM query of the molecule `other` (line PS, PS15b-2
-//! fix 1; `write_unreadable_section`): NCBI BLAST+ 2.17.0 merges the HSPs with the query's rows at the
-//! width of a nucleotide sequence, and its run stops where the merge fails: with an exception where two
-//! blocks of one subject row meet on a query row (`X_MERGE_START_ITERATOR`), where the rows order shared
-//! segments in two ways (`BUILD_INFINITE_LOOP`), where a later pass finds no row of its HSP
-//! (`X_MERGE_PROPER_ROW`) or where `Build` reads past the end of a row's starts
-//! (`MixError::NcbiReadsPastEnd`), and with SIGSEGV where a query letter against a gap of the subject
-//! opens a row of its own (`MixError::NcbiNullSecondRow`). Each expectation is NCBI's own run: the rows are NCBI's
-//! `-outfmt "6 sseqid qstart sstart btop"` rows (from the PSSM's molecule `aa` twin, whose search is the
-//! same), in their order, subjects numbered in order of first appearance, of psiblast with the review
-//! kit's molecule `other` PSSMs (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/rev15b2/inputs/`:
+//! Unit tests of the query-anchored section of a PSSM query of the molecule `other` (line PS,
+//! PS15b-2 fix 1; `write_unreadable_section`): NCBI BLAST+ 2.17.0 merges the HSPs with the query's
+//! rows at the width of a nucleotide sequence, and its run stops where the merge fails: with an
+//! exception where two blocks of one subject row meet on a query row (`X_MERGE_START_ITERATOR`),
+//! where the rows order shared segments in two ways (`BUILD_INFINITE_LOOP`), where a later pass
+//! finds no row of its HSP (`X_MERGE_PROPER_ROW`) or where `Build` reads past the end of a row's
+//! starts (`MixError::NcbiReadsPastEnd`), with SIGSEGV where a query letter against a gap of the
+//! subject opens a row of its own (`MixError::NcbiNullSecondRow`), and with a read of freed memory
+//! where `FillUnalignedRegions` replaces the last reference to a listed segment
+//! (`MixError::NcbiFreesSegment`). Each expectation is NCBI's own run: the rows are NCBI's `-outfmt
+//! "6 sseqid qstart sstart btop"` rows (from the PSSM's molecule `aa` twin, whose search is the
+//! same), in their order, subjects numbered in order of first appearance, of psiblast with the
+//! review kit's molecule `other` PSSMs
+//! (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/rev15b2/inputs/`:
 //! `o/tk_other_stdaa.asn`, `ps/ps6c_other_iupacaa.asn`) and the subjects of
-//! `/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/fix15b2_t0/` (the PSSM's query with letters
-//! deleted or inserted, and pieces of it), whose `-outfmt 1` NCBI answered (exit status 0), ended with
-//! the merge's exception (255) or with SIGSEGV (139).
+//! `/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/fix15b2_t0/` (the PSSM's query with
+//! letters deleted or inserted, and pieces of it), whose `-outfmt 1` NCBI answered (exit status 0),
+//! ended with the merge's exception (255) or with SIGSEGV (139).
 
 use super::tests::push_btop;
 use super::*;
@@ -294,21 +297,27 @@ fn the_rounds_of_ps6c_other_iupacaa_are_ncbis() {
     assert_eq!(rows_section(IUPAC_ROUND_3), Err(MergeFailure::Exception));
 }
 
-/// Round 2 of `tk_other_stdaa.asn -subject s.faa -num_iterations 2` of the differential corpus's
-/// case z147 (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/fix15b2_dz/cases_z/z147`, the
-/// PSSM's query with letters deleted and inserted): NCBI stops in `CAlnMixSegments::Build` with
-/// "CObject is corrupted" (exit status 255, 3 runs of 3); its round 1, the first HSP alone, is
-/// answered.
-const Z147_ROUND_2: &[(u32, u32, u32, &str)] = &[
+/// Round 1 of `tk_other_stdaa.asn -subject s.faa -num_iterations 2` of the differential corpus's
+/// case z147 (`/home/kawato/losat-baselines/psiblast-20261025/PS/tmp/fix15b2_dz/cases_z/z147`,
+/// letters 195-313 of the PSSM's query; row `db.ps15b2.p.othr.past.1`), which NCBI answers.
+const Z147_ROUND_1: &[(u32, u32, u32, &str)] = &[
     (0, 195, 1, "119"),
     (0, 11, 6, "MNAK1RKVLEVLVVLTE1PGMDFRAC4YQLA1NLILYLQTQNEK1"),
     (0, 122, 65, "2GDTHSADAQHQLML2PAI-H-KNLRLWPEYVTCNSSK1VKKQ1"),
+];
+
+/// Round 2 of the same run: NCBI stops in `CAlnMixSegments::Build` with "CObject is corrupted"
+/// (exit status 255, 3 runs of 3). The first match of the frame-1 row (the second HSP's first
+/// block) gives the subject's first row to the second HSP, whose last block then lands on that
+/// row inside the first HSP's segment.
+const Z147_ROUND_2: &[(u32, u32, u32, &str)] = &[
+    (0, 195, 1, "119"),
     (0, 107, 1, "VI1RKLKAKDN3RLIV1ILAEAGLG1-R-C1TK1DT1"),
 ];
 
 #[test]
 fn a_row_walked_past_its_end_is_ncbis_exception() {
-    assert_eq!(rows_section(&Z147_ROUND_2[..1]), line_feed());
+    assert_eq!(rows_section(Z147_ROUND_1), line_feed());
     let hsps = unreadable(Z147_ROUND_2);
     let merged = merge_groups(&hsps);
     assert!(
@@ -349,13 +358,34 @@ impl Cases {
     }
 }
 
+/// Case 586 of `random_sections_end_as_ncbis_merge_can`: a fill of the frame-1 row starts on a
+/// start of that row, whose segment it frees while `m_Segments` lists it (no NCBI run: a read of
+/// freed memory has no defined result).
+#[test]
+fn a_fill_that_frees_a_listed_segment_is_refused() {
+    let hsps = unreadable(&[
+        (0, 31, 134, "12"),
+        (0, 42, 44, "8-A-A1A-A-A-A-8"),
+        (0, 88, 96, "40"),
+        (1, 39, 109, "16"),
+    ]);
+    let merged = merge_groups(&hsps);
+    assert!(
+        matches!(merged, Err(aln_mix::MixError::NcbiFreesSegment)),
+        "{:?}",
+        merged.err()
+    );
+    assert_eq!(section(&hsps), Err(MergeFailure::Freed));
+}
+
 #[test]
 fn random_sections_end_as_ncbis_merge_can() {
     // Each merge of the HSPs that a search can give such a query returns (a line feed) or ends as
     // NCBI's does: never at a LOSAT internal error or a panic. 1 to 4 subjects of 1 to 3 HSPs
     // each, anywhere on the first 150 letters of the query and the subject.
     let mut cases = Cases(0x5eed_0015_b2f1_0001);
-    let mut ends = [0usize; 3];
+    let mut ends = [0usize; 4];
+    let mut unexpected = Vec::new();
     for case in 0..4000 {
         let mut hsps = Vec::new();
         for subject in 0..1 + cases.below(4) {
@@ -380,15 +410,30 @@ fn random_sections_end_as_ncbis_merge_can() {
             Ok(Err(error)) => match error
                 .get_ref()
                 .and_then(|inner| inner.downcast_ref::<UnreadableMergeRefusal>())
+                .map(|refusal| refusal.failure)
             {
-                Some(refusal) if refusal.failure == MergeFailure::Exception => 1,
-                Some(_) => 2,
-                None => panic!("case {case}: {rows:?}: {error}"),
+                Some(MergeFailure::Exception) => 1,
+                Some(MergeFailure::Crash) => 2,
+                Some(MergeFailure::Freed) => 3,
+                None => {
+                    unexpected.push(format!("case {case}: {rows:?}: {error}"));
+                    continue;
+                }
             },
-            Err(_) => panic!("case {case}: {rows:?}: a panic"),
+            Err(_) => {
+                unexpected.push(format!("case {case}: {rows:?}: a panic"));
+                continue;
+            }
         };
         ends[end] += 1;
     }
-    // Each end is met (line feed, exception, crash).
+    // Every case ends as one of NCBI's ends, and each end is met (line feed, exception, crash,
+    // freed memory).
+    assert!(
+        unexpected.is_empty(),
+        "{} cases: {:?}",
+        unexpected.len(),
+        &unexpected[..unexpected.len().min(8)]
+    );
     assert!(ends.iter().all(|&count| count > 0), "{ends:?}");
 }

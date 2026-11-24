@@ -829,16 +829,17 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// Where a merge fails (`Merge` is outside the `try`), NCBI's run ends there, before the
 /// section's first byte: with the merge's exception (`aln_mix::MixError::NcbiThrows`, exit status
 /// 255), with `CObjectException` where `Build` reads past the end of a row's starts
-/// (`aln_mix::MixError::NcbiReadsPastEnd`, exit status 255), or with SIGSEGV where it writes
+/// (`aln_mix::MixError::NcbiReadsPastEnd`, exit status 255), with SIGSEGV where it writes
 /// through a null row (`aln_mix::MixError::NcbiNullSecondRow`; its output then stops where its
-/// stream last flushed). That is an NCBI failure without a
-/// checkable valid result (AGENTS.md rule 3), so LOSAT refuses there (`UnreadableMergeRefusal`),
-/// after the bytes of the report before the section, which NCBI writes before its failure. The
-/// merge reads the HSPs' positions and lengths only (no `fCalcScore`), so the encoding of the
-/// PSSM's sequence plays no part. A PSSM query is never one of the subjects' Bioseqs (only a FASTA
-/// query record is, `subject_is_query_record`), and psiblast's HSPs have no segment of length 0
-/// (it has no `-ungapped`), so the merge's other stops (`MixError::NcbiAborts`,
-/// `MixError::NcbiFreesSegment`) stay internal errors.
+/// stream last flushed), or with a read of freed memory where `FillUnalignedRegions` replaces the
+/// last reference to a segment that `x_CreateDenseg` then reads
+/// (`aln_mix::MixError::NcbiFreesSegment`: the rows of the widths 3 and 1 can leave a fill's
+/// start on a start of the row). That is an NCBI failure without a checkable valid result
+/// (AGENTS.md rule 3), so LOSAT refuses there (`UnreadableMergeRefusal`), after the bytes of the
+/// report before the section, which NCBI writes before its failure. The merge reads the HSPs'
+/// positions and lengths only (no `fCalcScore`), so the encoding of the PSSM's sequence plays no
+/// part. A PSSM query is never one of the subjects' Bioseqs (only a FASTA query record is,
+/// `subject_is_query_record`), so `MixError::NcbiAborts` stays an internal error.
 pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     writer: &mut W,
     hsps: &Hsps,
@@ -860,6 +861,7 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
             return refusal(MergeFailure::Exception)
         }
         Err(aln_mix::MixError::NcbiNullSecondRow) => return refusal(MergeFailure::Crash),
+        Err(aln_mix::MixError::NcbiFreesSegment) => return refusal(MergeFailure::Freed),
         Err(error) => return Err(unasked_merge_stop(error)),
     };
     writer.write_all(b"\n")?;
@@ -883,6 +885,9 @@ pub(crate) enum MergeFailure {
     Exception,
     /// SIGSEGV (`aln_mix::MixError::NcbiNullSecondRow`).
     Crash,
+    /// A read of memory that NCBI has freed (`aln_mix::MixError::NcbiFreesSegment`), whose result
+    /// is undefined.
+    Freed,
 }
 
 /// LOSAT's refusal of the query-anchored section (outfmt 1 to 4) of a query that NCBI's display
@@ -911,6 +916,7 @@ impl std::fmt::Display for UnreadableMergeRefusal {
         let end = match self.failure {
             MergeFailure::Exception => "stops with a C++ exception",
             MergeFailure::Crash => "crashes",
+            MergeFailure::Freed => "reads memory that it has freed",
         };
         write!(
             f,

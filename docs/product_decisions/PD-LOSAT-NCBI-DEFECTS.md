@@ -1551,8 +1551,11 @@ hit as the first left it). Then the query's PSSM scores, and so every round's al
 statistics and PSSM files for that query, can differ from NCBI's. A search of NCBI's `rpsblast` with
 DELTA-BLAST's domain search options (E-value 0.05, no SEG, composition-based statistics 1) against
 cdd_delta (NCBI FTP, 2020-06-30) on the 4,300 proteins of E. coli K-12 MG1655 (2026-11-24) found 3,909
-queries with domain hits, 79 of them with two hits of one domain and one score, and 49 (1.25 %) where
-two such hits also overlap in the query; worse hits that overlap two tied ones were not counted.
+queries with domain hits. By E-value, which NCBI's sort compares, 27 of them have two hits of one
+domain with one E-value, and 10 (0.26 %) are where the order can change the PSSM: two tied hits
+overlap in the query in all 10, and a worse hit of the domain overlaps two tied ones in 5, all among
+the 10. The counts come from the E-values that search printed (psiblast line `PR/ps13/ties/ties.tsv`)
+and are an upper bound: equal printed E-values include values that are equal only after rounding.
 
 Fixtures: the unit test `hits_of_one_domain_with_one_evalue_keep_the_order_of_the_search`
 (`LOSAT/src/algorithm/rps_search/cdd_input_tests.rs`) holds an example of each case and LOSAT's

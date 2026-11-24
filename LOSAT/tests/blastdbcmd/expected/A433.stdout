@@ -1,0 +1,190 @@
+Bioseq ::= {
+  id {
+    other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  descr {
+    title "alpha",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A05616C7068610000A1803080A9803080A1801A094E505F303030
+3030310000A38002010100000000000000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 150,
+    seq-data ncbistdaa '1412090E1603030E01070F1111090D0B0E120A12110B0C060E120D
+160F1609130A14091108160E0A0305100D100707130B0E0A071314060F14081004140C0C0F0610
+16140D0D0F010E080F07060A0F050B050E07110B081009070E06070614110C0405160F0A04090B
+04050E09081410080D1607140F0309110C04160F0F0A0111090C0910010813130F090E14141603
+0E1412140616'H
+  }
+}
+Bioseq ::= {
+  id {
+    other {
+      accession "NP_000002",
+      version 1
+    }
+  },
+  descr {
+    title "beta1 beta2",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0562657461310000A1803080A9803080A1801A094E505F303030
+3030320000A38002010100000000000000000000A28002022586000000003080A0801A05626574
+61320000A180308000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 150,
+    seq-data ncbistdaa '01010B03030F0503080B010C0A11110801081210140D01100E0E13
+030D100B1107031109111313090E1601110C08050308050B0C0C100B0B0C160E0C16120A11050D
+05010C0F090913041314041406120F08130910120A0105100301050505090D0308080C14110A10
+13060B0708010E040D10011209010F060613121213130E140B0E0A01110307090510100C140A12
+071608111009'H
+  }
+}
+Bioseq ::= {
+  id {
+  },
+  descr {
+    title "gamma",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0567616D6D610000A180308000000000A2800202258600000000
+0000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 150,
+    seq-data ncbistdaa '03130C010A0D130B0B0607060806090F100A120B1013120A010812
+0D0E1607040A061604110B110F130F09040406141007100D0F04070D080D070E12110D040F0B13
+0A090A13090501051014010111050D0403100C1206121111010911131003100505110D0E130913
+040B03010B0C080E0D1604061105070104010B10080312160906071606050408070E070A0A1108
+030410081301'H
+  }
+}
+Bioseq ::= {
+  id {
+  },
+  descr {
+    title "delta1 >ref|NP_000006.1| delta2",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0664656C7461310000A180308000000000A2800202276A000000
+003080A0801A0664656C7461320000A1803080A9803080A1801A094E505F3030303030360000A3
+8002010100000000000000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 10090
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 150,
+    seq-data ncbistdaa '0C1308121207140F060A100613161304040B140E0B16060A030401
+030D0D0C050313110B0A0710110601040B07131316110C0D0B0A1114010F0506010D0A0712090B
+120914040D100D090710080A07100B0614090E100C110D0401101003050C100C1607060D0E0B0E
+14060A0907070E09010C1208011206051412060611040D16040304090B0104010C160906040310
+0C0E05161614'H
+  }
+}

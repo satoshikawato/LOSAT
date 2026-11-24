@@ -338,6 +338,11 @@ pub struct BlastpArgs {
     /// `-subject`, the call's (`api::run`, from its application start); `None` in LOSAT Web, which
     /// has no file system. Not a public option.
     pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
+    /// `SERIAL_VERIFY_DATA_WRITE` of the run's application settings when it changes what NCBI
+    /// writes (`ncbi_environment::WriteVerification`), set with the settings by the command line's
+    /// `run` and the library's entries; `-in_pssm`'s reader refuses a PSSM that the run would write
+    /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
+    pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
@@ -434,6 +439,7 @@ impl BlastpArgs {
             app: Default::default(),
             taxdb_setting: Default::default(),
             matrix_search: Default::default(),
+            write_verification: Default::default(),
             inclusion_ethresh: Default::default(),
             gap_trigger: Default::default(),
             sum_stats: Default::default(),
@@ -900,6 +906,11 @@ impl BlastpArgs {
             strategy: self.export_search_strategy.is_some(),
             database: self.db.is_some(),
             archive: self.archive.as_ref(),
+            write_verification: self.write_verification.as_ref(),
+            out_pssm: self
+                .psiblast_pssm
+                .as_ref()
+                .is_some_and(|pssm| pssm.out_pssm.is_some()),
             ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1319-1328
@@ -942,14 +953,46 @@ impl BlastpArgs {
             },
         };
         let psi_search = match pssm_read {
-            Some((mut search, file)) => {
+            Some((mut search, mut file)) => {
+                // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:340
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:366-369
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:557
+                // The search strategy's request holds the object itself and is written in ASN.1
+                // text before the rounds: that write reads each delay buffer of another format
+                // into the object (`PssmWithParameters::update_delayed`), so round 1's files and
+                // archive write the values read, without the messages of that read again (line
+                // RG-F3, PR 2: probe AR4 K2). The request itself was taken as read
+                // (`PsiSearch::request`).
+                if file.valid
+                    && crate::algorithm::pssm_search::pssm_request_written(
+                        self.export_search_strategy.is_some(),
+                        self.db.is_some(),
+                    )
+                {
+                    file.object
+                        .update_delayed(crate::report::serial::asn_input::Encoding::Text);
+                }
                 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-270
                 // psiblast's archive of each round of the PSSM holds the object that the search
                 // holds (the `CPsiBlast` constructor keeps the application's reference to it): after the
                 // constructor's scores, with the round's K/A written back
                 // (`blastp::archive::PsiArchive`).
                 if self.app == BlastpApp::Psiblast && self.archive.is_some() && file.valid {
-                    search.archive_pssm = Some(std::sync::Arc::new(file.object.clone()));
+                    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248
+                    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396
+                    // With `-out_pssm` NCBI writes the object in ASN.1 text as round 1 starts
+                    // (`SavePssmToFile`), before the round's archive, which then writes the
+                    // values read in every format (line RG-F3, PR 2: probe AR3 B, an XML PSSM's
+                    // XML archive with `-out_pssm`).
+                    let mut object = file.object.clone();
+                    if self
+                        .psiblast_pssm
+                        .as_ref()
+                        .is_some_and(|pssm| pssm.out_pssm.is_some())
+                    {
+                        object.update_delayed(crate::report::serial::asn_input::Encoding::Text);
+                    }
+                    search.archive_pssm = Some(std::sync::Arc::new(object));
                     search.archive_matrix_name_unwritable = file.matrix_name_unwritable();
                 }
                 in_pssm_file = Some(file);

@@ -36,6 +36,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO / "LOSAT" / "tests"))
+from losat_wording import losat_bytes, losat_output_bytes  # noqa: E402
 ENGINE = REPO / "LOSAT"
 F = "tests/fasta/outfmt0"
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE",
@@ -134,6 +136,9 @@ def first_difference(a: bytes, b: bytes) -> str:
 def classify(bin_dir: Path, losat: str, case) -> str:
     program, label, argv = case
     ncbi = run([str(bin_dir / program), *argv])
+    # AGENTS.md rule 8: NCBI's bytes are compared in LOSAT's words.
+    ncbi.stdout = bytes(losat_output_bytes(ncbi.stdout))
+    ncbi.stderr = bytes(losat_bytes(ncbi.stderr))
     ours = run([losat, program, *argv])
     if (ncbi.returncode, ncbi.stdout, ncbi.stderr) == (ours.returncode, ours.stdout, ours.stderr):
         kind = "same" if ncbi.returncode == 0 else "same-error"

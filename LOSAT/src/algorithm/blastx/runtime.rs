@@ -185,6 +185,13 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     ) {
     }
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
+    // No NCBI counterpart (scheduling only, LOSAT_X_BXREDOFLOW): the form in which the composition
+    // redo makes its matches ahead; it does not change any value NCBI computes.
+    /// `None`: the switch's choice; `Some(true)` the flow, `Some(false)` the fork-join batches of
+    /// `=0`. A test's observer chooses each in one process (`runtime/kappa_batch_tests.rs`).
+    fn x_redo_flow(&self) -> Option<bool> {
+        None
+    }
     // No NCBI counterpart: tells the search whether any observer callback records something; it
     // does not change any value NCBI computes.
     /// True when no callback records anything, so that work may be done out of order (and some of
@@ -217,7 +224,8 @@ pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
 // redo_align_params_tld and matrix_tld. It is used by one thread at a time.
 // One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the `context` cell of
 // the gapping parameters, which `redo_context_observed` fills for one synchronous call and restores
-// before returning; the state is only reached through its mutex.
+// before returning; the state is only reached through its mutex, or (`LOSAT_X_BXREDOFLOW`,
+// `kappa_batch.rs`) owned by the one thread that runs the flow's loop or one of its helpers.
 #[cfg(feature = "parallel")]
 struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]

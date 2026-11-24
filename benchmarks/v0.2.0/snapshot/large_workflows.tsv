@@ -1,0 +1,10 @@
+case	label	workflow	program	threads	detail	ncbi_wall_s	losat_wall_s	speedup	ncbi_rss_mib	losat_rss_mib	mem_reduction	same_output	ncbi_mt_differs
+M2_reads1e6s	1M reads × 16S (stdin)	megablast stdin	blastn	16	1M reads (150 nt) vs 16S rRNA, piped stdin	174.53	4.31	40.4942	498.0	344.0	1.4477	yes	no
+M2_reads1e6	1M reads × 16S (file)	megablast file	blastn	16	1M reads (150 nt) vs 16S rRNA, query file	10.98	3.63	3.0248	5221.6	294.2	17.7485	yes	no
+M2_amp1e5	QIIME 2 (100k amplicons)	QIIME 2	blastn	16	100k amplicons (253 nt) vs 16S rRNA	2444.29	493.37	4.9543	359.5	107.9	3.3318	yes	no
+SPB	Trinotate proteome	Trinotate	blastp	16	Proteome vs UniProtKB/Swiss-Prot	501.44	169.64	2.9559	447.6	64.8	6.9074	yes	no
+UR50_q100	UniRef50 (100 proteins)	UniRef50	blastp	16	100 human proteins vs 38.8M seqs (19 GB)	1755.51	615.9	2.8503	13702.5	92.6	147.9752	yes	no
+M2_amp1e4	QIIME 2 (10k amplicons)	QIIME 2	blastn	16	10k amplicons vs 16S rRNA (NCBI 16t drifts)	115.19	49.18	2.3422	100.8	87.7	1.1494	yes	yes
+SPX	Trinotate transcripts	Trinotate	blastx	16	Transcripts vs UniProtKB/Swiss-Prot	331.2	152.3	2.1747	332.0	57.0	5.8246	yes	no
+M3_rpr	BlobToolKit (ref_prok, 27 GB)	BlobToolKit	blastn	16	210 contigs vs ref_prok_rep_genomes (warm)	47.47	34.17	1.3892	25538.5	372.1	68.6334	yes	no
+M3_cnt	BlobToolKit (core_nt, 319 GB)	BlobToolKit	blastn	16	210 contigs vs NCBI core_nt (warm)	542.14	391.74	1.3839	263593.7	407.2	647.3323	yes	no

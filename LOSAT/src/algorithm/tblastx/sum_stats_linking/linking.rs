@@ -766,15 +766,15 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 // `rev_compare_hsps_tbx_int4` and the literal port `link_hsp_group_ncbi` for every group
 // (`x_hsp_inplace::link_in_place_int4`): the incremental kernel assumes HSPs whose end is after
 // their start (`linking_incr.rs`), while the literal port computes with `Int4` coordinates as NCBI
-// does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, which scores
-// an HSP of length 0 or less 0 (its loop does not run), below every context's cutoff (at least 1),
-// and deletes it. The reap reads each HSP's own E-value and the sorts are stable, so dropping
-// those HSPs here, before the sort, leaves the other HSPs NCBI keeps in NCBI's order; nothing
-// after this reads a dropped one or an `Int4` end below 0. This path runs only for such a
-// subject; the same subject without such an HSP links with
-// `apply_sum_stats_even_gap_linking_with_parallel`.
-/// The first linking call of a one-hit list holding an HSP of length 0 or less, after which those
-/// HSPs are dropped.
+// does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, whose fetch
+// of the subject comes first for every list that still holds an HSP (blast_engine.c:1480-1497,
+// blast_hits.c:2651-2665), and which scores an HSP of length 0 or less 0 (its loop does not run),
+// below every context's cutoff (at least 1), and deletes it. So those HSPs stay in the list with
+// the E-values this call gives them, through the sort and the reap, up to that fetch; they leave
+// after it (`subject_link::drop_unread_int4_inverted`). This path runs only for such a subject;
+// the same subject without such an HSP links with `apply_sum_stats_even_gap_linking_with_parallel`.
+/// The first linking call of a one-hit list holding an HSP of length 0 or less, which keeps those
+/// HSPs.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -792,7 +792,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
         return hits;
     }
     crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_int4(&mut hits);
-    let mut linked = x_hsp_inplace::link_in_place_int4(
+    x_hsp_inplace::link_in_place_int4(
         hits,
         params,
         linking_params,
@@ -801,9 +801,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
         length_adj_per_context,
         eff_searchsp_per_context,
         allow_parallel,
-    );
-    linked.retain(|hit| !hit.is_int4_inverted());
-    linked
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1012-1028

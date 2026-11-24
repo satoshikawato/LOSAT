@@ -116,28 +116,74 @@ fn hsps_without_sum_statistics_get_their_own_evalues_in_their_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 and :452-453
-// (cited at `drop_unread_without_linking`).
+// (cited at `drop_unread_int4_inverted`), with c++/src/algo/blast/core/blast_engine.c:1480-1497 and
+// c++/src/algo/blast/core/blast_hits.c:2651-2665: the fetch of the subject comes first.
 #[test]
-fn hsps_of_length_zero_or_less_leave_before_the_reevaluation_without_sum_statistics() {
+fn hsps_of_length_zero_or_less_stay_up_to_the_fetch_with_or_without_sum_statistics() {
     let contexts = [context(0.3176, 0.134), context(0.267, 0.041)];
     let eff_searchsp = [1_000_000, 2_500_000];
     let hits = || vec![hit(0, 30, 10, 10), hit(0, 50, 5, 30), hit(1, 25, 0, -2)];
     assert!(hits()[0].is_int4_inverted() && hits()[2].is_int4_inverted());
-    // The E-values of the first call do not drop them: the fetch of the subject sees them.
-    let unlinked = link_args(&contexts, None, &eff_searchsp);
-    let mut kept = first_link_subject_hits(&unlinked, hits(), 0);
-    assert_eq!(kept.len(), 3);
-    drop_unread_without_linking(&unlinked, 0, &mut kept);
-    assert_eq!(kept.iter().map(|h| h.raw_score).collect::<Vec<_>>(), [50]);
-    // The two-hit word finder saves none, and with sum statistics the first linking call
-    // dropped them already: the list stays as it is.
-    let mut two_hit = hits();
-    drop_unread_without_linking(&unlinked, 40, &mut two_hit);
-    assert_eq!(two_hit.len(), 3);
     let linking =
         subject_linking_params(true, 100, 3000, 3000, 20, &contexts[0].karlin_params).unwrap();
-    let linked = link_args(&contexts, Some(&linking), &eff_searchsp);
-    let mut with_sum_statistics = hits();
-    drop_unread_without_linking(&linked, 0, &mut with_sum_statistics);
-    assert_eq!(with_sum_statistics.len(), 3);
+    for linking_params in [None, Some(&linking)] {
+        // The first call (the E-values, or the linking with `Int4` ends) does not drop them: the
+        // fetch of the subject sees them.
+        let link = link_args(&contexts, linking_params, &eff_searchsp);
+        let mut kept = first_link_subject_hits(&link, hits(), 0);
+        assert_eq!(kept.len(), 3, "sum statistics {}", linking_params.is_some());
+        drop_unread_int4_inverted(0, &mut kept);
+        assert_eq!(kept.iter().map(|h| h.raw_score).collect::<Vec<_>>(), [50]);
+    }
+    // The two-hit word finder saves none: its list stays as it is.
+    let mut two_hit = hits();
+    drop_unread_int4_inverted(40, &mut two_hit);
+    assert_eq!(two_hit.len(), 3);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353 (cited at
+// `sort_and_reap_after_first_link`): `ScoreCompareHSPs` reads the query's end as `Int4`, so of two
+// HSPs equal up to it, the one ending at 5 comes before the one ending at -2 (which a `u32` reads
+// as 4294967294); then the reap by the preliminary E-value keeps an HSP of length 0 or less.
+#[test]
+fn the_sort_after_the_first_link_of_a_one_hit_list_reads_int4_ends() {
+    let contexts = [context(0.3176, 0.134), context(0.267, 0.041)];
+    let linking =
+        subject_linking_params(true, 100, 3000, 3000, 20, &contexts[0].karlin_params).unwrap();
+    let link = link_args(&contexts, Some(&linking), &[1_000_000, 2_500_000]);
+    let [reeval_ns, reeval_calls, linking_ns, linking_calls] = [0; 4].map(AtomicU64::new);
+    let diagnostics = DiagnosticCounters::default();
+    let stage = SubjectStageArgs {
+        contexts_ref: &contexts,
+        cutoff_scores: &[1, 1],
+        evalue_threshold: 10.0,
+        timing_enabled: false,
+        reeval_ns: &reeval_ns,
+        reeval_calls: &reeval_calls,
+        linking_ns: &linking_ns,
+        linking_calls: &linking_calls,
+        diag_enabled: false,
+        diagnostics: &diagnostics,
+        debug_output_filter: false,
+    };
+    let times = super::super::x_search_timing::XSearchTimes::new(false);
+    let list = || {
+        let mut hits = vec![hit(0, 30, 2, -2), hit(0, 30, 2, 5)];
+        for h in &mut hits {
+            h.s_aa_start = 2;
+            h.s_aa_end = 7;
+            h.e_value = 1.0;
+        }
+        hits
+    };
+    let sorted = |window| {
+        let mut lap = times.subject();
+        sort_and_reap_after_first_link(list(), &link, &stage, window, &mut lap)
+            .iter()
+            .map(UngappedHit::q_end_int4)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sorted(0), [5, -2]);
+    // The two-hit word finder's list keeps the `u32` comparator (its ends are never below 0).
+    assert_eq!(sorted(40), [-2, 5]);
 }

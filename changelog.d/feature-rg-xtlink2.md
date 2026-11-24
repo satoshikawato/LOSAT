@@ -1,0 +1,1 @@
+- `losat tblastx -window_size 0` with `-negative_seqidlist`: a subject whose only alignments are one-hit alignments of length 0 or less now has its definition lines read where NCBI BLAST+ reads them, so a database whose header there cannot be read is refused at that subject, as NCBI's search ends there (it used to write rows).

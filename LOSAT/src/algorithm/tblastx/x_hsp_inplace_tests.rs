@@ -545,11 +545,12 @@ fn int4_linking_of_positive_lists_is_link_in_place() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 and :452-453
 // HSPs of length 0 or less whose score is at most the linking cutoffs stay alone in the link
 // (no chain takes them or is taken by them); placed after the other HSPs of their group, they
-// change no value of the others. Linked with them and dropped, the list is the list linked
-// without them: the same HSPs, E-values and order (the input sorted by score, as the search
-// gives it).
+// change no value of the others. The linking call keeps them (the re-evaluation's fetch of the
+// subject sees them, `subject_link::drop_unread_int4_inverted` drops them after it); linked with
+// them and dropped, the list is the list linked without them: the same HSPs, E-values and order
+// (the input sorted by score, as the search gives it).
 #[test]
-fn int4_linking_drops_hsps_of_length_zero_or_less() {
+fn int4_linking_keeps_hsps_of_length_zero_or_less_that_change_nothing() {
     let mut rng = Rng(0x2545_F491_4F6C_DD1D);
     let cutoff_sets = test_cutoff_sets();
     for case in 0..150 {
@@ -561,6 +562,7 @@ fn int4_linking_drops_hsps_of_length_zero_or_less() {
         let inverted: Vec<UngappedHit> = (0..1 + rng.below(12) as usize)
             .map(|k| random_inverted_hit(&mut rng, n + k, queries, 20))
             .collect();
+        let inverted_count = inverted.len();
         let mut with_inverted = base.clone();
         with_inverted.extend(inverted);
         let linking = LinkingParams {
@@ -570,8 +572,10 @@ fn int4_linking_drops_hsps_of_length_zero_or_less() {
         };
         for parallel in [false, true] {
             let label = format!("case {case} n {n} parallel {parallel}");
-            let actual = one_hit_linking(with_inverted.clone(), &linking, parallel);
-            assert!(actual.iter().all(|hit| !hit.is_int4_inverted()), "{label}");
+            let mut actual = one_hit_linking(with_inverted.clone(), &linking, parallel);
+            let kept = actual.iter().filter(|hit| hit.is_int4_inverted()).count();
+            assert_eq!(kept, inverted_count, "{label}");
+            actual.retain(|hit| !hit.is_int4_inverted());
             // The dropped HSPs score below the others, so they come last in the score sort
             // and every other HSP keeps its list position (`link_id`).
             let expected = default_linking(base.clone(), &linking, parallel);
@@ -581,10 +585,11 @@ fn int4_linking_drops_hsps_of_length_zero_or_less() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-893
-// HSPs of length 0 or less with any score, anywhere in the list: none leaves the linking call,
-// every other HSP leaves it once, serially and on the pool alike.
+// HSPs of length 0 or less with any score, anywhere in the list: every HSP leaves the linking
+// call once (those of length 0 or less too, for the re-evaluation's fetch of the subject),
+// serially and on the pool alike.
 #[test]
-fn int4_linking_lets_no_hsp_of_length_zero_or_less_out() {
+fn int4_linking_lets_every_hsp_out_once() {
     let mut rng = Rng(0x1405_7B7E_F767_814F);
     let cutoff_sets = test_cutoff_sets();
     let mut linked_with_inverted = 0usize;
@@ -610,16 +615,15 @@ fn int4_linking_lets_no_hsp_of_length_zero_or_less_out() {
             gap_decay_rate: 0.5,
             cutoffs: cutoff_sets[case % cutoff_sets.len()],
         };
-        let serial = one_hit_linking(hits.clone(), &linking, false);
+        let mut serial = one_hit_linking(hits.clone(), &linking, false);
         let pooled = one_hit_linking(hits.clone(), &linking, true);
         assert_same_list(&format!("case {case}: pool"), &pooled, &serial);
-        assert!(
-            serial.iter().all(|hit| !hit.is_int4_inverted()),
-            "case {case}"
-        );
         let mut orders: Vec<u32> = serial.iter().map(|hit| hit.hsp_list_order).collect();
         orders.sort_unstable();
-        assert_eq!(orders, (0..n as u32).collect::<Vec<_>>(), "case {case}");
+        let all = (n + inverted_count) as u32;
+        assert_eq!(orders, (0..all).collect::<Vec<_>>(), "case {case}");
+        serial.retain(|hit| !hit.is_int4_inverted());
+        assert_eq!(serial.len(), n, "case {case}");
         let without: Vec<UngappedHit> = hits
             .iter()
             .filter(|hit| !hit.is_int4_inverted())

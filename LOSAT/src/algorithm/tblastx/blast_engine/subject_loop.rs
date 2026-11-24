@@ -166,8 +166,8 @@ impl SubjectEmit<'_> {
     // `Blast_HSPReevaluateWithAmbiguitiesUngapped` reads the HSP's letters (blast_hits.c:692-700),
     // and NCBI BLAST+ 2.17.0 dies with SIGSEGV. Every HSP that reaches LOSAT's re-evaluation has a
     // length of 1 or more (those of length 0 or less, which read nothing in NCBI's, are dropped
-    // after the first linking call, `subject_link::link_subject_hits_int4`, or without sum
-    // statistics before this refusal, `subject_link::drop_unread_without_linking`), so NCBI dies
+    // after the fetch and before this refusal, `subject_link::drop_unread_int4_inverted`), so
+    // NCBI dies
     // at the first HSP of every such list. The query batch fails with LOSAT's refusal
     // (PD-LOSAT-NCBI-DEFECTS 1.51, rule 3) after the reports of the batches before
     // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).

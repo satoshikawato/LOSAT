@@ -508,7 +508,7 @@ impl SearchPath {
         self.find(filename, None)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:441-451
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:464-470
     /// `SeqDB_ResolveDbPathNoExtension` of `dbname` and the type's letter: the first directory of
     /// the path that holds its alias file or its index file, joined with it (`None`: NCBI's
     /// empty string).
@@ -1861,7 +1861,7 @@ impl<'a> ListSet<'a> {
             ListIds::Si { ids, sorted } => {
                 for id in ids.iter_mut() {
                     id.si = super::isam::simplify_accession_for_isam(&id.si).map_err(|error| {
-                        OidListError::reader(SeqDbError::Unsupported {
+                        OidListError::reader(SeqDbError::NcbiThrows {
                             path: PathBuf::from(list.path),
                             message: format!(
                                 "the id {} of the seqid list of an alias file's SEQIDLIST throws \

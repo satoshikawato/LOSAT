@@ -1,7 +1,6 @@
 # id	args (bash words; single quotes only)
 H01	-help
 H02	-h
-H03	-version
 X01	
 X02	-dbtype nucl
 X03	-out x

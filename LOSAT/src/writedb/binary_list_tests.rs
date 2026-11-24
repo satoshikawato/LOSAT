@@ -23,7 +23,10 @@ fn a_negative_or_wide_gi_makes_eight_byte_words() {
     assert_eq!(&bytes[..8], &[0xFF, 0xFF, 0xFF, 0xFE, 0, 0, 0, 4]);
     assert_eq!(&bytes[8..16], &(-5i64).to_be_bytes());
     assert_eq!(&bytes[32..40], &4_294_967_297i64.to_be_bytes());
-    assert!(read_gi_list(&bytes).is_err(), "NCBI's GI reader takes -1 lists only");
+    assert!(
+        read_gi_list(&bytes).is_err(),
+        "NCBI's GI reader takes -1 lists only"
+    );
 }
 
 #[test]

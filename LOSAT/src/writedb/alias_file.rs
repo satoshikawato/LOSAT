@@ -88,10 +88,12 @@ pub(crate) fn dir_entry_name(path: &str) -> &str {
     path.rfind(separator).map_or(path, |at| &path[at + 1..])
 }
 
-/// Whether a reader error is one that NCBI's reader throws too: the writer's `catch (...)` then
-/// takes it for a database that does not open. LOSAT's refusals go to the caller.
+/// Whether a reader error is one that NCBI's reader throws too (its own text, another exception
+/// of NCBI's, or one whose report LOSAT refuses: `SeqDbError::ncbi_throws`): the writer's
+/// `catch (...)` then takes it for a database that does not open. LOSAT's other refusals go to
+/// the caller.
 fn ncbi_error(error: &SeqDbError) -> bool {
-    error.ncbi_message().is_some() || error.ncbi_exception().is_some()
+    error.ncbi_message().is_some() || error.ncbi_exception().is_some() || error.ncbi_throws()
 }
 
 /// `NSEQ` and `LENGTH` of the database `name` as NCBI's reader opens it (`CSeqDB` of the name
@@ -148,8 +150,7 @@ pub(crate) fn create_alias_file(
     let Some((num_seqs, length)) = counts else {
         dir_entry::remove(Path::new(&fname));
         return Err(AliasError::SeqDb(
-            "BLASTDB alias file creation failed.  Some referenced files may be missing"
-                .to_string(),
+            "BLASTDB alias file creation failed.  Some referenced files may be missing".to_string(),
         ));
     };
     if num_seqs == 0 {
@@ -300,7 +301,11 @@ pub(crate) fn create_oid_mask_db(
     let db = SeqDb::open_in(output_db, seqtype, path).map_err(AliasError::Reader)?;
     write(
         &mut ofs,
-        &format!("NSEQ {}\nLENGTH {}\n", db.ncbi_num_seqs(), db.total_length()),
+        &format!(
+            "NSEQ {}\nLENGTH {}\n",
+            db.ncbi_num_seqs(),
+            db.total_length()
+        ),
     );
     Ok(())
 }

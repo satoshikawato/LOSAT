@@ -287,8 +287,8 @@ fn create_alias_file(
                 source,
             })
         })?;
-        let binary = id_list::is_binary_gi_list(&bytes)
-            .map_err(|text| Failure::SeqDb(text.into_bytes()))?;
+        let binary =
+            id_list::is_binary_gi_list(&bytes).map_err(|text| Failure::SeqDb(text.into_bytes()))?;
         if !binary {
             let mol_type = args.as_string("dbtype")?.chars().next().unwrap_or('p');
             let ifname = std::mem::replace(&mut gilist, format!("{out}.{mol_type}.gil"));

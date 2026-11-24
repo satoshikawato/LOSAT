@@ -51,3 +51,15 @@ pub(crate) fn run(
     crate::ncbi_app::run(&TOOL, words, start, work::run)
 }
 
+/// The run of one command line with `input` as its standard input, its output on `out` and its
+/// errors on `err`; the exit status (NCBI's application around blastdb_aliastool's `Run`:
+/// `ncbi_app::run_with`), which the tests of NCBI's readers run in the process.
+#[cfg(test)]
+pub(crate) fn run_with(
+    words: &[OsString],
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    crate::ncbi_app::run_with(&TOOL, words, input, out, err, work::run)
+}

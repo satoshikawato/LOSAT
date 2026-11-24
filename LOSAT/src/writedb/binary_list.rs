@@ -14,7 +14,11 @@ use crate::seqdb::id_list::{GI_LIST_MAGIC, LONG_GI_LIST_MAGIC};
 /// big-endian words.
 pub(crate) fn gi_list_bytes(ids: &[i64]) -> Vec<u8> {
     let eight = ids.iter().any(|&id| id >> 32 != 0);
-    let magic = if eight { LONG_GI_LIST_MAGIC } else { GI_LIST_MAGIC };
+    let magic = if eight {
+        LONG_GI_LIST_MAGIC
+    } else {
+        GI_LIST_MAGIC
+    };
     let mut sorted = ids.to_vec();
     sorted.sort_unstable();
     let mut out = Vec::with_capacity(8 + sorted.len() * if eight { 8 } else { 4 });

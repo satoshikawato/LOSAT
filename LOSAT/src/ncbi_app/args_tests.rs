@@ -19,6 +19,7 @@ fn tool(program: &'static str) -> Tool {
         "makembindex" => include_str!("../makembindex/help.txt"),
         "windowmasker" => include_str!("../windowmasker/help.txt"),
         "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
+        "blastdb_aliastool" => include_str!("../blastdb_aliastool/help.txt"),
         _ => "",
     };
     Tool {
@@ -35,7 +36,7 @@ fn tool(program: &'static str) -> Tool {
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 7] = [
+const ON_THE_READER: [&str; 8] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
@@ -43,6 +44,7 @@ const ON_THE_READER: [&str; 7] = [
     "makembindex",
     "windowmasker",
     "makeprofiledb",
+    "blastdb_aliastool",
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
@@ -844,6 +846,7 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
         "segmasker",
         "windowmasker",
         "rpsbproc",
+        "blastdb_aliastool",
     ] {
         assert!(!rows.iter().any(|row| row.0 == program), "{program}");
     }

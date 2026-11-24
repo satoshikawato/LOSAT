@@ -216,8 +216,11 @@ pub fn info_text(bytes: &[u8]) -> Result<Vec<u8>, String> {
             out.push(b'\n');
             if info.db_vol_length > 0 {
                 out.extend_from_slice(
-                    format!("DB Info: \n\tTotal Vol Length: {}\n\tDB Create Date: ", info.db_vol_length)
-                        .as_bytes(),
+                    format!(
+                        "DB Info: \n\tTotal Vol Length: {}\n\tDB Create Date: ",
+                        info.db_vol_length
+                    )
+                    .as_bytes(),
                 );
                 out.extend_from_slice(&info.db_create_date);
                 out.extend_from_slice(b"\n\tDB Vols: ");

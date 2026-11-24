@@ -963,10 +963,6 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (the query-anchored formats write through the same formatter).
-    let pairwise = format
-        .and_then(crate::report::pairwise::PairwiseView::of)
-        .is_some();
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
@@ -975,13 +971,12 @@ pub fn run(
         Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
         _ => args.outfmt.clone(),
     };
-    // The organism report's `-out` file is written as NCBI's buffer writes it.
-    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
+    let mut stream =
+        crate::cli::ReportStream::of_cli(out_file, "tblastx", &args.outfmt, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+            ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
         search_cli(
             args,
             list,
@@ -995,6 +990,8 @@ pub fn run(
     };
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = stream.finish(result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -1017,10 +1014,8 @@ pub fn run(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119;
-    // `cli::ReportStream::finish`).
-    stream.finish(result, pairwise || tax_report)
+    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
+    result
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -1042,23 +1037,23 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, "tblastx", &args.outfmt, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
             &lines,
             &mut report,
         );
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &TblastxArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &TblastxArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTX")).map(std::io::BufWriter::new))
+        .map(|path| crate::cli::create_out_file(path, Some("TBLASTX")))
         .transpose()
 }
 
@@ -2001,11 +1996,7 @@ fn write_pairwise_prologs(
         if report::output_format(format.outfmt).is_pairwise()
             && prolog_before_search(&format.sink) == before_search
         {
-            let flush = crate::report::pairwise::flushes_after_prolog(
-                args.html_links.is_some(),
-                !format.sink.is_writer(),
-            );
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             match subjects {
                 ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
@@ -2049,9 +2040,7 @@ fn write_pairwise_prologs(
                     )?
                 }
             }
-            if flush {
-                writer.flush()?;
-            }
+            std::io::Write::flush(&mut writer)?;
         }
     }
     Ok(())

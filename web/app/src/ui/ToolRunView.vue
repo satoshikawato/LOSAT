@@ -289,6 +289,12 @@ const duration = computed(() => {
   return startedAt !== undefined && endedAt !== undefined ? formatDuration(endedAt - startedAt) : '';
 });
 
+function downloadLabel(tab: OutputTab): string {
+  if (tab.entry.key === 'stdout') return 'output';
+  if (tab.entry.key === 'stderr') return 'warnings';
+  return tab.entry.name;
+}
+
 function originText(origin: ToolFileOrigin): string {
   switch (origin.kind) {
     case 'picked':
@@ -366,7 +372,7 @@ function originText(origin: ToolFileOrigin): string {
 
           <div class="tool-output-actions">
             <button type="button" data-testid="tool-output-download" @click="downloadActive">
-              Download {{ activeTab.entry.name }} ({{ formatBytes(activeTab.entry.size) }})
+              Download {{ downloadLabel(activeTab) }} ({{ formatBytes(activeTab.entry.size) }})
             </button>
             <template v-if="activeTab.entry.isCounts && run.status === 'completed'">
               <button type="button" class="primary-action" data-testid="tool-use-in-blastn" @click="useInBlastn">

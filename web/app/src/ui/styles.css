@@ -1317,8 +1317,14 @@ textarea {
   gap: 4px 8px;
 }
 
-.parameter-form .param-inline[data-kind='file'] .param-hint {
-  flex: 1 1 24em;
+.parameter-form .param-inline[data-kind='file'] .param-hint-line {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.parameter-form .param-inline[data-kind='file'] .param-hint-line .help-tip {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .file-pick {

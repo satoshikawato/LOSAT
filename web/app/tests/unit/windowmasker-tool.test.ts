@@ -17,6 +17,7 @@ import {
 import { Coordinator, isToolRun, type SearchRequest, type ToolRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { ResultsBrowser } from '../../src/application/results';
+import { SessionFiles } from '../../src/application/session-files';
 import { ToolDraft } from '../../src/application/tool-draft';
 import {
   buildWindowMaskerArgv,
@@ -700,5 +701,107 @@ describe('Coordinator single queue and DataService tool storage', () => {
     await fakeResults.open(fakeId);
     await sleep(20);
     expect(fakeResults.state.get().toolBadge).toMatchObject({ level: 'development', label: 'Development build' });
+  });
+
+  it('keeps an inflated .gz session file alive until queued/running tool runs complete or cancel', async () => {
+    const { data } = makeData();
+    const dropped: string[] = [];
+    const origDrop = data.dropSessionFile.bind(data);
+    data.dropSessionFile = async (token: string) => {
+      dropped.push(token);
+      await origDrop(token);
+    };
+
+    const base = new FakeEngine();
+    const gates: Array<() => void> = [];
+    const readContents: string[] = [];
+    const engine = stubEngine(base, {
+      validateTool: (a) => base.validateTool(a),
+      async runTool(argv, opts) {
+        await new Promise<void>((resolve) => gates.push(resolve));
+        if (opts?.signal?.aborted === true) throw new RunCancelledError('tool');
+        for (const entry of opts?.directory ?? []) {
+          readContents.push(`${entry.name}:${await entry.file.text()}`);
+        }
+        return base.runTool(argv, opts);
+      },
+    });
+
+    const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
+    let id = 0;
+    const coordinator = new Coordinator({
+      engine,
+      data,
+      downloader: { save: () => undefined },
+      now: () => 10_000,
+      newRunId: () => `sf-${++id}`,
+      digest: sha256Hex,
+      sessionFiles,
+    });
+    const draft = new ToolDraft({
+      engine,
+      data,
+      enqueueToolAll: (reqs) => coordinator.enqueueToolAll(reqs),
+      isBusy: () => coordinator.isBusy(),
+      sessionFiles,
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    // Case 1: completion after removing .gz from form while run 2 is queued behind run 1.
+    const blockerId = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    await sleep(20);
+
+    draft.addFastaFiles([new File([gzipSync('>g1\nACGT\n')], 'g1.fa.gz')]);
+    await sleep(30);
+    const token1 = draft.state.get().fastaFiles[0]!.sessionToken!;
+    const key1 = draft.state.get().fastaFiles[0]!.key;
+    const queuedRes = await draft.submit();
+    expect(queuedRes.ok).toBe(true);
+    const run2Id = queuedRes.runIds![0]!;
+
+    // Remove from form while run 2 is queued -> must NOT drop yet.
+    draft.removeFastaFile(key1);
+    expect(dropped).toEqual([]);
+
+    // Release run 1, then run 2 reads g1.fa and completes -> drops exactly once at completion.
+    await nextGate(gates);
+    await waitTerminal(coordinator, blockerId);
+    expect(dropped).toEqual([]);
+    await nextGate(gates);
+    const run2 = await waitTerminal(coordinator, run2Id);
+    expect(run2.status).toBe('completed');
+    expect(readContents).toContain('g1.fa:>g1\nACGT\n');
+    expect(dropped).toEqual([token1]);
+
+    // Case 2: queued cancel after removing from form drops exactly once.
+    const blocker2 = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    await sleep(20);
+    draft.addFastaFiles([new File([gzipSync('>g2\nTGCA\n')], 'g2.fa.gz')]);
+    await sleep(30);
+    const token2 = draft.state.get().fastaFiles[0]!.sessionToken!;
+    const key2 = draft.state.get().fastaFiles[0]!.key;
+    const q2 = (await draft.submit()).runIds![0]!;
+    draft.removeFastaFile(key2);
+    expect(dropped).toEqual([token1]);
+    coordinator.cancel(q2);
+    expect(dropped).toEqual([token1, token2]);
+    await nextGate(gates);
+    await waitTerminal(coordinator, blocker2);
+
+    // Case 3: running cancel after removing from form drops exactly once when run ends.
+    draft.addFastaFiles([new File([gzipSync('>g3\nCCCC\n')], 'g3.fa.gz')]);
+    await sleep(30);
+    const token3 = draft.state.get().fastaFiles[0]!.sessionToken!;
+    const key3 = draft.state.get().fastaFiles[0]!.key;
+    const r3 = (await draft.submit()).runIds![0]!;
+    await sleep(20);
+    draft.removeFastaFile(key3);
+    expect(dropped).toEqual([token1, token2]);
+    coordinator.cancel(r3);
+    await nextGate(gates);
+    expect((await waitTerminal(coordinator, r3)).status).toBe('cancelled');
+    expect(dropped).toEqual([token1, token2, token3]);
   });
 });

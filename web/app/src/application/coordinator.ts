@@ -58,6 +58,7 @@ import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
+import type { SessionFiles } from './session-files';
 import { Store } from './store';
 import { ToolStorageSink } from './tool-storage-sink';
 
@@ -118,6 +119,8 @@ export interface ToolRequest {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryFile[];
   readonly prints?: PrintedKind;
+  /** OPFS-backed inflated session file tokens read by this run (directly or inside combined_input.fa). */
+  readonly sessionTokens?: readonly string[];
 }
 
 export interface SearchRunView {
@@ -168,6 +171,8 @@ export interface CoordinatorDeps {
   readonly dataWorkerEnded?: Promise<Error>;
   /** Runtime path and build identifier recorded on completed/failed tool runs. */
   readonly toolRuntime?: { readonly path: 'serial' | 'fake'; readonly engineBuild: string };
+  /** Shared holder tracker for inflated session files used by WindowMasker tool runs. */
+  readonly sessionFiles?: SessionFiles;
 }
 
 /** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
@@ -304,6 +309,8 @@ export class Coordinator {
       ...snapshots.map((snapshot): ToolRunView => ({ snapshot, status: 'queued', record: {} })),
     ]);
     for (const [index, snapshot] of snapshots.entries()) {
+      const tokens = requests[index]!.sessionTokens;
+      if (tokens !== undefined && tokens.length > 0) this.deps.sessionFiles?.set(`run:${snapshot.runId}`, tokens);
       this.toolDirectories.set(snapshot.runId, directories[index]!);
       this.queue.push(snapshot.runId);
     }
@@ -469,6 +476,7 @@ export class Coordinator {
       this.queue.splice(queuedIndex, 1);
       this.conffiles.delete(runId);
       this.toolDirectories.delete(runId);
+      this.deps.sessionFiles?.release(`run:${runId}`);
       if (isToolRun(view)) {
         this.updateTool(runId, { status: 'cancelled', record: { ...view.record, endedAt: this.deps.now() } });
       } else {
@@ -923,6 +931,7 @@ export class Coordinator {
       this.stopActive = undefined;
       this.toolAbort = undefined;
       this.toolDirectories.delete(runId);
+      this.deps.sessionFiles?.release(`run:${runId}`);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();

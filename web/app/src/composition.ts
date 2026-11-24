@@ -10,6 +10,7 @@ import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
+import { SessionFiles } from './application/session-files';
 import { ToolDraft } from './application/tool-draft';
 import type { Downloader } from './ports/download';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
@@ -68,6 +69,7 @@ export function createApp(options: AppOptions = {}): App {
           ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
           ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
         });
+  const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
   const toolRuntime =
     ENGINE_ASSETS === null
       ? { path: 'fake' as const, engineBuild: 'fake-engine' }
@@ -81,6 +83,7 @@ export function createApp(options: AppOptions = {}): App {
     digest: sha256Hex,
     dataWorkerEnded,
     toolRuntime,
+    sessionFiles,
   });
   const draft = new SearchDraft({
     engine,
@@ -101,6 +104,7 @@ export function createApp(options: AppOptions = {}): App {
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
     isBusy: () => coordinator.isBusy(),
     readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
+    sessionFiles,
   });
   const availability = new Availability({ draft, toolDraft, dataWorkerEnded });
   const examples = new ExampleLoader({

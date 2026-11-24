@@ -20,6 +20,7 @@ import type { DataGateway } from '../ports/data';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
 import type { InputMode, Validation } from './draft';
+import { SessionFiles } from './session-files';
 import { Store } from './store';
 
 /** One FASTA file added to WindowMasker's Input block (inflated into OPFS when compressed). */
@@ -88,6 +89,8 @@ export interface ToolDraftDeps {
   readonly enqueueToolAll: (requests: readonly ToolRequest[]) => Promise<EnqueueAllResult>;
   /** Reads a counts file saved in this browser for a taxonomy ID (OPFS-backed File). */
   readonly readSavedCounts?: (taxid: number) => Promise<File | undefined>;
+  /** Shared holder tracker for inflated session files; defaults to a draft-local instance in unit tests. */
+  readonly sessionFiles?: SessionFiles;
   /** True while the Engine worker is running another job (so `validateTool` would wait behind it). */
   readonly isBusy?: () => boolean;
   readonly debounceMs?: number;
@@ -107,8 +110,11 @@ export class ToolDraft {
   private validatedKey: string | undefined;
   private nextKey = 1;
   private readonly asking = new Set<Promise<unknown>>();
+  private readonly sessionFiles: SessionFiles;
 
   constructor(private readonly deps: ToolDraftDeps) {
+    this.sessionFiles =
+      deps.sessionFiles ?? new SessionFiles((token) => void deps.data.dropSessionFile(token).catch(() => undefined));
     const emptyValues = Object.fromEntries(STAGES.map((stage) => [stage, Object.freeze({})])) as Record<WindowMaskerStage, FormValues>;
     const emptyExtra = Object.fromEntries(STAGES.map((stage) => [stage, ''])) as Record<WindowMaskerStage, string>;
     this.state = new Store<ToolDraftState>({
@@ -270,7 +276,7 @@ export class ToolDraft {
   removeFastaFile(key: string): void {
     const target = this.state.get().fastaFiles.find((entry) => entry.key === key);
     if (target === undefined) return;
-    this.releaseSessionToken(target.sessionToken);
+    this.sessionFiles.release(`form:${key}`);
     this.set({
       fastaFiles: Object.freeze(this.state.get().fastaFiles.filter((entry) => entry.key !== key)),
       message: undefined,
@@ -487,7 +493,15 @@ export class ToolDraft {
         ? [this.buildPrintRequest(state, extraWords, prints)]
         : await this.buildStageRequests(state, extraWords);
 
-      const result = await this.deps.enqueueToolAll(requests);
+      const submitHolder = `submit:${this.nextKey++}`;
+      const tokens = requests.flatMap((request) => request.sessionTokens ?? []);
+      if (tokens.length > 0) this.sessionFiles.set(submitHolder, tokens);
+      let result: EnqueueAllResult;
+      try {
+        result = await this.deps.enqueueToolAll(requests);
+      } finally {
+        this.sessionFiles.release(submitHolder);
+      }
       if (!result.ok) {
         const text = toolValidationSummary(result.message);
         this.set({
@@ -584,7 +598,7 @@ export class ToolDraft {
       throw new Error(`${failed.name}: ${failed.error ?? 'could not be read'}`);
     }
 
-    const parts: ToolDirectoryFile[] = [];
+    const parts: Array<ToolDirectoryFile & { readonly sessionToken?: string }> = [];
     if (state.fastaPaste.trim() !== '') {
       parts.push({
         name: PASTE_NAME,
@@ -597,27 +611,43 @@ export class ToolDraft {
         name: entry.name,
         file: entry.file,
         origin: entry.inflatedFrom === undefined ? { kind: 'picked' } : { kind: 'inflated', from: entry.inflatedFrom },
+        ...(entry.sessionToken === undefined ? {} : { sessionToken: entry.sessionToken }),
       });
     }
     if (parts.length === 0) {
       throw new Error('Enter sequences or open FASTA files.');
     }
 
-    const makeRequest = (inputEntry: ToolDirectoryFile): ToolRequest => {
+    const makeRequest = (inputEntry: ToolDirectoryFile, sessionTokens: readonly string[]): ToolRequest => {
       const directory = assembleDirectory([inputEntry, ...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
       const argv = this.buildArgv(state, extraWords, { inputName: inputEntry.name, ustatName: ustatFile?.name });
-      return { tool: 'windowmasker', stage, argv, directory };
+      return {
+        tool: 'windowmasker',
+        stage,
+        argv,
+        directory,
+        ...(sessionTokens.length === 0 ? {} : { sessionTokens: Object.freeze([...sessionTokens]) }),
+      };
     };
 
-    if (parts.length === 1) return [makeRequest(parts[0]!)];
-    if (state.fastaMode === 'separate') return parts.map(makeRequest);
+    if (parts.length === 1) {
+      const only = parts[0]!;
+      return [makeRequest(only, only.sessionToken === undefined ? [] : [only.sessionToken])];
+    }
+    if (state.fastaMode === 'separate') {
+      return parts.map((part) => makeRequest(part, part.sessionToken === undefined ? [] : [part.sessionToken]));
+    }
     const combined = await combineFastaFiles(parts);
+    const combinedTokens = parts.flatMap((part) => (part.sessionToken === undefined ? [] : [part.sessionToken]));
     return [
-      makeRequest({
-        name: COMBINED_NAME,
-        file: combined,
-        origin: { kind: 'combined', parts: Object.freeze(parts.map((part) => part.name)) },
-      }),
+      makeRequest(
+        {
+          name: COMBINED_NAME,
+          file: combined,
+          origin: { kind: 'combined', parts: Object.freeze(parts.map((part) => part.name)) },
+        },
+        combinedTokens,
+      ),
     ];
   }
 
@@ -667,6 +697,7 @@ export class ToolDraft {
         this.updateFastaEntry(key, { status: 'failed', error: `A file named "${ref.name}" is already added.` });
         return;
       }
+      if (ref.token !== undefined) this.sessionFiles.set(`form:${key}`, [ref.token]);
       this.updateFastaEntry(key, {
         name: ref.name,
         size: ref.size,

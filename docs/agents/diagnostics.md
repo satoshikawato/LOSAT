@@ -7227,6 +7227,23 @@ Scheduling (each value computed by one thread with the original function; order 
   including two short hit lists where early termination skips most matches while the flow's ring wraps, and
   `LOSAT_TIMING`'s `ahead=` counts the matches the flow redid ahead; `runtime/kappa_batch_tests.rs` runs both forms in
   one process and compares every field of the hit lists and the loop's early-termination decisions.
+  Measured 2026-11-24 on the workstation, dev 9be4c0c5f against this change (f86e3e90e) and the same binary with `=0`
+  (node 1, n threads on n physical cores, 3 rounds in rotated order, medians of per-round ratios; every output the same
+  bytes in every arm and the same as NCBI BLAST+ 2.17.0's). Wall time, this change / dev: one 9,000-letter piece of
+  AP027131 against 595 proteins, `-use_sw_tback -max_target_seqs 3`, at 2 / 4 / 16 threads x0.704 / x0.656 / x0.998;
+  200 queries against the 40 proteins of `ov_atha`, `-use_sw_tback`, BATCH_SIZE 40000, at 4 / 8 / 16 / 32 threads x0.974
+  / x0.959 / x0.986 / x0.854, at the default batch size and 8 threads x1.007; 6 pieces of 60 kb of AP027131 against the
+  595 proteins, `-max_target_seqs 5`, at 4 / 8 / 16 threads x0.885 / x1.037 / x1.000 (runs of 0.2-0.5 s; `=0` read the
+  same x1.037 at 8); 16 and 32 pieces of 100 kb at 16 and 32 threads x0.918 / x0.948; AP027131 against 543 proteins at
+  2 / 8 threads x0.939 / x0.983; 800 fly cDNAs against 6,600 yeast proteins at 32 threads, `-subject` / `-db`, x0.971 /
+  x0.975; EDL933 against AMRProt (ABRicate's call) at 8 / 32 threads x1.000 / x0.998; 100 kb of AP027131 against
+  Swiss-Prot at 32 threads x1.003. A second run (7 rounds, 8 cores): the BATCH_SIZE 40000 row with 16 threads on 8 cores
+  x0.962 (6 of 7 rounds), at 8 threads x0.963 (7 of 7). Max RSS: the fly rows x0.699 / x0.722, the 100 kb pieces x0.832 /
+  x0.925, the BATCH_SIZE 40000 row at 32 threads x1.057 and the 9,000-letter row at 2 threads x1.123 (each below its time
+  gain), the others x0.95-x1.01. CPU time (user + system) x0.97-x1.01, except the 9,000-letter row at 2 threads (x1.083:
+  the second thread now redoes matches). A thread that waits sleeps after spinning and yielding, which keeps the
+  system time at 0.3-2.0 s a run where waits that only yield took 6-13 s (BATCH_SIZE 40000, 32 threads); with 16 threads
+  on 8 cores the yielding form was 2 % faster (6 of 7 rounds) for 2-6 s more system time a run.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

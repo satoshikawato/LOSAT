@@ -2204,9 +2204,10 @@ impl BlastpReport {
     /// such an id takes the subject's place (`ListedTitles::refuse_ids_of_queries`): a report
     /// reads their Bioseqs, or the batches' prefetch loads them (the first format's, unless
     /// `PRE_FETCH_SEQS_LIMIT` turns it off for every batch). psiblast's rounds read the aligned
-    /// letters of the subjects from that scope for the next round's PSSM, whatever the format.
-    fn resolve_subjects(formats: &[BlastpReport], app: BlastpApp) -> bool {
-        app == BlastpApp::Psiblast
+    /// letters of the subjects from that scope for a PSSM, whatever the format, where the call
+    /// can make one (`psi_reads`, `psi_reads_scope`; review 3 of line RG-KB item 12, F1).
+    fn resolve_subjects(formats: &[BlastpReport], app: BlastpApp, psi_reads: bool) -> bool {
+        (app == BlastpApp::Psiblast && psi_reads)
             || formats.iter().any(|format| format.reads_subjects())
             || (formats
                 .first()
@@ -2220,10 +2221,16 @@ impl BlastpReport {
     /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
     /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
     /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
-    /// psiblast's rounds (which read the letters for the next PSSM), keep LOSAT's refusal.
-    fn shows_query_bioseqs(formats: &[BlastpReport], app: BlastpApp) -> bool {
+    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters)
+    /// or search one (`-in_pssm`), keep LOSAT's refusal.
+    fn shows_query_bioseqs(
+        formats: &[BlastpReport],
+        args: &ResolvedBlastpArgs,
+        psi_reads: bool,
+    ) -> bool {
         use crate::report::query_bioseq::tabular_shows;
-        app == BlastpApp::Blastp
+        (args.app == BlastpApp::Blastp
+            || (args.app == BlastpApp::Psiblast && !psi_reads && args.psi_search.is_none()))
             && formats.iter().all(|format| match *format {
                 BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
                 BlastpReport::CustomTabular(spec) => {
@@ -10402,10 +10409,17 @@ fn run_call(
     );
     let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    // psiblast makes a PSSM from the round's Seq-aligns, reading the subjects' letters from the
+    // scope, only where another round follows or the last PSSM is saved.
+    let psi_reads = args.psi_pssm.is_some()
+        || reports
+            .psi_round
+            .is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next);
     if let (Some(titles), Some(scopes), true) = (
         listed_titles.as_mut(),
         reports.query_scopes,
-        BlastpReport::resolve_subjects(&requested_formats, args.app),
+        BlastpReport::resolve_subjects(&requested_formats, args.app, psi_reads),
     ) {
         let record = |query: usize| {
             let record = query_records.get(query.checked_sub(scopes.first())?)?;
@@ -10416,7 +10430,7 @@ fn run_call(
             })
         };
         let run = crate::report::query_bioseq::SeenRun {
-            shows: BlastpReport::shows_query_bioseqs(&requested_formats, args.app)
+            shows: BlastpReport::shows_query_bioseqs(&requested_formats, &args, psi_reads)
                 && ranges.query_input.range_length.is_none()
                 && database.is_some_and(|database| !database.loads_write_texts()),
             known: scopes.first()..if reports.last_call {

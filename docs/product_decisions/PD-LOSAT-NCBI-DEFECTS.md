@@ -2306,14 +2306,18 @@ file would differ, and NCBI's programs still could not open the database).
   makes the Bioseq of the first definition line that holds it as `s_SeqDB_SeqIdIn` reads the ids,
   which stops at the first id of the line that does not match (`seqdbvol.cpp:1328-1359`): another
   definition line than the Seq-align id's (probes `e15_twoline` of review 1 of item 12 and `e15nt`
-  of review 2) makes the Bioseq of the reports of that line: its title is NCBI's description line's
-  (outfmt 0 to 4), the generated title of the organism report (outfmt 18) and the generated title
-  of a line without one in the alignment's heading (`showalign.cpp:2250-2255`,
-  `taxFormat.cpp:915-926`), while the heading lists the sequence's own lines, as do the tables and
-  the XML documents (outfmt 5, 6, 8, 15 and the field lists of the probes). LOSAT writes them all
+  of review 2) makes the Bioseq of the reports of that line, and the reports read it in two ways.
+  Those that read the Bioseq's line take that line: its title is NCBI's description line's (outfmt
+  0 to 4), the generated title of the organism report (outfmt 18) and the generated title of a
+  line without one in the alignment's heading (`showalign.cpp:2250-2255`, `taxFormat.cpp:915-926`),
+  and its ids are the tabular `sseqid`, `sacc` and `saccver`, the labels of outfmt 1 to 4, the
+  SAM name and the `-html` link. Those that read the Bioseq's whole set of lines list the
+  sequence's own lines: the alignment's heading, the tabular `stitle`, `salltitles` and
+  `sallseqid`, and the XML `Hit` (outfmt 5, 15 and 16; `tabular.cpp:415-439`,
+  `showdefline.cpp:248-293`; probes `e15g` and `e15tu` of review 3). LOSAT takes the first group
   from that Bioseq's line (`ParsedSubject::target`, the line of `DeflineSet::bioseq_defline` of
   the handle's id; review 2, N3, where review 1 had refused the description line and the
-  organism report); no definition line (one
+  organism report) and the second from the stored set, as NCBI does; no definition line (one
   line with the chain 321 before the chain 65, `e15b_oneline`) makes NCBI's load throw, in every
   format that reads the Bioseq or prefetches it (outfmt 0, 1, 2, 5, 6, 7, 10, 15, 16 and 18 of the
   probe), which LOSAT refuses
@@ -3135,12 +3139,14 @@ file would differ, and NCBI's programs still could not open the database).
   the chain 321 and no chain-id: the refusal of a sequence with the id of a query
   (`common::database::refuse_id_of_a_query`, PD-LOSAT-DATABASE-SEARCH) covers it, since review 2
   (N1) only in the formats in which NCBI's scope looks the sequence up by its Seq-align id (a
-  report that reads its Bioseq, or the batch's prefetch; psiblast every format). The Seq-annots
+  report that reads its Bioseq, or the batch's prefetch; psiblast every format where the call
+  makes a PSSM from the round, review 3, F1). The Seq-annots
   and the archive (outfmt 8, 9, 11, 12) write NCBI's bytes, as on dev. NCBI shows the query's
   Bioseq for the sequence in the reports that read it (`6 sseqid stitle` of probe `c321`:
   `pdb|1AB1|A` and `N/A`), and since decision KB-12-1 (2026-11-25) so does LOSAT, from one owner
   of the run's query Bioseqs (`report::query_bioseq`) that the tables and the organism report
-  read, for every sequence with the id of a query (PD-LOSAT-DATABASE-SEARCH): the query's ids,
+  read, for every sequence with the id of a query in BLASTP, BLASTN, BLASTX, TBLASTN, TBLASTX
+  and a psiblast call that makes no PSSM (PD-LOSAT-DATABASE-SEARCH): the query's ids,
   `stitle` `N/A`, the query's length as `slen`, no taxonomy, and the query's line in the organism
   report. The fields and formats that read the found Bioseq's letters keep the refusal.
 - makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,

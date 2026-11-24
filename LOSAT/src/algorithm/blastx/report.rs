@@ -609,6 +609,24 @@ pub(super) fn sort_lists(batches: &mut [BatchResults]) {
     }
 }
 
+/// Whether the reports of `options` show NCBI's bytes for a reported sequence that the scope finds
+/// as a query of its batch (`report::query_bioseq`): BLASTX's tables that read no letter of the
+/// found Bioseq (`query_bioseq::tabular_shows`), the organism report, the Seq-annots and the
+/// archive (which write the Seq-align id alone), without `-query_loc`. RPSTBLASTN keeps LOSAT's
+/// refusal.
+pub(super) fn shows_query_bioseqs(options: &ResolvedOptions) -> bool {
+    options.rpstblastn.is_none()
+        && options.query_range.is_none()
+        && match options.outfmt {
+            8 | 9 | 11 | 12 | 18 => true,
+            6 | 7 | 10 | 20 => crate::report::query_bioseq::tabular_shows(
+                options.tabular,
+                crate::blastinput::app::Program::Blastx,
+            ),
+            _ => false,
+        }
+}
+
 /// The number of HSPs that the reports of `batches` show (`has_seqalign`).
 pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
     batches
@@ -631,6 +649,15 @@ fn check_failed_lookups(
         return Ok(());
     }
     for batch in batches {
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
+        let row = |qidx: usize, oid: usize| match shown {
+            ShownSubjects::Database { reported, .. }
+                if reported.seen_of(batch.query_ordinal + qidx, oid).is_some() =>
+            {
+                crate::report::query_bioseq::SEEN_ROW
+            }
+            _ => oid,
+        };
         crate::report::tabular::check_failed_lookups(
             options.tabular,
             (0..batch.queries.len()).map(|qidx| {
@@ -642,9 +669,14 @@ fn check_failed_lookups(
                             .iter()
                             .any(|hsp| has_seqalign(hsp, options.gapped))
                     })
-                    .map(|list| list.oid)
+                    .map(move |list| row(qidx, list.oid))
             }),
-            |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
+            |oid| {
+                if oid == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
+                shown.lookup_failure(options.tabular, &subjects[oid], oid)
+            },
             |oid| match shown {
                 ShownSubjects::Database { reported, .. } => {
                     crate::report::tabular::failed_database_subject(

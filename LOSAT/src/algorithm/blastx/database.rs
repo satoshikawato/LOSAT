@@ -160,6 +160,12 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(crate) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// NCBI's warning of a failed prefetch, which names the run's program
     /// (`shared::prefetch_warning`).
     pub(crate) fn prefetch_warning(&self) -> Vec<u8> {
@@ -425,6 +431,12 @@ pub(crate) struct ReportedSubjects {
     /// `-db_soft_mask` and `-db_hard_mask` with a pairwise report: the stored masks of the
     /// search's algorithm of each rank (`read_db_masks`); `None` otherwise.
     db_masks: Option<Vec<Vec<(u32, u32)>>>,
+    /// The query Bioseqs that NCBI's scope finds for the reported sequences
+    /// (`report::query_bioseq`, filled by `refuse_ids_of_queries`), by the run's searched query
+    /// and the ordinal id.
+    seen: crate::report::query_bioseq::QueryBioseqs,
+    /// The run's searched query of the reader batch's first query (`refuse_ids_of_queries`).
+    seen_first: usize,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -1460,34 +1472,60 @@ impl ReportedSubjects {
     /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
     /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
     /// from the reader batch, and the query's index), where the reports resolve the subjects'
-    /// Seq-align ids (`resolves_subjects`).
+    /// Seq-align ids (`resolves_subjects`). Where the scope finds a query for the sequence and the
+    /// reports show NCBI's bytes for it (`run`), that query is noted in `seen` instead
+    /// (`report::query_bioseq::note_or_refuse`).
     pub(crate) fn refuse_ids_of_queries(
-        &self,
+        &mut self,
         batches: &[BatchResults],
         gapped: bool,
         scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+        run: &crate::report::query_bioseq::SeenRun<'_, '_>,
     ) -> Result<()> {
         if self.parsed.is_empty() || !self.resolves_subjects {
             return Ok(());
         }
+        self.seen_first = scopes.first();
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
                     if !super::report::reported(list, gapped) {
                         continue;
                     }
-                    if let Some(subject) = self.parsed_subject(list.oid) {
-                        shared::refuse_id_of_a_query(
-                            subject,
-                            || self.oids[list.oid],
-                            scopes.of_query(batch.query_ordinal + qidx),
-                            PROGRAM,
-                        )?;
-                    }
+                    let Some(subject) = self.parsed.get(list.oid).and_then(Option::as_deref)
+                    else {
+                        continue;
+                    };
+                    let oid = self.oids[list.oid];
+                    crate::report::query_bioseq::note_or_refuse(
+                        &mut self.seen,
+                        subject,
+                        || oid,
+                        scopes.first() + batch.query_ordinal + qidx,
+                        self.ordinals[list.oid],
+                        scopes.run(),
+                        run,
+                        PROGRAM,
+                    )?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// The query Bioseq that NCBI's scope finds for the sequence of rank `rank` in the report of
+    /// the reader batch's query `ordinal` (`report::query_bioseq::SeenFrom::of`).
+    pub(crate) fn seen_of(
+        &self,
+        ordinal: usize,
+        rank: usize,
+    ) -> Option<&crate::report::query_bioseq::QueryBioseq> {
+        if self.seen.is_empty() {
+            return None;
+        }
+        self.seen
+            .numbered_from(self.seen_first)
+            .of(ordinal, *self.ordinals.get(rank)?)
     }
 
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).

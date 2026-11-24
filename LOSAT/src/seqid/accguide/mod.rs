@@ -178,7 +178,9 @@ impl SubMap {
             wildcards: Vec::new(),
             specials: match part {
                 Part::Rules => OnceLock::new(),
-                Part::Specials(_) | Part::All => OnceLock::from(Specials::default()),
+                Part::Specials(_) => OnceLock::from(Specials::default()),
+                #[cfg(test)]
+                Part::All => OnceLock::from(Specials::default()),
             },
         }
     }
@@ -189,6 +191,8 @@ impl SubMap {
 /// The multimap of the small specials is a map of each key to its options in the multimap's
 /// order (an `emplace` adds an option at the end of its key's equal range), kept as the place
 /// of the options in `small_options`, where the key is kept too: `SHints` holds that place.
+/// The cleanup at the end of a build removes from `small_specials` a key whose options all
+/// became empty; its place in `small_options` stays, and no lookup reaches it.
 #[derive(Default, Debug)]
 struct Specials {
     big_specials: BTreeMap<Vec<u8>, (Vec<u8>, AccInfo)>,
@@ -222,7 +226,7 @@ impl Specials {
             .rules
             .remove(&fmt)
             .and_then(|submap| submap.specials.into_inner())
-            .unwrap_or_default()
+            .expect("a build of the specials of a format with a prefix rule has its specials")
     }
 }
 
@@ -243,7 +247,9 @@ enum Part {
     Rules,
     /// Every rule, with the specials of one format.
     Specials(u32),
-    /// Every rule, with every special, and the diagnostics of the loading (the tests).
+    /// Every rule, with every special, and the diagnostics of the loading: the build of the
+    /// tests, which check that the built-in guide raises none.
+    #[cfg(test)]
     All,
 }
 
@@ -253,6 +259,7 @@ impl Part {
         match self {
             Part::Rules => false,
             Part::Specials(only) => only == fmt,
+            #[cfg(test)]
             Part::All => true,
         }
     }
@@ -261,13 +268,6 @@ impl Part {
     /// a format keeps only them).
     fn keeps_prefixes(self) -> bool {
         !matches!(self, Part::Specials(_))
-    }
-
-    /// Whether a build of this part makes the diagnostics of the loading that need lookups of
-    /// the guide (`FindSpecial` and `Find` of each special): only the build of every part.
-    /// They change no rule, and the built-in guide raises none (the tests check it).
-    fn diagnoses(self) -> bool {
-        self == Part::All
     }
 }
 
@@ -288,23 +288,24 @@ pub struct AccGuide {
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:907-945
 /// `prev_small_special` is the place of the key's options in the current format's
 /// `small_options` and the position of the option in its equal range (`None` for `end()`);
-/// `prev_big_special` is only an insertion hint and is not kept. The fallback members serve
-/// unknown type names only.
+/// `prev_big_special` is only an insertion hint and is not kept. `prev_special2_acc`, the
+/// running accession of a `special2` block, is kept as its key and its bit (`special2_key`,
+/// `special2_bit`): every range of the built-in guide replaces digits of the bit only (see
+/// `add_special2_ranges`). The members that serve unknown type names only (the fallbacks:
+/// `prev_special_type` and its name) are not kept; those that only `FindSpecial` reads are
+/// kept by the build of the tests ([`SpecialHints`]).
 struct Hints {
     prev_type: AccInfo,
     prev_type_name: Vec<u8>,
     prev_submap: Option<u32>,
     prev_small_special: Option<(usize, usize)>,
-    prev_special_format: u32,
-    prev_special_key: Vec<u8>,
-    prev_special_type_name: Vec<u8>,
-    prev_special_base_key: Vec<u8>,
-    prev_special_type: AccInfo,
-    prev_special_base_type: AccInfo,
-    prev_special2_acc: Vec<u8>,
+    special2_key: Vec<u8>,
+    special2_bit: u32,
     special2_submap: Option<u32>,
     special2_type: AccInfo,
     version: u32,
+    #[cfg(test)]
+    special: SpecialHints,
 }
 
 impl Default for Hints {
@@ -314,16 +315,38 @@ impl Default for Hints {
             prev_type_name: Vec::new(),
             prev_submap: None,
             prev_small_special: None,
-            prev_special_format: 0,
-            prev_special_key: Vec::new(),
-            prev_special_type_name: Vec::new(),
-            prev_special_base_key: Vec::new(),
-            prev_special_type: UNKNOWN,
-            prev_special_base_type: UNKNOWN,
-            prev_special2_acc: Vec::new(),
+            special2_key: Vec::new(),
+            special2_bit: 0,
             special2_submap: None,
             special2_type: UNKNOWN,
             version: 1,
+            #[cfg(test)]
+            special: SpecialHints::default(),
+        }
+    }
+}
+
+/// The members of `SHints` that only `FindSpecial` reads, for the diagnostics of the loading
+/// (`prev_special_format`, `prev_special_key`, `prev_special_base_key` and
+/// `prev_special_base_type`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:907-931
+#[cfg(test)]
+struct SpecialHints {
+    format: u32,
+    key: Vec<u8>,
+    base_key: Vec<u8>,
+    base_type: AccInfo,
+}
+
+#[cfg(test)]
+impl Default for SpecialHints {
+    fn default() -> Self {
+        SpecialHints {
+            format: 0,
+            key: Vec::new(),
+            base_key: Vec::new(),
+            base_type: UNKNOWN,
         }
     }
 }
@@ -386,7 +409,7 @@ fn bit_digits(fmt: u32) -> u32 {
 /// `SAccGuide::x_SplitSpecial` of `acc` and `fmt`: the length of the prefix that keys the special
 /// and the number that is its bit.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1596-1629
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1596-1625
 fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
     let raw_digits = fmt & 0xffff;
     let digits = bit_digits(fmt);
@@ -403,20 +426,6 @@ fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
         }
         (pos, result)
     }
-}
-
-/// Whether `text` is ASCII digits alone (true when empty).
-fn all_digits(text: &[u8]) -> bool {
-    text.iter().all(u8::is_ascii_digit)
-}
-
-/// The number that at most 9 ASCII digits write (0 for none): `bit_number` of them when there
-/// are some.
-fn digits_value(digits: &[u8]) -> u32 {
-    debug_assert!(digits.len() <= MAX_SMALL_SPECIAL_DIGITS as usize && all_digits(digits));
-    digits
-        .iter()
-        .fold(0, |number, &c| number * 10 + u32::from(c - b'0'))
 }
 
 /// The digits of a range `<low>[-<high>]` as numbers with their counts (an empty high when
@@ -458,14 +467,6 @@ fn with_last_digits(number: u32, (digits, count): (u32, usize)) -> u32 {
         _ => 0,
     };
     cleared + digits
-}
-
-/// Writes `number` (below 10 to the power of the length of `text`) into `text` as digits.
-fn write_digits(text: &mut [u8], mut number: u32) {
-    for c in text.iter_mut().rev() {
-        *c = b'0' + (number % 10) as u8;
-        number /= 10;
-    }
 }
 
 /// `NStr::MatchesMask` of `str` against `mask` (case-sensitive) for the masks of the guide, which are
@@ -571,7 +572,8 @@ impl AccGuide {
             return Some(hints.prev_type);
         }
         let value = find_acc_info(name)?;
-        hints.prev_special_key.clear();
+        #[cfg(test)]
+        hints.special.key.clear();
         hints.prev_type_name = name.to_ascii_lowercase();
         hints.prev_type = value;
         Some(value)
@@ -580,21 +582,55 @@ impl AccGuide {
     /// `SHints::FindSpecial` of the guide, `fmt` and an accession or range.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:991-1010
+    /// (The members of the fallbacks that it sets are not kept: see [`Hints`].)
+    #[cfg(test)]
     fn find_special(&self, hints: &mut Hints, fmt: u32, acc_or_range: &[u8]) -> AccInfo {
         let pfx = &acc_or_range[..((fmt >> 16) as usize).min(acc_or_range.len())];
-        if fmt == hints.prev_special_format {
-            if acc_or_range == hints.prev_special_key.as_slice() {
-                hints.prev_special_type = hints.prev_type;
-                hints.prev_special_type_name = hints.prev_type_name.clone();
+        let special = &mut hints.special;
+        if fmt == special.format {
+            if acc_or_range == special.key.as_slice() {
                 return hints.prev_type;
-            } else if pfx == hints.prev_special_base_key.as_slice() {
-                return hints.prev_special_base_type;
+            } else if pfx == special.base_key.as_slice() {
+                return special.base_type;
             }
         }
-        hints.prev_special_format = fmt;
-        hints.prev_special_base_key = pfx.to_vec();
-        hints.prev_special_base_type = self.find(fmt, pfx, None);
-        hints.prev_special_base_type
+        special.format = fmt;
+        special.base_key = pfx.to_vec();
+        special.base_type = self.find(fmt, pfx, None);
+        special.base_type
+    }
+
+    /// The diagnostic of `AddRule` for a special (`acc`, of the format `fmt`) whose prefix rule
+    /// does not list specials (`FindSpecial` of `acc`, then `Find` of `first`), shown as
+    /// `shown`. Only the build of every part makes it (the tests): it changes no rule, and
+    /// the built-in guide raises none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1139,1141-1152,1225-1238
+    #[cfg(test)]
+    fn check_specials_listed(
+        &mut self,
+        hints: &mut Hints,
+        fmt: u32,
+        acc: &[u8],
+        first: &[u8],
+        shown: &[u8],
+    ) {
+        if self.part != Part::All {
+            return;
+        }
+        // `Find` reads the prefixes, which this build keeps.
+        debug_assert!(self.part.keeps_prefixes());
+        if self.find_special(hints, fmt, acc) & F_SPECIALS != 0 {
+            return;
+        }
+        let mut key_used = Vec::new();
+        self.find(fmt, first, Some(&mut key_used));
+        if !key_used.is_empty() {
+            self.load_warnings.push(format!(
+                "Main listing for special {} doesn't indicate that specials are present.",
+                String::from_utf8_lossy(shown)
+            ));
+        }
     }
 
     /// `SHints::FindSubMap` of the rules and `fmt`: the rules of `fmt`, made if absent.
@@ -622,7 +658,7 @@ impl AccGuide {
     /// `SAccGuide::x_AddSpecial` with the submap of `fmt` (its `specials`), hints, `fmt`, `from`,
     /// `to`, `value`, `old_name` and `new_name`, for a known type name (`old_name` null).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1597
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1594
     fn add_special(
         specials: &mut Specials,
         hints: &mut Hints,
@@ -830,27 +866,16 @@ impl AccGuide {
             .position(|&c| c == b'-')
             .map(|offset| pos + offset);
         let fmt = format_key(pos, pos2.unwrap_or(range.len()) - pos);
-        let old = if self.part.diagnoses() {
-            self.find_special(hints, fmt, range)
-        } else {
-            F_SPECIALS
-        };
-        let value = Self::find_acc_info_hinted(hints, tokens[2]);
         let first = &range[..pos2.unwrap_or(range.len())];
-        if old & F_SPECIALS == 0 {
-            let mut key_used = Vec::new();
-            self.find(fmt, first, Some(&mut key_used));
-            if !key_used.is_empty() {
-                self.load_warnings.push(format!(
-                    "Main listing for special {} doesn't indicate that specials are present.",
-                    String::from_utf8_lossy(range)
-                ));
-            }
-        }
-        match value {
+        #[cfg(test)]
+        self.check_specials_listed(hints, fmt, range, first, range);
+        match Self::find_acc_info_hinted(hints, tokens[2]) {
             None => self.unknown_name(tokens[2]),
             Some(value) => {
-                hints.prev_special_key = range.to_vec();
+                #[cfg(test)]
+                {
+                    hints.special.key = range.to_vec();
+                }
                 self.find_sub_map(hints, fmt);
                 if self.part.has_specials_of(fmt) {
                     let last = pos2.map_or(range, |pos2| &range[pos2 + 1..]);
@@ -858,8 +883,6 @@ impl AccGuide {
                 }
             }
         }
-        hints.prev_special_type_name.clear();
-        hints.prev_special_type = UNKNOWN;
     }
 
     /// The `special2 <letters>+<digits> <type>` line of `AddRule`, which starts a block of
@@ -881,43 +904,38 @@ impl AccGuide {
         let letters = &spec[..plus];
         let digits = bit_number(spec.get(plus + 1..).unwrap_or_default()) as usize;
         let fmt = format_key(letters.len(), digits);
-        hints.prev_special_format = fmt;
+        #[cfg(test)]
+        {
+            hints.special.format = fmt;
+        }
         hints.special2_submap = Some(self.find_sub_map(hints, fmt));
-        let mut acc = letters.to_vec();
-        acc.resize(letters.len() + digits, b'0');
-        hints.prev_special2_acc = acc.clone();
-        let old = if self.part.diagnoses() {
-            self.find_special(hints, fmt, &acc)
-        } else {
-            F_SPECIALS
-        };
-        if old & F_SPECIALS == 0 {
-            let mut why = Vec::new();
-            self.find(fmt, &acc, Some(&mut why));
-            if !why.is_empty() {
-                self.load_warnings.push(format!(
-                    "Main listing for special {} doesn't indicate that specials are present.",
-                    String::from_utf8_lossy(spec)
-                ));
-            }
+        // The block's accession, the letters and `digits` zeros: its key, and its bit 0.
+        let key_len = normal_size(fmt) - bit_digits(fmt) as usize;
+        hints.special2_key.clear();
+        hints.special2_key.extend_from_slice(letters);
+        hints.special2_key.resize(key_len, b'0');
+        hints.special2_bit = 0;
+        #[cfg(test)]
+        {
+            let mut acc = letters.to_vec();
+            acc.resize(letters.len() + digits, b'0');
+            self.check_specials_listed(hints, fmt, &acc, &acc, spec);
         }
         match Self::find_acc_info_hinted(hints, tokens[2]) {
             Some(value) => hints.special2_type = value,
             None => self.unknown_name(tokens[2]),
         }
-        hints.prev_special_type_name.clear();
-        hints.prev_special_type = UNKNOWN;
     }
 
     /// The `: <range> ...` lines of a `special2` block: each range replaces the last digits
     /// of the block's running accession.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1292-1323
-    /// While each range replaces digits only among those that `x_SplitSpecial` reads as the
-    /// bit (`bit_digits`), the accession keeps its size and its key, and its bit is kept as a
-    /// number: `from` and `to` are then a small special of that key, from the bit after the
-    /// low digits to the bit after the high ones. Every range of the built-in guide is of this
-    /// form; any other is added from the text of the accession.
+    /// Every range of the built-in guide is `<digits>[-<digits>]`, each side at most
+    /// `bit_digits` digits (the digits that `x_SplitSpecial` reads as the bit; `make_accguide.py`
+    /// refuses any other, and a test checks the files). Such a range keeps the accession's size
+    /// and key, so `from` and `to` are a small special of that key, from the bit after the low
+    /// digits to the bit after the high ones, and the bit is kept as a number.
     fn add_special2_ranges<'t>(
         &mut self,
         ranges: impl Iterator<Item = &'t [u8]>,
@@ -936,57 +954,30 @@ impl AccGuide {
             return;
         }
         let value = hints.special2_type;
-        let specials = self.specials_mut(fmt);
-        let mut acc = std::mem::take(&mut hints.prev_special2_acc);
         let digits = bit_digits(fmt) as usize;
-        let key_len = normal_size(fmt) - digits;
-        let mut bit = (acc.len() == normal_size(fmt) && all_digits(&acc[key_len..]))
-            .then(|| digits_value(&acc[key_len..]));
-        let mut from = Vec::new();
+        let specials = self.specials_mut(fmt);
+        let key = std::mem::take(&mut hints.special2_key);
+        let mut bit = hints.special2_bit;
         // The hint while it is known to be of this key (set by the range before).
         let mut known: Option<(usize, usize)> = None;
         for range in ranges {
-            if let Some(number) = bit {
-                if let Some([low, high]) = range_numbers(range, digits) {
-                    let left = with_last_digits(number, low);
-                    let right = with_last_digits(left, high);
-                    bit = Some(right);
-                    match known {
-                        Some((slot, prev)) => {
-                            let options = &mut specials.small_options[slot].1;
-                            let index =
-                                Self::add_to_options(options, Some(prev), left, right, value);
-                            hints.prev_small_special = Some((slot, index));
-                        }
-                        None => {
-                            let key = &acc[..key_len];
-                            Self::add_small_special(specials, hints, key, left, right, value);
-                        }
-                    }
-                    known = hints.prev_small_special;
-                    continue;
+            let [low, high] = range_numbers(range, digits)
+                .expect("every special2 range of the built-in guide is of the bit's digits");
+            let left = with_last_digits(bit, low);
+            let right = with_last_digits(left, high);
+            bit = right;
+            match known {
+                Some((slot, prev)) => {
+                    let options = &mut specials.small_options[slot].1;
+                    let index = Self::add_to_options(options, Some(prev), left, right, value);
+                    hints.prev_small_special = Some((slot, index));
                 }
-                write_digits(&mut acc[key_len..], number);
-                bit = None;
+                None => Self::add_small_special(specials, hints, &key, left, right, value),
             }
-            known = None;
-            let (low, high) = match range.iter().position(|&c| c == b'-') {
-                Some(dash) => (&range[..dash], &range[dash + 1..]),
-                None => (range, &b""[..]),
-            };
-            let end = acc.len();
-            acc[end - low.len()..].copy_from_slice(low);
-            from.clear();
-            from.extend_from_slice(&acc);
-            if !high.is_empty() {
-                acc[end - high.len()..].copy_from_slice(high);
-            }
-            Self::add_special(specials, hints, fmt, &from, &acc, value);
+            known = hints.prev_small_special;
         }
-        if let Some(number) = bit {
-            write_digits(&mut acc[key_len..], number);
-        }
-        hints.prev_special2_acc = acc;
+        hints.special2_key = key;
+        hints.special2_bit = bit;
     }
 
     /// `SAccGuide::SAccGuide()` with the built-in rules, then the cleanup of empty small

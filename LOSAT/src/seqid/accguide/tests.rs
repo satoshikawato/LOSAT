@@ -256,28 +256,39 @@ fn canonical_new<'a>(
         .collect()
 }
 
-/// FNV-1a 64 of the canonical form: every format, key, value and range of the guide.
+/// FNV-1a 64 of the canonical form: every format, key, value and range of the guide, each
+/// list after its length, each item after its length in bytes (`make_accguide.py` writes the
+/// same stream).
 fn fingerprint(canonical: &Canonical) -> u64 {
     let mut bytes = Vec::new();
     let mut put = |data: &[u8]| {
         bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
         bytes.extend_from_slice(data);
     };
+    let count = |n: usize| (n as u32).to_le_bytes();
+    put(&count(canonical.len()));
     for (fmt, prefixes, wildcards, big, small) in canonical {
         put(&fmt.to_le_bytes());
-        for (key, value) in prefixes.iter().chain(wildcards) {
-            put(key);
-            put(&value.to_le_bytes());
+        for list in [prefixes, wildcards] {
+            put(&count(list.len()));
+            for (key, value) in list {
+                put(key);
+                put(&value.to_le_bytes());
+            }
         }
+        put(&count(big.len()));
         for (to, from, value) in big {
             put(to);
             put(from);
             put(&value.to_le_bytes());
         }
+        put(&count(small.len()));
         for (key, options) in small {
             put(key);
+            put(&count(options.len()));
             for (ranges, value) in options {
                 put(&value.to_le_bytes());
+                put(&count(ranges.len()));
                 for (left, right) in ranges {
                     put(&left.to_le_bytes());
                     put(&right.to_le_bytes());
@@ -288,15 +299,17 @@ fn fingerprint(canonical: &Canonical) -> u64 {
     fnv1a64(&bytes)
 }
 
-/// The fingerprint of the guide that the builder before the specials were read per format made
-/// (dev 2cd5a1906; the tests of b259ca129 and 5c522de1f compared that builder's guide with this
-/// one, whole and by part, and every lookup at the edges of the ranges, 2026-11-24).
-const GUIDE_FINGERPRINT: u64 = 0xa28f_dd99_aea8_0b98;
+/// The fingerprint of NCBI's built-in guide, as `make_accguide.py` prints it (its own model of
+/// `SAccGuide`'s loading, from `accguide2.inc` and the values of `acc_info.rs`): run it again
+/// when the guide or a value changes. The guide of dev 2cd5a1906's builder had it too (the
+/// tests of b259ca129 to af9d5619e compared that builder's guide with this one, whole and by
+/// part, and every lookup at the edges of the ranges, 2026-11-24).
+const GUIDE_FINGERPRINT: u64 = 0xe9e2_88a9_4ded_e627;
 
-/// The builder makes the guide of the old builder, whole, and part by part: the rules without
-/// the specials, and the specials of each format built alone.
+/// The guide has the fingerprint of NCBI's, whole, and part by part: the rules without the
+/// specials, and the specials of each format built alone.
 #[test]
-fn the_builder_makes_the_guide_of_the_old_builder() {
+fn the_guide_has_ncbi_s_fingerprint_whole_and_by_part() {
     let all = AccGuide::built_in(Part::All);
     let whole = canonical_new(&all, |_, submap| {
         submap
@@ -320,7 +333,8 @@ fn the_builder_makes_the_guide_of_the_old_builder() {
         if parts.peek().is_some_and(|part| part.0 == entry.0) {
             assert!(parts.next() == Some(entry), "format {:#x} differs", entry.0);
         } else {
-            // A format of `special` lines alone: no lookup reaches its specials.
+            // A format of `special` lines alone, which no lookup reaches (every format of the
+            // built-in guide has a prefix rule or a wildcard: this serves another guide).
             assert!(
                 entry.1.is_empty() && entry.2.is_empty(),
                 "format {:#x}",
@@ -441,12 +455,44 @@ fn rule_lines_split_as_str_lines() {
     }
 }
 
-/// The ranges of a `special2` block added from the text of the accession, range by range
-/// (NCBI's loop, which `add_special2_ranges` follows for a range that changes the key).
-fn add_ranges_from_text(guide: &mut AccGuide, hints: &mut Hints, ranges: &[&[u8]]) {
+/// Every range of every `special2` block of the built-in guide is `<digits>[-<digits>]` with
+/// at most `bit_digits` digits a side, the one form that `add_special2_ranges` reads, and each
+/// block follows its `special2` line.
+#[test]
+fn every_special2_range_is_of_the_bit_s_digits() {
+    let mut ranges = RangeLines::new(RANGES);
+    let mut previous: Option<&str> = None;
+    let mut tokens = 0usize;
+    for line in RULES.lines() {
+        if line == ":" {
+            let spec = previous
+                .and_then(|rule| rule.strip_prefix("special2 "))
+                .and_then(|rest| rest.split(' ').next())
+                .expect("a block follows its special2 line");
+            let (letters, digits) = spec.split_once('+').expect("<letters>+<digits>");
+            let fmt = format_key(letters.len(), digits.parse().expect("digits"));
+            let bit = bit_digits(fmt) as usize;
+            while let Some(range_line) = ranges.next_line() {
+                for range in range_line.split(|&c| c == b' ') {
+                    assert!(
+                        range_numbers(range, bit).is_some(),
+                        "{spec} {}",
+                        String::from_utf8_lossy(range)
+                    );
+                    tokens += 1;
+                }
+            }
+        }
+        previous = Some(line);
+    }
+    assert_eq!(tokens, 456_251);
+}
+
+/// The ranges of a `special2` block added from the text of the accession `acc`, range by range
+/// (NCBI's loop).
+fn add_ranges_from_text(guide: &mut AccGuide, hints: &mut Hints, acc: &mut [u8], ranges: &[&[u8]]) {
     let fmt = hints.special2_submap.expect("a special2 block");
     let value = hints.special2_type;
-    let mut acc = std::mem::take(&mut hints.prev_special2_acc);
     for range in ranges {
         let (low, high) = match range.iter().position(|&c| c == b'-') {
             Some(dash) => (&range[..dash], &range[dash + 1..]),
@@ -454,32 +500,23 @@ fn add_ranges_from_text(guide: &mut AccGuide, hints: &mut Hints, ranges: &[&[u8]
         };
         let end = acc.len();
         acc[end - low.len()..].copy_from_slice(low);
-        let from = acc.clone();
+        let from = acc.to_vec();
         if !high.is_empty() {
             acc[end - high.len()..].copy_from_slice(high);
         }
-        AccGuide::add_special(guide.specials_mut(fmt), hints, fmt, &from, &acc, value);
+        AccGuide::add_special(guide.specials_mut(fmt), hints, fmt, &from, acc, value);
     }
-    hints.prev_special2_acc = acc;
 }
 
-/// Random digits for one side of a range: mostly at most `bit` of them, sometimes up to `size`
-/// with a letter first.
-fn random_range_part(next: &mut impl FnMut(u64) -> u64, bit: usize, size: usize) -> Vec<u8> {
-    let long = next(10) == 0;
-    let max = if long { size } else { bit };
-    let len = next(1 + max as u64) as usize;
-    let mut out: Vec<u8> = (0..len).map(|_| b'0' + next(10) as u8).collect();
-    if long && !out.is_empty() && next(3) == 0 {
-        out[0] = b'A' + next(26) as u8;
-    }
-    out
+/// Random digits for one side of a range, at most `bit` of them.
+fn random_range_part(next: &mut impl FnMut(u64) -> u64, bit: usize) -> Vec<u8> {
+    let len = next(1 + bit as u64) as usize;
+    (0..len).map(|_| b'0' + next(10) as u8).collect()
 }
 
-/// `add_special2_ranges` adds random ranges as they are added from the text, in formats of
-/// every split of `x_SplitSpecial` (no digits, fewer than 10, 10, more than 10), with ranges
-/// that keep the key and ranges that do not (too long, with a second `-`, with letters), and
-/// blocks of the same key and of others one after the other.
+/// `add_special2_ranges` adds random ranges as NCBI's loop adds them from the text, in formats
+/// of every split of `x_SplitSpecial` (no digits, fewer than 10, 10, more than 10), with blocks
+/// of the same key and of others one after the other.
 #[test]
 fn special2_ranges_add_as_from_the_text() {
     let mut state = 0x9e37_79b9_7f4a_7c15_u64;
@@ -503,11 +540,15 @@ fn special2_ranges_add_as_from_the_text() {
         let bit = bit_digits(fmt) as usize;
         let spec = format!("{}+{digits}", &"ABCD"[..letters]);
         let types = ["embl_prot", "ddbj_prot", "gb_prot"];
+        let mut acc = Vec::new();
         for block in 0..60 {
             let mut letters_now = spec.clone().into_bytes();
             if block % 4 == 3 {
                 letters_now[0] = b'Q';
             }
+            acc.clear();
+            acc.extend_from_slice(&letters_now[..letters]);
+            acc.resize(size, b'0');
             let type_name = types[next(3) as usize].as_bytes();
             let header: [&[u8]; 3] = [b"special2", &letters_now, type_name];
             for (guide, hints) in [
@@ -520,25 +561,23 @@ fn special2_ranges_add_as_from_the_text() {
             for _ in 0..1 + next(4) {
                 let mut tokens: Vec<Vec<u8>> = Vec::new();
                 for _ in 0..1 + next(30) {
-                    let mut token = random_range_part(&mut next, bit, size);
+                    let mut token = random_range_part(&mut next, bit);
                     if next(4) != 0 {
-                        let mut high = random_range_part(&mut next, bit, size);
-                        if next(40) == 0 {
-                            high.push(b'-');
-                            high.extend(random_range_part(&mut next, bit, size));
-                        }
-                        high.truncate(size);
                         token.push(b'-');
-                        token.extend(high);
+                        token.extend(random_range_part(&mut next, bit));
                     }
                     tokens.push(token);
                 }
                 let ranges: Vec<&[u8]> = tokens.iter().map(Vec::as_slice).collect();
                 numeric.add_special2_ranges(ranges.iter().copied(), &mut numeric_hints);
-                add_ranges_from_text(&mut text, &mut text_hints, &ranges);
+                add_ranges_from_text(&mut text, &mut text_hints, &mut acc, &ranges);
+                let mut running = numeric_hints.special2_key.clone();
+                if bit > 0 {
+                    running.extend(format!("{:0bit$}", numeric_hints.special2_bit).bytes());
+                }
                 assert_eq!(
-                    String::from_utf8_lossy(&numeric_hints.prev_special2_acc),
-                    String::from_utf8_lossy(&text_hints.prev_special2_acc)
+                    String::from_utf8_lossy(&running),
+                    String::from_utf8_lossy(&acc)
                 );
                 assert_eq!(
                     numeric_hints.prev_small_special,

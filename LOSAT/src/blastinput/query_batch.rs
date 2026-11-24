@@ -308,26 +308,13 @@ impl QueryScope {
         ) {
             return Err(refusal);
         }
-        // `duplicate_id` keeps the version's kind of two BLASTN queries only (`may_match` asks it
-        // too).
+        // `duplicate_id` keeps the version's kind of two BLASTN queries only.
         self.keys.extend(
             ids.iter()
                 .filter_map(|id| crate::seqid::id_scope::version_keys(id).map(|(own, _)| own)),
         );
         self.note_first(ids, record);
         Ok(())
-    }
-
-    /// Whether an earlier record of the scope may have a text id that `CSeq_id::Match` takes for
-    /// `id` though the scope tells them apart (`Meets::New`): two Seq-ids match only where they
-    /// share a key of `defline_set::match_keys`, which `scope_keys` splits by the version and the
-    /// PDB chain, so such a text id has the same accession with the other kind of version
-    /// (`id_scope::version_keys`, whose own kind `add` keeps). A necessary condition
-    /// (`QueryScopes::add_batch_records` compares the ids where it holds; it asks the PDB
-    /// molecules of the batch's records itself).
-    fn may_match(&self, id: &crate::seqid::ParsedSeqId) -> bool {
-        crate::seqid::id_scope::version_keys(id)
-            .is_some_and(|(_, other)| self.keys.contains(&other))
     }
 
     /// Notes `record` (its number in the scope and its letters) for the keys of `ids` that no
@@ -646,10 +633,10 @@ pub(crate) struct QueryScopes {
 ///   `XmlMatrixFailure::SecondQueryOrEnd`).
 ///
 /// Only the queries that match an earlier one are listed: a run whose Seq-ids all differ keeps
-/// nothing per query, and compares a query's Seq-id with another only where the scope's keys or
-/// the PDB molecules of the batch allow a match (`QueryScope::may_match`,
-/// `QueryScopes::add_batch_records`; the first query of a batch with the lead of an earlier
-/// batch). The run's, not a batch's.
+/// nothing per query, and compares a query's Seq-id with another only where the scope or the
+/// forms of the batch's Seq-ids allow a match (`Meets`, `HeldIds::other_form_before`; a query of a
+/// batch with the lead of an earlier batch while the held report is that batch's). The run's, not
+/// a batch's.
 #[derive(Debug, Default)]
 struct HeldIds {
     /// Once a batch added the run's first searched query: the first searched query of the held
@@ -663,6 +650,10 @@ struct HeldIds {
     joins: Vec<usize>,
     /// Each searched query whose result shows an earlier searched query of its batch, ascending.
     labels: Vec<Label>,
+    /// The forms of the Seq-ids of the batch's searched queries so far (`id_scope::match_form`),
+    /// a mask of the forms by key: emptied at each batch, whose queries alone it is asked for
+    /// (`other_form_before`), and kept for the next batch's.
+    forms: rustc_hash::FxHashMap<u64, u8>,
 }
 
 /// A searched query whose result shows an earlier searched query of its batch (`HeldIds::labels`).
@@ -683,11 +674,22 @@ struct Label {
 type BatchLead<'r> = Option<(usize, Option<&'r crate::seqid::ParsedSeqId>)>;
 
 impl HeldIds {
+    /// Notes the form `form` of the Seq-id of a searched query of the batch (`forms`); whether
+    /// an earlier searched query of the batch has a Seq-id of the same key in another form, the
+    /// only one of a scope's other records that `CSeq_id::Match` can take for it (`Meets::New`),
+    /// the same form matching only an equal id (`id_scope::match_form`).
+    fn other_form_before(&mut self, form: crate::seqid::id_scope::MatchForm) -> bool {
+        let forms = self.forms.entry(form.key).or_insert(0);
+        let other = *forms & !form.bit != 0;
+        *forms |= form.bit;
+        other
+    }
+
     /// Notes the searched query `query` with the Seq-id `id` (`None`: no ids of its own), which
-    /// an earlier record of the scope may match where `candidate` (its ids meet the scope other
-    /// than `Meets::New`, or `QueryScope::may_match`); `earlier` gives the Seq-ids of the searched
-    /// queries of its batch before it, in order, the first being the run's query `batch_start`.
-    /// Whether it is the run's first.
+    /// an earlier searched query of its batch may match where `candidate` (its ids meet the scope
+    /// other than `Meets::New`, or `other_form_before`); `earlier` gives the Seq-ids of the
+    /// searched queries of its batch before it, in order, the first being the run's query
+    /// `batch_start`. Whether it is the run's first.
     fn note<'r>(
         &mut self,
         lead: &mut BatchLead<'r>,
@@ -1188,8 +1190,8 @@ impl QueryScopes {
     /// round 6, 2026-11-20; review 4 of D10, M1). The refusal also tells whether the run's XML
     /// failure takes it (`ScopeRefusal::xml_takes`, `HeldIds::reaches`), and the searched queries'
     /// Seq-ids are noted for the XML family formats (`HeldIds`; `records` is walked again from the
-    /// batch's start only for a query whose ids may match an earlier one: `QueryScope::may_match`,
-    /// or a PDB molecule of the batch's).
+    /// batch's start only for a query whose ids may match an earlier one: `Meets` other than
+    /// `Meets::New`, or `HeldIds::other_form_before`).
     pub(crate) fn add_batch_records<'r>(
         &mut self,
         records: impl IntoIterator<
@@ -1235,12 +1237,7 @@ impl QueryScopes {
         let mut searched = 0;
         let mut holds_first = false;
         let mut lead: BatchLead<'r> = None;
-        // The molecules of the PDB Seq-ids of the batch's searched queries so far
-        // (`id_scope::pdb_mol_key`), which `CSeq_id::Match` takes for one where either id has no
-        // chain though the scope tells them apart: the candidates of `HeldIds::note` within the
-        // batch, which is all it asks there. Made only for a batch with such ids, and dropped
-        // with it.
-        let mut pdb_mols: Option<std::collections::HashSet<u64>> = None;
+        self.held.forms.clear();
         let records = records.into_iter();
         let batch_records = records.clone();
         for (place, (believed, length, is_searched)) in records.enumerate() {
@@ -1248,10 +1245,10 @@ impl QueryScopes {
             let meets = believed.map(|believed| scope.meets(&believed.ids, self.program));
             if is_searched {
                 let id = believed.map(|believed| &believed.best);
-                let mol = id.and_then(crate::seqid::id_scope::pdb_mol_key);
-                let mol_seen = mol.is_some_and(|mol| !pdb_mols.get_or_insert_default().insert(mol));
-                let candidate = mol_seen
-                    || id.is_some_and(|id| meets != Some(Meets::New) || scope.may_match(id));
+                let other_form = id
+                    .and_then(crate::seqid::id_scope::match_form)
+                    .is_some_and(|form| self.held.other_form_before(form));
+                let candidate = other_form || (id.is_some() && meets != Some(Meets::New));
                 let earlier = batch_records
                     .clone()
                     .take(place)

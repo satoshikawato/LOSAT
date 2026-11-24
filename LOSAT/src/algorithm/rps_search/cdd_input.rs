@@ -416,6 +416,17 @@ pub(crate) fn build_msa(
     let mut rows: Vec<Vec<CdCell>> = Vec::with_capacity(hits.len());
     for hit in hits {
         let mut row = vec![CdCell::UNALIGNED; query.len()];
+        // The profile's columns that the hit's segments read, at most up to the last one's end
+        // (`CdHitData`: a few reads for the hit).
+        let end = hit
+            .segments
+            .iter()
+            .map(|segment| {
+                i64::from(segment.subject.from) + i64::from(segment.query.to - segment.query.from)
+            })
+            .max()
+            .map_or(0, |end| usize::try_from(end).unwrap_or(0));
+        let mut data = files.hit(hit.oid as usize, end);
         for segment in &hit.segments {
             let len = segment.query.to - segment.query.from;
             if len < 0
@@ -426,8 +437,8 @@ pub(crate) fn build_msa(
                 anyhow::bail!(CddRefusal::Range(id_label(&hit.id)).message());
             }
             let from = segment.subject.from as usize;
-            let data = files
-                .columns(hit.oid as usize, from, from + len as usize)
+            let data = data
+                .columns(from, from + len as usize)
                 .map_err(open_error)?;
             for (offset, (wfreqs, iobsr)) in data.wfreqs.into_iter().zip(data.iobsr).enumerate() {
                 row[segment.query.from as usize + offset] = CdCell::aligned(columns.len());

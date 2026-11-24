@@ -519,9 +519,14 @@ fn scan_na_lookup(
 /// a chunk shorter than the word, which has no scan). The chunk's HSP list is the other word
 /// finders' (`prelim_subject::chunk_hsp_list`).
 ///
+/// Kept out of its one caller, `prelim_chunk_hits`, whose other chunks run the default word
+/// finders: a window below 0 is only an imported search strategy's.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`) and
 /// c++/src/algo/blast/core/na_ungapped.c:1597-1695
+#[cold]
+#[inline(never)]
 pub(super) fn neg_chunk_hits<const UNGAPPED: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,

@@ -71,7 +71,7 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
     out.push(TAG_VISIBLE_STRING);
     write_length(out, text.len());
     let mut rest = text;
-    while let Some(at) = find_first(rest, |byte| !(b' '..=b'~').contains(&byte)) {
+    while let Some(at) = find_first(rest, is_bad_visible) {
         out.extend_from_slice(&rest[..at]);
         bad.push(BadTitleChar {
             byte: rest[at],
@@ -81,6 +81,25 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
         rest = &rest[at + 1..];
     }
     out.extend_from_slice(rest);
+}
+
+/// Whether `write_visible_string` writes `byte` as `#` (a byte outside ' '..'~').
+fn is_bad_visible(byte: u8) -> bool {
+    !(b' '..=b'~').contains(&byte)
+}
+
+/// The bytes of `text` that `write_visible_string` writes as `#` and the stream offsets that it
+/// reports, without writing them: `start` is the stream offset of the string's first byte, after
+/// its tag and length.
+fn bad_visible_chars(text: &[u8], start: usize, bad: &mut Vec<BadTitleChar>) {
+    let mut at = 0;
+    while let Some(found) = find_first(&text[at..], is_bad_visible) {
+        bad.push(BadTitleChar {
+            byte: text[at + found],
+            stream_offset: start + at + found,
+        });
+        at += found + 1;
+    }
 }
 
 /// The bytes of `defline_set`'s record besides its title: at most 77 (eleven tags with indefinite
@@ -108,14 +127,7 @@ fn title_prefix(out: &mut Vec<u8>, title: &[u8]) {
 pub(crate) fn bad_title_chars(title: &[u8], bad: &mut Vec<BadTitleChar>) {
     let mut prefix = Vec::with_capacity(16);
     title_prefix(&mut prefix, title);
-    let mut at = 0;
-    while let Some(found) = find_first(&title[at..], |byte| !(b' '..=b'~').contains(&byte)) {
-        bad.push(BadTitleChar {
-            byte: title[at + found],
-            stream_offset: prefix.len() + at + found,
-        });
-        at += found + 1;
-    }
+    bad_visible_chars(title, prefix.len(), bad);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
@@ -203,6 +215,11 @@ fn encoded_capacity(set: &DeflineSet) -> usize {
 /// `MSerial_AsnBinary`), with the member path of each string for the serializer's diagnostics.
 struct SetWriter<'a> {
     out: Vec<u8>,
+    /// Whether the bytes of the strings are written (the header) or only counted in `skipped`
+    /// (the diagnostics alone, `defline_set_bad_chars`): every other byte is written either
+    /// way, so the stream offsets of the reports are the same.
+    write_strings: bool,
+    skipped: usize,
     path: Vec<&'static str>,
     bad: &'a mut Vec<BadChar>,
 }
@@ -227,7 +244,14 @@ impl SetWriter<'_> {
 
     fn string(&mut self, text: &[u8]) {
         let mut bad = Vec::new();
-        write_visible_string(&mut self.out, text, &mut bad);
+        if self.write_strings {
+            write_visible_string(&mut self.out, text, &mut bad);
+        } else {
+            self.out.push(TAG_VISIBLE_STRING);
+            write_length(&mut self.out, text.len());
+            bad_visible_chars(text, self.skipped + self.out.len(), &mut bad);
+            self.skipped += text.len();
+        }
         for bad_char in bad {
             self.bad.push(BadChar {
                 path: self.path.join("."),
@@ -387,42 +411,67 @@ impl SetWriter<'_> {
 pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
     let mut w = SetWriter {
         out: Vec::with_capacity(encoded_capacity(set)),
+        write_strings: true,
+        skipped: 0,
         path: vec!["Blast-def-line-set"],
         bad,
     };
-    w.open(TAG_SEQUENCE);
-    for defline in &set.deflines {
-        w.path.push("E");
-        w.open(TAG_SEQUENCE);
-        if let Some(title) = &defline.title {
-            w.string_member(DEFLINE_TITLE, "title", title);
-        }
-        w.context(DEFLINE_SEQID, "seqid", |w| {
-            w.open(TAG_SEQUENCE);
-            for id in &defline.ids {
-                w.path.push("E");
-                w.seq_id(id);
-                w.path.pop();
-            }
-            w.close();
-        });
-        if let Some(taxid) = defline.taxid {
-            w.int_member(DEFLINE_TAXID, "taxid", taxid);
-        }
-        if let Some(values) = &defline.memberships {
-            w.int_list(3, "memberships", values);
-        }
-        if let Some(values) = &defline.links {
-            w.int_list(4, "links", values);
-        }
-        if let Some(values) = &defline.other_info {
-            w.int_list(5, "other-info", values);
-        }
-        w.close();
-        w.path.pop();
-    }
-    w.close();
+    w.set(set);
     w.out
+}
+
+/// The diagnostics of `encode_defline_set(set, bad)` without its record: the strings' bytes
+/// are searched, not written (`SetWriter::write_strings`). `ExtractBioseqDeflines` serializes the
+/// definition lines it built only for these diagnostics and throws the bytes away (cited at
+/// `WriteDb::post_extracted_deflines`); computing them alone gives the same diagnostics (LOSAT's
+/// speed: the record is written once, for the header).
+pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
+    let mut w = SetWriter {
+        out: Vec::with_capacity(encoded_capacity(set)),
+        write_strings: false,
+        skipped: 0,
+        path: vec!["Blast-def-line-set"],
+        bad,
+    };
+    w.set(set);
+}
+
+impl SetWriter<'_> {
+    /// The record of `set`: SEQUENCE OF Blast-def-line.
+    fn set(&mut self, set: &DeflineSet) {
+        self.open(TAG_SEQUENCE);
+        for defline in &set.deflines {
+            self.path.push("E");
+            self.open(TAG_SEQUENCE);
+            if let Some(title) = &defline.title {
+                self.string_member(DEFLINE_TITLE, "title", title);
+            }
+            self.context(DEFLINE_SEQID, "seqid", |w| {
+                w.open(TAG_SEQUENCE);
+                for id in &defline.ids {
+                    w.path.push("E");
+                    w.seq_id(id);
+                    w.path.pop();
+                }
+                w.close();
+            });
+            if let Some(taxid) = defline.taxid {
+                self.int_member(DEFLINE_TAXID, "taxid", taxid);
+            }
+            if let Some(values) = &defline.memberships {
+                self.int_list(3, "memberships", values);
+            }
+            if let Some(values) = &defline.links {
+                self.int_list(4, "links", values);
+            }
+            if let Some(values) = &defline.other_info {
+                self.int_list(5, "other-info", values);
+            }
+            self.close();
+            self.path.pop();
+        }
+        self.close();
+    }
 }
 
 #[cfg(test)]

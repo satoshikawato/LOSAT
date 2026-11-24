@@ -196,27 +196,9 @@ impl DbFile {
         end: u64,
         buffer: RangeBuffer<'_>,
     ) -> Result<Vec<u8>, SeqDbError> {
-        if end < start {
-            return Err(SeqDbError::Format {
-                path: self.path.clone(),
-                message: format!("byte range {start}..{end} ends before it starts"),
-            });
-        }
         // Checked before the buffer is allocated: a corrupt offset must not
         // ask for gigabytes.
-        if end > self.len {
-            return Err(SeqDbError::Format {
-                path: self.path.clone(),
-                message: format!(
-                    "byte range {start}..{end} passes the end of the file ({} bytes)",
-                    self.len
-                ),
-            });
-        }
-        let len = usize::try_from(end - start).map_err(|_| SeqDbError::Format {
-            path: self.path.clone(),
-            message: format!("byte range {start}..{end} does not fit in memory"),
-        })?;
+        let len = self.range_len(start, end)?;
         // A buffer of the pool or of the worker keeps the bytes its last read left in it, and only
         // the bytes past them are zeroed before the read writes them all.
         let mut buf = match buffer {
@@ -230,9 +212,43 @@ impl DbFile {
         Ok(buf)
     }
 
+    /// No NCBI counterpart (NCBI lends a pointer into its mapping of the file): the bytes of
+    /// `start..end` lent to `read`, with `read_range`'s errors in the same order. They are read
+    /// into this thread's own buffer, which keeps its room from one read to the next, so that a
+    /// reader of one record per sequence (a header, `Volume::with_header_record`) allocates
+    /// nothing per record; the thread holds the room of the longest range it was lent. A `read`
+    /// that itself reads a range here is lent a buffer of its own.
+    pub fn with_range<T>(
+        &self,
+        start: u64,
+        end: u64,
+        read: impl FnOnce(&[u8]) -> T,
+    ) -> Result<T, SeqDbError> {
+        thread_local! {
+            static LENT: std::cell::Cell<Vec<u8>> = const { std::cell::Cell::new(Vec::new()) };
+        }
+        let mut buf = LENT.take();
+        let lent = self.range_len(start, end).and_then(|len| {
+            buf.clear();
+            buf.reserve_exact(len);
+            buf.resize(len, 0);
+            self.read_exact_at(&mut buf, start)
+        });
+        let out = lent.map(|()| read(&buf));
+        LENT.set(buf);
+        out
+    }
+
     /// The checks of `read_range(start, end)` before its buffer
     /// is allocated, with the same errors in the same order, without the read.
     pub fn x_check_range(&self, start: u64, end: u64) -> Result<(), SeqDbError> {
+        self.range_len(start, end).map(|_| ())
+    }
+
+    /// The length of the range `start..end`, or the error of a range that ends before it
+    /// starts, passes the end of the file or does not fit in memory: the checks of every read of
+    /// a range (`read_range`, `with_range`, `x_check_range`).
+    fn range_len(&self, start: u64, end: u64) -> Result<usize, SeqDbError> {
         if end < start {
             return Err(SeqDbError::Format {
                 path: self.path.clone(),
@@ -251,8 +267,7 @@ impl DbFile {
         usize::try_from(end - start).map_err(|_| SeqDbError::Format {
             path: self.path.clone(),
             message: format!("byte range {start}..{end} does not fit in memory"),
-        })?;
-        Ok(())
+        })
     }
 
     /// The whole file.

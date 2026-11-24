@@ -1188,7 +1188,7 @@ impl std::fmt::Display for SetupEngineError {
 impl std::error::Error for SetupEngineError {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
-// blast_parameters.c:759-760 (cited in `run_local_search_with_pool` and at
+// blast_parameters.c:759-760 (cited at `BatchSplit::whole_batch_checks` and at
 // `stats::setup::hit_saving_parameters_fail`)
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-301
 /// The checks of the setup of NCBI's preliminary search (`BLAST_GapAlignSetUp`, after its
@@ -1424,22 +1424,6 @@ fn run_local_search_with_redo<R: MatchRedo>(
         true,
         pool,
     )?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // Without the Gumbel block (`-searchsp`, `OLD_FSC` or an ungapped search, which has none
-    // either, blast_setup.c:517-527) a set of subjects whose average is below one letter, in
-    // nucleotides, fails the setup of the preliminary search of a batch that NCBI searches (one
-    // with a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
-    // reports of the batches before (`preliminary_setup_checks`). A count of 0
-    // (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal there
-    // (`common::database::check_setup_count`, D1a-5 of line RG), after the same reports; a run
-    // whose batches have no valid context does not reach it and is reported as NCBI's. A batch
-    // that NCBI splits meets these checks in the setup of its first chunk with a valid context,
-    // after the chunk stops before it (`SplitBatchSteps`). `query_set_setup` above
-    // (NCBI's `BLAST_CalcEffLengths`, blast_setup.c:946-951, before the division at :975) refuses
-    // first where NCBI's search space overflows: with a count of 0 as well, that LOSAT refusal
-    // takes the place of this one for a run that NCBI does not finish. It is not a batch failure,
-    // so it comes before the reports of the batches before, which NCBI writes before it crashes
-    // (line RG D1a-6, review A F2).
     let split = BatchSplit::of(
         queries,
         setup_only.as_ref().map(|set_up| set_up.records),
@@ -1456,17 +1440,10 @@ fn run_local_search_with_redo<R: MatchRedo>(
             scoring.gapped,
         )
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-937
-    // The setup's read of OID 0 (`ReadFails::Setup`) comes before these checks: a batch searched
-    // whole on such a database fails with that read's error (`tblastn_app::search`), with
-    // `-searchsp` or `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG
-    // item X-short-bat fix 5), as a split batch's chunks meet it first (`SplitBatchSteps`).
-    if split.chunks.is_none()
-        && valid_contexts.iter().any(|&valid| valid)
-        && profile.subject_set.read_fails != Some(ReadFails::Setup)
-    {
-        setup_checks()?;
-    }
+    let any_valid = valid_contexts.iter().any(|&valid| valid);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-980 (cited at
+    // `BatchSplit::whole_batch_checks`)
+    split.whole_batch_checks(any_valid, profile.subject_set.read_fails, setup_checks)?;
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115:
@@ -1488,7 +1465,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // The set-up alone (`set_up_batch`): no search. A batch with a valid context reads its
     // subjects, one searched whole after the checks above (`BatchSplit::set_up_reads`).
     if let Some(set_up) = setup_only {
-        set_up.reads = valid_contexts.iter().any(|&valid| valid)
+        set_up.reads = any_valid
             && split.set_up_reads(
                 queries,
                 set_up.records,
@@ -1499,27 +1476,16 @@ fn run_local_search_with_redo<R: MatchRedo>(
             )?;
         return Ok(Vec::new());
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327:
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824:
-    // Preserve the parameter/validity state for reporting, then skip subject
-    // search when every query context has failed Karlin setup.
-    // A batch searched whole with a valid context gets to the read of a database whose read fails
-    // (`DatabaseReadReached`: `tblastn_app::search` fails it with the read's error), and with no
-    // subject in hand otherwise (a list that kept no sequence) finds nothing; a split batch meets
-    // its chunk stops first (`SplitBatchSteps`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327 (cited at
+    // `BatchSplit::searches`)
+    // The parameter/validity state above is kept for reporting; a batch whose subjects are not
+    // searched finds nothing.
     let no_hits = || {
         (0..queries.len())
             .map(|_| KappaResultHitList::new(profile.max_target_seqs))
             .collect::<Result<Vec<_>>>()
     };
-    if !valid_contexts.iter().any(|&valid| valid) {
-        return no_hits();
-    }
-    if split.chunks.is_none() && profile.subject_set.read_fails.is_some() {
-        return Err(DatabaseReadReached.into());
-    }
-    if split.chunks.is_none() && subjects.count() == 0 {
+    if !split.searches(any_valid, profile.subject_set.read_fails, subjects.count())? {
         return no_hits();
     }
     // Diagnostic (LOSAT_TIMING): from here to the end of the batch's search (the preliminary
@@ -2885,6 +2851,67 @@ impl BatchSplit {
             .then(|| split_protein_batch(&lengths, sizes))
             .flatten();
         Ok(Self { sizes, chunks })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-937
+    /// The setup checks `setup_checks` (`preliminary_setup_checks`) of the batch, where NCBI
+    /// searches it whole with a valid context (`any_valid`). Without the Gumbel block
+    /// (`-searchsp`, `OLD_FSC` or an ungapped search, which has none either,
+    /// blast_setup.c:517-527) a set of subjects whose average is below one letter, in nucleotides,
+    /// fails the setup of the preliminary search of a batch that NCBI searches (one with a valid
+    /// context): `tblastn_app::search` fails it with NCBI's engine error after the reports of the
+    /// batches before. A count of 0 (of a positive total) is the division by 0 where NCBI crashes,
+    /// LOSAT's refusal there (`common::database::check_setup_count`, D1a-5 of line RG), after the
+    /// same reports; a run whose batches have no valid context does not reach it and is reported
+    /// as NCBI's. A batch that NCBI splits meets these checks in the setup of its first chunk with
+    /// a valid context, after the chunk stops before it (`SplitBatchSteps`). `query_set_setup`,
+    /// which the caller runs first (NCBI's `BLAST_CalcEffLengths`, blast_setup.c:946-951, before
+    /// the division at :975), refuses first where NCBI's search space overflows: with a count of 0
+    /// as well, that LOSAT refusal takes the place of this one for a run that NCBI does not
+    /// finish. It is not a batch failure, so it comes before the reports of the batches before,
+    /// which NCBI writes before it crashes (line RG D1a-6, review A F2). The setup's read of OID 0
+    /// (`read_fails` of `ReadFails::Setup`) comes before these checks: a batch searched whole on
+    /// such a database fails with that read's error (`tblastn_app::search`), with `-searchsp` or
+    /// `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG item X-short-bat
+    /// fix 5), as a split batch's chunks meet it first.
+    fn whole_batch_checks(
+        &self,
+        any_valid: bool,
+        read_fails: Option<ReadFails>,
+        setup_checks: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        if self.chunks.is_none() && any_valid && read_fails != Some(ReadFails::Setup) {
+            setup_checks()?;
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824
+    /// Whether the batch's subjects are searched (`false`: the batch finds nothing). Not when every
+    /// query context has failed the Karlin setup (`any_valid` false). A batch searched whole with a
+    /// valid context gets to the read of a database whose read fails (`read_fails`;
+    /// `DatabaseReadReached`: `tblastn_app::search` fails it with the read's error), and with no
+    /// subject in hand otherwise (`subject_count` 0: a list that kept no sequence) finds nothing; a
+    /// split batch meets its chunk stops first (`SplitBatchSteps`).
+    fn searches(
+        &self,
+        any_valid: bool,
+        read_fails: Option<ReadFails>,
+        subject_count: usize,
+    ) -> Result<bool> {
+        if !any_valid {
+            return Ok(false);
+        }
+        if self.chunks.is_some() {
+            return Ok(true);
+        }
+        if read_fails.is_some() {
+            return Err(DatabaseReadReached.into());
+        }
+        Ok(subject_count > 0)
     }
 
     /// Whether NCBI's search of the batch, which has a valid context, reads the subjects, for the

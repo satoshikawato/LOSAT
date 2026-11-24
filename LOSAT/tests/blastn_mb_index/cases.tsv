@@ -10,9 +10,10 @@
 # and qst2.fa: two random queries each from that session's probe). Rows on databases made in the setup print no database date (outfmt 6).
 # A row with a refusal is one where NCBI reads an index in an
 # undefined way (or crashes): LOSAT refuses with "-use_index true with <refusal> is not supported by LOSAT's BLASTN", after the
-# output of the query batches before; NCBI's output stays for the lines that take them. A fourth field "same as NAME" compares
-# the row with row NAME's files: NCBI's -num_threads 1 output, which LOSAT gives at every thread count (Owner 2026-10-13), where
-# NCBI's result at more threads depends on its threads (m_mixed1 with -num_threads 4: NCBI crashed, exit 139, in 8 of 8 runs).
+# output of the query batches before; NCBI's output stays for the lines that take them. A fourth field "batch NAME" compares
+# the row with row NAME's files: NCBI's search with the index of the same queries as one query batch (BATCH_SIZE=1000000000),
+# a first search, at any -num_threads; LOSAT searches every query batch of an index of only some volumes with the index
+# (the Owner's answer C to Q-MIXIDX, approved exception 30 of PD-LOSAT-NCBI-DEFECTS; the D5c rows below).
 noidx	-	-query q.fa -outfmt 6 -use_index true -db v1
 noidx_al	-	-query q.fa -outfmt 6 -use_index true -db al
 noidx_archive	-	-query q.fa -outfmt 11 -use_index true -db v1
@@ -69,7 +70,7 @@ used_old_empty	makembindex -input db.fa -iformat fasta -old_style_index true -ou
 undefined_idx38	makembindex -input v1 -nmer 8 ; cut v1.00.idx 38	-query q.fa -outfmt 6 -use_index true -db al	a MegaBLAST index volume whose header NCBI does not read whole (@CWD@/v1.00.idx)
 old_endless	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,0,-1	an -index_name range of volumes that NCBI's loader does not finish ('oidx,,0,-1')
 # D5b-2 rows (2026-11-21): the indexed search (one-hit seeds), compared with NCBI; then the combinations D5b-2 refused (since
-# D5b-3 compared, except -db_hard_mask, D5b-5's, and the m_mixed2 crash).
+# D5b-3 compared, except -db_hard_mask, D5b-5's, and the m_mixed2 crash, D5c's).
 p1_0	makembindex -input v1 -nmer 8	-query q.fa -outfmt 0 -use_index true -db v1
 p1_arch	makembindex -input v1 -nmer 8	-query q.fa -outfmt 11 -use_index true -db v1
 b2_16	makembindex -input b2 -nmer 8	-query q2.fa -outfmt 6 -use_index true -db b2 -word_size 16
@@ -121,29 +122,29 @@ z_20_t4	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TEST
 win_i	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -window_size 40
 firstvol_list	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db 'v1 mv'
 mixed_list	makembindex -input mv -nmer 8	-query q.fa -outfmt 6 -use_index true -db 'v1 mv'
-m_mixed1	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz
-m_mixed2	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.02.shd	-query qz.fa -outfmt 6 -use_index true -db mz	a MegaBLAST database index of only some database volumes (@CWD@/mz.00.00.idx) and a later query batch or query chunk whose scan saves initial hits into a list that NCBI frees
+m_mixed1	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz	batch m_mixed1_1b
+m_mixed2	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.02.shd	-query qz.fa -outfmt 6 -use_index true -db mz	batch m_mixed2_1b
 span_n8	makeblastdb -in span.fa -dbtype nucl -out span ; makembindex -input span -nmer 8	-query qspan.fa -outfmt 6 -use_index true -db span -word_size 12 -evalue 1000
 span_n8_ws28	makeblastdb -in span.fa -dbtype nucl -out span ; makembindex -input span -nmer 8	-query qspan.fa -outfmt 6 -use_index true -db span -evalue 1000
 span_n12	makeblastdb -in span.fa -dbtype nucl -out span ; makembindex -input span	-query qspan.fa -outfmt 6 -use_index true -db span -word_size 16 -evalue 1000
 # D5b-3 rows (2026-11-22): mixed searches (DB volumes without a usable index are scanned, with or without an Error line),
-# a later query batch or chunk that reads the results NCBI keeps of an earlier search (searched with no seeds, or refused
-# where NCBI's scan frees its list of initial hits), and two-hit searches (-window_size).
+# a later query batch or chunk that reads the results NCBI keeps of an earlier search (since D5c compared with the search as
+# one query batch or without the index), and two-hit searches (-window_size).
 m_part	makembindex -input mv -nmer 8 ; rm mv.02.shd	-query q.fa -outfmt 6 -use_index true -db mv
 m_part_0	makembindex -input mv -nmer 8 ; rm mv.02.shd	-query q.fa -outfmt 0 -use_index true -db mv
-m_part_b1	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query q.fa -outfmt 6 -use_index true -db mv
-m_part_b1_t4	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query q.fa -outfmt 6 -use_index true -db mv -num_threads 4	same as m_part_b1
+m_part_b1	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query q.fa -outfmt 6 -use_index true -db mv	batch m_part_b1_1b
+m_part_b1_t4	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query q.fa -outfmt 6 -use_index true -db mv -num_threads 4	batch m_part_b1_1b
 m_part_one	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query qst1.fa -outfmt 6 -use_index true -db mv
-m_part_two	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query qst2.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index of only some database volumes (@CWD@/mv.00.00.idx) and a later query batch or query chunk whose scan saves initial hits into a list that NCBI frees
-m_part_c1200	makembindex -input mv -nmer 8 ; rm mv.02.shd	CHUNK_SIZE=1200 -query q.fa -outfmt 6 -use_index true -db mv	a MegaBLAST database index of only some database volumes (@CWD@/mv.00.00.idx) and a later query batch or query chunk whose scan saves initial hits into a list that NCBI frees
-m_part_c2000	makembindex -input mv -nmer 8 ; rm mv.02.shd	CHUNK_SIZE=2000 -query q.fa -outfmt 6 -use_index true -db mv
+m_part_two	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1 -query qst2.fa -outfmt 6 -use_index true -db mv	batch m_part_two_1b
+m_part_c1200	makembindex -input mv -nmer 8 ; rm mv.02.shd	CHUNK_SIZE=1200 -query q.fa -outfmt 6 -use_index true -db mv	plain m_part_c1200_n
+m_part_c2000	makembindex -input mv -nmer 8 ; rm mv.02.shd	CHUNK_SIZE=2000 -query q.fa -outfmt 6 -use_index true -db mv	plain m_part_c2000_n
 m_badshd	makembindex -input mv -nmer 8 ; put mv.01.shd 8 99	-query q.fa -outfmt 6 -use_index true -db mv
 m_badshd_b1	makembindex -input mv -nmer 8 ; put mv.01.shd 8 99	BATCH_SIZE=1 -query q.fa -outfmt 6 -use_index true -db mv
 m_noidx	makembindex -input mv -nmer 8 ; rm mv.01.00.idx	-query q.fa -outfmt 6 -use_index true -db mv
 m_noseq	makembindex -input mv -nmer 8 ; put mv.01.00.idx 36 0	-query q.fa -outfmt 6 -use_index true -db mv
 m_total	makembindex -input mv -nmer 8 ; put mv.01.00.idx 36 3	-query q.fa -outfmt 6 -use_index true -db mv
-m_mixed1_t4	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz -num_threads 4	same as m_mixed1
-m_mixed1_win	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz -window_size 40
+m_mixed1_t4	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz -num_threads 4	batch m_mixed1_1b
+m_mixed1_win	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz -window_size 40	batch m_mixed1_win_1b
 c_win_16_8	makembindex -input b2 -nmer 8	-query q2.fa -outfmt 6 -use_index true -db b2 -word_size 16 -window_size 8
 c_win_16_40	makembindex -input b2 -nmer 8	-query q2.fa -outfmt 6 -use_index true -db b2 -word_size 16 -window_size 40
 c_win_28_8	makembindex -input b2 -nmer 8	-query q2.fa -outfmt 6 -use_index true -db b2 -window_size 8
@@ -180,3 +181,16 @@ hm_i_r	makembindex -input hmr -nmer 8	-query qhm.fa -outfmt 6 -use_index true -d
 hm_n_nodust	-	-query qhm.fa -outfmt 6 -db hm -db_hard_mask 11 -dust no
 hm_i_nodust	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -dust no	plain hm_n_nodust
 hm_i_old	makembindex -input hm.fa -iformat fasta -old_style_index true -output hmo -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -index_name hmo -db_hard_mask 11	plain hm_n
+# D5c rows (2026-11-24, ad-RG-D5-13): an index of only some volumes searched in several query batches or query chunks, every
+# one with the index's seeds (the Owner's answer C to Q-MIXIDX, approved exception 30 of PD-LOSAT-NCBI-DEFECTS). NCBI's own
+# search with the index of such a row loses the seeds of the last index volume before a volume without one after its first
+# batch or chunk, or crashes (ncbi/<row>.*, kept for blastn_mb_index_fixtures.rs ncbi_loses_seeds_after_the_first_search). Rows
+# NAME_1b: the search as one query batch (a first search, which loses none); rows NAME_n: the search without the index (one-hit
+# query chunks, where no NCBI search with the index loses none); both frozen with freeze_d5b2.py --only.
+m_mixed1_1b	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	BATCH_SIZE=1000000000 -query qz.fa -outfmt 6 -use_index true -db mz
+m_mixed2_1b	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.02.shd	BATCH_SIZE=1000000000 -query qz.fa -outfmt 6 -use_index true -db mz
+m_mixed1_win_1b	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	BATCH_SIZE=1000000000 -query qz.fa -outfmt 6 -use_index true -db mz -window_size 40
+m_part_b1_1b	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1000000000 -query q.fa -outfmt 6 -use_index true -db mv
+m_part_two_1b	makembindex -input mv -nmer 8 ; rm mv.02.shd	BATCH_SIZE=1000000000 -query qst2.fa -outfmt 6 -use_index true -db mv
+m_part_c1200_n	makembindex -input mv -nmer 8 ; rm mv.02.shd	CHUNK_SIZE=1200 -query q.fa -outfmt 6 -db mv
+m_part_c2000_n	makembindex -input mv -nmer 8 ; rm mv.02.shd	CHUNK_SIZE=2000 -query q.fa -outfmt 6 -db mv

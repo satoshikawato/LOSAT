@@ -16,15 +16,19 @@
 //! NCBI's run succeeds, LOSAT writes nothing, or the batches before for a refusal of a later query
 //! batch or query chunk (its text names one).
 //!
-//! A row whose fourth field is `same as NAME` (the setup and the words of row NAME, with another
-//! `-num_threads`) is compared with row NAME's NCBI files: NCBI's `-num_threads 1` output, which
-//! LOSAT gives at every thread count (Owner 2026-10-13), for a run whose NCBI result at more
-//! threads depends on its threads. A row whose fourth field is `plain NAME` (row NAME's search
-//! with `-use_index true` (and `-index_name` for an old-style index) and `-db_hard_mask`, its
-//! setup with the index made, at any `-num_threads`) is compared with row NAME's NCBI files: NCBI's search without the index, whose
-//! output LOSAT's one-hit search with the index gives there, the masked letters matching nothing
-//! and the seeds in their hard ranges (the Owner's answer C to Q-HARDIDX, approved exception 24 of
-//! PD-LOSAT-NCBI-DEFECTS). A row whose fourth field is `expect NAME` (a search with the index and
+//! A row whose fourth field is `batch NAME` (row NAME's search with the index, in several query
+//! batches, at any `-num_threads`; row NAME has `BATCH_SIZE=1000000000`) is compared with row
+//! NAME's NCBI files: NCBI's search of the same queries as one query batch, a first search, whose
+//! output LOSAT gives when it searches every query batch of an index of only some volumes with the
+//! index (the Owner's answer C to Q-MIXIDX, approved exception 30 of PD-LOSAT-NCBI-DEFECTS; NCBI's
+//! later batches lose seeds there or crash, `ncbi_loses_seeds_after_the_first_search`). A row
+//! whose fourth field is `plain NAME` (row NAME's search with `-use_index true` (and `-index_name`
+//! for an old-style index), its setup with the index made, at any `-num_threads`) is compared with
+//! row NAME's NCBI files: NCBI's search without the index, whose output LOSAT's one-hit search
+//! with the index gives there: with `-db_hard_mask`, the masked letters matching nothing and the
+//! seeds in their hard ranges (the Owner's answer C to Q-HARDIDX, approved exception 24 of
+//! PD-LOSAT-NCBI-DEFECTS); in the query chunks of an index of only some volumes, the index
+//! searched for each chunk (approved exception 30). A row whose fourth field is `expect NAME` (a search with the index and
 //! `-db_hard_mask`) is compared with `exception24/NAME.{out,err,rc}`: LOSAT's output where no NCBI
 //! search gives it, the two-hit search (`-window_size`), whose index and scan pair other hits; that
 //! file is NCBI's search without the index with the rows that
@@ -54,11 +58,13 @@ struct Case {
     /// LOSAT's refusal (`@CWD@` for the row's directory), for a row that NCBI searches with
     /// the index.
     refusal: Option<String>,
-    /// The row whose NCBI files this row is compared with (itself, or that of `same as NAME` or
+    /// The row whose NCBI files this row is compared with (itself, or that of `batch NAME` or
     /// `plain NAME`), or the name of its `exception24` files (`expect NAME`).
     ncbi: String,
     /// A `plain NAME` row.
     plain: bool,
+    /// A `batch NAME` row.
+    batch: bool,
     /// The directory of the files that the row is compared with: `ncbi`, or `exception24` for
     /// an `expect NAME` row.
     files: &'static str,
@@ -79,7 +85,7 @@ fn cases() -> Vec<Case> {
         };
         let mut words = shell_words(fields[2]).0;
         let variables = take_variables(&mut words);
-        let same_as = fields.get(3).and_then(|text| text.strip_prefix("same as "));
+        let batch = fields.get(3).and_then(|text| text.strip_prefix("batch "));
         let plain = fields.get(3).and_then(|text| text.strip_prefix("plain "));
         let expect = fields.get(3).and_then(|text| text.strip_prefix("expect "));
         cases.push(Case {
@@ -89,14 +95,11 @@ fn cases() -> Vec<Case> {
             variables,
             refusal: fields
                 .get(3)
-                .filter(|_| same_as.is_none() && plain.is_none() && expect.is_none())
+                .filter(|_| batch.is_none() && plain.is_none() && expect.is_none())
                 .map(|text| text.to_string()),
-            ncbi: same_as
-                .or(plain)
-                .or(expect)
-                .unwrap_or(fields[0])
-                .to_string(),
+            ncbi: batch.or(plain).or(expect).unwrap_or(fields[0]).to_string(),
             plain: plain.is_some(),
+            batch: batch.is_some(),
             files: if expect.is_some() {
                 "exception24"
             } else {
@@ -114,9 +117,9 @@ fn cases() -> Vec<Case> {
             case.name
         );
     }
-    // A `same as` row runs its row's search with another thread count; a `plain` row, with the
-    // index (made in its setup, named by `-index_name` for an old-style one) and the hard mask,
-    // at any thread count.
+    // A `batch` row runs its row's search in more query batches (`BATCH_SIZE`), at any thread
+    // count; a `plain` row, with the index (made in its setup, named by `-index_name` for an
+    // old-style one), at any thread count.
     let without_threads = |words: &[String], index: bool| {
         let mut kept = Vec::new();
         let mut words = words.iter();
@@ -152,16 +155,31 @@ fn cases() -> Vec<Case> {
                     .words
                     .windows(2)
                     .any(|pair| pair == ["-use_index", "true"])
-                && case.words.iter().any(|word| word == "-db_hard_mask")
                 && !row.words.iter().any(|word| word == "-use_index")
+                && row.variables == case.variables
         } else {
-            row.ncbi == row.name && row.setup == case.setup
+            let one_batch = |variables: &[(String, String)]| -> Vec<(String, String)> {
+                let mut kept: Vec<(String, String)> = variables
+                    .iter()
+                    .filter(|(name, _)| name != "BATCH_SIZE")
+                    .cloned()
+                    .collect();
+                kept.push(("BATCH_SIZE".to_string(), "1000000000".to_string()));
+                kept.sort();
+                kept
+            };
+            let mut variables = row.variables.clone();
+            variables.sort();
+            row.ncbi == row.name
+                && row.setup == case.setup
+                && case.batch
+                && variables == one_batch(&case.variables)
+                && !case.variables.iter().any(|(name, _)| name == "CHUNK_SIZE")
         };
         assert!(
-            same && row.variables == case.variables
-                && without_threads(&row.words, case.plain)
-                    == without_threads(&case.words, case.plain),
-            "{}: not row {}'s search with another -num_threads (or with the index)",
+            same && without_threads(&row.words, case.plain)
+                == without_threads(&case.words, case.plain),
+            "{}: not row {}'s search in more query batches (or with the index)",
             case.name,
             row.name
         );
@@ -472,6 +490,50 @@ fn the_two_hit_index_search_adds_the_index_s_pairs() {
             "qhm2\thm0\t97.778\t900\t20\t0\t191\t1090\t1960\t1061\t0.0\t1565",
         ]
     );
+}
+
+/// NCBI's own search with an index of only some volumes in several query batches or query chunks
+/// (`ncbi/<row>.*` of the `batch` and `plain` rows of D5c): after its first search it loses the
+/// seeds of the last index volume before a volume without an index (its rows are those of the
+/// search as one query batch, or without the index, less the hits in that volume: AP027131.1 of
+/// mz, sbj3 of mv), or its scan frees the list of initial hits and it crashes (134 `double free
+/// detected`, 139) after the output of the batches before. LOSAT's rows are the whole list
+/// (approved exception 30 of PD-LOSAT-NCBI-DEFECTS).
+#[test]
+fn ncbi_loses_seeds_after_the_first_search() {
+    let read = |path: String| fs::read_to_string(fixtures().join("ncbi").join(path)).unwrap();
+    for (row, whole, lost, status) in [
+        ("m_part_b1", "m_part_b1_1b", "\tsbj3\t", "0"),
+        ("m_part_c2000", "m_part_c2000_n", "\tsbj3\t", "0"),
+        ("m_mixed1", "m_mixed1_1b", "\tAP027131.1\t", "0"),
+        ("m_mixed1_win", "m_mixed1_win_1b", "\tAP027131.1\t", "0"),
+        ("m_part_two", "m_part_two_1b", "\t", "134"),
+        ("m_part_c1200", "m_part_c1200_n", "\t", "134"),
+        ("m_mixed2", "m_mixed2_1b", "\t", "139"),
+    ] {
+        let ncbi = read(format!("{row}.out"));
+        let whole_rows = read(format!("{whole}.out"));
+        let mut rest = whole_rows.lines();
+        let mut missing = Vec::new();
+        for line in ncbi.lines() {
+            loop {
+                let next = rest
+                    .next()
+                    .unwrap_or_else(|| panic!("{row}: {line} not in {whole}"));
+                if next == line {
+                    break;
+                }
+                missing.push(next);
+            }
+        }
+        missing.extend(rest);
+        assert!(!missing.is_empty(), "{row}: no row lost");
+        assert!(
+            missing.iter().all(|line| line.contains(lost)),
+            "{row}: {missing:?}"
+        );
+        assert_eq!(read(format!("{row}.rc")).trim(), status, "{row}");
+    }
 }
 
 #[test]

@@ -1,0 +1,144 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: pn
+           4 sequences; 1,800 total letters
+
+
+
+Query= q0
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000001.1 alpha                                                     832     0.0  
+
+
+>NP_000001.1 alpha
+Length=450
+
+ Score = 832 bits (450),  Expect = 0.0
+ Identities = 450/450 (100%), Gaps = 0/450 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGGACCATTCCGTATTGTTGTCCGGCTGGTCAGTCTTCTATTAATCTGCCGACCAAAACC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TGGACCATTCCGTATTGTTGTCCGGCTGGTCAGTCTTCTATTAATCTGCCGACCAAAACC  60
+
+Query  61   TCTCTGATGTTTCCGACCAATTATCAGTATATTGTGAAATGGATTTCTCATTATCCGAAA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TCTCTGATGTTTCCGACCAATTATCAGTATATTGTGAAATGGATTTCTCATTATCCGAAA  120
+
+Query  121  TGTGAACGTAATCGTGGTGGTGTGCTGCCGAAAGGTGTGTGGTTTCAGTGGCATCGTGAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TGTGAACGTAATCGTGGTGGTGTGCTGCCGAAAGGTGTGTGGTTTCAGTGGCATCGTGAT  180
+
+Query  181  TGGATGATGCAGTTTCGTTATTGGAATAATCAGGCTCCGCATCAGGGTTTTAAACAGGAA  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  TGGATGATGCAGTTTCGTTATTGGAATAATCAGGCTCCGCATCAGGGTTTTAAACAGGAA  240
+
+Query  241  CTGGAACCGGGTTCTCTGCATCGTATTGGTCCGTTTGGTTTTTGGTCTATGGATGAATAT  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CTGGAACCGGGTTCTCTGCATCGTATTGGTCCGTTTGGTTTTTGGTCTATGGATGAATAT  300
+
+Query  301  CAGAAAGATATTCTGGATGAACCGATTCATTGGCGTCATAATTATGGTTGGCAGTGTATT  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  CAGAAAGATATTCTGGATGAACCGATTCATTGGCGTCATAATTATGGTTGGCAGTGTATT  360
+
+Query  361  TCTATGGATTATCAGCAGAAAGCTTCTATTATGATTCGTGCTCATGTGGTGCAGATTCCG  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  TCTATGGATTATCAGCAGAAAGCTTCTATTATGATTCGTGCTCATGTGGTGCAGATTCCG  420
+
+Query  421  TGGTGGTATTGTCCGTGGACCTGGTTTTAT  450
+            ||||||||||||||||||||||||||||||
+Sbjct  421  TGGTGGTATTGTCCGTGGACCTGGTTTTAT  450
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 767376
+
+
+Query= q1
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000002.1 Unknown                                                   832     0.0  
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 767376
+
+
+Query= q2
+
+Length=450
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 767376
+
+
+Query= q3
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000006.1 Unknown                                                   832     0.0  
+
+
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 767376
+
+
+  Database: pn
+    Posted date:  Nov 24, 2026  8:43 PM
+  Number of letters in database: 1,800
+  Number of sequences in database:  4
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

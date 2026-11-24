@@ -1,0 +1,176 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/idlist/x1"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "x1",
+          "query_len": 150,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gi|5|ref|NP_000102.1|",
+                  "accession": "NP_000102",
+                  "title": "beta1",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                },
+                {
+                  "id": "gi|5"
+                }
+              ],
+              "len": 150,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 319.701,
+                  "score": 818,
+                  "evalue": 1.99062e-118,
+                  "identity": 150,
+                  "positive": 150,
+                  "query_from": 1,
+                  "query_to": 150,
+                  "hit_from": 1,
+                  "hit_to": 150,
+                  "align_len": 150,
+                  "gaps": 0,
+                  "qseq": "RKSLRHEDTWVDFIACGFHRGTATEFPMVEYMVMVGRICRLNYVPWLKESFKKNYWAMCTKSNGSNCRYAQRRYLDVPSCFSEWHPVWNAAIRHHIMHWIEREQPKPMADEELHRIEASQHSQPAKNGQNVCQGEWGNIVQIQHTGIPRH",
+                  "hseq": "RKSLRHEDTWVDFIACGFHRGTATEFPMVEYMVMVGRICRLNYVPWLKESFKKNYWAMCTKSNGSNCRYAQRRYLDVPSCFSEWHPVWNAAIRHHIMHWIEREQPKPMADEELHRIEASQHSQPAKNGQNVCQGEWGNIVQIQHTGIPRH",
+                  "midline": "RKSLRHEDTWVDFIACGFHRGTATEFPMVEYMVMVGRICRLNYVPWLKESFKKNYWAMCTKSNGSNCRYAQRRYLDVPSCFSEWHPVWNAAIRHHIMHWIEREQPKPMADEELHRIEASQHSQPAKNGQNVCQGEWGNIVQIQHTGIPRH"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "ref|NP_000110.1|",
+                  "accession": "NP_000110",
+                  "title": "g1",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                },
+                {
+                  "id": "ref|NP_000110.1|"
+                }
+              ],
+              "len": 150,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 15.3938,
+                  "score": 28,
+                  "evalue": 2.2414,
+                  "identity": 5,
+                  "positive": 7,
+                  "query_from": 53,
+                  "query_to": 60,
+                  "hit_from": 54,
+                  "hit_to": 61,
+                  "align_len": 8,
+                  "gaps": 0,
+                  "qseq": "KNYWAMCT",
+                  "hseq": "RNRYAMCT",
+                  "midline": "+N +AMCT"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 14.6234,
+                  "score": 26,
+                  "evalue": 5.21144,
+                  "identity": 5,
+                  "positive": 7,
+                  "query_from": 68,
+                  "query_to": 77,
+                  "hit_from": 56,
+                  "hit_to": 65,
+                  "align_len": 10,
+                  "gaps": 0,
+                  "qseq": "RYAQRRYLDV",
+                  "hseq": "RYAMCTYIEV",
+                  "midline": "RYA   Y++V"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 14.2382,
+                  "score": 25,
+                  "evalue": 6.75165,
+                  "identity": 4,
+                  "positive": 6,
+                  "query_from": 5,
+                  "query_to": 12,
+                  "hit_from": 135,
+                  "hit_to": 142,
+                  "align_len": 8,
+                  "gaps": 0,
+                  "qseq": "RHEDTWVD",
+                  "hseq": "QHVDPWVN",
+                  "midline": "+H D WV+"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "ref|NP_000101.1|",
+                  "accession": "NP_000101",
+                  "title": "alpha",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 150,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 15.0086,
+                  "score": 27,
+                  "evalue": 3.04495,
+                  "identity": 6,
+                  "positive": 11,
+                  "query_from": 108,
+                  "query_to": 128,
+                  "hit_from": 48,
+                  "hit_to": 69,
+                  "align_len": 22,
+                  "gaps": 1,
+                  "qseq": "MADEELHR-IEASQHSQPAKNG",
+                  "hseq": "LNTQEFHRGLNDRTYEPPIRNG",
+                  "midline": "+  +E HR +    +  P +NG"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 7,
+            "db_len": 1050,
+            "hsp_len": 29,
+            "eff_space": 102487,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

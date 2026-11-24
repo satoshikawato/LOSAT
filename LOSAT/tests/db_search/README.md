@@ -1432,7 +1432,8 @@ files and alias files over them: the list alone, under `NSEQ` and `LENGTH` (read
 the constructor's scan), ANDed with a range or an `OIDLIST`, nested, two alias files over one volume, beside the bare
 volume (sequences left with no line), over one or both volumes of `gm`, and the list files' forms and errors (binary,
 no last separator, a GI past 2^32, `#`, empty, a bad count, missing at the absolute path
-`/losat-idlist-fixture-missing/none.txt`, two files in one value). The rows are `db.il.*` (every search program;
+`/losat-idlist-fixture-missing/none.txt`, two files in one value), and databases whose headers were rewritten with
+definition lines without a Seq-id (`ln`, `lnn`, `lm`, `x1`, `xw`, `pn`). The rows are `db.il.*` (every search program;
 `rps/ilmiss.pal` and `ilmissw.pal` over `rps_mini` with a missing GILIST) and blastdbcmd's cases A272-A366
 (`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt` and `u_np103.txt` are the searches' own
 `-seqidlist` files beside the alias files' lists.

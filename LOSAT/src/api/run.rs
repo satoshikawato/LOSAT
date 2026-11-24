@@ -841,6 +841,7 @@ fn psiblast_args(
             format.outfmt,
             format.side_out(args.out.as_deref()),
             false,
+            crate::algorithm::blastp::args::BlastpApp::Psiblast,
         )?;
     }
     args.into_blastp_args()

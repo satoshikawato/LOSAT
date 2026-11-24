@@ -21,7 +21,12 @@ fn only_a_shown_unsure_subject_is_refused() {
             .into_iter()
             .collect(),
     };
-    found.refuse_unsure_shown([0, 1]).unwrap();
-    let error = found.refuse_unsure_shown([0, 2]).unwrap_err().to_string();
+    found
+        .refuse_unsure_shown([0, 1], BlastpApp::Psiblast)
+        .unwrap();
+    let error = found
+        .refuse_unsure_shown([0, 2], BlastpApp::Psiblast)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("gb|ABC12.1| and emb|ABC12.1|"), "{error}");
 }

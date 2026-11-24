@@ -317,6 +317,7 @@ impl PsiblastArgs {
             &self.outfmt,
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
+            BlastpApp::Psiblast,
         )?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
@@ -477,8 +478,14 @@ impl PsiblastArgs {
     /// (`blastp::tabular`), without a custom delimiter, which psiblast's formatter does not get
     /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
     /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
-    /// `-outfmt`.
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+    /// `-outfmt`. `app`: psiblast, or deltablast (`deltablast::args`), which writes outfmt 0, 6 and
+    /// 7 only (item PS15b-3); the refusal names it (`BlastpApp::name`).
+    pub fn check_outfmt(
+        outfmt: &str,
+        out: Option<&std::path::Path>,
+        strategy: bool,
+        app: BlastpApp,
+    ) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
         // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
         let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?
@@ -490,24 +497,29 @@ impl PsiblastArgs {
         if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
             return Ok(());
         }
-        if let Some(format) = ReportFormat::from_number(choice.number) {
-            if !matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Xml
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::AsnText
-                    | ReportFormat::AsnBinary
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::ArchiveFormat
-                    | ReportFormat::CommaSeparatedValuesWithHeader
-            ) {
-                bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST yet",
-                    choice.number
-                );
-            }
+        let writes = match app {
+            BlastpApp::Deltablast => matches!(choice.number, 0 | 6 | 7),
+            _ => ReportFormat::from_number(choice.number).is_none_or(|format| {
+                matches!(
+                    format,
+                    ReportFormat::Pairwise
+                        | ReportFormat::Xml
+                        | ReportFormat::Tabular
+                        | ReportFormat::TabularWithComments
+                        | ReportFormat::AsnText
+                        | ReportFormat::AsnBinary
+                        | ReportFormat::CommaSeparatedValues
+                        | ReportFormat::ArchiveFormat
+                        | ReportFormat::CommaSeparatedValuesWithHeader
+                )
+            }),
+        };
+        if !writes {
+            bail!(
+                "output format {} is not supported by LOSAT's {} yet",
+                choice.number,
+                app.name()
+            );
         }
         Ok(())
     }

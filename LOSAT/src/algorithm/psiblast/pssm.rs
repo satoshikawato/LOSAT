@@ -12,6 +12,7 @@ use std::io::Write as _;
 use anyhow::Result;
 
 use super::rounds::SetKey;
+use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::pssm_search::in_pssm::{score_block, NCBISTDAA_TO_AMINOACID};
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
@@ -319,7 +320,8 @@ pub(crate) struct QueryPssm {
 /// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
 /// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
 /// sequence`, `input_msa`), also where the PSSM then fails. `archive`: the run's archive holds the
-/// PSSM's object (`QueryPssm::object`).
+/// PSSM's object (`QueryPssm::object`). `app`: the program (psiblast, or deltablast in its rounds
+/// after the first), which LOSAT's refusals name.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:380-404
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:131-148
@@ -353,12 +355,21 @@ pub(crate) fn query_pssm(
     ancillary: PssmAncillary,
     unread: &mut Vec<u32>,
     archive: bool,
+    app: BlastpApp,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
     sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
     let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
     let letters = &encoded.aa_seq[1..=encoded.aa_len];
-    let msa = input_msa(letters, alignments, subject, key, inclusion_ethresh, unread)?;
+    let msa = input_msa(
+        letters,
+        alignments,
+        subject,
+        key,
+        inclusion_ethresh,
+        unread,
+        app,
+    )?;
     if request.pseudocount < 0 {
         return Err(blast_options_error(
             "IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0",
@@ -673,6 +684,7 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
 // then ordered by score, so with an inclusion threshold below 1.0e-180 the counted subjects are
 // not shown to come first:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1390-1395,3089-3101 and 3095-3102
+/// `app`: psiblast, or deltablast in its rounds after the first (the refusal's names).
 fn input_msa(
     query: &[u8],
     alignments: &[PssmAlignment<'_>],
@@ -680,6 +692,7 @@ fn input_msa(
     key: &dyn Fn(u32) -> SetKey,
     inclusion_ethresh: f64,
     unread: &mut Vec<u32>,
+    app: BlastpApp,
 ) -> Result<PsiMsa> {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
     const BLAST_EXPECT_VALUE: f64 = 10.0;
@@ -715,7 +728,9 @@ fn input_msa(
             }
             let Some(row) = msa.rows.get_mut(msa_index) else {
                 anyhow::bail!(
-                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s {} writes out of bounds) is not supported by LOSAT's {}",
+                    app.ncbi_name(),
+                    app.name()
                 );
             };
             match subject(alignment.subject)?

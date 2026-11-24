@@ -286,12 +286,14 @@ pub struct DeltablastArgs {
 
 impl DeltablastArgs {
     /// blastp's arguments for deltablast's search, after LOSAT's refusal of the output formats
-    /// that it does not write yet.
+    /// that it does not write yet (all but 0, 6 and 7, item PS15b-3; psiblast's reading of
+    /// `-outfmt`, `PsiblastArgs::check_outfmt`, names deltablast in it).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(
+        PsiblastArgs::check_outfmt(
             &self.outfmt,
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
+            BlastpApp::Deltablast,
         )?;
         let delta = DeltaOptions {
             domain_inclusion_ethresh: self.domain_inclusion_ethresh,
@@ -409,27 +411,5 @@ impl DeltablastArgs {
             Some(b'D' | b'd' | b'T' | b't') => format!("1{}", &value[1..]),
             _ => value.to_string(),
         }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
-    /// NCBI's own reading of `-outfmt` comes first (psiblast's, `PsiblastArgs::check_outfmt`); the
-    /// formats that NCBI runs and LOSAT's deltablast does not write yet (all but 0, 6 and 7, item
-    /// PS15b-3) are refused, except those that NCBI refuses itself later (`ncbi_refuses_format`).
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
-        use crate::blastinput::app::{early_format_choice, ncbi_refuses_format, Program};
-        PsiblastArgs::check_outfmt(outfmt, out, strategy)?;
-        let Some(choice) = early_format_choice(outfmt, strategy)?.parsed().cloned() else {
-            return Ok(());
-        };
-        if ncbi_refuses_format(&choice, Program::Blastp, out) {
-            return Ok(());
-        }
-        if !matches!(choice.number, 0 | 6 | 7) {
-            anyhow::bail!(
-                "output format {} is not supported by LOSAT's DELTABLAST yet",
-                choice.number
-            );
-        }
-        Ok(())
     }
 }

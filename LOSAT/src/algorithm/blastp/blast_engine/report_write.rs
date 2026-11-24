@@ -895,7 +895,7 @@ pub(super) fn write_pairwise(
     // psiblast's two-part table looks each shown subject up in the previous round's
     // set by its handle: LOSAT refuses one that it cannot place as NCBI does.
     if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
-        found.refuse_unsure_shown(shown.iter().copied())?;
+        found.refuse_unsure_shown(shown.iter().copied(), args.app)?;
     }
     // The results' query masks (`result_query_masks`: none for psiblast's rounds), which the rows
     // show in lower case.

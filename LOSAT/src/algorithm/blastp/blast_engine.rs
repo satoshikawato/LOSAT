@@ -2960,7 +2960,7 @@ fn psiblast_pssms(
             .filter(|hsp| psi_round::included(hsp.e_value, args.inclusion_ethresh))
             .map(|hsp| keys.key(hsp.s_idx))
             .collect();
-        crate::algorithm::psiblast::rounds::SetKey::check_handles(&rows)?;
+        crate::algorithm::psiblast::rounds::SetKey::check_handles(&rows, args.app)?;
     }
     let mut files = PssmFiles::new(request);
     for (query, hit_list) in hit_lists.iter().enumerate() {
@@ -3020,6 +3020,7 @@ fn psiblast_pssms(
             &mut unread,
             // The PSSM after the last round, which no archive holds.
             false,
+            args.app,
         );
         let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
@@ -4796,8 +4797,11 @@ fn search_cli(
             resolved.num_threads = rps_hooks::volume_count(database);
         }
     }
-    // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
-    if resolved.app.is_psi() && database.is_none() {
+    // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`);
+    // deltablast's subjects are its round 1's per-subject searches (`CPsiBl2Seq`), which warn of
+    // each subject without letters and run (NCBI 2.17.0 probes `se1`, `se1_0`, `se2`, `se1_e1` of
+    // PS13a's fix round 2a).
+    if resolved.app == BlastpApp::Psiblast && database.is_none() {
         psiblast_check_subject_letters(&subjects.records)?;
     }
     // psiblast `-in_pssm`: the query is the PSSM's (read with the options, `check_options`);
@@ -5234,7 +5238,7 @@ fn run_local_formats(
     let xinclude = xinclude_format(&args, outputs)?;
     let scope = pssm_check_scope(&args);
     let args = resolved;
-    if args.app.is_psi() {
+    if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
     }
     // psiblast `-in_pssm` (the library API's `Inputs::pssm`): the query is the PSSM's, whose ids
@@ -5676,8 +5680,15 @@ fn resolve_for_formats(
 /// (`kbp_std`): NCBI's psiblast crashes where `PsiBlastSetupScoreBlock` reads the `kbp_psi` block
 /// that `Blast_ScoreBlkKbpUngappedCalc` did not make (2.17.0, exit 139): a PSSM query
 /// (`psiblast_stop_at_invalid_query`), and a later round whose masks leave no letter
-/// (`psi_round::run_queries`).
-const INVALID_PSSM_QUERY_REFUSAL: &str = "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST";
+/// (`psi_round::run_queries`; deltablast's later rounds are psiblast's searches, `CPsiBlast`,
+/// deltablast_app.cpp:486-530). `app` names the program.
+fn invalid_pssm_query_refusal(app: BlastpApp) -> anyhow::Error {
+    anyhow::anyhow!(
+        "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s {} crashes) is not supported by LOSAT's {}",
+        app.ncbi_name(),
+        app.name()
+    )
+}
 
 fn psiblast_stop_at_invalid_query(
     args: &ResolvedBlastpArgs,
@@ -5753,7 +5764,7 @@ fn psiblast_stop_at_invalid_query(
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
         // did not make (psiblast_aux_priv.cpp:89-107, blast_stat.c:2783-2799).
         Ok(_) if args.psi_search.is_some() && !contexts[batch].is_valid => {
-            anyhow::anyhow!(INVALID_PSSM_QUERY_REFUSAL)
+            invalid_pssm_query_refusal(args.app)
         }
         // Its letters give them, but the file's ungapped values make `kbp_psi` invalid.
         Ok(_) if args.psi_search.is_some() => crate::blastinput::app::engine_error(

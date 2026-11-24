@@ -3182,7 +3182,11 @@ impl PssmReads {
         match &self.refused {
             Some((oid, reason, program)) => Err(shared::parsed_refusal(
                 *oid,
-                &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
+                // The PSSM of psiblast's rounds, also deltablast's (`program`: the run's name).
+                &format!(
+                    "{reason}, and is in {}'s PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)",
+                    program.to_ascii_lowercase()
+                ),
                 program,
             )),
             None => Ok(()),

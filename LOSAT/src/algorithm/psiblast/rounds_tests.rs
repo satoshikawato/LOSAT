@@ -97,7 +97,7 @@ fn a_pssm_row_joins_following_hits_whose_seq_align_ids_match() {
     assert_ne!(key(8), key(7));
     assert!(key(8).matches(&key(7)) && key(7).matches(&key(8)));
     assert!(!key(8).matches(&key(4)));
-    SetKey::check_handles(&[key(8), key(7), key(4)]).unwrap();
+    SetKey::check_handles(&[key(8), key(7), key(4)], BlastpApp::Psiblast).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320 (cited at
@@ -125,21 +125,30 @@ fn keys_that_ncbis_handles_can_take_for_one_are_refused() {
         id("gb|X1.1|"),
         id("sp||NAMEY"),
     ];
-    SetKey::check_handles(&keys).unwrap();
-    SetKey::check_handles(&[id("pdb|1ABC|A"), id("pdb|1ABC|a"), id("pdb|1ABC|B")]).unwrap();
+    SetKey::check_handles(&keys, BlastpApp::Psiblast).unwrap();
+    SetKey::check_handles(
+        &[id("pdb|1ABC|A"), id("pdb|1ABC|a"), id("pdb|1ABC|B")],
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     for (a, b) in [
         ("gb|ABC12.1|", "gb|abc12.1|"),
         ("gb|ABC12.1|", "emb|ABC12.1|"),
         ("lcl|seqA", "lcl|SEQA"),
         ("gnl|MyDb|tagX", "gnl|MYDB|TAGX"),
     ] {
-        let error = SetKey::check_handles(&[id(a), id("gb|X1.1|"), id(b)]).unwrap_err();
+        let error = SetKey::check_handles(&[id(a), id("gb|X1.1|"), id(b)], BlastpApp::Psiblast)
+            .unwrap_err();
         assert_eq!(
             error.to_string(),
             format!("the Seq-align ids {a} and {b} of two database sequences that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's PSIBLAST")
         );
     }
-    let error = SetKey::check_handles(&[SetKey::Index(5), id("gnl|BL_ORD_ID|5")]).unwrap_err();
+    let error = SetKey::check_handles(
+        &[SetKey::Index(5), id("gnl|BL_ORD_ID|5")],
+        BlastpApp::Psiblast,
+    )
+    .unwrap_err();
     assert!(
         error
             .to_string()
@@ -152,7 +161,8 @@ fn keys_that_ncbis_handles_can_take_for_one_are_refused() {
 // `HandleIndex`): a giim id is never one handle with an equal one.
 #[test]
 fn a_giim_key_is_refused() {
-    let error = SetKey::check_handles(&[id("gb|X1.1|"), id("gim|123")]).unwrap_err();
+    let error =
+        SetKey::check_handles(&[id("gb|X1.1|"), id("gim|123")], BlastpApp::Psiblast).unwrap_err();
     assert!(error.to_string().contains("gim|123"), "{error}");
     assert!(error.to_string().contains("a giim id"), "{error}");
 }
@@ -162,7 +172,7 @@ fn a_giim_key_is_refused() {
 #[test]
 fn a_key_is_unsure_against_a_previous_set_only_where_the_handles_can_be_one() {
     let previous = [id("gb|ABC12.1|"), id("gb|X1.1|")];
-    let index = HandleIndex::new(&previous).unwrap();
+    let index = HandleIndex::new(&previous, BlastpApp::Psiblast).unwrap();
     assert_eq!(index.unsure(&id("gb|abc12.1|")), Some(&previous[0]));
     assert_eq!(index.unsure(&id("emb|ABC12.1|")), Some(&previous[0]));
     assert_eq!(index.unsure(&id("gb|ABC12.1|")), None);

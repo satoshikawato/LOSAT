@@ -17,6 +17,7 @@ use super::in_pssm_files::InPssmRounds;
 use super::pssm::{
     is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest,
 };
+use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
 /// The rounds of a psiblast run of FASTA queries or of a PSSM query: `-num_iterations` (0: until
@@ -112,12 +113,15 @@ impl SetKey {
     }
 
     /// LOSAT's refusal of the keys `a` and `b`, which differ but which NCBI's handles can take for
-    /// one sequence (`HandleIndex`).
-    pub(crate) fn refuse_pair(a: &SetKey, b: &SetKey) -> anyhow::Error {
+    /// one sequence (`HandleIndex`), in a run of `app` (psiblast, or deltablast's rounds, whose
+    /// inclusion sets and PSSMs are psiblast's).
+    pub(crate) fn refuse_pair(a: &SetKey, b: &SetKey, app: BlastpApp) -> anyhow::Error {
         anyhow::anyhow!(
-            "the Seq-align ids {} and {} of two database sequences that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's PSIBLAST",
+            "the Seq-align ids {} and {} of two database sequences that {} compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's {}",
             a.label(),
-            b.label()
+            b.label(),
+            app.ncbi_name(),
+            app.name()
         )
     }
 
@@ -134,9 +138,12 @@ impl SetKey {
     }
 
     /// LOSAT's refusal of two keys of `keys` that differ but that NCBI's handles can take for
-    /// one sequence, and of a `giim` key (`HandleIndex::new`).
-    pub(crate) fn check_handles<'a>(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<()> {
-        HandleIndex::new(keys).map(|_| ())
+    /// one sequence, and of a `giim` key (`HandleIndex::new`), in a run of `app`.
+    pub(crate) fn check_handles<'a>(
+        keys: impl IntoIterator<Item = &'a SetKey>,
+        app: BlastpApp,
+    ) -> Result<()> {
+        HandleIndex::new(keys, app).map(|_| ())
     }
 }
 
@@ -149,19 +156,22 @@ impl SetKey {
 /// `seqid::defline_set::handle_superset_key`: building it refuses two keys that differ but share
 /// that key (NCBI's handles can be one or two) and a `giim` key (built for the rows of a PSSM, and
 /// for a previous set, which was such rows); `unsure` then names a key of the index that another
-/// key differs from but can be one handle with.
+/// key differs from but can be one handle with. `app`: the run's program (psiblast, or deltablast),
+/// which the refusals name.
 pub(crate) struct HandleIndex<'a> {
     by_superset: std::collections::BTreeMap<Vec<u8>, &'a SetKey>,
 }
 
 impl<'a> HandleIndex<'a> {
-    pub(crate) fn new(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<Self> {
+    pub(crate) fn new(keys: impl IntoIterator<Item = &'a SetKey>, app: BlastpApp) -> Result<Self> {
         let mut by_superset = std::collections::BTreeMap::new();
         for key in keys {
             if let SetKey::Id(crate::seqid::model::ParsedSeqId::Giim(_)) = key {
                 anyhow::bail!(
-                    "the Seq-align id {} of a database sequence in psiblast's PSSM, a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id (it counts each of its alignments as a row of the PSSM's multiple alignment and cannot read its letters), is not supported by LOSAT's PSIBLAST",
-                    key.label()
+                    "the Seq-align id {} of a database sequence in {}'s PSSM, a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id (it counts each of its alignments as a row of the PSSM's multiple alignment and cannot read its letters), is not supported by LOSAT's {}",
+                    key.label(),
+                    app.ncbi_name(),
+                    app.name()
                 );
             }
             match by_superset.entry(key.superset()) {
@@ -169,7 +179,7 @@ impl<'a> HandleIndex<'a> {
                     entry.insert(key);
                 }
                 std::collections::btree_map::Entry::Occupied(entry) if *entry.get() != key => {
-                    return Err(SetKey::refuse_pair(entry.get(), key));
+                    return Err(SetKey::refuse_pair(entry.get(), key, app));
                 }
                 std::collections::btree_map::Entry::Occupied(_) => {}
             }

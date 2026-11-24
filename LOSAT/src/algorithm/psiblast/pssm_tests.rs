@@ -190,6 +190,7 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap();
     assert_eq!(msa.rows.len(), 3);
@@ -234,7 +235,16 @@ fn an_unread_seq_align_makes_its_row_the_query() {
         alignment(3, 1e-7, 2, 1, 3, None),
     ];
     let mut unread = Vec::new();
-    let msa = input_msa(&query, &alignments, &letters, &key, 0.002, &mut unread).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &letters,
+        &key,
+        0.002,
+        &mut unread,
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(unread, vec![1, 2]);
     assert_eq!(msa.rows.len(), 4);
     let whole = query.map(Some).to_vec();
@@ -265,6 +275,7 @@ fn an_alignment_past_the_last_row_is_refused() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
@@ -285,6 +296,7 @@ fn an_alignment_past_the_last_row_is_refused() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap();
     assert_eq!(msa.rows.len(), 3);
@@ -331,7 +343,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(1, 1e-9, 1, 1, 3, None),
         alignment(2, 1e-8, 0, 0, 4, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(
         row_letters(&msa.rows[1]),
@@ -347,7 +368,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(2, 1e-10, 0, 0, 2, None),
         alignment(3, 1e-9, 2, 2, 2, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(
         row_letters(&msa.rows[1]),
@@ -360,7 +390,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(0, 1e-9, 0, 0, 4, None),
         alignment(3, 1e-8, 2, 2, 2, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 4);
     assert_eq!(
         row_letters(&msa.rows[3]),
@@ -373,7 +412,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(2, 1e-9, 0, 0, 4, None),
         alignment(1, 1e-8, 0, 0, 4, None),
     ];
-    let error = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap_err();
+    let error = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap_err();
     assert!(
         error
             .to_string()
@@ -405,6 +453,7 @@ fn an_e_value_from_10_on_counts_as_10() {
             &SetKey::Index,
             threshold,
             &mut Vec::new(),
+            BlastpApp::Psiblast,
         )
         .unwrap();
         assert_eq!(msa.rows.len(), rows, "{e_value} {threshold}");
@@ -574,6 +623,7 @@ fn run_query_pssm_of(
         ANCILLARY,
         &mut Vec::new(),
         false,
+        BlastpApp::Psiblast,
     )
 }
 
@@ -669,6 +719,7 @@ fn an_o_in_the_query_prints_as_x() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap();
     let sbp = score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap();

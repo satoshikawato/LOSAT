@@ -26,7 +26,7 @@ use super::{
     write_reports_without_queries, BlastpRanges, BlastpReports, BlastpSubjectSource, ShownLetters,
     ShownSubjects, SubjectSet,
 };
-use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
+use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::common::database::HeaderReadError;
 use crate::algorithm::psiblast::pssm::{
@@ -595,7 +595,7 @@ fn run_queries(
                     // A later round whose letters give no Karlin-Altschul parameters (SEG again on the
                     // letters that the rounds before masked can mask every letter left): NCBI's
                     // setup crashes there, after this round's PSSM files, as for a PSSM query
-                    // (`INVALID_PSSM_QUERY_REFUSAL`).
+                    // (`invalid_pssm_query_refusal`).
                     //
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2782-2799
                     // The set-up's query (`kbp_std`), which a split query's round reads too.
@@ -604,7 +604,7 @@ fn run_queries(
                         .unwrap_or(&query_now.frame)
                         .clone()]];
                     if !super::pssm_hooks::psi_contexts(args, &frames)[0].is_valid {
-                        bail!(super::INVALID_PSSM_QUERY_REFUSAL);
+                        return Err(super::invalid_pssm_query_refusal(args.app));
                     }
                     search.round_query = Some(query_now.frame.clone());
                     // A split query's next round starts again from the record (`RoundQuery::split`).
@@ -1222,12 +1222,12 @@ pub(super) fn round_outcome(
     // round makes the next PSSM), and the shown subjects with the previous set in the two-part
     // table (`FoundBefore::unsure`, refused where it shows them). The previous set is one that
     // passed the rows' check: a round follows only one that made the next PSSM.
-    let earlier = HandleIndex::new(previous)?;
+    let earlier = HandleIndex::new(previous, args.app)?;
     if let Some((other, key)) = set
         .iter()
         .find_map(|key| earlier.unsure(key).map(|other| (other, key)))
     {
-        return Err(SetKey::refuse_pair(other, key));
+        return Err(SetKey::refuse_pair(other, key, args.app));
     }
     let found_before = if previous.is_empty() {
         None
@@ -1260,7 +1260,7 @@ pub(super) fn round_outcome(
     };
     let makes_next = has_alignments && !io.extra_result && (goes_on || io.save_last);
     if makes_next {
-        HandleIndex::new(&set)?;
+        HandleIndex::new(&set, args.app)?;
     }
     let ancillary = round_ancillary(args, contexts, gapped);
     // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:569-577
@@ -1331,13 +1331,18 @@ impl FoundBefore {
     /// superset of the first `-num_descriptions` Seq-aligns that NCBI's `x_SplitSeqAlign` looks up
     /// (blast_format.cpp:541-553); the checks of the shown titles refuse every such subject first
     /// in the cases built so far (review 2 of line DBID pssmrows, L1), so this stays a backstop.
-    pub(super) fn refuse_unsure_shown(&self, shown: impl IntoIterator<Item = usize>) -> Result<()> {
+    /// `app`: the run's program, which the refusal names.
+    pub(super) fn refuse_unsure_shown(
+        &self,
+        shown: impl IntoIterator<Item = usize>,
+        app: BlastpApp,
+    ) -> Result<()> {
         for s_idx in shown {
             if let Some((earlier, subject)) = u32::try_from(s_idx)
                 .ok()
                 .and_then(|s_idx| self.unsure.get(&s_idx))
             {
-                return Err(SetKey::refuse_pair(earlier, subject));
+                return Err(SetKey::refuse_pair(earlier, subject, app));
             }
         }
         Ok(())
@@ -1379,7 +1384,7 @@ impl SubjectKeys<'_> {
                 None => Vec::new(),
             };
             if letters.is_empty() {
-                bail!("internal error of LOSAT's PSIBLAST: subject {s_idx} of the PSSM has no letters");
+                bail!("LOSAT internal error: subject {s_idx} of the PSSM has no letters");
             }
             Ok(letters)
         })
@@ -1532,6 +1537,7 @@ fn next_pssm(
         ancillary,
         &mut unread,
         args.archive.is_some(),
+        args.app,
     );
     keys.unread_warnings(args.app.ncbi_name(), &unread, warnings);
     pssm

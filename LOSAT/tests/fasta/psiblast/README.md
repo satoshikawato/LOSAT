@@ -101,4 +101,8 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   E and Q; `ps8_c2c.faa`: YP_009220489.1 of `tests/fasta/WSSV.faa`; `ps8_s_lc.faa`: its letters with the first 60 in
   lower case (`-lcase_masking` masks a subject's lower case); `ps8_sid_q.faa` and `ps8_sid_s.faa`: a query and a
   subject set whose first record has the query's Seq-id `gb|ABC12345.1|` (under `-parse_deflines` NCBI shows them as
-  one sequence; LOSAT's rule refuses it).
+  one sequence; LOSAT's rule refuses it). For the `db.phi.long.*` rows (PS8a dev merge): `ps8_q24k.faa`, one
+  24,334-letter record made of BDT63125.1, BDT61687.1, BDT63580.1 and BDV50172.1 (the wsv360-like proteins of the
+  `tests/fasta/` virus sets, longest first), long enough for blastp's query split, which NCBI never applies to
+  PHI-BLAST; `ps8_x21000p.faa`: 21,000 `X`, then the letters of `ps8_c2c.faa`, in one record; `ps8_s_bdt63125.faa`:
+  BDT63125.1 alone.

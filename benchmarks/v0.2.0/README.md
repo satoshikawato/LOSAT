@@ -13,7 +13,7 @@ Every number on this page comes directly from the checksummed TSV tables in [`sn
 
 How to read the numbers:
 
-- A ratio is `BLAST+ ÷ LOSAT`. Tables 1–4 use medians across rounds; Table 5 (UniRef50) uses one chosen round per arm; Table 6 (SILVA 144) uses the mean of 2 alternated runs (`vsearch`: 1 run). Above `1×` means LOSAT took less time or less memory. Tables round ratios to one decimal (and whole numbers from 100); figures round to whole numbers from 10 (and two decimals near `1.0×` so `1.02×` is distinguishable from a tie).
+- **Time and memory comparisons.** Wall-time speedup is `BLAST+ ÷ LOSAT` (above `1×` = LOSAT faster; vs. LOSAT v0.1.0 in Table 7 and Figure 6). Memory comparisons are LOSAT's share of the baseline (below `100%` = LOSAT smaller), written as percent first with the same share as a fraction in parentheses — for example `44% (1/2.3)`, where `N` is `baseline ÷ LOSAT` (tight inside-plot labels show `1/N` alone). Tables 1–4 and 7 use medians across rounds; Table 5 (UniRef50) uses one chosen round per arm; Table 6 (SILVA 144) uses the mean of 2 alternated runs (`vsearch`: 1 run). Tables round ratios and denominators to one decimal (and whole numbers from 100); figures round to whole numbers from 10 (and two decimals near `1.0×` so `1.02×` is distinguishable from a tie).
 - Memory is peak resident set size (`max RSS`), with anonymous heap (`RssAnon`) separated where measured (`Figure 4c`, UniRef50 and SILVA 144 tables). NCBI BLAST+ maps database files into memory (`mmap`), so its `max RSS` on large `-db` searches includes file-backed pages that the OS kernel can reclaim. "Warm" means database files were read once before timed runs; "cold" means Linux page-cache entries were dropped before each run.
 - "Same output" means byte-identical SHA-256 checksums of the output files.
 
@@ -50,28 +50,28 @@ File names, sizes, and SHA-256 digests of every input are recorded in [`snapshot
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="figures/fig1_suite_overview_dark.png">
-    <img alt="Wall-time speedup (16 and 1 threads) and remaining peak memory footprint (% of BLAST+) for LOSAT 93ca2f652 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities" src="figures/fig1_suite_overview.png" width="100%">
+    <img alt="Wall-time speedup (16 and 1 threads) and peak memory as LOSAT's share of BLAST+ for LOSAT 93ca2f652 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities" src="figures/fig1_suite_overview.png" width="100%">
   </picture>
 </p>
 
-**Figure 1.** LOSAT `93ca2f652` vs. NCBI BLAST+ 2.17.0 and `rpsbproc` 0.5.1 across all 12 search modes and 3 single-threaded utilities ([`snapshot/standard_workloads.tsv`](snapshot/standard_workloads.tsv), [`snapshot/utilities.tsv`](snapshot/utilities.tsv)). **a**, combined 16-thread (filled) and 1-thread (open) wall-time speedup lollipops, plus 1-thread utilities (`makeblastdb`, `rpsbproc`). **b**, LOSAT peak resident memory at 16 threads (1 thread for utilities) as a percentage of NCBI BLAST+ 2.17.0 (`100%` reference track; shorter bars indicate smaller memory).
+**Figure 1.** LOSAT `93ca2f652` vs. NCBI BLAST+ 2.17.0 and `rpsbproc` 0.5.1 across all 12 search modes and 3 single-threaded utilities ([`snapshot/standard_workloads.tsv`](snapshot/standard_workloads.tsv), [`snapshot/utilities.tsv`](snapshot/utilities.tsv)). **a**, combined 16-thread (filled) and 1-thread (open) wall-time speedup lollipops, plus 1-thread utilities (`makeblastdb`, `rpsbproc`). **b**, LOSAT peak resident memory at 16 threads (1 thread for utilities) as a share of NCBI BLAST+ 2.17.0 (`100%` reference track, labeled as percent and fraction `1/N`; shorter bars indicate smaller memory).
 
 **Table 2.** Search mode medians. At 16 threads: 8 rounds after a discarded warm-up (`psiblast`, `rpsblast`, `rpstblastn`: 3 rounds; NCBI `tblastx`: 1 run). At 1 thread: 5 LOSAT runs and 1 NCBI run (`psiblast`, `rpsblast`: 3 each; `rpstblastn`: 1 each).
 
-| Search | 1t: LOSAT / BLAST+ (s) | BLAST+ ÷ LOSAT | 16t: LOSAT / BLAST+ (s) | BLAST+ ÷ LOSAT | Max RSS, 16t: LOSAT / BLAST+ (MiB) | BLAST+ ÷ LOSAT | Output |
+| Search | 1t: LOSAT / BLAST+ (s) | BLAST+ ÷ LOSAT | 16t: LOSAT / BLAST+ (s) | BLAST+ ÷ LOSAT | Max RSS, 16t: LOSAT / BLAST+ (MiB) | LOSAT max RSS as share of BLAST+ | Output |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `megablast` | 61.52 / 111.22 | 1.8 | 4.20 / 10.30 | 2.5 | 62.0 / 140.0 | 2.3 | same |
-| `dc-megablast` | 13.50 / 44.21 | 3.3 | 1.31 / 3.12 | 2.4 | 107.4 / 690.5 | 6.4 | same |
-| `blastn` | 54.93 / 262.44 | 4.8 | 4.67 / 18.37 | 3.9 | 76.7 / 1,889.0 | 24.6 | same |
-| `blastn-short` | 27.31 / 28.84 | 1.1 | 1.59 / 29.09 | 18.3 | 97.9 / 411.8 | 4.2 | same |
-| `blastp` | 42.86 / 132.42 | 3.1 | 2.87 / 9.02 | 3.1 | 47.5 / 131.0 | 2.8 | see note |
-| `blastp-fast` | 50.95 / 210.68 | 4.1 | 4.20 / 14.65 | 3.5 | 107.6 / 580.1 | 5.4 | see note |
-| `blastx` | 7.46 / 17.59 | 2.4 | 0.51 / 1.64 | 3.2 | 17.5 / 95.3 | 5.4 | same |
-| `tblastn` | 12.23 / 44.64 | 3.7 | 0.90 / 3.99 | 4.4 | 695.1 / 5,539.7 | 8.0 | same |
-| `tblastx` | 62.35 / 6,493.88 | 104 | 4.72 / 2,970.75 | 629 | 567.5 / 738.7 | 1.3 | same |
-| `psiblast` | 122.45 / 166.55 | 1.4 | 15.95 / 16.33 | 1.02 | 36.9 / 356.8 | 9.7 | same |
-| `rpsblast` | 35.99 / 44.97 | 1.2 | 3.77 / 6.49 | 1.7 | 254.5 / 1,693.3 | 6.7 | same |
-| `rpstblastn` | 248.98 / 284.10 | 1.1 | 18.00 / 42.90 | 2.4 | 297.3 / 1,916.8 | 6.4 | same |
+| `megablast` | 61.52 / 111.22 | 1.8 | 4.20 / 10.30 | 2.5 | 62.0 / 140.0 | 44% (1/2.3) | same |
+| `dc-megablast` | 13.50 / 44.21 | 3.3 | 1.31 / 3.12 | 2.4 | 107.4 / 690.5 | 16% (1/6.4) | same |
+| `blastn` | 54.93 / 262.44 | 4.8 | 4.67 / 18.37 | 3.9 | 76.7 / 1,889.0 | 4.1% (1/24.6) | same |
+| `blastn-short` | 27.31 / 28.84 | 1.1 | 1.59 / 29.09 | 18.3 | 97.9 / 411.8 | 24% (1/4.2) | same |
+| `blastp` | 42.86 / 132.42 | 3.1 | 2.87 / 9.02 | 3.1 | 47.5 / 131.0 | 36% (1/2.8) | see note |
+| `blastp-fast` | 50.95 / 210.68 | 4.1 | 4.20 / 14.65 | 3.5 | 107.6 / 580.1 | 19% (1/5.4) | see note |
+| `blastx` | 7.46 / 17.59 | 2.4 | 0.51 / 1.64 | 3.2 | 17.5 / 95.3 | 18% (1/5.4) | same |
+| `tblastn` | 12.23 / 44.64 | 3.7 | 0.90 / 3.99 | 4.4 | 695.1 / 5,539.7 | 13% (1/8.0) | same |
+| `tblastx` | 62.35 / 6,493.88 | 104 | 4.72 / 2,970.75 | 629 | 567.5 / 738.7 | 77% (1/1.3) | same |
+| `psiblast` | 122.45 / 166.55 | 1.4 | 15.95 / 16.33 | 1.02 | 36.9 / 356.8 | 10% (1/9.7) | same |
+| `rpsblast` | 35.99 / 44.97 | 1.2 | 3.77 / 6.49 | 1.7 | 254.5 / 1,693.3 | 15% (1/6.7) | same |
+| `rpstblastn` | 248.98 / 284.10 | 1.1 | 18.00 / 42.90 | 2.4 | 297.3 / 1,916.8 | 16% (1/6.4) | same |
 
 Notes on Table 2:
 
@@ -81,40 +81,40 @@ Notes on Table 2:
 
 **Table 3.** Single-threaded database construction and conserved-domain annotation utilities (medians of 3 alternated runs, LOSAT `93ca2f652`; [`snapshot/utilities.tsv`](snapshot/utilities.tsv)).
 
-| Program and input | LOSAT / NCBI (s) | NCBI ÷ LOSAT | Max RSS: LOSAT / NCBI (MiB) | NCBI ÷ LOSAT | Output |
+| Program and input | LOSAT / NCBI (s) | NCBI ÷ LOSAT | Max RSS: LOSAT / NCBI (MiB) | LOSAT max RSS as share of NCBI | Output |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `makeblastdb -dbtype nucl`, RefSeq 16S rRNA (28,036 sequences, 40.6 Mb) | 0.193 / 0.691 | 3.6 | 9.0 / 52.0 | 5.8 | not compared |
-| `makeblastdb -dbtype prot`, UniProtKB/Swiss-Prot (575,748 sequences, 209.0 M aa) | 2.197 / 8.537 | 3.9 | 16.0 / 58.4 | 3.6 | not compared |
-| `rpsbproc -t both -m rep -f`, `rpsblast` XML of 4,300 *E. coli* proteins vs. CDD v3.22 | 1.309 / 2.610 | 2.0 | 62.0 / 331.0 | 5.3 | same |
+| `makeblastdb -dbtype nucl`, RefSeq 16S rRNA (28,036 sequences, 40.6 Mb) | 0.193 / 0.691 | 3.6 | 9.0 / 52.0 | 17% (1/5.8) | not compared |
+| `makeblastdb -dbtype prot`, UniProtKB/Swiss-Prot (575,748 sequences, 209.0 M aa) | 2.197 / 8.537 | 3.9 | 16.0 / 58.4 | 27% (1/3.6) | not compared |
+| `rpsbproc -t both -m rep -f`, `rpsblast` XML of 4,300 *E. coli* proteins vs. CDD v3.22 | 1.309 / 2.610 | 2.0 | 62.0 / 331.0 | 19% (1/5.3) | same |
 
 ## 2. Large reference workflows and published tools (Table 4, Figure 2)
 
-To separate genuine search performance from process start-up latency, Figure 2 plots **only workloads where NCBI BLAST+ took at least 1 s per BLAST invocation**, displaying both wall-time speedup and peak resident memory reduction side by side. Start-up-dominated official tool test suites (`< 1 s/run` in BLAST+: ABRicate at 0.78 s/run across 9 runs, Bakta, CheckV, Easyfig `tblastx`, Galaxy, MAKER `blastn`, mlst, nf-core/blast, QIIME 2 small test, ResFinder/PlasmidFinder, and RGI) also matched NCBI output and remain recorded in full in [`snapshot/downstream_tools.tsv`](snapshot/downstream_tools.tsv).
+To separate genuine search performance from process start-up latency, Figure 2 plots **only workloads where NCBI BLAST+ took at least 1 s per BLAST invocation**, displaying both wall-time speedup and LOSAT's share of BLAST+'s peak resident memory side by side. Start-up-dominated official tool test suites (`< 1 s/run` in BLAST+: ABRicate at 0.78 s/run across 9 runs, Bakta, CheckV, Easyfig `tblastx`, Galaxy, MAKER `blastn`, mlst, nf-core/blast, QIIME 2 small test, ResFinder/PlasmidFinder, and RGI) also matched NCBI output and remain recorded in full in [`snapshot/downstream_tools.tsv`](snapshot/downstream_tools.tsv).
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="figures/fig2_real_pipelines_dark.png">
-    <img alt="Wall-time speedup and remaining peak memory footprint (% of BLAST+) across large reference workflows and published tools taking at least 1 second per run" src="figures/fig2_real_pipelines.png" width="100%">
+    <img alt="Wall-time speedup and peak memory as LOSAT's share of BLAST+ across large reference workflows and published tools taking at least 1 second per run" src="figures/fig2_real_pipelines.png" width="100%">
   </picture>
 </p>
 
-**Figure 2.** Unmodified BLAST+ commands run through `losat --install-shims` ([`snapshot/large_workflows.tsv`](snapshot/large_workflows.tsv), [`snapshot/downstream_tools.tsv`](snapshot/downstream_tools.tsv)). Each panel pairs wall-time speedup (`BLAST+ ÷ LOSAT`, longer = faster) with LOSAT's remaining peak resident memory as a percentage of BLAST+ (`100%` reference track, shorter = smaller). **a**, 9 large reference workflows at 16 threads (earlier development build `095ff0c16`, medians of 3 rounds; warm `ref_prok_rep_genomes` on release candidate `93ca2f652` appears in §3 / Figure 3a–b). On 1M reads against 16S rRNA, piping the query through `stdin` slows NCBI BLAST+ `15.9×` compared with reading from a file (`174.53 s` vs. `10.98 s`), whereas LOSAT takes `1.19×` as long (`4.31 s` vs. `3.63 s`), yielding `40.5×` via `stdin` vs. `3.0×` from a query file (consistent with Figure 3c's `3.3×` on build `93ca2f652`). **b**, 14 multi-thread published tool rows taking ≥ 1 s/run (16 threads; Prokka, Roary, and OrthoFinder as 16 concurrent 1-thread processes; LOSAT `095ff0c16`). **c**, 7 single-thread-only published tool rows taking ≥ 1 s/run (LOSAT `e04e79480`, `d9527a7da`, `1855cad86`, medians of 4 runs). Plotted times for multi-call tools are summed over the BLAST calls in each workflow. `†` marks workloads where NCBI BLAST+'s multi-thread output drifts from its own 1-thread output; LOSAT matches 1-thread NCBI byte-for-byte.
+**Figure 2.** Unmodified BLAST+ commands run through `losat --install-shims` ([`snapshot/large_workflows.tsv`](snapshot/large_workflows.tsv), [`snapshot/downstream_tools.tsv`](snapshot/downstream_tools.tsv)). Each panel pairs wall-time speedup (`BLAST+ ÷ LOSAT`, longer = faster) with LOSAT's peak resident memory as a share of BLAST+ (`100%` reference track, labeled as percent and fraction `1/N`; shorter = smaller). **a**, 9 large reference workflows at 16 threads (earlier development build `095ff0c16`, medians of 3 rounds; warm `ref_prok_rep_genomes` on release candidate `93ca2f652` appears in §3 / Figure 3a–b). On 1M reads against 16S rRNA, piping the query through `stdin` slows NCBI BLAST+ `15.9×` compared with reading from a file (`174.53 s` vs. `10.98 s`), whereas LOSAT takes `1.19×` as long (`4.31 s` vs. `3.63 s`), yielding `40.5×` via `stdin` vs. `3.0×` from a query file (consistent with Figure 3c's `3.3×` on build `93ca2f652`). **b**, 14 multi-thread published tool rows taking ≥ 1 s/run (16 threads; Prokka, Roary, and OrthoFinder as 16 concurrent 1-thread processes; LOSAT `095ff0c16`). **c**, 7 single-thread-only published tool rows taking ≥ 1 s/run (LOSAT `e04e79480`, `d9527a7da`, `1855cad86`, medians of 4 runs). Plotted times for multi-call tools are summed over the BLAST calls in each workflow. `†` marks workloads where NCBI BLAST+'s multi-thread output drifts from its own 1-thread output; LOSAT matches 1-thread NCBI byte-for-byte.
 
-**Table 4.** Large reference workflows at 16 threads (earlier development build `095ff0c16` vs. NCBI BLAST+ 2.17.0, warm page cache; [`snapshot/large_workflows.tsv`](snapshot/large_workflows.tsv)). Across the 8 query-file workflows, LOSAT ran `1.4×` to `5.0×` faster (`3.0×` on 1M reads from a file, consistent with Figure 3c's `3.3×` on build `93ca2f652`), and `40.5×` faster when piping those 1M reads through `stdin`, where NCBI BLAST+ takes `15.9×` longer than from a file (`174.53 s` vs. `10.98 s`) while LOSAT takes `1.19×` (`4.31 s` vs. `3.63 s`). For warm `ref_prok_rep_genomes` on release candidate `93ca2f652` (`29.37 s` / `1.6×`, `71.4×` memory), see §3 and Figure 3a–b.
+**Table 4.** Large reference workflows at 16 threads (earlier development build `095ff0c16` vs. NCBI BLAST+ 2.17.0, warm page cache; [`snapshot/large_workflows.tsv`](snapshot/large_workflows.tsv)). Across the 8 query-file workflows, LOSAT ran `1.4×` to `5.0×` faster (`3.0×` on 1M reads from a file, consistent with Figure 3c's `3.3×` on build `93ca2f652`), and `40.5×` faster when piping those 1M reads through `stdin`, where NCBI BLAST+ takes `15.9×` longer than from a file (`174.53 s` vs. `10.98 s`) while LOSAT takes `1.19×` (`4.31 s` vs. `3.63 s`). For warm `ref_prok_rep_genomes` on release candidate `93ca2f652` (`29.37 s` / `1.6×` faster, `1.4% (1/71.4)` of BLAST+'s max RSS), see §3 and Figure 3a–b.
 
-| Workflow | Program | LOSAT / BLAST+ (s) | Speedup | Max RSS: LOSAT / BLAST+ (MiB) | Memory ratio | Output |
+| Workflow | Program | LOSAT / BLAST+ (s) | Speedup | Max RSS: LOSAT / BLAST+ (MiB) | LOSAT max RSS as share of BLAST+ | Output |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| 1M reads (150 nt) vs. 16S rRNA (`stdin`) | `blastn` | 4.31 / 174.53 | 40.5 | 344.0 / 498.0 | 1.4 | same |
-| 1M reads (150 nt) vs. 16S rRNA (query file) | `blastn` | 3.63 / 10.98 | 3.0 | 294.2 / 5,221.6 | 17.7 | same |
-| QIIME 2 (100k amplicons, 253 nt) vs. 16S rRNA | `blastn` | 493.37 / 2,444.29 | 5.0 | 107.9 / 359.5 | 3.3 | same |
-| Trinotate proteome vs. Swiss-Prot | `blastp` | 169.64 / 501.44 | 3.0 | 64.8 / 447.6 | 6.9 | same |
-| UniRef50 (100 human proteins vs. 38.8M seqs) | `blastp` | 615.90 / 1,755.51 | 2.9 | 92.6 / 13,702.5 | 148 | same |
-| QIIME 2 (10k amplicons) vs. 16S rRNA | `blastn` | 49.18 / 115.19 | 2.3 | 87.7 / 100.8 | 1.1 | same as NCBI 1t (`†`) |
-| Trinotate transcripts vs. Swiss-Prot | `blastx` | 152.30 / 331.20 | 2.2 | 57.0 / 332.0 | 5.8 | same |
-| BlobToolKit (`ref_prok_rep_genomes`, 27 GB) | `blastn` | 34.17 / 47.47 | 1.4 | 372.1 / 25,538.5 | 68.6 | same |
-| BlobToolKit (`core_nt`, 319 GB) | `blastn` | 391.74 / 542.14 | 1.4 | 407.2 / 263,593.7 | 647 | same |
+| 1M reads (150 nt) vs. 16S rRNA (`stdin`) | `blastn` | 4.31 / 174.53 | 40.5 | 344.0 / 498.0 | 69% (1/1.4) | same |
+| 1M reads (150 nt) vs. 16S rRNA (query file) | `blastn` | 3.63 / 10.98 | 3.0 | 294.2 / 5,221.6 | 5.6% (1/17.7) | same |
+| QIIME 2 (100k amplicons, 253 nt) vs. 16S rRNA | `blastn` | 493.37 / 2,444.29 | 5.0 | 107.9 / 359.5 | 30% (1/3.3) | same |
+| Trinotate proteome vs. Swiss-Prot | `blastp` | 169.64 / 501.44 | 3.0 | 64.8 / 447.6 | 14% (1/6.9) | same |
+| UniRef50 (100 human proteins vs. 38.8M seqs) | `blastp` | 615.90 / 1,755.51 | 2.9 | 92.6 / 13,702.5 | 0.68% (1/148) | same |
+| QIIME 2 (10k amplicons) vs. 16S rRNA | `blastn` | 49.18 / 115.19 | 2.3 | 87.7 / 100.8 | 87% (1/1.1) | same as NCBI 1t (`†`) |
+| Trinotate transcripts vs. Swiss-Prot | `blastx` | 152.30 / 331.20 | 2.2 | 57.0 / 332.0 | 17% (1/5.8) | same |
+| BlobToolKit (`ref_prok_rep_genomes`, 27 GB) | `blastn` | 34.17 / 47.47 | 1.4 | 372.1 / 25,538.5 | 1.5% (1/68.6) | same |
+| BlobToolKit (`core_nt`, 319 GB) | `blastn` | 391.74 / 542.14 | 1.4 | 407.2 / 263,593.7 | 0.15% (1/647) | same |
 
-All 28 published tools tested (ABRicate, AMRFinderPlus, Bakta, Biopython, BlobToolKit, BRIG, BUSCO, CheckV, ECTyper, Easyfig, Galaxy, Kaptive, MAKER, mlst, MOB-suite, nf-core/blast, OrthoFinder, Prokka, pyani ANIb, QIIME 2, rBLAST, ResFinder/PlasmidFinder, RGI, Roary, SISTR, Trinotate, Unicycler, ViPTreeGen) produced identical output to NCBI BLAST+ 2.17.0 (matching NCBI's 1-thread output where NCBI's multi-thread output drifts in BUSCO and QIIME 2). Among the `≥ 1 s/run` tool rows plotted in Figure 2b–c, LOSAT ran `2.0×` (BUSCO) to `20×` (AMRFinderPlus) faster at the tools' thread counts with `1.3×` to `8.3×` lower peak RSS, and `1.8×` to `3.4×` faster in the 7 single-thread-only suites with `1.3×` to `22.5×` lower peak RSS. Single-thread timings for the multi-thread tool rows (for example, AMRFinderPlus `4.88×`, BRIG `3.24×`, Prokka `2.77×`) remain recorded in full in [`snapshot/downstream_tools.tsv`](snapshot/downstream_tools.tsv).
+All 28 published tools tested (ABRicate, AMRFinderPlus, Bakta, Biopython, BlobToolKit, BRIG, BUSCO, CheckV, ECTyper, Easyfig, Galaxy, Kaptive, MAKER, mlst, MOB-suite, nf-core/blast, OrthoFinder, Prokka, pyani ANIb, QIIME 2, rBLAST, ResFinder/PlasmidFinder, RGI, Roary, SISTR, Trinotate, Unicycler, ViPTreeGen) produced identical output to NCBI BLAST+ 2.17.0 (matching NCBI's 1-thread output where NCBI's multi-thread output drifts in BUSCO and QIIME 2). Among the `≥ 1 s/run` tool rows plotted in Figure 2b–c, LOSAT ran `2.0×` (BUSCO) to `20×` (AMRFinderPlus) faster at the tools' thread counts using `12% (1/8.3)` to `79% (1/1.3)` of BLAST+'s peak RSS, and `1.8×` to `3.4×` faster in the 7 single-thread-only suites using `4.4% (1/22.5)` to `75% (1/1.3)` of BLAST+'s peak RSS. Single-thread timings for the multi-thread tool rows (for example, AMRFinderPlus `4.88×`, BRIG `3.24×`, Prokka `2.77×`) remain recorded in full in [`snapshot/downstream_tools.tsv`](snapshot/downstream_tools.tsv).
 
 ## 3. Scaling with database size, query volume, and threads (Figure 3)
 
@@ -127,8 +127,8 @@ All 28 published tools tested (ABRicate, AMRFinderPlus, Bakta, Biopython, BlobTo
 
 **Figure 3.** LOSAT (circles) vs. NCBI BLAST+ 2.17.0 (diamonds) across database size, query volume, threads, and modes ([`snapshot/scaling.tsv`](snapshot/scaling.tsv), [`snapshot/standard_workloads.tsv`](snapshot/standard_workloads.tsv)). **a**, peak memory and **b**, warm-cache (filled) and cold-cache (open) wall time of `megablast` of 210 draft contigs (5.50 Mb) against databases from `abr_genes` (0.16 MB) and RefSeq 16S rRNA (15.3 MB) to `ref_prok_rep_genomes` (26.8 GB, 1.14M seqs) and NCBI `core_nt` (319.4 GB, 132.3M seqs), both programs `-db`, 16 threads, `-max_target_seqs 10 -max_hsps 1 -evalue 1e-25 -lcase_masking -dust "20 64 1"`. **c**, wall time and peak memory of `megablast` for 10k, 100k, and 1M reads (150 nt) against RefSeq 16S rRNA (16t, both `-db`). **d**, multi-core speed efficiency (`1` to `16` cores vs. the dotted ideal linear diagonal) and **e**, peak memory curves (`1` to `16` cores; solid = LOSAT, dashed = BLAST+) for `blastn`, `blastp`, and `tblastn` in Table 1 forms. **f**, 1-thread (open) to 16-thread (filled) peak memory shift across all 12 search modes. LOSAT `93ca2f652`, except `core_nt` and cold-cache runs (`095ff0c16`).
 
-- **Database size (a, b).** On `ref_prok_rep_genomes` (26.8 GB), warm cache: 29.37 s and 358 MiB vs. 47.28 s and 25,580 MiB (`1.6×` faster, `71.4×` lower max RSS); cold cache: 44.96 s vs. 87.22 s (`1.9×`). On `core_nt` (319.4 GB), warm cache: 391.74 s and 407 MiB vs. 542.14 s and 263,594 MiB / 257.4 GiB (`1.4×` faster, `647×` lower max RSS); cold cache: 491.16 s vs. 775.83 s (`1.6×`, peak 409 MiB vs. 257.4 GiB). On `abr_genes` (0.16 MB), BLAST+ spent 0.90 s mostly in start-up.
-- **Query volume (c).** From 10,000 to 1,000,000 reads, LOSAT scaled from 0.075 s / 58.3 MiB to 3.60 s / 302.3 MiB, while BLAST+ rose from 1.49 s / 232.1 MiB to 12.01 s / 5,145.2 MiB (`3.3×` faster and `17.0×` lower max RSS at 1M reads).
+- **Database size (a, b).** On `ref_prok_rep_genomes` (26.8 GB), warm cache: 29.37 s and 358 MiB vs. 47.28 s and 25,580 MiB (`1.6×` faster, `1.4% (1/71.4)` of BLAST+'s max RSS); cold cache: 44.96 s vs. 87.22 s (`1.9×`). On `core_nt` (319.4 GB), warm cache: 391.74 s and 407 MiB vs. 542.14 s and 263,594 MiB / 257.4 GiB (`1.4×` faster, `0.15% (1/647)` of BLAST+'s max RSS); cold cache: 491.16 s vs. 775.83 s (`1.6×`, peak 409 MiB vs. 257.4 GiB). On `abr_genes` (0.16 MB), BLAST+ spent 0.90 s mostly in start-up.
+- **Query volume (c).** From 10,000 to 1,000,000 reads, LOSAT scaled from 0.075 s / 58.3 MiB to 3.60 s / 302.3 MiB, while BLAST+ rose from 1.49 s / 232.1 MiB to 12.01 s / 5,145.2 MiB (`3.3×` faster using `5.9% (1/17.0)` of BLAST+'s max RSS at 1M reads).
 - **Threads and modes (d–f).** From 1 to 16 cores, LOSAT achieved `11.8×` scaling on `blastn`, `14.9×` on `blastp`, and `13.6×` on `tblastn`, staying `3.1×` to `4.9×` faster than BLAST+ at every thread count while keeping peak memory far below BLAST+ across every thread count (`e`) and across all 12 search modes (`f`).
 
 ## 4. Exact BLAST+ parity vs. heuristic aligners (Tables 5–6, Figure 4)
@@ -200,12 +200,12 @@ Heuristic protein and nucleotide aligners (DIAMOND, MMseqs2, vsearch) give up ex
 
 **Table 7.** LOSAT v0.1.0 release binary vs. LOSAT `93ca2f652` (v0.2.0) and NCBI BLAST+ 2.17.0 at 16 threads.
 
-| Mode | v0.1.0 time (s) | BLAST+ time (s) | v0.2.0 time (s) | Speedup vs. v0.1.0 | v0.1.0 RSS (MiB) | BLAST+ RSS (MiB) | v0.2.0 RSS (MiB) | Memory vs. v0.1.0 |
+| Mode | v0.1.0 time (s) | BLAST+ time (s) | v0.2.0 time (s) | Speedup vs. v0.1.0 | v0.1.0 RSS (MiB) | BLAST+ RSS (MiB) | v0.2.0 RSS (MiB) | v0.2.0 max RSS as share of v0.1.0 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `blastn` | 212.38 | 18.37 | 4.67 | 45.5× | 3,858.5 | 1,889.0 | 76.7 | 50.3× |
-| `tblastx`* | 188.02 | 2,970.75 | 4.72 | 39.8× | 1,605.4 | 738.7 | 567.5 | 2.8× |
-| `megablast`* | 57.66 | 10.30 | 4.20 | 13.7× | 2,031.0 | 140.0 | 62.0 | 32.8× |
-| `blastp` | 15.74 | 9.02 | 2.87 | 5.5× | 578.9 | 131.0 | 47.5 | 12.2× |
+| `blastn` | 212.38 | 18.37 | 4.67 | 45.5× | 3,858.5 | 1,889.0 | 76.7 | 2.0% (1/50.3) |
+| `tblastx`* | 188.02 | 2,970.75 | 4.72 | 39.8× | 1,605.4 | 738.7 | 567.5 | 35% (1/2.8) |
+| `megablast`* | 57.66 | 10.30 | 4.20 | 13.7× | 2,031.0 | 140.0 | 62.0 | 3.1% (1/32.8) |
+| `blastp` | 15.74 | 9.02 | 2.87 | 5.5× | 578.9 | 131.0 | 47.5 | 8.2% (1/12.2) |
 
 *\*LOSAT v0.1.0 outputs for `megablast` and `tblastx` differed from NCBI BLAST+; v0.2.0 matches NCBI BLAST+ 2.17.0 form for form (Table 2 notes).*
 

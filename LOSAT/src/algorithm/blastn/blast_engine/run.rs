@@ -3804,9 +3804,12 @@ struct SubjectScratch {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:97-106
     diag_hash: DiagHashTable,
     // EXPERIMENT (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`): the allocations of the partition
-    // tables and buffers of the partitioned fold of the strips paths. Every partitioned stage
-    // copies `diag_hash` into the partition tables, so no content carries over from one stage
-    // to the next. Empty while the switch is off. No NCBI counterpart.
+    // tables and buffers of the partitioned fold of the strips paths. A partitioned stage on the
+    // chains copies `diag_hash` into the partition tables, so no table content carries over from
+    // one stage to the next; with LOSAT_X_DCLATEST the stages on the maps copy no table, and the
+    // maps (each partition's and the owner's, `PartState::latest`, `PartScratch::latest`) carry
+    // their entries from stage to stage, dead at the next stage's start (`DiagLatest::begin`).
+    // Empty while the switch is off. No NCBI counterpart.
     x_pair_fold: x_pair_seed::PartScratch,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
     diag_table_offset: i32,
@@ -5899,6 +5902,7 @@ fn post_process_hits_and_write(
                         kind: output_format.xml2_kind(),
                         only_xml2: xml_only_xml2,
                         side_sink: side_sink.as_ref(),
+                        prefetch: database::prefetch_format(output_formats),
                     },
                     report,
                     &hit_lists,

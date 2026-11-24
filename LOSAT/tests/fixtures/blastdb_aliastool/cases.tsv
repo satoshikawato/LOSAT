@@ -1,0 +1,186 @@
+# id	args (bash words; single quotes only)
+H01	-help
+H02	-h
+X01	
+X02	-dbtype nucl
+X03	-out x
+X04	-title T -out x
+X05	-db in/p4 -gilist in/gi_ok.txt -out ga -logfile l.txt
+X06	-oid_masks 1 -out x
+X07	-taxidlist in/tax.txt -out x
+X08	-db in/p4 -gilist in/gi_ok.txt -out ga -dbtype prot
+X09	-seqid_file_out c.bsl
+X10	-dbtype dna -out x
+X11	-db in/p4 -gilist in/gi_ok.txt -out ''
+G01	-gi_file_in in/gi_ok.txt
+G02	-gi_file_in in/gi_ok.txt -gi_file_out ok.bgl
+G03	-gi_file_in in/gi_bad.txt -gi_file_out bad.bgl
+G04	-gi_file_in in/gi_big.txt -gi_file_out big.bgl
+G05	-gi_file_in in/empty.txt -gi_file_out e.bgl
+G06	-gi_file_in in/gi_crlf.txt -gi_file_out c.bgl
+G07	-gi_file_in in/nope.txt
+G08	-gi_file_in in/gi_ok.txt -gi_file_out nodir/x.bgl
+G09	-gi_file_in in/gi_ok.txt -db in/p4
+G10	-gi_file_out x.bgl
+G11	-gi_file_in - -gi_file_out s.bgl
+G12	-gi_file_in in/gi_ok.txt -gi_file_out ok.bgl -logfile log.txt
+G13	-gi_file_in in/gi_dup.txt -gi_file_out d.bgl
+G14	-gi_file_in in/gi_ok.txt -dbtype nucl
+G15	-gi_file_in in/gi_ok.txt -gi_file_out in/gi_ok.txt
+G16	-gi_file_in in/gi_ok.bgl -gi_file_out b.bgl
+A01	-db in/p4 -gilist in/gi_ok.txt -out ga
+A02	-db in/p5 -gilist in/gi_ok.txt -out ga5
+A03	-db in/p4 -gilist in/gi_ok.bgl -out gb
+A04	-db in/p4 -gilist in/gi_none.txt -out gn
+A05	-db in/p4 -gilist in/nope.txt -out gm
+A06	-db in/nope -gilist in/gi_ok.txt -out gx
+A07	-db in/p4 -gilist in/gi_ok.txt -out gt -title 'my title'
+A08	-db in/n4 -dbtype nucl -gilist in/gi_n.txt -out gnn
+A09	-db in/p4 -out gq
+A10	-db 'in/p4 in/q4' -gilist in/gi_ok.txt -out g2
+A11	-db in/p4 -gilist in/gi_ok.txt -out sub/ga
+A12	-db in/p4 -gilist in/gi_ok.txt -out in/ga
+A13	-db in/p4 -gilist in/gi_big.txt -out gbig
+A14	-db in/p4 -dbtype nucl -gilist in/gi_ok.txt -out gw
+A15	-db in/p4 -gilist in/gi_ok.txt
+A16	-db in/p4 -gilist in/gi_ok.txt -out ga -dblist in/q4
+A17	-db in/p4 -gilist in/gi_bad.txt -out gbad
+A18	-db in/p4 -gilist in/gi_big.bgl -out gbb
+A19	-db in/p4 -gilist in/empty.txt -out ge
+A20	-db in/p4 -gilist in/gi_ok.txt -out ga -title ''
+A21	-db in/pvm -gilist in/gi_ok.txt -out gv
+A22	-db in/p4.pal -gilist in/gi_ok.txt -out gp
+S01	-db in/p4 -seqidlist in/ids.txt -out sa4
+S02	-db in/p5 -seqidlist in/ids.txt -out sa5
+S03	-db in/p5 -seqidlist in/ids.bsl -out sb5
+S04	-db in/p5 -seqidlist in/nope.txt -out sm
+S05	-db in/p5 -seqidlist in/ids_none.txt -out sn
+S06	-db in/p5 -seqidlist in/ids.txt -gilist in/gi_ok.txt -out sx
+S07	-db in/n5 -dbtype nucl -seqidlist in/ids_n.txt -out sn5
+S08	-db in/p4 -seqidlist in/ids_none.txt -out sn4
+S09	-db in/p5 -seqidlist in/ids_bad.txt -out sbad
+S10	-db in/p5 -seqidlist in/ids.txt -out sa5 -title T
+T01	-db in/p5 -taxidlist in/tax.txt -out ta
+T02	-db in/p5 -taxidlist in/tax_none.txt -out tn
+T03	-db in/p4 -taxidlist in/tax.txt -out t4
+T04	-db in/p5 -taxidlist in/nope.txt -out tm
+T05	-db in/p5 -taxidlist in/tax_bad.txt -out tb
+T06	-db in/n5 -dbtype nucl -taxidlist in/tax2.txt -out tn5
+T07	-db in/p5 -taxidlist in/tax.txt -seqidlist in/ids.txt -out tx
+O01	-db in/pm -oid_masks 1 -out oa
+O02	-db in/p5 -oid_masks 1 -out ob
+O03	-db in/pvm -oid_masks 1 -out oc
+O04	-db in/pm -oid_masks 0 -out od
+O05	-db in/pm -oid_masks 2 -out oe
+O06	-db in/nope -oid_masks 1 -out of
+O07	-db in/pm -oid_masks 1 -out og -title T
+O08	-db in/pm -oid_masks 1
+O09	-db in/pm -oid_masks 3 -out oh
+O10	-db in/p4 -oid_masks 1 -out oi
+O11	-db in/pm -oid_masks 1 -out sub/oj
+O12	-db in/pm -oid_masks -1 -out ok
+D01	-dblist 'in/p4 in/q4' -dbtype prot -title T -out da
+D02	-dblist 'in/p4 in/nope' -dbtype prot -title T -out db
+D03	-dblist_file in/dbs.txt -dbtype prot -title T -out dc
+D04	-dblist_file in/dbs_missing.txt -dbtype prot -title T -out dd
+D05	-dblist 'in/p4 in/q4' -dbtype prot -title T -out de -gilist in/gi_ok.txt
+D06	-dblist 'in/p4 in/q4' -dbtype prot -out df
+D07	-dblist in/n4 -dbtype nucl -title T -out dg
+D08	-dblist 'in/p4  in/q4' -dbtype prot -title T -out dh
+D09	-dblist 'in/p4 in/q4' -title T -out di
+D10	-dblist in/p4 -dbtype nucl -title T -out dj
+D11	-dblist 'in/p4 in/q4' -dbtype prot -title '' -out dk
+D12	-dblist 'in/p4 in/q4' -dbtype prot -title T -out dl -seqidlist in/ids.txt
+D13	-dblist_file in/empty.txt -dbtype prot -title T -out dm
+D14	-dblist_file in/dbs5.txt -dbtype prot -title T -out dn
+D15	-dblist_file in/dbs.txt -dblist in/p4 -dbtype prot -title T -out do
+D16	-dblist in/p4 -dbtype prot -title T -out dp -gilist in/gi_none.txt
+D17	-dblist ' in/p4' -dbtype prot -title T -out dq
+D18	-dblist in/p4 -dbtype prot -title T -out dr -taxidlist in/tax.txt
+D19	-dblist in/p4 -dbtype prot -title T -out ds -oid_masks 1
+D20	-dblist_file in/nope.txt -dbtype prot -title T -out dt
+D21	-dblist 'in/p4 in/q4' -dbtype prot -title T -out sub/du
+D22	-dblist in/pvm -dbtype prot -title T -out dv
+D23	-dblist in/p4 -dbtype prot -title T -out dw -gilist in/gi_big.txt
+N01	-num_volumes 2 -out in/pmv -dbtype prot -title T
+N02	-num_volumes 9 -out in/pmv -dbtype prot -title T
+N03	-num_volumes 0 -out in/pmv -dbtype prot -title T
+N04	-num_volumes 1 -out in/pmv -dbtype prot -title T
+N05	-num_volumes 2 -out in/pmv -dbtype nucl -title T
+N06	-num_volumes 2 -out in/pmv -dbtype prot -title ''
+N07	-num_volumes 2 -out in/pmv -title T
+N08	-num_volumes 2 -out in/pmv -dbtype prot
+N09	-num_volumes 2 -out nothere -dbtype prot -title T
+N10	-num_volumes 3 -out in/pvm -dbtype prot -title T
+D24	-dblist in/p4 -dbtype prot -title T -out dx -num_volumes 2
+V01	-vdblist 'SRR1 SRR2' -dbtype nucl -title T -out va
+V02	-vdblist_file in/vdbs.txt -dbtype nucl -title T -out vb
+V03	-dblist in/n4 -vdblist SRR1 -dbtype nucl -title T -out vc
+V04	-vdblist '' -dbtype nucl -title T -out vd
+V05	-vdblist SRR1 -dbtype prot -title T -out ve
+V06	-vdblist_file in/empty.txt -dbtype nucl -title T -out vf
+V07	-dblist_file in/dbs.txt -vdblist_file in/vdbs.txt -dbtype prot -title T -out vg
+V08	-vdblist SRR1 -dbtype nucl -title '' -out vh
+V09	-dblist in/nope -vdblist SRR1 -dbtype nucl -title T -out vi
+V10	-vdblist 'SRR1  SRR2' -dbtype nucl -title T -out sub/vj
+C01	-seqid_file_in in/ids.txt
+C02	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_title 'T x'
+C03	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/p5
+C04	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/p4
+C05	-seqid_file_in in/ids_bad.txt -seqid_file_out c.bsl
+C06	-seqid_file_in in/ids_gi.txt -seqid_file_out c.bsl
+C07	-seqid_file_in in/ids_long.txt -seqid_file_out c.bsl
+C08	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/p5 -seqid_dbtype nucl
+C09	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/nope
+C10	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/pvm
+C11	-seqid_file_in in/nope.txt
+C12	-seqid_file_in in/empty.txt -seqid_file_out c.bsl
+C13	-seqid_file_in in/ids_n.txt -seqid_file_out c.bsl -seqid_db in/n5 -seqid_dbtype nucl
+C14	-seqid_file_in in/ids.txt -seqid_file_out nodir/c.bsl
+C15	-seqid_dbtype prot -seqid_file_in in/ids.txt
+C16	-seqid_title T
+C17	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db 'in/p5 in/q5'
+C18	-seqid_file_in in/ids_crlf.txt -seqid_file_out c.bsl
+C19	-seqid_file_in in/ids_none.txt -seqid_file_out c.bsl -seqid_db in/p5
+C20	-seqid_file_in - -seqid_file_out c.bsl
+C21	-seqid_file_in in/ids_bad2.txt -seqid_file_out c.bsl
+C22	-seqid_file_in in/ids_sp.txt -seqid_file_out c.bsl
+C23	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/p5 -seqid_dbtype prot
+C24	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/n5
+C25	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_title ''
+C26	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -seqid_db in/pmv
+C27	-seqid_file_in in/ids.txt -seqid_file_out c.bsl -logfile l.txt
+I01	-seqid_file_info in/ids.bsl
+I02	-seqid_file_info in/ids_db.bsl
+I03	-seqid_file_info in/ids.txt
+I04	-seqid_file_info in/nope.bsl
+I05	-seqid_file_info in/empty.txt
+I06	-seqid_file_info in/trunc.bsl
+I07	-seqid_file_info in/ids_zero.bsl
+I08	-seqid_file_info in/ids_n.bsl
+I09	-seqid_file_info in/ids.bsl -seqid_db in/p5
+I10	-seqid_file_info in/gi_ok.bgl
+O13	-db in/pm -oid_masks 1 -out in/oa
+O14	-db in/pvm -oid_masks 1 -out in/oc
+O15	-db in/pm -oid_masks 1 -out in/ob -title T
+O16	-db in/pm -oid_masks 0 -out in/od
+O17	-db in/pm -oid_masks 2 -out in/oe
+O18	-db in/pvm -oid_masks 3 -out in/of
+O19	-db in/pm -dbtype nucl -oid_masks 1 -out in/og
+C28	-seqid_file_in in/ids_bad_gi.txt -seqid_file_out c.bsl
+C29	-seqid_file_in in/ids_bad_pat.txt -seqid_file_out c.bsl
+C30	-seqid_file_in in/ids_bad_gb.txt -seqid_file_out c.bsl
+C31	-seqid_file_in in/ids_odd.txt -seqid_file_out c.bsl
+C32	-seqid_file_in in/ids_bad_gi.txt -seqid_file_out c.bsl -seqid_db in/p5
+S11	-db in/p4 -seqidlist in/ids_bad_gi.txt -out sbg
+S12	-db in/p4 -seqidlist in/ids_odd.txt -out sodd
+X12	-seqid_file_out c.bsl -dbtype prot
+X13	-seqid_file_info in/ids.bsl -dbtype prot
+R01	-db in/p4 -gilist in/self.p.gil -out in/self
+R02	-dblist_file in/dbs_vt.txt -dbtype prot -out ra -title T
+R03	-vdblist_file in/vdbs_vt.txt -dbtype nucl -title T -out rv
+R04	-seqid_file_info in/ids_n31.bsl
+R05	-seqid_file_info in/ids_n32.bsl
+R06	-seqid_file_info in/ids_n32p1.bsl
+R07	-seqid_file_info in/ids_dbnovol.bsl
+R08	-dblist_file in/dbs_ff.txt -dbtype prot -out rb -title T

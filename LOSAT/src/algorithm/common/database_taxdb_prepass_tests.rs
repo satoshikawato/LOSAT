@@ -2898,24 +2898,135 @@ fn a_read_again_loads_nothing_where_ncbi_keeps_every_sequence() {
         ..VolumeLookups::default()
     };
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![false, false])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, 2, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![true]));
-    // A read again by another subject's Seq-align id is another blob of NCBI's data loader (the
-    // sequence with that id's handle, review 1 of item O4b2-5, H1): a load or none, as before
-    // item O4b2-5. Sequence 2 by subject 4's id may put 150 in the slot: it holds either.
-    assert_eq!(record.offset_slot(0, 2, 4, &[150], L), Ok(vec![false]));
-    // Sequence 3 again by its own id loads nothing; a first load of `L` after it is not certain.
-    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![false]));
-    assert!(record.offset_slot(0, 5, 5, &[L], L).is_err());
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[L], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, &by(2), &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 3, &by(3), &[L], L), Ok(vec![true]));
+    let after_three = (record.offset_slots.clone(), record.slot_blobs.clone());
+    // A read by another Seq-align id is another blob of NCBI's data loader (the sequence with
+    // that id's handle, review 1 of item O4b2-5, H1), a load of its own where no Bioseq of the
+    // sequence's blobs holds that id (item O4b2-7): sequence 2 by id 4 puts 150 there again.
+    assert_eq!(record.offset_slot(0, 2, &by(4), &[150], L), Ok(vec![false]));
+    // Sequence 3 again by its own id loads nothing; a first load of `L` after it misses.
+    assert_eq!(record.offset_slot(0, 3, &by(3), &[L], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 5, &by(5), &[L], L), Ok(vec![true]));
+    // Where the Bioseq of sequence 2's blob holds id 4, NCBI's scope may give it without a load:
+    // the slot holds either, and the first load of `L` after it is not certain.
+    (record.offset_slots, record.slot_blobs) = after_three;
+    assert_eq!(
+        record.offset_slot(0, 2, &found_in(4, 2), &[150], L),
+        Ok(vec![false])
+    );
+    assert_eq!(record.offset_slot(0, 3, &by(3), &[L], L), Ok(vec![false]));
+    assert!(record.offset_slot(0, 5, &by(5), &[L], L).is_err());
+    // A read by an id whose handle LOSAT does not know (NCBI makes one at each read) is refused.
+    assert_eq!(
+        record.offset_slot(0, 6, &BlobName::default(), &[L], L),
+        Err(SlotUncertain {
+            ordinal: 6,
+            again: false,
+            after: Some(SlotFetch {
+                ordinal: 2,
+                taxid: 150,
+                again: true,
+            }),
+            order: None,
+            unnamed: true,
+        })
+    );
+}
+
+/// The blob name of a read by the Seq-align id `id` ([`BlobName`]): its handle, and a scope key
+/// that its Bioseq holds and by which it finds such a Bioseq.
+fn by(id: u32) -> BlobName {
+    BlobName {
+        handle: Some(id.to_le_bytes().to_vec()),
+        finds: (vec![u64::from(id)], Vec::new()),
+        holds: BioseqKeys {
+            scope: vec![u64::from(id)],
+            ..BioseqKeys::default()
+        },
+    }
+}
+
+/// [`by`] of `id`, which also finds the Bioseq of a read by `other`.
+fn found_in(id: u32, other: u32) -> BlobName {
+    let mut name = by(id);
+    name.finds.0.push(u64::from(other));
+    name
+}
+
+/// `VolumeLookups::unordered_slot`: loads of one key whose order LOSAT does not know, a load that
+/// NCBI may make or not counted both ways (review 1 of item O4b2-3, F2).
+#[test]
+fn a_group_of_loads_takes_both_cases_of_a_load_made_or_not() {
+    const L: i32 = 99990;
+    let load = |ordinal: u32, blob: u32, lookups: &[i32], name: BlobName| SlotLoad {
+        ordinal,
+        blob,
+        volume: 0,
+        lookups: lookups.to_vec(),
+        order: 7,
+        name,
+    };
+    // Batch 1: sZ (150) alone; batch 2: sZ again and sQ (150): without `kept`, sZ's blob is
+    // loaded or not, and no case writes a text; the slot holds 150 in every case.
+    let mut record = VolumeLookups::default();
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[150], L), Ok(vec![false]));
+    let (z, q) = (load(0, 0, &[150], by(0)), load(1, 1, &[150], by(1)));
+    let misses = record.unordered_slot(0, &[&z, &q], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![false]), (1, vec![false])]);
+    assert_eq!(record.offset_slots[&0].holds, SlotHolds::Other);
+    // A (L) and then A again with B (L): A's second load, made or not, comes after L in any
+    // order (the slot holds L): no text.
+    let mut record = VolumeLookups::default();
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
+    let (a, b) = (load(0, 0, &[L], by(0)), load(1, 1, &[L], by(1)));
+    let misses = record.unordered_slot(0, &[&a, &b], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![false]), (1, vec![false])]);
+    assert_eq!(record.offset_slots[&0].holds, SlotHolds::Last);
+    // A (L, 150) and then A again with B (L): A's second load leaves 150 before B or not, which
+    // decides B's miss: refused.
+    let mut record = VolumeLookups::default();
+    assert_eq!(
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
+        Ok(vec![true, false])
+    );
+    let (a, b) = (load(0, 0, &[L, 150], by(0)), load(1, 1, &[L], by(1)));
+    assert!(record.unordered_slot(0, &[&a, &b], L).is_err());
+    // Where NCBI keeps every sequence, A's second load is none for certain: B misses after A's 150.
+    let mut record = VolumeLookups {
+        kept: true,
+        ..VolumeLookups::default()
+    };
+    assert_eq!(
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
+        Ok(vec![true, false])
+    );
+    let misses = record.unordered_slot(0, &[&a, &b], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![false, false]), (1, vec![true])]);
+    // Two loads of one sequence by two ids in one group, neither found in the other's Bioseq: two
+    // loads, whose order decides where each looks its lines up in another order (L, 150 and 150,
+    // L: once or twice), and not where both look L up (once).
+    let mut record = VolumeLookups::default();
+    let (one, two) = (load(0, 0, &[L, 150], by(0)), load(1, 0, &[150, L], by(1)));
+    assert!(record.unordered_slot(0, &[&one, &two], L).is_err());
+    let (one, two) = (load(0, 0, &[L], by(0)), load(1, 0, &[L], by(1)));
+    let misses = record.unordered_slot(0, &[&one, &two], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![true]), (1, vec![false])]);
+    // The second id found in the first load's Bioseq: made or not, it comes after L.
+    let mut record = VolumeLookups::default();
+    let two = load(1, 0, &[L], found_in(1, 0));
+    let misses = record.unordered_slot(0, &[&one, &two], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![true]), (1, vec![false])]);
+    assert!(!record.slot_blobs[&0][1].sure);
 }
 
 /// The bounds of NCBI's object manager: a database of at most 10 sequences keeps every load, of
@@ -2955,95 +3066,99 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     // H1 (cc_m): one load of L, 150, L; again: its own 150 is between.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150, L], L),
         Ok(vec![true, false, true])
     );
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150, L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
             after: Some(fetch(0, 150, true)),
             order: None,
+            unnamed: false,
         })
     );
     // M1 (b) (cc_m2): A (L, 150) and B (L), first loads: two texts. Read again, A may put 150
     // there (Either), and B's read again is not certain.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 1, 1, &[L], L),
+        record.offset_slot(0, 1, &by(1), &[L], L),
         Err(SlotUncertain {
             ordinal: 1,
             again: true,
             after: Some(fetch(0, 150, true)),
             order: None,
+            unnamed: false,
         })
     );
     // A first load after such a read again (C of 99990 + 256 * 2 is not L).
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, 2, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, &by(2), &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 3, 3, &[9606, L + 512, L], L),
+        record.offset_slot(0, 3, &by(3), &[9606, L + 512, L], L),
         Ok(vec![false, false, true])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 4, 4, &[L], L),
+        record.offset_slot(0, 4, &by(4), &[L], L),
         Err(SlotUncertain {
             ordinal: 4,
             again: false,
             after: Some(fetch(1, 150, true)),
             order: None,
+            unnamed: false,
         })
     );
     // M1 (a) (cc_ax): 150 never looked up: L's reads again write nothing.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
     for _ in 0..3 {
-        assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![false]));
+        assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![false]));
     }
     // cc_ac: A (L), C (150), then A again: refused, after C's fetch.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L], L),
+        record.offset_slot(0, 0, &by(0), &[L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
             after: Some(fetch(1, 150, false)),
             order: None,
+            unnamed: false,
         })
     );
     // C, then A in another volume (cc_c1 cc_a1), then both again; taxids of other slots.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, &by(0), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, &by(1), &[L, 9606], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, &by(0), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, &by(1), &[L, 9606], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 5, 5, &[9606, 151], L),
+        record.offset_slot(0, 5, &by(5), &[9606, 151], L),
         Ok(vec![false, false])
     );
-    assert!(!record.slot_loads.contains(&5));
+    assert!(!record.slot_blobs.contains_key(&5));
 }
 
 /// `pssm_load_texts` on `tm_cache150` (st1 99990, st2 150, st3 99990, parsed Seq-ids, one

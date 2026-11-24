@@ -1195,6 +1195,21 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   NCBI's mapper packs gi ids, so its prefetch loads the batch's subjects in the order of their gi numbers, where the taxids
   alternate from gi 1 to gi 10: the offset error comes six times (the order of the OIDs would give it once). Rows
   `db.tm.bp.cachegi.*`.
+- `tm_hd.pal` (`DBLIST tm_hd_a tm_hd_b`) and `tm_hdr.pal` (`DBLIST tm_hdr_a tm_hdr_b`), line NP item O4b2-7: two
+  volumes of the protein of `tm_cache.faa` each. `tm_hd_a` holds one sequence with two definition lines,
+  `gb|AAA00001.1|` (taxid 99990) and `gb|XYZ00002.1|` (150), `tm_hd_b` one with `gb|XYZ00002.1|` (562); `tm_hdr_a` holds
+  `gb|XYZ00005.1|` (99990) and `gb|AAA00002.1|` (150), `tm_hdr_b` `gb|AAA00002.1|` (562) (the `.faa` and `.map` of each
+  volume), built in this directory with
+
+      for v in tm_hd_a tm_hd_b tm_hdr_a tm_hdr_b; do
+          makeblastdb -in $v.faa -dbtype prot -out $v -title "${v//_/ }" -parse_seqids -taxid_map $v.map
+      done
+
+  NCBI's data loader gives the first volume's sequence for the second volume's Seq-align id, which it holds in its second
+  line, and names a blob by the sequence with the id's Seq-id handle: the prefetch loads that sequence twice, by its own
+  id and by the other, and `tm_hd`'s handles in that order look 99990 up again after 150 (the offset error twice), while
+  `tm_hdr`'s other order gives it once. `tm_hd_q2.faa` holds the query of `tm_cache_q.faa` twice: a second batch
+  (`BATCH_SIZE=1`) loads nothing again. Rows `db.tm.hd.*`.
 
 Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
 NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of

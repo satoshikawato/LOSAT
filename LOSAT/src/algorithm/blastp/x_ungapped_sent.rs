@@ -292,7 +292,7 @@ impl<'a> XSentSubject<'a> {
 pub(crate) unsafe fn two_hit(
     query: &XSentQuery,
     subject: XSentSubject<'_>,
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -328,7 +328,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
     keys: &KeyTable,
     query: &[Q],
     subject: &[u8],
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -347,7 +347,6 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
     let qb = query.as_ptr().add(1);
     let sb = subject.as_ptr().add(1);
     let mut q_right_off = q_right_off as i32;
-    let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
 
     // the word loop of `W` letters (inside both sequences: checked above), on keys from 0: its

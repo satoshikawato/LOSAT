@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "zq6pH",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "zq6pH",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T20:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49799,
+  "bytes-to-cache": 238,
+  "files": [
+    "zq6pH.pdb",
+    "zq6pH.phr",
+    "zq6pH.pin",
+    "zq6pH.pnd",
+    "zq6pH.pni",
+    "zq6pH.pog",
+    "zq6pH.pos",
+    "zq6pH.pot",
+    "zq6pH.psq",
+    "zq6pH.ptf",
+    "zq6pH.pto"
+  ]
+}

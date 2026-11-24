@@ -1,0 +1,113 @@
+PssmWithParameters ::= {
+  pssm {
+    isProtein TRUE,
+    numRows 28,
+    numColumns 1,
+    byRow FALSE,
+    query seq {
+      id {
+        local str "Query_1"
+      },
+      descr {
+        title "rnd random"
+      },
+      inst {
+        repr raw,
+        mol aa,
+        length 1,
+        seq-data ncbistdaa '0C'H
+      },
+      annot {
+        {
+          data ftable {
+            {
+              data variation {
+                population-data { NULL },
+                data unknown NULL
+              },
+              location whole local str "Query_1"
+            }
+          }
+        }
+      }
+    },
+    intermediateData {
+      freqRatios {
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 },
+        { 0, 10, 0 }
+      }
+    },
+    finalData {
+      scores {
+        -32768,
+        -1,
+        -3,
+        -2,
+        -3,
+        -2,
+        0,
+        -3,
+        -2,
+        1,
+        -1,
+        2,
+        6,
+        -2,
+        -3,
+        0,
+        -1,
+        -2,
+        -1,
+        1,
+        -2,
+        -1,
+        -1,
+        -1,
+        -1,
+        -4,
+        -1,
+        2
+      },
+      lambda { 267, 10, -3 },
+      kappa { 459597639216676, 10, -16 },
+      h { 14, 10, -2 },
+      lambdaUngapped { 324159163235737, 10, -15 },
+      kappaUngapped { 150160799427986, 10, -15 },
+      hUngapped { 765945647632464, 10, -15 }
+    }
+  },
+  params {
+    pseudocount 0,
+    rpsdbparams {
+      matrixName "BLOSUM62",
+      gapOpen 11,
+      gapExtend 1
+    }
+  }
+}

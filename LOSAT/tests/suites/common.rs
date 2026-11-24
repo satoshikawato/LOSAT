@@ -11,6 +11,8 @@
 mod archive_replaced_bytes;
 #[path = "../balanced_title.rs"]
 mod balanced_title;
+#[path = "../blastdb_aliastool_fixtures.rs"]
+mod blastdb_aliastool_fixtures;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -55,6 +57,8 @@ mod entry_names;
 mod export_search_strategy;
 #[path = "../function_size_limit.rs"]
 mod function_size_limit;
+#[path = "../gi_mask_read.rs"]
+mod gi_mask_read;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]

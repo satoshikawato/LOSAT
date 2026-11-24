@@ -172,7 +172,7 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     write_freq(&base, 28);
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     files.open_freq(&base, "RPSBLAST", None).unwrap();
-    files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
+    assert!(files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap());
     assert_eq!(ratios.len(), 2);
     assert_eq!(ratios[0][0], 4000.0 / 1e9);
     assert_eq!(ratios[1][27], 5027.0 / 1e9);
@@ -184,7 +184,7 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     write_freq(&base, 28);
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     files.open_freq(&base, "RPSBLAST", None).unwrap();
-    files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
+    assert!(files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap());
     let flat: Vec<i32> = (0..7)
         .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
         .collect();
@@ -210,25 +210,25 @@ fn the_score_bound_of_a_profile_sums_its_rows_positive_maxima() {
 fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
     let dir = scratch("freqerr");
     let base = write_volume(&dir, 28, AUX);
-    let shown = canonical_volume_path(&base);
+    let shown = String::from_utf8(canonical_volume_path(&base)).unwrap();
     let text = format!(
         "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
     );
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     assert_eq!(
         files.open_freq(&base, "RPSBLAST", None).err(),
-        Some(RpsOpenError::Ncbi(text.clone()))
+        Some(RpsOpenError::Ncbi(text.clone().into_bytes()))
     );
     std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
     assert_eq!(
         files.open_freq(&base, "RPSBLAST", None).err(),
-        Some(RpsOpenError::Ncbi(text))
+        Some(RpsOpenError::Ncbi(text.into_bytes()))
     );
     // A database of one volume: its `-db` value as given (`RpsVolumeSetup::with_database`).
     assert_eq!(
         files.open_freq(&base, "RPSTBLASTN", Some("./cdd")).err(),
         Some(RpsOpenError::Ncbi(
-            "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".to_string()
+            "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".into()
         ))
     );
     write_freq(&base, 28);
@@ -245,28 +245,28 @@ fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
 fn ncbis_errors_come_in_ncbis_file_order() {
     let dir = scratch("errors");
     let base = write_volume(&dir, 28, AUX);
-    let shown = canonical_volume_path(&base);
+    let shown = String::from_utf8(canonical_volume_path(&base)).unwrap();
     let open = || RpsVolumeFiles::open(&base, &[3, 2]).err();
     std::fs::write(base.with_extension("rps"), words(&[7, 2])).unwrap();
     assert_eq!(
         open(),
         Some(RpsOpenError::Ncbi(format!(
             "RPS BLAST profile file ({shown}.rps) is either corrupt or constructed for an incompatible architecture"
-        )))
+        ).into_bytes()))
     );
     std::fs::remove_file(base.with_extension("loo")).unwrap();
     assert_eq!(
         open(),
-        Some(RpsOpenError::Ncbi(format!(
-            "Cannot memory map RPS-BLAST database file: {shown}.loo"
-        )))
+        Some(RpsOpenError::Ncbi(
+            format!("Cannot memory map RPS-BLAST database file: {shown}.loo").into_bytes()
+        ))
     );
     std::fs::remove_file(base.with_extension("aux")).unwrap();
     assert_eq!(
         open(),
-        Some(RpsOpenError::Ncbi(format!(
-            "Cannot open RPS-BLAST auxiliary file: {shown}.aux"
-        )))
+        Some(RpsOpenError::Ncbi(
+            format!("Cannot open RPS-BLAST auxiliary file: {shown}.aux").into_bytes()
+        ))
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -275,11 +275,38 @@ fn ncbis_errors_come_in_ncbis_file_order() {
 fn inconsistent_files_are_refused() {
     let dir = scratch("refused");
     let base = write_volume(&dir, 28, AUX);
-    // The consensus lengths of the sequence part differ.
-    assert!(matches!(
-        RpsVolumeFiles::open(&base, &[3, 3]),
-        Err(RpsOpenError::Refused(_))
-    ));
+    // `.pin` lengths other than the profiles' columns open: NCBI reads them only in the traceback,
+    // where `rps_search::profile` asks each read (series PR, item PS10e).
+    let files = RpsVolumeFiles::open(&base, &[3, 3]).unwrap();
+    drop(files);
+    // A profile without its sentinel row: offsets that do not ascend.
+    let rps = std::fs::read(base.with_extension("rps")).unwrap();
+    let mut flat = rps.clone();
+    flat[12..16].copy_from_slice(&0i32.to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &flat).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that do not ascend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and 0 do not ascend)"
+        ),
+        "{text}"
+    );
+    // Offsets that descend (a hand-edited `.rps`): the same text, no row count below 0.
+    let mut descending = rps.clone();
+    descending[12..16].copy_from_slice(&(-3i32).to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &descending).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that descend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and -3 do not ascend)"
+        ),
+        "{text}"
+    );
+    std::fs::write(base.with_extension("rps"), &rps).unwrap();
     // Too few K values.
     std::fs::write(base.with_extension("aux"), AUX.replace("2\n3.9e-02\n", "")).unwrap();
     assert!(matches!(

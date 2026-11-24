@@ -28,8 +28,10 @@ use super::sdust::{merge_mask_info, SDustMasker};
 
 /// The settings of the masking run, as `CWinMaskConfig` reads them from NCBI's `CArgs`.
 pub(super) struct Options<'a> {
-    pub ustat: &'a str,
-    pub input: &'a str,
+    /// `-ustat`: the counts file's name (its bytes).
+    pub ustat: &'a std::ffi::OsStr,
+    /// `-in`: the bytes of a FASTA file's name or of a database's.
+    pub input: &'a std::ffi::OsStr,
     pub infmt: &'a str,
     pub outfmt: &'a str,
     pub parse_seqids: bool,
@@ -38,7 +40,7 @@ pub(super) struct Options<'a> {
     /// `-dust_level` when `-dust` is true (`eGenerateMasksWithDuster`).
     pub dust_level: Option<i32>,
     /// The `BLASTDB` of the configuration (`ApplicationSettings::blastdb`).
-    pub blastdb_registry: Result<Option<&'a str>, &'a str>,
+    pub blastdb_registry: Option<&'a [u8]>,
 }
 
 /// One sequence of the input (`CBioseq`).
@@ -128,7 +130,7 @@ pub(super) fn config_exception(
     line: u32,
     kind: &'static str,
     function: &'static str,
-    message: &str,
+    message: impl Into<Vec<u8>>,
 ) -> NcbiException {
     NcbiException::new(
         ThrowSite {
@@ -171,7 +173,7 @@ pub(super) fn reader<'a, R: Read + 'a>(
     match (options.infmt, input) {
         ("fasta", Some(input)) => fasta_source(input, options.parse_seqids).map(Some),
         ("blastdb", _) => database_source(
-            options.input,
+            &crate::utils::os_bytes::os_str_bytes(options.input),
             options.blastdb_registry,
             prints_title(options.outfmt),
         )
@@ -196,8 +198,8 @@ pub(super) fn fasta_source<'a, R: Read + 'a>(
 /// `CMaskBDBReader` of the nucleotide database `name` on the search path of `registry`
 /// (`Options::blastdb_registry`); `title_printed` as `MaskBdbReader::open`'s.
 pub(super) fn database_source(
-    name: &str,
-    registry: Result<Option<&str>, &str>,
+    name: &[u8],
+    registry: Option<&[u8]>,
     title_printed: bool,
 ) -> Result<Box<dyn SequenceSource>, Failure> {
     Ok(Box::new(DatabaseSource::open(
@@ -248,7 +250,11 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),
             MaskReadError::Read(error) => read_failure(error),
             MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+            MaskReadError::Std(what) => Failure::Std(what),
             MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
+            MaskReadError::SeqMap { error, .. } => {
+                Failure::Ncbi(crate::seqmasks_io::fasta_reader::seq_map_exception(error))
+            }
         })?;
         let titles = self.titles;
         Ok(record.map(|record| Record {
@@ -283,11 +289,7 @@ struct DatabaseSource {
 }
 
 impl DatabaseSource {
-    fn open(
-        name: &str,
-        registry: Result<Option<&str>, &str>,
-        title_printed: bool,
-    ) -> Result<Self, Failure> {
+    fn open(name: &[u8], registry: Option<&[u8]>, title_printed: bool) -> Result<Self, Failure> {
         let reader = MaskBdbReader::open(
             name,
             SeqType::Nucleotide,
@@ -401,7 +403,7 @@ pub(super) fn run(
 ///
 /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:208-232
 fn masker(options: &Options<'_>, diag: &mut Diag) -> Result<SeqMasker, Failure> {
-    let file = format!("-ustat {}", options.ustat);
+    let file = format!("-ustat {}", options.ustat.to_string_lossy());
     let counts = open_counts(options.ustat, &file, &options.params, &options.pct, diag)?;
     SeqMasker::new(Arc::new(counts), &options.params).map_err(|error| winmask_failure(&file, error))
 }
@@ -410,7 +412,7 @@ fn masker(options: &Options<'_>, diag: &mut Diag) -> Result<SeqMasker, Failure> 
 /// percentages `pct`, its warnings posted as NCBI posts them: the factory's at once, the
 /// readers' after. `file` names the file in LOSAT's refusals (`-ustat <name>`).
 pub(super) fn open_counts(
-    name: &str,
+    name: &std::ffi::OsStr,
     file: &str,
     params: &MaskerParams,
     pct: &PctSettings,
@@ -477,9 +479,12 @@ fn mask_input(
         if record.iupac.is_empty() || !lists.consider(&record) {
             continue;
         }
-        let mut mask = masker
-            .mask(&record.iupac)
-            .map_err(|error| winmask_failure(&format!("-ustat {}", options.ustat), error))?;
+        let mut mask = masker.mask(&record.iupac).map_err(|error| {
+            winmask_failure(
+                &format!("-ustat {}", options.ustat.to_string_lossy()),
+                error,
+            )
+        })?;
         if let Some(duster) = duster.as_mut() {
             let dust = duster.mask(&record.iupac, &mask);
             merge_mask_info(&mut mask, &dust);

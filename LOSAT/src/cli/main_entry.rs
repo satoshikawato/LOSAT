@@ -70,7 +70,7 @@ fn run_main_entry() -> Result<()> {
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
     // `losat blastdbcmd` reads its command line with NCBI's argument reader
-    // (`ncbi_app::args`), not clap's: the words after `blastdbcmd` go to it as they are.
+    // (`ncbi_app::args`): the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
@@ -134,8 +134,13 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("makeprofiledb") {
         std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
     }
-    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
-    // top level has no options of its own.
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:704-707
+    // `losat blastdb_aliastool` too.
+    if let Some(start) = started("blastdb_aliastool") {
+        std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
+    }
+    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
+    // (`cli::top_level`), which has no options of its own.
     if argv
         .get(1)
         .is_some_and(|word| crate::cli::INSTALL_SHIMS_WORDS.iter().any(|w| word == w))
@@ -202,16 +207,15 @@ fn run_main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program) is
-    // clap's.
+    // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program):
+    // LOSAT's own (`cli::top_level`).
     let Some(start) = start else {
-        let error = crate::cli::top_level_error(&argv);
-        let message = crate::cli::top_level_message(&error);
-        match error.use_stderr() {
-            true => write_dropping_errors(&mut std::io::stderr(), &message),
-            false => write_dropping_errors(&mut crate::cli::standard_output(), &message),
+        let top_level = crate::cli::top_level(&argv);
+        match top_level.error {
+            true => write_dropping_errors(&mut std::io::stderr(), &top_level.text),
+            false => write_dropping_errors(&mut crate::cli::standard_output(), &top_level.text),
         }
-        std::process::exit(error.exit_code());
+        std::process::exit(top_level.status);
     };
     let tool = crate::cli::reader::tool(start.program())
         .expect("a program of ENTRY_NAMES that is not on `ncbi_app` is on the reader");
@@ -236,6 +240,7 @@ fn run_main_entry() -> Result<()> {
         &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
+        &crate::report::run_files::OpenFiles::disk(),
     );
     let args = match read {
         Ok(args) => args,
@@ -257,12 +262,12 @@ fn run_main_entry() -> Result<()> {
         start.settings().map_err(anyhow::Error::msg)?;
         return Ok(());
     }
-    // LOSAT's refusals of what it does not run (`reader::refusal_after_read`), then clap's
-    // conversion of the arguments that NCBI's reader read (`reader::convert`): LOSAT's errors, on
+    // LOSAT's refusals of what it does not run (`reader::refusal_after_read`), then the program's
+    // options of the arguments that NCBI's reader read (`reader::options`): LOSAT's errors, on
     // the terminal's standard error (`Error: ` and the text, exit status 1; line RG DECISIONS 32).
     let command = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(refusal) => Err(refusal),
-        None => crate::cli::reader::convert(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args, false),
     };
     let command = match command {
         Ok(command) => command,
@@ -283,6 +288,25 @@ fn run_main_entry() -> Result<()> {
         }
         return Ok(());
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:784-793 (cited at
+    // `ncbi_environment::WriteVerification`)
+    // The BLAST XML report (outfmt 5) of every search program changes under a
+    // `SERIAL_VERIFY_DATA_WRITE` of `ALWAYS` or `DEFVALUE_ALWAYS`: LOSAT refuses such a run here,
+    // before any output, with its other refusals of the settings (the settings that each program
+    // refuses come first, in its own arm below).
+    if let Ok(settings) = start.settings() {
+        let number = search_outfmt(&cli.command)
+            .and_then(|outfmt| crate::blastinput::app::parse_formatting_string(outfmt).ok())
+            .map(|choice| choice.number);
+        if let Some(refusal) =
+            crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
+                settings.write_verification.as_ref(),
+                number.into_iter(),
+            )
+        {
+            return Err(anyhow::Error::msg(refusal));
+        }
+    }
     // The messages of tblastx's, rpsblast's and rpstblastn's runs go where the diagnostics go
     // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
     // target from here, where NCBI's `Run` makes its handler. LOSAT's refusals above stay on the
@@ -300,7 +324,7 @@ fn run_main_entry() -> Result<()> {
         _ => drop(target),
     }
     if startup_trace {
-        eprintln!("[startup] after clap parse");
+        eprintln!("[startup] after the options are read");
     }
     // The search programs write an error's text before its error archive, where NCBI's
     // `CATCH_ALL` posts it (`cli::post_native_error`).
@@ -492,6 +516,21 @@ fn run_main_entry() -> Result<()> {
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
+/// The `-outfmt` value of a search program's command line; `None` for the other programs.
+fn search_outfmt(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Blastx(args) => Some(&args.outfmt),
+        Commands::Blastn(args) => Some(&args.outfmt),
+        Commands::Blastp(args) => Some(&args.outfmt),
+        Commands::Tblastx(args) => Some(&args.outfmt),
+        Commands::Tblastn(args) => Some(&args.outfmt),
+        Commands::Psiblast(args) => Some(&args.outfmt),
+        Commands::Rpsblast(args) => Some(&args.outfmt),
+        Commands::Rpstblastn(args) => Some(&args.outfmt),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
+    }
+}
+
 fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     match outcome {
         crate::rpsbproc::Outcome::Exit(0) => {}

@@ -759,7 +759,7 @@ fn random_cases_with_and_without_aliasing() {
 // earlier argument could not exclude. The units' lists are the masked reference's in every
 // case, also with the batched extensions of LOSAT_X_TBXEXTBATCH.
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-528,598-604
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-524,596-599
 #[test]
 fn units_equal_the_masked_reference_where_the_first_guard_fails() {
     let mut rng = Rng(0x7e57_ab1e_5eed_0001);
@@ -1031,7 +1031,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
             wide_groups +=
                 usize::from(group_starts(&contexts, X_MAX_GROUPS).len() < contexts.len());
             let mut want: Vec<InitHSP> = Vec::new();
-            plain.scan_unit_hits::<_, XNoProbe, false, false, 0>(
+            plain.scan_unit_hits::<_, XNoProbe, false, false, false, 0>(
                 &unit,
                 &inp,
                 &mut scratch,
@@ -1070,49 +1070,49 @@ fn masked_unit_tables_give_the_unmasked_units() {
                 }
                 let mut got: Vec<InitHSP> = Vec::new();
                 match name {
-                    "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, 0>(
+                    "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, false, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
                         &mut got,
                         &mut XNoProbe,
                     ),
-                    "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false, 0>(
+                    "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false, false, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
                         &mut got,
                         &mut XNoProbe,
                     ),
-                    "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true, 0>(
+                    "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true, true, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
                         &mut got,
                         &mut XNoProbe,
                     ),
-                    "bf pf" => pp.scan_unit_hits::<_, XNoProbe, true, true, 0>(
+                    "bf pf" => pp.scan_unit_hits::<_, XNoProbe, true, true, true, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
                         &mut got,
                         &mut XNoProbe,
                     ),
-                    "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, 3>(
+                    "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, false, 3>(
                         &unit,
                         &inp,
                         &mut scratch,
                         &mut got,
                         &mut XNoProbe,
                     ),
-                    "bf sent" => pp.scan_unit_hits::<_, XNoProbe, false, true, 3>(
+                    "bf sent" => pp.scan_unit_hits::<_, XNoProbe, false, true, true, 3>(
                         &unit,
                         &inp,
                         &mut scratch,
                         &mut got,
                         &mut XNoProbe,
                     ),
-                    _ => pp.scan_unit_hits::<_, XNoProbe, true, true, 3>(
+                    _ => pp.scan_unit_hits::<_, XNoProbe, true, true, true, 3>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -1125,7 +1125,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
             }
             for (name, len) in [("batched", x_tbx_extbatch::BATCH), ("batched 1", 1)] {
                 let mut got: Vec<InitHSP> = Vec::new();
-                pp.scan_unit_batched_hits::<_, false, false, 0>(
+                pp.scan_unit_batched_hits::<_, false, false, false, 0>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -1134,7 +1134,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
                 );
                 lists.push((name, got));
                 let mut got: Vec<InitHSP> = Vec::new();
-                pp.scan_unit_batched_hits::<_, true, true, 0>(
+                pp.scan_unit_batched_hits::<_, true, true, true, 0>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -1144,7 +1144,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
                 lists.push((name, got));
                 if sent {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, true, true, 3>(
+                    pp.scan_unit_batched_hits::<_, true, true, true, 3>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -1153,7 +1153,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
                     );
                     lists.push((name, got));
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, false, false, 3>(
+                    pp.scan_unit_batched_hits::<_, false, false, false, 3>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -1173,7 +1173,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
                 == Some((mask as usize).div_ceil(2))
             {
                 let mut got: Vec<InitHSP> = Vec::new();
-                control.scan_unit_hits::<_, XNoProbe, false, false, 0>(
+                control.scan_unit_hits::<_, XNoProbe, false, false, false, 0>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -2703,7 +2703,7 @@ fn tbx_prefetch_rule_at_its_boundaries() {
     assert!(!x_prefetch_units(Some(2), [2047].into_iter()));
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
 // The unit functions with the prefetch of LOSAT_X_TBXPREFETCH (`PF`) on search pools of 1, 2
 // and 8 threads, in both list forms: the random cases of the compact tests (one and several
 // chunks per frame) and the large case of the unmap tests (batches far longer than
@@ -3012,7 +3012,7 @@ fn units_equal_the_masked_reference(
                 masked_units += usize::from(is_masked);
                 combos[matrix_no][usize::from(batched)] += usize::from(is_masked);
                 let mut want: Vec<InitHSP> = Vec::new();
-                pp.scan_unit_hits::<_, XNoProbe, false, false, 0>(
+                pp.scan_unit_hits::<_, XNoProbe, false, false, false, 0>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -3022,7 +3022,7 @@ fn units_equal_the_masked_reference(
                 let mut lists: Vec<(&str, Vec<InitHSP>)> = Vec::new();
                 let mut run = |name, got: Vec<InitHSP>| lists.push((name, got));
                 let mut got = Vec::new();
-                pp.scan_unit_hits::<_, XNoProbe, true, true, 0>(
+                pp.scan_unit_hits::<_, XNoProbe, true, true, true, 0>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -3032,7 +3032,7 @@ fn units_equal_the_masked_reference(
                 run("bf pf", got);
                 if batched {
                     let mut got = Vec::new();
-                    pp.scan_unit_batched_hits::<_, true, true, 0>(
+                    pp.scan_unit_batched_hits::<_, true, true, true, 0>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -3049,21 +3049,23 @@ fn units_equal_the_masked_reference(
                     ] {
                         let mut got = Vec::new();
                         match (pf, bf) {
-                            (false, false) => pp.scan_unit_hits::<_, XNoProbe, false, false, 2>(
-                                &unit,
-                                &inp,
-                                &mut scratch,
-                                &mut got,
-                                &mut XNoProbe,
-                            ),
-                            (false, true) => pp.scan_unit_hits::<_, XNoProbe, false, true, 2>(
-                                &unit,
-                                &inp,
-                                &mut scratch,
-                                &mut got,
-                                &mut XNoProbe,
-                            ),
-                            _ => pp.scan_unit_hits::<_, XNoProbe, true, true, 2>(
+                            (false, false) => pp
+                                .scan_unit_hits::<_, XNoProbe, false, false, false, 2>(
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                    &mut XNoProbe,
+                                ),
+                            (false, true) => pp
+                                .scan_unit_hits::<_, XNoProbe, false, true, true, 2>(
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                    &mut XNoProbe,
+                                ),
+                            _ => pp.scan_unit_hits::<_, XNoProbe, true, true, true, 2>(
                                 &unit,
                                 &inp,
                                 &mut scratch,
@@ -3075,7 +3077,7 @@ fn units_equal_the_masked_reference(
                     }
                     for len in [x_tbx_extbatch::BATCH, 1].into_iter().filter(|_| batched) {
                         let mut got = Vec::new();
-                        pp.scan_unit_batched_hits::<_, true, true, 2>(
+                        pp.scan_unit_batched_hits::<_, true, true, true, 2>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -3084,7 +3086,7 @@ fn units_equal_the_masked_reference(
                         );
                         run("batched bf pf sent", got);
                         let mut got = Vec::new();
-                        pp.scan_unit_batched_hits::<_, false, false, 2>(
+                        pp.scan_unit_batched_hits::<_, false, false, false, 2>(
                             &unit,
                             &inp,
                             &mut scratch,

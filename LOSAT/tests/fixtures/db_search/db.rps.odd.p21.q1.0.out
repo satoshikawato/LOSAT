@@ -1,0 +1,65 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/l_p21.lst
+           3 sequences; 59 total letters
+
+
+
+Query= q_c1
+
+Length=22
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:237975 cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sor...  42.2    1e-13
+
+
+>CDD:237975 cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose specific 
+IIB subunit. The bacterial phosphoenolpyruvate: sugar 
+phosphotransferase system (PTS) is a multi-protein system involved 
+in the regulation of a variety of metabolic and transcriptional 
+processes. This family is one of four structurally 
+and functionally distinct group IIB PTS system cytoplasmic 
+enzymes, necessary for the uptake of carbohydrates across 
+the cytoplasmic membrane and their phosphorylation. The active 
+site histidine receives a phosphate group from the IIA subunit 
+and transfers it to the substrate.
+Length=21
+
+ Score = 42.2 bits (100),  Expect = 1e-13, Method: Composition-based stats.
+ Identities = 21/21 (100%), Positives = 21/21 (100%), Gaps = 0/21 (0%)
+
+Query  1   IVLARIDDRLIHGQVATTWTK  21
+           IVLARIDDRLIHGQVATTWTK
+Sbjct  1   IVLARIDDRLIHGQVATTWTK  21
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.418    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0771    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1298
+
+
+  Database: in/l_p21.lst
+    Posted date:  Nov 21, 2026  5:07 AM
+  Number of letters in database: 59
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

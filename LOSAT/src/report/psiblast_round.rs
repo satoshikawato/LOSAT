@@ -144,10 +144,10 @@ pub(crate) fn write_psiblast_round_report(
         sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
             // An aligned subject's load may end the run where the view's answer says
-            // (`PairwiseView::after_throw`, as `x_pairwise_par::alignment_end` asks it).
+            // (`PairwiseConfig::after_throw`, as `x_pairwise_par::alignment_end` asks it).
             let aligned = group.aligned(report.num_alignments);
             let end = crate::report::x_pairwise_par::aligned_end(
-                config.view.after_throw(),
+                config.after_throw(),
                 aligned,
                 |s_idx| sections.thrown(s_idx),
             );
@@ -282,7 +282,7 @@ impl RoundSections<'_> {
                 None,
             )?,
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1540-1545
         writeln!(writer)
     }
 
@@ -321,7 +321,7 @@ impl RoundSections<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:756-848
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:85-87
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:86-87
     /// One part: for the repeat pass the two lines of the Score/E header, then the part's line
     /// and a blank line, then its rows (`write_description_table`'s rows and widths, every row of
     /// the part counted: its `m_NumToShow` is the number of its Seq-aligns). A part without rows

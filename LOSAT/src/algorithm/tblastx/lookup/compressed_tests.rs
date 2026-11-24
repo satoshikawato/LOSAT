@@ -727,7 +727,7 @@ fn compressed_scan_subject_emits_ncbi_subject_major_order() {
     assert_eq!(s_range[1], 6);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405
 #[test]
 fn compressed_scan_subject_small_buffer_resumes_without_splitting_subject_offset() {
     let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");

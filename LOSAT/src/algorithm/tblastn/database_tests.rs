@@ -62,13 +62,16 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
     TblastnDatabase {
         db: {
-            let mut db =
-                SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+            let mut db = SeqDb::open_in(
+                path.to_str().unwrap().as_bytes(),
+                SeqType::Nucleotide,
+                &search,
+            )
+            .unwrap();
             db.read_name_records(path.to_str().unwrap(), false).unwrap();
             db
         },
@@ -131,7 +134,14 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
     let of = |letters: bool| {
         let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
         let mut titles = DatabaseTitles::new();
-        read_titles(&database, &hitlists, 0, Default::default(), &mut titles).unwrap();
+        read_titles(
+            &database,
+            &hitlists,
+            0,
+            (Default::default(), true),
+            &mut titles,
+        )
+        .unwrap();
         reported_subjects(
             &database,
             &titles,
@@ -139,7 +149,7 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
             SubjectLetters::Stream(&stream),
             letters,
             &[],
-            &[],
+            (&[], false),
             None,
             &[],
             true,
@@ -189,7 +199,14 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
         let mut hitlists: Vec<KappaResultHitList> =
             queries.iter().map(|&lists| hitlist(lists)).collect();
         let mut titles = DatabaseTitles::new();
-        read_titles(database, &hitlists, 0, Default::default(), &mut titles).unwrap();
+        read_titles(
+            database,
+            &hitlists,
+            0,
+            (Default::default(), true),
+            &mut titles,
+        )
+        .unwrap();
         let reported = reported_subjects(
             database,
             &titles,
@@ -197,7 +214,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             SubjectLetters::Stream(&stream),
             true,
             &[],
-            &[],
+            (&[], false),
             None,
             &[],
             true,

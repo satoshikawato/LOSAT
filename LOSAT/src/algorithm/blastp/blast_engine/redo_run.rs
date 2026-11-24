@@ -159,7 +159,7 @@ impl RedoParamsBuilder<'_> {
                 local_scaling_factor,
             ),
             do_link_hsps,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:379-383
         })
     }
 }
@@ -966,6 +966,56 @@ where
     Ok(())
 }
 
+/// The error of the batch `batch` whose Smith-Waterman redo failed at its last redone match
+/// (`sw_batch_failed`), the redo having taken the lists up to query `q_idx`'s with the heaps
+/// `heaps`: LOSAT's refusal instead where a fetch before it read a header that cannot be read,
+/// which ended NCBI's search there (`FetchNotes::refused_before_failure`). The one owner of that
+/// order, for the one-thread loop and the windows' replay (`x_redo_par.rs`, `XSwBatch::pass`).
+#[cold]
+#[inline(never)]
+pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+    q_idx: usize,
+) -> anyhow::Error {
+    if let Some(refusal) =
+        fetch_notes.refused_before_failure(heaps, batch.clone(), q_idx, usize::MAX)
+    {
+        return refusal;
+    }
+    sw_batch_failed(
+        batch.start,
+        &heaps[batch.start],
+        fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, usize::MAX),
+    )
+}
+
+/// The error of the batch `batch` whose Smith-Waterman redo does not end at the match after the
+/// kept list `position` of query `q_idx` (`sw_endless`), with the heaps `heaps` as the redo left
+/// them before that match: LOSAT's refusal instead where a fetch before it read a header that
+/// cannot be read, which ended NCBI's search there (`FetchNotes::refused_before_failure`). The one
+/// owner of that order, for the one-thread loop and the windows' replay (`x_redo_par.rs`,
+/// `XSwBatch::redone`).
+#[cold]
+#[inline(never)]
+pub(in crate::algorithm::blastp) fn sw_endless_after(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+    q_idx: usize,
+    position: usize,
+) -> anyhow::Error {
+    if let Some(refusal) = fetch_notes.refused_before_failure(heaps, batch.clone(), q_idx, position)
+    {
+        return refusal;
+    }
+    sw_endless(
+        batch.start,
+        fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, position),
+    )
+}
+
 /// NCBI's error of a query batch whose Smith-Waterman redo (`smith_waterman_match::SwRedoFailed`)
 /// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
 /// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
@@ -1229,15 +1279,11 @@ where
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_status.failed() && q_idx + 1 == batch.end {
-                return Err(sw_batch_failed(
-                    batch.start,
-                    &redone_matches[batch.start],
-                    fetch_notes.fetched_before_failure(
-                        redone_matches,
-                        batch.clone(),
-                        q_idx,
-                        usize::MAX,
-                    ),
+                return Err(sw_batch_failed_after(
+                    fetch_notes,
+                    batch.clone(),
+                    redone_matches,
+                    q_idx,
                 ));
             }
             continue;
@@ -1347,14 +1393,12 @@ where
                     &mut None,
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
-                    sw_endless(
-                        batch.start,
-                        fetch_notes.fetched_before_failure(
-                            redone_matches,
-                            batch.clone(),
-                            q_idx,
-                            x_match_position,
-                        ),
+                    sw_endless_after(
+                        fetch_notes,
+                        batch.clone(),
+                        redone_matches,
+                        q_idx,
+                        x_match_position,
                     )
                 })?
                 else {
@@ -1407,15 +1451,11 @@ where
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_status.failed() && q_idx + 1 == batch.end {
-            return Err(sw_batch_failed(
-                batch.start,
-                &redone_matches[batch.start],
-                fetch_notes.fetched_before_failure(
-                    redone_matches,
-                    batch.clone(),
-                    q_idx,
-                    usize::MAX,
-                ),
+            return Err(sw_batch_failed_after(
+                fetch_notes,
+                batch.clone(),
+                redone_matches,
+                q_idx,
             ));
         }
     }

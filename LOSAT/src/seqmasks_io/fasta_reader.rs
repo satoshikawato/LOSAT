@@ -451,7 +451,8 @@ fn mask_record<R: Read>(record: Record, reader: &mut FastaReader<R>) -> MaskReco
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector.cpp:1281-1284
 ///
 /// A virtual sequence (`fDisableNoResidues`) and a record above makeblastdb's length limit do
-/// not come from this reader's flags, and a delta with gap pieces is refused before
+/// not come from this reader's flags. A delta with gap pieces (gaps whose sum wrapped NCBI's
+/// `TSeqPos` to 0) reads through `gapped_letters` once `seq_map_error` has found nothing
 /// (`MaskFastaReader::next`; makembindex's stream, `dbindex::stream`). A protein's literals are
 /// NCBIeaa only in such a delta.
 pub(crate) fn iupac_letters<R: Read>(inst: SeqInst, reader: &mut FastaReader<R>) -> Vec<u8> {

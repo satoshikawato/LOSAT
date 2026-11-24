@@ -490,16 +490,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
         if !OBJECT && self.thrown.is_some() {
             return;
         }
-        if self.lines_to < self.start {
-            self.lines_to = self.start;
-            self.lines = 0;
-        }
-        self.lines_to = self.lines_to.min(self.out.len());
-        self.lines += self.out[self.lines_to..]
-            .iter()
-            .filter(|&&byte| byte == b'\n')
-            .count() as u64;
-        self.lines_to = self.out.len();
+        self.count_lines();
         let at = self.out.len() - self.start;
         if !OBJECT {
             let erased = u64::from(self.piece == Piece::Fragment);
@@ -691,6 +682,21 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
         self.open_tag(start);
     }
 
+    /// Counts the ends of line held after those counted (`lines`, from the bytes held after the
+    /// last hand-on).
+    fn count_lines(&mut self) {
+        if self.lines_to < self.start {
+            self.lines_to = self.start;
+            self.lines = 0;
+        }
+        self.lines_to = self.lines_to.min(self.out.len());
+        self.lines += self.out[self.lines_to..]
+            .iter()
+            .filter(|&&byte| byte == b'\n')
+            .count() as u64;
+        self.lines_to = self.out.len();
+    }
+
     fn fail(&mut self, error: SerialError) {
         if self.error.is_none() {
             self.error = Some(error);
@@ -791,7 +797,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     }
 
     /// `BeginNamedType`: `<Type>` (the object mode).
-    fn begin_named(&mut self, type_name: &str) {
+    fn begin_named(&mut self, type_name: &'static str) {
         if OBJECT {
             self.pending_elem = false;
             self.push_name(&[type_name.as_bytes()]);
@@ -1007,7 +1013,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         }
     }
 
-    fn null_element(&mut self) {
+    fn null_element(&mut self, _element_type: &str) {
         self.fail(SerialError::NullElement);
     }
 
@@ -1122,6 +1128,17 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
         (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:193-196
+    /// The position of NCBI's XML stream in the object mode, the line count of its output buffer:
+    /// 1 + the ends of line held (`encoder::Traced` adds those handed on).
+    fn position(&mut self) -> Option<StreamPosition> {
+        if !OBJECT {
+            return None;
+        }
+        self.count_lines();
+        Some(StreamPosition::Line(1 + self.lines))
     }
 
     fn error(&self) -> Option<SerialError> {

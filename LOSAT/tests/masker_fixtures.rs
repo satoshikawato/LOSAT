@@ -362,21 +362,31 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     })
 }
 
-/// Whether `case` of windowmasker names a list that NCBI reads as the lines of a text stream
-/// (`-ids`, `-exclude_ids`, and `-in` with `-fa_list`) in a file that has a `\r\n`: the text
-/// mode of the stream on Windows reads each `\r\n` as `\n` (`ncbi_app::files::LineEnds`), where
-/// on Linux the `\r` stays in the line, so NCBI's bytes from Linux are not those of its build for
-/// Windows there.
-fn crlf_text_list(program: &str, case: &Case) -> bool {
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:467-482
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:237
+// `FillIdList` reads the `-ids` and `-exclude_ids` lists with `NcbiGetlineEOL`, whose line ends
+// are the platform's: `\n` with a last `\r` dropped on Windows, `\r` or `\n` on macOS
+// (`NCBI_OS_DARWIN`), `\n` elsewhere. The `-fa_list` list is read with `std::getline` (`\n`).
+/// Whether `case` of windowmasker names a list whose lines NCBI's build for this platform reads
+/// otherwise than its Linux build, whose bytes are frozen (on Linux a `\r` stays in the line): on
+/// Windows a list (`-ids`, `-exclude_ids`, and `-in` with `-fa_list`) with a `\r\n`, which the
+/// text mode of the stream reads as `\n`; on macOS an id list (`-ids`, `-exclude_ids`) with a
+/// `\r`, where `NcbiGetlineEOL` ends a line (`ncbi_app::files::LineEnds`, whose
+/// `input_lines` tests pin each platform's lines on every host).
+fn list_read_otherwise_than_on_linux(program: &str, case: &Case) -> bool {
     let fa_list = case.words.windows(2).any(|pair| {
         pair[0] == "-fa_list" && ["t", "true", "1"].contains(&pair[1].to_ascii_lowercase().as_str())
     });
     program == "windowmasker"
         && case.words.windows(2).any(|pair| {
-            let list = matches!(pair[0].as_str(), "-ids" | "-exclude_ids")
-                || (fa_list && pair[0] == "-in");
-            list && fs::read(fixtures(program).join(&pair[1]))
-                .is_ok_and(|bytes| bytes.windows(2).any(|two| two == b"\r\n"))
+            let id_list = matches!(pair[0].as_str(), "-ids" | "-exclude_ids");
+            let list = id_list || (fa_list && pair[0] == "-in");
+            list && fs::read(fixtures(program).join(&pair[1])).is_ok_and(|bytes| {
+                let crlf = bytes.windows(2).any(|two| two == b"\r\n");
+                let cr = bytes.contains(&b'\r');
+                (cfg!(windows) && crlf) || (cfg!(target_os = "macos") && id_list && cr)
+            })
         })
 }
 
@@ -477,13 +487,13 @@ fn expected_row(program: &str, name: &str) -> Streams {
 /// Whether `case` of `program` runs on this platform: a row that writes its output to a device
 /// file runs where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null`
 /// means no log file on every platform: NCBI's `SetLogFile` compares the name,
-/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix; a `crlf_text_list` row runs
-/// off Windows.
+/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix; a row whose list NCBI reads
+/// here otherwise than on Linux (`list_read_otherwise_than_on_linux`) does not run.
 fn runs_here(program: &str, case: &Case) -> bool {
     if counts_directory(program, case) && !cfg!(unix) {
         return false;
     }
-    if crlf_text_list(program, case) && cfg!(windows) {
+    if list_read_otherwise_than_on_linux(program, case) {
         return false;
     }
     let out = case

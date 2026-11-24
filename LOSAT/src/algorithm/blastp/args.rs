@@ -426,6 +426,12 @@ pub struct BlastpArgs {
     /// has no file system. Not a public option.
     #[arg(skip)]
     pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
+    /// `SERIAL_VERIFY_DATA_WRITE` of the run's application settings when it changes what NCBI
+    /// writes (`ncbi_environment::WriteVerification`), set with the settings by the command line's
+    /// `run` and the library's entries; `-in_pssm`'s reader refuses a PSSM that the run would write
+    /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
+    #[arg(skip)]
+    pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
@@ -922,6 +928,11 @@ impl BlastpArgs {
             strategy: self.export_search_strategy.is_some(),
             database: self.db.is_some(),
             archive: self.archive.as_ref(),
+            write_verification: self.write_verification.as_ref(),
+            out_pssm: self
+                .psiblast_pssm
+                .as_ref()
+                .is_some_and(|pssm| pssm.out_pssm.is_some()),
             ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1319-1328

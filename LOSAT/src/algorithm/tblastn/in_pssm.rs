@@ -48,7 +48,8 @@ pub(super) fn program_type(pssm: bool) -> Option<crate::report::record::ProgramT
 /// for both programs), whose refusals name LOSAT's TBLASTN and whose scores of a PSSM of
 /// frequency ratios only are made with the options' matrix (`matrix_name`); `strategy` and
 /// `database` are whether the run writes a search strategy and searches `-db`
-/// (`PssmReader::strategy`); the messages of NCBI's reader go to `diagnostics`.
+/// (`PssmReader::strategy`); `write_verification` is the run's `SERIAL_VERIFY_DATA_WRITE`
+/// (`PssmReader::write_verification`); the messages of NCBI's reader go to `diagnostics`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:125-130
 pub(super) fn read(
@@ -57,6 +58,7 @@ pub(super) fn read(
     strategy: bool,
     database: bool,
     archive: Option<&crate::report::archive::ArchiveHandle>,
+    write_verification: Option<&crate::blastinput::ncbi_environment::WriteVerification>,
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
@@ -67,6 +69,8 @@ pub(super) fn read(
             strategy,
             database,
             archive,
+            write_verification,
+            out_pssm: false,
         },
         diagnostics,
     )?;

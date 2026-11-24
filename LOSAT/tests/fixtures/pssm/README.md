@@ -69,3 +69,11 @@ The `losat-rejection` rows are LOSAT's refusals of a value of another type than 
 as `NULL` outside a skip (`docs/manual/src/refusals-edge-cases.md`).
 
 `ps15b2_tk_other_stdaa.asn.gz`: `ps4_tk_paja.asn.gz` with its query's Seq-inst molecule `aa` changed to `other` (the first `mol aa,`; ncbistdaa letters), gzipped; the PSSM query of rows `db.ps15b2.p.othr.crash.*`, `.open.*`, `.prow.*`, `.loop.*` and `.past.*` (line PS, PS15b-2 fix 1).
+
+`d3c_r_<case>.asn.gz` (6 text files): the inputs of the rows `db.ptr.ps.o11.r_<case>*` (line RG item D3c-3c) in
+`tests/db_search_manifest/psiblast.ptr.tsv`: `../db_search/db.ps.asn.rnd.6.asn` with an element stated as `NULL` in a
+list of its query that NCBI's object manager does not read and that holds no type the XML archive writer of LOSAT
+cannot write yet (Seq-hist replaces ids, alone and second, and assembly; Seq-ext seg and delta; BioSource subtype), so
+that NCBI's `-outfmt 11` stops at the element in its three streams (ASN.1 text, XML, binary). They were made by
+`remaining-gaps-20261112/D/d3/c3c/tools/gen_probeA2.py` (official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`,
+probe `c3c/probeA2/`).

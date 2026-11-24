@@ -82,9 +82,9 @@ const LOO_HEADER_BYTES: usize = 40;
 /// Why a volume's RPS files cannot be searched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RpsOpenError {
-    /// NCBI's own error (`CBlastException` with `eRpsInit`): the text after `BLAST engine
-    /// error: `.
-    Ncbi(String),
+    /// NCBI's own error (`CBlastException` with `eRpsInit`): the bytes after `BLAST engine
+    /// error: ` (a path in them as the system's bytes).
+    Ncbi(Vec<u8>),
     /// LOSAT's refusal of files that NCBI would read outside their bounds or that LOSAT does not
     /// search.
     Refused(String),
@@ -152,18 +152,18 @@ pub(crate) fn parse_aux(text: &str) -> Option<RpsAux> {
 }
 
 /// The path that NCBI's errors name: the volume's directory made absolute, with links and `..`
-/// resolved (`CSeqDB::FindVolumePaths`), and the volume's name without extension.
-pub(crate) fn canonical_volume_path(base: &Path) -> String {
+/// resolved (`CSeqDB::FindVolumePaths`), and the volume's name without extension, as the
+/// system's bytes (NCBI's `std::string`).
+pub(crate) fn canonical_volume_path(base: &Path) -> Vec<u8> {
     let name = base.file_name().map(PathBuf::from).unwrap_or_default();
     let dir = match base.parent() {
         Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
         _ => PathBuf::from("."),
     };
-    std::fs::canonicalize(&dir)
+    let path = std::fs::canonicalize(&dir)
         .map(|dir| dir.join(&name))
-        .unwrap_or_else(|_| base.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
+        .unwrap_or_else(|_| base.to_path_buf());
+    crate::utils::os_bytes::path_bytes(&path).into_owned()
 }
 
 /// A `.freq` file read at offsets: the file itself where the platform has positioned reads, else
@@ -378,8 +378,8 @@ pub(crate) struct RpsVolumeFiles {
     regrouped: Option<(Vec<[i32; 4]>, Vec<i32>)>,
     /// The `.freq` file (frequency ratios), opened by [`Self::open_freq`]: read by `pread`, not
     /// mapped, so that its pages never count in the resident set (a CDD volume's is 81 MB; the
-    /// redo of a search touches almost all of it).
-    freq: Option<FreqSource>,
+    /// redo of a search touches almost all of it), with its length in bytes.
+    freq: Option<(FreqSource, u64)>,
 }
 
 impl RpsVolumeFiles {
@@ -446,19 +446,37 @@ impl RpsVolumeFiles {
             PathBuf::from(path)
         };
         let aux_text = std::fs::read(with(".aux")).map_err(|_| {
-            RpsOpenError::Ncbi(format!("Cannot open RPS-BLAST auxiliary file: {shown}.aux"))
+            RpsOpenError::Ncbi(
+                [
+                    b"Cannot open RPS-BLAST auxiliary file: ",
+                    &shown[..],
+                    b".aux",
+                ]
+                .concat(),
+            )
         })?;
         let map = |extension: &str| {
             MappedFile::open(&with(extension)).map_err(|_| {
-                RpsOpenError::Ncbi(format!(
-                    "Cannot memory map RPS-BLAST database file: {shown}{extension}"
-                ))
+                RpsOpenError::Ncbi(
+                    [
+                        b"Cannot memory map RPS-BLAST database file: ",
+                        &shown[..],
+                        extension.as_bytes(),
+                    ]
+                    .concat(),
+                )
             })
         };
         let magic_error = |extension: &str| {
-            RpsOpenError::Ncbi(format!(
-                "RPS BLAST profile file ({shown}{extension}) is either corrupt or constructed for an incompatible architecture"
-            ))
+            RpsOpenError::Ncbi(
+                [
+                    b"RPS BLAST profile file (",
+                    &shown[..],
+                    extension.as_bytes(),
+                    b") is either corrupt or constructed for an incompatible architecture",
+                ]
+                .concat(),
+            )
         };
         let empty = |extension: &str| {
             RpsOpenError::Refused(format!(
@@ -517,19 +535,20 @@ impl RpsVolumeFiles {
             .into());
         }
         let offsets = rps.i32s(8, num_profiles + 1).ok_or_else(|| empty(".rps"))?;
-        // Each profile's rows: its consensus letters and one sentinel row.
+        // Each profile's rows: its columns and one sentinel row. A profile whose `.psq` letters
+        // (the `.pin` length) are more or fewer than its columns opens: NCBI reads its letters
+        // only in the traceback, where LOSAT asks each read of them
+        // (`algorithm::rps_search::profile`; series PR, item PS10e).
         if offsets[0] != 0 {
             return Err(refused(".rps profiles do not start at row 0").into());
         }
-        for (i, &length) in lengths.iter().enumerate() {
-            let rows = i64::from(offsets[i + 1]) - i64::from(offsets[i]);
-            if rows != i64::from(length) + 1 {
-                return Err(refused(&format!(
-                    ".rps profile {i} has {} rows for a consensus sequence of {length} letters",
-                    rows - 1
-                ))
-                .into());
-            }
+        if let Some(i) = (0..num_profiles).find(|&i| offsets[i + 1] <= offsets[i]) {
+            return Err(refused(&format!(
+                ".rps profile {i} has no rows, not even its sentinel row (its offsets {} and {} do not ascend)",
+                offsets[i],
+                offsets[i + 1]
+            ))
+            .into());
         }
         let num_rows =
             usize::try_from(offsets[num_profiles]).map_err(|_| refused(".rps row count"))?;
@@ -619,11 +638,20 @@ impl RpsVolumeFiles {
         program: &str,
         database_name: Option<&str>,
     ) -> Result<(), RpsOpenError> {
-        let shown = database_name.map_or_else(|| canonical_volume_path(base), str::to_string);
+        let shown = database_name.map_or_else(
+            || canonical_volume_path(base),
+            |name| name.as_bytes().to_vec(),
+        );
         let missing = || {
-            RpsOpenError::Ncbi(format!(
-                "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
-            ))
+            RpsOpenError::Ncbi(
+                [
+                    &shown[..],
+                    b" contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ",
+                    &shown[..],
+                    b".",
+                ]
+                .concat(),
+            )
         };
         let mut path = base.as_os_str().to_os_string();
         path.push(".freq");
@@ -638,12 +666,13 @@ impl RpsVolumeFiles {
         let needed = num_rows
             .checked_mul(self.alphabet * 4)
             .and_then(|bytes| bytes.checked_add(self.rows_start()));
-        if needed.is_none_or(|needed| freq.len().map_or(true, |len| len < needed)) {
+        let length = freq.len().ok();
+        if needed.is_none_or(|needed| length.is_none_or(|len| len < needed)) {
             return Err(RpsOpenError::Refused(
                 format!("a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"),
             ));
         }
-        self.freq = Some(freq);
+        self.freq = Some((freq, length.unwrap_or(0) as u64));
         Ok(())
     }
 
@@ -690,7 +719,11 @@ impl RpsVolumeFiles {
     /// The frequency ratios of the rows `start..start + count` into `out` (28 per row): each
     /// row takes `alphabet` integers from the `.freq` file at the `.rps` alphabet's stride,
     /// divided by `FREQ_RATIO_SCALE` and padded with 0.0 (a 26-column `.rps` with a 28-column
-    /// `.freq` reads rows two integers early, as NCBI does).
+    /// `.freq` reads rows two integers early, as NCBI does). NCBI reads the rows in the file's
+    /// mapping: bytes after the file's end read as the zeros of its last page
+    /// (`file::mapped_length`; the row after the rows of a profile whose `.pin` length is above
+    /// its columns, `rps_search::profile`), and `false` is returned where a row's bytes lie past
+    /// that page (NCBI's read faults).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:985-1006
     /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:83
@@ -700,30 +733,42 @@ impl RpsVolumeFiles {
         count: usize,
         bytes: &mut Vec<u8>,
         out: &mut Vec<[f64; 28]>,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<bool> {
         out.clear();
-        let Some(freq) = self.freq.as_ref() else {
-            return Ok(());
+        let Some((freq, file_length)) = self.freq.as_ref() else {
+            return Ok(true);
         };
+        let file_length = *file_length;
         // (`bytes` only grows: a list's rows are not zeroed again for the next one.)
         let wanted = count * self.alphabet * 4;
         if bytes.len() < wanted {
             bytes.resize(wanted, 0);
         }
         let bytes = &mut bytes[..wanted];
-        freq.read_at(
-            bytes,
-            (self.rows_start() + start * self.alphabet * 4) as u64,
-        )?;
-        out.extend(bytes.chunks_exact(self.alphabet * 4).map(|row| {
-            let mut ratios = [0.0f64; 28];
-            for (ratio, value) in ratios.iter_mut().zip(row.chunks_exact(4)) {
-                *ratio = f64::from(i32::from_le_bytes([value[0], value[1], value[2], value[3]]))
-                    / 1_000_000_000.0;
+        let offset = (self.rows_start() + start * self.alphabet * 4) as u64;
+        let end = offset + wanted as u64;
+        if end > super::file::mapped_length(file_length) {
+            return Ok(false);
+        }
+        let in_file = usize::try_from(file_length.saturating_sub(offset))
+            .unwrap_or(usize::MAX)
+            .min(wanted);
+        let (read, zeros) = bytes.split_at_mut(in_file);
+        freq.read_at(read, offset)?;
+        zeros.fill(0);
+        // Each row is written where it stays (its zeros, then its ratios over them), not built
+        // aside and copied in.
+        out.reserve(count);
+        for row in bytes.chunks_exact(self.alphabet * 4) {
+            out.push([0.0; 28]);
+            let Some(ratios) = out.last_mut() else {
+                break;
+            };
+            for (ratio, value) in ratios.iter_mut().zip(row.as_chunks::<4>().0) {
+                *ratio = f64::from(i32::from_le_bytes(*value)) / 1_000_000_000.0;
             }
-            ratios
-        }));
-        Ok(())
+        }
+        Ok(true)
     }
 
     /// Every hit of the table names a position whose word lies in the concatenated rows

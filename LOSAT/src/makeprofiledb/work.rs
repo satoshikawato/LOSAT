@@ -12,7 +12,7 @@ use crate::report::run_files::OpenedFile;
 use crate::report::serial::asn_types::{Post, ReadError};
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::{BlastDefline, DeflineSet};
-use crate::utils::os_bytes::path_from_bytes;
+use crate::utils::os_bytes::{path_from_bytes, path_of_bytes};
 use crate::writedb::alias_file::{self, AliasError, FilterType, CLOCK_ERROR};
 use crate::writedb::bioseq::{self, Bioseq, ParsedIds};
 use crate::writedb::build_db::{create_directories, delete_blast_db};
@@ -156,9 +156,10 @@ struct Params<'a> {
     log_file: Option<OpenedFile>,
     /// The list of profile files (`m_InPssmList`), read whole.
     in_list: Vec<u8>,
-    title: String,
+    /// `-title` (its bytes; `-in` without it).
+    title: Vec<u8>,
     word_default_score_threshold: f64,
-    out_db_name: String,
+    out_db_name: Vec<u8>,
     max_smp_files_per_vol: i32,
     create_index_file: bool,
     gap_open: i32,
@@ -208,7 +209,8 @@ fn init<'a>(
         None
     };
     let in_name = args
-        .as_string("in")
+        .os_value("in")
+        .ok_or_else(|| crate::ncbi_app::args::no_value("in"))
         .map_err(|error| diag.init_arg_exception(error))?;
     let mut in_file = files::open_input_file("in", in_name, input)
         .map_err(|error| diag.init_arg_exception(error))?;
@@ -218,19 +220,20 @@ fn init<'a>(
     let mut in_list = Vec::new();
     if let Err(error) = in_file.read_to_end(&mut in_list) {
         return Err(diag.refuse(&unsupported(&format!(
-            "an -in list that cannot be read (`{in_name}': {error}; NCBI's makeprofiledb reads \
-             it without end)"
+            "an -in list that cannot be read (`{}': {error}; NCBI's makeprofiledb reads it \
+             without end)",
+            in_name.to_string_lossy()
         ))));
     }
     drop(in_file);
-    let in_string = in_name.to_string();
+    let in_bytes = crate::utils::os_bytes::os_str_bytes(in_name);
     let title = args
-        .value("title")
-        .map_or_else(|| in_string.clone(), str::to_string);
+        .bytes("title")
+        .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
     let word_default_score_threshold = args.double("threshold").expect("a default");
     let out_db_name = args
-        .value("out")
-        .map_or_else(|| in_string.clone(), str::to_string);
+        .bytes("out")
+        .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
     let max_smp_files_per_vol = args.integer("max_smp_vol").expect("a default");
     let create_index_file = args.boolean("index").expect("a default");
     let matrix = args.value("matrix").expect("a default").to_string();
@@ -247,7 +250,7 @@ fn init<'a>(
     };
     let (taxids, user_taxids) = if let Some(taxid) = args.integer("taxid") {
         (TaxIdSet::with_global(taxid), true)
-    } else if let Some(name) = args.value("taxid_map") {
+    } else if let Some(name) = args.os_value("taxid_map") {
         let file = files::open_input_file("taxid_map", name, input)
             .map_err(|error| diag.init_arg_exception(error))?;
         let mut taxids = TaxIdSet::default();
@@ -271,8 +274,9 @@ fn init<'a>(
             }
             Err(TaxIdMapError::BlankLine(line)) => {
                 return Err(diag.refuse(&unsupported(&format!(
-                    "a -taxid_map line of white space only (line {line} of `{name}'; NCBI's \
-                     makeprofiledb crashes on it)"
+                    "a -taxid_map line of white space only (line {line} of `{}'; NCBI's \
+                     makeprofiledb crashes on it)",
+                    name.to_string_lossy()
                 ))))
             }
         }
@@ -311,7 +315,7 @@ fn post_seq_id_warning(diag: &mut Diag, warning: &crate::seqid::accguide::SeqIdW
 /// The state that makeprofiledb's destructor reads: the volumes made (`m_VolNames`), whether the
 /// build ended (`m_Done`) and the output's name.
 struct Built {
-    vol_names: Vec<String>,
+    vol_names: Vec<Vec<u8>>,
     done: bool,
 }
 
@@ -413,22 +417,23 @@ fn report(error: RunError, diag: &mut Diag) -> i32 {
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:334-375
 /// makeprofiledb's destructor: after a build that did not end, the RPS files of every volume
 /// begun (and the alias file of several); after one that ended, the `.pog` file of each volume.
-fn destroy(built: &Built, out_db_name: &str) {
-    let remove = |name: String| {
-        crate::writedb::dir_entry::remove(Path::new(&name));
+fn destroy(built: &Built, out_db_name: &[u8]) {
+    let remove = |name: &[u8], extension: &str| {
+        let path = [name, b".", extension.as_bytes()].concat();
+        crate::writedb::dir_entry::remove(&path_of_bytes(&path));
     };
     if !built.done {
         for name in &built.vol_names {
             for extension in ["rps", "loo", "aux", "freq"] {
-                remove(format!("{name}.{extension}"));
+                remove(name, extension);
             }
         }
         if built.vol_names.len() > 1 {
-            remove(format!("{out_db_name}.pal"));
+            remove(out_db_name, "pal");
         }
     } else {
         for name in &built.vol_names {
-            remove(format!("{name}.pog"));
+            remove(name, "pog");
         }
     }
 }
@@ -437,14 +442,15 @@ fn destroy(built: &Built, out_db_name: &str) {
 /// `s_DeleteMakeprofileDb`: the RPS files of a database of the name (each extension of the
 /// single volume, else of the volumes `.00`, `.01`, ... while they are removed), then the
 /// database itself (`DeleteBlastDb`); whether the database was removed.
-fn delete_makeprofile_db(name: &str) -> Result<bool, RunError> {
+fn delete_makeprofile_db(name: &[u8]) -> Result<bool, RunError> {
+    let named = |suffix: String| path_of_bytes(&[name, suffix.as_bytes()].concat()).into_owned();
     for extension in [
         ".rps", ".loo", ".aux", ".freq", ".blocks", ".wcounts", ".obsr",
     ] {
-        if !crate::writedb::dir_entry::remove(Path::new(&format!("{name}{extension}"))) {
+        if !crate::writedb::dir_entry::remove(&named(extension.to_string())) {
             let mut index = 0u32;
-            while crate::writedb::dir_entry::remove(Path::new(&format!(
-                "{name}.{}{}{extension}",
+            while crate::writedb::dir_entry::remove(&named(format!(
+                ".{}{}{extension}",
                 index / 10,
                 index % 10
             ))) {
@@ -540,8 +546,8 @@ fn x_run(
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1865-1876
 // The volumes are named by their file names (`SeqDB_RemoveDirName`), without a list
 // (`eNoAliasFilterType`); the reader opens the new alias file on the database search path (the
-// current directory, `BLASTDB`, the registry's `[BLAST] BLASTDB`), whose registry value LOSAT
-// refuses where it does not read it, as its other database readers do.
+// current directory, `BLASTDB`, the registry's `[BLAST] BLASTDB`). The names and the title are
+// their bytes.
 /// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line
 /// (`writedb::alias_file::create_alias_file`).
 fn create_alias_file(
@@ -550,38 +556,27 @@ fn create_alias_file(
     settings: &ApplicationSettings,
     diag: &mut Diag,
 ) -> Result<(), RunError> {
-    let names: Vec<String> = built
+    let names: Vec<&[u8]> = built
         .vol_names
         .iter()
-        .map(|name| crate::seqdb::alias::base_name(name).to_string())
+        .map(|name| crate::seqdb::alias::base_name(name))
         .collect();
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => {
-            return Err(RunError::Failed(
-                crate::algorithm::common::database::refusal(reason, super::PROGRAM).to_string(),
-            ))
-        }
-    };
-    let created = crate::seqdb::SearchPath::from_environment(registry)
-        .map_err(AliasError::Reader)
-        .and_then(|path| {
-            alias_file::create_alias_file(
-                &params.out_db_name,
-                &names,
-                crate::seqdb::SeqType::Protein,
-                "",
-                &params.title,
-                FilterType::None,
-                &path,
-            )
-        });
+    let path = crate::seqdb::SearchPath::from_environment(settings.blastdb.as_deref());
+    let created = alias_file::create_alias_file(
+        &params.out_db_name,
+        &names,
+        crate::seqdb::SeqType::Protein,
+        b"",
+        &params.title,
+        FilterType::None,
+        &path,
+    );
     match created {
         Ok(line) => {
-            diag.post(&line);
+            diag.post_bytes(&line);
             Ok(())
         }
-        Err(AliasError::SeqDb(text)) => Err(RunError::SeqDb(text.into_bytes())),
+        Err(AliasError::SeqDb(text)) => Err(RunError::SeqDb(text)),
         Err(AliasError::Reader(error)) => Err(RunError::Failed(
             crate::algorithm::common::database::losat_reader_error(&error, super::PROGRAM),
         )),
@@ -703,7 +698,7 @@ fn make_vol(
     let mut output_db = WriteDb::new(
         &db_name,
         true,
-        params.title.as_bytes(),
+        &params.title,
         now.index_date().as_bytes(),
         MAX_FILE_SIZE,
         params.db_ver,
@@ -970,7 +965,7 @@ fn add_to_database(
             defline_field: Vec::new(),
             title_descr: None,
         }),
-        past_seq_pos: None,
+        delta_fix: None,
     };
     let added = output_db.add_sequence(bioseq);
     post_writer(diag, params.stdout, output_db);

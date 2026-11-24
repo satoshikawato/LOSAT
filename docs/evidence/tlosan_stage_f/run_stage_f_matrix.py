@@ -130,7 +130,7 @@ def physical(out: Path, log) -> None:
             print("PASS", name, flush=True)
 
 
-# NCBI c++/src/algo/blast/core/blast_engine.c:1452-1465:
+# NCBI c++/src/algo/blast/core/blast_engine.c:1462-1465:
 # The API oracle selects FindGeneticCode(code); code 1 is calibrated to the CLI.
 def codes(out: Path, log, api: Path) -> None:
     baseline = {(row["code"], row["outfmt"]): row for row in records(E / "all_codes_20260925/comparison.jsonl")}

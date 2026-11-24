@@ -12,8 +12,8 @@
 //! (`crate::writedb::cout`, `crate::ncbi_app::files::Ostream`, rpsbproc's report) drop the
 //! bytes of the failed write and write nothing after it. Where that cuts the output follows
 //! each writer's own write sizes; NCBI's for the tools' records are item T8a's (line RG-T5).
-//! A `std::io::BufWriter` keeps the bytes. The search report stream still has one over this
-//! device until T6a (#1508).
+//! A `std::io::BufWriter` keeps the bytes. The search programs' report stream
+//! (`crate::report::ostream::ReportStream`) holds NCBI's buffer of `cout` over this device.
 //!
 //! The library leaves the process's standard output to `Stdout`, which its caller shares.
 
@@ -95,6 +95,27 @@ impl std::io::Write for StandardOutput {
             }
             #[cfg(not(any(unix, target_os = "wasi")))]
             Device::Missing => Ok(buf.len()),
+        }
+    }
+
+    /// The device's own gathered write (`writev` of the descriptor), so that the bytes that NCBI's
+    /// buffer holds and the bytes after them reach it as one write where NCBI's stream writes them
+    /// so (`report::ostream`'s device writes). A console writes each part.
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        match &mut self.0 {
+            #[cfg(any(unix, windows, target_os = "wasi"))]
+            Device::Raw(file) => std::io::Write::write_vectored(&mut **file, bufs),
+            #[cfg(windows)]
+            Device::Console(stdout) => {
+                let Some(first) = bufs.iter().find(|buf| !buf.is_empty()) else {
+                    return Ok(0);
+                };
+                std::io::Write::write_all(stdout, first)?;
+                std::io::Write::flush(stdout)?;
+                Ok(first.len())
+            }
+            #[cfg(not(any(unix, target_os = "wasi")))]
+            Device::Missing => Ok(bufs.iter().map(|buf| buf.len()).sum()),
         }
     }
 

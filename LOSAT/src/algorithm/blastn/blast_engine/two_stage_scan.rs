@@ -660,7 +660,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:451-497
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1675-1683
     if offset_pairs_len > 0 {
         pair_extend::extend_offset_pairs(
             scan,

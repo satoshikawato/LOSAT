@@ -328,14 +328,16 @@ impl ColumnAlgorithms {
 
             // Check for identical algorithm descriptions (should not happen.)
             if let Some(duplicate) = first_duplicate(&metadata) {
-                return Err(SeqDbError::Format {
-                    path: path.to_path_buf(),
-                    message: format!(
-                        "Error: volume ({}) mask data has duplicates value ({})",
-                        volume.base().display(),
-                        duplicate
-                    ),
-                });
+                return Err(SeqDbError::NotFound(
+                    [
+                        b"Error: volume (".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(volume.base()),
+                        b") mask data has duplicates value (",
+                        duplicate.as_bytes(),
+                        b")",
+                    ]
+                    .concat(),
+                ));
             }
 
             for (key, description) in metadata {
@@ -405,13 +407,15 @@ impl MaskAlgorithms {
     /// four-item description; otherwise the whole description, for example `"30:"`), or the
     /// text of NCBI's exception: "Cannot find string algorithm id in algorithm map."; for GI
     /// masks the id of the `MASKLIST` name (`GiMasks::algorithm_id`, whose text lists them).
-    pub fn id_of(&self, name: &str) -> Result<i32, String> {
+    /// `name` is the bytes of NCBI's `std::string`; the descriptions are text, so a name that is
+    /// not UTF-8 matches none of them.
+    pub fn id_of(&self, name: &[u8]) -> Result<i32, Vec<u8>> {
         match &self.kind {
-            AlgorithmsKind::Columns(table) => table
-                .desc_to_id
-                .get(name)
+            AlgorithmsKind::Columns(table) => std::str::from_utf8(name)
+                .ok()
+                .and_then(|name| table.desc_to_id.get(name))
                 .copied()
-                .ok_or_else(|| "Cannot find string algorithm id in algorithm map.".to_string()),
+                .ok_or_else(|| b"Cannot find string algorithm id in algorithm map.".to_vec()),
             AlgorithmsKind::Gi(masks) => masks.algorithm_id(name),
         }
     }
@@ -608,14 +612,10 @@ fn read_ranges_into(
 impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
-    /// database without mask data. With GI masks, their table, or LOSAT's refusal of a
-    /// `MASKLIST` name (`alias::gi_mask_list`).
+    /// database without mask data. With GI masks, their table.
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);
-        }
-        if let Some(refusal) = &self.gi_mask_refusal {
-            return Err(refusal.duplicate());
         }
         let table = MaskAlgorithms::build(&self.volumes)?;
         Ok(self.mask_algorithms.get_or_init(|| table))
@@ -732,13 +732,8 @@ impl SeqDb {
         column.read_blobs(range.first, range.end, &mut block.blobs);
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2520-2523
-    // For each sequence the GI comes first, then `x_Open` of the algorithm, then the lookup.
-    // NCBI keeps the files once opened and opens them again at the next sequence after a failed
-    // opening, which fails again on the same files: the block opens them at its first sequence
-    // whose GI is read, and a failure is the error of every later sequence whose GI is read.
     /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of
-    /// `range`, or its error, into `block`.
+    /// `range`, or its error, into `block`, read by one [`GiMasks::reader`].
     fn read_gi_mask_block(
         &self,
         masks: &GiMasks,
@@ -749,21 +744,10 @@ impl SeqDb {
         block.source = BlockSource::Gi;
         block.ranges.clear();
         block.gi_spans.clear();
-        let volume = &self.volumes[range.volume];
-        let mut files = None;
+        let mut reader = masks.reader(range.volume, &self.volumes[range.volume], algo_id);
         for vol_oid in range.first..range.end {
             let start = block.ranges.len();
-            let read = masks
-                .seq_gi_key(range.volume, volume, vol_oid)
-                .and_then(
-                    |key| match files.get_or_insert_with(|| masks.open(algo_id)) {
-                        Ok(files) => {
-                            files.ranges_into(key, &mut block.ranges, &mut block.gi_window)
-                        }
-                        Err(error) => Err(error.duplicate()),
-                    },
-                );
-            let span = match read {
+            let span = match reader.ranges_into(vol_oid, &mut block.ranges, &mut block.gi_window) {
                 Ok(()) => Ok(start..block.ranges.len()),
                 Err(error) => {
                     block.ranges.truncate(start);

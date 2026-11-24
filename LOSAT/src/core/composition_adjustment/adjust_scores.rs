@@ -816,7 +816,7 @@ pub(crate) fn blast_get_composition_range(
     Ok((left, right))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1170-1194
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1161-1199
 pub fn read_aa_composition(sequence: &[u8]) -> BlastAminoAcidComposition {
     let mut composition = BlastAminoAcidComposition::empty();
     for &residue in sequence {
@@ -872,12 +872,12 @@ pub fn build_matrix_info(matrix: ScoringMatrix, ungapped_lambda: f64) -> Result<
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:31-48
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:38-59
 fn dense_matrix_new(nrows: usize, ncols: usize) -> Vec<Vec<f64>> {
     vec![vec![0.0; ncols]; nrows]
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:52-74
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:63-85
 fn ltriang_matrix_new(n: usize) -> Vec<Vec<f64>> {
     (0..n).map(|row| vec![0.0; row + 1]).collect()
 }
@@ -1059,7 +1059,7 @@ fn x_solve_ltriang_pos_def_cols(x: &mut [f64], n: usize, l: &[Vec<f64>], wc: &[f
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:175-193
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:190-209
 fn euclidean_norm(v: &[f64]) -> f64 {
     let mut sum = 1.0;
     let mut scale = 0.0;
@@ -1084,7 +1084,7 @@ fn add_vectors(y: &mut [f64], alpha: f64, x: &[f64]) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:209-223
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:224-239
 fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:224-238
     // The quotients first, then the scan (`x_step_bound`), for the 400 values of the Newton
@@ -1111,7 +1111,7 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     alpha
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:402-416
 fn freq_ratio_to_score_square(
     matrix: &mut [[f64; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET],
     rows: usize,
@@ -1235,7 +1235,7 @@ fn calc_lambda_full_precision_from_scores(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:136-147
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:135-157
 pub fn blast_get_relative_entropy(
     a: &[f64; COMPO_NUM_TRUE_AA],
     b: &[f64; COMPO_NUM_TRUE_AA],
@@ -1259,7 +1259,7 @@ pub fn blast_get_relative_entropy(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:89-107
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:106-131
 fn apply_pseudocounts(
     probs20: &mut [f64; COMPO_NUM_TRUE_AA],
     number_of_observations: i32,
@@ -1291,7 +1291,7 @@ fn gather_letter_probs(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:444-458
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:449-461
 fn unpack_letter_probs(
     std_probs: &mut [f64; COMPO_LARGEST_ALPHABET],
     probs: &[f64; COMPO_NUM_TRUE_AA],
@@ -1305,14 +1305,14 @@ fn unpack_letter_probs(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:467-478
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:472-480
 fn set_pair_ambig_probs_to_sum(probs: &mut [f64; COMPO_LARGEST_ALPHABET]) {
     probs[E_BCHAR] = probs[E_DCHAR] + probs[E_NCHAR];
     probs[E_ZCHAR] = probs[E_ECHAR] + probs[E_QCHAR];
     probs[E_JCHAR] = probs[E_ICHAR] + probs[E_LCHAR];
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:538-604
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:542-603
 fn true_aa_to_std_target_freqs(
     std_freq: &mut [[f64; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET],
     freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
@@ -1449,7 +1449,7 @@ fn int4_matrix_from_freq(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:760-793
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:759-798
 fn scores_std_alphabet(
     target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
     matrix_info: &BlastMatrixInfo,
@@ -1584,7 +1584,7 @@ pub fn x_adjmemo_print_stats() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:95-126
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:112-139
 fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:126-137
     // The register-accumulator form (`x_scaled_symmetric_product_a`) for `alphsize` up to 20
@@ -1633,7 +1633,7 @@ fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: 
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:154-180
 // The same additions per element in the same order, arranged so that independent elements
 // advance together.
 //
@@ -1741,7 +1741,7 @@ fn residuals_linear_constraints(
     multiply_by_a(1.0, ra, alphsize, -1.0, x);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:241-262
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:267-287
 fn dual_residuals(
     resids_x: &mut [f64],
     alphsize: usize,
@@ -1868,7 +1868,7 @@ fn factor_re_newton_system(
     x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:480-524
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:550-603
 fn solve_re_newton_system(
     x: &mut [f64],
     z: &mut [f64],
@@ -2289,7 +2289,7 @@ pub(crate) fn blast_adjust_scores(
             K_FIXED_RE_BLOSUM62,
             workspace,
         )? {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1509-1517
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1519-1521
             return Ok(Some(BlastAdjustScoresResult {
                 matrix_adjust_rule,
                 adjusted_matrix,

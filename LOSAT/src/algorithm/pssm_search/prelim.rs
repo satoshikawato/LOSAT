@@ -5,7 +5,7 @@
 //! `kbp_gap_psi` and the reap by the preliminary e-value (`s_BlastSearchEngineCore`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:490-555
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:445
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:444-446
 //!
 //! The PSSM query has one context at query offset 0 (`s_AdjustHspOffsetsAndGetQueryData`
 //! subtracts nothing), so `query_info->contexts[0]` stands for every context lookup of the
@@ -151,7 +151,7 @@ fn tree_hsp(hsp: &BlastpPreliminaryHsp) -> TreeHsp {
 /// `ScoreCompareHSPs`: score down, subject offset up, subject end down, query offset up, query
 /// end down.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1350
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1354
 pub(crate) fn score_compare(
     a: &BlastpPreliminaryHsp,
     b: &BlastpPreliminaryHsp,
@@ -256,7 +256,7 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
         if init_hsps.is_empty() {
             return None;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:228-231
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
         sort_init_hsps_by_score(init_hsps);
         hsps.clear();
         self.gapped_score(init_hsps, tree, hsps, gap, s_idx, subject_sequence, aa_len);

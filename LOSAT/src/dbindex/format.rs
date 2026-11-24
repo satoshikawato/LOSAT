@@ -14,8 +14,8 @@ use super::{SeqNum, Word, OFFSET_COMBINED, UNCOMPRESSED, VERSION, WIDTH_32};
 
 /// `<base>.<NN>.idx`: the name of index volume `volume` (two digits at least).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:105-112
-pub(crate) fn volume_name(base: &str, volume: u32) -> String {
-    format!("{base}.{volume:02}.idx")
+pub(crate) fn volume_name(base: &[u8], volume: u32) -> Vec<u8> {
+    [base, format!(".{volume:02}.idx").as_bytes()].concat()
 }
 
 /// The `.shd` super header of the index of one database volume (`CIndexSuperHeader<1>`): the
@@ -38,8 +38,8 @@ impl SuperHeader {
     /// is returned.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:196-203
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:241-252
-    pub(crate) fn save(&self, fname: &str) {
-        let Ok(file) = std::fs::File::create(fname) else {
+    pub(crate) fn save(&self, fname: &[u8]) {
+        let Ok(file) = std::fs::File::create(crate::utils::os_bytes::path_of_bytes(fname)) else {
             return;
         };
         let mut out = std::io::BufWriter::new(file);

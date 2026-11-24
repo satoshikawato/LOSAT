@@ -18,10 +18,10 @@ use super::SeqDbError;
 /// The message of NCBI's error for a file it maps that is not a file: an OID list file, or the
 /// GI-mask data file of a volume that is not found, which NCBI maps by the empty name
 /// (`gi_mask::GiMaskFiles::open`).
-pub(super) fn not_a_file(path: &str) -> Vec<u8> {
+pub(super) fn not_a_file(path: &[u8]) -> Vec<u8> {
     [
         b"To be memory mapped the file must exist: '".as_slice(),
-        path.as_bytes(),
+        path,
         b"'",
     ]
     .concat()
@@ -35,7 +35,7 @@ pub(super) fn not_a_file(path: &str) -> Vec<u8> {
 pub(super) enum OidListError {
     /// The path is not a regular file (missing, a directory, the directory of an empty value):
     /// NCBI's `eMemoryMappingFailure` (`not_a_file`).
-    NotAFile(String),
+    NotAFile(Vec<u8>),
     /// The file holds no byte: NCBI maps nothing and reads the header through a null pointer
     /// (SIGSEGV, probe G5 of line RG D1b).
     Empty(PathBuf),
@@ -163,10 +163,10 @@ pub(super) struct OidListFile {
 // asserts that the file holds a byte after the 4-byte header.
 /// Reads the OID list file `path` (the path of the alias file's `OIDLIST`, as
 /// `alias::compute_masks` resolved it).
-pub(super) fn read(path: &str) -> Result<OidListFile, OidListError> {
-    let at = Path::new(path);
+pub(super) fn read(path: &[u8]) -> Result<OidListFile, OidListError> {
+    let at = &*crate::utils::os_bytes::path_of_bytes(path);
     if !super::alias::exists(at) {
-        return Err(OidListError::NotAFile(path.to_string()));
+        return Err(OidListError::NotAFile(path.to_vec()));
     }
     let file = DbFile::open(at).map_err(|error| OidListError::read(error, at))?;
     if file.is_empty() {

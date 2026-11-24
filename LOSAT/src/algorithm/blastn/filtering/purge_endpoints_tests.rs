@@ -382,7 +382,7 @@ fn equivalent_scripts_keep_endpoints_and_score() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2285-2387
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2286-2320,2351-2386
 #[test]
 fn common_endpoint_comparator_ignores_edit_script() {
     let (g_path, s_path) = opaque_equal_endpoint_hsps();
@@ -464,7 +464,7 @@ fn source_compatible_purge_never_synthesizes_edit_script() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2285-2318
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2291-2318
 #[test]
 fn test_purge_common_start_keeps_longer_end_on_score_tie() {
     fn make_hit(q_end: usize, s_end: usize) -> BlastnHsp {

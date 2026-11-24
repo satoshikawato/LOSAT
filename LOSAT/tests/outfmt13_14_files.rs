@@ -1487,11 +1487,13 @@ fn blastx_hold_with_free_side_files_writes_them_all_and_the_check_leaves_nothing
     }
 }
 
-/// DECISIONS 35 S2: a write to a side file that fails after it was opened (the file is a link to `/dev/full`)
-/// ends the run with one answer in all five programs and in BLASTX with and without a hold: `BLAST failed to write
-/// output`, exit status 6 (the message and status of a failed write to `-out` in outfmt 0), an empty master, and the
-/// side files after the failed one not written. Deviation: NCBI reports the failed flush and goes on with exit
-/// status 0 (OF5c review, probe `F`). Linux only: macOS and Windows have no `/dev/full`.
+/// A write to a side file that fails after it was opened (the file is a link to `/dev/full`) ends as NCBI 2.17.0's
+/// in all five programs and in BLASTX with and without a hold (line RG item T6a, survey T6 D8; PD exception 7
+/// withdrawn): a document that NCBI's file buffer writes before its end fails there, the buffer's write fault
+/// (`Error: (802.5) [<program>] CObjectOStream: error at byte <N>: stack is empty: write fault`), and the run stops
+/// with exit status 0, an empty master and no side file after the failed one; a document that the file's buffer holds
+/// to its end fails at its last flush, posts NCBI's chain of `cannot close output stream`, and the run goes on (exit
+/// status 0, the master written). Linux only: macOS and Windows have no `/dev/full`.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_side_file_write_error_gives_one_answer_in_every_program() {
@@ -1613,18 +1615,40 @@ fn a_side_file_write_error_gives_one_answer_in_every_program() {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             let output = run_in(&inputs(), &args, &[]);
             let what = format!("{label} {format}");
-            assert_eq!(
-                String::from_utf8_lossy(&output.stderr),
-                "BLAST failed to write output\n",
-                "{what}"
-            );
-            assert_eq!(output.status.code(), Some(6), "{what}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let program = args[0];
+            assert_eq!(output.status.code(), Some(0), "{what}: {stderr}");
             assert!(output.stdout.is_empty(), "{what}");
-            assert_eq!(fs::read(&out).unwrap(), b"", "{what}: the master is empty");
-            assert!(
-                !work.join(format!("o.out_2.{extension}")).exists(),
-                "{what}: no side file after the failed one"
-            );
+            let fault = format!("Error: (802.5) [{program}] CObjectOStream: error at byte ");
+            let at = stderr
+                .find(&fault)
+                .unwrap_or_else(|| panic!("{what}: {stderr}"));
+            let rest = &stderr[at + fault.len()..];
+            let digits = rest.chars().take_while(char::is_ascii_digit).count();
+            assert!(digits > 0, "{what}: {stderr}");
+            match &rest[digits..] {
+                ": stack is empty: write fault\n" => {
+                    assert_eq!(fs::read(&out).unwrap(), b"", "{what}: the master is empty");
+                    assert!(
+                        !work.join(format!("o.out_2.{extension}")).exists(),
+                        "{what}: no side file after the failed one"
+                    );
+                }
+                chain => {
+                    let n = &rest[..digits];
+                    // NCBI's chain of the failed close, in LOSAT's words (`wording::losat_text`).
+                    let ncbi = format!(
+                        ": stack is empty: cannot close output stream\n\
+                         Error: (CIOException::eFlush) [{program}] COStreamBuffer::Flush: failed\n\
+                         Error: (CSerialException::eIoError) [{program}] byte {n}: cannot close \
+                         output stream\n\
+                         Error: (802.4) [{program}] Cannot close serializing output stream \
+                         (CSerialException::eIoError) byte {n}: cannot close output stream\n"
+                    );
+                    assert_eq!(chain, losat::wording::losat_text(&ncbi), "{what}");
+                    assert!(!fs::read(&out).unwrap().is_empty(), "{what}: the master");
+                }
+            }
             fs::remove_dir_all(work).ok();
         }
     }

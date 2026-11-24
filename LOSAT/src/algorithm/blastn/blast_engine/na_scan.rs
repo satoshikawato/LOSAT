@@ -211,7 +211,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 if q_off_1 == 0 {
                     continue;
                 }
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1412
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1415
                 let q_off0 = q_off_1 as usize - 1;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:900-903
                 let context_idx = query_context_index.context_for_offset(q_off0);
@@ -355,7 +355,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                     0
                 };
 
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-676
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674
                 let s_end_pos_i32 = s_end_pos as i32;
                 let window_end = last_hit + window_size as i32;
                 if two_hits && (hit_saved || s_end_pos_i32 > window_end) {

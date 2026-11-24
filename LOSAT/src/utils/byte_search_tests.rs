@@ -84,6 +84,28 @@ fn find_first_is_the_first_index() {
 }
 
 #[test]
+fn find_first_finds_a_match_at_every_place_of_every_window() {
+    // One match alone, and with a second match at the end, at every place of haystacks across the
+    // 32-byte folds, the first window of 64, the later windows and the overlapping last one; and
+    // no match.
+    let is_b = |byte: u8| byte == b'b';
+    for len in 1..=260usize {
+        let mut text = vec![b'a'; len];
+        assert_eq!(find_first(&text, is_b), None, "{len}");
+        for at in 0..len {
+            text[at] = b'b';
+            assert_eq!(find_first(&text, is_b), Some(at), "{len} {at}");
+            if at + 1 < len {
+                text[len - 1] = b'b';
+                assert_eq!(find_first(&text, is_b), Some(at), "{len} {at} and the end");
+                text[len - 1] = b'a';
+            }
+            text[at] = b'a';
+        }
+    }
+}
+
+#[test]
 fn find_is_the_first_occurrence() {
     let texts = search_texts();
     for needle in search_needles() {

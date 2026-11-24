@@ -1,8 +1,9 @@
-//! The mask reader builds a `Seq-id` in its own walk (text and binary share one builder,
-//! `reader::read_seq_id`, over the frames of the reader), `seqid::ber::decode_seq_id` builds one
-//! for the defline of a database and `seqid::asn_text` one for the PSSM and rpsbproc readers:
-//! three readers of the same type. For a valid `Seq-id` of every alternative they must give the
-//! same `ParsedSeqId`, so that a mask id and a database id compare as NCBI's one `CSeq_id` does.
+//! The table-driven reader builds a `Seq-id` for the mask files and the PSSM (text and binary share
+//! one builder, `asn_types::seq_id::read_seq_id`, over the frames of the reader),
+//! `seqid::ber::decode_seq_id` builds one for the defline of a database and `seqid::asn_text` one
+//! for the rpsbproc archive reader: three readers of the same type. For a valid `Seq-id` of every
+//! alternative they must give the same `ParsedSeqId`, so that a mask id and a database id compare
+//! as NCBI's one `CSeq_id` does.
 
 use super::reader::{seq_id_from_binary, seq_id_from_text};
 use crate::report::seqid::SeqId;

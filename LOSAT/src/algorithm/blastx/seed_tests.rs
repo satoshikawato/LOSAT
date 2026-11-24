@@ -26,3 +26,75 @@ fn diagonal_size_power_and_int4_overflow_boundary() {
     assert!(Diagonals::new(i32::MAX as usize, 1).is_err());
     assert!(Diagonals::new(usize::MAX, 0).is_err());
 }
+
+/// BLASTX's table as the `-db_hard_mask` search moves it between sequences
+/// (`search_db_masked.rs`: `TableStart::apply`, `TableEnd::apply`): NCBI's table at its one-thread
+/// offset, the clear before the move, the moves after a sequence, and the move past Int4 an error.
+#[test]
+fn hard_mask_starts_and_ends_move_the_table() {
+    use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart, TableEnd, TableStart};
+    let window = 40;
+    let mut d = Diagonals::new(500, window).unwrap();
+    let mut written = DiagStruct::default();
+    written.set_last_hit(5000);
+    written.set_flag(1);
+    d.entries.fill(written);
+    d.offset = 5000;
+    TableStart::Keep.apply(&mut d, window).unwrap();
+    assert_eq!((d.offset, d.entries[3]), (5000, written));
+    TableStart::Move {
+        clear: false,
+        by: 70,
+    }
+    .apply(&mut d, window)
+    .unwrap();
+    assert_eq!((d.offset, d.entries[3]), (5070, written));
+    TableStart::Move {
+        clear: true,
+        by: 70,
+    }
+    .apply(&mut d, window)
+    .unwrap();
+    assert_eq!(d.offset, window + 70);
+    assert!(d
+        .entries
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    TableEnd::Move(98).apply(&mut d, window).unwrap();
+    assert_eq!(d.offset, window + 168);
+    d.entries.fill(written);
+    TableEnd::Clear.apply(&mut d, window).unwrap();
+    assert_eq!(d.offset, window);
+    assert!(d
+        .entries
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    for (start, entry) in [
+        (
+            NcbiStart {
+                offset: -98,
+                cleared: false,
+            },
+            DiagStruct::default(),
+        ),
+        (
+            NcbiStart {
+                offset: 5,
+                cleared: true,
+            },
+            DiagStruct::clear(window),
+        ),
+    ] {
+        d.entries.fill(written);
+        TableStart::New(start).apply(&mut d, window).unwrap();
+        assert_eq!(d.offset, start.offset);
+        assert!(d.entries.iter().all(|&e| e == entry), "{start:?}");
+        d.entries.fill(written);
+        d.ncbi_table(start, window);
+        assert_eq!(d.offset, start.offset);
+        assert!(d.entries.iter().all(|&e| e == entry), "{start:?}");
+    }
+    d.offset = i32::MAX - 10;
+    let error = TableEnd::Move(98).apply(&mut d, window).unwrap_err();
+    assert_eq!(error.to_string(), "BLASTX diagonal offset exceeds Int4");
+}

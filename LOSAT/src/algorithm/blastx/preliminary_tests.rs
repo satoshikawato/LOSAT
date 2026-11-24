@@ -1,4 +1,5 @@
 use super::*;
+use crate::algorithm::blastn::interval_tree::IndexMethod;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:212-226
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819-834
 #[test]

@@ -12,7 +12,8 @@ use anyhow::{bail, Result};
 /// The inputs and the output are the call's, so `-query`, `-subject`, `-out`, `-db` and the
 /// help and version words are refused.
 pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
-    // The host has no database files; LOSAT Web searches the records it gives (`run_local`).
+    // The frozen ABI v1 (plan TD-1) has no database search; LOSAT Web searches a database
+    // through ABI v2.
     if extra
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")

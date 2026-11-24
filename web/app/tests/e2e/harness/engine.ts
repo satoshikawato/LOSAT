@@ -6,7 +6,7 @@ import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { InputRole, OutputFormat, ProgramId } from 'losat/domain';
 import type { EngineGateway, EngineInput, OutputStream, RuntimeInfo } from 'losat/ports';
-import type { RunView } from '../../../src/application/coordinator';
+import { isToolRun, type RunView } from '../../../src/application/coordinator';
 import { createApp, type App } from '../../../src/composition';
 import { buildArgv } from '../../../src/domain/argv';
 import { fastaParser, programById } from '../../../src/domain/programs';
@@ -121,7 +121,7 @@ export class SearchSession {
 
   view(runId: string): RunView {
     const view = this.app.coordinator.state.get().runs.find((run) => run.snapshot.runId === runId);
-    if (view === undefined) throw new Error(`no run ${runId}`);
+    if (view === undefined || isToolRun(view)) throw new Error(`no run ${runId}`);
     return view;
   }
 

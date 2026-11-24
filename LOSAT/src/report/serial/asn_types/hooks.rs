@@ -1,17 +1,13 @@
 //! What NCBI's hand-written classes do when the reader has read one of them (their
 //! `PostRead`), for the classes of the table whose `PostRead` changes the object or stops the
 //! reader (SURVEY_D3 §2.4 of line RG series F: `CSeq_descr`, `CVariation_ref`; the others keep
-//! caches only), and the Seq-id, which LOSAT keeps in its one Seq-id model (`seqid::model`).
+//! caches only). (The Seq-id is read into LOSAT's Seq-id model by its own reader, `super::seq_id`.)
 
 use super::read::{Frame, Post, PostSink};
 use super::table::named;
 use super::{member_index, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_input::{Fail, R, VECTOR_RESERVE_LENGTH_ERROR};
-use crate::seqid::model::{
-    Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
-    PdbSeqId, TextseqId,
-};
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:1497-1527
 // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_seg.hpp:181-182 (the hook is global:
@@ -118,7 +114,7 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> R<(
 /// Whether a hook of the type `ty` reads its value: the members read so far (`pre_read_member`
 /// of a Dense-seg), the whole value (`post_read` of a Seq-descr and a Variation-ref, which fail
 /// or post by it). Such a value is read whole where the reader keeps no value
-/// (`read::ObjectStream::read_value`); the Seq-id's hook only makes LOSAT's model of it.
+/// (`read::ObjectStream::read_value`).
 pub(super) fn reads_its_value(ty: u16) -> bool {
     matches!(
         ty,
@@ -132,7 +128,6 @@ pub(super) fn post_read(ty: u16, value: Value, posts: &mut dyn PostSink) -> R<Va
     match ty {
         named::SEQ_DESCR => seq_descr_post_read(value),
         named::VARIATION_REF => Ok(variation_ref_post_read(value, posts)),
-        named::SEQ_ID => Ok(Value::SeqId(Box::new(seq_id_of(&value)))),
         _ => Ok(value),
     }
 }
@@ -268,131 +263,5 @@ fn int(value: &Value) -> i64 {
     match value {
         Value::Int(n) => *n,
         other => unreachable!("an INTEGER of the table, not {other:?}"),
-    }
-}
-
-fn int4(value: &Value) -> i32 {
-    i32::try_from(int(value)).expect("an Int4 of the table")
-}
-
-fn string(value: &Value) -> Vec<u8> {
-    match value {
-        Value::Str(text) => text.clone(),
-        other => unreachable!("a string of the table, not {other:?}"),
-    }
-}
-
-fn choice(value: &Value) -> (usize, &Value) {
-    match value {
-        Value::Choice(index, value) => (usize::from(*index), value),
-        other => unreachable!("a CHOICE of the table, not {other:?}"),
-    }
-}
-
-/// The member `name` of the SEQUENCE `value` of the type `ty`, when set.
-fn field<'v>(value: &'v Value, ty: u16, name: &str) -> Option<&'v Value> {
-    value.member(member_index(ty, name))
-}
-
-/// The Seq-id `value` (read under the table) in LOSAT's Seq-id model, which holds each member of
-/// every alternative (an OPTIONAL member as `None` when not set, `PDB-seq-id.chain` set to its
-/// DEFAULT as `Some(32)`), so the Seq-id keeps what was read.
-pub(super) fn seq_id_of(value: &Value) -> ParsedSeqId {
-    let (variant, value) = choice(value);
-    let textseq = |value: &Value| TextseqId {
-        name: field(value, named::TEXTSEQ_ID, "name").map(string),
-        accession: field(value, named::TEXTSEQ_ID, "accession").map(string),
-        release: field(value, named::TEXTSEQ_ID, "release").map(string),
-        version: field(value, named::TEXTSEQ_ID, "version").map(int4),
-    };
-    match crate::seqid::model::SEQ_ID_ALTERNATIVES[variant] {
-        "local" => ParsedSeqId::Local(object_id(value)),
-        "gibbsq" => ParsedSeqId::Gibbsq(int4(value)),
-        "gibbmt" => ParsedSeqId::Gibbmt(int4(value)),
-        "giim" => ParsedSeqId::Giim(GiimportId {
-            id: field(value, named::GIIMPORT_ID, "id")
-                .map(int4)
-                .expect("mandatory"),
-            db: field(value, named::GIIMPORT_ID, "db").map(string),
-            release: field(value, named::GIIMPORT_ID, "release").map(string),
-        }),
-        "genbank" => ParsedSeqId::Genbank(textseq(value)),
-        "embl" => ParsedSeqId::Embl(textseq(value)),
-        "pir" => ParsedSeqId::Pir(textseq(value)),
-        "swissprot" => ParsedSeqId::Swissprot(textseq(value)),
-        "patent" => {
-            let cit = field(value, named::PATENT_SEQ_ID, "cit").expect("mandatory");
-            let (number, id) = choice(field(cit, named::ID_PAT, "id").expect("mandatory"));
-            ParsedSeqId::Patent(PatentSeqId {
-                seqid: field(value, named::PATENT_SEQ_ID, "seqid")
-                    .map(int4)
-                    .expect("mandatory"),
-                cit: IdPat {
-                    country: field(cit, named::ID_PAT, "country")
-                        .map(string)
-                        .expect("mandatory"),
-                    id: if number == 0 {
-                        PatentNumber::Number(string(id))
-                    } else {
-                        PatentNumber::AppNumber(string(id))
-                    },
-                    doc_type: field(cit, named::ID_PAT, "doc-type").map(string),
-                },
-            })
-        }
-        "other" => ParsedSeqId::Other(textseq(value)),
-        "general" => ParsedSeqId::General(dbtag(value)),
-        "gi" => ParsedSeqId::Gi(int(value)),
-        "ddbj" => ParsedSeqId::Ddbj(textseq(value)),
-        "prf" => ParsedSeqId::Prf(textseq(value)),
-        "pdb" => ParsedSeqId::Pdb(PdbSeqId {
-            mol: field(value, named::PDB_SEQ_ID, "mol")
-                .map(string)
-                .expect("mandatory"),
-            chain: field(value, named::PDB_SEQ_ID, "chain").map(int4),
-            rel: field(value, named::PDB_SEQ_ID, "rel").map(date),
-            chain_id: field(value, named::PDB_SEQ_ID, "chain-id").map(string),
-        }),
-        "tpg" => ParsedSeqId::Tpg(textseq(value)),
-        "tpe" => ParsedSeqId::Tpe(textseq(value)),
-        "tpd" => ParsedSeqId::Tpd(textseq(value)),
-        "gpipe" => ParsedSeqId::Gpipe(textseq(value)),
-        _ => ParsedSeqId::NamedAnnotTrack(textseq(value)),
-    }
-}
-
-fn object_id(value: &Value) -> ObjectId {
-    match choice(value) {
-        (0, value) => ObjectId::Id(int4(value)),
-        (_, value) => ObjectId::Str(string(value)),
-    }
-}
-
-fn dbtag(value: &Value) -> Dbtag {
-    Dbtag {
-        db: field(value, named::DBTAG, "db")
-            .map(string)
-            .expect("mandatory"),
-        tag: field(value, named::DBTAG, "tag")
-            .map(object_id)
-            .expect("mandatory"),
-    }
-}
-
-fn date(value: &Value) -> Date {
-    match choice(value) {
-        (0, value) => Date::Str(string(value)),
-        (_, value) => {
-            let get = |name: &str| field(value, named::DATE_STD, name);
-            Date::Std(DateStd {
-                year: get("year").map(int4).expect("mandatory"),
-                month: get("month").map(int4),
-                day: get("day").map(int4),
-                season: get("season").map(string),
-                hour: get("hour").map(int4),
-                minute: get("minute").map(int4),
-                second: get("second").map(int4),
-            })
-        }
     }
 }

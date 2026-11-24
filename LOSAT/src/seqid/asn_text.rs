@@ -2,8 +2,8 @@
 //! alternative, as `ber` is its BER reader: the rpsbproc archive reader reads its Seq-ids with it.
 //! Each value is read below the frame `at` that holds it (`asn_text_reader::Frame`), and the
 //! posts of its strings are given to `posts` as they are read (`Reader::string`).
-//! (The PSSM reader, psiblast and tblastn `-in_pssm`, reads them with the generic typed reader,
-//! `report::serial::asn_types`, and converts them to the same model.)
+//! (The PSSM reader, psiblast and tblastn `-in_pssm`, and makeblastdb's mask reader read them with
+//! the table-driven reader, which builds the same model, `report::serial::asn_types::seq_id`.)
 
 use crate::report::serial::asn_text_reader::{AsnSource, Frame, Reader, ReplacedSink, Result};
 use crate::seqid::model::{

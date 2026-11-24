@@ -259,13 +259,11 @@ pub(crate) struct Mask {
 
 /// The objects of one input stream: the hand grammar below over the lexical reader of the typed
 /// reader's input (`ObjectStream::input_mut`), which reads the values that the grammar does not
-/// take (`typed_member`).
+/// take (`typed_member`). What NCBI's reader posts while it reads an object goes to the typed
+/// reader's posts (`P`, rpsbproc's report, which writes each) when it is posted: the hand
+/// grammar's posts (`Reader::string`) and the typed reader's.
 pub(crate) struct ArchiveStream<R: Read, P: PostSink> {
-    objects: ObjectStream<TextInput<StreamSource<R>>>,
-    /// Where what NCBI's reader posts while it reads an object goes when it is posted: the hand
-    /// grammar's posts (`Reader::string`) and the typed reader's (rpsbproc's report, which
-    /// writes each).
-    posts: P,
+    objects: ObjectStream<TextInput<StreamSource<R>>, P>,
     done: bool,
 }
 
@@ -492,18 +490,18 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     /// after the white space that rpsbproc skips to tell ASN.1 from XML), their posts given to
     /// `posts` as they are posted.
     pub(crate) fn new(input: R, first: &[u8], posts: P) -> Self {
-        let mut objects = ObjectStream::text(StreamSource::new(input, first), Names::ARCHIVE);
+        let mut objects =
+            ObjectStream::text_posting(StreamSource::new(input, first), Names::ARCHIVE, posts);
         objects.input_mut().r.root = blast4_archive();
         ArchiveStream {
             objects,
-            posts,
             done: false,
         }
     }
 
     /// Where the posts go (rpsbproc's report, between the objects).
     pub(crate) fn posts(&mut self) -> &mut P {
-        &mut self.posts
+        self.objects.posts()
     }
 
     /// The lexical reader.
@@ -555,17 +553,14 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
         let name = at.name().expect("a member or variant is being read");
         let ty = asn_types::members(parent)[asn_types::member_index(parent, name)].ty;
         let root = self.r().root;
-        match self
-            .objects
-            .read_value(ty, root, &at.steps(), &mut self.posts)
-        {
+        match self.objects.read_value(ty, root, at.steps()) {
             Ok(()) => Ok(()),
             Err(ReadError::Unsupported(what)) => Err(self.r().not_supported(&format!(
                 "an archive value that LOSAT's reader does not read ({what})"
             ))),
             // Only the kind of this error is read: `next_archive` ends the input at a format
-            // error without a message, as NCBI's rpsbproc ends it at any exception of its reader
-            // (`catch (...)`), so this text is never shown.
+            // error without a message, as NCBI's rpsbproc ends it at any exception of its reader,
+            // which it catches whatever its class, so this text is never shown.
             Err(_) => Err(self.r().error("the typed reader failed")),
         }
     }
@@ -577,8 +572,8 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     /// The reader and where its posts go, for a value whose strings post as they are read.
     #[inline]
     fn reader_and_posts(&mut self) -> (&mut Reader<StreamSource<R>>, &mut P) {
-        let ArchiveStream { objects, posts, .. } = self;
-        (&mut objects.input_mut().r, posts)
+        let (input, posts) = self.objects.input_and_posts();
+        (&mut input.r, posts)
     }
 
     fn string(&mut self, at: &Frame<'_>) -> Result<Vec<u8>> {

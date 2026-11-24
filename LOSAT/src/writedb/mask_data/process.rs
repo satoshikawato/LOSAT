@@ -51,10 +51,11 @@ use std::path::{Path, PathBuf};
 use super::MaskedRangeSet;
 use crate::ncbi_str::{string_to_int, truncate_spaces_str};
 use crate::report::serial::asn_input::Utf8TagOnce;
+use crate::report::serial::asn_types::Post;
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
-use crate::writedb::mask_info::{MaskFileError, MaskFileReader, MaskPost};
+use crate::writedb::mask_info::{MaskFileError, MaskFileReader};
 use crate::writedb::WriteDbError;
 
 /// The values of the options that `x_ProcessMaskData` reads: `None` for an option that was not
@@ -323,10 +324,10 @@ pub(crate) fn process_mask_data(
 /// run's: `BuildDatabase::utf8_once`), whichever file it is in.
 fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
     for post in reader.take_posts() {
-        if matches!(post, MaskPost::Utf8Tag(_)) && !utf8_once.first() {
+        if matches!(post, Post::Utf8Tag(_)) && !utf8_once.first() {
             continue;
         }
-        let line = post.line();
+        let line = post.line(Some("makeblastdb"));
         warn(line.strip_suffix(b"\n").unwrap_or(&line));
     }
 }

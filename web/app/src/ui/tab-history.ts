@@ -22,7 +22,9 @@
 // restoration, the Search tab's button, which goes back, scrolled the page down to where the form
 // had been left, and the focused tab out of view.
 
-export type MainTab = 'search' | 'results';
+export type MainTab = 'search' | 'results' | 'windowmasker';
+
+type FormTab = 'search' | 'windowmasker';
 
 /** The part of `window.history` that the tabs use. */
 export interface TabHistory {
@@ -68,8 +70,10 @@ export function tabNavigation(history: TabHistory, options: TabNavigationOptions
   const load = options.load ?? crypto.randomUUID();
   const now = options.now ?? (() => performance.now());
   history.scrollRestoration = 'manual';
-  /** The tab of the current entry: Results only for this load's own Results entry. */
-  const entryTab = (): MainTab => (isResultsEntry(history.state) && history.state.load === load ? 'results' : 'search');
+  /** The form tab (Search or WindowMasker) that Back from Results returns to. */
+  let lastForm: FormTab = 'search';
+  /** Whether the current entry is this load's own Results entry. */
+  const onResultsEntry = (): boolean => isResultsEntry(history.state) && history.state.load === load;
   /** A Results entry of an earlier load, whose results are gone. */
   const gone = (): boolean => isResultsEntry(history.state) && history.state.load !== load;
   // The tab chosen while a `back()` of the page is on its way: the entry is known only when the
@@ -88,12 +92,13 @@ export function tabNavigation(history: TabHistory, options: TabNavigationOptions
     }
   };
   const choose = (tab: MainTab): void => {
+    if (tab !== 'results') lastForm = tab;
     if (pending() !== undefined) {
       going = { tab, since: going!.since };
       return;
     }
-    if (tab === entryTab()) return;
     if (tab === 'results') {
+      if (onResultsEntry()) return;
       const entry: ResultsEntry = { losatTab: 'results', load };
       try {
         history.pushState(entry, '');
@@ -101,8 +106,8 @@ export function tabNavigation(history: TabHistory, options: TabNavigationOptions
         // WebKit refuses more than 100 pushState calls in 30 s (an arrow key held down): the tab
         // is shown all the same, without an entry, and the next choice starts from the entry there is.
       }
-    } else if (!gone()) {
-      // The entry below this load's Results entry is always the Search entry it was pushed from.
+    } else if (onResultsEntry() && !gone()) {
+      // The entry below this load's Results entry is always the form entry it was pushed from.
       goBack(tab);
     }
   };
@@ -118,7 +123,7 @@ export function tabNavigation(history: TabHistory, options: TabNavigationOptions
         goBack(wanted ?? 'search');
         return wanted ?? 'search';
       }
-      if (wanted === undefined) return entryTab();
+      if (wanted === undefined) return onResultsEntry() ? 'results' : lastForm;
       choose(wanted);
       return wanted;
     },

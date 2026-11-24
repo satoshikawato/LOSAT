@@ -11,6 +11,16 @@ export interface BlockWriter {
    */
   append(bytes: Uint8Array): void;
   /**
+   * Writes a copy of `bytes` at byte `offset` (POSIX semantics: a write past the end leaves
+   * zero bytes between). Throws StorageFullError when the storage is full.
+   */
+  writeAt(offset: number, bytes: Uint8Array): void;
+  /**
+   * Sets the block's length to `length`, truncating or zero-extending it. Throws StorageFullError
+   * when extending beyond capacity.
+   */
+  truncate(length: number): void;
+  /**
    * Drops every byte appended so far: the block stays open, empty, and gives the space back (a run
    * output that the engine discards, docs/web/abi_v2.md §5).
    */
@@ -27,6 +37,8 @@ export interface BlockStore {
   create(path: string): Promise<BlockWriter>;
   /** Reads `length` bytes at `offset` of a sealed block, as a new buffer. */
   read(path: string, offset: number, length: number): Promise<Uint8Array>;
+  /** Returns a `File` backed by a sealed block without copying its bytes into JS heap when OPFS is used. */
+  readFile(path: string, name: string, type?: string): Promise<File>;
   /** The length of a sealed block. */
   size(path: string): Promise<number>;
   /** Removes every block under the directory `prefix`, sealed or not. */

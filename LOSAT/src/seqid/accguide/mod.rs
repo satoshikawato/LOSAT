@@ -7,7 +7,9 @@
 //! on the machine). They are kept in two files beside this module, made by
 //! `LOSAT/tests/accguide/make_accguide.py`: `rules.txt` (every line that `AddRule` reads,
 //! without its comment) and `ranges.bin` (the range lines of `special2` blocks, four bits per
-//! character). They are read into the guide once, at the first lookup.
+//! character). The prefix rules are read into the guide once, at the first lookup; the specials
+//! of a format (its `special` lines and `special2` blocks, almost all of the text) once, at the
+//! first lookup that reads them, which few accessions do (see `Part`).
 //!
 //! What is not ported: the branches of `AddRule` for a type name that this build does not
 //! know (the fallbacks: every name of the built-in guide is known, which the tests check),
@@ -24,6 +26,7 @@ use std::sync::OnceLock;
 pub use acc_info::*;
 
 use super::model::ParsedSeqId;
+use crate::utils::byte_search::find_first;
 
 /// A `CSeq_id::EAccessionInfo` value.
 pub type AccInfo = u32;
@@ -69,27 +72,47 @@ pub struct SeqIdWarning {
 #[derive(Default, Debug)]
 struct BitRanges(Vec<(u32, u32)>);
 
+/// `partition_point` of `items` and `before` (true for a prefix of `items`, false for the
+/// rest), searched from the end: the items 1, 2, 4, ... places before the end are tested until
+/// one is before the point, and the span after it is then searched in halves. The cost grows
+/// with the distance of the point from the end, which is 0 when a range comes after the ones of
+/// its set (the guide lists its ranges in increasing order).
+fn partition_point_from_end<T>(items: &[T], before: impl Fn(&T) -> bool) -> usize {
+    let mut end = items.len();
+    let mut step = 1;
+    while end > 0 {
+        let probe = end.saturating_sub(step);
+        if before(&items[probe]) {
+            return probe + 1 + items[probe + 1..end].partition_point(&before);
+        }
+        end = probe;
+        step *= 2;
+    }
+    0
+}
+
 impl BitRanges {
     /// `set_range(left, right)`.
     fn set_range(&mut self, left: u32, right: u32) {
         let ranges = &mut self.0;
         // The ranges that touch or overlap [left, right].
-        let first = ranges.partition_point(|&(_, end)| end.saturating_add(1) < left);
-        let last = ranges.partition_point(|&(start, _)| start <= right.saturating_add(1));
+        let first = partition_point_from_end(ranges, |&(_, end)| end.saturating_add(1) < left);
+        let last = partition_point_from_end(ranges, |&(start, _)| start <= right.saturating_add(1));
         if first == last {
             ranges.insert(first, (left, right));
         } else {
             let start = left.min(ranges[first].0);
             let end = right.max(ranges[last - 1].1);
-            ranges.splice(first..last, [(start, end)]);
+            ranges[first] = (start, end);
+            ranges.drain(first + 1..last);
         }
     }
 
     /// `clear_range(left, right)`.
     fn clear_range(&mut self, left: u32, right: u32) {
         let ranges = &mut self.0;
-        let first = ranges.partition_point(|&(_, end)| end < left);
-        let last = ranges.partition_point(|&(start, _)| start <= right);
+        let first = partition_point_from_end(ranges, |&(_, end)| end < left);
+        let last = partition_point_from_end(ranges, |&(start, _)| start <= right);
         if first == last {
             return;
         }
@@ -118,14 +141,102 @@ impl BitRanges {
 /// `SAccGuide::SSubMap`: the rules of one format (`<letters>+<digits>`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:889-911
-/// The multimap is a map of each key to its options in the multimap's order (an
-/// `emplace` adds an option at the end of its key's equal range).
-#[derive(Default, Debug)]
+/// The specials are made at the first lookup that reads them (see [`Part`]); a build that
+/// makes them sets them at once.
+#[derive(Debug)]
 struct SubMap {
     prefixes: BTreeMap<Vec<u8>, AccInfo>,
     wildcards: Vec<(Vec<u8>, AccInfo)>,
+    specials: OnceLock<Specials>,
+}
+
+impl SubMap {
+    /// The rules of a format that a build of `part` adds: with empty specials when the build
+    /// makes specials (of this format or another: a lookup during the build then never makes
+    /// them), without them for [`Part::Rules`].
+    fn new(part: Part) -> Self {
+        SubMap {
+            prefixes: BTreeMap::new(),
+            wildcards: Vec::new(),
+            specials: match part {
+                Part::Rules => OnceLock::new(),
+                Part::Specials(_) | Part::All => OnceLock::from(Specials::default()),
+            },
+        }
+    }
+}
+
+/// The specials of one format: `big_specials` and `small_specials` of `SSubMap`.
+///
+/// The multimap of the small specials is a map of each key to its options in the multimap's
+/// order (an `emplace` adds an option at the end of its key's equal range), kept as the place
+/// of the options in `small_options`, where the key is kept too: `SHints` holds that place.
+#[derive(Default, Debug)]
+struct Specials {
     big_specials: BTreeMap<Vec<u8>, (Vec<u8>, AccInfo)>,
-    small_specials: BTreeMap<Vec<u8>, Vec<(BitRanges, AccInfo)>>,
+    small_specials: BTreeMap<Vec<u8>, usize>,
+    small_options: Vec<(Vec<u8>, Vec<(BitRanges, AccInfo)>)>,
+}
+
+impl Specials {
+    /// The options of the small special `key`: its equal range of the multimap.
+    fn options(&self, key: &[u8]) -> &[(BitRanges, AccInfo)] {
+        match self.small_specials.get(key) {
+            Some(&slot) => &self.small_options[slot].1,
+            None => &[],
+        }
+    }
+
+    /// The place of the options of `key`, made empty for a new key.
+    fn slot(&mut self, key: &[u8]) -> usize {
+        if let Some(&slot) = self.small_specials.get(key) {
+            return slot;
+        }
+        let slot = self.small_options.len();
+        self.small_options.push((key.to_vec(), Vec::new()));
+        self.small_specials.insert(key.to_vec(), slot);
+        slot
+    }
+
+    /// The specials of `fmt` in the built-in guide (a build of [`Part::Specials`]).
+    fn built_in(fmt: u32) -> Specials {
+        AccGuide::built_in(Part::Specials(fmt))
+            .rules
+            .remove(&fmt)
+            .and_then(|submap| submap.specials.into_inner())
+            .unwrap_or_default()
+    }
+}
+
+/// The part of the guide that a build reads the rules for.
+///
+/// The prefixes, the wildcards and the general databases are read at the first lookup
+/// ([`guide`]); the specials of a format (the `special` lines and the `special2` blocks, almost
+/// all of the guide's text) at the first lookup that reads them (`Find` reads them for an
+/// accession only when its prefix or wildcard has `fAcc_specials`). A build of the specials of a
+/// format reads every line in order, so that `SHints` holds what it holds in NCBI's loading when
+/// a line of that format is added; it adds no specials of other formats, which never change
+/// those of this one: every line that adds a special first makes its format the current one
+/// (`FindSubMap`), which forgets the small special of another format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    /// The rules without the specials (the `special` and `special2` lines are not read).
+    Rules,
+    /// Every rule, with the specials of one format.
+    Specials(u32),
+    /// Every rule, with every special (the tests).
+    All,
+}
+
+impl Part {
+    /// Whether a build of this part adds the specials of `fmt`.
+    fn has_specials_of(self, fmt: u32) -> bool {
+        match self {
+            Part::Rules => false,
+            Part::Specials(only) => only == fmt,
+            Part::All => true,
+        }
+    }
 }
 
 /// `SAccGuide`.
@@ -136,19 +247,22 @@ pub struct AccGuide {
     /// The diagnostics of Warning severity that NCBI's loading would post (none for the
     /// built-in guide).
     load_warnings: Vec<String>,
+    /// What this guide was built with.
+    part: Part,
 }
 
 /// `SAccGuide::SHints`: the state that `AddRule` keeps from one line to the next.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:907-945
-/// `prev_small_special` is the key and the position of the option in its equal range
-/// (`None` for `end()`); `prev_big_special` is only an insertion hint and is not kept.
-/// The fallback members serve unknown type names only.
+/// `prev_small_special` is the place of the key's options in the current format's
+/// `small_options` and the position of the option in its equal range (`None` for `end()`);
+/// `prev_big_special` is only an insertion hint and is not kept. The fallback members serve
+/// unknown type names only.
 struct Hints {
     prev_type: AccInfo,
     prev_type_name: Vec<u8>,
     prev_submap: Option<u32>,
-    prev_small_special: Option<(Vec<u8>, usize)>,
+    prev_small_special: Option<(usize, usize)>,
     prev_special_format: u32,
     prev_special_key: Vec<u8>,
     prev_special_type_name: Vec<u8>,
@@ -308,19 +422,18 @@ impl AccGuide {
             }
         }
         if acc_or_pfx != pfx && result & F_SPECIALS != 0 {
+            let specials = submap.specials.get_or_init(|| Specials::built_in(fmt));
             let (prefix_len, n) = split_special(acc_or_pfx, fmt);
             let prefix = &acc_or_pfx[..prefix_len];
-            if let Some(options) = submap.small_specials.get(prefix) {
-                for (bits, value) in options {
-                    if bits.test(n) {
-                        if let Some(key_used) = key_used {
-                            key_used.clear();
-                        }
-                        return *value;
+            for (bits, value) in specials.options(prefix) {
+                if bits.test(n) {
+                    if let Some(key_used) = key_used {
+                        key_used.clear();
                     }
+                    return *value;
                 }
             }
-            if let Some((_, (first, value))) = submap
+            if let Some((_, (first, value))) = specials
                 .big_specials
                 .range::<[u8], _>((Bound::Included(acc_or_pfx), Bound::Unbounded))
                 .next()
@@ -381,7 +494,8 @@ impl AccGuide {
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1012-1028
     fn find_sub_map(&mut self, hints: &mut Hints, fmt: u32) -> u32 {
         if hints.prev_submap != Some(fmt) {
-            self.rules.entry(fmt).or_default();
+            let part = self.part;
+            self.rules.entry(fmt).or_insert_with(|| SubMap::new(part));
             hints.prev_submap = Some(fmt);
             hints.prev_small_special = None;
         }
@@ -393,14 +507,21 @@ impl AccGuide {
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1597
     /// A bit vector needs no size here (`BitRanges`); `x_SplitSpecial` never gives a bit
-    /// past it.
+    /// past it. A build that does not make the specials of `fmt` adds nothing (see [`Part`]).
     fn add_special(&mut self, hints: &mut Hints, fmt: u32, from: &[u8], to: &[u8], value: AccInfo) {
+        if !self.part.has_specials_of(fmt) {
+            return;
+        }
         let (from_len, left) = split_special(from, fmt);
         let (to_len, right) = split_special(to, fmt);
-        let submap = self.rules.get_mut(&fmt).expect("FindSubMap made the rules");
+        let specials = self
+            .rules
+            .get_mut(&fmt)
+            .and_then(|submap| submap.specials.get_mut())
+            .expect("FindSubMap made the rules and their specials");
         let (from_pfx, to_pfx) = (&from[..from_len], &to[..to_len]);
         if from_pfx != to_pfx {
-            let entry = submap
+            let entry = specials
                 .big_specials
                 .entry(to.to_vec())
                 .or_insert_with(|| (from.to_vec(), value));
@@ -408,10 +529,16 @@ impl AccGuide {
             return;
         }
         let same = |option: &(BitRanges, AccInfo)| option.1 & !F_FALLBACK == value & !F_FALLBACK;
-        let options = submap.small_specials.entry(from_pfx.to_vec()).or_default();
-        let mut index = match &hints.prev_small_special {
-            Some((key, prev)) if key.as_slice() == from_pfx => {
-                let prev = *prev;
+        let hint = hints
+            .prev_small_special
+            .filter(|&(slot, _)| specials.small_options[slot].0 == from_pfx);
+        let slot = match hint {
+            Some((slot, _)) => slot,
+            None => specials.slot(from_pfx),
+        };
+        let options = &mut specials.small_options[slot].1;
+        let mut index = match hint {
+            Some((_, prev)) => {
                 options[prev].0.clear_range(left, right);
                 let mut it = prev;
                 loop {
@@ -424,7 +551,7 @@ impl AccGuide {
                     it -= 1;
                 }
             }
-            _ => 0,
+            None => 0,
         };
         while index < options.len() && !same(&options[index]) {
             index += 1;
@@ -434,7 +561,7 @@ impl AccGuide {
         }
         options[index].0.set_range(left, right);
         options[index].1 = value;
-        hints.prev_small_special = Some((from_pfx.to_vec(), index));
+        hints.prev_small_special = Some((slot, index));
     }
 
     /// `SAccGuide::AddRule` (with a rule and `hints`) for the lines of `rules.txt`; `ranges` gives the
@@ -536,6 +663,9 @@ impl AccGuide {
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1133-1154,1193-1209
     fn add_special_rule(&mut self, tokens: &[&[u8]], hints: &mut Hints) {
+        if self.part == Part::Rules {
+            return;
+        }
         hints.special2_submap = None;
         let range = tokens[1];
         let pos = range
@@ -580,6 +710,9 @@ impl AccGuide {
     /// A known name in the third token is the only case without a fallback (the elided
     /// lines, 1248-1294).
     fn add_special2_rule(&mut self, tokens: &[&[u8]], hints: &mut Hints) {
+        if self.part == Part::Rules {
+            return;
+        }
         if hints.version < 2 {
             self.load_warnings
                 .push("special2 valid only in version 2+ guides".to_string());
@@ -629,6 +762,7 @@ impl AccGuide {
         };
         let value = hints.special2_type;
         let mut acc = std::mem::take(&mut hints.prev_special2_acc);
+        let mut from = Vec::with_capacity(acc.len());
         for range in ranges {
             let (low, high) = match range.iter().position(|&c| c == b'-') {
                 Some(dash) => (&range[..dash], &range[dash + 1..]),
@@ -636,14 +770,12 @@ impl AccGuide {
             };
             let end = acc.len();
             acc[end - low.len()..].copy_from_slice(low);
-            if high.is_empty() {
-                let from = acc.clone();
-                self.add_special(hints, fmt, &from, &acc, value);
-            } else {
-                let from = acc.clone();
+            from.clear();
+            from.extend_from_slice(&acc);
+            if !high.is_empty() {
                 acc[end - high.len()..].copy_from_slice(high);
-                self.add_special(hints, fmt, &from, &acc, value);
             }
+            self.add_special(hints, fmt, &from, &acc, value);
         }
         hints.prev_special2_acc = acc;
     }
@@ -655,17 +787,27 @@ impl AccGuide {
     /// The comments and blank lines of `kBuiltInGuide` are not in `rules.txt` (`AddRule`
     /// returns at once for them), and no data file is looked for (`g_FindDataFile`):
     /// makeblastdb 2.17.0 reads the built-in guide when no newer `accguide2.txt` is on its
-    /// data path, and LOSAT always reads it.
-    fn built_in() -> AccGuide {
+    /// data path, and LOSAT always reads it. A build of `part` passes over the range lines of
+    /// the `special2` blocks it adds nothing for.
+    fn built_in(part: Part) -> AccGuide {
         let mut guide = AccGuide {
             rules: BTreeMap::new(),
             general: BTreeMap::new(),
             load_warnings: Vec::new(),
+            part,
         };
         let mut hints = Hints::default();
         let mut ranges = RangeLines::new(RANGES);
         for line in RULES.lines() {
             if line == ":" {
+                if part == Part::Rules
+                    || hints
+                        .special2_submap
+                        .is_some_and(|fmt| !part.has_specials_of(fmt))
+                {
+                    ranges.skip_block();
+                    continue;
+                }
                 while let Some(tokens) = ranges.next_line() {
                     let mut words: Vec<&[u8]> = vec![b":"];
                     words.extend(tokens.split(|&c| c == b' '));
@@ -676,8 +818,18 @@ impl AccGuide {
             let words: Vec<&[u8]> = line.split(' ').map(str::as_bytes).collect();
             guide.add_rule(&words, &mut hints);
         }
-        for submap in guide.rules.values_mut() {
-            submap.small_specials.retain(|_, options| {
+        for specials in guide
+            .rules
+            .values_mut()
+            .filter_map(|submap| submap.specials.get_mut())
+        {
+            let Specials {
+                small_specials,
+                small_options,
+                ..
+            } = specials;
+            small_specials.retain(|_, slot| {
+                let options = &mut small_options[*slot].1;
                 options.retain(|(bits, _)| bits.any());
                 !options.is_empty()
             });
@@ -725,6 +877,21 @@ impl<'a> RangeLines<'a> {
         value
     }
 
+    /// Passes over the rest of the block, up to the nibble that ends it for `next_line` (13 or
+    /// more), a byte at a time.
+    fn skip_block(&mut self) {
+        if !self.nibble.is_multiple_of(2) && self.next_nibble() >= 13 {
+            return;
+        }
+        let start = self.nibble / 2;
+        let rest = self.data.get(start..).unwrap_or_default();
+        self.nibble = match find_first(rest, |byte| byte >> 4 >= 13 || byte & 15 >= 13) {
+            Some(offset) if rest[offset] >> 4 >= 13 => 2 * (start + offset) + 1,
+            Some(offset) => 2 * (start + offset) + 2,
+            None => 2 * self.data.len() + 1,
+        };
+    }
+
     fn next_line(&mut self) -> Option<&[u8]> {
         self.line.clear();
         loop {
@@ -739,12 +906,13 @@ impl<'a> RangeLines<'a> {
     }
 }
 
-/// The guide, read at its first use (`s_Guide`, a `CSafeStatic` made at the first call).
+/// The guide, read at its first use (`s_Guide`, a `CSafeStatic` made at the first call), with the
+/// specials of each format read at the first lookup that reads them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1627-1632
 pub fn guide() -> &'static AccGuide {
     static GUIDE: OnceLock<AccGuide> = OnceLock::new();
-    GUIDE.get_or_init(AccGuide::built_in)
+    GUIDE.get_or_init(|| AccGuide::built_in(Part::Rules))
 }
 
 /// `CSeq_id::IdentifyAccession` of `acc` with `flags`: the type of a bare accession. `warn` gets the

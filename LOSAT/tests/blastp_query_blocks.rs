@@ -549,7 +549,8 @@ fn blastp_xml2_cache(query: &Path, taxdb: &str, outfmt: &str) -> (bool, Vec<u8>,
 /// such a run takes the search of all queries. `qx` (no hits) then `qN` (a1, 99990) make two
 /// blocks; with a healthy taxonomy database the run searches them block by block. Since line NP
 /// item O4b2-6 the damaged one writes NCBI BLAST+ 2.17.0's two offset errors (its ordinal ids
-/// fix the order of the loads) instead of a refusal.
+/// fix the order of the loads; row `db.nz.cq.x.bp.reppo.b1.qx.16` freezes NCBI's bytes of this
+/// run) instead of a refusal.
 #[test]
 fn an_xml2_run_on_the_taxonomy_cache_slot_takes_the_search_of_all_queries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

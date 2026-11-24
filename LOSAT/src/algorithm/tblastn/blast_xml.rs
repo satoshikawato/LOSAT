@@ -485,6 +485,10 @@ impl PreparedXml {
             // The query's warnings come before its document (`QueryWarnings`).
             if let Some(warnings) = warnings.as_deref_mut() {
                 warnings.before_query(q_idx, &mut *writer)?;
+                // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
+                if q_idx < self.texts.len() {
+                    warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
+                }
             }
             if q_idx == self.texts.len() {
                 // The held report that is never written (`prepare`, `written_queries`).

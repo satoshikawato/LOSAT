@@ -55,9 +55,9 @@ fn the_notes_come_at_the_first_hit_that_needs_them() {
 }
 
 /// Where the loads follow NCBI's order (a damaged taxonomy database whose last taxid shares its
-/// cache slot with another taxid of a volume), a batch's prefetch texts come at the batch's first
-/// `Hit` that asks the database (a later one where none of the batch asks), after the texts of
-/// opening, and a read's texts at the `Hit` of that query and subject.
+/// cache slot with another taxid of a volume), a batch's prefetch texts come where the batch
+/// begins (`batch_texts` before its first query's report, also where no `Hit` of the batch asks),
+/// after the texts of opening, and a read's texts at the `Hit` of that query and subject, once.
 #[test]
 fn placed_texts_come_at_the_batch_and_the_hit_that_load() {
     let notes = TaxdbNotes {
@@ -79,7 +79,12 @@ fn placed_texts_come_at_the_batch_and_the_hit_that_load() {
             .unwrap();
         String::from_utf8(sink).unwrap()
     };
-    // a `Hit` without a taxid asks nothing: the batch's texts wait
+    let batch = |printer: &mut TaxdbPrinter<'_>, query: usize| {
+        String::from_utf8(printer.batch_texts(query)).unwrap()
+    };
+    // batch 1 begins at query 0: opening, then its prefetch, before any `Hit`
+    assert_eq!(batch(&mut printer, 0), "Error: [blastp] Error: open\nP1\n");
+    assert_eq!(batch(&mut printer, 1), "");
     let mut sink = Vec::new();
     printer
         .at_hit((0, 2), 0, &HitTaxonomy::Unnamed, &mut sink)
@@ -87,16 +92,18 @@ fn placed_texts_come_at_the_batch_and_the_hit_that_load() {
     assert!(sink.is_empty());
     assert_eq!(
         at(&mut printer, 1, 0, 99990),
-        "Error: [blastp] Error: open\nP1\nError: [blastp] Error: hit\n"
-    );
-    assert_eq!(
-        at(&mut printer, 1, 1, 99990),
         "Error: [blastp] Error: hit\n"
     );
-    // batch 2 (query 2) had no `Hit` that asks: its texts come at query 3's first one, with the
-    // read of that `Hit`
+    // batch 2 begins at query 2, whose report has no `Hit` that asks
+    assert_eq!(batch(&mut printer, 2), "P2\n");
+    assert_eq!(batch(&mut printer, 3), "");
     assert_eq!(
         at(&mut printer, 3, 1, 99990),
-        "P2\nR1\nError: [blastp] Error: hit\n"
+        "R1\nError: [blastp] Error: hit\n"
+    );
+    // the read's texts are written once
+    assert_eq!(
+        at(&mut printer, 3, 1, 99990),
+        "Error: [blastp] Error: hit\n"
     );
 }

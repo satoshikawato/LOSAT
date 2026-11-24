@@ -236,9 +236,7 @@ impl TblastnDatabase {
             shared::XmlBatchLoads::of(
                 hitlists.len(),
                 spans,
-                &shared::BatchPrefetch::of(hitlists.len(), 0, spans, |span| {
-                    seq_aligns_of(&hitlists[span], reported.gapped)
-                }),
+                &reported.prefetch,
                 &reported.loads,
                 |query| reported_ranks(std::slice::from_ref(&hitlists[query])).collect(),
             )
@@ -868,9 +866,10 @@ pub(super) struct ReportedSubjects {
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
     /// The searched queries of each batch of the call, numbered from 0 (the whole call as one
-    /// where empty), for NCBI's loads of the XML2 and JSON reports by batch
-    /// (`shared::XmlBatchLoads`).
+    /// where empty), and whether each batch's prefetch is on (the one that `loads` read), for
+    /// NCBI's loads of the XML2 and JSON reports by batch (`shared::XmlBatchLoads`).
     pub(super) spans: Vec<std::ops::Range<usize>>,
+    pub(super) prefetch: shared::BatchPrefetch,
 }
 
 impl ReportedSubjects {
@@ -1350,6 +1349,7 @@ pub(super) fn reported_subjects(
         loads,
         gapped,
         spans: batches.to_vec(),
+        prefetch,
     })
 }
 

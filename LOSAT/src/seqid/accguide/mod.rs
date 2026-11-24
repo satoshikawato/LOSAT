@@ -293,7 +293,7 @@ pub struct AccGuide {
 /// `special2_bit`): every range of the built-in guide replaces digits of the bit only (see
 /// `add_special2_ranges`). The members that serve unknown type names only (the fallbacks:
 /// `prev_special_type` and its name) are not kept; those that only `FindSpecial` reads are
-/// kept by the build of the tests ([`SpecialHints`]).
+/// kept by the build of the tests (`SpecialHints`).
 struct Hints {
     prev_type: AccInfo,
     prev_type_name: Vec<u8>,

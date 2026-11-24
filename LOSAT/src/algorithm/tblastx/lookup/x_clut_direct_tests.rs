@@ -1337,7 +1337,7 @@ fn blastx_bucket_fill_in_parts_is_the_one_part_fill() {
 fn blastx_tables_built_in_parts_are_the_one_part_tables() {
     // The table's fields, and whether its offsets are `u16`.
     type Fields = ((i32, i32, i32, Vec<u32>, Vec<u32>, Vec<u32>, i32), bool);
-    fn fields(built: Option<Result<XBxCompressedLookup, ()>>) -> Fields {
+    fn fields(built: Option<Result<XBxCompressedLookup, BanksFilled>>) -> Fields {
         fn of<H: XQueryOffset>(
             table: &mut XFlatCompressedLookup<H>,
             poison: H,

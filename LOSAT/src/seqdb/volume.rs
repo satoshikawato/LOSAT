@@ -564,23 +564,24 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
         let file = self.hdr_file()?;
-        self.checked(file.with_range(start, end, |record| read(record, file.path()))?)
-    }
-
-    /// `result` of a decode of a header record, where NCBI's exception of a check that the run's
-    /// settings turn off is LOSAT's refusal (`SeqDb::refuse_unchecked_reads`): the one place of
-    /// that choice for every read of the volume's records (`with_header_record`,
-    /// `visit_headers`).
-    #[inline(always)]
-    fn checked<T>(&self, mut result: Result<T, SeqDbError>) -> Result<T, SeqDbError> {
-        if let Err(error) = &mut result {
-            self.unchecked(error);
-        }
+        let mut result = file.with_range(start, end, |record| read(record, file.path()))?;
+        self.check(&mut result);
         result
     }
 
-    /// `checked`'s error, replaced in place: out of line, so that a record that decodes costs
-    /// one test and its value is not moved.
+    /// `result`, a decode of a header record, with NCBI's exception of a check that the run's
+    /// settings turn off made LOSAT's refusal (`SeqDb::refuse_unchecked_reads`): the one place of
+    /// that choice for every read of the volume's records (`with_header_record`,
+    /// `visit_headers`). It takes the result where the read put it: a record that decodes costs
+    /// the test of its result, and its value is not moved.
+    #[inline(always)]
+    fn check<T>(&self, result: &mut Result<T, SeqDbError>) {
+        if let Err(error) = result {
+            self.unchecked(error);
+        }
+    }
+
+    /// `check`'s error, replaced in place, out of line.
     #[cold]
     #[inline(never)]
     fn unchecked(&self, error: &mut SeqDbError) {
@@ -1343,10 +1344,9 @@ impl Volume {
             for j in i..stop {
                 let lo = (u64::from(offsets[j]) - start) as usize;
                 let hi = (u64::from(offsets[j + 1]) - start) as usize;
-                if !visit(
-                    first + j as u32,
-                    self.checked(decode(first + j as u32, &data[lo..hi], &hr_path)),
-                ) {
+                let mut decoded = decode(first + j as u32, &data[lo..hi], &hr_path);
+                self.check(&mut decoded);
+                if !visit(first + j as u32, decoded) {
                     return false;
                 }
             }

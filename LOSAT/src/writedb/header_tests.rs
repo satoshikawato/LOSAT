@@ -449,6 +449,30 @@ mod parsed {
         ]
     }
 
+    /// The member path of the deepest members (every alternative with strings, a date of both
+    /// kinds) fits the capacity that the writer starts with.
+    #[test]
+    fn the_member_path_never_grows() {
+        let set = DeflineSet {
+            deflines: vec![BlastDefline {
+                title: text("t"),
+                ids: ids_with_strings(b"s"),
+                taxid: Some(1),
+                memberships: Some(vec![1]),
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        };
+        for write_strings in [true, false] {
+            let mut bad = Vec::new();
+            let mut w = SetWriter::new(&set, write_strings, &mut bad);
+            let capacity = w.path.capacity();
+            w.set(&set);
+            assert_eq!(w.path.capacity(), capacity);
+            assert_eq!(w.path, ["Blast-def-line-set"]);
+        }
+    }
+
     /// The diagnostics without the record (`defline_set_bad_chars`) are those of the record, for
     /// strings of every byte in every string member, before and after other members, and lengths
     /// whose BER length takes one to three bytes.

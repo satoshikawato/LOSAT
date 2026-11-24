@@ -1370,7 +1370,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         s_len_full,
     } = subject_ctx;
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1662
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1667
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-874
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1089
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826

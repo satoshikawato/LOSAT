@@ -447,7 +447,7 @@ pub struct BlastnArgs {
     #[arg(skip = 0usize)]
     pub scan_step: usize,
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-782
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:772-782
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed when the options
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).

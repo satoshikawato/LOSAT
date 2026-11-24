@@ -146,7 +146,7 @@ pub struct BlastCompoSequenceRange {
     pub context: i32,
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:123-130
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:131-139
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlastCompoSequenceData {
     pub buffer: Vec<u8>,
@@ -168,7 +168,7 @@ impl BlastCompoSequenceData {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
+    // NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:132-135
     #[inline]
     pub fn data(&self) -> &[u8] {
         let start = self.data_offset;
@@ -229,13 +229,13 @@ impl BlastCompoSequenceData {
     }
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:143-146
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:156-162
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlastCompoMatchingSequence<'a> {
     pub length: i32,
     pub index: i32,
     pub data: &'a [u8],
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1518-1521
     pub genetic_code_id: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1518-1520
     /// The nucleotides a translated subject's windows are read from (`na_sequence`): its
@@ -245,7 +245,7 @@ pub struct BlastCompoMatchingSequence<'a> {
 }
 
 impl<'a> BlastCompoMatchingSequence<'a> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1067-1106
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1377-1388
     pub fn new(index: i32, data: &'a [u8]) -> Self {
         Self {
             length: data.len() as i32,
@@ -736,7 +736,7 @@ fn window_info_join(win1: &mut WindowInfo, win2: WindowInfo) {
     *tail = win2.align;
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:497-505
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:497-511
 fn window_swap_range(window: &mut WindowInfo) {
     std::mem::swap(&mut window.query_range, &mut window.subject_range);
 }
@@ -1634,7 +1634,7 @@ pub fn preliminary_test_near_identical(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1292
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1107,1135-1138
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234,1240-1241,1256-1256,1259-1260
 // No NCBI counterpart: probe of the BLASTX parallel redo. It records, per match, whether
@@ -1818,7 +1818,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:865-889
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:872-890
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:879-888
     let windows = if params.query_is_translated {
         windows_from_translated_query_aligns(
@@ -1989,7 +1989,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                         || hsp_index == 0
                         || (near_identical != old_near_identical))
                 {
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938,1234-1238
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:905-937,1236-1239
                     let subject_composition = if params.subject_is_translated {
                         translated_subject_composition(
                             &range.subject.buffer,
@@ -2005,7 +2005,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
                     {
                         adjust_search_failed = true;
                     } else {
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1228-1249
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1240-1255
                         let adjusted = blast_adjust_scores(
                             &params.matrix_info,
                             &query_composition,

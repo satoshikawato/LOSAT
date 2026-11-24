@@ -361,7 +361,7 @@ fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
     ))
 }
 
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1818
 /// The `eCoding_Iupac` letters of a protein's NCBIstdaa codes (`CSeqVector`'s IUPACaa): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them (segmasker 2.17.0 writes
 /// them so with `-infmt blastdb -outfmt fasta`, fixture `db_ambig_fasta`).

@@ -48,7 +48,7 @@ pub fn encode_protein_sequence(seq: &[u8]) -> EncodedProtein {
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1381-1382
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:72-77,83-84
 pub fn encode_protein_query_frame_with_seg(seq: &[u8], seg: Option<&SegParams>) -> QueryFrame {
     encode_query_frame::<false>(seq, seg, false)
 }

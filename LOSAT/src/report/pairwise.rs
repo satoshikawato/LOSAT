@@ -2902,7 +2902,7 @@ fn write_final_database_report<W: Write>(
     writeln!(writer)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-441
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
 /// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):

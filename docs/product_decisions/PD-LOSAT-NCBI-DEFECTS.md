@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.96
+- Version: 1.97
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -618,7 +618,14 @@
   line item PS10c's 1.84 and line RG item D1c-1's 1.85, then psiblast line item PS10d's 1.86, line
   NP item O4b2-2's 1.87, line NP item M4b-3c's 1.88 and line NP item M4b-T2's 1.89, then line RG
   item T5d's 1.90 and line PS item PS12d's 1.91, then line NP item O4b2-4's 1.92, then line RG item
-  D1c-1c's 1.93, then line NP item M4c-2's 1.94, then line NP item M4b-3b's 1.95)
+  D1c-1c's 1.93, then line NP item M4c-2's 1.94, then line NP item M4b-3b's 1.95);
+  1.97 2026-11-24 (approved exception 20 also for a short query against one short subject:
+  TBLASTX's and TBLASTN's `-ungapped` linking against one subject whose expected length is 0 or
+  less, where NCBI's big-gap cutoff is `INT_MIN + 1` as for a batch averaging 0 and NCBI crashes in
+  its first linking call; LOSAT's sums in 64 bits, and the cutoff of a negative expected length
+  taken as NCBI's `INT_MIN + 1` (LOSAT computed 1 there); its rows equal NCBI's own output for the
+  nearest search it completes in every probed case; pending the Owner's answer to question
+  Q-XT1 of line RG item X-short-tbx-link)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3239,9 +3246,10 @@ file would differ, and NCBI's programs still could not open the database).
   probes a query of 10 or 11 bases against a subject of 12 to 14 bases, a query of 11 or 12 bases
   against a subject of 11 bases, and 9 bases against 12 or 13 at `-word_size 2` make NCBI die
   earlier, in its first linking call (`BLAST_LinkHsps` under `s_BlastSearchEngineCore`, gdb on ws,
-  2026-11-17 and 2026-11-18). Against 12 to 14 bases LOSAT writes rows; against 11 bases LOSAT
-  refuses with this item's message, at a later step than NCBI's. Both are open (line RG item
-  X-short-tbx-link).
+  2026-11-17 and 2026-11-18): their big-gap cutoff is `INT_MIN + 1`, approved exception 20 (since
+  version 1.97, a short query against one short subject). LOSAT links them with its sums in 64
+  bits; against 12 bases or more it writes rows, and against 11 bases it refuses with this item's
+  message at the re-evaluation that follows the linking.
 
 - TBLASTN with `-db_soft_mask`, a gapped search of a chunk that saves an initial alignment starting
   before the chunk (version 1.89, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
@@ -3856,6 +3864,37 @@ request that added it.
     both strands, so the sets and their e-values differ: with `-searchsp 1000000` in both runs, 6
     of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
     average of 0 to 1 and wrote the rows of other cutoffs here.
+
+    **A short query against one short subject (version 1.97, line RG item X-short-tbx-link;
+    pending the Owner's answer to question Q-XT1, option A).** The same cutoff comes from another
+    input: with one subject, NCBI's expected length (`BLAST_Nint(log(K * q * s) / H)`, with the
+    average query length `q` and the subject's length `s` in protein letters) is 0 when `K q s` is
+    near 1, and negative below about `e^{-H/2}`. At 0, `y_variable` and `x_variable` are 0 and the
+    logarithm -inf, as above; below 0 the subject's length grows by the expected length, so
+    `y_variable` (the logarithm of the subject's length over the grown one) and `x_variable` are
+    negative and the logarithm is NaN, which NCBI's x86-64 conversion also takes to `INT_MIN`
+    (`blast_parameters.c:1036-1072`). In both the big-gap cutoff is `INT_MIN + 1`, the linking's
+    `maxscore` (`-cutoff[1]`) is `INT_MAX`, no sum that overflows `Int4` reaches it, and NCBI reads
+    the chain it never found (`link_hsps.c:694,868,931-932`; gdb on 2.17.0: a read at address 0x2a
+    in `BLAST_LinkHsps` under `s_BlastSearchEngineCore`). This takes short inputs: in our probes
+    TBLASTX queries of 9 to 11 bases against subjects of 11 to 14 bases, and of 6 to 16 bases
+    against 8 to 20 bases at `-word_size 2 -threshold 1`, both with `-window_size 0`; TBLASTN
+    `-ungapped` `WWWW` against 12 to 14 bases at `-word_size 2 -threshold 1`; BLASTX `-ungapped`
+    reaches the cutoff with queries of 8 to 14 bases against 2 to 4 residues, but no HSP of ours
+    reached its linking. NCBI dies in every probed run whose subject list reaches the linking with
+    an HSP (89 of 418 TBLASTX runs of `TGG` repeats, 42 of 600 runs of random short sequences, and
+    the TBLASTN one). LOSAT links with the same cutoff and its sums in 64 bits, as above; before
+    this version it took Rust's conversion of the NaN, 0, a cutoff of 1. Unlike the batches
+    averaging 0, a completing NCBI run gives LOSAT's bytes here: the subject with a second one of
+    N that has no hits (12 N, or 300 N where 12 leave the database's length in protein letters
+    under the grown subject's), which makes the database longer than the subject and the cutoff
+    finite, and `-dbsize` of the subject's length, wrote LOSAT's one-subject bytes in all 45
+    TBLASTX runs above with subjects of 12 bases or more, all 42 random ones and the TBLASTN one.
+    The cases `link.q11_s12`, `link.q8_s12_ws2` and `link.rq76_rs76_ws2` of
+    `tblastx_regression_fixtures.py` (NCBI's arguments in its `ORACLE_ARGV`) and
+    `tests/tblastn_ungapped_short_link.rs` keep them. With a subject of fewer than 12 bases the
+    next step of such a search is the re-evaluation that the TBLASTX item of version 1.51 refuses
+    (rule 3), so LOSAT refuses there, after the linking.
 
 ## Approved exception 22 (`losat windowmasker`, an empty id in a list matched as text, version 1.75)
 

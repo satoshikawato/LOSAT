@@ -82,3 +82,67 @@ fn residue_runs_match_the_byte_by_byte_scan() {
         }
     }
 }
+
+/// `data_line_counts` gives the counts of `CheckDataLine`'s loop, one byte at a time with its
+/// stop at `;`, for every byte at every place and on random lines of up to 70 bytes.
+#[test]
+fn data_line_counts_match_the_loop() {
+    let reference = |checked: &[u8], is_nuc: bool| {
+        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
+        for &c in checked {
+            if c.is_ascii_alphabetic() || c == b'*' {
+                good += 1;
+                if is_nuc && is_ambig_nuc(c) {
+                    ambig_nuc += 1;
+                }
+            } else if c == b'-' {
+                good += 1;
+            } else if is_space(c) || c.is_ascii_digit() {
+                // White space and digits are neutral.
+            } else if c == b';' {
+                break;
+            } else {
+                bad += 1;
+            }
+        }
+        (good, bad, ambig_nuc)
+    };
+    for is_nuc in [false, true] {
+        for byte in 0..=u8::MAX {
+            for len in [1, 2, 31, 32, 33, 60, 63, 64, 70] {
+                for at in [0, len / 2, len - 1] {
+                    let mut line = b"ACGTNRYacgt".repeat(7);
+                    line.truncate(len);
+                    line[at] = byte;
+                    assert_eq!(
+                        data_line_counts(&line, is_nuc),
+                        reference(&line, is_nuc),
+                        "{is_nuc} {byte:#04x} {len} {at}"
+                    );
+                }
+            }
+        }
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        const BYTES: &[u8] = b"ACGTNacgtnRYKMBDHVWSUEFILPQXZ*- ;0912\t";
+        for _ in 0..5000 {
+            let len = (next() % 71) as usize;
+            let line: Vec<u8> = (0..len)
+                .map(|_| match next() % 16 {
+                    0 => next() as u8,
+                    _ => BYTES[(next() % BYTES.len() as u64) as usize],
+                })
+                .collect();
+            assert_eq!(
+                data_line_counts(&line, is_nuc),
+                reference(&line, is_nuc),
+                "{is_nuc} {line:?}"
+            );
+        }
+    }
+}

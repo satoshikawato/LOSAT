@@ -823,6 +823,32 @@ fn is_ambig_nuc(c: u8) -> bool {
     b"URYSWKMBDHVN".contains(&c.to_ascii_uppercase())
 }
 
+/// The counts of `CheckDataLine`'s loop (cited at `check_data_line`) over `checked` (at most 70
+/// bytes): the good bytes (letters, `*` and `-`), the bad ones (neither good nor white space nor a
+/// digit) and, for nucleotide input, the ambiguous nucleotides among the letters, up to the first
+/// `;`, where the loop stops. Each is counted in a loop of its own without an early exit (LOSAT's
+/// speed; `tests::data_line_counts_match_the_loop` compares them with the loop).
+fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    fn count(bytes: &[u8], test: impl Fn(u8) -> bool) -> usize {
+        // At most 70 bytes: the count fits a byte.
+        usize::from(
+            bytes
+                .iter()
+                .fold(0u8, |count, &c| count + u8::from(test(c))),
+        )
+    }
+    let checked = &checked[..find_first(checked, |c| c == b';').unwrap_or(checked.len())];
+    let good = |c: u8| c.is_ascii_alphabetic() | (c == b'*') | (c == b'-');
+    let goods = count(checked, good);
+    let bads = count(checked, |c| !(good(c) | is_space(c) | c.is_ascii_digit()));
+    let ambiguous = if is_nuc {
+        count(checked, |c| c.is_ascii_alphabetic() && is_ambig_nuc(c))
+    } else {
+        0
+    };
+    (goods, bads, ambiguous)
+}
+
 impl RecordState {
     /// `ParseDefLine`: the title for the reader's checks
     /// (`CFastaDeflineReader::ParseDefline`), the ids (with `-parse_seqids`) or the
@@ -954,25 +980,8 @@ impl RecordState {
         if !self.seq_data.is_empty() {
             return Ok(());
         }
-        let is_nuc = self.is_nuc();
-        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
         let len_to_check = s.len().min(70);
-        for &c in &s[..len_to_check] {
-            if c.is_ascii_alphabetic() || c == b'*' {
-                good += 1;
-                if is_nuc && is_ambig_nuc(c) {
-                    ambig_nuc += 1;
-                }
-            } else if c == b'-' {
-                good += 1;
-            } else if is_space(c) || c.is_ascii_digit() {
-                // White space and digits are neutral.
-            } else if c == b';' {
-                break;
-            } else {
-                bad += 1;
-            }
-        }
+        let (good, bad, ambig_nuc) = data_line_counts(&s[..len_to_check], self.is_nuc());
         if bad >= good / 3 && (len_to_check > 3 || good == 0 || bad > good) {
             return Err(ParseError::fasta_error(
                 ErrCode::Format,

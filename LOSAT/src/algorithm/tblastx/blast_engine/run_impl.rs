@@ -1499,8 +1499,8 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
@@ -1584,8 +1584,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;

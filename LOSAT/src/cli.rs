@@ -1,33 +1,22 @@
-//! Public CLI v2 boundary. Clap's double-dash representation is internal only.
+//! Public CLI v2 boundary: LOSAT's command line, `losat <program> <words>`, whose programs read
+//! their arguments with NCBI's argument reader (`reader`) into their own options (`Commands`).
 
 use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::ncbi_app::args::Refusal;
 use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
-use clap::{CommandFactory, Parser, Subcommand};
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
-// `-help` and `-h` open with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call
-// BLAST+ look for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
-// The options follow in clap's layout.
-const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}";
-
-/// The top level's `-help`: NCBI's headings, and what the entry names need.
-const LOSAT_HELP_TEMPLATE: &str =
-    "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
-
 pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
 
 // What the `losat` binary runs; the crate's root re-exports `main_entry` for it.
 pub(crate) mod main_entry;
 
-// NCBI's argument reader of the programs whose arguments clap converts.
+// NCBI's argument reader of the programs that read their arguments into their options.
 pub(crate) mod reader;
 pub use reader::ArgvError;
 
@@ -140,10 +129,10 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
-/// What a program that `main_entry` runs before clap reads the command line (the programs of
-/// `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's argument
-/// reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION line of
-/// the program (its first line; `convert2blastmask`'s continues in NCBI's text).
+/// What a program that `main_entry` runs before `cli::reader` reads the command line (the
+/// programs of `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's
+/// argument reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION
+/// line of the program (its first line; `convert2blastmask`'s continues in NCBI's text).
 fn entry_program_description(name: &str) -> &'static str {
     match name {
         "blastdbcmd" => "BLAST database client",
@@ -186,38 +175,12 @@ fn top_level_after_help() -> &'static str {
     })
 }
 
-// No NCBI counterpart: `losat <program>` names the program.
-// LOSAT's command line, `losat <program> <words>` (`Commands`). Its command (`CommandFactory`) is
-// `cli_command`'s: `Cli::command()` has every program's arguments (`api::describe`, which reads
-// NCBI's argument tables, has a test that its options are these, line RG item K4i-3a), and the
-// command of one program has only its arguments (`command_of`). A doc comment here would be
-// clap's description of the top level (`long_about`).
-#[derive(clap::Args, Debug)]
-#[command(
-    version,
-    about = "Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions",
-    help_template = LOSAT_HELP_TEMPLATE,
-    after_help = top_level_after_help()
-)]
+// No NCBI counterpart: `losat <program>` names the program (NCBI has one executable per program).
+/// LOSAT's command line, `losat <program> <words>`: the options of its program.
+#[derive(Debug)]
 pub struct Cli {
-    #[command(subcommand)]
     pub command: Commands,
 }
-
-// The `Parser` that `#[derive(Parser)]` writes (clap_derive 4.6.7: src/derives/parser.rs:85-107,
-// src/derives/into_app.rs:21-64): `Command::new("losat")` with `Cli`'s `Args`, its program
-// arguments added by `cli_command`.
-impl CommandFactory for Cli {
-    fn command() -> clap::Command {
-        cli_command::<false>(|_| true)
-    }
-
-    fn command_for_update() -> clap::Command {
-        cli_command::<true>(|_| true)
-    }
-}
-
-impl Parser for Cli {}
 
 #[cfg(test)]
 impl Cli {
@@ -230,144 +193,27 @@ impl Cli {
     }
 }
 
-/// `Cli`'s command with the arguments of `program` only (`cli_command`): LOSAT Web's ABI v1's
-/// (`web_v1_argv`) and the tests'.
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn command_of(program: &str) -> clap::Command {
-    cli_command::<false>(|name| name == program)
-}
-
-/// `Cli`'s command (`augment_args`, or `augment_args_for_update` with `UPDATE`) where the programs
-/// whose names `selected` takes have their arguments (`program_args`). The others have their
-/// names, descriptions and help template, which the top level's help lists, and no arguments:
-/// clap converts the arguments of one program (`reader::convert`). clap adds the others' arguments where it
-/// builds them (`#[command(defer = true)]` on `Commands`). `UPDATE` is a constant so that a
-/// program that never calls `command_for_update` carries none of its code.
-fn cli_command<const UPDATE: bool>(selected: impl Fn(&str) -> bool) -> clap::Command {
-    let command = clap::Command::new("losat");
-    let (mut command, program_args) = if UPDATE {
-        (
-            <Cli as clap::Args>::augment_args_for_update(command),
-            PROGRAM_ARGS_FOR_UPDATE,
-        )
-    } else {
-        (<Cli as clap::Args>::augment_args(command), PROGRAM_ARGS)
-    };
-    debug_assert_eq!(command.get_subcommands().count(), program_args.len());
-    for (program, &args) in command.get_subcommands_mut().zip(program_args) {
-        let deferred = std::mem::take(program);
-        *program = if selected(deferred.get_name()) {
-            args(deferred.defer(no_args))
-        } else {
-            deferred.defer(args)
-        };
-    }
-    command
-}
-
-/// What clap builds of a program whose arguments `cli_command` has added: nothing more.
-fn no_args(command: clap::Command) -> clap::Command {
-    command
-}
-
-/// What `Commands` defers for a program (`#[command(defer = true)]`): the arguments that
-/// `cli_command` adds for `CommandFactory::command` (`PROGRAM_ARGS`) or for `command_for_update`
-/// (`PROGRAM_ARGS_FOR_UPDATE`).
-type ProgramArgs = fn(clap::Command) -> clap::Command;
-
-// clap_derive 4.6.7: src/derives/subcommand.rs:288-358 (a variant's command: its description and
-// help template, `final_from_attrs`, after its `Args`, or before them when deferred)
-/// The arguments of the program whose command is `command` (`A::augment_args`, or
-/// `augment_args_for_update` with `UPDATE`), as clap's derive adds them where it does not defer
-/// them: the description stays the variant's. A deferred `Args` comes after the variant's
-/// description, and the doc comment of an `Args` (`RpsbprocArgs`, `MakedbArgs` and the groups that
-/// the programs flatten) is a description to clap. Every variant has a description and no `Args`
-/// sets a help template (`cli_tests`), so the rest of the variant's command stays as the derive
-/// writes it.
-fn program_args<A: clap::Args, const UPDATE: bool>(command: clap::Command) -> clap::Command {
-    use clap::builder::Resettable;
-    let about = Resettable::from(command.get_about().cloned());
-    let long_about = Resettable::from(command.get_long_about().cloned());
-    let command = if UPDATE {
-        A::augment_args_for_update(command)
-    } else {
-        A::augment_args(command)
-    };
-    command.about(about).long_about(long_about)
-}
-
-/// `Commands`, `PROGRAM_ARGS` and `PROGRAM_ARGS_FOR_UPDATE` from one list of the programs (a
-/// program is added in one place).
-macro_rules! programs {
-    (
-        $(#[$($attr:tt)*])*
-        $vis:vis enum $name:ident {
-            $( $(#[$($variant_attr:tt)*])* $variant:ident($($args:tt)+), )+
-        }
-    ) => {
-        $(#[$($attr)*])*
-        $vis enum $name {
-            $( $(#[$($variant_attr)*])* $variant($($args)+), )+
-        }
-
-        /// Each program's arguments (`program_args` of its variant's type), in the order of
-        /// `Commands`' variants: the order of `Cli`'s subcommands.
-        const PROGRAM_ARGS: &[ProgramArgs] = &[ $( program_args::<$($args)+, false>, )+ ];
-
-        /// `PROGRAM_ARGS` for `command_for_update` (`augment_args_for_update`).
-        const PROGRAM_ARGS_FOR_UPDATE: &[ProgramArgs] = &[ $( program_args::<$($args)+, true>, )+ ];
-    };
-}
-
-programs! {
-    #[derive(Subcommand, Debug, Clone)]
-    #[command(defer = true)]
-    pub enum Commands {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-        /// Translated nucleotide query vs protein subject (blastx)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Blastx(blastx::BlastxArgs),
-        /// Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)
-        #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Blastn(blastn::BlastnArgs),
-        /// Pairwise protein alignment (blastp)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Blastp(blastp::BlastpArgs),
-        /// Pairwise 6-frame translated nucleotide alignment (tblastx)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Tblastx(tblastx::TblastxArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
-        /// Protein query vs translated nucleotide subject (tblastn)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Tblastn(tblastn::TblastnArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
-        /// Position-Specific Iterated BLAST (psiblast)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Psiblast(psiblast::PsiblastArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
-        /// Reverse Position Specific BLAST (rpsblast)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Rpsblast(rpsblast::RpsblastArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
-        /// Translated Reverse Position Specific BLAST (rpstblastn)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Rpstblastn(rpstblastn::RpstblastnArgs),
-        // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
-        /// makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
-        #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
-        Makedb(crate::writedb::makeblastdb::MakedbArgs),
-        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
-        /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
-        #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
-        Rpsbproc(crate::rpsbproc::RpsbprocArgs),
-    }
+/// The options of the program that a command line runs, one variant for each program of
+/// `PROGRAMS`, in its order: each read from NCBI's arguments by its type's `from_args`
+/// (`reader::options`, line RG DECISIONS K4i-3-1).
+#[derive(Debug, Clone)]
+pub enum Commands {
+    Blastx(blastx::BlastxArgs),
+    Blastn(blastn::BlastnArgs),
+    Blastp(blastp::BlastpArgs),
+    Tblastx(tblastx::TblastxArgs),
+    Tblastn(tblastn::TblastnArgs),
+    Psiblast(psiblast::PsiblastArgs),
+    Rpsblast(rpsblast::RpsblastArgs),
+    Rpstblastn(rpstblastn::RpstblastnArgs),
+    Makedb(crate::writedb::makeblastdb::MakedbArgs),
+    Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }
 
 /// Reads `argv` (`losat <program> <words>`) into the program's arguments for a caller that runs no
 /// NCBI application start (the engine's own argv: BLASTN's repeat search; the tests): NCBI's
-/// reader of the program, LOSAT's refusals, clap's conversion (`reader::read_argv`). The toolkit's
-/// words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are refused
+/// reader of the program, LOSAT's refusals, the program's options (`reader::read_argv`). The
+/// toolkit's words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are refused
 /// (`toolkit_file_word_refusal`; makeblastdb keeps its own `-logfile` argument), and so are the
 /// versions (`version_word_refusal`) and `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<I, S>(argv: I) -> Result<Cli, ArgvError>
@@ -517,6 +363,9 @@ pub(crate) fn is_program(name: &str) -> bool {
     PROGRAMS.iter().any(|(program, _)| *program == name)
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
+// The help opens with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call BLAST+ look
+// for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
 /// The top level's help: its usage, its description, the programs (`PROGRAMS`, and a `help` that
 /// the top level of LOSAT 0.2.0 listed), its two flags, and the other programs and the shims
 /// (`top_level_after_help`).
@@ -544,7 +393,7 @@ fn top_level_help() -> String {
 // NCBI keeps the bytes of an option's value.
 /// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
 /// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
-/// programs on clap (`reader::refusal_after_read`) and those of `ncbi_app`
+/// programs on `cli::reader` (`reader::refusal_after_read`) and those of `ncbi_app`
 /// (`ncbi_app::args::Args::text_values_refusal`).
 pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
     format!(

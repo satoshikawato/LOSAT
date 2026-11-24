@@ -6,8 +6,8 @@
 //! taxids of a database (`taxonomy`: `-tax_info`), its metadata (`metadata`: `-metadata`,
 //! `-metadata_output_prefix`), the databases of a directory (`list`: `-list`,
 //! `-list_outfmt`, `-recursive`, `-remove_redundant_dbs`), `-show_blastdb_search_path`, `-h`,
-//! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
-//! clap's: `main` hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
+//! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader): `main`
+//! hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
 //! are read (`-info`, `-mask_sequence_with`, `%m`). A `-db` of several names is read as NCBI's
 //! reader reads it, as one database (`SeqDb::open_in`).
 

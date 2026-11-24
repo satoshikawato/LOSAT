@@ -1,6 +1,7 @@
 //! LOSAT's top level (`losat` and the words before a program's name, `top_level`) writes the bytes
 //! frozen in `tests/fixtures/top_level` from the top level of LOSAT 0.2.0 before line RG item
-//! K4i-3c (clap's): its help, its version, and its errors, for every form that it took or refused.
+//! K4i-3c (clap's top level then): its help, its version, and its errors, for every form that it
+//! took or refused.
 
 use std::ffi::OsString;
 

@@ -1,272 +1,203 @@
-//! v1's frozen command (`frozen_command`, a builder) is the command that clap's derive of the
-//! command line made when v1 was frozen, and v1 reads every request as it read it with the derive
-//! (line RG item K4i-3c, its proof before the derive leaves; DECISIONS K4i-3-1 Q4): the same
-//! arguments (ids, long names, value names, actions, defaults, value types) and usage, the same
-//! list of long names for its messages (`LONGS`), and, on the frozen cases and a sweep of every
-//! argument, the same options or the same message.
-
-use std::ffi::OsString;
-
-use clap::{CommandFactory, FromArgMatches};
+//! v1's copies of the command line's value parsers (`ncbi_integer`, `ncbi_int8`, `ncbi_double`,
+//! `genetic_code_number`) read the values as NCBI's arguments read them, with v1's messages.
 
 use super::*;
-use crate::cli::Cli;
-
-/// What the arguments of a program's command are, without their help texts.
-fn shape(command: &clap::Command, program: &str) -> (Vec<String>, String) {
-    let mut command = command.clone();
-    command.build();
-    let scope = command.find_subcommand(program).unwrap();
-    let args = scope
-        .get_arguments()
-        .map(|arg| {
-            format!(
-                "{} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {:?}",
-                arg.get_id(),
-                arg.get_long(),
-                arg.get_short(),
-                arg.get_value_names(),
-                arg.get_action(),
-                arg.get_num_args(),
-                arg.get_default_values(),
-                arg.is_required_set(),
-                arg.is_hide_set(),
-                arg.get_value_parser().type_id(),
-            )
-        })
-        .collect();
-    let mut scope = scope.clone();
-    (args, scope.render_usage().to_string())
-}
 
 #[test]
-fn the_frozen_command_is_the_derive_s() {
-    for program in ["blastx", "tblastn"] {
+fn integers_are_read_as_ncbi_reads_them() {
+    for (value, expected) in [
+        ("7", 7),
+        ("+7", 7),
+        ("-07", -7),
+        ("0x1F", 31),
+        ("0XaB", 171),
+        ("0x", 0),
+        ("2147483647", i32::MAX),
+        ("-2147483648", i32::MIN),
+    ] {
+        assert_eq!(ncbi_integer(value), Ok(expected), "{value}");
+    }
+    for value in [
+        "",
+        " 7",
+        "7 ",
+        "+",
+        "-0x5",
+        "0x+5",
+        "0x5g",
+        "1_000",
+        "2147483648",
+        "0x80000000",
+        "00x5",
+        "7.0",
+    ] {
+        assert!(ncbi_integer(value).is_err(), "{value:?}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129 (`s_StringToInt8`)
+// An Int8 argument (`-dbsize`) reads what an integer argument reads, in 64 bits.
+#[test]
+fn int8_arguments_are_read_as_ncbi_reads_them() {
+    for (value, expected) in [
+        ("7", 7),
+        ("+7", 7),
+        ("-07", -7),
+        ("0", 0),
+        ("0x1F", 31),
+        ("0XaB", 171),
+        ("0x", 0),
+        ("3000000000", 3_000_000_000),
+        ("-3000000000", -3_000_000_000),
+        ("9223372036854775807", i64::MAX),
+        ("-9223372036854775808", i64::MIN),
+        ("0x7FFFFFFFFFFFFFFF", i64::MAX),
+    ] {
+        assert_eq!(ncbi_int8(value), Ok(expected), "{value}");
+    }
+    for value in [
+        "",
+        " 7",
+        "7 ",
+        "+",
+        "-0x5",
+        "0x5g",
+        "1_000",
+        "9223372036854775808",
+        "-9223372036854775809",
+        "0x8000000000000000",
+        "7.0",
+        "1e3",
+        "abc",
+    ] {
+        assert!(ncbi_int8(value).is_err(), "{value:?}");
+    }
+}
+
+// LOSAT's messages for the integers NCBI cannot convert (`s_StringToInt8`, then the range of
+// `int` for `CArg_Integer`): a byte after `0x` that is not a hexadecimal digit is tested before
+// the base 16 overflow.
+#[test]
+fn integer_arguments_name_what_failed() {
+    for value in ["0x10000000000000000g", "9223372036854775808", "abc", "0x5g"] {
         assert_eq!(
-            shape(&frozen_command(program), program),
-            shape(&crate::cli::command_of(program), program),
-            "{program}"
+            ncbi_int8(value),
+            Err("expected an integer".to_string()),
+            "{value}"
         );
     }
-}
-
-#[test]
-fn the_long_names_are_the_derive_s() {
-    let command = Cli::command();
-    let derive: Vec<&str> = std::iter::once(&command)
-        .chain(command.get_subcommands())
-        .flat_map(|scope| scope.get_arguments().filter_map(clap::Arg::get_long))
-        .collect();
-    assert_eq!(LONGS, derive.as_slice());
-}
-
-/// v1's reading of `argv` with the derive (before line RG item K4i-3c): the derive's command with
-/// v1's parsers (and `mutate`), the derive's conversion of the words it took, and its messages.
-fn with_derive(
-    program: &str,
-    mutate: fn(clap::Command) -> clap::Command,
-    argv: Vec<OsString>,
-) -> Result<String, String> {
-    let command = mutate(v1_command(crate::cli::command_of(program), program));
-    let read = || -> Result<Commands, clap::Error> {
-        let (program, given) = checked_words(&command, argv)?;
-        let mut translated: Vec<OsString> = vec!["losat".into(), program.into()];
-        for (name, value) in given {
-            match value {
-                Some(value) => {
-                    let mut word = OsString::from(format!("--{name}="));
-                    word.push(value);
-                    translated.push(word);
-                }
-                None => translated.push(format!("--{name}").into()),
-            }
-        }
-        let mut matches = command.clone().try_get_matches_from(&translated)?;
-        Cli::from_arg_matches_mut(&mut matches)
-            .map(|cli| cli.command)
-            .map_err(|error| error.format(&mut command.clone()))
-    };
-    read()
-        .map(|command| format!("{command:?}"))
-        .map_err(|error| render(&error))
-}
-
-/// v1's reading of `argv` now (`parse`).
-fn with_builder(
-    program: &str,
-    mutate: fn(clap::Command) -> clap::Command,
-    argv: Vec<OsString>,
-) -> Result<String, String> {
-    parse(mutate(command(program)), argv).map(|command| format!("{command:?}"))
-}
-
-fn blastx_outfmt(command: clap::Command) -> clap::Command {
-    command.mut_subcommand("blastx", |blastx| {
-        blastx.mut_arg("outfmt", |outfmt| {
-            outfmt.value_parser(crate::algorithm::blastx::web::v1_outfmt)
-        })
-    })
-}
-
-fn unchanged(command: clap::Command) -> clap::Command {
-    command
-}
-
-/// Values for the sweep of an argument that reads its value as `reads`.
-fn values(reads: Reads, long: &str) -> Vec<&'static str> {
-    match reads {
-        Flag => vec![],
-        Text => vec![
-            "x",
-            "",
-            "0",
-            "6",
-            "7",
-            "7 qseqid sseqid",
-            "11",
-            "both",
-            "plus",
-            "minus",
-            "blastx",
-            "blastx-fast",
-            "tblastn",
-            "tblastn-fast",
-            "BLOSUM62",
-            "1-10",
-            "yes",
-            "no",
-            "20 64 1",
-            "0x2",
-        ],
-        Path => vec!["x", "-", "in/q.fa", "--evalue", "---word_size"],
-        Integer | Count | Small => vec![
-            "-1",
-            "0",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "11",
-            "12",
-            "33",
-            "255",
-            "256",
-            "x",
-            "0x10",
-            "0x",
-            "2147483648",
-            "+3",
-            " 3",
-            "1e1",
-        ],
-        Int8 => vec!["-1", "0", "1", "x", "0x10", "9223372036854775808", "1.5"],
-        Double => vec![
-            "-1", "0", "0.25", "0.5", "1", "50", "100", "101", "x", "1e-5", "inf", "nan", "0x1p2",
-            "2,5",
-        ],
-        Boolean => vec!["true", "false", "T", "f", "1", "0", "x", ""],
-    }
-    .into_iter()
-    .chain((long == "query_loc").then_some("---evalue"))
-    .collect()
-}
-
-fn argv(program: &str, extra: &[&str]) -> Vec<OsString> {
-    ["losat", program, "-query", "query", "-subject", "subject"]
-        .iter()
-        .chain(extra)
-        .map(OsString::from)
-        .collect()
-}
-
-#[test]
-fn v1_reads_every_request_as_with_the_derive() {
-    let mut cases: Vec<(&str, Vec<String>)> = Vec::new();
-    for (program, args) in [("blastx", BLASTX), ("tblastn", TBLASTN)] {
-        cases.push((program, vec![]));
-        for &(_, long, _, reads, _) in args {
-            if matches!(long, "query" | "subject") {
-                continue;
-            }
-            let flag = format!("-{long}");
-            match reads {
-                Flag => {
-                    cases.push((program, vec![flag.clone()]));
-                    cases.push((program, vec![format!("{flag}=true")]));
-                    cases.push((program, vec![flag.clone(), flag.clone()]));
-                }
-                _ => {
-                    for value in values(reads, long) {
-                        cases.push((program, vec![flag.clone(), value.to_string()]));
-                        cases.push((program, vec![format!("{flag}={value}")]));
-                    }
-                    cases.push((program, vec![flag.clone()]));
-                    cases.push((
-                        program,
-                        vec![flag.clone(), "1".into(), flag.clone(), "2".into()],
-                    ));
-                }
-            }
-        }
-        for (name, excluded) in V1_EXCLUSIONS {
-            for other in *excluded {
-                let words = |name: &str| -> Vec<String> {
-                    let reads = args.iter().find(|arg| arg.1 == name).map(|arg| arg.3);
-                    match reads {
-                        Some(Flag) => vec![format!("-{name}")],
-                        _ => vec![format!("-{name}"), "x".into()],
-                    }
-                };
-                let mut both = words(name);
-                both.extend(words(other));
-                cases.push((program, both));
-            }
-        }
-        for extra in [
-            &["-mt_mode", "1"][..],
-            &["-mt_mode", "1", "-num_threads", "2"],
-            &["-in_pssm", "x"],
-            &["-query_loc", "1-5"],
-            &["-nosuch"],
-            &["--evalue", "1"],
-            &["-evalue"],
-            &["--"],
-            &["-evalue", "1", "--"],
-            &["-logfile", "x"],
-            &["-dryrun"],
-            &["-version"],
-            &["-db", "x", "-dbsize", "5"],
-            &["-outfmt", "7 qseqid sseqid evalue", "-evalue", "1e-5"],
-            &["-outfmt", "6 nosuch"],
-            &["-word_size", "1"],
-            &["-matrix", "FOO"],
-        ] {
-            cases.push((program, extra.iter().map(|word| word.to_string()).collect()));
-        }
-    }
-    let mut same = 0;
-    let mut differing = Vec::new();
-    for (program, extra) in &cases {
-        let extra: Vec<&str> = extra.iter().map(String::as_str).collect();
-        let mutate = match *program {
-            "blastx" => blastx_outfmt,
-            _ => unchanged,
-        };
-        let derive = with_derive(program, mutate, argv(program, &extra));
-        let builder = with_builder(program, mutate, argv(program, &extra));
-        match derive == builder {
-            true => same += 1,
-            false => differing.push(format!(
-                "{program} {extra:?}:\n  derive  {derive:?}\n  builder {builder:?}"
-            )),
-        }
-    }
-    eprintln!("v1 cases: {same} the same, {} differing", differing.len());
-    assert!(
-        differing.is_empty(),
-        "{}",
-        differing[..differing.len().min(20)].join("\n")
+    assert_eq!(
+        ncbi_int8("0x8000000000000000"),
+        Err("Integer value is out of range".to_string())
     );
+    for value in [
+        "2147483648",
+        "0x80000000",
+        "-2147483649",
+        "0x8000000000000000",
+    ] {
+        assert_eq!(
+            ncbi_integer(value),
+            Err("Integer value is out of range".to_string()),
+            "{value}"
+        );
+    }
+    assert_eq!(
+        ncbi_integer("9223372036854775808"),
+        Err("expected an integer".to_string())
+    );
+}
+
+// `CArgAllowGeneticCodeInteger::Verify` (`NStr::StringToInt` of `value`, blast_args.cpp:998-1007):
+// the number of a code of 0 to 255 written without a minus sign.
+#[test]
+fn genetic_codes_are_read_as_ncbi_reads_them() {
+    for (value, expected) in [("1", 1), ("+5", 5), ("005", 5), ("33", 33), ("255", 255)] {
+        assert_eq!(genetic_code_number(value), Some(expected), "{value}");
+    }
+    for value in [
+        "-0",
+        "-5",
+        "256",
+        "2147483648",
+        "",
+        " 5",
+        "5 ",
+        "5.0",
+        "0x",
+        "0x5",
+    ] {
+        assert_eq!(genetic_code_number(value), None, "{value:?}");
+    }
+}
+
+// NCBI 2.17.0's `CArg_Double`: the bits of `NStr::StringToDouble` of `value`
+// with `fDecimalPosixOrLocal` from NCBI's corelib (swebok-improve-20261105/sw8/nfix/probe/x87,
+// `s2dp`), and `blastn -evalue <value>` (exit 0, or 1 with the usage for the errors).
+#[test]
+fn reals_are_read_as_ncbis_carg_double() {
+    for (value, bits) in [
+        ("1e-5", 0x3ee4_f8b5_88e3_68f1),
+        (".5", 0x3fe0_0000_0000_0000),
+        ("+2", 0x4000_0000_0000_0000),
+        ("-0", 0x8000_0000_0000_0000),
+        // glibc's hexadecimal numbers
+        ("0x10", 0x4030_0000_0000_0000),
+        ("0x1p-3", 0x3fc0_0000_0000_0000),
+        ("-0x.8", 0xbfe0_0000_0000_0000),
+        // `StringToDoublePosix` reads a final exponent mark, in x87 extended precision
+        ("1e", 0x3ff0_0000_0000_0000),
+        ("2.5E", 0x4004_0000_0000_0000),
+        ("-3e", 0xc008_0000_0000_0000),
+        ("12345678901234567890e", 0x43e5_6a95_319d_63e1),
+        ("0.0000000000000001e", 0x3c9c_d2b2_97d8_89bc),
+        // the infinities, and NaN with glibc's sign and payload
+        ("1e400", 0x7ff0_0000_0000_0000),
+        ("+Infinity", 0x7ff0_0000_0000_0000),
+        // `StringToDoublePosix` reads an `inf` after a point, which `strtod` does not
+        (".inf", 0x7ff0_0000_0000_0000),
+        ("-.Infinity", 0xfff0_0000_0000_0000),
+        ("-nan", 0xfff8_0000_0000_0000),
+        ("-nan(1)", 0xfff8_0000_0000_0001),
+        ("+nan(5)", 0x7ff8_0000_0000_0005),
+        ("-NaN()", 0xfff8_0000_0000_0000),
+        ("+nan(x_9)", 0x7ff8_0000_0000_0000),
+    ] {
+        let read = ncbi_double(value).unwrap_or_else(|e| panic!("{value}: {e}"));
+        assert_eq!(read.to_bits(), bits, "{value}");
+    }
+    for value in [
+        "+nan(",
+        "+nan(1",
+        "+nan(-)",
+        "+nan(1)x",
+        "+-nan(1)",
+        "nan(1)",
+        "nan(5)",
+        ",5",
+        ",",
+        "1x",
+        "1e+",
+        "1ex",
+        "--5",
+        "2,5",
+        "inf",
+        "nan",
+        " 1",
+        "",
+        "e5",
+        "0x",
+        "1.2.3",
+        // A character of several bytes across the fourth byte (S11 audit F-1).
+        "-xx€",
+        "-in\u{fffd}",
+        "+\u{fffd}\u{fffd}",
+        "-1éé",
+    ] {
+        assert_eq!(
+            ncbi_double(value),
+            Err("expected a number".into()),
+            "{value:?}"
+        );
+    }
 }

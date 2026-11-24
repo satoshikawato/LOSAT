@@ -1,13 +1,11 @@
 //! Command-line arguments for RPS-BLAST (`losat rpsblast`).
 
 use anyhow::Result;
-use clap::Args;
 use std::path::PathBuf;
 
 use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
 use crate::algorithm::rps_search::engine::RpsSearch;
 use crate::blastinput::report_counts::FormattingArgs;
-use crate::blastinput::value_parsers::*;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:70-131
 // rpsblast's arguments: blastp's search, filtering, query, formatting and composition-based
@@ -19,94 +17,56 @@ use crate::blastinput::value_parsers::*;
 // searches with mode 0), and with `-use_sw_tback` NCBI's Smith-Waterman redo (PS11c-3); the
 // argument that LOSAT does not run yet (`-html`, PS15a) is refused by the parser (its row of
 // `ncbi_app::args::refusal`).
-#[derive(Args, Debug, Clone)]
-#[command(rename_all = "snake_case")]
+#[derive(Debug, Clone)]
 pub struct RpsblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
-    #[arg(long, default_value = "-", value_parser = ncbi_path(), value_name = "PATH")]
     pub query: PathBuf,
-    #[arg(
-        long,
-        value_name = "NAME",
-        help = "BLAST database name (a profile database)"
-    )]
     pub db: Option<String>,
-    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
     /// are read.
-    #[arg(long, value_name = "filename", value_parser = ncbi_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
-    #[arg(long, value_parser = ncbi_double, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2234-2236
     /// `-dbsize`: replaces the database's length in every statistic (`x_AdjustDbSize` then keeps
     /// the volumes' own sequence counts, `rps_hooks::rps_search`).
-    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
     /// `-searchsp`: at any value (0 too) the search runs without the Gumbel block
     /// (`ResolvedBlastpArgs::old_fsc`); above 0 it is every query's and volume's effective
     /// search space (`rps_hooks::rps_search`).
-    #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    #[arg(
-        long,
-        default_value = "1",
-        help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics, 2 and 3 as 1 with a larger preliminary e-value"
-    )]
     pub comp_based_stats: String,
-    #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
-    #[arg(
-        long = "show_gis",
-        default_value_t = false,
-        help = "Show NCBI GIs in deflines?"
-    )]
     pub show_gis: bool,
-    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
-    #[arg(long = "num_alignments", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
     // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
     // blast_args.cpp:2683-2721, cited at `FormattingArgs`): the width of the outfmt 0
     // alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
     // rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
     // `SetLineLength` only).
-    #[command(flatten)]
     pub formatting: FormattingArgs,
-    #[arg(long, value_parser = ncbi_integer_as::<usize>, help = "Maximum number of aligned sequences to keep [default: 500]")]
     pub max_target_seqs: Option<usize>,
-    #[arg(long = "max_hsps", value_parser = ncbi_integer_as::<usize>)]
     pub max_hsps_per_subject: Option<usize>,
-    #[arg(long = "qcov_hsp_perc", value_parser = ncbi_double, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229
     /// `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`: the RPS engine's X-drops in bits
     /// (`RpsSearch`); NCBI's checks of their values are made with the options' others.
-    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for ungapped extensions")]
     pub xdrop_ungap: Option<f64>,
-    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for preliminary gapped extensions")]
     pub xdrop_gap: Option<f64>,
-    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for final gapped alignment")]
     pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
     /// `-sum_stats`: `false` is rpsblast's default; `true` is refused where the search starts
     /// (`rps_hooks::rps_search`), after NCBI's errors of the options, the database and the files.
-    #[arg(long = "sum_stats", value_name = "bool_value", value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-899 and 892-899
     /// `-use_sw_tback`: the composition-based redo (modes 1 to 3) is NCBI's Smith-Waterman redo
     /// (`RpsSearch::use_sw_tback`); without composition-based statistics it changes nothing.
-    #[arg(
-        long = "use_sw_tback",
-        default_value_t = false,
-        help = "Compute locally optimal Smith-Waterman alignments?"
-    )]
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-342
     /// `-seg`, `-soft_masking` and `-lcase_masking` are blastp's query encoding: a hard mask
@@ -114,43 +74,19 @@ pub struct RpsblastArgs {
     /// and count identities on the letters as read; soft masking keeps the letters (it only
     /// leaves words out of a query lookup table, which an RPS search does not build), so it
     /// changes the outfmt 0 display alone.
-    #[arg(
-        long,
-        value_name = "SEG_options",
-        help = "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable) [default: no]"
-    )]
     pub seg: Option<String>,
-    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
-    #[arg(long, value_parser = ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
-    #[arg(
-        long = "lcase_masking",
-        default_value_t = false,
-        help = "Use lower case filtering in query and subject sequence(s)?"
-    )]
     pub lcase_masking: bool,
-    #[arg(
-        long = "query_loc",
-        value_name = "RANGE",
-        help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
-    )]
     pub query_loc: Option<String>,
-    #[arg(
-        long = "parse_deflines",
-        default_value_t = false,
-        help = "Should the query and subject defline(s) be parsed?"
-    )]
     pub parse_deflines: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:48-66
     /// `-num_threads`: LOSAT's pool size (0: the number of volumes, NCBI's "auto"); the output
     /// is the same at every value.
-    #[arg(long, default_value_t = 1, value_parser = ncbi_integer)]
     pub num_threads: i32,
     /// `-mt_mode` is read and has no effect: LOSAT searches the queries in parallel and writes
     /// NCBI's `-num_threads 1` output at every value.
-    #[arg(long, value_name = "int_value", value_parser = ncbi_integer_as::<u8>, help = "Multi-thread mode: 0 split by database volumes, 1 split by queries (accepted; the output does not depend on it)")]
     pub mt_mode: Option<u8>,
 }
 

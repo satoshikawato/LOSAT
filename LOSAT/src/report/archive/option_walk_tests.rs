@@ -13,7 +13,7 @@
 use super::options::OptionInputs;
 use super::strategy::{hitlist_size, HitlistArgs};
 use super::ArchiveRequest;
-use crate::cli::{Cli, Commands};
+use crate::cli::Commands;
 
 /// A change of the default request: the parameter in its place, a new one after another, or a
 /// parameter gone; or the parser refuses the words with the base command line (`Conflicts`: an
@@ -28,7 +28,7 @@ enum Edit {
 
 use Edit::{After, At, Conflicts, Drop};
 
-/// One run of the walk: the argument's id (clap's), the words added to the base command line,
+/// One run of the walk: the argument's name, the words added to the base command line,
 /// and what changes in the request.
 type Case = (&'static str, &'static [&'static str], &'static [Edit]);
 
@@ -94,16 +94,11 @@ fn expected(default: &[&str], edits: &[Edit]) -> Vec<String> {
 }
 
 fn walk(app: &App) {
-    // Every argument of the program's command line has a case.
-    let command = <Cli as clap::CommandFactory>::command();
-    let subcommand = command
-        .find_subcommand(app.program)
-        .expect("the program's subcommand");
-    let missing: Vec<String> = subcommand
-        .get_arguments()
-        .map(|arg| arg.get_id().as_str().to_string())
-        .filter(|id| id.as_str() != "help")
-        .filter(|id| !app.cases.iter().any(|case| case.0 == id))
+    // Every argument that the program's options read has a case.
+    let tool = crate::cli::reader::tool(app.program).expect("the program is on the reader");
+    let missing: Vec<&str> = crate::cli::reader::options_tests::names_read(tool)
+        .into_iter()
+        .filter(|name| !app.cases.iter().any(|case| case.0 == *name))
         .collect();
     assert!(
         missing.is_empty(),
@@ -187,8 +182,8 @@ const DB_FILTERS: &[Case] = &[
 /// The formatting arguments (`FormattingArgs`): the report's only.
 const FORMATTING: &[Case] = &[
     ("line_length", &["-line_length", "80"], &[]),
-    ("sort_hits", &["-sorthits", "1"], &[]),
-    ("sort_hsps", &["-sorthsps", "1"], &[]),
+    ("sorthits", &["-sorthits", "1"], &[]),
+    ("sorthsps", &["-sorthsps", "1"], &[]),
 ];
 
 fn with(cases: &[&'static [Case]]) -> &'static [Case] {
@@ -263,7 +258,7 @@ const PSIBLAST: &[Case] = &[
         &[At("HitlistSize", "Integer(600)")],
     ),
     (
-        "max_hsps_per_subject",
+        "max_hsps",
         &["-max_hsps", "3"],
         &[After(
             "PseudoCountWeight",
@@ -337,12 +332,12 @@ const PSIBLAST: &[Case] = &[
         ],
     ),
     (
-        "gap_open",
+        "gapopen",
         &["-gapopen", "9"],
         &[After("PseudoCountWeight", "GapOpeningCost", "Integer(9)")],
     ),
     (
-        "gap_extend",
+        "gapextend",
         &["-gapextend", "2"],
         &[After("PseudoCountWeight", "GapExtensionCost", "Integer(2)")],
     ),
@@ -576,7 +571,7 @@ const RPS_COMMON: &[Case] = &[
         &[At("HitlistSize", "Integer(3)")],
     ),
     (
-        "max_hsps_per_subject",
+        "max_hsps",
         &["-max_hsps", "2"],
         &[After("EvalueThreshold", "MaxHspsPerSubject", "Integer(2)")],
     ),
@@ -793,12 +788,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[After("WordThreshold", "WordSize", "Integer(4)")],
         ),
         (
-            "gap_open",
+            "gapopen",
             &["-gapopen", "9"],
             &[After("WordThreshold", "GapOpeningCost", "Integer(9)")],
         ),
         (
-            "gap_extend",
+            "gapextend",
             &["-gapextend", "2"],
             &[After("WordThreshold", "GapExtensionCost", "Integer(2)")],
         ),

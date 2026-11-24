@@ -31,21 +31,11 @@ use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
 // NCBI's argument reader reports the exclusions (`cli::reader`).
 /// The two options of a program whose database arguments support masking (BLASTN).
-#[derive(clap::Args, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DbMaskArgs {
     /// `-db_soft_mask`.
-    #[arg(
-        long = "db_soft_mask",
-        value_name = "filtering_algorithm",
-        help = "Filtering algorithm ID to apply to the BLAST database as soft masking"
-    )]
     pub db_soft_mask: Option<String>,
     /// `-db_hard_mask` (refused for the masks of `HardMaskShape`: `ResolvedMask::check_losat_limits`).
-    #[arg(
-        long = "db_hard_mask",
-        value_name = "filtering_algorithm",
-        help = "Filtering algorithm ID to apply to the BLAST database as hard masking"
-    )]
     pub db_hard_mask: Option<String>,
 }
 

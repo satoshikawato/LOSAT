@@ -36,19 +36,16 @@ fn a_refused_index_file_is_printed_as_a_refusal() {
 // rules are makeblastdb's (makeblastdb.cpp:322-329, cited at `MakedbArgs`).
 #[test]
 fn registry_and_argument_rules_of_parse_seqids() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Wrap {
-        #[command(flatten)]
-        args: MakedbArgs,
-    }
-    let parse = |words: &[&str]| {
-        let mut argv = vec!["makeblastdb"];
+    let parse = |words: &[&str]| -> MakedbArgs {
+        let mut argv = vec!["losat", "makeblastdb"];
         argv.extend(words);
-        Wrap::try_parse_from(argv).unwrap().args
+        match crate::cli::try_parse_from(argv).unwrap().command {
+            crate::cli::Commands::Makedb(args) => args,
+            command => panic!("not makeblastdb: {command:?}"),
+        }
     };
-    let plain = parse(&["--dbtype", "prot"]);
-    let parsed = parse(&["--dbtype", "prot", "--parse_seqids"]);
+    let plain = parse(&["-dbtype", "prot"]);
+    let parsed = parse(&["-dbtype", "prot", "-parse_seqids"]);
     assert_eq!(check_registry_settings(&plain, Ok(Some("100"))), Ok(()));
     assert_eq!(check_registry_settings(&plain, Err("unread")), Ok(()));
     assert_eq!(check_registry_settings(&parsed, Ok(None)), Ok(()));

@@ -17,7 +17,7 @@ use crate::blastinput::ncbi_environment::{preparse, DiagTarget, Preparsed};
 use crate::ncbi_app::args::{is_file_argument, refusal, Args, NotConverted, Refusal};
 use crate::ncbi_app::{Diag, ReadEnd, Tool};
 
-/// A `Tool` of a program on clap: NCBI's frozen `-help` text, no diagnostic prefix, no
+/// A `Tool` of a program on this reader: NCBI's frozen `-help` text, no diagnostic prefix, no
 /// components.
 macro_rules! tool {
     ($program:literal, $shown:literal, $help:expr) => {
@@ -117,7 +117,7 @@ static TOOLS: [&Tool; 10] = [
     &RPSBPROC,
 ];
 
-/// The `Tool` of `program`, if it is one of the programs whose arguments clap converts.
+/// The `Tool` of `program`, if it is one of the programs whose options this reader reads.
 pub(crate) fn tool(program: &str) -> Option<&'static Tool> {
     TOOLS.iter().copied().find(|tool| tool.program == program)
 }
@@ -168,96 +168,12 @@ pub(crate) fn refusal_after_read(tool: &Tool, args: &Args) -> Option<String> {
     })
 }
 
-// No NCBI counterpart: NCBI's `CArgs` is the program's arguments; LOSAT's programs read theirs from
-// clap's types (line RG item K4i-3 takes them from `Args`).
-#[cfg(test)]
-/// The argv that clap converts for `tool`'s arguments `args` (`convert`): `losat <program>`, then
-/// each argument given, in the command line's order, as `--name=` and its value's bytes, or
-/// `--name` for a flag. The defaults are clap's (NCBI's reader adds them, and clap's types have
-/// the same), the toolkit's file arguments are the application start's (only makeblastdb's clap
-/// has its own `-logfile`), and an argument that LOSAT refuses is left out where the caller ends
-/// before the refusals (a dry run, `refused`): its value is not read. A value that is not UTF-8,
-/// which LOSAT refuses after a dry run's end, is clap's lossy text there.
-fn clap_argv(tool: &Tool, args: &Args, command: &clap::Command, dry_run: bool) -> Vec<OsString> {
-    let program = command
-        .find_subcommand(tool.program)
-        .expect("each program on the reader is a command");
-    let has_long = |name: &str| {
-        program
-            .get_arguments()
-            .any(|arg| arg.get_long() == Some(name))
-    };
-    let mut argv: Vec<OsString> = vec!["losat".into(), tool.program.into()];
-    for (name, value) in args.given_values() {
-        if is_file_argument(name) && !has_long(name) {
-            continue;
-        }
-        if dry_run && named_refusal(tool, name).is_some() {
-            continue;
-        }
-        match value {
-            None => argv.push(format!("--{name}").into()),
-            Some(value) => {
-                let mut word = OsString::from(format!("--{name}="));
-                match dry_run && args.is_bytes(name) && refuses_bytes(tool, name) {
-                    true => word.push(value.to_string_lossy().as_ref()),
-                    false => word.push(value),
-                }
-                argv.push(word);
-            }
-        }
-    }
-    argv
-}
-
-/// clap's conversion of `tool`'s arguments `args` into the program's types (`clap_argv`); `dry_run`
-/// for a caller that ends before LOSAT's refusals (`clap_argv`). NCBI's reader has checked the
-/// arguments, so clap's checks hold for every argv that it read (`ncbi_xmlhelp_tests`,
-/// `cli_v2_tests`): a failure is LOSAT's error (`conversion_error`), never clap's text. The
-/// programs read their options with `options`; its proof test (`options_tests`) compares the two.
-#[cfg(test)]
-pub(crate) fn convert(tool: &Tool, args: &Args, dry_run: bool) -> Result<Commands, String> {
-    let mut command = super::command_of(tool.program);
-    let argv = clap_argv(tool, args, &command, dry_run);
-    command
-        .try_get_matches_from_mut(argv)
-        .and_then(|mut matches| {
-            <super::Cli as clap::FromArgMatches>::from_arg_matches_mut(&mut matches)
-        })
-        .map(|cli| cli.command)
-        .map_err(|error| conversion_error(tool, &error))
-}
-
-/// LOSAT's error where clap does not convert an argument that NCBI's reader read (`convert`): the
-/// argument that clap names, without clap's words.
-#[cfg(test)]
-fn conversion_error(tool: &Tool, error: &clap::Error) -> String {
-    use clap::error::{ContextKind, ContextValue};
-    let name = match error.get(ContextKind::InvalidArg) {
-        Some(ContextValue::String(arg)) => arg
-            .split([' ', '='])
-            .next()
-            .map(|word| word.trim_start_matches('-').to_string()),
-        _ => None,
-    };
-    match name {
-        Some(name) => format!(
-            "LOSAT's {} does not convert the value of -{name} that NCBI's argument reader read",
-            tool.refusal_name
-        ),
-        None => format!(
-            "LOSAT's {} does not convert the arguments that NCBI's argument reader read",
-            tool.refusal_name
-        ),
-    }
-}
-
 // No NCBI counterpart: NCBI's `CArgs` is the program's arguments; LOSAT's programs read theirs into
 // their own option types (line RG DECISIONS K4i-3-1).
 /// The options of `tool`'s arguments `args` (each program's `from_args`); `dry_run` for a caller
 /// that ends before LOSAT's refusals, which reads a value that LOSAT refuses for not being UTF-8 as
 /// its lossy text (`Args::with_lossy_text`). A key that the option's type does not hold is LOSAT's
-/// error (`conversion_error`).
+/// error (`not_converted`).
 pub(crate) fn options(tool: &Tool, args: &Args, dry_run: bool) -> Result<Commands, String> {
     use crate::algorithm::{
         blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
@@ -420,4 +336,4 @@ pub(crate) fn read_argv(
 
 #[cfg(test)]
 #[path = "options_tests.rs"]
-mod options_tests;
+pub(crate) mod options_tests;

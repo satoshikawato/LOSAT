@@ -617,10 +617,10 @@ impl Args {
     /// reads as text (`value`), which `ncbi_app::run_app` writes where the body would start, so
     /// that NCBI's errors of the reader and `-dryrun` come first: NCBI's `Run` reads the bytes.
     /// It names the first such argument in the command line's order, in the words of the
-    /// programs on clap (`cli::non_utf8_value_refusal`). The values read by their bytes are not
-    /// refused: an `eOutputFile` key, which the programs open by its name's bytes (`output_file`,
-    /// `os_value`), `-logfile`, which the application opens before the reader, and `-conffile`,
-    /// whose file the application loads before the reader (`ncbi_environment`).
+    /// programs on `cli::reader` (`cli::non_utf8_value_refusal`). The values read by their bytes
+    /// are not refused: an `eOutputFile` key, which the programs open by its name's bytes
+    /// (`output_file`, `os_value`), `-logfile`, which the application opens before the reader,
+    /// and `-conffile`, whose file the application loads before the reader (`ncbi_environment`).
     pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
         let read_as_bytes = |name: &str| {
             FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
@@ -637,8 +637,8 @@ impl Args {
     }
 
     /// The arguments given on the command line, in their order, each with its value's bytes
-    /// (`None` for a flag): what LOSAT's programs on clap hand to clap's conversion
-    /// (`cli::reader::convert`).
+    /// (`None` for a flag), which LOSAT's refusals of the programs on `cli::reader` read
+    /// (`cli::reader::refusal_after_read`).
     pub(crate) fn given_values(&self) -> impl Iterator<Item = (&'static str, Option<&OsStr>)> + '_ {
         self.given.iter().map(|&name| (name, self.os_value(name)))
     }

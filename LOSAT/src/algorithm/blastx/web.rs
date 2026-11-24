@@ -48,7 +48,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2827-2845
 /// ABI v1's reading of a BLASTX `-outfmt` value, which is frozen (plan TD-1): the values
 /// and the errors of the CLI's BLASTX parser before it read `-outfmt` as NCBI.
-pub(crate) fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
+fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
     let mut tokens = value.split_whitespace();
     let f = tokens.next().ok_or("empty outfmt")?;
     if !matches!(f, "0" | "6" | "7") {

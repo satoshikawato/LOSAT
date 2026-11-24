@@ -13,7 +13,6 @@ use std::collections::BTreeSet;
 use std::io::Write;
 
 use anyhow::Result;
-use clap::Args;
 
 use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -33,55 +32,21 @@ use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2283-2289
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2318
 /// The list options of a search program's command line.
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DbFilterArgs {
     /// `-seqidlist`: a file of Seq-ids (text, or binary from `blastdb_aliastool`).
-    #[arg(
-        long = "seqidlist",
-        value_name = "filename",
-        help = "Restrict search of database to list of SeqIDs"
-    )]
     pub seqidlist: Option<String>,
     /// `-negative_seqidlist`: a file of Seq-ids to leave out.
-    #[arg(
-        long = "negative_seqidlist",
-        value_name = "filename",
-        help = "Restrict search of database to everything except the specified SeqIDs"
-    )]
     pub negative_seqidlist: Option<String>,
     /// `-taxids`: taxids separated by commas.
-    #[arg(
-        long = "taxids",
-        value_name = "taxids",
-        help = "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
-    )]
     pub taxids: Option<String>,
     /// `-taxidlist`: a file of taxids, one per line.
-    #[arg(
-        long = "taxidlist",
-        value_name = "filename",
-        help = "Restrict search of database to include only the specified taxonomy IDs and their descendants"
-    )]
     pub taxidlist: Option<String>,
     /// `-negative_taxids`: taxids separated by commas.
-    #[arg(
-        long = "negative_taxids",
-        value_name = "taxids",
-        help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
-    )]
     pub negative_taxids: Option<String>,
     /// `-negative_taxidlist`: a file of taxids, one per line.
-    #[arg(
-        long = "negative_taxidlist",
-        value_name = "filename",
-        help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants"
-    )]
     pub negative_taxidlist: Option<String>,
     /// `-no_taxid_expansion`: the taxids alone, without their descendants.
-    #[arg(
-        long = "no_taxid_expansion",
-        help = "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs "
-    )]
     pub no_taxid_expansion: bool,
 }
 

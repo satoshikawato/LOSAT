@@ -6972,7 +6972,8 @@ fn run_local_formats(
             "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
-    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    // The command line has checked `-strand` when it read it (NCBI's argument reader); a caller of
+    // `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
         outputs
@@ -7040,7 +7041,8 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     crate::algorithm::blastn::args::BLASTN_TASK.check(&mut args.task)?;
-    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    // The command line has checked `-strand` when it read it (NCBI's argument reader); a caller of
+    // `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
         outputs

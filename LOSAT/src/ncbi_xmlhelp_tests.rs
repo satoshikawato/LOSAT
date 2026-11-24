@@ -7,8 +7,8 @@ use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, A
 use crate::ncbi_app::args::{refusal, Refusal};
 use std::ffi::OsString;
 
-/// The programs whose arguments NCBI's reader reads and clap converts (`cli::reader`).
-const CLAP_PROGRAMS: [&str; 10] = [
+/// The programs whose arguments NCBI's reader reads into their options (`cli::reader`).
+const READER_PROGRAMS: [&str; 10] = [
     "blastn",
     "blastp",
     "blastx",
@@ -64,20 +64,21 @@ fn dependencies(xml: &str) -> Vec<(String, String)> {
 }
 
 // The arguments of NCBI's XML, which NCBI's reader reads (its tables are made from the XML), and
-// those that clap converts are one table (line RG DECISIONS K4i-2b-2 (2)): each argument of the
-// XML is converted by clap under its name, as a key or a flag as the XML says, or refused by name
-// after the read (`Refusal::Read`, never converted); clap has no other argument. The XML that
-// `-xmlhelp` prints keeps exactly the arguments not refused (by name or at the run, `Refusal::Run`).
+// those that the programs' options read are one table (line RG DECISIONS K4i-2b-2 (2), item
+// K4i-3c): each argument of the XML is read into the options under its name, as a key or a flag
+// as the XML says, or refused by name after the read (`Refusal::Read`, never read); the options
+// read no other argument. The XML that `-xmlhelp` prints keeps exactly the arguments not refused
+// (by name or at the run, `Refusal::Run`).
 #[test]
-fn the_xml_names_are_the_arguments_that_clap_converts() {
-    for program in CLAP_PROGRAMS {
+fn the_xml_names_are_the_arguments_that_the_options_read() {
+    for program in READER_PROGRAMS {
         let xml = xml_help_text(program).unwrap();
-        let command = crate::cli::command_of(program);
-        let scope = command.find_subcommand(program).unwrap();
-        let converted = |name: &str| {
-            scope
-                .get_arguments()
-                .find(|arg| arg.get_long() == Some(name))
+        let tool = crate::cli::reader::tool(program).unwrap();
+        let read = crate::cli::reader::options_tests::names_read(tool);
+        let kind = |name: &str| {
+            crate::ncbi_app::args::described(tool)
+                .find(|arg| arg.name == name)
+                .map(|arg| arg.kind)
         };
         let names = ncbi_argument_names(program);
         for &(name, flag) in &names {
@@ -88,26 +89,22 @@ fn the_xml_names_are_the_arguments_that_clap_converts() {
             }
             let row = refusal(program, name);
             let by_name = matches!(row, Some(Refusal::Read(_)));
-            let arg = converted(name);
-            assert_eq!(arg.is_some(), !by_name, "{program} -{name}");
-            if let Some(arg) = arg {
+            assert_eq!(read.contains(name), !by_name, "{program} -{name}");
+            if read.contains(name) {
                 assert_eq!(
-                    arg.get_action().takes_values(),
-                    !flag,
-                    "{program} -{name}: a key of the XML is a key of clap"
+                    kind(name) == Some(crate::ncbi_app::args::Kind::Flag),
+                    flag,
+                    "{program} -{name}: a key of the XML is a key of the options"
                 );
             }
             assert_eq!(kept, row.is_none(), "{program} -{name}");
         }
-        // clap converts nothing that the reader does not read (the hooks of LOSAT Web are no
-        // argument: `#[arg(skip)]`).
-        for arg in scope.get_arguments() {
-            let Some(long) = arg.get_long() else {
-                continue;
-            };
+        // The options read nothing that the reader does not read (the hooks of LOSAT Web are no
+        // argument).
+        for name in read {
             assert!(
-                names.iter().any(|&(name, _)| name == long),
-                "{program} --{long} is no argument of NCBI's XML"
+                names.iter().any(|&(xml, _)| xml == name),
+                "{program} -{name} is no argument of NCBI's XML"
             );
         }
     }
@@ -131,7 +128,7 @@ fn run_refusals_name_the_argument_and_the_program() {
 // and the dependencies that name one are missing.
 #[test]
 fn the_xml_is_ncbis_without_the_refused_arguments() {
-    for program in CLAP_PROGRAMS {
+    for program in READER_PROGRAMS {
         // NCBI's XML in LOSAT's words (the program's description names LOSAT's version).
         let ncbi = crate::wording::losat_text(ncbi_xml(program).unwrap()).into_owned();
         let xml = xml_help_text(program).unwrap();
@@ -214,7 +211,7 @@ fn a_refused_name_takes_its_dependencies() {
 // XML (`the_web_engine_prints_the_command_lines_help`).
 #[test]
 fn the_library_refuses_xmlhelp() {
-    for program in CLAP_PROGRAMS {
+    for program in READER_PROGRAMS {
         let error = try_parse_from(["losat", program, "-xmlhelp"]).unwrap_err();
         let shown = crate::cli::reader::tool(program).unwrap().refusal_name;
         assert_eq!(

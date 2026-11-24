@@ -945,6 +945,11 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
                     "a match of length 0 in a section with the query's own Bioseq",
                 ))
             }
+            // Only a query read at the width 3 whose letters are a protein's gets there, and such
+            // a query is never one of the subjects' Bioseqs (`write_unreadable_section`).
+            Err(error @ aln_mix::MixError::NcbiNullSecondRow) => {
+                return Err(unasked_merge_stop(error))
+            }
             Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
         }
     }
@@ -980,6 +985,11 @@ pub(crate) fn section_frees(hsps: &Hsps) -> io::Result<bool> {
                 return Err(internal(
                     "a section of length 0 matches that NCBI BLAST+ aborts on",
                 ))
+            }
+            // Only a query read at the width 3 whose letters are a protein's gets there, and its
+            // program (psiblast) makes no segment of length 0 (`write_unreadable_section`).
+            Err(error @ aln_mix::MixError::NcbiNullSecondRow) => {
+                return Err(unasked_merge_stop(error))
             }
             Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
         }

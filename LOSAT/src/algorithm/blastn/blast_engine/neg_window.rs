@@ -619,9 +619,6 @@ pub(super) fn neg_chunk_hits<const UNGAPPED: bool>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500,560-563
-    if let Some(index) = batch.mb_index {
-        index.note_scanned_hits(subject.s_idx as u32, subject_scratch.ungapped_hits.len());
-    }
     let chunk_prelim_hits = chunk_hsp_list::<UNGAPPED>(
         batch,
         subject,

@@ -383,6 +383,110 @@ mod parsed {
             ("Blast-def-line-set.E.title", 19)
         );
     }
+
+    /// Ids of the alternatives with strings, every string member set to `s`.
+    fn ids_with_strings(s: &[u8]) -> Vec<ParsedSeqId> {
+        let t = |s: &[u8]| Some(s.to_vec());
+        let ts = TextseqId {
+            name: t(s),
+            accession: t(s),
+            release: t(s),
+            version: Some(3),
+        };
+        vec![
+            ParsedSeqId::Local(ObjectId::Str(s.to_vec())),
+            ParsedSeqId::Local(ObjectId::Id(5)),
+            ParsedSeqId::Gibbsq(7),
+            ParsedSeqId::Giim(GiimportId {
+                id: 9,
+                db: t(s),
+                release: t(s),
+            }),
+            ParsedSeqId::Genbank(ts.clone()),
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 2,
+                cit: IdPat {
+                    country: s.to_vec(),
+                    id: PatentNumber::Number(s.to_vec()),
+                    doc_type: t(s),
+                },
+            }),
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 3,
+                cit: IdPat {
+                    country: s.to_vec(),
+                    id: PatentNumber::AppNumber(s.to_vec()),
+                    doc_type: None,
+                },
+            }),
+            ParsedSeqId::Other(ts.clone()),
+            ParsedSeqId::General(Dbtag {
+                db: s.to_vec(),
+                tag: ObjectId::Str(s.to_vec()),
+            }),
+            ParsedSeqId::Gi(-1),
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: s.to_vec(),
+                chain: Some(32),
+                rel: Some(Date::Std(DateStd {
+                    year: 2020,
+                    month: Some(1),
+                    day: None,
+                    season: t(s),
+                    hour: None,
+                    minute: Some(5),
+                    second: None,
+                })),
+                chain_id: t(s),
+            }),
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: s.to_vec(),
+                chain: None,
+                rel: Some(Date::Str(s.to_vec())),
+                chain_id: None,
+            }),
+            ParsedSeqId::NamedAnnotTrack(ts),
+        ]
+    }
+
+    /// The diagnostics without the record (`defline_set_bad_chars`) are those of the record, for
+    /// strings of every byte in every string member, before and after other members, and lengths
+    /// whose BER length takes one to three bytes.
+    #[test]
+    fn bad_chars_alone_are_those_of_the_record() {
+        let mut texts = crate::utils::byte_search::tests::search_texts();
+        for len in [127, 128, 255, 256, 65_536] {
+            let mut text = vec![b'a'; len];
+            text[0] = 0x80;
+            text[len / 2] = b'\t';
+            text[len - 1] = 0xff;
+            texts.push(text);
+        }
+        for s in &texts {
+            let defline = |title: Option<Vec<u8>>| BlastDefline {
+                title,
+                ids: ids_with_strings(s),
+                taxid: Some(9606),
+                memberships: Some(vec![1]),
+                links: Some(vec![]),
+                other_info: Some(vec![-5]),
+                ..BlastDefline::default()
+            };
+            let set = DeflineSet {
+                deflines: vec![
+                    defline(Some(s.clone())),
+                    defline(None),
+                    defline(Some(b"x\x01y".to_vec())),
+                ],
+                utf8: false,
+            };
+            let (mut alone, mut written) = (Vec::new(), Vec::new());
+            defline_set_bad_chars(&set, &mut alone);
+            let record = encode_defline_set(&set, &mut written);
+            assert_eq!(alone, written, "{} bytes", s.len());
+            assert!(written.iter().all(|bad| record[bad.stream_offset] == b'#'));
+        }
+    }
 }
 
 /// The title's diagnostics without the record are those of the record, for titles of every byte

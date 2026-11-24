@@ -374,10 +374,16 @@ impl Encoder for AsnBinaryEncoder<'_> {
         Ok(())
     }
 
-    fn null_element(&mut self) {
+    /// As `AsnTextEncoder::null_element`.
+    fn null_element(&mut self, _element_type: &str) {
         if self.error.is_none() {
             self.error = Some(SerialError::NullElement);
         }
+    }
+
+    /// `byte N`: the offset in the bytes held (`encoder::Traced` adds those handed on).
+    fn position(&mut self) -> Option<StreamPosition> {
+        Some(StreamPosition::Byte(self.out.len() as u64))
     }
 
     fn error(&self) -> Option<SerialError> {

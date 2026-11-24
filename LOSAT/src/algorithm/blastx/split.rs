@@ -157,7 +157,7 @@ pub fn split_queries(
     // NCBI's `size_t` chunk ranges then wrap (it stops with a CCoreException).
     if (size as i64) < 0 {
         return Err(refusal(
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's BLASTX",
+            crate::algorithm::blastn::query_split::negative_split_refusal("BLASTX"),
         ));
     }
     // NCBI splits the nucleotide query and translates each chunk, so an overlap that is not a

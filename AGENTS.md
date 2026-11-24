@@ -143,7 +143,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      overflow and it crashes, adds them in 64 bits (PD-LOSAT-NCBI-DEFECTS exception 20, version
      1.68); so do TBLASTX's and TBLASTN's `-ungapped` linking of a short query against one short
      subject, whose expected length of 0 or less gives the same cutoff, and whose rows equal
-     NCBI's for the nearest search it completes (version 1.97). A sequence that a seqid list
+     NCBI's for the nearest search it completes (version 1.99). A sequence that a seqid list
      keeps without a definition line is reproduced, not rejected: NCBI drops its hits at the
      Seq-aligns (a positive list, PD-LOSAT-NCBI-DEFECTS 1.32) or where its search
      fetches the subject again (a negative list, 1.34). Approved

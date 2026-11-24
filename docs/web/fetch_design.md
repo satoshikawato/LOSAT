@@ -288,3 +288,23 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    taxid 562 に `LOSAT/tests/winmask/counts/mg1655_u9.obinary` を返す。Download → 保存 → 検索 → 再読み込みで要求が増えない → Delete、
    切れた応答 → Continue が Range で続きを取り同じ SHA-256、Last-Modified が変わると 0 から、404 / 500 の文、engine の build では native の CLI
    （`WINDOW_MASKER_PATH=<dir>`、`<dir>/562/wmasker.obinary`）と outfmt 0 / 6 / 7 が同じ。
+7. **ブラウザで作った counts の保存（DW-56、2026-11-24、Owner-delegated）**：WindowMasker タブの `-mk_counts` と `-convert` が `-out`
+   ファイルに書いた counts を、利用者が「Save for taxonomy ID」を押したときだけ同じ OPFS 領域（`windowmasker/<taxid>/wmasker.obinary` と
+   `meta.json`）へ保存する（自動保存はしない、REQ-20。通信は一切しない）。
+   - `meta.json` は従来の全フィールドを保ったまま `url: ''`・`lastModified: ''` とし、新しいフィールド
+     `made: {run, argv, inputs: [{name, size}], engineBuild, madeAt}` を書く。`made` が無ければ NCBI からの取得として従来どおり読む。
+     古い版のタブは `url` が一致しないため未取得とみなし、NCBI のファイルと取り違えることはない（Download を押さない限り上書きしない）。
+   - 保存は Web Lock `losat-web:windowmasker:<taxid>` の下で 8 MiB ずつ流し（724 MB の counts をページ JS ヒープに載せない）、
+     同じ ID に既に保存済み（取得済み・途中まで取得・ブラウザ作成のいずれか）があれば `COUNTS_EXISTS` で止めて確認ダイアログ
+     （`ReplaceCountsDialog.vue`）を出す。別のタブが同じ ID を取得中ならその場で「Another tab is downloading the counts for <taxid>.」と断る。
+     途中で途切れた作成コピー（`complete: false`）は再開せず、次の読み取り時に削除する。
+   - ポートは `readCounts(taxid)`（由来は `downloaded` / `made` の直和）と `listCounts()`（保存済み一覧、WindowMasker の `-ustat` / `-in`
+     の選択に並べる）を持つ。ダウンロード側の URL 一致確認は `CountsLoader` に残す。
+   - BroadcastChannel `losat-web:windowmasker` は削除だけでなく保存・差し替えでも変更を知らせ（古いタブ互換のため `{deleted: taxid}` の形を維持）、
+     他のタブは OPFS から読み直して BLASTN の行と WindowMasker の選択一覧を更新する。
+   - 検索への渡し方は取得した counts と同一（`windowmasker/<taxid>/wmasker.obinary`）。Run details は URL 行を出さず
+     「`<taxid>`: wmasker.obinary made in this browser by run `<n>` (`<YYYY-MM-DD>`), `<size>`」と SHA-256 を示す。
+   - e2e（`tests/e2e/window-masker-save.spec.ts`）：`ascii`・`binary`・`obinary` の各形式で作成・保存した counts による BLASTN
+     `-window_masker_taxid 562` が native CLI（`WINDOW_MASKER_PATH`）と outfmt 0 / 6 / 7・stderr までバイト一致すること、再読み込み後の
+     「Made in this browser」表示と無通信、差し替え・削除・2 タブ間の取得中拒否と変更同期、保存済み counts からの `-ustat` 一致、
+     64 MiB counts の保存でページ JS ヒープ増加が 32 MiB 未満であることを確かめる。

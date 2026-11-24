@@ -652,6 +652,19 @@ fn lookup_file_names_replace_the_last_two_letters() {
     assert_eq!(lmdb_file_name(Path::new("x.ndb"), "ot"), Path::new("x.not"));
 }
 
+// The name's bytes stay, as NCBI's `std::string` keeps them (makeprofiledb `-out o\xe9` writes
+// `o\xe9.pos`, `.pot`, `.ptf` and `.pto`; line RG item K10a).
+#[cfg(unix)]
+#[test]
+fn lookup_file_names_keep_the_bytes_of_the_name() {
+    use std::os::unix::ffi::OsStrExt;
+    let pdb = Path::new(std::ffi::OsStr::from_bytes(b"d/o\xe9.pdb"));
+    assert_eq!(
+        lmdb_file_name(pdb, "os").as_os_str().as_bytes(),
+        b"d/o\xe9.pos"
+    );
+}
+
 #[test]
 fn an_oid_without_ids_in_the_middle_stops_the_pos_file() {
     // f8gimid: a GI-only OID between two OIDs with accessions: makeblastdb aborts with

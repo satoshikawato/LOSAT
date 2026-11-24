@@ -27,4 +27,8 @@ output files and prefixes, missing ones, `BLASTDB` of the environment and of `.n
 that name a format, an algorithm, its options, an entry, a range or a mask (a `-taxids` word that is
 not a number stays LOSAT's refusal, as `-taxids abc`: NCBI's exception names its own source files). NCBI reads
 each as the bytes of its `std::string`; `R6a` (`-list_outfmt '%f %t'`), once LOSAT's refusal, is
-now NCBI's bytes too.
+now NCBI's bytes too. On the same day every case got `expected/<case>.files`, the names of the
+files and directories its run made (one per line in byte order, a byte outside printable ASCII or
+the backslash as `\xHH`), which the test compares too; the earlier cases' standard output, error and
+exit status came out the same again, but for the time of `R4`'s makeblastdb line and the build path
+in its exception message (kept as frozen on 2026-11-20).

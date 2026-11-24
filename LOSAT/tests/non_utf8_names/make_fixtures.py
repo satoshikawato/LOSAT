@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Freeze what NCBI BLAST+ 2.17.0 writes for the cases of `cases.tsv` (`expected/<case>.stdout`,
-`.stderr`, `.rc`), the cases of `LOSAT/tests/non_utf8_names.rs`.
+`.stderr`, `.rc`, and `.files`: the names of the files and directories the run made, `made()`), the
+cases of `LOSAT/tests/non_utf8_names.rs`.
 
 Each case runs in a new directory of its own (`--work`), made by the case's setup, with an empty
 `HOME`, without `BLASTDB` and `NCBI_CONFIG_PATH` but the case's, and with `BLAST_USAGE_REPORT=false`
@@ -82,6 +83,28 @@ def set_up(setup: str, d: bytes) -> None:
             raise SystemExit(f"unknown step {step!r}")
 
 
+def paths(d: bytes) -> set:
+    """The paths below `d`, `/`-separated, a directory's with a final `/`."""
+    found = set()
+    for root, dirs, files in os.walk(d):
+        rel = os.path.relpath(root, d)
+        prefix = b"" if rel == b"." else rel + b"/"
+        found.update(prefix + name + b"/" for name in dirs)
+        found.update(prefix + name for name in files)
+    return found
+
+
+def made(before: set, after: set) -> bytes:
+    """Each path of `after` not in `before`, one per line in byte order, a byte that is not printable
+    ASCII or is the backslash as `\\xHH`."""
+    out = bytearray()
+    for path in sorted(after - before):
+        for b in path:
+            out += bytes([b]) if 0x21 <= b <= 0x7E and b != 0x5C else b"\\x%02x" % b
+        out += b"\n"
+    return bytes(out)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ncbi-bin", default=os.environ.get("NCBI_BIN", ""))
@@ -109,7 +132,9 @@ def main() -> int:
             run_env[name.encode()] = words(value, d)
         program, *rest = argv.split(" ")
         command = [os.fsencode(os.path.join(args.ncbi_bin, program))] + [words(w, d) for w in rest]
+        before = paths(d)
         done = subprocess.run(command, cwd=d, env=run_env, capture_output=True, timeout=60)
+        (HERE / "expected" / f"{case}.files").write_bytes(made(before, paths(d)))
         for name, data in (("stdout", done.stdout), ("stderr", done.stderr)):
             (HERE / "expected" / f"{case}.{name}").write_bytes(data.replace(d, b"{D}"))
         (HERE / "expected" / f"{case}.rc").write_text(f"{done.returncode}\n")

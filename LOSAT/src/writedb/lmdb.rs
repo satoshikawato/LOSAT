@@ -116,14 +116,10 @@ fn lmdb_error(e: LmdbError) -> WriteDbError {
 /// `GetFileNameFromExistingLMDBFile`: the LMDB file name with its last two letters replaced.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:763-788
 pub(crate) fn lmdb_file_name(lmdb_filename: &Path, suffix: &str) -> PathBuf {
-    let mut s = lmdb_filename
-        .as_os_str()
-        .to_owned()
-        .into_string()
-        .unwrap_or_default();
-    s.truncate(s.len().saturating_sub(2));
-    s.push_str(suffix);
-    PathBuf::from(s)
+    let mut name = crate::utils::os_bytes::path_bytes(lmdb_filename).into_owned();
+    name.truncate(name.len().saturating_sub(2));
+    name.extend_from_slice(suffix.as_bytes());
+    crate::utils::os_bytes::path_from_bytes(name)
 }
 
 /// The bytes up to the first NUL (`strlen` of `id.c_str()`).

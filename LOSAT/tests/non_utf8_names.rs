@@ -10,13 +10,15 @@
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
-//! `Building a new DB, current time: ` is not compared (as `dropin_corpus.py`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
+//! `Building a new DB, current time: ` is not compared (as `dropin_corpus.py`); the names of the
+//! files and directories the run made are (`expected/<case>.files`, `made`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
 //! survey left open.
 //!
 //! Unix only, and not macOS: a file name there is the system's bytes, and APFS refuses a name that
 //! is not UTF-8 (Windows and WASI keep a name as Unicode text; `LOSAT/src/utils/os_bytes.rs`).
 #![cfg(all(unix, not(target_os = "macos")))]
 
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
@@ -146,6 +148,43 @@ fn without_time(output: &[u8]) -> Vec<u8> {
     [&output[..start], b"{TIME}".as_slice(), &output[end..]].concat()
 }
 
+/// The paths below `d`, `/`-separated, a directory's with a final `/` (`make_fixtures.py`'s
+/// `paths`).
+fn paths(d: &Path) -> BTreeSet<Vec<u8>> {
+    let mut found = BTreeSet::new();
+    let mut stack = vec![(d.to_path_buf(), Vec::new())];
+    while let Some((dir, prefix)) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            let mut name = prefix.clone();
+            name.extend_from_slice(entry.file_name().as_bytes());
+            if entry.file_type().unwrap().is_dir() {
+                name.push(b'/');
+                stack.push((entry.path(), name.clone()));
+            }
+            found.insert(name);
+        }
+    }
+    found
+}
+
+/// Each path of `after` not in `before`, one per line in byte order, a byte that is not printable
+/// ASCII or is the backslash as `\xHH` (`make_fixtures.py`'s `made`, `expected/<case>.files`).
+fn made(before: &BTreeSet<Vec<u8>>, after: &BTreeSet<Vec<u8>>) -> Vec<u8> {
+    let mut out = Vec::new();
+    for path in after.difference(before) {
+        for &b in path {
+            if b.is_ascii_graphic() && b != b'\\' {
+                out.push(b);
+            } else {
+                out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
+            }
+        }
+        out.push(b'\n');
+    }
+    out
+}
+
 #[test]
 fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
     let manifest = std::fs::read_to_string(fixtures().join("cases.tsv")).unwrap();
@@ -183,7 +222,9 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             command.env(name, OsString::from_vec(words(value, &db)));
         }
         let _files = home_and_worker_log(&mut command, &format!("non_utf8_{case}"));
+        let before = paths(&d);
         let output = command.output().expect("run LOSAT");
+        let made = made(&before, &paths(&d));
         ran += 1;
         let rc: i32 = std::fs::read_to_string(fixtures().join(format!("expected/{case}.rc")))
             .unwrap()
@@ -195,15 +236,18 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
                 output.status.code() == Some(rc)
                     && without_time(&output.stdout) == expected(case, "stdout", &db)
                     && output.stderr == expected(case, "stderr", &db)
+                    && made
+                        == std::fs::read(fixtures().join(format!("expected/{case}.files"))).unwrap()
             }
             other => panic!("kind {other}"),
         };
         if !ok {
             failures.push(format!(
-                "{case}: rc {:?} (NCBI {rc})\nstdout {:?}\nstderr {:?}",
+                "{case}: rc {:?} (NCBI {rc})\nstdout {:?}\nstderr {:?}\nmade {:?}",
                 output.status.code(),
                 String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&made)
             ));
         }
     }

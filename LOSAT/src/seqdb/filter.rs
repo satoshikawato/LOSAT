@@ -1840,20 +1840,18 @@ impl SeqDb {
 
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's list
     /// or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but none of its
-    /// definition lines; the reader's error where a tag cannot be read as NCBI's header read
-    /// adjusts it. True without either.
+    /// definition lines, and where no line it keeps holds a Seq-id (an edited header; the lists
+    /// erase such lines); the reader's error where a tag cannot be read as NCBI's header read
+    /// adjusts it.
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
         self.line_read(ordinal).map(|(kept, _)| kept)
     }
 
     /// [`SeqDb::keeps_line`], read as NCBI's `GetSeqIDs` reads the header, with whether the
     /// record holds a UTF8String where a VisibleString is expected (NCBI's read then posts its
-    /// warning, `Utf8Reads`): false where the reads cannot drop every line, which leaves the
-    /// record unread (`Volume::line_read`).
+    /// warning, `Utf8Reads`): false where the volume filters no line, whose walk of the record
+    /// reads no string (`Volume::line_read`).
     pub fn line_read(&self, ordinal: u32) -> Result<(bool, bool), SeqDbError> {
-        if self.filter.is_none() {
-            return Ok((true, false));
-        }
         let at = self.find_volume(ordinal)?;
         self.volumes[at.volume].line_read(at.vol_oid)
     }

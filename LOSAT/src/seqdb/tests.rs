@@ -10,7 +10,7 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use super::alias::{test_read_values, test_split_quoted};
-use super::header::{decode_defline_set, decode_defline_taxids};
+use super::header::{decode_defline_set, decode_defline_taxids, holds_a_seqid};
 use super::index::IndexFile;
 use super::*;
 use crate::core::blast_encoding::{encode_iupac_to_blastna, iupacna_to_ncbi4na};
@@ -1591,6 +1591,41 @@ fn the_taxid_of_a_definition_line_is_read_apart() {
         .unwrap();
     record.drain(at..at + 7);
     assert_eq!(decode_defline_taxids(&record, path, 5).unwrap(), [0]);
+}
+
+/// NCBI's Seq-align builder takes the ids of every definition line and makes no Seq-align of a
+/// sequence whose lines hold none (`holds_a_seqid`, line RG D1c-1c-b): the walk stops at the
+/// first Seq-id, wherever its line is, and skips the other members by their lengths.
+#[test]
+fn a_record_holds_a_seqid_where_any_line_has_one() {
+    let path = Path::new("test.phr");
+    let with_id = defline_record(b"a title", &bl_ord_id(&[0x05]));
+    let without = defline_record(b"no id", &[]);
+    assert!(holds_a_seqid(&with_id, path).unwrap());
+    assert!(!holds_a_seqid(&without, path).unwrap());
+    // Two lines in one set: the inner `Blast-def-line` of each record, either order.
+    let line = |record: &[u8]| record[2..record.len() - 2].to_vec();
+    let set = |lines: &[&[u8]]| {
+        let mut record = vec![0x30, 0x80];
+        for one in lines {
+            record.extend_from_slice(&line(one));
+        }
+        record.extend_from_slice(&[0, 0]);
+        record
+    };
+    assert!(holds_a_seqid(&set(&[&without, &with_id]), path).unwrap());
+    assert!(holds_a_seqid(&set(&[&with_id, &without]), path).unwrap());
+    assert!(!holds_a_seqid(&set(&[&without, &without]), path).unwrap());
+    // A line without a title member; definite lengths (NCBI reads both forms).
+    assert!(!holds_a_seqid(&[0x30, 0x06, 0x30, 0x04, 0xa1, 0x02, 0x30, 0x00], path).unwrap());
+    assert!(holds_a_seqid(
+        &[0x30, 0x0b, 0x30, 0x09, 0xa1, 0x07, 0x30, 0x05, 0xab, 0x03, 0x02, 0x01, 0x07],
+        path
+    )
+    .unwrap());
+    // An empty record is read as before; one cut short is the reader's error.
+    assert!(holds_a_seqid(&[], path).unwrap());
+    assert!(holds_a_seqid(&without[..without.len() - 4], path).is_err());
 }
 
 #[test]

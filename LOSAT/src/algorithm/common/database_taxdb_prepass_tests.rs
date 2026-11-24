@@ -1987,6 +1987,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     &[other],
                     &std::collections::BTreeSet::from([0]),
                     &[None::<&crate::report::db_subject::ParsedSubject>],
+                    &|| None,
                     "BLASTN",
                 )
                 .unwrap();
@@ -2827,8 +2828,10 @@ fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
 }
 
 /// `read_reported_taxonomy` (XML2 and JSON, line DBID L1d): NCBI fetches every reported
-/// subject, so a run whose volume has the cache collision is refused where a reported subject
-/// has a positive taxid (`nz_rep`: a1 99990, b1 150, c1 99990, d1 without a taxid, e1 -5;
+/// subject, so a run whose volume has the cache collision, whose batches the caller does not
+/// give (`&|| None`; line NP item O4b2-6 follows them where it does), is refused before anything
+/// is opened where a reported subject has a positive taxid (`nz_rep`: a1 99990, b1 150, c1 99990,
+/// d1 without a taxid, e1 -5;
 /// `nz_repo`: a1 to d1 without parsed Seq-ids), and not for d1 or e1 alone or for nothing
 /// reported; the taxonomy databases without the offset error read the same subjects.
 #[test]
@@ -2846,7 +2849,8 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
             .collect();
         let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
-        read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, "BLASTN").map(|_| ())
+        read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, &|| None, "BLASTN")
+            .map(|_| ())
     };
     let db = open("offset_last_past_end");
     for ranks in [&[0][..], &[1], &[3, 2], &[0, 1, 2, 3]] {
@@ -2879,7 +2883,15 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
         let run = TaxdbRun::default();
         let no_parsed: &[Option<&crate::report::db_subject::ParsedSubject>] = &[];
-        let result = read_reported_taxonomy(&db, &run, &ordinals, &reported, no_parsed, "BLASTN");
+        let result = read_reported_taxonomy(
+            &db,
+            &run,
+            &ordinals,
+            &reported,
+            no_parsed,
+            &|| None,
+            "BLASTN",
+        );
         assert_eq!(result.is_err(), refused, "{ranks:?}");
         if let Err(error) = result {
             assert!(error.is::<TaxonomyRefusal>(), "{ranks:?} {error:#}");

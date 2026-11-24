@@ -524,7 +524,9 @@ impl BlastnDatabase {
     /// (`loads`, `ReportedSubjects::loads`: the reads of a subject whose `Hit` throws, and of one
     /// shown only after it, are never made, so the texts of opening the taxonomy database and of a
     /// volume's first lookup of a taxid go to the loads that make them; review 1 of line DBID
-    /// pfoff-1, H1).
+    /// pfoff-1, H1). `(spans, gapped)`: the queries of each batch of the call (the whole call as
+    /// one where empty) and whether the search is gapped, for NCBI's loads by batch
+    /// (`shared::XmlBatchLoads`, `batches_prefetch`; asked only where they decide the texts).
     #[allow(clippy::type_complexity)]
     pub(super) fn read_taxids(
         &self,
@@ -532,6 +534,7 @@ impl BlastnDatabase {
         parsed: &[Option<Arc<ParsedSubject>>],
         hit_lists: &[Option<BlastnHitList>],
         loads: &HitLoads,
+        (spans, gapped, format): (&[std::ops::Range<usize>], bool, shared::PrefetchFormat),
     ) -> Result<(
         Vec<i32>,
         Vec<crate::report::blast_xml::HitTaxonomy>,
@@ -546,7 +549,32 @@ impl BlastnDatabase {
             .map(|hsp| hsp.s_idx as usize)
             .filter(|&rank| loads.loaded(rank))
             .collect();
-        shared::read_reported_taxonomy(&self.db, &self.taxdb, ordinals, &reported, parsed, PROGRAM)
+        // Each query's `Hit`s, the subjects of its HSP lists in order.
+        let batches = || {
+            shared::XmlBatchLoads::of(
+                hit_lists.len(),
+                spans,
+                &batches_prefetch(format, hit_lists, 0, spans, gapped),
+                loads,
+                |query| {
+                    hit_lists[query]
+                        .iter()
+                        .flat_map(|hit_list| &hit_list.hsplist_array)
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(|hsp| hsp.s_idx as usize)
+                        .collect()
+                },
+            )
+        };
+        shared::read_reported_taxonomy(
+            &self.db,
+            &self.taxdb,
+            ordinals,
+            &reported,
+            parsed,
+            &batches,
+            PROGRAM,
+        )
     }
 
     /// Whether `taxdb.bti` is on the search path, asked once for the run

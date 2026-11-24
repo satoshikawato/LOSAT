@@ -5904,6 +5904,7 @@ fn post_process_hits_and_write(
                         kind: output_format.xml2_kind(),
                         only_xml2: xml_only_xml2,
                         side_sink: side_sink.as_ref(),
+                        prefetch: database::prefetch_format(output_formats),
                     },
                     report,
                     &hit_lists,

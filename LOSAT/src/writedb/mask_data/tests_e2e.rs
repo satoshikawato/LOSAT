@@ -24,11 +24,12 @@ use super::process::{process_mask_data, MaskDataError, MaskDataOptions};
 use super::tests::{bioseq, column_date, new_db};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
+use crate::utils::test_dir::TempDir;
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
 use crate::writedb::mask_info::MaskFileError;
-use crate::writedb::tests::{files_named, seqdb_fixtures, stored_date, time_of, TempDir, LINUX};
+use crate::writedb::tests::{base_in, files_named, seqdb_fixtures, stored_date, time_of, LINUX};
 use crate::writedb::writer::{DbVersion, Indices};
 use crate::writedb::WriteDbError;
 
@@ -302,8 +303,8 @@ fn assert_rebuilds(case: &Case, fixture_dir: &Path, fixture: &str, expected_stde
         .iter()
         .map(|base| column_date(&fixture_dir.join(format!("{base}.{letter}aa"))))
         .collect();
-    let tmp = TempDir::new(&case.name);
-    let run = run_case(case, &tmp.base(fixture), &index_date, &column_dates);
+    let tmp = TempDir::unique(&format!("writedb-{}", case.name));
+    let run = run_case(case, &base_in(&tmp, fixture), &index_date, &column_dates);
     assert_eq!(run.status, 0, "{fixture}: {}", run.stderr_text());
     assert_eq!(
         run.stderr_text(),
@@ -321,7 +322,7 @@ fn assert_rebuilds(case: &Case, fixture_dir: &Path, fixture: &str, expected_stde
         names,
         "{fixture}: the mask files in the log"
     );
-    assert_same_files(&tmp.0, fixture, fixture_dir, fixture, case.version);
+    assert_same_files(&tmp, fixture, fixture_dir, fixture, case.version);
     assert_eq!(
         stored_title(&first_index, seqtype),
         case.title,
@@ -329,7 +330,12 @@ fn assert_rebuilds(case: &Case, fixture_dir: &Path, fixture: &str, expected_stde
     );
     let expected_dir = fixture_dir.parent().unwrap().join("expected");
     if expected_dir.join(format!("{fixture}.masks.tsv")).exists() {
-        assert_reads_back(&tmp.base(fixture), case.protein, &expected_dir, fixture);
+        assert_reads_back(
+            &base_in(&tmp, fixture),
+            case.protein,
+            &expected_dir,
+            fixture,
+        );
     }
 }
 
@@ -506,8 +512,8 @@ fn the_writer_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
             failed += 1;
             assert_eq!(expected_status.trim(), "1", "{name}");
             assert!(files_named(&dir.join("db"), &format!("{name}.")).is_empty());
-            let tmp = TempDir::new(name);
-            let run = run_case(case, &tmp.base(name), "Oct 20, 2026  1:00 PM", &[]);
+            let tmp = TempDir::unique(&format!("writedb-{name}"));
+            let run = run_case(case, &base_in(&tmp, name), "Oct 20, 2026  1:00 PM", &[]);
             assert_eq!(run.status, 1, "{name}: the run should fail");
             assert_eq!(
                 run.stderr_text(),
@@ -516,7 +522,7 @@ fn the_writer_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
             );
             // The files of a failed run are removed.
             assert_eq!(
-                files_named(&tmp.0, &format!("{name}.")),
+                files_named(&tmp, &format!("{name}.")),
                 Vec::<String>::new(),
                 "{name}: files left behind"
             );
@@ -679,12 +685,12 @@ fn every_mask_parse_file_runs_end_to_end() {
             title: ncbi.fasta.clone(),
             version: DbVersion::V4,
         };
-        let tmp = TempDir::new("mask-parse");
-        let run = run_case(&case, &tmp.base("db"), "Oct 20, 2026  1:00 PM", &[]);
+        let tmp = TempDir::unique("writedb-mask-parse");
+        let run = run_case(&case, &base_in(&tmp, "db"), "Oct 20, 2026  1:00 PM", &[]);
         let stderr = run.stderr_text();
         let no_files = || {
             assert_eq!(
-                files_named(&tmp.0, "db."),
+                files_named(&tmp, "db."),
                 Vec::<String>::new(),
                 "{file}: files left behind"
             );
@@ -697,7 +703,7 @@ fn every_mask_parse_file_runs_end_to_end() {
             "{file}: standard error"
         );
         if class == Class::Read && run.status == 0 {
-            compared += assert_database(&tmp.base("db"), protein, file, ncbi);
+            compared += assert_database(&base_in(&tmp, "db"), protein, file, ncbi);
             listed += ncbi.masks.values().map(BTreeMap::len).sum::<usize>();
         } else {
             no_files();
@@ -766,15 +772,15 @@ pub(super) fn assert_database(out_base: &str, protein: bool, file: &str, ncbi: &
 /// of `tests/seqdb/mask_writer`, a directory, a file that is not an ASN.1 file, an empty file
 /// and (on Unix) a link to nothing.
 pub(super) fn option_root() -> TempDir {
-    let tmp = TempDir::new("mask-options");
+    let tmp = TempDir::unique("writedb-mask-options");
     let writer = seqdb_fixtures().join("mask_writer");
     for file in ["dust.asnt", "wm.asnt"] {
-        std::fs::copy(writer.join(file), tmp.0.join(file)).unwrap();
+        std::fs::copy(writer.join(file), tmp.join(file)).unwrap();
     }
-    std::fs::create_dir(tmp.0.join("adir")).unwrap();
-    std::fs::write(tmp.0.join("empty.txt"), b"").unwrap();
+    std::fs::create_dir(tmp.join("adir")).unwrap();
+    std::fs::write(tmp.join("empty.txt"), b"").unwrap();
     #[cfg(unix)]
-    std::os::unix::fs::symlink("nowhere.asnt", tmp.0.join("dangling.asnt")).unwrap();
+    std::os::unix::fs::symlink("nowhere.asnt", tmp.join("dangling.asnt")).unwrap();
     tmp
 }
 
@@ -1089,9 +1095,9 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
     }));
     for (mask_data, mask_id, mask_desc, status, stderr, mask_files, column) in cases {
         let label = format!("{mask_data:?} {mask_id:?} {mask_desc:?}");
-        let case = option_case(&tmp.0, mask_data, mask_id, mask_desc);
-        let out = TempDir::new("mask-options-out");
-        let run = run_case(&case, &out.base("db"), "Oct 20, 2026  1:00 PM", &[]);
+        let case = option_case(&tmp, mask_data, mask_id, mask_desc);
+        let out = TempDir::unique("writedb-mask-options-out");
+        let run = run_case(&case, &base_in(&out, "db"), "Oct 20, 2026  1:00 PM", &[]);
         assert_eq!(run.status, status, "{label}: {}", run.stderr_text());
         assert_eq!(run.stderr_text(), stderr, "{label}: standard error");
         assert_eq!(
@@ -1099,7 +1105,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             mask_files,
             "{label}: the mask files in the log"
         );
-        let written = files_named(&out.0, "db.");
+        let written = files_named(&out, "db.");
         if status == 0 {
             assert!(
                 written.iter().any(|f| f == "db.nin"),
@@ -1123,21 +1129,21 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
 fn a_mask_file_that_cannot_be_opened_is_an_unknown_encoding() {
     use std::os::unix::fs::PermissionsExt;
     let tmp = option_root();
-    let file = tmp.0.join("noperm.asnt");
-    std::fs::copy(tmp.0.join("dust.asnt"), &file).unwrap();
+    let file = tmp.join("noperm.asnt");
+    std::fs::copy(tmp.join("dust.asnt"), &file).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o0)).unwrap();
     if std::fs::File::open(&file).is_ok() {
         return;
     }
-    let case = option_case(&tmp.0, "noperm.asnt", None, None);
-    let out = TempDir::new("mask-options-out");
-    let run = run_case(&case, &out.base("db"), "Oct 20, 2026  1:00 PM", &[]);
+    let case = option_case(&tmp, "noperm.asnt", None, None);
+    let out = TempDir::unique("writedb-mask-options-out");
+    let run = run_case(&case, &base_in(&out, "db"), "Oct 20, 2026  1:00 PM", &[]);
     assert_eq!(run.status, 1);
     assert_eq!(
         run.stderr_text(),
         "LOSAT options error: Unknown encoding for mask data in 'noperm.asnt'\n"
     );
-    assert_eq!(files_named(&out.0, "db."), Vec::<String>::new());
+    assert_eq!(files_named(&out, "db."), Vec::<String>::new());
 }
 
 // ---------------------------------------------------------------------
@@ -1231,8 +1237,8 @@ fn a_database_without_mask_data_has_no_column_files() {
             &["pin", "psq", "phr", "pal", "pdb", "ptf", "pot", "pto"][..],
         ),
     ] {
-        let tmp = TempDir::new("mask-plain");
-        let mut db = new_db(&tmp.base("db"), b"Oct 12, 2026  3:22 PM", 100, version);
+        let tmp = TempDir::unique("writedb-mask-plain");
+        let mut db = new_db(&base_in(&tmp, "db"), b"Oct 12, 2026  3:22 PM", 100, version);
         for i in 1..=5 {
             db.add_sequence(bioseq(i, 40)).unwrap();
         }
@@ -1244,7 +1250,7 @@ fn a_database_without_mask_data_has_no_column_files() {
                 String::from_utf8_lossy(&file)
             );
         }
-        let written = files_named(&tmp.0, "db.");
+        let written = files_named(&tmp, "db.");
         assert!(
             written.iter().any(|f| f.ends_with(".pal")),
             "{version:?}: {written:?}"
@@ -1265,9 +1271,9 @@ fn a_database_without_mask_data_has_no_column_files() {
 #[test]
 fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
     let mut log = Vec::new();
-    let tmp = TempDir::new("mask-destructor");
+    let tmp = TempDir::unique("writedb-mask-destructor");
     let mut db = BuildDatabase::new(
-        &tmp.base("db"),
+        &base_in(&tmp, "db"),
         b"t",
         true,
         &mut log,

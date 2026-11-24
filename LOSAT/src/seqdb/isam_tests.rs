@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::seqdb::volume::Volume;
 use crate::seqdb::SeqType;
+use crate::utils::test_dir::TempDir;
 
 fn ids_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids")
@@ -28,27 +29,6 @@ impl Rng {
 
     fn below(&mut self, n: usize) -> usize {
         (self.next() % n as u64) as usize
-    }
-}
-
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-isam-{tag}-{}-{}",
-            crate::utils::test_dir::process_id(),
-            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -390,17 +370,17 @@ fn file_names_and_missing_files() {
 
 #[test]
 fn rejected_headers_leave_the_index_uninitialised() {
-    let dir = TempDir::new("badhdr");
+    let dir = TempDir::unique("isam-badhdr");
     let mut rng = Rng(0x1234_5678_9abc_def1);
     let records = synthetic_records(&mut rng, 300);
-    let good = build_isam(&dir.0, "good", &records, 64);
+    let good = build_isam(&dir, "good", &records, 64);
     assert!(good.is_initialized());
-    let index = std::fs::read(dir.0.join("good.nsi")).unwrap();
-    let data = std::fs::read(dir.0.join("good.nsd")).unwrap();
+    let index = std::fs::read(dir.join("good.nsi")).unwrap();
+    let data = std::fs::read(dir.join("good.nsd")).unwrap();
     let open = |name: &str, index: &[u8], data: &[u8]| {
-        std::fs::write(dir.0.join(format!("{name}.nsi")), index).unwrap();
-        std::fs::write(dir.0.join(format!("{name}.nsd")), data).unwrap();
-        StringIsam::open_volume(&dir.0.join(name), false).unwrap()
+        std::fs::write(dir.join(format!("{name}.nsi")), index).unwrap();
+        std::fs::write(dir.join(format!("{name}.nsd")), data).unwrap();
+        StringIsam::open_volume(&dir.join(name), false).unwrap()
     };
     let mut version = index.clone();
     version[3] = 2;
@@ -462,12 +442,12 @@ fn rejected_headers_leave_the_index_uninitialised() {
 
 #[test]
 fn damaged_headers_are_format_errors() {
-    let dir = TempDir::new("damaged");
+    let dir = TempDir::unique("isam-damaged");
     let mut rng = Rng(77);
     let records = synthetic_records(&mut rng, 200);
-    build_isam(&dir.0, "good", &records, 64);
-    let index = std::fs::read(dir.0.join("good.nsi")).unwrap();
-    let data = std::fs::read(dir.0.join("good.nsd")).unwrap();
+    build_isam(&dir, "good", &records, 64);
+    let index = std::fs::read(dir.join("good.nsi")).unwrap();
+    let data = std::fs::read(dir.join("good.nsd")).unwrap();
     for (field, value, what) in [
         (4, 0, "no samples"),
         (4, 1, "too few samples"),
@@ -479,9 +459,9 @@ fn damaged_headers_are_format_errors() {
         let mut bad = index.clone();
         bad[4 * field..4 * field + 4].copy_from_slice(&i32::to_be_bytes(value));
         let name = format!("bad{field}_{value}");
-        std::fs::write(dir.0.join(format!("{name}.nsi")), &bad).unwrap();
-        std::fs::write(dir.0.join(format!("{name}.nsd")), &data).unwrap();
-        let result = StringIsam::open_volume(&dir.0.join(&name), false);
+        std::fs::write(dir.join(format!("{name}.nsi")), &bad).unwrap();
+        std::fs::write(dir.join(format!("{name}.nsd")), &data).unwrap();
+        let result = StringIsam::open_volume(&dir.join(&name), false);
         assert!(
             matches!(result, Err(SeqDbError::Format { .. })),
             "{what}: {result:?}"
@@ -489,9 +469,9 @@ fn damaged_headers_are_format_errors() {
     }
     // An index shorter than its tables.
     let short = &index[..40 + 4 * 3];
-    std::fs::write(dir.0.join("short.nsi"), short).unwrap();
-    std::fs::write(dir.0.join("short.nsd"), &data).unwrap();
-    let result = StringIsam::open_volume(&dir.0.join("short"), false);
+    std::fs::write(dir.join("short.nsi"), short).unwrap();
+    std::fs::write(dir.join("short.nsd"), &data).unwrap();
+    let result = StringIsam::open_volume(&dir.join("short"), false);
     assert!(
         matches!(result, Err(SeqDbError::Format { .. })),
         "{result:?}"
@@ -567,10 +547,10 @@ fn blanks_after_a_key_match_the_shorter_term() {
 
 #[test]
 fn synthetic_index_searches_every_key() {
-    let dir = TempDir::new("synsearch");
+    let dir = TempDir::unique("isam-synsearch");
     let mut rng = Rng(0xdead_beef_cafe_f00d);
     let records = synthetic_records(&mut rng, 4000);
-    let isam = build_isam(&dir.0, "syn", &records, 64);
+    let isam = build_isam(&dir, "syn", &records, 64);
     assert!(isam.num_samples() > 60);
     // A key with 150 lines spans three pages and is found whole.
     let dup = isam.string_search(b"dup_key").unwrap();
@@ -586,11 +566,11 @@ fn synthetic_index_searches_every_key() {
 
 #[test]
 fn synthetic_index_with_other_page_sizes() {
-    let dir = TempDir::new("synpages");
+    let dir = TempDir::unique("isam-synpages");
     let mut rng = Rng(5150);
     let records = synthetic_records(&mut rng, 600);
     for page_size in [2usize, 3, 7, 64, 1000] {
-        let isam = build_isam(&dir.0, &format!("p{page_size}"), &records, page_size);
+        let isam = build_isam(&dir, &format!("p{page_size}"), &records, page_size);
         for key in distinct_keys(&records).iter().step_by(3) {
             for term in variants(key, &mut rng) {
                 check_term(&isam, &records, &term);
@@ -1139,11 +1119,11 @@ fn positive_batch_translates_every_key_of_the_fixtures() {
 
 #[test]
 fn positive_batch_on_synthetic_indices() {
-    let dir = TempDir::new("synbatch");
+    let dir = TempDir::unique("isam-synbatch");
     let mut rng = Rng(0xabcdef);
     let records = synthetic_records(&mut rng, 4000);
     for page_size in [64usize, 5] {
-        let isam = build_isam(&dir.0, &format!("b{page_size}"), &records, page_size);
+        let isam = build_isam(&dir, &format!("b{page_size}"), &records, page_size);
         check_batch(&isam, &records, &mut rng, 0);
         check_batch(&isam, &records, &mut rng, 123_456);
     }
@@ -1151,7 +1131,7 @@ fn positive_batch_on_synthetic_indices() {
 
 #[test]
 fn positive_batch_picks_the_first_or_the_last_line_of_a_key_and_skips_translated_entries() {
-    let dir = TempDir::new("synlast");
+    let dir = TempDir::unique("isam-synlast");
     let records = vec![
         (b"a".to_vec(), 1),
         (b"b".to_vec(), 5),
@@ -1160,7 +1140,7 @@ fn positive_batch_picks_the_first_or_the_last_line_of_a_key_and_skips_translated
         (b"c".to_vec(), 7),
     ];
     for page_size in [1usize, 2, 3, 64] {
-        let isam = build_isam(&dir.0, &format!("l{page_size}"), &records, page_size);
+        let isam = build_isam(&dir, &format!("l{page_size}"), &records, page_size);
         let mut ids = vec![SiOid::new("b"), SiOid::new("b"), SiOid::new("d")];
         isam.ids_to_oids(100, &mut ids, &mut false).unwrap();
         assert_eq!(ids[0].oid, Some(120), "page size {page_size}");
@@ -1313,12 +1293,12 @@ fn negative_scan_marks_included_and_visible() {
 
 #[test]
 fn negative_scan_on_synthetic_indices() {
-    let dir = TempDir::new("synneg");
+    let dir = TempDir::unique("isam-synneg");
     let mut rng = Rng(0x5eed);
     let records = synthetic_records(&mut rng, 3000);
     let keys = distinct_keys(&records);
     for page_size in [64usize, 4] {
-        let isam = build_isam(&dir.0, &format!("n{page_size}"), &records, page_size);
+        let isam = build_isam(&dir, &format!("n{page_size}"), &records, page_size);
         for round in 0..6 {
             let share = [1, 2, 3, 10, 50, 1][round];
             let mut list: Vec<Vec<u8>> = keys
@@ -1337,7 +1317,7 @@ fn negative_scan_on_synthetic_indices() {
 #[test]
 fn negative_scan_pair_rule() {
     // `acc` followed by `acc.1` in a page: the line of `acc` is not included, the next line decides.
-    let dir = TempDir::new("pair");
+    let dir = TempDir::unique("isam-pair");
     let records = vec![
         (b"abc".to_vec(), 0),
         (b"abc.1".to_vec(), 1),
@@ -1345,7 +1325,7 @@ fn negative_scan_pair_rule() {
         (b"abd.2".to_vec(), 2),
         (b"abe".to_vec(), 3),
     ];
-    let isam = build_isam(&dir.0, "pair", &records, 64);
+    let isam = build_isam(&dir, "pair", &records, 64);
     let run = |list: &[&str]| {
         let mut list: Vec<Vec<u8>> = list.iter().map(|s| s.as_bytes().to_vec()).collect();
         let mut out = NegativeOids::new();

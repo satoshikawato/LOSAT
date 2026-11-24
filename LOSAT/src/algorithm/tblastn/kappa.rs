@@ -223,8 +223,8 @@ pub(super) fn postredo_num_ident(
     ))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526:
-// c++/src/algo/blast/core/blast_hits.c:767-811:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:526-529:
+// c++/src/algo/blast/core/blast_hits.c:798-807,833:
 #[cfg(test)]
 pub(super) fn postredo_converted_stats(
     converted: &ConvertedKappaHsp,
@@ -238,7 +238,7 @@ pub(super) fn postredo_converted_stats(
 /// and gap letters.
 pub(super) type ConvertedStats = (usize, usize, usize, usize, usize, usize);
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:767-811;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:798-807,833;
 // blast_traceback.c:650-662; objtools/align_format/tabular.cpp:1003-1021:
 // identity uses aligned residues; positives use the selected scoring matrix.
 pub(super) fn postredo_converted_stats_with_matrix(
@@ -521,7 +521,7 @@ pub(super) fn incoming_alignments(
     incoming
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3639
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3577-3585,3625-3641
 #[allow(dead_code)] // The public TBLASTN path stays gated until D and E complete.
 pub(super) fn redo_preliminary_match<'s>(
     preliminary_hits: &[GappedHsp],

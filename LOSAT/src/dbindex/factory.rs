@@ -329,6 +329,21 @@ impl SubjectMap {
         } else {
             self.chunks.last().expect("a chunk").seq_start as usize + (step / CR) as usize
         };
+        // NCBI's chunk end, the chunk's start plus `chunk_size_` as a `TSeqPos`, wraps past 2^32:
+        // the chunk's one valid interval is then `chunk_size` letters from its start, past the
+        // sequence's end, and building the index reads them (SIGSEGV for 4294967293 and
+        // 4294967294 letters; remaining-gaps-20261112/K/kc/p11d/p3 l93n, l94n).
+        if chunk_start < self.seq_len()
+            && u64::from(chunk_start) + self.chunk_size > u32::MAX.into()
+        {
+            let first_wrapping = (u64::from(u32::MAX) + 1 - self.chunk_size).div_ceil(step) * step;
+            return Err(StreamError::Refused(super::unsupported(&format!(
+                "a sequence of {} letters or more, whose last chunk of {} letters NCBI's \
+                 makembindex reads past the sequence's end (its end wraps at 32 bits)",
+                crate::ncbi_str::with_commas(first_wrapping + 1),
+                crate::ncbi_str::with_commas(self.chunk_size),
+            ))));
+        }
         if !self.add_chunk_base(seq_off) {
             return Ok((false, false));
         }
@@ -972,3 +987,7 @@ pub(crate) fn make_index(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "factory_tests.rs"]
+mod tests;

@@ -163,7 +163,9 @@ fn dir_name(path: &[u8]) -> &[u8] {
         .map_or(&[], |at| &path[..at])
 }
 
-fn base_name(path: &[u8]) -> &[u8] {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:50-59
+/// `SeqDB_RemoveDirName` (`CSeqDB_Path::FindFileName`): `path` after its last path separator.
+pub(crate) fn base_name(path: &[u8]) -> &[u8] {
     path.iter()
         .rposition(|&byte| byte == SEPARATOR)
         .map_or(path, |at| &path[at + 1..])
@@ -173,7 +175,7 @@ fn base_name(path: &[u8]) -> &[u8] {
 // `CSeqDB_Path::FindBaseName` is `SeqDB_RemoveExtn` of `SeqDB_RemoveDirName` of the path
 // (seqdbgeneral.hpp:975-979): the file name without a final `.pal`, `.nal`,
 // `.pin`, `.nin`, `.pdb` or `.ndb`. `SeqDB_CompareVolume` compares these.
-fn path_base_name(path: &[u8]) -> &[u8] {
+pub(crate) fn path_base_name(path: &[u8]) -> &[u8] {
     remove_extn(base_name(path))
 }
 
@@ -498,6 +500,14 @@ impl SearchPath {
     /// regular file `filename`, joined with it (`None`: NCBI's empty string).
     pub fn resolve_file(&self, filename: &[u8]) -> Option<Vec<u8>> {
         self.find(filename, None)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:464-470
+    /// `SeqDB_ResolveDbPathNoExtension` of `dbname` and the type's letter: the first directory of
+    /// the path that holds its alias file or its index file, joined with it (`None`: NCBI's
+    /// empty string).
+    pub(crate) fn resolve_db(&self, dbname: &[u8], seqtype: SeqType) -> Option<Vec<u8>> {
+        self.find(dbname, Some(seqtype))
     }
 }
 
@@ -1834,7 +1844,7 @@ impl<'a> ListSet<'a> {
             ListIds::Si { ids, sorted } => {
                 for id in ids.iter_mut() {
                     id.si = super::isam::simplify_accession_for_isam(&id.si).map_err(|error| {
-                        OidListError::reader(SeqDbError::Unsupported {
+                        OidListError::reader(SeqDbError::NcbiThrows {
                             path: path_from_bytes(list.path),
                             message: format!(
                                 "the id {} of the seqid list of an alias file's SEQIDLIST throws \

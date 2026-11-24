@@ -50,7 +50,7 @@ fn fails_one_batch(error: &anyhow::Error) -> bool {
 /// error) is returned as `Err` to stop the run before its first byte.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
-        return Ok(crate::blastinput::app::engine_error(text));
+        return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
     let error = match error.downcast::<ErrorAfterBatchReports>() {
         Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),
@@ -1624,7 +1624,7 @@ fn search(
     // `-in_pssm` (PSI-TBLASTN): the query's PSSM, which the batch's search and reports read.
     let pssm = resolved.pssm.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289
     // IDENTITY's reset (`search_settings`) writes through the memento's pointers into the options
     // that every query batch reuses: the first batch resets the mode and warns its queries, and
     // the later batches start in mode 0 without the warning. These are the searched queries of

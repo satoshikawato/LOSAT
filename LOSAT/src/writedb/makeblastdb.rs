@@ -6,8 +6,6 @@
 use crate::wording::DATABASE_ERROR;
 use std::io::{BufRead, Read, Write};
 
-use clap::Args;
-
 use super::build_db::{endl, BuildDatabase};
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
@@ -22,7 +20,6 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
-use crate::blastinput::value_parsers::ncbi_integer;
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -37,86 +34,97 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 // requirements (`-taxid_map` needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc`
 // needs `-mask_id`, `-gi_mask` needs `-parse_seqids` and excludes `-mask_id`, `-gi_mask_name`
 // needs `-mask_data` and `-gi_mask`) of the command line and of a library call, in NCBI's order
-// and words (its usage, exit status 1); clap then converts the arguments it read. The options of
-// makeblastdb that LOSAT does not support are refused by name after the reader
+// and words (its usage, exit status 1); `from_args` then reads the arguments it read. The options
+// of makeblastdb that LOSAT does not support are refused by name after the reader
 // (`ncbi_app::args::refusal`).
 /// Arguments of `losat makeblastdb`, under makeblastdb's names.
-#[derive(Args, Debug, Clone)]
-#[command(rename_all = "snake_case")]
+#[derive(Debug, Clone)]
 pub struct MakedbArgs {
     /// Input FASTA file (`-` is standard input), or the input databases of -input_type blastdb
-    #[arg(long = "in", default_value = "-", value_name = "input_file")]
     pub input: String,
     /// Type of the data specified in input_file (fasta and blastdb are supported)
-    #[arg(long, default_value = "fasta", value_name = "type")]
     pub input_type: String,
     /// Molecule type of target db
-    #[arg(long, value_name = "molecule_type")]
     pub dbtype: String,
     /// Title for BLAST database [default: the input file name given to -in; for -input_type
     /// blastdb, the title of the input database]
-    #[arg(long, value_name = "database_title")]
     pub title: Option<String>,
     /// Name of BLAST database to be created [default: the input file name given to -in]
-    #[arg(long, value_name = "database_name")]
     pub out: Option<String>,
     /// Version of BLAST database to be created
-    #[arg(long, default_value_t = 5, value_name = "version",
-          value_parser = ncbi_integer)]
     pub blastdb_version: i32,
     /// Maximum file size for BLAST database files
-    #[arg(long, default_value = "3GB", value_name = "number_of_bytes")]
     pub max_file_sz: String,
     /// Path prefix for location of database files in metadata
-    #[arg(long, value_name = "String")]
     pub metadata_output_prefix: Option<String>,
     /// File to which the program log should be redirected
-    #[arg(long, value_name = "File_Name")]
     pub logfile: Option<String>,
     /// Create index of sequence hash values.
-    #[arg(long)]
     pub hash_index: bool,
     /// Taxonomy ID to assign to all sequences
-    // NCBI's integer and its constraint (`nonnegative_ncbi_integer`): `0x10` is 16 (NCBI BLAST+
-    // 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with `-dryrun`).
-    #[arg(long, value_name = "TaxID",
-          value_parser = ncbi_integer)]
+    // NCBI's integer and its constraint, at least 0 (NCBI's reader, `ncbi_app::constraint`): `0x10`
+    // is 16 (NCBI BLAST+ 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with
+    // `-dryrun`).
     pub taxid: Option<i32>,
-    /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
-    #[allow(rustdoc::invalid_html_tags, reason = "NCBI's help, printed by clap")]
-    #[arg(long, value_name = "TaxIDMapFile")]
+    /// Text file mapping sequence IDs to taxonomy IDs. Format: `<SequenceId> <TaxonomyId><newline>`
     pub taxid_map: Option<String>,
     /// Comma-separated list of input files containing masking data as produced by NCBI masking
     /// applications (e.g. dustmasker, segmasker, windowmasker)
-    #[arg(long, value_name = "mask_data_files")]
     pub mask_data: Option<String>,
     /// Comma-separated list of strings to uniquely identify the masking algorithm
-    #[arg(long, value_name = "mask_algo_ids")]
     pub mask_id: Option<String>,
     /// Comma-separated list of free form strings to describe the masking algorithm details
-    #[arg(long, value_name = "mask_algo_descriptions")]
     pub mask_desc: Option<String>,
     /// Create GI indexed masking data.
-    #[arg(long)]
     pub gi_mask: bool,
     /// Comma-separated list of masking data output files.
-    #[arg(long, value_name = "gi_based_mask_names")]
     pub gi_mask_name: Option<String>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are
     /// parsed automatically
-    #[arg(long)]
     pub parse_seqids: bool,
     /// 0x01 Exclude Model
     // NCBI's integer (`AsInteger`, an `int`: `0x01` is 1, `-1` sets every bit), made an `Uint8`
     // (makeblastdb.cpp:1227-1230).
-    #[arg(long, value_name = "oid_masks",
-          value_parser = crate::blastinput::value_parsers::ncbi_integer)]
     pub oid_masks: Option<i32>,
     /// Copy the sequences of -input_type blastdb in a random order, seeded by the clock's second
     // NCBI's argument is hidden (`fHidden`, makeblastdb.cpp:253-254): its help lists it with
     // `-help-full` only. LOSAT's help is NCBI's text (`cli::reader`): `-help-full` lists it, `-help` does not.
-    #[arg(long, hide = true)]
     pub randomize: bool,
+}
+
+impl MakedbArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, makeblastdb's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(MakedbArgs {
+            input: args.option_or_default("in")?,
+            input_type: args.option_or_default("input_type")?,
+            dbtype: args.option_or_default("dbtype")?,
+            title: args.given_option("title")?,
+            out: args.given_option("out")?,
+            blastdb_version: args.option_or_default("blastdb_version")?,
+            max_file_sz: args.option_or_default("max_file_sz")?,
+            metadata_output_prefix: args.given_option("metadata_output_prefix")?,
+            logfile: args.given_option("logfile")?,
+            hash_index: args.flag("hash_index"),
+            taxid: args.given_option("taxid")?,
+            taxid_map: args.given_option("taxid_map")?,
+            mask_data: args.given_option("mask_data")?,
+            mask_id: args.given_option("mask_id")?,
+            mask_desc: args.given_option("mask_desc")?,
+            gi_mask: args.flag("gi_mask"),
+            gi_mask_name: args.given_option("gi_mask_name")?,
+            parse_seqids: args.flag("parse_seqids"),
+            oid_masks: args.given_option("oid_masks")?,
+            randomize: args.flag("randomize"),
+        })
+    }
 }
 
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
@@ -229,13 +237,16 @@ impl std::fmt::Display for MakedbError {
     }
 }
 
-/// Whether `error` is LOSAT's refusal of a database where NCBI crashes or gives a result that
-/// depends on its memory ([`SeqDbError::NcbiCrashes`], [`SeqDbError::Unsupported`]), which is
-/// printed as the other refusals of makeblastdb are, with exit status 1.
+/// Whether `error` is LOSAT's refusal of a database where NCBI crashes, throws what LOSAT does
+/// not report or gives a result that depends on its memory ([`SeqDbError::NcbiCrashes`],
+/// [`SeqDbError::NcbiThrows`], [`SeqDbError::Unsupported`]), which is printed as the other
+/// refusals of makeblastdb are, with exit status 1.
 fn is_refusal(error: &SeqDbError) -> bool {
     matches!(
         error,
-        SeqDbError::NcbiCrashes { .. } | SeqDbError::Unsupported { .. }
+        SeqDbError::NcbiCrashes { .. }
+            | SeqDbError::NcbiThrows { .. }
+            | SeqDbError::Unsupported { .. }
     )
 }
 

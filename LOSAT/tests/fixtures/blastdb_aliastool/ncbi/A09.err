@@ -1,0 +1,2 @@
+BLAST query/options error: Either gilist, seqid_list, taxidlist or oid_masks must be specified if database name is used
+Please refer to the BLAST+ user manual.

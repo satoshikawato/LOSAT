@@ -15,7 +15,7 @@ use crate::seqid::model::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{BdbError, MaskBdbReader};
 use crate::sequence::title::get_title_without_source;
 use crate::writedb::fasta_source::reader::{
-    past_seq_pos_refusal, FastaReader, ReadError, ReaderFlags, ReaderWarning, Record, SeqInst,
+    FastaReader, ReadError, ReaderFlags, ReaderWarning, Record,
 };
 
 /// `CSequenceIStream::TSeqData` of a sequence (a null `seq_entry_` is `None` of `next`).
@@ -493,18 +493,29 @@ impl<'a> FastaStream<'a> {
         let record: Record = match result {
             Ok(record) => record,
             // NCBI catches every exception of the reader and ends the input.
-            Err(ReadError::Parse(_) | ReadError::Ncbi(_) | ReadError::OutOfMemory) => {
-                return Ok(None)
+            Err(
+                ReadError::Parse(_)
+                | ReadError::Ncbi(_)
+                | ReadError::OutOfMemory
+                | ReadError::OutOfRange { .. },
+            ) => return Ok(None),
+            // NCBI crashes (SIGSEGV) where the reader packs the record.
+            Err(ReadError::PackOverflow) => {
+                return Err(StreamError::Refused(super::unsupported(
+                    &crate::writedb::fasta_source::reader::pack_overflow_what(),
+                )));
             }
         };
-        if let SeqInst::PastSeqPos { length, .. } = record.inst {
-            let mut id = Vec::new();
-            if let Some(first) = record.ids.first() {
-                crate::seqid::label::fasta(first, &mut id);
-            }
-            return Err(StreamError::Refused(super::unsupported(
-                &past_seq_pos_refusal(&String::from_utf8_lossy(&id), length),
-            )));
+        // Gaps stay pieces only where their sum wraps NCBI's `TSeqPos` to 0 past 2^32
+        // letters (`reader::RecordState::assemble_seq`); the index reads the sequence's
+        // `CSeqVector` outside the reader's `try`.
+        if let Some(fault) = crate::seqmasks_io::fasta_reader::seq_map_error(
+            &record.inst,
+            crate::seqmasks_io::fasta_reader::SeqMapRead::Sequential,
+        ) {
+            return Err(StreamError::Ncbi(
+                crate::seqmasks_io::fasta_reader::seq_map_exception(fault.error),
+            ));
         }
         let id = if self.titles {
             let ids = [ParsedSeqId::Local(crate::seqid::model::ObjectId::Id(

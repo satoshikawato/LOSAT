@@ -72,7 +72,7 @@ pub struct TreeHsp {
 }
 
 /// Interval tree node
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:48-58 SIntervalNode
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:59-71 SIntervalNode
 #[derive(Clone, Debug)]
 struct IntervalNode {
     /// Left boundary of this node's range
@@ -85,7 +85,7 @@ struct IntervalNode {
     midptr: i32,
     /// Index of right child (0 = none)
     rightptr: i32,
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:56
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:69-70
     /// The HSP of a leaf, as 1 + its index in `BlastIntervalTree::hsps`; 0 (NULL) for internal
     /// nodes. A node is then 28 bytes, as NCBI's (with an 8-byte pointer) is 32, instead of 64
     /// with the HSP inside it.

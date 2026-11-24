@@ -4,40 +4,17 @@
 //! digests for the larger ones). The tests run no NCBI program.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
     lmdb_file_name, max_entry_per_txn, txn_batches, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
+use crate::utils::test_dir::TempDir;
 use crate::writedb::platform::{LmdbPlatform, Platform};
 
 /// The platform of the expected files (makeblastdb 2.17.0 on Linux x86-64: pages of 4096 bytes,
 /// map sizes 700000000 and 300000000, files not grown to the map), whatever platform the tests
 /// run on.
 const LINUX: Platform = Platform::LINUX_X86_64;
-
-/// A directory of this test run, removed when the value is dropped.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(label: &str) -> Self {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-lmdb-{label}-{}-{}",
-            crate::utils::test_dir::process_id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// The `m_list` entries of one OID: (id, `saveToOidList`).
 type Entries = Vec<(Vec<u8>, bool)>;
@@ -197,14 +174,14 @@ fn fixture(name: &str) -> PathBuf {
 /// Write `c` and compare every file with the fixture files `<name>.<ext>`, or with the
 /// (size, FNV-1a) digests given.
 fn check(name: &str, c: &Content, digests: &[Digest]) {
-    let dir = TempDir::new(name);
-    write(c, &dir.0).unwrap();
+    let dir = TempDir::unique(&format!("lmdb-{name}"));
+    write(c, &dir).unwrap();
     let t = c.dbtype;
     let exts = ["db", "tf", "os", "ot", "to"];
     let mut compared = 0;
     for ext in exts {
         let ext = format!("{t}{ext}");
-        let ours = std::fs::read(dir.0.join(format!("db.{ext}"))).ok();
+        let ours = std::fs::read(dir.join(format!("db.{ext}"))).ok();
         if let Some(&(_, size, h)) = digests.iter().find(|d| d.0 == ext) {
             let ours = ours.unwrap_or_else(|| panic!("{name}: no .{ext} written"));
             assert_eq!((ours.len(), fnv1a(&ours)), (size, h), "{name}: .{ext}");
@@ -232,7 +209,7 @@ fn check(name: &str, c: &Content, digests: &[Digest]) {
         }
     }
     assert!(compared >= 2, "{name}: nothing compared");
-    assert!(!dir.0.join("db.pdb-lock").exists() && !dir.0.join("db.ptf-lock").exists());
+    assert!(!dir.join("db.pdb-lock").exists() && !dir.join("db.ptf-lock").exists());
 }
 
 #[test]
@@ -329,9 +306,9 @@ fn map_size_from_blastdb_lmdb_map_size() {
     for i in 1..=3 {
         c.oids.push((text_id(&format!("XP_{i:06}"), 1), vec![0]));
     }
-    let dir = TempDir::new("f1pmap");
-    write(&c, &dir.0).unwrap();
-    let ours = std::fs::read(dir.0.join("db.pdb")).unwrap();
+    let dir = TempDir::unique("lmdb-f1pmap");
+    write(&c, &dir).unwrap();
+    let ours = std::fs::read(dir.join("db.pdb")).unwrap();
     let mut expected = std::fs::read(fixture("f1p.pdb")).unwrap();
     for off in [32, 4096 + 32] {
         expected[off..off + 8].copy_from_slice(&123_456_789u64.to_le_bytes());
@@ -677,8 +654,8 @@ fn an_oid_without_ids_in_the_middle_stops_the_pos_file() {
     c.oids.push((text_id("NP_000001", 1), vec![0]));
     c.oids.push((Vec::new(), vec![0]));
     c.oids.push((text_id("NP_000002", 1), vec![0]));
-    let dir = TempDir::new("f8gimid");
-    let e = write(&c, &dir.0).unwrap_err();
+    let dir = TempDir::unique("lmdb-f8gimid");
+    let e = write(&c, &dir).unwrap_err();
     assert_eq!(
         e.to_string(),
         "Error: Input id list not in ascending oid order"
@@ -691,7 +668,7 @@ fn an_oid_without_ids_in_the_middle_stops_the_pos_file() {
 // probe of 2026-11-08), each before the data file is made.
 #[test]
 fn an_environment_that_does_not_open_is_ncbi_s_database_error() {
-    let dir = TempDir::new("envopen");
+    let dir = TempDir::unique("lmdb-envopen");
     let small = LmdbPlatform {
         max_map_size: u64::from(u32::MAX),
         ..LmdbPlatform::LINUX_X86_64
@@ -700,7 +677,7 @@ fn an_environment_that_does_not_open_is_ncbi_s_database_error() {
         crate::writedb::WriteDbError::Database(message) => message,
         other => panic!("{other:?}"),
     };
-    let pdb = dir.0.join("db.pdb");
+    let pdb = dir.join("db.pdb");
     let settings = LmdbEnvSettings::default();
     let Err(e) = WriteDbLmdb::new(&pdb, 1 << 32, &small, &settings) else {
         panic!("a map of 4 GiB on a 32-bit platform");
@@ -712,7 +689,7 @@ fn an_environment_that_does_not_open_is_ncbi_s_database_error() {
     assert!(!pdb.exists());
     #[cfg(unix)]
     {
-        let long = dir.0.join(format!("{}.pdb", "e".repeat(247)));
+        let long = dir.join(format!("{}.pdb", "e".repeat(247)));
         let Err(e) = WriteDbTaxId::new(&long, 0, &LmdbPlatform::LINUX_X86_64, &settings) else {
             panic!("a lock file name of 256 bytes");
         };
@@ -729,8 +706,8 @@ fn zero_entries_per_transaction_is_refused() {
     // MAX_LMDB_TXN_ENTRY=0: makeblastdb never leaves its transaction loop.
     let mut c = f4(3, None);
     c.max_txn = Some("0".to_string());
-    let dir = TempDir::new("max0");
-    assert!(write(&c, &dir.0).is_err());
+    let dir = TempDir::unique("lmdb-max0");
+    assert!(write(&c, &dir).is_err());
 }
 
 // ---- the gate of the makedb-v5 line (scripts/s1_gate.py) -----------------------------------
@@ -800,16 +777,16 @@ fn s1_gate() {
     let mut lines = Vec::new();
     for f in files {
         let (name, c, oracle) = parse_manifest(&std::fs::read_to_string(&f).unwrap());
-        let dir = TempDir::new("gate");
+        let dir = TempDir::unique("lmdb-gate");
         let start = std::time::Instant::now();
-        if let Err(e) = write(&c, &dir.0) {
+        if let Err(e) = write(&c, &dir) {
             lines.push(format!("{name} - error: {e}"));
             continue;
         }
         let secs = start.elapsed().as_secs_f64();
         for (ext, path) in oracle {
             let expected = std::fs::read(&path).unwrap();
-            let line = match std::fs::read(dir.0.join(format!("db.{ext}"))) {
+            let line = match std::fs::read(dir.join(format!("db.{ext}"))) {
                 Err(_) => format!("{name} .{ext} missing"),
                 Ok(ours) => match first_difference(&ours, &expected) {
                     None => format!("{name} .{ext} equal"),

@@ -446,6 +446,31 @@ impl Write for Ostream<'_> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:744-752
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
+/// The opening of the `fPreOpen` output key `name` whose value is `value` as the reader reads its
+/// word (`CArg_OutputFile`'s constructor): `-` is `stdout`, the empty name opens nothing (NCBI's
+/// `eNoFile`), and another name makes or empties the file in the run's files `files`; the stream
+/// is not written (blastdb_aliastool's `Run` writes the file by its name again). LOSAT Web's
+/// refusal of a name is left to that later opening.
+pub(crate) fn pre_open_output(
+    name: &str,
+    value: &OsStr,
+    files: &OpenFiles,
+) -> Result<(), ArgException> {
+    if value == "-" {
+        return Ok(());
+    }
+    let bytes = value.as_encoded_bytes();
+    if value.is_empty() {
+        return Err(not_accessible(name, bytes));
+    }
+    files
+        .create(value)
+        .map(drop)
+        .map_err(|Unopened| not_accessible(name, bytes))
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
 /// `AsOutputFile()` of the argument `name` whose value is `value`, the name's bytes: `-` is
 /// `stdout`, the empty name opens nothing, and another name makes or empties the file

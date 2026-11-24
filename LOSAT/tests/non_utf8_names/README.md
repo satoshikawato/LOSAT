@@ -47,3 +47,17 @@ file, an `-in` list entry and a run in a directory, makeblastdb in a directory (
 database name is the directory's bytes and `-out`), blastdbcmd `-taxidlist` and `-ipg_batch` of a
 file, an alias file's `DBLIST` entry, a database through a symbolic link to a directory, and a
 volume without its `.nsq` (NCBI's `File (...) not found` keeps the byte), each name with 0xE9.
+Round 3 of the review (the same day, all cases frozen again) replaced that rule: `.files` now lists
+every path the run made, changed or removed (a removed one with `gone`), and a file's size and
+digest are those of its bytes with the build's dates as `<DATE>` (`undated`): the date field of an
+index file's header (`.nin`, `.pin`: its length and its bytes with their padding), every
+`MM/DD/YYYY hh:mm:ss` (an alias file's comment, the index file of a column or of a GI mask) and
+`YYYY-MM-DDThh:mm:ss` (a metadata file's `last-updated`), and a metadata file's `bytes-total`
+counted without the date fields of the index files it lists (their length changes with the date).
+So the titles and names inside index, alias and metadata files are compared too (`K10_mp_title`,
+`K10_mp_in_file`). Eight cases came with it: `makeblastdb -input_type blastdb` copying the
+`MASKLIST` database (its mask column), `-db_hard_mask` by that mask in blastn, tblastn and tblastx
+(`sv4`) and blastp (`svp`, the mask `pm1` under the name `p\xe91`), a second makeblastdb in
+`d\xe9` over an existing database (`Deleted existing ... named` with the byte, the old volume's
+extra files gone), and rpsblast and rpstblastn on a profile database found through `BLASTDB` of
+`d\xe9` without its `.aux` (NCBI's engine error names the path with the byte).

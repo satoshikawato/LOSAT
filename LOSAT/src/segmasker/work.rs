@@ -13,11 +13,14 @@ use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{iupacaa_letters, prints_title, BdbError, MaskBdbReader};
-use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
+use crate::seqmasks_io::fasta_reader::{
+    seq_map_exception, seq_vector_exception, MaskFastaReader, MaskReadError,
+};
 use crate::seqmasks_io::run::{
     finish, post_read_texts, serial_write_failure, write_failure, RunFailure,
 };
 use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
+use crate::utils::dust::MaskedInterval;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::{SegMasker, SegParams};
 
@@ -157,7 +160,7 @@ fn run_masks(
     let result = (|| {
         while let Some(record) = source.next_record()? {
             post_read_texts::<Failure>(&record.texts, &mut out, diag)?;
-            let masks = masker.seq_buffer_seg::<false>(&record.stdaa);
+            let masks = seg_masks(&masker, &record.stdaa);
             let mask: Vec<(u32, u32)> = masks
                 .iter()
                 .map(|interval| (interval.start as u32, (interval.end - 1) as u32))
@@ -177,6 +180,18 @@ fn run_masks(
         Ok(())
     })();
     finish(writer, &mut out, diag, result, outfmt, super::PROGRAM)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:73-77
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1763-1766
+/// `CSegMasker::operator()`: `SeqBufferSeg` of the record's residues, whose count it passes as
+/// an `Int4`. From 2^31 letters (the reader keeps fewer than 2^32) the count is negative, below
+/// the window, so `s_SeqEntropy` finds no segments and NCBI prints the record without intervals.
+fn seg_masks(masker: &SegMasker, stdaa: &[u8]) -> Vec<MaskedInterval> {
+    if i32::try_from(stdaa.len()).is_err() {
+        return Vec::new();
+    }
+    masker.seq_buffer_seg::<false>(stdaa)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52
@@ -300,7 +315,18 @@ impl Source<'_> {
                         MaskReadError::Ncbi(exception) => Failure::Caught(exception),
                         MaskReadError::Read(error) => read_failure(error),
                         MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                        MaskReadError::Std(what) => Failure::Std(what),
                         MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
+                        // The lookup of the first segment throws as it is; `CanGetRange`
+                        // catches what the walk over the range throws.
+                        MaskReadError::SeqMap {
+                            error,
+                            first_segment: true,
+                            ..
+                        } => Failure::Caught(seq_map_exception(error)),
+                        MaskReadError::SeqMap { length, .. } => {
+                            Failure::Caught(seq_vector_exception(length))
+                        }
                     })?;
                 Ok(record.map(|record| Record {
                     ids: record.ids,

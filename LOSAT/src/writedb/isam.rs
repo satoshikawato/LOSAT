@@ -19,6 +19,7 @@ use rustc_hash::FxHashSet;
 use super::files::WriteDbFile;
 use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
+use crate::utils::decimal::push_decimal;
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_isam.hpp:156-165
 const KEY_OFFSET: i32 = 9 * 4;
@@ -199,25 +200,6 @@ fn prefix_bytes(prefix: u64) -> [u8; 8] {
         *byte ^= 0x80;
     }
     bytes
-}
-
-/// Appends `value` in decimal (the `%d` format of `sprintf`).
-fn push_decimal(out: &mut Vec<u8>, value: i64) {
-    let mut digits = [0u8; 20];
-    let mut n = value.unsigned_abs();
-    let mut at = digits.len();
-    loop {
-        at -= 1;
-        digits[at] = b'0' + (n % 10) as u8;
-        n /= 10;
-        if n == 0 {
-            break;
-        }
-    }
-    if value < 0 {
-        out.push(b'-');
-    }
-    out.extend_from_slice(&digits[at..]);
 }
 
 /// The decimal digits of `value` (the `%d` format of `sprintf` applied to an OID) in `buf`.

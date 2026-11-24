@@ -168,17 +168,20 @@ impl Narrow {
         }
     }
 
-    /// `contains_hit`: whether the chain of `cell` holds `q_off_1` (the whole chain is walked,
-    /// as the 4-byte table's test does).
+    /// `contains_hit`: whether the chain of `cell` holds `q_off_1` (the walk stops at the first
+    /// element equal to it, as the 4-byte table's test does).
     #[inline(always)]
     pub(super) fn contains(&self, cell: usize, q_off_1: u32) -> bool {
-        let mut found = false;
-        self.each(cell, |q_off| {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69
+        // (`s_MBLookup`: the walk returns at the first element equal to the offset)
+        let mut q_off = get(&self.heads, cell);
+        while q_off != 0 {
             if q_off == q_off_1 {
-                found = true;
+                return true;
             }
-        });
-        found
+            q_off = get(&self.chain, q_off as usize);
+        }
+        false
     }
 
     /// `count_hits`: the length of the chain of `cell`.

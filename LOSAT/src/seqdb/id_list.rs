@@ -212,6 +212,23 @@ fn binary_kind(bytes: &[u8]) -> Result<Option<bool>, String> {
     Err("Specified file is not a valid GI/TI list.".to_string())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1376-1403
+/// `SeqDB_IsBinaryGiList` of a file's bytes (`s_ContainsBinaryNumericIdList` of `eGiList`):
+/// whether they are a binary list, of GIs or TIs alike; NCBI's `CSeqDBException` text for an
+/// empty or unknown file.
+pub(crate) fn is_binary_gi_list(bytes: &[u8]) -> Result<bool, String> {
+    binary_kind(bytes).map(|kind| kind.is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb.cpp:220-238
+/// The first word of a binary GI list of 4-byte GIs, which the reader takes (`read_gi_list`) and
+/// the writer writes (`writedb::binary_list`): -1.
+pub(crate) const GI_LIST_MAGIC: i32 = -1;
+
+/// The first word of a binary GI list of 8-byte GIs (-2), which the writer writes when a GI does
+/// not fit 32 bits and NCBI's reader of GI lists does not take.
+pub(crate) const LONG_GI_LIST_MAGIC: i32 = -2;
+
 /// The big-endian 32-bit word `at` of `bytes`.
 fn word(bytes: &[u8], at: usize) -> u32 {
     u32::from_be_bytes(bytes[4 * at..4 * at + 4].try_into().expect("4 bytes"))
@@ -263,7 +280,7 @@ pub(crate) fn read_gi_list(bytes: &[u8]) -> Result<Vec<u32>, String> {
     if binary_kind(bytes)?.is_some() {
         let words = bytes.len() / 4;
         let num_gis = words - 2;
-        if word(bytes, 0) != 0xFFFF_FFFF || word(bytes, 1) as usize != num_gis {
+        if word(bytes, 0) != GI_LIST_MAGIC as u32 || word(bytes, 1) as usize != num_gis {
             return Err("Specified file is not a valid binary GI file.".to_string());
         }
         return Ok((2..words).map(|at| word(bytes, at)).collect());

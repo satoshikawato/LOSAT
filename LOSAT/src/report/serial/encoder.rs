@@ -231,6 +231,9 @@ impl NullElement {
                 if self.element_frame { 1296 } else { 1272 },
                 "ncbi::CObjectOStreamXml::WriteContainerContents",
             ),
+            // `Traced::null_element` makes no throw of the JSON stream, whose documents have no
+            // NULL element (`json::JsonEncoder::null_element`).
+            Stream::Json => unreachable!("the JSON stream writes no NULL element"),
         }
     }
 
@@ -317,10 +320,12 @@ pub trait Encoder {
     /// `asn_types::write`), the one of its `STREAM`; `None` for a stream of no ASN.1 encoding.
     fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
         use crate::report::serial::asn_input::Encoding;
-        Self::STREAM.map(|stream| match stream {
-            Stream::AsnText => Encoding::Text,
-            Stream::AsnBinary => Encoding::Binary,
-            Stream::Xml => Encoding::Xml,
+        Self::STREAM.and_then(|stream| match stream {
+            Stream::AsnText => Some(Encoding::Text),
+            Stream::AsnBinary => Some(Encoding::Binary),
+            Stream::Xml => Some(Encoding::Xml),
+            // The JSON stream copies no delay buffer (`json::JsonEncoder::delayed`).
+            Stream::Json => None,
         })
     }
     /// `WriteFileHeader` of a type: the start of a document whose top-level object is of the
@@ -696,10 +701,15 @@ impl<E: Encoder, P> Traced<E, P> {
         )
     }
 
-    /// The bytes at the start of the document that NCBI's buffer held when it first wrote to its
-    /// output, `None` before (`out_buffer::OutBuffer::first_write`; `None` for an encoder that
-    /// `Traced` does not follow).
-    pub(crate) fn first_write(&self) -> Option<usize> {
+    /// The writes of NCBI's buffer of the document to its output so far (`OutBuffer::pieces`):
+    /// NCBI's insertions of it into the report's stream; none for a stream without a model of its
+    /// buffer.
+    pub fn pieces(&self) -> &[usize] {
+        self.buffer.as_ref().map_or(&[], OutBuffer::pieces)
+    }
+
+    /// The stream's position at the first of those writes (`OutBuffer::first_write`).
+    pub fn first_write(&self) -> Option<u64> {
         self.buffer.as_ref().and_then(OutBuffer::first_write)
     }
 
@@ -855,7 +865,27 @@ impl<E: Encoder, P> Traced<E, P> {
     }
 
     /// Hands on the bytes of the document up to `target` (bytes from its start).
+    /// Each of NCBI's writes of its buffer (`pieces`) is handed on by itself: one insertion of
+    /// NCBI's into the report's stream (`ostream::ReportStream`).
     fn hand_to(&mut self, sink: &mut dyn std::io::Write, target: u64) -> std::io::Result<()> {
+        let mut end = 0u64;
+        let ends: Vec<u64> = self
+            .pieces()
+            .iter()
+            .map(|&piece| {
+                end += piece as u64;
+                end
+            })
+            .filter(|&end| end > self.handed && end < target)
+            .collect();
+        for end in ends {
+            self.hand_piece(sink, end)?;
+        }
+        self.hand_piece(sink, target)
+    }
+
+    /// Hands on the bytes of the document up to `target`, in one hand-on.
+    fn hand_piece(&mut self, sink: &mut dyn std::io::Write, target: u64) -> std::io::Result<()> {
         if target > self.handed {
             let count = (target - self.handed) as usize + std::mem::take(&mut self.foreign);
             // NCBI's buffer never writes more than the encoder holds: a larger count is a model
@@ -978,7 +1008,8 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     /// before NCBI's loop over the elements; none in NCBI's XML stream for an element of a named
     /// type, `name_element`), then NCBI's throw (`NullElement`) where the stream stands; the
     /// bytes held are those NCBI flushed, and the calls after it write nothing (`call`, `string`).
-    /// An encoder that `Traced` does not follow (`Encoder::STREAM`) keeps its error alone.
+    /// An encoder that `Traced` does not follow (`Encoder::STREAM`), or the JSON stream, whose
+    /// documents have no NULL element (`json::JsonEncoder::null_element`), keeps its error alone.
     fn null_element(&mut self, element_type: &str) {
         if self.thrown.is_some() {
             return;
@@ -989,7 +1020,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         let element_frame = matches!(self.frames.last(), Some(Frame::Element { shown: true }));
         let position = self.inner.position();
         self.inner.null_element(element_type);
-        let (Some(stream), Some(position)) = (E::STREAM, position) else {
+        let (Some(stream), Some(position)) =
+            (E::STREAM.filter(|stream| *stream != Stream::Json), position)
+        else {
             return;
         };
         let position = match position {
@@ -1051,6 +1084,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Traced<E, P> {
             }
         }
         if all {
+            if let Some(written) = self.buffer.as_ref().map(OutBuffer::written) {
+                self.hand_to(sink, written)?;
+            }
             self.foreign = 0;
             return self.inner.flush_to(sink, true);
         }

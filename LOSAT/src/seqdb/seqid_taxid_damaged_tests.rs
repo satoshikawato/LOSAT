@@ -28,7 +28,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use super::alias::SearchPath;
-use super::damaged_files_tests::{cases, Rng, TempDir};
+use super::damaged_files_tests::{cases, copy_fixtures, name, Rng};
 use super::filter::{DbList, SeqidList, TaxidList};
 use super::isam::{seqdb_simplify_accession, NegativeOids, SiOid, StringIsam};
 use super::isam_num::NumericIsam;
@@ -39,6 +39,7 @@ use super::tax_files::{self, OidSeqIds, OidTaxIds, TaxError};
 use super::tax_sqlite::TaxonomySqlite;
 use super::taxdb::TaxDb;
 use super::{SeqDb, SeqDbError, SeqType};
+use crate::utils::test_dir::TempDir;
 
 fn lmdb_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/lmdb")
@@ -103,7 +104,7 @@ fn volume_tables_with_more_entries_than_the_file_holds_are_errors() {
 /// address-space limit).
 #[test]
 fn string_isam_pages_larger_than_the_data_file_are_errors() {
-    let dir = TempDir::new("ids-isam");
+    let dir = TempDir::unique("damaged-ids-isam");
     let index = std::fs::read(ids_dir().join("prot_v4.psi")).unwrap();
     let samples = u32::from_be_bytes(index[16..20].try_into().unwrap());
     assert_eq!(samples, 3, "the fixture's sample count");
@@ -112,7 +113,7 @@ fn string_isam_pages_larger_than_the_data_file_are_errors() {
     let mut damaged = index.clone();
     damaged[12..16].copy_from_slice(&terms.to_be_bytes());
     damaged[20..24].copy_from_slice(&page.to_be_bytes());
-    let (idx, dat) = (dir.0.join("d.psi"), dir.0.join("d.psd"));
+    let (idx, dat) = (dir.join("d.psi"), dir.join("d.psd"));
     std::fs::write(&idx, &damaged).unwrap();
     std::fs::copy(ids_dir().join("prot_v4.psd"), &dat).unwrap();
     let isam = StringIsam::open(&idx, &dat).unwrap();
@@ -316,7 +317,7 @@ fn sweep(
 ) {
     let read_all = || {
         let mut trace = Trace::default();
-        read(&dir.0, &mut trace);
+        read(dir, &mut trace);
         trace.finish()
     };
     let intact = read_all();
@@ -326,7 +327,7 @@ fn sweep(
     );
     let mut problems = Vec::new();
     for target in targets {
-        let path = dir.0.join(target);
+        let path = dir.join(target);
         let orig = std::fs::read(&path).unwrap();
         let mut rng = Rng::seeded(&format!("{tag}/{target}"));
         let (mut seeded_opened, mut seeded_reached) = (0, 0);
@@ -526,17 +527,17 @@ fn read_seqid_lists(name: &str, seqtype: SeqType, ids: &[Vec<u8>], trace: &mut T
 }
 
 fn sweep_isams(stem: &str, seqtype: SeqType) {
-    let dir = TempDir::new(&format!("ids-{stem}"));
-    dir.copy_fixtures(&ids_dir(), &[stem]);
+    let dir = TempDir::unique(&format!("damaged-ids-{stem}"));
+    copy_fixtures(&dir, &ids_dir(), &[stem]);
     let letter = match seqtype {
         SeqType::Protein => 'p',
         SeqType::Nucleotide => 'n',
     };
     let ext = |ext: &str| format!("{stem}.{letter}{ext}");
     let queries = IsamQueries::new(
-        string_keys(&std::fs::read(dir.0.join(ext("sd"))).unwrap()),
-        &file_gis(&std::fs::read(dir.0.join(ext("nd"))).unwrap()),
-        SeqDb::open(&dir.name(stem), seqtype).unwrap().num_seqs(),
+        string_keys(&std::fs::read(dir.join(ext("sd"))).unwrap()),
+        &file_gis(&std::fs::read(dir.join(ext("nd"))).unwrap()),
+        SeqDb::open(&name(&dir, stem), seqtype).unwrap().num_seqs(),
     );
     assert!(
         queries.list.len() >= 6,
@@ -642,9 +643,9 @@ fn read_lmdb_files(dir: &Path, num_oids: u32, trace: &mut Trace) {
 
 #[test]
 fn damaged_lmdb_lookup_files_never_panic() {
-    let dir = TempDir::new("lmdb-p5");
-    dir.copy_fixtures(&lmdb_dir(), &["p5"]);
-    let pdb = std::fs::read(dir.0.join("p5.pdb")).unwrap();
+    let dir = TempDir::unique("damaged-lmdb-p5");
+    copy_fixtures(&dir, &lmdb_dir(), &["p5"]);
+    let pdb = std::fs::read(dir.join("p5.pdb")).unwrap();
     let volumes = tax_files::volumes(&Env::open(&pdb).unwrap()).unwrap();
     let num_oids = u32::try_from(tax_files::total_oids(&volumes)).unwrap();
     assert_eq!(num_oids, 7, "the OIDs of p5");
@@ -716,8 +717,8 @@ fn read_tx(dir: &Path, trace: &mut Trace) {
 
 #[test]
 fn damaged_lookup_files_of_a_database_never_panic() {
-    let dir = TempDir::new("lmdb-tx");
-    dir.copy_fixtures(&lmdb_dir(), &["tx"]);
+    let dir = TempDir::unique("damaged-lmdb-tx");
+    copy_fixtures(&dir, &lmdb_dir(), &["tx"]);
     let targets = ["tx.pdb", "tx.ptf", "tx.pto", "tx.pot", "tx.pos"];
     // The database and its three lookups.
     sweep("tx", &dir, &targets, 4, read_tx);
@@ -741,7 +742,7 @@ const TAXDB_TAXIDS: [i32; 11] = [
 /// The taxonomy name files on the search path, read by the lookups of the taxonomy columns
 /// (`names`) and of the checks before a search (`offset_error_taxid`, `any_lookup_faults`, `any_lookup_may_fail`).
 fn read_taxdb(dir: &Path, trace: &mut Trace) {
-    let search = SearchPath::new(dir, Some(dir.as_os_str()), None).unwrap();
+    let search = SearchPath::new(dir, Some(dir.as_os_str()), None);
     match TaxDb::open(&search) {
         // A database that NCBI treats as missing.
         Ok(db) if db.is_missing() => trace.note(db.open_messages()),
@@ -765,8 +766,9 @@ fn read_taxdb(dir: &Path, trace: &mut Trace) {
 
 #[test]
 fn damaged_taxdb_files_never_panic() {
-    let dir = TempDir::new("taxdb");
-    dir.copy_fixtures(
+    let dir = TempDir::unique("damaged-taxdb");
+    copy_fixtures(
+        &dir,
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/good"),
         &["taxdb"],
     );

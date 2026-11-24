@@ -1,0 +1,3 @@
+Error: (802.4) [tblastx] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+Error: [tblastx] JSON format failed
+BLAST failed to write output

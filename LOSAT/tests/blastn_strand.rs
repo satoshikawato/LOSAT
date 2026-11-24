@@ -1,6 +1,6 @@
 //! `blastn -strand plus|minus|both` on whole searches: the option is accepted (an unknown value is
-//! a clap error), `both` is the search without the option, and the searches of the two strands
-//! together are the search of both (NCBI BLAST+ 2.17.0 `-num_threads 1`, checked over
+//! NCBI's argument error), `both` is the search without the option, and the searches of the two
+//! strands together are the search of both (NCBI BLAST+ 2.17.0 `-num_threads 1`, checked over
 //! 543 + 91 probe cases: the lines of `plus` are the plus/plus lines of `both` and the lines of
 //! `minus` the plus/minus lines, with the same e-values; only the order of the subjects can
 //! change). That the bytes equal NCBI's is the business of the probe (`ncbi-parity` O2a) and the

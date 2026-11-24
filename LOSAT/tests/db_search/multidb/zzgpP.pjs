@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "zzgpP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "zzgpP",
+  "number-of-letters": 280,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-23T08:09:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49911,
+  "bytes-to-cache": 387,
+  "files": [
+    "zzgpP.pdb",
+    "zzgpP.phr",
+    "zzgpP.pin",
+    "zzgpP.pnd",
+    "zzgpP.pni",
+    "zzgpP.pog",
+    "zzgpP.pos",
+    "zzgpP.pot",
+    "zzgpP.psq",
+    "zzgpP.ptf",
+    "zzgpP.pto"
+  ]
+}

@@ -258,7 +258,7 @@ impl RoundSections<'_> {
                 None,
             )?,
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1540-1545
         writeln!(writer)
     }
 
@@ -297,7 +297,7 @@ impl RoundSections<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:756-848
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:85-87
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:86-87
     /// One part: for the repeat pass the two lines of the Score/E header, then the part's line
     /// and a blank line, then its rows (`write_description_table`'s rows and widths, every row of
     /// the part counted: its `m_NumToShow` is the number of its Seq-aligns). A part without rows

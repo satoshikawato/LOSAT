@@ -182,3 +182,56 @@ fn x_range_words_gives_the_counted_loop_s_words() {
     }
     assert!(words_seen > 1_000_000, "{words_seen} words");
 }
+
+/// No NCBI counterpart (a check of the walk's form): `contains_hit` answers, for every cell of the
+/// query's words and a few empty cells, and every query offset, whether the cell's chain holds
+/// the offset (`for_each_hit`), now that the walk returns at the first equal element; on chain
+/// tables of 4-byte elements (lookup width 8) and of 3-byte elements (width 12, LOSAT_X_MB24),
+/// with long chains (runs of one letter, repeats) and random letters.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69
+#[test]
+fn contains_hit_answers_the_chain_s_offsets() {
+    use crate::algorithm::blastn::lookup::build_two_stage_lookup;
+    let mut seed = 0x00C0_47A1_u64;
+    let mut next = |n: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) % n
+    };
+    let mut seq: Vec<u8> = Vec::new();
+    seq.extend(std::iter::repeat_n(0u8, 40));
+    for _ in 0..30 {
+        seq.extend([1u8, 3, 2, 0, 1, 3]);
+    }
+    seq.extend((0..400).map(|_| next(4) as u8));
+    seq.extend(std::iter::repeat_n(3u8, 25));
+    seq.extend((0..200).map(|_| next(4) as u8));
+    for lut in [8usize, 12] {
+        let refs: Vec<&[u8]> = vec![&seq];
+        let masks = vec![Vec::new()];
+        let table = build_two_stage_lookup(&refs, &[0], 28, lut, &masks, None, 0, 1_000_000, false);
+        let mask = (1u64 << (2 * lut)) - 1;
+        let mut cells: Vec<u64> = seq
+            .windows(lut)
+            .map(|w| w.iter().fold(0u64, |a, &b| (a << 2) | u64::from(b)) & mask)
+            .collect();
+        cells.extend((0..20).map(|_| next(mask + 1)));
+        cells.sort_unstable();
+        cells.dedup();
+        let mut longest = 0usize;
+        for &cell in &cells {
+            let mut chain = Vec::new();
+            table.for_each_hit(cell, |q| chain.push(q));
+            longest = longest.max(chain.len());
+            for q in 0..=(seq.len() as u32 + 2) {
+                assert_eq!(
+                    table.contains_hit(cell, q),
+                    q != 0 && chain.contains(&q),
+                    "lut {lut} cell {cell} offset {q}"
+                );
+            }
+        }
+        assert!(longest >= 25, "lut {lut}: a long chain ({longest})");
+    }
+}

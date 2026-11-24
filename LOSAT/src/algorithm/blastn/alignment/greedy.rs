@@ -2410,7 +2410,7 @@ unsafe fn x_greedy_cell_slow<const REVERSE: bool>(
     // The reference loop indexes the slices with these offsets.
     assert!(seq1_index >= 0 && seq2_index >= 0);
     let index = x_first_mismatch::<REVERSE>(seq1, seq2, len1, len2, seq1_index, seq2_index);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331-334,356-359
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:336-339,359-362
     let stop1 = seq1_index + index;
     let stop2 = seq2_index + index;
     if stop2 < len2 {
@@ -4083,7 +4083,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2805-2831
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2808-2818
             eprintln!(
                 "[GREEDY_DIRECTION] right q_ext={} s_ext={} score={}",
                 q_ext_r, s_ext_r, score
@@ -4124,7 +4124,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2836-2864
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2839-2851
             eprintln!(
                 "[GREEDY_DIRECTION] left q_ext={} s_ext={} score={}",
                 q_ext_l, s_ext_l, score_left
@@ -4188,7 +4188,7 @@ pub(super) fn greedy_gapped_alignment_internal(
                 subject.at(s_end),
             );
             if debug_traceback {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2759
                 eprintln!(
                     "[GREEDY_TRACEBACK] start=({}, {}) post_reduce={}",
                     q_off,

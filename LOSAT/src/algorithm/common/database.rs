@@ -8316,7 +8316,7 @@ pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (cited at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:774-777 (cited at
 // `ParsedSubject::prefetched`)
 /// The stop of NCBI's prefetch of one query batch's reported subjects `subjects` for a first
 /// format that writes the taxonomy database's texts at each `Hit` (`TaxdbPrinter`: the XML2 and

@@ -511,7 +511,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd, rpsbproc
-│   ├── cli/reader.rs      # NCBI's argument reader for the programs whose types clap converts (all above but blastdbcmd, plus rpstblastn)
+│   ├── cli/reader.rs      # NCBI's argument reader for the programs whose option types read its `Args` (`from_args`; all above but blastdbcmd, plus rpstblastn)
 │   ├── common.rs          # Shared hit type, gap edit operations and the HSP comparators
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
@@ -529,6 +529,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
 │   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports and their dispatch to the programs
+│   ├── web_v1_argv.rs     # ABI v1's frozen clap builder (wasm32 and its native tests), the only clap left: a new option reads `Args` in its type's `from_args`
 │   ├── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 │   └── web_adapter.rs     # Hidden façade: the engine items that web/adapter names, each named on its own
 └── tests/

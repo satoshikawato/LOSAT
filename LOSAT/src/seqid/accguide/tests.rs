@@ -1,8 +1,5 @@
 use super::*;
 
-#[path = "tests_old.rs"]
-mod old;
-
 /// FNV-1a 64 of the compacted guide lines, as `make_accguide.py` printed it for
 /// `accguide2.inc` of 2.17.0 (598d8ae6): 25,549 lines, 1,737,234 bytes.
 const GUIDE_FNV1A64: u64 = 0x0f89_a3ba_8888_0aef;
@@ -222,38 +219,7 @@ type Canonical = Vec<(
     Vec<(Vec<u8>, Vec<(Vec<(u32, u32)>, AccInfo)>)>,
 )>;
 
-fn canonical_old(guide: &old::AccGuide) -> Canonical {
-    guide
-        .rules
-        .iter()
-        .map(|(&fmt, submap)| {
-            (
-                fmt,
-                submap.prefixes.clone().into_iter().collect(),
-                submap.wildcards.clone(),
-                submap
-                    .big_specials
-                    .iter()
-                    .map(|(to, (from, value))| (to.clone(), from.clone(), *value))
-                    .collect(),
-                submap
-                    .small_specials
-                    .iter()
-                    .map(|(key, options)| {
-                        let options = options
-                            .iter()
-                            .map(|(bits, value)| (bits.0.clone(), *value))
-                            .collect();
-                        (key.clone(), options)
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
-}
-
-/// The canonical form of the new guide `guide`, with the specials of each format that
-/// `specials` gives.
+/// The canonical form of `guide`, with the specials of each format that `specials` gives.
 fn canonical_new<'a>(
     guide: &'a AccGuide,
     specials: impl Fn(u32, &'a SubMap) -> &'a Specials,
@@ -322,26 +288,24 @@ fn fingerprint(canonical: &Canonical) -> u64 {
     fnv1a64(&bytes)
 }
 
-/// The new builder makes the guide of dev's builder (`tests_old.rs`), whole, and part by part:
-/// the rules without the specials, and the specials of each format built alone.
+/// The fingerprint of the guide that the builder before the specials were read per format made
+/// (dev 2cd5a1906; the tests of b259ca129 and 5c522de1f compared that builder's guide with this
+/// one, whole and by part, and every lookup at the edges of the ranges, 2026-11-24).
+const GUIDE_FINGERPRINT: u64 = 0xa28f_dd99_aea8_0b98;
+
+/// The builder makes the guide of the old builder, whole, and part by part: the rules without
+/// the specials, and the specials of each format built alone.
 #[test]
 fn the_builder_makes_the_guide_of_the_old_builder() {
-    let old = old::AccGuide::built_in();
     let all = AccGuide::built_in(Part::All);
-    let expected = canonical_old(&old);
     let whole = canonical_new(&all, |_, submap| {
         submap
             .specials
             .get()
             .expect("made by a build of every part")
     });
-    assert_eq!(old.load_warnings, all.load_warnings);
-    assert_eq!(old.general, all.general);
-    assert_eq!(whole.len(), expected.len());
-    for (new, old) in whole.iter().zip(&expected) {
-        assert!(new == old, "format {:#x} differs", old.0);
-    }
-    println!("guide fingerprint {:#018x}", fingerprint(&expected));
+    assert_eq!(fingerprint(&whole), GUIDE_FINGERPRINT);
+    assert_eq!(all.general.len(), 5);
     let rules = AccGuide::built_in(Part::Rules);
     assert!(rules.load_warnings.is_empty());
     assert_eq!(rules.general, all.general);
@@ -367,21 +331,22 @@ fn the_builder_makes_the_guide_of_the_old_builder() {
     assert!(parts.next().is_none());
 }
 
-/// The lookups of the guide (`Find`, with the key it reports) answer as dev's builder's guide
-/// does: at both ends of every range of every small special and next to them, at both ends of
-/// every big special and next to them, and for random accessions of every prefix and wildcard.
+/// The lookups of the guide (`Find`, with the key it reports), which reads the specials of a
+/// format at need, answer as the guide built whole does: at both ends of every range of every
+/// small special and next to them, at both ends of every big special and next to them, and for
+/// random accessions of every prefix and wildcard.
 #[test]
-fn lookups_answer_as_with_the_old_builder() {
-    let old = old::AccGuide::built_in();
+fn lookups_answer_as_with_the_whole_guide() {
+    let whole = AccGuide::built_in(Part::All);
     let new = guide();
     let mut lookups = 0usize;
     let mut check = |fmt: u32, acc: &[u8]| {
-        let (mut old_key, mut new_key) = (Vec::new(), Vec::new());
-        let expected = old.find(fmt, acc, Some(&mut old_key));
+        let (mut whole_key, mut new_key) = (Vec::new(), Vec::new());
+        let expected = whole.find(fmt, acc, Some(&mut whole_key));
         let got = new.find(fmt, acc, Some(&mut new_key));
         assert_eq!(
             (got, &new_key),
-            (expected, &old_key),
+            (expected, &whole_key),
             "{fmt:#x} {}",
             String::from_utf8_lossy(acc)
         );
@@ -395,11 +360,15 @@ fn lookups_answer_as_with_the_old_builder() {
         state ^= state << 17;
         state % bound
     };
-    for (&fmt, submap) in &old.rules {
+    for (&fmt, submap) in &whole.rules {
         let letters = (fmt >> 16) as usize;
         let digits = (fmt & 0xffff) as usize;
         let size = letters + digits;
-        for (key, options) in &submap.small_specials {
+        let specials = submap
+            .specials
+            .get()
+            .expect("made by a build of every part");
+        for (key, &slot) in &specials.small_specials {
             // The digits that the bit is cut from (`x_SplitSpecial` of an accession of the
             // format's size).
             let Some(width) = size
@@ -409,7 +378,7 @@ fn lookups_answer_as_with_the_old_builder() {
                 continue;
             };
             let limit = 10u64.pow(width as u32);
-            for (bits, _) in options {
+            for (bits, _) in &specials.small_options[slot].1 {
                 for &(left, right) in &bits.0 {
                     let (left, right) = (u64::from(left), u64::from(right));
                     for bit in [left.wrapping_sub(1), left, right, right + 1] {
@@ -422,7 +391,7 @@ fn lookups_answer_as_with_the_old_builder() {
                 }
             }
         }
-        for (to, (from, _)) in &submap.big_specials {
+        for (to, (from, _)) in &specials.big_specials {
             for acc in [from, to] {
                 check(fmt, acc);
                 for step in [b'0', b'9'] {

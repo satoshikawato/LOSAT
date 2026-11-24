@@ -35,6 +35,7 @@ pub(crate) mod x_query_dust_par;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:149-242 (`s_NuclUngappedExtendExact`). The same
 // loops with their step counts worked out first (LOSAT_X_BNUNGAPCOUNT, graduated 2026-10-27).
 pub(crate) mod x_ungap_count;
+pub(crate) mod x_ungap_block;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-166
 pub mod hsp;
 pub(crate) mod sam;

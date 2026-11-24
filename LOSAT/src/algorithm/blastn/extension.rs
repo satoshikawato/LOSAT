@@ -416,6 +416,20 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     reduced_cutoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
+    if super::x_ungap_block::probe() & 1 != 0 {
+        return super::x_ungap_block::approx_blocks(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            s_match_end,
+            subject_len,
+            x_dropoff,
+            score_table,
+            reduced_cutoff,
+            matrix,
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
     // 913-917 and 1755-1759)
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64

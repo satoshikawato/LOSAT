@@ -188,6 +188,17 @@ fn write_int8(out: &mut Vec<u8>, data: i64) {
     write_int8_value(out, data);
 }
 
+/// The capacity that `encode_defline_set` gives the record of `set`: 64 bytes, and for each
+/// definition line its title and 64 bytes an id, so that a record of the usual size is written
+/// without growing its buffer (LOSAT's speed); a larger one grows as before.
+fn encoded_capacity(set: &DeflineSet) -> usize {
+    64 + set
+        .deflines
+        .iter()
+        .map(|defline| defline.title.as_ref().map_or(0, Vec::len) + 64 * defline.ids.len())
+        .sum::<usize>()
+}
+
 /// The BER writer of a whole `Blast-def-line-set` (`*deflines` streamed to `oss` through
 /// `MSerial_AsnBinary`), with the member path of each string for the serializer's diagnostics.
 struct SetWriter<'a> {
@@ -375,7 +386,7 @@ impl SetWriter<'_> {
 /// VisibleString cannot hold are written as `#` and appended to `bad`.
 pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
     let mut w = SetWriter {
-        out: Vec::with_capacity(64),
+        out: Vec::with_capacity(encoded_capacity(set)),
         path: vec!["Blast-def-line-set"],
         bad,
     };

@@ -1,4 +1,7 @@
-use super::{decode_full_set, read_std_signed, title_replaced_chars, Reader, StdSignedError};
+use super::{
+    decode_full_set, fix_visible_chars, read_std_signed, replaced_bytes, title_replaced_chars,
+    Reader, StdSignedError,
+};
 use crate::seqdb::header::decode_deflines_as;
 use std::path::Path;
 
@@ -357,4 +360,39 @@ fn title_posts_give_each_byte_with_the_string_as_ncbi_holds_it() {
     assert_eq!(&*replaced[0].string, b"z\xff");
     // A clean record: nothing.
     assert!(title_replaced_chars(&titled_set(&[b"clean"])).is_empty());
+}
+
+/// `replaced_bytes` counts the bytes that `fix_visible_chars` replaces, for strings of every
+/// byte value and of lengths about its pieces of 255 bytes, every byte replaced included.
+#[test]
+fn replaced_bytes_counts_the_replaced_bytes() {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for len in [
+        0, 1, 31, 32, 254, 255, 256, 509, 510, 511, 765, 766, 1_000, 4_097,
+    ] {
+        let random: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+        let mixed: Vec<u8> = (0..len)
+            .map(|i| if i % 3 == 0 { 0x7f } else { b'a' })
+            .collect();
+        for value in [
+            random,
+            mixed,
+            vec![0x80; len],
+            vec![b'~'; len],
+            vec![0x1f; len],
+        ] {
+            let replaced = fix_visible_chars(&value)
+                .iter()
+                .zip(&value)
+                .filter(|(fixed, stored)| fixed != stored)
+                .count();
+            assert_eq!(replaced_bytes(&value), replaced, "length {len}");
+        }
+    }
 }

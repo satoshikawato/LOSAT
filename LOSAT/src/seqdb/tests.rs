@@ -2081,6 +2081,46 @@ fn x_check_range_gives_the_errors_of_read_range() {
 }
 
 #[test]
+fn with_range_lends_the_bytes_and_errors_of_read_range() {
+    let dir = temp_dir("with-range");
+    let path = dir.join("ten");
+    let bytes: Vec<u8> = (0..10).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    let file = file::DbFile::open(&path).unwrap();
+    // The longest range first: a later, shorter range is lent its own bytes only.
+    for (start, end) in [
+        (0, 10),
+        (3, 2),
+        (0, 11),
+        (10, 11),
+        (10, 10),
+        (4, 6),
+        (9, 10),
+        (0, 3),
+    ] {
+        assert_eq!(
+            file.with_range(start, end, <[u8]>::to_vec)
+                .map_err(|e| e.to_string()),
+            file.read_range(start, end).map_err(|e| e.to_string()),
+            "{start}..{end}"
+        );
+    }
+    // A read inside the reader's read is lent a buffer of its own, and the outer bytes stay.
+    let nested = file
+        .with_range(2, 8, |outer| {
+            let inner = file.with_range(5, 7, <[u8]>::to_vec).unwrap();
+            (inner, outer.to_vec())
+        })
+        .unwrap();
+    assert_eq!(nested, (bytes[5..7].to_vec(), bytes[2..8].to_vec()));
+    assert_eq!(
+        file.with_range(1, 4, <[u8]>::to_vec).unwrap(),
+        bytes[1..4].to_vec()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn header_members_lengths_and_bytes() {
     let path = Path::new("test.phr");
     let decode = |record: &[u8]| decode_defline_set(record, path, 0);

@@ -306,7 +306,8 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile`, whether it is a dry run, whether its inputs are read
+   * `-conffile`, the file of its `-logfile`, the file of its `-export_search_strategy` (an engine
+   * before line RG item F1w gives none), whether it is a dry run, whether its inputs are read
    * together (`registerInputs`), what it prints in place of a search (`prints`) and whether it searches the database of
    * `-db` (`database`); or the CLI's message for an argv that the engine cannot start (a program that ABI v2 does not run).
    */
@@ -316,6 +317,7 @@ export class ReactorAbi {
     const json = this.response() as {
       conffile: string | null;
       log_file: string | null;
+      strategy_file?: string | null;
       dry_run: boolean;
       register_inputs: boolean;
       prints: string | null;
@@ -327,6 +329,7 @@ export class ReactorAbi {
       start: {
         conffile: json.conffile,
         logFile: json.log_file,
+        strategyFile: json.strategy_file ?? null,
         dryRun: json.dry_run,
         registerInputs: json.register_inputs,
         prints: json.prints,

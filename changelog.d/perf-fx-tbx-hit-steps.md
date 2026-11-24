@@ -1,0 +1,1 @@
+- tblastx searches with many hits run faster: 40 Autographivirales phage genomes searched against each other (BLOSUM45) take about 9 % less time at one thread, and 40 Begomovirus genomes about 3 % less. Reports do not change.

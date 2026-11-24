@@ -1,0 +1,2 @@
+creating <R>/sv5/db.00.idx...Error: (CSeqDBException::eInvalid) Could not open gi-mask index files.
+Error: (106.16) Application's execution failed (CSeqDBException::eInvalid) Could not open gi-mask index files.

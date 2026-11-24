@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "s95pP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "s95pP.fa",
+  "number-of-letters": 95,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-24T04:22:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49591,
+  "bytes-to-cache": 193,
+  "files": [
+    "s95pP.pdb",
+    "s95pP.phr",
+    "s95pP.pin",
+    "s95pP.pnd",
+    "s95pP.pni",
+    "s95pP.pog",
+    "s95pP.pos",
+    "s95pP.pot",
+    "s95pP.psq",
+    "s95pP.ptf",
+    "s95pP.pto"
+  ]
+}

@@ -554,10 +554,10 @@ fn losat(dir: &Path, command: &str) -> (i32, String, String) {
 
 /// The database of one volume that `losat makeblastdb -gi_mask` writes opens (its alias file
 /// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 25), and LOSAT's
-/// programs that read sequences stop on its `MASKLIST` with LOSAT's refusal, before they print
-/// anything: they do not read GI masks yet (line NP item M4c-2).
+/// readers read its GI masks (line NP item M4c-2; `gi_mask_read.rs` compares their output with
+/// NCBI's on the same database).
 #[test]
-fn readers_refuse_the_gi_masks_of_a_single_volume_database() {
+fn readers_read_the_gi_masks_of_a_single_volume_database() {
     let inputs = fixtures().join("in");
     let tmp = TempDir::new("readers");
     for name in ["nucl.fa", "dust_nucl.asnb"] {
@@ -572,15 +572,21 @@ fn readers_refuse_the_gi_masks_of_a_single_volume_database() {
     let alias = std::fs::read_to_string(tmp.0.join("db.nal")).unwrap();
     assert!(alias.ends_with("\nDBLIST db\nMASKLIST gm1 \n"), "{alias:?}");
     assert!(tmp.0.join("db.njs").is_file());
-    let refusal = "unsupported database: alias file key MASKLIST is not supported";
+    let info = losat(&tmp.0, "blastdbcmd -db db -info");
+    assert_eq!((info.0, info.2.as_str()), (0, ""), "{info:?}");
+    assert!(
+        info.1.contains(
+            "\n0            dust                                    window=64; level=20; linker=1"
+        ),
+        "{info:?}"
+    );
     for command in [
-        "blastdbcmd -db db -info",
         "blastdbcmd -db db -entry all -outfmt %m0",
         "blastn -query nucl.fa -db db -db_soft_mask 0 -outfmt 6",
     ] {
         let got = losat(&tmp.0, command);
         assert!(
-            got.0 == 1 && got.1.is_empty() && got.2.contains(refusal),
+            got.0 == 0 && got.2.is_empty() && !got.1.is_empty(),
             "{command}: {got:?}"
         );
     }

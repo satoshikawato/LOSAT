@@ -219,7 +219,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+    return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
   }
 
   /**

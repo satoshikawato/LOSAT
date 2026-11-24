@@ -498,13 +498,9 @@ impl HspStream {
 
     /// The lists of the closed stream, in their order, as `cut` leaves them (`Runtime::batch_end`:
     /// without the subjects that the fetches of the redo or the traceback exclude).
-    pub fn retain_closed<E>(
-        &mut self,
-        cut: impl FnOnce(&mut Vec<HspList>) -> Result<(), E>,
-    ) -> Result<(), E> {
-        match self.sorted.as_mut() {
-            Some(sorted) => cut(sorted),
-            None => Ok(()),
+    pub fn retain_closed(&mut self, cut: impl FnOnce(&mut Vec<HspList>)) {
+        if let Some(sorted) = self.sorted.as_mut() {
+            cut(sorted);
         }
     }
 

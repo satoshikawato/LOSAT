@@ -1,0 +1,8 @@
+Error: [blastdbcmd] Filtering algorithm dust does not exist.
+
+Available filtering algorithm(s):
+
+Algorithm ID  Algorithm name                          
+    0         m1                                      
+    1         m2                                      
+

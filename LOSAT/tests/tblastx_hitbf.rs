@@ -13,7 +13,9 @@
 //! frames of about 50,000 letters, so the unit path runs; `LOSAT_X_TBXEXTBATCH=2` sends its units to
 //! the batched scan. The tests compare the default, the batched scan, the prefetch
 //! on every subject and today's lists with `=0`; the reach rows (`LOSAT_X_REACH`,
-//! `tests/reach_support`) show that the loop ran.
+//! `tests/reach_support`) show that the loop ran. `LOSAT_X_TBXHITSTEP` (in the strict set), the
+//! form of the loop that writes a cell's next value before the candidate test, two hits a step,
+//! is compared with its `=0` on the same searches (`the_hit_steps_change_no_report`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +29,8 @@ fn fasta(name: &str) -> PathBuf {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXHITBF", "0");
+/// The branch-free loop before LOSAT_X_TBXHITSTEP (`x_hits_before`).
+const HITSTEP_OFF: (&str, &str) = ("LOSAT_X_TBXHITSTEP", "0");
 /// The batched scan of LOSAT_X_TBXEXTBATCH on every unit (`x_hit_batched` for the rare hits).
 const BATCHED: (&str, &str) = ("LOSAT_X_TBXEXTBATCH", "2");
 /// Today's `InitHSP` lists instead of the compact records (`run_unit`, `run_unit_batched`).
@@ -162,5 +166,34 @@ fn the_branch_free_loop_gives_the_same_report() {
         }
         let (batched_off, _) = inputs.tblastx(threads, &[BATCHED, OFF]);
         assert_eq!(batched_off, off, "threads {threads}: batched =0 against =0");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (the tests of each hit
+// of the two-hit loop). The branch-free loop writes a cell's next value before the candidate test
+// and takes two hits a step (`LOSAT_X_TBXHITSTEP`, on by default; the unit tests of
+// `tblastx/x_tbx_hitbf.rs` compare it with the loop before and with the reference's statements on
+// random tables): every search gives the report of `=0`, in `scan_unit` and the batched scan, with
+// and without the prefetch, at one and two threads.
+#[test]
+fn the_hit_steps_change_no_report() {
+    let inputs = Inputs::new("steps");
+    for threads in [1, 2] {
+        for switches in [
+            &[][..],
+            &[PREFETCH][..],
+            &[BATCHED][..],
+            &[BATCHED, PREFETCH][..],
+        ] {
+            let mut off_arm: Vec<(&str, &str)> = switches.to_vec();
+            off_arm.push(HITSTEP_OFF);
+            let (off, _) = inputs.tblastx(threads, &off_arm);
+            assert!(!off.is_empty(), "threads {threads} {switches:?}: no hits");
+            let (report, _) = inputs.tblastx(threads, switches);
+            assert!(
+                report == off,
+                "threads {threads} {switches:?}: LOSAT_X_TBXHITSTEP changed the report"
+            );
+        }
     }
 }

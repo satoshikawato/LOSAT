@@ -45,6 +45,17 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
 - `lnn` (review 1 of D1c-1b, F1): version 5 of lnn.fna (3 nucleotides, taxids from lnn.map), the only line of
   OID 0 rewritten to have no Seq-id; OID 0 is `lnnq.fna` (the back-translation of `lnnq.faa`), OID 1 the same
   with every 37th base changed, OID 2 unrelated.
+- `lr`, `ls` (D1c-1c, review 2 G2 of D1c-1b): version 5 of lr.faa and ls.faa in three volumes (one sequence each):
+  OID 0 a filler, then the query `lrq.faa` (`ref|NP_700002.1| strong` in lr, `ref|NP_700001.1|` in ls) and a random
+  1000-residue `gnl|BL_ORD_ID|xyz weak` (best E-value about 2.5), weak before strong in lr and after it in ls: under a
+  negative seqid list NCBI's fetch of the weak subject cannot read its header (the string tag in a later volume), and
+  the composition-based redo frees it unfetched once the strong hit fills the hit list. `lrn`, `lsn`: the same,
+  back-translated (TBLASTN), `lrq.fna` the back-translated query (BLASTX). `lrqw.faa` (and `lrqw.fna`) holds that query
+  and then the weak sequence `w`, whose own search fetches the weak subject: with `BATCH_SIZE=1` NCBI writes the first
+  batch's report and then ends.
+- `lm` (D1c-1c-b): `ln` with its first 30 letters made `Q` in every sequence and the SEG masks of `segmasker
+  -parse_seqids` (algorithm 21) in the volume, the same lines rewritten without Seq-ids: blastdbcmd's masks of a
+  sequence whose front line has none (NCBI's Seq-loc of the masks takes the null best id and throws).
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -59,7 +70,7 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
            "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
-           "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa"}
+           "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -342,6 +353,34 @@ def build_d1c1b(mk, common):
     drop_seqids(OUT / "lnn", {0: {0}}, "n")
 
 
+def build_d1c1c(mk):
+    """The databases of D1c-1c: lr and ls (a later volume's string BL_ORD_ID tag on a weak subject), and their
+    nucleotide forms lrn and lsn."""
+    back_translate(OUT / "lrq.faa", OUT / "lrq.fna")
+    back_translate(OUT / "lrqw.faa", OUT / "lrqw.fna")
+    for name in ("lr", "ls"):
+        run([mk, "-in", f"{name}.faa", "-dbtype", "prot", "-out", name, "-title", name, "-parse_seqids",
+             "-max_file_sz", "1000B"])
+        back_translate(OUT / f"{name}.faa", OUT / f"{name}.fna")
+        run([mk, "-in", f"{name}.fna", "-dbtype", "nucl", "-out", f"{name}n", "-title", f"{name}n", "-parse_seqids",
+             "-max_file_sz", "1000B"])
+        (OUT / f"{name}.fna").unlink()
+
+
+def build_d1c1cb(ncbi: Path):
+    """The database of D1c-1c-b: lm (ln's lines without Seq-ids over a volume with SEG masks)."""
+    lines = (OUT / "ln.faa").read_text().splitlines()
+    (OUT / "lm.faa").write_text("\n".join(line if line.startswith(">") else "Q" * 30 + line[30:]
+                                          for line in lines) + "\n")
+    run([str(ncbi / "segmasker"), "-in", "lm.faa", "-infmt", "fasta", "-parse_seqids", "-outfmt",
+         "maskinfo_asn1_bin", "-out", "lm.asnb"])
+    run([str(ncbi / "makeblastdb"), "-in", "lm.faa", "-dbtype", "prot", "-out", "lm", "-title", "lm",
+         "-parse_seqids", "-taxid_map", "ln.map", "-mask_data", "lm.asnb"])
+    drop_seqids(OUT / "lm", {1: {1}, 2: {0}, 3: {0}})
+    for name in ("lm.faa", "lm.asnb"):
+        (OUT / name).unlink()
+
+
 def main():
     ncbi = Path(sys.argv[1])
     for path in OUT.iterdir():
@@ -368,6 +407,8 @@ def main():
          "-blastdb_version", "4"])
     build_d1c_fix1(mk, common)
     build_d1c1b(mk, common)
+    build_d1c1c(mk)
+    build_d1c1cb(ncbi)
     for path in list(OUT.glob("*.pjs")) + list(OUT.glob("*.njs")):
         path.unlink()
     for name, data in LISTS.items():

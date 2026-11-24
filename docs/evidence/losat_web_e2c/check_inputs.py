@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "losat_web_e2a"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "LOSAT" / "tests"))
+from losat_wording import losat_bytes, losat_output_bytes  # noqa: E402
 from run_oracle import ENGINE  # noqa: E402
 
 REJECTION_MARKERS = (b"which LOSAT does not reproduce", b"not supported by LOSAT")
@@ -526,6 +528,12 @@ def classify(ncbi: subprocess.CompletedProcess, ours: subprocess.CompletedProces
     return f"DIFF exit {ncbi.returncode}/{ours.returncode}"
 
 
+# Optional NCBI-side substitution, empty here: {case: (word, near_word, label)}. A later layer fills it
+# for a case whose NCBI result is compared at another argument value (NCBI's run replaces `word` with
+# `near_word`); a `same` result is then reported as `label`.
+NCBI_NEAR: dict[str, tuple[str, str, str]] = {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bin-dir", type=Path, required=True)
@@ -565,7 +573,9 @@ def main() -> int:
                 Path(f"{out_fifo}.read").unlink(missing_ok=True)
                 os.mkfifo(out_fifo)
                 reader = subprocess.Popen(["sh", "-c", f"cat '{out_fifo}' > '{out_fifo}.read'"])
-            words = [*command, *(str(out) if word == "{OUT}" else word for word in argv)]
+            near = NCBI_NEAR.get(name) if label == "ncbi" else None
+            words = [*command, *(str(out) if word == "{OUT}" else near[1] if near and word == near[0] else word
+                                 for word in argv)]
             try:
                 if stdin_file:
                     with open(ENGINE / stdin_file, "rb") as handle:
@@ -574,6 +584,12 @@ def main() -> int:
                     run = subprocess.run(words, cwd=ENGINE, capture_output=True, input=stdin, env=env, timeout=60)
             except subprocess.TimeoutExpired as expired:
                 run = subprocess.CompletedProcess(expired.cmd, -9, b"", b"<timeout>")
+            # AGENTS.md rule 8: NCBI's bytes are compared in LOSAT's words (the `-out` file and the
+            # pipe's bytes are mapped on their own, before the `<out>`/`<fifo>` markers join the output).
+            words_of = label == "ncbi"
+            if words_of:
+                run.stdout = bytes(losat_output_bytes(run.stdout))
+                run.stderr = bytes(losat_bytes(run.stderr))
             if writer:
                 writer.kill()
                 writer.wait()
@@ -583,12 +599,19 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     reader.kill()
                     reader.wait()
-                run.stdout += b"<fifo>" + Path(f"{out_fifo}.read").read_bytes()
+                piped = Path(f"{out_fifo}.read").read_bytes()
+                run.stdout += b"<fifo>" + (bytes(losat_output_bytes(piped)) if words_of else piped)
             if "{OUT}" in argv:
-                run.stdout += b"<out>" + (out.read_bytes() if out.exists() else b"<missing>")
+                if not out.exists():
+                    run.stdout += b"<out><missing>"
+                else:
+                    written = out.read_bytes()
+                    run.stdout += b"<out>" + (bytes(losat_output_bytes(written)) if words_of else written)
             runs.append(run)
         ncbi, ours = runs
         result = "timeout" if -9 in (ncbi.returncode, ours.returncode) else classify(ncbi, ours)
+        if result == "same" and name in NCBI_NEAR:
+            result = NCBI_NEAR[name][2]
         if result != expect:
             unexpected.append(name)
         first = ours.stderr.decode(errors="replace").strip().splitlines()

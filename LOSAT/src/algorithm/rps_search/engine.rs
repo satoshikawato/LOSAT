@@ -739,7 +739,7 @@ impl RpsRun<'_> {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(searched);
             if remaining[q_idx].fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
-                let traced = finish_query(scratch, q_idx);
+                let traced = out_of_line(|| finish_query(scratch, q_idx));
                 *results[q_idx]
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(traced);
@@ -770,6 +770,17 @@ impl RpsRun<'_> {
         }
         Ok(take_results(refused, results))
     }
+}
+
+// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
+/// Calls `run` (the rest of a query's search after its last unit, `RpsRun::search_volume`) in a
+/// function of its own that is never inlined, so that the unit's search, whose scan is inlined in
+/// the caller, does not take its code: the scan's registers and stack slots then do not depend on
+/// the traceback's code. A change there had moved them and made the scan's branches mispredict
+/// 3-4 % more (CDD searches 0.9-1.3 % slower; series PR, item PS10e).
+#[inline(never)]
+fn out_of_line<T>(run: impl FnOnce() -> T) -> T {
+    run()
 }
 
 /// The number of units of the query `q_idx` (`search_volume`).

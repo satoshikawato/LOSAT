@@ -895,4 +895,74 @@ describe('Coordinator single queue and DataService tool storage', () => {
     probe2.close();
     await data.deleteRun(finId);
   });
+
+  it('re-reads draft state after awaiting validation in ToolDraft.submit()', async () => {
+    const { data } = makeData();
+    let releaseInflate!: () => void;
+    const inflateGate = new Promise<void>((resolve) => {
+      releaseInflate = resolve;
+    });
+    const origInflate = data.inflateToSessionFile.bind(data);
+    data.inflateToSessionFile = async (file: File) => {
+      await inflateGate;
+      return origInflate(file);
+    };
+
+    const base = new FakeEngine();
+    let holdFirstValidate = false;
+    let releaseValidate!: () => void;
+    const validateGate = new Promise<void>((resolve) => {
+      releaseValidate = resolve;
+    });
+    let validateWaiting = false;
+    const engine = stubEngine(base, {
+      async validateTool(argv) {
+        if (holdFirstValidate) {
+          holdFirstValidate = false;
+          validateWaiting = true;
+          await validateGate;
+        }
+        return base.validateTool(argv);
+      },
+    });
+
+    const enqueued: ToolRequest[] = [];
+    const draft = new ToolDraft({
+      engine,
+      data,
+      enqueueToolAll: async (reqs) => {
+        enqueued.push(...reqs);
+        return { ok: true, runIds: reqs.map((_, i) => `sub-${i + 1}`) };
+      },
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    // Start inflating a .gz file (still inflating when submit() is clicked) and trigger a held validation.
+    draft.addFastaFiles([new File([gzipSync('>seq\nACGTACGT\n')], 'late.fa.gz')]);
+    expect(draft.state.get().fastaFiles[0]?.status).toBe('inflating');
+    holdFirstValidate = true;
+    draft.setField('-unit', '6');
+    const submitPromise = draft.submit();
+    for (let i = 0; i < 40 && !validateWaiting; i++) await sleep(10);
+    expect(validateWaiting).toBe(true);
+
+    // While submit() is awaiting validation, finish the inflate AND change -unit to 7.
+    releaseInflate();
+    for (let i = 0; i < 40 && draft.state.get().fastaFiles[0]?.status !== 'ready'; i++) await sleep(10);
+    expect(draft.state.get().fastaFiles[0]?.status).toBe('ready');
+    draft.setField('-unit', '7');
+
+    // Release validation; submit() must build the request from the post-await state (late.fa + -unit 7).
+    releaseValidate();
+    const res = await submitPromise;
+    expect(res.ok).toBe(true);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.argv).toContain('-in');
+    expect(enqueued[0]!.argv).toContain('late.fa');
+    expect(enqueued[0]!.argv).toContain('-unit');
+    expect(enqueued[0]!.argv).toContain('7');
+    expect(enqueued[0]!.argv).not.toContain('6');
+  });
 });

@@ -455,10 +455,26 @@ export class ToolDraft {
 
   /** Submits the current WindowMasker job(s) to the shared Coordinator queue. */
   async submit(): Promise<EnqueueAllResult> {
-    const state = this.state.get();
-    if (state.submitting) return { ok: false, message: 'A submission is already in progress.' };
+    if (this.state.get().submitting) return { ok: false, message: 'A submission is already in progress.' };
     this.set({ submitting: true, message: undefined });
     try {
+      const busy = this.deps.isBusy?.() === true;
+      if (!busy) {
+        for (;;) {
+          if (this.validationTimer !== undefined) {
+            clearTimeout(this.validationTimer);
+            this.validationTimer = undefined;
+            await this.runValidationNow();
+            continue;
+          }
+          const turn = this.validationTurn;
+          await turn;
+          if (this.validationTimer === undefined && this.validationTurn === turn) break;
+        }
+      }
+      // Re-read the draft state after awaiting validation (same order as SearchDraft.prepareAndEnqueue)
+      // so changes that arrived during the await (an inflate finishing, an option changing) are used.
+      const state = this.state.get();
       let extraWords: readonly string[];
       try {
         extraWords = this.parseExtra(state);
@@ -468,26 +484,16 @@ export class ToolDraft {
         return { ok: false, message };
       }
 
-      const preview = this.buildArgv(state, extraWords);
-      const prints = toolPrintsKind(preview);
-
-      const busy = this.deps.isBusy?.() === true;
-      if (!busy) {
-        if (this.validationTimer !== undefined) {
-          clearTimeout(this.validationTimer);
-          this.validationTimer = undefined;
-          await this.runValidationNow();
-        } else {
-          await this.validationTurn;
-        }
-      }
-      const currentKey = this.validationKey(this.state.get());
-      const validated = this.state.get().validation;
+      const currentKey = this.validationKey(state);
+      const validated = state.validation;
       if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
         const text = toolValidationSummary(validated.message);
         this.reportError(text);
         return { ok: false, message: text };
       }
+
+      const preview = this.buildArgv(state, extraWords);
+      const prints = toolPrintsKind(preview);
 
       const requests = prints !== null
         ? [this.buildPrintRequest(state, extraWords, prints)]

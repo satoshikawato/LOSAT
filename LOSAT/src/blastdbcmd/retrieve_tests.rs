@@ -164,7 +164,7 @@ fn batch_lines_split_in_two() {
     std::fs::remove_dir_all(&dir).unwrap();
     assert!(
         matches!(read_batch("entry_batch", std::ffi::OsStr::new("in/nosuch.txt"), &mut Cin::new(&mut std::io::empty())),
-            Err(Stop::Ncbi(message))
-        if message == "Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
+            Err(Stop::NcbiBytes(message))
+        if message == b"Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
     );
 }

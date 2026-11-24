@@ -1315,8 +1315,8 @@ fn invalid_databases_give_ncbis_errors() {
     );
     let error = open_error("alias_empty", SeqType::Protein);
     assert!(
-        matches!(&error, SeqDbError::Format { message, .. }
-            if message.starts_with("No database names were found in alias file [")),
+        matches!(&error, SeqDbError::NotFound(message)
+            if message.starts_with(b"No database names were found in alias file [")),
         "{error}"
     );
     let error = open_error("alias_missing", SeqType::Protein);
@@ -2639,7 +2639,6 @@ fn ncbis_errors_are_told_from_losats() {
         "Error: requested sequence type does not match DB.",
         "DB list contains both Version 4 and Version 5 dbs",
         "Illegal configuration: DB alias files are mutually recursive.",
-        "No database names were found in alias file [/data/alias].",
     ] {
         assert_eq!(
             format(message).ncbi_message().as_deref(),

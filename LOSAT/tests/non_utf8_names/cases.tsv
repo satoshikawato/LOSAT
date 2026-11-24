@@ -76,7 +76,6 @@ K10_bd_entry	ncbi	-	copy tests/db_search/xb_n.nhr ndb.nhr ; copy tests/db_search
 K10_bd_outfmt	ncbi	-	copy tests/db_search/xb_n.nhr ndb.nhr ; copy tests/db_search/xb_n.nin ndb.nin ; copy tests/db_search/xb_n.nsq ndb.nsq	blastdbcmd -db ndb -entry all -outfmt %l\xe9%o
 K10_bd_range	ncbi	-	copy tests/db_search/xb_n.nhr ndb.nhr ; copy tests/db_search/xb_n.nin ndb.nin ; copy tests/db_search/xb_n.nsq ndb.nsq	blastdbcmd -db ndb -entry all -range \xe9
 K10_bd_mask_with	ncbi	-	copy tests/db_search/xb_n.nhr ndb.nhr ; copy tests/db_search/xb_n.nin ndb.nin ; copy tests/db_search/xb_n.nsq ndb.nsq	blastdbcmd -db ndb -entry all -mask_sequence_with \xe9
-K10_bd_taxids	ncbi	-	copy tests/db_search/xb_n.nhr ndb.nhr ; copy tests/db_search/xb_n.nin ndb.nin ; copy tests/db_search/xb_n.nsq ndb.nsq	blastdbcmd -db ndb -taxids \xe9
 K10_mp_in_missing	ncbi	-	mkdir x	makeprofiledb -in m\xe9
 K10_mp_title	ncbi	-	copy tests/fixtures/makeprofiledb/in/d1.smp d1.smp ; write l.txt d1.smp\n	makeprofiledb -in l.txt -out pdb -title t\xe9
 K10_mp_in_file	ncbi	-	copy tests/fixtures/makeprofiledb/in/d1.smp d1.smp ; write l\xe9.txt d1.smp\n	makeprofiledb -in l\xe9.txt -out pdb

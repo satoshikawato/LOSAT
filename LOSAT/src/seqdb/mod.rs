@@ -451,9 +451,6 @@ const NCBI_COLUMN_MESSAGE_PREFIXES: [&str; 3] = [
     "Error: volume (",
 ];
 
-/// seqdbalias.cpp:740-754; the name of the alias file follows.
-const NCBI_EMPTY_DBLIST_PREFIX: &str = "No database names were found in alias file [";
-
 /// ncbifile.cpp:5893-5943: `CMemoryFile`'s text for a file it cannot open; the path, `':` and the
 /// `strerror` text follow (`SeqDbError::memory_map_message`).
 const MEMORY_FILE_PREFIX: &str = "CMemoryFile: Cannot memory map file '";
@@ -502,7 +499,6 @@ impl SeqDbError {
             SeqDbError::NotFound(message) => Some(message.clone()),
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
                 .contains(&message.as_str())
-                || message.starts_with(NCBI_EMPTY_DBLIST_PREFIX)
                 || NCBI_COLUMN_MESSAGE_PREFIXES
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))

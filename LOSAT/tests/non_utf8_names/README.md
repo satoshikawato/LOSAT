@@ -24,6 +24,7 @@ with them) are the values of dustmasker (`dm`), segmasker (`sm`), windowmasker (
 makembindex (`mi`), convert2blastmask (`cb`), blastdbcmd (`bd`) and makeprofiledb (`mp`) with the
 byte 0xE9: names of input files, databases (`-infmt blastdb`, `-db`, a `-fa_list` line, `-list`),
 output files and prefixes, missing ones, `BLASTDB` of the environment and of `.ncbirc`, and words
-that name a format, an algorithm, its options, an entry, a range, a mask or a taxid. NCBI reads
+that name a format, an algorithm, its options, an entry, a range or a mask (a `-taxids` word that is
+not a number stays LOSAT's refusal, as `-taxids abc`: NCBI's exception names its own source files). NCBI reads
 each as the bytes of its `std::string`; `R6a` (`-list_outfmt '%f %t'`), once LOSAT's refusal, is
 now NCBI's bytes too.

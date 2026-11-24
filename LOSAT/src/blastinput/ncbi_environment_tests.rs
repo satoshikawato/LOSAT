@@ -1076,10 +1076,10 @@ fn the_blastdb_value_is_its_bytes() {
     let _ = std::fs::remove_file(&ini);
     std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = C:\\db\n").unwrap();
     assert_eq!(settings(&[]).blastdb, Some(b"C:db".to_vec()));
-    std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = /d\\xffb\n").unwrap();
+    std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = /d\\xff/b\n").unwrap();
     let bytes = settings(&[]);
     assert!(bytes.data_loaders);
-    assert_eq!(bytes.blastdb, Some(b"/d\xffb".to_vec()));
+    assert_eq!(bytes.blastdb, Some(b"/d\xff/b".to_vec()));
     // A layer above the file answers first.
     assert_eq!(
         settings(&[("NCBI_CONFIG__BLAST__BLASTDB", "/db")]).blastdb,

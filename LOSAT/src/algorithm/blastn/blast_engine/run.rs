@@ -6929,15 +6929,15 @@ fn run_local_formats(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // `run_local` searches subject records (the library, `api::run`; the WebAssembly adapter,
-    // `web/adapter`; ABI v1, which refuses `-db` before in `web_api.rs`, `parse_blastn_args`);
+    // `web/adapter`; ABI v1, which refuses `-db` earlier: `parse_blastn_args` in `web_api.rs`);
     // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is run by run_local_database, not run_local");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     // The counts file of `-window_masker_db` is read through the caller's counts source
     // (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter` gives
     // its registered counts files); a caller of `run_local` that sets none has no counts
-    // source; ABI v1 refuses `-window_masker_db` before (`web_api.rs`, `parse_blastn_args`).
+    // source; ABI v1 refuses `-window_masker_db` earlier (`parse_blastn_args` in `web_api.rs`).
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
             "-window_masker_db (a WindowMasker counts file) needs its counts source set before calling run_local (BlastnArgs::window_masker_counts)"
@@ -6947,8 +6947,8 @@ fn run_local_formats(
     // registry (`BlastnArgs::window_masker_registry`, from the run's settings) and counts
     // source (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter`
     // gives its registered counts files); a caller of `run_local` that omits either cannot
-    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` before (`web_api.rs`,
-    // `parse_blastn_args`).
+    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` earlier (`parse_blastn_args` in
+    // `web_api.rs`).
     if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
         && (args.window_masker_registry.is_none() || args.window_masker_counts.is_none())
     {
@@ -6959,7 +6959,7 @@ fn run_local_formats(
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
     // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
     // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
-    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
+    // no repeat search; ABI v1 refuses the option earlier (`parse_blastn_args` in `web_api.rs`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
             "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"

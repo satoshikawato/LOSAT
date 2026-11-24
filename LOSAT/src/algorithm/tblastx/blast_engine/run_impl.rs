@@ -1503,9 +1503,9 @@ pub fn run_local(
     // The command line checks `-strand` at parsing (clap), before anything else; a caller of
     // `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
-    // The host has no database files; LOSAT Web searches the records it gives.
+    // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`), with LOSAT's refusals; `check_ncbi_options` and `search` check the formats

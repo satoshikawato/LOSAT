@@ -1110,9 +1110,9 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
-    // The host has no database files; LOSAT Web searches the records it gives.
+    // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that

@@ -2,45 +2,78 @@
 //! for ([`find_first`]), the first of one byte ([`find_byte`], C's `memchr`), the first
 //! occurrence of a byte string ([`find`], `string::find`) and the mask of one byte in a block of
 //! 16 ([`equal_bytes_16`], [`gather_high_bits`]). makeblastdb's FASTA reader, its titles
-//! and its header writer search every byte of every definition line, so the search tests the
-//! bytes a block at a time.
+//! and its header writer search every byte of every line, so the search tests the bytes a
+//! window at a time.
 //!
 //! No NCBI counterpart: NCBI's code calls the C and C++ libraries for these searches, or tests
 //! one byte at a time (dustmasker's test of each letter for `N`); LOSAT keeps what they return
 //! (the index of the first match, the bytes that match), not how they search.
 
-/// The bytes that [`find_first`] tests at once.
+/// The bytes of a window of [`find_first`]: a window's indexes fit a byte.
+const WINDOW: usize = 64;
+
+/// The bytes of a block that [`find_first`] tests at once in a haystack shorter than a window.
 const BLOCK: usize = 32;
 
-/// The index of the first byte of `haystack` that `test` holds for. The bytes are tested a block
-/// of [`BLOCK`] at a time, in a loop without an early exit, so that the compiler can test a block
-/// with vector compares; the block that holds one is then searched byte by byte. The last block
-/// ends at the end of `haystack` and overlaps the one before it, where `test` holds for no byte;
-/// only a haystack shorter than a block is searched byte by byte alone.
-pub(crate) fn find_first(haystack: &[u8], test: impl Fn(u8) -> bool) -> Option<usize> {
-    let holds = |block: &[u8; BLOCK]| block.iter().fold(false, |any, &b| any | test(b));
-    let first = |block: &[u8], start: usize| {
-        block
-            .iter()
-            .position(|&b| test(b))
-            .map(|offset| start + offset)
-    };
-    let (blocks, tail) = haystack.as_chunks::<BLOCK>();
-    for (index, block) in blocks.iter().enumerate() {
-        if holds(block) {
-            return first(block, index * BLOCK);
+/// The index of the first byte of `window` (at most 255 bytes) that `test` holds for, or
+/// `u8::MAX` where it holds for none: the least index of a match, in a loop without an early
+/// exit, which the compiler's loop vectorizer turns into vector compares and a vector minimum.
+///
+/// The form is deliberate: the same minimum written as a fold over `enumerate()` is not
+/// vectorized by rustc 1.92 (8-13 instructions a byte against about 1), so keep the `for` loop.
+#[inline(always)]
+fn first_in(window: &[u8], test: impl Fn(u8) -> bool) -> u8 {
+    debug_assert!(window.len() < usize::from(u8::MAX));
+    let mut least = u8::MAX;
+    for (index, &b) in window.iter().enumerate() {
+        least = least.min(if test(b) { index as u8 } else { u8::MAX });
+    }
+    least
+}
+
+/// Whether `test` holds for a byte of `window`, in a loop without an early exit (vectorized as
+/// [`first_in`], with an OR in place of the minimum). The OR is of bytes: a fold of `bool`s is
+/// not vectorized by rustc 1.92.
+#[inline(always)]
+fn holds_in(window: &[u8], test: impl Fn(u8) -> bool) -> bool {
+    window.iter().fold(0u8, |any, &b| any | u8::from(test(b))) != 0
+}
+
+/// The index of the first byte of `haystack` that `test` holds for.
+///
+/// The first [`WINDOW`] bytes are searched at once ([`first_in`]); the windows after them are
+/// tested first ([`holds_in`]) and searched only where `test` holds, the last window ending at
+/// the end of `haystack` and overlapping the one before it (where `test` holds for no byte). A
+/// haystack shorter than a window is tested as two blocks of [`BLOCK`] bytes that overlap, by a
+/// fold over each, and searched only where `test` holds; one shorter than a block is searched
+/// alone. The forms differ only in how many instructions they take (a short line is mostly its
+/// own haystack; a line end is searched for in a whole buffer).
+pub(crate) fn find_first(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> Option<usize> {
+    let len = haystack.len();
+    let found = |least: u8| (least != u8::MAX).then_some(usize::from(least));
+    if len < WINDOW {
+        if len >= BLOCK {
+            let first = &haystack.as_chunks::<BLOCK>().0[0];
+            let last = &haystack[len - BLOCK..].as_chunks::<BLOCK>().0[0];
+            if !holds_in(first, test) && !holds_in(last, test) {
+                return None;
+            }
         }
+        return found(first_in(haystack, test));
     }
-    if blocks.is_empty() || tail.is_empty() {
-        return first(tail, 0);
+    if let Some(index) = found(first_in(&haystack[..WINDOW], test)) {
+        return Some(index);
     }
-    let start = haystack.len() - BLOCK;
-    let last = &haystack[start..].as_chunks::<BLOCK>().0[0];
-    if holds(last) {
-        first(last, start)
-    } else {
-        None
+    let mut start = WINDOW;
+    while start < len {
+        let base = start.min(len - WINDOW);
+        let window = &haystack[base..base + WINDOW];
+        if holds_in(window, test) {
+            return found(first_in(window, test)).map(|index| base + index);
+        }
+        start = base + WINDOW;
     }
+    None
 }
 
 /// The index of the first `byte` of `haystack` (C's `memchr`).

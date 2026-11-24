@@ -22,14 +22,13 @@ mod range;
 mod retrieve;
 mod taxonomy;
 
-use crate::wording::DATABASE_ERROR;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, Ostream};
-use crate::ncbi_app::{Diag, Tool};
+use crate::ncbi_app::{database_error, Diag, Tool};
 use crate::ncbi_str::{int_with_commas, with_commas};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
@@ -242,10 +241,7 @@ fn output_refusal(reason: &str) -> String {
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). With `guess`, an exception of NCBI's reader
-/// (`SeqDbError::is_seqdb_exception`) moves on to the nucleotide database, and the nucleotide
-/// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
-/// protein database.
+/// constructor applies). `guess` is NCBI's guess of the type (`SeqDb::open_guessing`).
 fn open_database(
     name: &str,
     dbtype: &str,
@@ -257,46 +253,15 @@ fn open_database(
         "nucl" => &[SeqType::Nucleotide],
         _ => &[SeqType::Protein, SeqType::Nucleotide],
     };
-    let mut types = types.iter().peekable();
-    loop {
-        let Some(&seqtype) = types.next() else {
-            unreachable!("at least one sequence type is tried");
-        };
+    SeqDb::open_guessing(types, |seqtype| {
         // The alias files' counts fail where NCBI's constructor reaches them, which the list of
         // `-target_only` moves (`SeqDb::check_alias_values`).
-        let opened = SeqDb::open_search_in(name, seqtype, path).and_then(|mut db| {
-            let volumes = SeqDb::info_volumes(name, seqtype, path)?;
-            prepare(&mut db)?;
-            db.check_alias_values()?;
-            Ok((db, volumes))
-        });
-        match opened {
-            Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
-            opened => return opened,
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-/// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
-/// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
-/// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
-/// refusal.
-fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
-    if let Some(exception) = error.ncbi_exception() {
-        diag.post_bytes(&[b"Error: ".as_slice(), &exception.what()].concat());
-        return 255;
-    }
-    match error.ncbi_message() {
-        Some(text) => {
-            diag.post_bytes(&[DATABASE_ERROR.as_bytes(), b" ", &text].concat());
-            2
-        }
-        None => diag.refuse(&crate::algorithm::common::database::losat_reader_error(
-            &error, PROGRAM,
-        )),
-    }
+        let mut db = SeqDb::open_search_in(name, seqtype, path)?;
+        let volumes = SeqDb::info_volumes(name, seqtype, path)?;
+        prepare(&mut db)?;
+        db.check_alias_values()?;
+        Ok((db, volumes))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:533-573

@@ -136,6 +136,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database | index files | [makembindex](docs/manual/src/programs/makembindex.md) |
 | `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files | | [makeprofiledb](docs/manual/src/programs/makeprofiledb.md) |
+| `blastdb_aliastool` | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists | alias files, binary lists | [blastdb_aliastool](docs/manual/src/programs/blastdb_aliastool.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
 `rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).

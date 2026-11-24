@@ -231,6 +231,13 @@ pub enum SeqDbError {
     /// whose message is `message` followed by [`NCBI_CRASHES_ON_IT`]
     /// ([`SeqDbError::ncbi_crashes`]).
     NcbiCrashes { path: PathBuf, message: String },
+    /// An exception that NCBI's reader throws and whose report LOSAT does not give (the
+    /// `CSeqIdException` of NCBI's simplification of a seqid list's id,
+    /// `SeqDB_SimplifyAccession`): LOSAT's refusal wherever a program reports it, in the words of an
+    /// `Unsupported` database; a caller that catches every exception of NCBI's (the alias file
+    /// writer's catch of any exception, `writedb::alias_file`) takes it for NCBI's failure
+    /// ([`SeqDbError::ncbi_throws`]).
+    NcbiThrows { path: PathBuf, message: String },
     /// A `CSeqDBException` of the code `eMemoryMappingFailure` whose message is NCBI's (an OID
     /// list file of an alias file's `OIDLIST` that is not a file, `oid_list::OidListError`; the
     /// GI-mask data file of a volume that is not found, `gi_mask::GiMaskFiles::open`): a
@@ -279,7 +286,8 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
                 write!(f, "{}: {}", path.display(), message)
             }
-            SeqDbError::Unsupported { path, message } => {
+            SeqDbError::Unsupported { path, message }
+            | SeqDbError::NcbiThrows { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
             SeqDbError::NcbiCrashes { path, message } => write!(
@@ -346,6 +354,10 @@ impl SeqDbError {
                 path: path.clone(),
                 message: message.clone(),
             },
+            SeqDbError::NcbiThrows { path, message } => SeqDbError::NcbiThrows {
+                path: path.clone(),
+                message: message.clone(),
+            },
             SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
             SeqDbError::Internal(message) => SeqDbError::Internal(message.clone()),
             SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
@@ -373,6 +385,12 @@ impl SeqDbError {
     /// says it).
     pub fn ncbi_crashes(&self) -> bool {
         matches!(self, SeqDbError::NcbiCrashes { .. })
+    }
+
+    /// Whether this is LOSAT's refusal of an exception that NCBI's reader throws
+    /// ([`SeqDbError::NcbiThrows`]): the variant, not the text, says it.
+    pub fn ncbi_throws(&self) -> bool {
+        matches!(self, SeqDbError::NcbiThrows { .. })
     }
 
     /// Whether this is a file whose bytes the system does not give, in LOSAT's words: a read
@@ -529,6 +547,7 @@ impl SeqDbError {
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
             | SeqDbError::NcbiCrashes { .. }
+            | SeqDbError::NcbiThrows { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Internal(_)
             | SeqDbError::Ncbi(_)
@@ -1336,6 +1355,28 @@ impl SeqDb {
         path: &SearchPath,
     ) -> Result<Vec<String>, SeqDbError> {
         alias::info_volumes(name, seqtype, path)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
+    /// NCBI's guess of a database's type (`CSeqDB` of `eUnknown`, the programs' `guess`): `open`
+    /// of each type of `types` in order. An exception of NCBI's reader
+    /// ([`SeqDbError::is_seqdb_exception`]) moves on to the next type, and the last type's error is
+    /// the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
+    /// database as the type it tried.
+    pub(crate) fn open_guessing<T>(
+        types: &[SeqType],
+        mut open: impl FnMut(SeqType) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        let mut types = types.iter().peekable();
+        while let Some(&seqtype) = types.next() {
+            match open(seqtype) {
+                Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
+                opened => return opened,
+            }
+        }
+        Err(SeqDbError::Internal(
+            "no sequence type to open the database as".to_string(),
+        ))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-936

@@ -1,4 +1,4 @@
-use super::{BlastnArgs, QueryStrand, BLASTN_TASKS};
+use super::{BlastnArgs, QueryStrand};
 use clap::{CommandFactory, Parser};
 
 #[derive(Parser)]
@@ -7,13 +7,23 @@ struct TestCli {
     args: BlastnArgs,
 }
 
-// blastn_args.cpp:57-59: -task takes NCBI's nucleotide tasks; LOSAT runs those of
-// `BLASTN_TASKS` (rmblastn among them) and lists its tasks for any other name, as for the
-// other programs' -task (`task_parser`).
+// blastn_args.cpp:57-59: -task takes NCBI's nucleotide tasks (NCBI's reader checks the set);
+// describe lists them in the order of NCBI's BLASTN page, and the help texts name every one.
 #[test]
-fn task_accepts_the_task_table_and_lists_it() {
-    let parse = |task: &str| {
-        TestCli::try_parse_from([
+fn task_takes_ncbis_tasks_and_the_help_names_them() {
+    let tasks = crate::ncbi_app::args::choices("blastn", "task").unwrap();
+    assert_eq!(
+        tasks,
+        [
+            "megablast",
+            "dc-megablast",
+            "blastn",
+            "blastn-short",
+            "rmblastn"
+        ]
+    );
+    for task in &tasks {
+        let argv = [
             "losat",
             "--query",
             "q.fa",
@@ -21,44 +31,40 @@ fn task_accepts_the_task_table_and_lists_it() {
             "s.fa",
             "--task",
             task,
-        ])
-    };
-    for task in BLASTN_TASKS {
-        assert_eq!(parse(task).unwrap().args.task, *task);
+        ];
+        assert_eq!(TestCli::try_parse_from(argv).unwrap().args.task, *task);
     }
     let command = TestCli::command();
     let arg = command
         .get_arguments()
         .find(|arg| arg.get_long() == Some("task"))
         .unwrap();
-    let listed: Vec<String> = arg
-        .get_possible_values()
-        .iter()
-        .map(|value| value.get_name().to_string())
-        .collect();
-    assert_eq!(listed, BLASTN_TASKS);
-    // The help texts name every task in place of clap's list.
-    assert!(arg.is_hide_possible_values_set());
     for help in [arg.get_help(), arg.get_long_help()] {
         let help = help.unwrap().to_string();
-        for task in BLASTN_TASKS {
-            assert!(help.contains(task), "{help}");
+        for task in &tasks {
+            assert!(help.contains(task.as_str()), "{help}");
         }
     }
-    // rmblastn: NCBI's matrix-only task (blast_options_handle.cpp:365-370).
-    assert_eq!(parse("rmblastn").unwrap().args.task, "rmblastn");
+    // NCBI BLAST+ 2.17.0 blastn `-task <name>` of a name that is not NCBI's (frozen on the
+    // workstation with `env -i`, line RG item K4i-2b round 2): the constraint's error, NCBI's posts in LOSAT's words; the case of the name counts.
     for other in ["vecscreen", "MEGABLAST", "blastn-fast"] {
-        let error = parse(other).err().unwrap();
-        assert_eq!(
-            error.kind(),
-            clap::error::ErrorKind::InvalidValue,
-            "{other}"
+        let argv = [
+            "losat", "blastn", "-query", "q.fa", "-subject", "s.fa", "-task", other,
+        ];
+        let Err(crate::cli::ArgvError::Report(bytes)) = crate::cli::try_parse_from(argv) else {
+            panic!("{other}: not NCBI's argument error");
+        };
+        let text = String::from_utf8(bytes).unwrap();
+        let line = format!(
+            "Argument \"task\". Illegal value, expected Permissible values: 'blastn' 'blastn-short' 'dc-megablast' 'megablast' 'rmblastn' :  `{other}'"
         );
-        assert!(
-            error.to_string().contains(
-                "[possible values: megablast, dc-megablast, blastn, blastn-short, rmblastn]"
-            ),
-            "{error}"
+        let ncbi = format!("Error: {line}\nError:  (CArgException::eConstraint) {line}\n");
+        assert_eq!(
+            text.split_once(&format!("{}\n\n", "=".repeat(72)))
+                .unwrap()
+                .1,
+            crate::wording::losat_text(&ncbi),
+            "{other}"
         );
     }
 }

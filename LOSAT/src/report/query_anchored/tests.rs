@@ -141,6 +141,17 @@ fn section(
     format: u8,
     line_length: usize,
 ) -> String {
+    section_with(probe, rows, format, line_length, false)
+}
+
+/// `section` of a report with `-html` (`html`, `View::html`) or without.
+fn section_with(
+    probe: &Probe,
+    rows: &[(u32, u32, u32, &str)],
+    format: u8,
+    line_length: usize,
+    html: bool,
+) -> String {
     let mut hsps = Hsps::default();
     for &(subject, qstart, sstart, btop) in rows {
         push_btop(&mut hsps, subject, qstart, sstart, btop);
@@ -148,6 +159,7 @@ fn section(
     let view = View {
         identity: matches!(format, 1 | 3),
         anchored: matches!(format, 1 | 2),
+        html,
     };
     let mut out = Vec::new();
     write_section(&mut out, view, line_length, &hsps, probe).expect("the section");
@@ -767,6 +779,7 @@ fn no_hsps_write_nothing() {
         View {
             identity: true,
             anchored: true,
+            html: false,
         },
         60,
         &Hsps::default(),
@@ -800,6 +813,7 @@ fn self_section(name: &str, rows: &[(u32, u32, u32, &str)], format: u8) -> Strin
     let view = View {
         identity: matches!(format, 1 | 3),
         anchored: matches!(format, 1 | 2),
+        html: false,
     };
     let mut out = Vec::new();
     write_section(&mut out, view, 60, &hsps, &probe).expect("the section");
@@ -956,6 +970,7 @@ fn the_query_s_own_bioseq_without_a_start_is_where_ncbi_aborts() {
         View {
             identity: true,
             anchored: true,
+            html: false,
         },
         60,
         &hsps,
@@ -964,4 +979,103 @@ fn the_query_s_own_bioseq_without_a_start_is_where_ncbi_aborts() {
     .expect_err("no section");
     assert!(error.to_string().contains("internal error"), "{error}");
     assert!(out.is_empty());
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2485-2573
+// Formats 1 to 4 with `-html` (line RG, item T4b): each row line puts the columns of the row's masks
+// in NCBI's `<font>` span, as outfmt 0's rows do, over every character of those columns: the
+// identity dots of formats 1 and 3 (a masked letter equal to the query's is a `.`, `x_OutputSeq`
+// masks the line after the identity test), the gaps and the blanks past the row's end. The spans
+// are all that `-html` adds to the section (NCBI BLAST+ 2.17.0, `blastp -html` on the T3a probes
+// below: line RG T4b probes `bp.t3a.lc.f1.h`, `bp.t3a.lc.f3.h` (the inputs of the fixture rows
+// `db.of1.bp.lc.f1` and `.f3` with `-html`), `bp.t3a.seg.f1.h` and `bp.t3a.seg.f3.h`; the
+// fixture rows `html.bp.mk.lc.f1` and `.f3` hold such spans of other inputs).
+const OPEN: &str = "<font color=\"#000000\">";
+const CLOSE: &str = "</font>";
+
+/// `section_with` of `-html` and of the plain report, after the check that the spans are all
+/// that `-html` adds.
+fn html_section(probe: &Probe, rows: &[(u32, u32, u32, &str)], format: u8) -> String {
+    let html = section_with(probe, rows, format, 60, true);
+    let plain = section(probe, rows, format, 60);
+    assert_eq!(
+        html.replace(OPEN, "").replace(CLOSE, ""),
+        plain,
+        "outfmt {format}"
+    );
+    html
+}
+
+#[test]
+fn html_spans_cover_the_columns_of_a_subject_mask() {
+    // bp.t3a.lc.f1 and .f3 with `-html`: the run 120-125 goes to the columns of the second row and
+    // the run 85-92 to those of the first (`subject_mask_spreads_to_the_subject_s_other_rows`); each
+    // span holds those columns in both rows, with their dots and the second row's blanks past its
+    // end.
+    let mut probe = probe("qa", 1, &["s_twice_lc"]);
+    probe.subject_masks[0] = vec![(84, 91), (119, 124)];
+    let rows = [
+        (0, 3, 73, "VL1SNTSFLSMADRA2FG3VG3IQ14NY9NQ7FE1KA6SE7"),
+        (0, 11, 1, "15WN15DG8RH7GA2QDSDTD2PS3YINK1ND1HVSYSFFYMT1ETT-R-I-R-T-N-K-H-Y-W-S-R-Y-H-A-P-MLHWQNQSFLTMKDVANINQ2EQPY1RPQPEKEQ4"),
+    ];
+    for format in [1, 3] {
+        assert_eq!(
+            html_section(&probe, &rows, format),
+            r##"
+Query_1    3    VWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGCFQ  62
+Subject_1  1            ...............N...............G.......<font color="#000000">.h....</font>...A..D  52
+Subject_1  73   L.NSLMDA..G...G...Q..............Y.........Q...<font color="#000000">....e.</font>A......  132
+
+Query_1    63   STQNPYFMYNYNTHSSFMSETRIRTNKHYWSRYHAPMHQQFTKVNNGAEPGRQEEIRFT  121
+Subject_1  53   DD..S...IK.D.VYFYT.T----------------LWNSLMDAIQ..<font color="#000000">qy.ppkq.</font>...  95
+Subject_1  133  E.......                                        <font color="#000000">        </font>     140
+
+"##,
+            "outfmt {format}"
+        );
+    }
+}
+
+#[test]
+fn html_spans_cover_a_query_mask_and_its_gaps() {
+    // bp.t3a.seg.f1 and .f3 with `-html`.
+    let mut probe = probe("qseg", 1, &["sseg", "s_ins"]);
+    probe.query_masks = vec![(75, 94)];
+    let rows = [
+        (
+            0,
+            1,
+            1,
+            "5TW10VW10NW10QW10FW10FW10NW10QW10QW10IW10HW10NW10IW10DW10KW10",
+        ),
+        (
+            1,
+            1,
+            1,
+            "26HV13-W-W-H-H-W11LK8F-Q-S-T-11Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-Q-5-P-G70",
+        ),
+    ];
+    // Format 1: only the query row has the mask; its letters are all in one span.
+    let got = html_section(&probe, &rows, 1);
+    let lines: Vec<&str> = got.lines().collect();
+    assert_eq!(
+        lines[8],
+        format!(
+            "Query_1    61   FQSTQNPYFMYNYNT{OPEN}qqqqqqqqqqqqqqqqqqqq{CLOSE}\
+             HSSFMSETRIRTNKHYWSRYHAPMH  120"
+        )
+    );
+    assert_eq!(got.matches(OPEN).count(), 1);
+    // Format 3 (flat): the gap of the query row after the mask stays outside its span.
+    let got = html_section(&probe, &rows, 3);
+    let lines: Vec<&str> = got.lines().collect();
+    assert_eq!(
+        lines[5],
+        format!(
+            "Query_1    56   KFIGCFQSTQNPYFMYNYNT{OPEN}qqqqqqqqqqqqqqqqqqqq{CLOSE}\
+             HSSFM--SETRIRTNKHYWS  113"
+        )
+    );
+    assert_eq!(got.matches(OPEN).count(), 1);
 }

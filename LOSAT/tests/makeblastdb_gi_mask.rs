@@ -21,8 +21,9 @@
 //! The cases of the column `losat` other than `same`: `refuse` (two algorithms that would write
 //! one GI-mask data file at the same time, which LOSAT refuses at the record that would open it:
 //! exit status 1, and what an error of NCBI's `SetMaskData` leaves, `REFUSED_LEFTOVERS`) and
-//! `parser` (an argument rule that LOSAT's parser checks: exit status 2 and no file, where
-//! makeblastdb prints its usage; LOSAT's message holds the sentence of makeblastdb's).
+//! `parser` (an argument rule of NCBI's argument reader, which LOSAT's makeblastdb reads with:
+//! makeblastdb's usage and posts, exit status 1 and no file, compared as `same`; line RG item
+//! K4i-2b).
 //!
 //! The expectations of a single-volume database built with `-gi_mask` are NCBI's run with the one
 //! change of PD-LOSAT-NCBI-DEFECTS approved exception 25 (`single_volume_exception` of the
@@ -495,29 +496,10 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
                 }
                 problems
             }
+            // NCBI's argument reader's error: makeblastdb's bytes, as `same`.
             "parser" => {
                 counts[2] += 1;
-                let files = listing(&case_dir, &put);
-                let mut problems = Vec::new();
-                if got.0 != 2 || !got.1.is_empty() || !files.is_empty() {
-                    problems.push(format!("not a parser error: {got:?}, files {files:?}"));
-                }
-                // makeblastdb's sentence of a dependency, in LOSAT's message.
-                let frozen =
-                    std::fs::read(dir.join("expected").join(format!("{}.stderr", case.name)))
-                        .unwrap();
-                let frozen = String::from_utf8_lossy(&losat::wording::losat_output_bytes(&frozen))
-                    .into_owned();
-                let sentence = frozen
-                    .lines()
-                    .find_map(|line| line.split_once("(CArgException::eConstraint) "))
-                    .map(|(_, sentence)| sentence);
-                if let Some(sentence) = sentence {
-                    if !got.2.contains(sentence) {
-                        problems.push(format!("not makeblastdb's sentence {sentence:?}: {got:?}"));
-                    }
-                }
-                problems
+                compare(&case, &case_dir, &put, got, started, &before)
             }
             other => vec![format!("unknown column {other:?}")],
         };

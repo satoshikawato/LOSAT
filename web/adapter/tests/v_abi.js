@@ -710,8 +710,9 @@ function checkSurface(reactor, native) {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
-      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short") && task.help.includes("rmblastn"),
-                "blastn: tasks in -task's help");
+      // The help is NCBI's comment of -task; the tasks are its choices (NCBI's set, in the order of NCBI's Web page).
+      assert.equal(task.help, "Task to execute", "blastn: NCBI's help of -task");
+      assert.deepEqual(task.choices, ["megablast", "dc-megablast", "blastn", "blastn-short", "rmblastn"], "blastn: tasks in -task's choices");
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
@@ -890,7 +891,8 @@ function checkSurface(reactor, native) {
 // The words with which the command line prints its help or its version (line WQA's D14, 2026-11-20; abi_v2.md §5 stream
 // 11, §9 `prints`), for every program and word, and the words, registry file and file of -logfile around them, each
 // compared with the native CLI's run of the same argv from an empty directory.
-const HELP_WORDS = ["-h", "-help", "-help-full", "--help", "-xmlhelp"];
+// `--help` is no word of NCBI's reader (`Unknown argument: "-help"`, line RG item K4i-2b, 2026-11-23).
+const HELP_WORDS = ["-h", "-help", "-help-full", "-xmlhelp"];
 const VERSION_WORDS = ["-version", "-version-full", "-version-full-xml", "-version-full-json"];
 
 function checkPrints(reactor, native) {

@@ -8,7 +8,7 @@ use std::io::{BufRead, Read, Write};
 
 use clap::Args;
 
-use super::build_db::BuildDatabase;
+use super::build_db::{endl, BuildDatabase};
 use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::mask_data::process::{process_mask_data, MaskDataOptions};
@@ -21,7 +21,7 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
-use crate::ncbi_app::args::{walk_dependencies, Dep};
+use crate::blastinput::value_parsers::ncbi_integer;
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -32,14 +32,13 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-251
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:319-329
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:257-288
-// LOSAT's parser checks the range of `-taxid`; after the parse it checks the exclusions and the
+// NCBI's argument reader (`cli::reader`) checks the constraints, the exclusions and the
 // requirements (`-taxid_map` needs `-parse_seqids`, `-mask_id` needs `-mask_data`, `-mask_desc`
 // needs `-mask_id`, `-gi_mask` needs `-parse_seqids` and excludes `-mask_id`, `-gi_mask_name`
-// needs `-mask_data` and `-gi_mask`) with `dependency_error`, in NCBI's order and words. Its
-// errors are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's
-// argument reader prints its usage (exit status 1); `check_arguments` makes the same check for
-// the library (exit status 1). The options of makeblastdb that LOSAT does not support are not
-// registered; `crate::cli` names them in its error.
+// needs `-mask_data` and `-gi_mask`) of the command line and of a library call, in NCBI's order
+// and words (its usage, exit status 1); clap then converts the arguments it read. The options of
+// makeblastdb that LOSAT does not support are refused by name after the reader
+// (`ncbi_app::args::refusal`).
 /// Arguments of `losat makeblastdb`, under makeblastdb's names.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
@@ -48,11 +47,10 @@ pub struct MakedbArgs {
     #[arg(long = "in", default_value = "-", value_name = "input_file")]
     pub input: String,
     /// Type of the data specified in input_file (fasta and blastdb are supported)
-    #[arg(long, default_value = "fasta", value_name = "type",
-          value_parser = ["fasta", "blastdb", "asn1_bin", "asn1_txt"])]
+    #[arg(long, default_value = "fasta", value_name = "type")]
     pub input_type: String,
     /// Molecule type of target db
-    #[arg(long, value_name = "molecule_type", value_parser = ["nucl", "prot"])]
+    #[arg(long, value_name = "molecule_type")]
     pub dbtype: String,
     /// Title for BLAST database [default: the input file name given to -in; for -input_type
     /// blastdb, the title of the input database]
@@ -63,7 +61,7 @@ pub struct MakedbArgs {
     pub out: Option<String>,
     /// Version of BLAST database to be created
     #[arg(long, default_value_t = 5, value_name = "version",
-          value_parser = clap::value_parser!(i32).range(4..=5))]
+          value_parser = ncbi_integer)]
     pub blastdb_version: i32,
     /// Maximum file size for BLAST database files
     #[arg(long, default_value = "3GB", value_name = "number_of_bytes")]
@@ -81,7 +79,7 @@ pub struct MakedbArgs {
     // NCBI's integer and its constraint (`nonnegative_ncbi_integer`): `0x10` is 16 (NCBI BLAST+
     // 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with `-dryrun`).
     #[arg(long, value_name = "TaxID",
-          value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_integer)]
+          value_parser = ncbi_integer)]
     pub taxid: Option<i32>,
     /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
     #[allow(rustdoc::invalid_html_tags, reason = "NCBI's help, printed by clap")]
@@ -115,8 +113,7 @@ pub struct MakedbArgs {
     pub oid_masks: Option<i32>,
     /// Copy the sequences of -input_type blastdb in a random order, seeded by the clock's second
     // NCBI's argument is hidden (`fHidden`, makeblastdb.cpp:253-254): its help lists it with
-    // `-help-full` only. LOSAT's help (its own texts, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-    // exception 1) lists it in neither.
+    // `-help-full` only. LOSAT's help is NCBI's text (`cli::reader`): `-help-full` lists it, `-help` does not.
     #[arg(long, hide = true)]
     pub randomize: bool,
 }
@@ -420,121 +417,18 @@ pub fn check_registry_settings(
     }
 }
 
-/// NCBI's `m_Dependencies` of makeblastdb, from its `-xmlhelp` XML (`ncbi_app::args`, the
-/// tables of `src/ncbi_xmlhelp/makeblastdb.xml`): the `SetDependency` calls of its `Init`
-/// (makeblastdb.cpp:276-329, cited at `MakedbArgs`) in the order of NCBI's `multimap`.
-fn makeblastdb_dependencies() -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
-    crate::ncbi_app::args::arguments("makeblastdb")
-        .expect("makeblastdb's -xmlhelp XML (src/ncbi_xmlhelp)")
-        .dependencies()
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:225-332
-/// makeblastdb's arguments in the order its `Init` declares them, each with whether it is
-/// mandatory (`AddKey`, the molecule type alone): the order of `x_PostCheck`'s second walk,
-/// which looks for a required argument that is missing and ends at a missing mandatory one
-/// (that error is the parser's, `crate::cli`). LOSAT registers all of them but the hidden
-/// `verbose` and `limit_defline` (`MakedbArgs`); the clap id of `in` is `input`.
-const MAKEBLASTDB_ARGUMENTS: [(&str, bool); 22] = [
-    ("in", false),
-    ("input_type", false),
-    ("dbtype", true),
-    ("title", false),
-    ("parse_seqids", false),
-    ("hash_index", false),
-    ("randomize", false),
-    ("mask_data", false),
-    ("mask_id", false),
-    ("mask_desc", false),
-    ("gi_mask", false),
-    ("gi_mask_name", false),
-    ("out", false),
-    ("blastdb_version", false),
-    ("max_file_sz", false),
-    ("metadata_output_prefix", false),
-    ("logfile", false),
-    ("verbose", false),
-    ("limit_defline", false),
-    ("taxid", false),
-    ("taxid_map", false),
-    ("oid_masks", false),
-];
-
-/// Whether the argument `name` of a dependency was given: NCBI's reader asks `CArgs::Exist` of
-/// the name and whether the argument has a value. The molecule type is a field that a library
-/// call always sets.
-fn given(args: &MakedbArgs, name: &str) -> bool {
-    match name {
-        "dbtype" => true,
-        "parse_seqids" => args.parse_seqids,
-        "gi_mask" => args.gi_mask,
-        "gi_mask_name" => args.gi_mask_name.is_some(),
-        "mask_data" => args.mask_data.is_some(),
-        "mask_id" => args.mask_id.is_some(),
-        "mask_desc" => args.mask_desc.is_some(),
-        "taxid" => args.taxid.is_some(),
-        "taxid_map" => args.taxid_map.is_some(),
-        _ => false,
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296
-// The walk of NCBI's argument reader (`ncbi_app::args::walk_dependencies`, the one port of it):
-// the first exclusion met in NCBI's `multimap` ends the check, else the first missing argument
-// in the order of declaration names the first dependency that required it. `-taxid` with
-// `-taxid_map` meets the dependency of `taxid` first: `Argument "taxid_map". Incompatible with
-// argument:  `taxid'`. Without the molecule type (a mandatory argument) the second walk ends
-// there: only an exclusion is reported, before the parser's own error for it.
-/// The first dependency of makeblastdb's arguments that the arguments `given` break, checked as
-/// NCBI's argument reader checks them after the parse (`CArgDescriptions::x_PostCheck`), with
-/// its sentence. The one check of the dependencies: LOSAT's parser calls it on the command line
-/// (`crate::cli`, exit status 2) and `check_arguments` for the library's callers. `given` is
-/// asked only of the arguments of a dependency and of the mandatory one.
-pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
-    // A dependency is checked only for an argument that is given (the map holds an exclusion in
-    // both directions): when none of them is, nothing can fail, and the walk is not made.
-    if !makeblastdb_dependencies().any(|(first, _, _)| given(first)) {
-        return None;
-    }
-    // The words of a message are the tables' names, ASCII: its bytes are its text.
-    let text = |message: Vec<u8>| String::from_utf8_lossy(&message).into_owned();
-    let walk = match walk_dependencies(makeblastdb_dependencies(), given) {
-        Ok(walk) => walk,
-        Err(message) => return Some(text(message)),
-    };
-    for (name, mandatory) in MAKEBLASTDB_ARGUMENTS {
-        let required = walk.missing(name);
-        if (required.is_none() && !mandatory) || given(name) {
-            continue;
-        }
-        // A required argument that is missing, or a missing mandatory one (the parser's error).
-        return required.map(text);
-    }
-    None
-}
-
-/// `dependency_error` of the arguments of a library call.
-fn check_dependencies(args: &MakedbArgs) -> Result<(), MakedbError> {
-    match dependency_error(&|name| given(args, name)) {
-        Some(message) => Err(MakedbError::Argument(message)),
-        None => Ok(()),
-    }
-}
-
-/// The checks of the arguments that NCBI's parser makes, first: the format version and the
-/// dependencies between options.
-fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1218-1219
-    // The parser allows 4 and 5 only (`CArgAllow_Integers` from `eBDB_Version4` to
-    // `eBDB_Version5`).
-    let Some(version) = DbVersion::from_number(args.blastdb_version) else {
-        return Err(unsupported(format!(
+/// The format version of `-blastdb_version`, which NCBI's argument reader allows only as 4 or 5
+/// (`CArgAllow_Integers` from `eBDB_Version4` to `eBDB_Version5`); a library caller that set the
+/// field itself gets LOSAT's refusal of another number.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1218-1219
+fn db_version(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
+    DbVersion::from_number(args.blastdb_version).ok_or_else(|| {
+        unsupported(format!(
             "-blastdb_version {} is not a version makeblastdb writes (4 or 5)",
             args.blastdb_version
-        )));
-    };
-    check_dependencies(args)?;
-    Ok(version)
+        ))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1278-1287
@@ -774,7 +668,7 @@ fn build_database_with_log(
     logfile_error: Option<MakedbError>,
     end_messages: &mut Vec<Vec<u8>>,
 ) -> Result<(), MakedbError> {
-    let version = check_arguments(args)?;
+    let version = db_version(args)?;
     let is_protein = args.dbtype == "prot";
     let blastdb_input = args.input_type == "blastdb";
 
@@ -857,11 +751,12 @@ fn build_database_with_log(
         db.set_oid_masks(oid_masks as u64);
     }
     let max_file_size = max_file_size(args)?;
-    let _ = writeln!(
+    let _ = write!(
         db.log(),
         "Maximum file size: {}",
         uint8_to_string_data_size(max_file_size)
     );
+    endl(db.log());
     db.set_max_file_size(max_file_size);
     let (taxids, stdin_map) = read_taxids(args, stdin, err)?;
     if let Some(taxids) = taxids {
@@ -1272,17 +1167,21 @@ fn add_fasta(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1171
-// Every line of the log ends with `endl`, which flushes the stream, so the
-// log and the messages of the standard error stream reach a common
-// destination (`2>&1`) in the order of the events. The standard output of
-// the Rust library is line buffered whatever it is connected to; the log
-// goes to it without another buffer.
+// The log is `cout`, and every line of it ends with a new line and a flush (`build_db::endl`),
+// so the log and the messages of the standard error stream reach a common destination (`2>&1`)
+// in the order of the events. `CoutLog` writes it as NCBI's `cout` (`writedb::cout`) over the
+// process's standard output with no buffer of Rust's (`cli::standard_output`). The buffer
+// writes a line where NCBI's does, a write that fails loses what the buffer held, and the
+// stream writes nothing after it (`badbit`; line RG item KC-11b-2).
 /// Runs `losat makeblastdb` with the settings of its application start and returns the exit code.
 pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
     let stderr = std::io::stderr();
-    let mut out = stdout.lock();
+    let mut device = crate::cli::standard_output();
+    let mut out = CoutLog(super::cout::cout(
+        &mut device,
+        crate::cli::NcbiStdio::cout(),
+    ));
     let mut err = stderr.lock();
     let now = LocalTime::now();
     let status = run_with(
@@ -1294,8 +1193,26 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
         &mut out,
         &mut err,
     );
+    // The exit's flush of `cout`.
     let _ = out.flush();
     status
+}
+
+/// makeblastdb's log on NCBI's `cout`: a write is an insertion, a flush is the stream's flush
+/// (the end of each line, `build_db::endl`). The stream's state is not reported: NCBI's
+/// makeblastdb does not read it.
+struct CoutLog<'a>(super::cout::Cout<'a>);
+
+impl Write for CoutLog<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.insert(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush();
+        Ok(())
+    }
 }
 
 /// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes: `None` when the

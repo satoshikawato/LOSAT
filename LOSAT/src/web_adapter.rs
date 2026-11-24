@@ -19,34 +19,52 @@
 
 use std::ffi::OsString;
 
-// The command line's arguments (`cli.rs`): the clap types of every program, the parser's
-// messages, the text that the command line prints where its reader stopped at a help word, and
-// the command line's own errors.
-pub use crate::cli::{
-    command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
-};
+// The command line's arguments (`cli.rs`): the clap types of every program, how NCBI's reader
+// and LOSAT's refusals end an argv (the text that the command line prints where its reader
+// stopped at a help word, an argument error's report, a refusal), and the command line's own
+// errors.
+pub use crate::cli::{ArgvError, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
 
 // The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
 // made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
-// defaults it resolves.
+// defaults it resolves (the defaults and the choices come with `described_parameters`).
 pub use crate::ncbi_app::args::{genetic_codes, string_values};
 
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
-/// as the command line reads it after its application start, NCBI's single-dash options included.
-/// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
-/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them, and the help
-/// words stop the reader as on the command line, `-xmlhelp` included: the run prints their text
-/// (`printed_text`; line WQA's D14, 2026-11-20). The versions are printed by the start
-/// (`CallerStart::version`) and never reach the reader.
+/// as the command line reads it after its application start (NCBI's reader, LOSAT's refusals,
+/// clap's conversion: `cli::reader`). A run of ABI v2 makes its own start (`start_run`), so the
+/// toolkit's words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are taken, as the
+/// library API takes them, and the help words stop the reader as on the command line, `-xmlhelp`
+/// included: the run prints their text (`ArgvError::Printed`; line WQA's D14, 2026-11-20). The
+/// versions are printed by the start (`CallerStart::version`) and never reach the reader.
+///
+/// The posts of an argument error go to the `-logfile` target of the run's start `started`
+/// (`CallerStart::target`: the file of `-logfile`, which the run hands over with
+/// `CallerStart::finish`), and the error's report is what the command line writes to its standard
+/// error then: NCBI's usage, its line that points to the error logs, the line of `=`. Without a
+/// start (an argv read on its own: `None`) the posts are the report's, as without `-logfile`.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
 /// other clap type.
-pub fn try_parse_cli<I, S>(argv: I) -> Result<Cli, clap::Error>
+pub fn try_parse_cli<I, S>(argv: I, started: Option<&CallerStart>) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_with_printing_start(argv)
+    let target = started.map_or(
+        &crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+        CallerStart::target,
+    );
+    crate::cli::try_parse_with_printing_start(argv, target)
+}
+
+/// The message of an argv that the reader or LOSAT's refusals end (`try_parse_cli`), as LOSAT Web
+/// gives it to the host (docs/web/abi_v2.md §4): an argument error's report as the command line
+/// writes it to its standard error, ending with its line end; LOSAT's refusal as the library API
+/// gives it (`api::Error::Argv`: without the command line's `Error: ` and newline); the text that
+/// the command line prints where the reader stopped at a help word.
+pub fn argv_message(error: &ArgvError) -> String {
+    error.to_string()
 }
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
@@ -218,6 +236,15 @@ pub use crate::blastinput::fasta_reader::{
 // the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
 // the refusal of a record longer than LOSAT reads.
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
+
+/// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
+/// command line's `-help`, as the library API's `describe` gives each (NCBI's argument tables,
+/// line RG DECISIONS K4i-3-1): the rows of the adapter's `describe`, which leaves out the options
+/// that the adapter sets itself. `api::describe` lists the same rows but those that the library
+/// API sets.
+pub fn described_parameters(program: crate::api::Program) -> Vec<crate::api::Parameter> {
+    crate::api::described_parameters(program).collect()
+}
 
 /// The options of `program`'s command line that the browser's searches of records do not take:
 /// the search strategy file, which the library API refuses too (`api::search::file_options`), and

@@ -183,7 +183,13 @@ impl SubjectPasses<'_> {
             s_id,
             s_len_full,
         };
-        if let Some(kept) = prelim_source {
+        // The traceback calls the instance without a window below 0 (`traceback_pass`), so the
+        // window's instance holds no traceback, and `traceback_subject` keeps one caller per form.
+        debug_assert!(
+            !NEG || prelim_source.is_none(),
+            "the traceback runs no word finder"
+        );
+        if let (false, Some(kept)) = (NEG, prelim_source) {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633
             // The traceback of the HSPs that the preliminary stage kept
             // (`traceback_subject::traceback_subject`).

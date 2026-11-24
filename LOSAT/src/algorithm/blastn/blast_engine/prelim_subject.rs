@@ -1568,6 +1568,10 @@ pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-888,897-899
 /// (`s_BlastSearchEngineCore`) and :654,662-664 (`s_Blast_HSPListReapByPrelimEvalue`, :642-674)
+///
+/// Inlined into each instance of `prelim_subject` (`NEG`: one per window form), as into the one
+/// caller it had before the window below 0 had an instance of its own.
+#[inline(always)]
 pub(super) fn reap_prelim(batch: &PrelimBatch<'_>, combined_prelim_hits: &mut Vec<PrelimHit>) {
     let &PrelimBatch {
         query_eff_searchsp,
@@ -1606,6 +1610,9 @@ pub(super) fn reap_prelim(batch: &PrelimBatch<'_>, combined_prelim_hits: &mut Ve
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497,1521-1526,1534-1536
 /// (`BLAST_PreliminarySearchEngine`)
 /// The tab that indents line 1535 is written as spaces.
+///
+/// Inlined into each instance of `prelim_subject`, as `reap_prelim`.
+#[inline(always)]
 pub(super) fn finish_ungapped_prelim(
     batch: &PrelimBatch<'_>,
     subject: BlastnSubjectRef<'_>,

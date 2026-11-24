@@ -6,6 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
+#[cfg(not(windows))]
 use std::path::Path;
 
 use super::bioseq::{Bioseq, PastSeqPos};

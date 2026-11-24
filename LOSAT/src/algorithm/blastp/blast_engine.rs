@@ -5494,10 +5494,11 @@ fn check_shown_subject_titles(
 /// (`shown`), checked where the subjects are a database's (`ListedTitles::check_shown_titles`,
 /// which takes the subjects whose load throws from the view's `hit_loads`, then
 /// `ListedTitles::refuse_described_lines` of the subjects of the final hit lists whose
-/// description lines the report prints, `report_prep::described_in`: line RG-KB item 12 review
-/// 1) or a FASTA set's (`check_shown_subject_titles`, then the same refusals of the description
-/// lines of the records whose ids `-parse_deflines` read, the view's `listed_parsed`: review 2,
-/// N2). `rows_of` is `run_call`'s closure of the rows of a range of queries.
+/// description lines the report prints, `report_prep::described_in`: the first review of line
+/// RG-KB item 12) or a FASTA set's (`check_shown_subject_titles`, then the same refusals of the
+/// description lines of the records whose ids `-parse_deflines` read, the view's
+/// `listed_parsed`: the second review, N2). `rows_of` is `run_call`'s closure of the rows of a
+/// range of queries.
 fn check_pairwise_shown_titles(
     view: &report_write::ReportView<'_>,
     pairwise: crate::report::pairwise::PairwiseView,

@@ -104,9 +104,18 @@ fn refused<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], variable: &str, refu
 
 /// `args` on an input that passes the checks: the values that turn them off change nothing.
 fn unchanged<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S]) {
+    unchanged_from(dir, args, &|| {});
+}
+
+/// `unchanged`, with `reset` before each run: a build that replaces its database of an earlier
+/// run says so (makeblastdb's "Deleted existing ... BLAST database"), so each run starts from
+/// the same files.
+fn unchanged_from<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], reset: &dyn Fn()) {
+    reset();
     let unset = losat(dir, args, None);
     assert_eq!(unset.status.code(), Some(0), "{args:?}");
     for (name, value) in [(READ, "NO"), (GET, "NEVER")] {
+        reset();
         let run = losat(dir, args, Some((name, value)));
         assert_eq!(
             (
@@ -255,7 +264,9 @@ fn profiles_and_mask_data_that_lack_a_member_are_refused_with_the_check_off() {
         READ,
         "a profile (-in) that lacks a mandatory member is not supported by LOSAT's MAKEPROFILEDB",
     );
-    let out = dir.join("m").display().to_string();
+    let built = dir.join("built");
+    std::fs::create_dir_all(&built).unwrap();
+    let out = built.join("m").display().to_string();
     let mask = |data: &str| {
         [
             "makeblastdb",
@@ -276,7 +287,10 @@ fn profiles_and_mask_data_that_lack_a_member_are_refused_with_the_check_off() {
         READ,
         "mask data (-mask_data) that lacks a mandatory member is not supported by LOSAT's makeblastdb",
     );
-    unchanged(&dir, &mask("tests/seqdb/mask_parse/dust.asnt"));
+    unchanged_from(&dir, &mask("tests/seqdb/mask_parse/dust.asnt"), &|| {
+        let _ = std::fs::remove_dir_all(&built);
+        std::fs::create_dir_all(&built).unwrap();
+    });
     let _ = std::fs::remove_dir_all(&dir);
 }
 

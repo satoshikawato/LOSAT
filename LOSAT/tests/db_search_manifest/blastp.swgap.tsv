@@ -1,0 +1,17 @@
+# Rows db.swgap.blastp.* (line RG item X4b-gap, 2026-11-24): BLASTP -use_sw_tback of f101 (tests/fasta/swgap/f101.faa) against nest (tests/fasta/rps/nest.faa; database tests/db_search/swgap/nestaa): the Dense-seg starts with 95 gaps in the query's row; tables and the HSP header's Gaps count the columns inside the query row's range, XML/JSON rows show the end gaps as spaces (Hsp_gaps and align-len stay the whole alignment's); -subject keeps the end gaps. Built by tests/db_search/swgap/build.sh. Freeze them alone with db_search_fixtures.py freeze --ncbi-bin DIR --program blastp --only db.swgap.
+row_id	program	kind	db	query	extra_args	outfmt	rc	stdout_sha256	stdout_bytes	stderr_sha256	covers	files	side_sha256
+db.swgap.blastp.dbp.0	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	0					X4b-gap: -db, outfmt 0
+db.swgap.blastp.dbp.5	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	5					X4b-gap: -db, BLAST XML
+db.swgap.blastp.dbp.6std	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore score nident positive gaps ppos					X4b-gap: -db, the std fields with nident, positive, gaps, ppos
+db.swgap.blastp.dbp.6btop	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	6 qseqid sseqid qstart qend sstart send qframe sframe evalue score length gaps qseq sseq btop					X4b-gap: -db, qseq, sseq, btop, frames, length, gaps
+db.swgap.blastp.dbp.7	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	7					X4b-gap: -db, outfmt 7
+db.swgap.blastp.dbp.13	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	13					X4b-gap: -db, outfmt 13 (JSON side files)	xinclude	
+db.swgap.blastp.dbp.15	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	15					X4b-gap: -db, single-file JSON
+db.swgap.blastp.dbp.16	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback	16					X4b-gap: -db, single-file XML2
+db.swgap.blastp.dbp.0sp2	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback -sorthsps 2	0					X4b-gap: -db, -sorthsps 2 (query start)
+db.swgap.blastp.dbp.0html	blastp	ncbi	tests/db_search/swgap/nestaa	tests/fasta/swgap/f101.faa	-use_sw_tback -html	0					X4b-gap: -db, -html
+db.swgap.blastp.subp.0	blastp	ncbi	subject:tests/fasta/rps/nest.faa	tests/fasta/swgap/f101.faa	-use_sw_tback	0					X4b-gap: -subject, outfmt 0
+db.swgap.blastp.subp.5	blastp	ncbi	subject:tests/fasta/rps/nest.faa	tests/fasta/swgap/f101.faa	-use_sw_tback	5					X4b-gap: -subject, BLAST XML
+db.swgap.blastp.subp.6std	blastp	ncbi	subject:tests/fasta/rps/nest.faa	tests/fasta/swgap/f101.faa	-use_sw_tback	6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore score nident positive gaps ppos					X4b-gap: -subject, the std fields with nident, positive, gaps, ppos
+db.swgap.blastp.subp.13	blastp	ncbi	subject:tests/fasta/rps/nest.faa	tests/fasta/swgap/f101.faa	-use_sw_tback	13					X4b-gap: -subject, outfmt 13 (JSON side files)	xinclude	
+db.swgap.blastp.subp.0nd0sp3	blastp	ncbi	subject:tests/fasta/rps/nest.faa	tests/fasta/swgap/f101.faa	-use_sw_tback -num_descriptions 0 -sorthsps 3	0					X4b-gap: -subject, -sorthsps 3 (percent identity) without the description table

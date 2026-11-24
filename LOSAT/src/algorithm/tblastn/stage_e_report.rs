@@ -342,6 +342,10 @@ pub(super) fn render(
     for hitlist in hitlists.iter_mut() {
         hitlist.sort_hsps_for_report();
         hitlist.drop_zero_score_hsps();
+        // `-subject`'s Seq-loc mapper, once, before any format reads the HSPs.
+        if matches!(shown, ShownSubjects::Fasta { .. }) {
+            hitlist.map_subject_alignments();
+        }
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
@@ -1592,8 +1596,10 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => &reported.loads,
         },
     )
-    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
-    .map_err(crate::cli::NativeError::of_writer)?;
+    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
+    // sort or the description table may stop at a query row that starts with a gap
+    // (`EmptyRowsStop`, `TblastnSections::head`).
+    .map_err(crate::algorithm::blastx::report::empty_rows_stop)?;
     Ok(())
 }
 

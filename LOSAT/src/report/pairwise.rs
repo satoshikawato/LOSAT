@@ -387,11 +387,13 @@ impl PairwiseHit {
             )
     }
 
-    /// What `CSeq_align::GetSeqRange` of the row finds on the HSP's Seq-align as the engine made it
+    /// What `CSeq_align::GetSeqRange` of the row finds on the HSP's Seq-align as the report holds it
     /// (`serial::seqalign::std_seg_row_range`): the empty rows of `rows_empty`, or the row that a
-    /// translated search's Smith-Waterman alignment starts with a gap in (RPSTBLASTN's
-    /// `-use_sw_tback`). The hits that keep their Seq-align's offsets (`has_sort_offsets`: BLASTX,
-    /// TBLASTN and TBLASTX) have Std-segs; the others' Dense-seg has a range in every row.
+    /// translated search's Smith-Waterman alignment starts with a gap in (`-use_sw_tback` of
+    /// BLASTX, TBLASTN and RPSTBLASTN; a `-subject` report's HSPs come mapped,
+    /// `serial::seqalign::mapped_script`). The hits that keep their Seq-align's offsets
+    /// (`has_sort_offsets`: BLASTX, TBLASTN and TBLASTX) have Std-segs; the others' Dense-seg has
+    /// a range in every row.
     pub(crate) fn row_range(&self, row: AlignRow) -> Option<RowRangeError> {
         if !self.hit.has_sort_offsets {
             return None;
@@ -403,13 +405,29 @@ impl PairwiseHit {
             row,
         )
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2576-2613
+    /// The gaps of the HSP's header line (`Gaps = `, `x_GetNumGaps`): the gap columns inside the
+    /// query row's aligned range, so the query row's end gaps of a Smith-Waterman alignment
+    /// (`serial::seqalign::row_end_gaps`) are left out; the line's denominators stay the
+    /// alignment's columns. The one count of every program's header (`write_hsp_identities`,
+    /// `write_tblastn_hsp_info`); `gaps` (also the library's `HspRecord::gaps`) stays the
+    /// alignment's.
+    pub(crate) fn shown_gaps(&self) -> usize {
+        let gaps = self.gaps.unwrap_or_else(|| self.hit.gap_letters());
+        let end_gaps = super::serial::seqalign::row_end_gaps(
+            self.hit.gap_info.as_deref().unwrap_or_default(),
+            AlignRow::Query,
+        );
+        gaps.saturating_sub(end_gaps.columns())
+    }
 }
 
 /// What `CSeq_align::GetSeqRange` of the row finds on the Seq-align of `hit`, of the subject whose hits are
 /// `hits`, as NCBI's formatters read it (`PairwiseHit::row_range`): `-subject`'s Seq-loc mapper
 /// (`remaps`) rewrites the empty query row of a subject with rows of letters into one nucleotide
-/// (`mapper_rewrites`; the empty subject row stays), and leaves out a first segment with a gap row
-/// (`serial::seqalign::std_seg_kept`).
+/// (`mapper_rewrites`; the empty subject row stays). Its leaving out of an end segment with a gap
+/// row is in the hit already (`serial::seqalign::mapped_script`).
 fn seen_row_range(
     remaps: bool,
     hits: &[&PairwiseHit],
@@ -419,8 +437,9 @@ fn seen_row_range(
     let error = hit.row_range(row)?;
     let seen = match (error, row) {
         (RowRangeError::Empty, AlignRow::Query) => !mapper_rewrites(remaps, hits),
-        (RowRangeError::Empty, AlignRow::Subject) => true,
-        (RowRangeError::SeqidsNotConsistent, _) => !remaps,
+        (RowRangeError::Empty, AlignRow::Subject) | (RowRangeError::SeqidsNotConsistent, _) => {
+            true
+        }
     };
     seen.then_some(error)
 }
@@ -1457,7 +1476,7 @@ fn write_hsp_identities<W: Write>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let pos_pct = ncbi_percent_match(positives, align_len);
 
-    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
+    let gaps = hit.shown_gaps();
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let gap_pct = ncbi_percent_match(gaps, align_len);
 
@@ -3807,8 +3826,9 @@ fn write_description_table<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
     html: Option<HtmlRows<'_>>,
-    // Where the table's read of its rows' ranges throws (BLASTX's HSPs with empty rows,
-    // `described_row_range`): that exception; `None` for every other table.
+    // Where the table's read of its rows' ranges throws (`described_row_range`: BLASTX's HSPs with
+    // empty rows, BLASTX's and TBLASTN's rows that start with a gap): that exception; `None` for
+    // every other table.
     rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1070
@@ -4317,6 +4337,8 @@ fn write_blastn_description_table<W: Write>(
         crate::report::db_subject::AfterThrow,
     )>,
     loads: &crate::report::db_subject::HitLoads,
+    // Where the rows' ranges throw (`write_description_table`; TBLASTN's, `described_row_range`).
+    rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -4348,7 +4370,7 @@ fn write_blastn_description_table<W: Write>(
             parsed,
             loads,
         }),
-        None,
+        rows_throw,
     )
 }
 
@@ -4666,6 +4688,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
+            None,
         )?;
         writeln!(writer)
     }
@@ -5237,6 +5260,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
+            None,
         )?;
         writeln!(writer)
     }
@@ -5579,17 +5603,28 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             }
             return Ok(());
         };
+        // NCBI's sorts read the HSPs' ranges before the table (`sort_stop`): a query row that
+        // starts with a gap (a Smith-Waterman alignment of `-use_sw_tback`, `-db`: `-subject`'s
+        // records come mapped) throws there.
+        let (grouped, order) = (&group.subject_hits, &group.subject_order);
+        let remaps = self.database.is_none();
+        if let Some(stop) = sort_stop(self.config.sort, remaps, order, grouped) {
+            writer.flush()?;
+            return Err(io::Error::other(stop));
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1004-1011
         // The table of every program follows `x_InitDeflineTable`
         // (`write_blastn_description_table`): the subject's highest bit score and that HSP's
         // E-value, and the title of the subject (`CDeflineGenerator`), for the first
         // `m_NumDescriptions` subjects. The titles are those of the records read (by
-        // subject index), as BLASTN's and TBLASTX's.
+        // subject index), as BLASTN's and TBLASTX's. It reads the ranges of every HSP of each
+        // described subject first, as BLASTX's (`described_row_range`).
+        let descriptions = group.described(self.report.num_descriptions);
         write_blastn_description_table(
             writer,
-            group.described(self.report.num_descriptions),
-            group.subject_order.len() <= self.report.num_descriptions,
-            &group.subject_hits,
+            descriptions,
+            order.len() <= self.report.num_descriptions,
+            grouped,
             &group.subject_titles,
             self.parsed_subjects,
             self.subject_sources,
@@ -5599,6 +5634,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
+            described_row_range(remaps, descriptions, grouped).map(EmptyRowsStop::RowRange),
         )?;
         writeln!(writer)
     }
@@ -5728,7 +5764,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let percent = |n: usize| ncbi_percent_match(n, length);
     let positives = hit.positives.unwrap_or(h.num_positives);
-    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
+    let gaps = hit.shown_gaps();
     writeln!(
         writer,
         " Identities = {}/{} ({:.0}%), Positives = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",

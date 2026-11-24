@@ -36,6 +36,7 @@ use super::stage_e_report::{
     aligned_sequences_into, record_coordinates, ReportRanges, ShownSubjects,
 };
 use super::x_subject_store::SubjectLetters;
+use crate::algorithm::blastx::empty_rows::row_range_exception;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ProteinScoringSpec;
 use crate::report::blast_xml::hsp::translation_frame;
@@ -43,12 +44,14 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::{HitNames, SubjectNames};
 use crate::report::blast_xml::{
-    filter, hit_ranges, written_queries, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery,
-    XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
+    filter, hit_ranges, written_queries, CaughtException, QueryMask, StructuredXml, XmlHit, XmlHsp,
+    XmlQuery, XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
-use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
+use crate::report::serial::seqalign::{
+    read_num_ident, seqalign_evalue, std_seg_row_range, AlignRow,
+};
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
@@ -612,6 +615,24 @@ impl PreparedXml {
                             let mut translation = TargetTranslation::of(subject_seq, &code);
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                                 let hsp = &linked.hsp;
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
+                                // The start of a row whose range the XML cannot take, the query's
+                                // first: a row that starts with a gap (`-subject`'s mapping drops
+                                // such a first segment, `KappaResultHitList::map_subject_alignments`).
+                                // NCBI catches it in `s_BlastXMLAddIteration` (`CaughtException`).
+                                let row_range = |row| {
+                                    std_seg_row_range(
+                                        i64::from(hsp.q_start),
+                                        i64::from(hsp.q_end),
+                                        &payload.edit_script,
+                                        row,
+                                    )
+                                };
+                                if let Some(error) = row_range(AlignRow::Query)
+                                    .or_else(|| row_range(AlignRow::Subject))
+                                {
+                                    return Err(CaughtException(row_range_exception(error)).into());
+                                }
                                 let frame = i32::from(hsp.frame);
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
                                 // translated coordinates use three nucleotide letters per

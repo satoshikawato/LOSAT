@@ -773,7 +773,8 @@ pub(super) fn write_blastx_tabular(
                                         (a.qstart - a.qend).abs() + 1
                                     },
                                 ),
-                            };
+                            }
+                            .within_query_range(&hsp.edit_script);
                             (row, tabular_query, tabular_subject)
                         };
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1108

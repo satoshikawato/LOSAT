@@ -1692,6 +1692,28 @@ pub struct TabularHsp<'a> {
     pub qcovhsp: i32,
 }
 
+impl TabularHsp<'_> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:960-968
+    /// The row of an HSP whose edit script is `ops` and whose `length`, `gaps` and `gap_opens` are
+    /// the whole alignment's, as NCBI counts them (`GetAlignLengths`): the columns inside the
+    /// query row's aligned range only, so the query row's end gaps of a Smith-Waterman alignment
+    /// (`serial::seqalign::row_end_gaps`, `-use_sw_tback`) come off the three (and `pident`,
+    /// `ppos` divide by the shorter length; `mismatch` stays). An X-drop alignment has none.
+    pub(crate) fn within_query_range(self, ops: &[crate::common::GapEditOp]) -> Self {
+        let end_gaps = crate::report::serial::seqalign::row_end_gaps(
+            ops,
+            crate::report::serial::seqalign::AlignRow::Query,
+        );
+        Self {
+            length: self.length.saturating_sub(end_gaps.columns()),
+            gaps: self.gaps.saturating_sub(end_gaps.columns()),
+            gap_opens: self.gap_opens.saturating_sub(end_gaps.opens),
+            ..self
+        }
+    }
+}
+
 /// `NStr::Quote` with its default quote (`"`) and escape (`\`) characters.
 fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
     if text.is_empty() {

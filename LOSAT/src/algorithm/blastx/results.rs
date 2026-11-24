@@ -123,6 +123,28 @@ impl HspList {
         self.hsps.sort_by(compare_hsp);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1632-1638
+    /// `-subject`'s Seq-loc mapper (`s_RemapToSubjectLoc`) on the list's HSPs, after the report's
+    /// sort (`sort_evalue`; the mapper works on the sorted Seq-aligns): each HSP as
+    /// `serial::seqalign::mapped_script` keeps it, an end segment with a gap row left out (a
+    /// Smith-Waterman alignment of `-use_sw_tback` that starts with a gap): its starts move past
+    /// the left-out letters and its ends back before them; the scores and the identities stay.
+    /// Every format reads the mapped HSP (`report::sort_lists` maps once per batch).
+    pub(crate) fn map_subject_alignments(&mut self) {
+        for hsp in &mut self.hsps {
+            let mapped = crate::report::serial::seqalign::mapped_script(&hsp.edit_script);
+            if !mapped.drops(&hsp.edit_script) {
+                continue;
+            }
+            let raw = &mut hsp.hsp;
+            raw.q_start += mapped.start[0] as i32;
+            raw.s_start += mapped.start[1] as i32;
+            raw.q_end -= mapped.end[0] as i32;
+            raw.s_end -= mapped.end[1] as i32;
+            hsp.edit_script = hsp.edit_script[mapped.kept].to_vec();
+        }
+    }
+
     /// The HSPs in the order `sort_evalue` puts them (the reports' order, `report::sort_lists`),
     /// without moving them: the same stable sort by `compare_hsp`.
     pub(crate) fn evalue_order(&self) -> Vec<&Hsp> {

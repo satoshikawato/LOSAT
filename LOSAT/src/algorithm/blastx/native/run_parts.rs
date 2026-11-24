@@ -251,14 +251,8 @@ impl ArchiveBatch<'_> {
             query_scopes,
         } = self;
         // The BLAST archive (outfmt 11): one document per query batch, written from the
-        // data of outfmt 8's Seq-aligns.
-        for batch in results.iter_mut() {
-            for lists in &mut batch.queries {
-                for list in lists {
-                    list.sort_evalue();
-                }
-            }
-        }
+        // data of outfmt 8's Seq-aligns, in the reports' order (`report::sort_lists`).
+        crate::algorithm::blastx::report::sort_lists(results, database.is_none());
         let reported;
         let (subject_names, call_subjects): (_, &[FastaRecord]) =
             match (&database, &pairwise_database) {

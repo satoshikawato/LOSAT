@@ -934,6 +934,7 @@ fn tabular_hsp<'r>(
             coverage.of_hsp(span, span)
         },
     }
+    .within_query_range(hsp.gap_info.as_deref().unwrap_or_default())
 }
 
 #[cfg(test)]

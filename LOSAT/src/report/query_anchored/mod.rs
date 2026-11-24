@@ -74,6 +74,22 @@ impl HspStrands {
     pub(crate) fn differ(self) -> bool {
         self.query_minus != self.subject_minus
     }
+
+    /// The frame that `s_GetStdsegMasterFrame` reads of a translated query's first Std-seg
+    /// (`query_frame`): the HSP's frame in the query's record (`frame`), or, where the query's row
+    /// starts with a gap (`leading_gap`: the first segment's query interval is empty, so neither
+    /// plus nor a stop), the minus frame that the record's length in nucleotides (`length`) alone
+    /// gives, -(length % 3 + 1). NCBI probes (`X/xs/x4bgap/probe/frame`): 570, 571 and 572
+    /// nucleotides give -1, -2 and -3.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-438
+    pub(crate) fn master_frame(frame: i8, leading_gap: bool, length: usize) -> i8 {
+        if leading_gap {
+            -((length % 3) as i8 + 1)
+        } else {
+            frame
+        }
+    }
 }
 
 /// One HSP of a section (`Hsps::iter`): its subject's key, its Dense-seg's segments and its rows'

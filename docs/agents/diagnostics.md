@@ -442,6 +442,7 @@ export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_BXW4CAP=1
 export LOSAT_X_CHAINRUN=1
 export LOSAT_X_CLUTPAIRS=1
+export LOSAT_X_CSRQSKEEP=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCQSAHEAD=1
@@ -450,6 +451,7 @@ export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DP32=1
+export LOSAT_X_DPEDGE=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
@@ -824,6 +826,19 @@ Same values, faster computation:
   its time and max RSS (same-run A/B against dev of megablast, blastn, dc-megablast, blastp, blastx, tblastn
   and tblastx: CPU x0.9988-x1.0023, user instructions x0.99994-x1.00082; blastx over 31 pairs x1.0001,
   where dev against itself gives x0.9997).
+- `LOSAT_X_DPEDGE=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
+  added it, 2026-11-24; `=0` returns to the previous kernel) the 8-bit 256-bit X-drop kernel
+  (`align8`) masks the lanes at and past the end of the matrix (`limit`: the end of `B`, or the
+  fence) only in the one block that crosses it, the row's last; the other blocks no longer test
+  `limit`, select a mask (all ones there) and AND it into H. Every lane holds the same value, so
+  results and edit scripts do not change (the argument is at the head of `utils/x_xdrop_avx2.rs`;
+  the fuzz test against the scalar NCBI loops runs both instances). On the workstation (one core
+  unless noted, median, same run against dev 9ba71edbf): blastn (31,168 Drosophila cDNAs x 3 Mb
+  genome) x0.972 with 2.8 % fewer user instructions, blastp (WSSV x PajaWSV) x0.989,
+  blastn-short x0.999, the blastn case at 16 threads x0.996 and dc-megablast at 16 threads x0.989;
+  megablast runs no `align8` (the same instruction count, x0.9993 cycles); max RSS the same. Line FN
+  s7 measured seven row-frame items of `align8` one by one and in 14 combinations; this one was the
+  only item faster on both the traceback and the score-only rows.
 - `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's
@@ -3896,6 +3911,60 @@ Scheduling (each value computed by one thread with the original function; order 
   not act (dc-megablast, blastn and megablast of the 31,168 cDNAs, blastn of 5,000: x1.001-1.023, cycles x1.001-1.002,
   the same peaks); with `-db` the loop keeps (dc-megablast of the 31,168 cDNAs at 16 threads `RssAnon` 138 -> 131 MiB,
   x0.993; blastn of 5,000 88 -> 87, x0.994).
+- `LOSAT_X_CSRQSKEEP=1` (BLASTN dc-megablast, where a one-template lookup table laid out as CSR (`LOSAT_X_DCCSR`)
+  takes its `offsets` through the batch loop's keep (`LOSAT_X_MBLUTKEEP`); in the strict set from the pull request that
+  added it, 2026-11-23: `LOSAT_X_CSRQSKEEP=0` turns it off) keeps the CSR's second array, `qs` (one element per word of
+  the batch's table), in the keep with the kept table (`blastn/x_mb_lut_keep.rs`, argument in its header). NCBI
+  allocates each batch's chains (`next_pos`, `blast_nalookup.c:685` and `:979`), which `qs` stands for, and frees them
+  with the table (`:1377`); a CSR build allocated `qs` per batch and the batch freed it with the CSR. For the
+  dc-megablast of 31,168 D. melanogaster cDNAs a full batch's `qs` is 37 MB, above glibc's largest mmap threshold (32
+  MiB), so each build mapped it, faulted its pages in during the place pass (at one thread 91 % of the search's page
+  faults were in `x_dc_csr::build`) and unmapped it at the batch's end. Now a discontiguous CSR whose `offsets` goes back
+  to the keep gives its `qs` back too when it is dropped (`x_dc_csr::Csr::x_kept_with_qs`; the keep holds the one with
+  the most room, one with less is freed with its CSR), and the next such build takes it where it allocated `qs` before
+  when its capacity holds the build's `qs` (`x_mb_lut_keep::qs_buffer`, the decision point, in `x_dc_csr::build`,
+  `x_disc_lookup_par::csr_on_pool` and `csr_on_pool_steps`); else it frees the kept one and then allocates, as
+  `Keep::take_buffer` does with a table too short. No build follows the loop's last tables, so before they drop
+  (`x_lut_drop::after_prelim` of the last batch, or the last query chunk of a split last batch) the keep frees a kept
+  `qs` and takes none back (`Keep::close_qs`; `Keep::release` closes it too): the last CSR frees its `qs` with its
+  table, where and when it did before the switch, and a search of one batch frees it as before. The switch has no rule
+  of its own (`docs/decisions/SWITCH_APPROVALS.md` class (ii)): it runs wherever a CSR of `LOSAT_X_DCCSR` takes its
+  `offsets` through the keep. The contiguous CSR builds (`LOSAT_X_BNCSR`: `x_bn_csr`, `x_mb_lookup_once`) keep their own `qs`
+  (`Csr::x_kept`): their CSR tables have 4^11 cells or fewer (at 4^12 only `LOSAT_X_MBCSR`'s side beside a large
+  subject) while megablast's full batches have 4^12, so in a loop the CSR batches are the small ones, and a kept `qs`
+  (4 MiB for a packed head of 4^11 cells) idled through the full batches' scans, where the peak is, while a `qs` that
+  small comes back from glibc's heap without faults anyway. Measured with them (2026-11-23, line FD, workstation node
+  1, dev 5541322b2 against its merge 141e00ebc, the cDNAs above against 3 Mb of the D. melanogaster genome,
+  `-subject`): megablast at 16 threads 0.757 s against 0.748 s with VmHWM +2.90 % (137,004 against 133,146 KiB; `=0`
+  +0.10 %), at one thread 3.935 s against 3.916 s with max RSS +2.5 %; blastn at 16 threads 4.718 s against 4.651 s
+  (VmHWM -1.6 %), so no gain for more memory. The discontiguous CSR batches are the full ones (`LOSAT_X_DCCSR`'s size
+  rule) and the probe batches chains, so the kept `qs` goes from one full batch to the next (numbers below).
+  Every discontiguous build writes each element of `qs` that it uses before it reads one (its place pass writes each
+  place `0 .. words` once), so a kept `qs` is not zeroed and the CSR is the fresh build's: every array and every report
+  is what it is without the switch. Memory: no build allocates a `qs` beside the kept one; between a CSR's drop and the
+  next CSR build the loop holds the `qs` it freed there before (through a batch's traceback, as the kept table, but not
+  in the loop's last batch, and through the chain builds of `CBatchSizeMixer`'s probe batches), and a smaller batch's
+  CSR uses the largest kept `qs` (the resident pages that earlier builds wrote). `[TIMING] x_mb_lut_keep: ... qs_kept=
+  qs_fresh=` counts the discontiguous CSR builds through the keep that took the kept `qs` and those that allocated
+  theirs (none kept, or too small); both are 0 with `=0`. The unit tests of `x_mb_lut_keep_tests.rs` (a kept `qs`
+  taken, one too small freed, `close_qs`, `release`, `=0`), `csrs_through_the_keep_share_its_qs` and
+  `a_csr_kept_without_its_qs_frees_it` (`x_dc_csr_tests.rs`), and each discontiguous CSR build's test on a kept `qs` of
+  stale values with exactly the room the fresh build allocated and with one element less
+  (`x_dc_csr::x_assert_same_on_a_kept_qs`: the same arrays, the kept buffer taken or freed) check it, and
+  `LOSAT/tests/blastn_csr_qs_keep.rs` compares the reports and the standard error (but its `[TIMING]` lines) with
+  `=0`'s for dc-megablast and megablast (the reference side: no `qs` kept) of several query batches at 1 and 4 threads
+  and checks the counters. A probe of line FD (commit e79ea6298, one process-wide `qs` instead of the keep's;
+  workstation node 1, the cDNAs above against 3 Mb, `-subject`, outfmt 6) took 1.251 s against 1.319 s at 16 threads
+  (x0.948, cycles equal) and x0.983 at one, max RSS +0.4 % and -0.06 %.
+  Evidence (2026-11-24, line FD, workstation node 1, 16 cores, memory bound to the node; dev 9be4c0c5f, its merge
+  7ed7a66d1 and the merge with `=0` in one run, rotated, medians; reports identical in every arm): dc-megablast of the
+  31,168 cDNAs against 3 Mb of the D. melanogaster genome (`-subject`, outfmt 6) at 16 threads 1.216 s against 1.285 s
+  (x0.946; VmHWM sampled every 2 ms over 8 rounds 120,170 against 119,592 KiB, +0.48 %), at 8 threads 2.085 s against
+  2.167 s (x0.962, VmHWM +0.29 %), at one thread 12.801 s against 12.978 s (x0.986); 5,000 of the cDNAs at 16 threads
+  0.246 s against 0.256 s (x0.961, VmHWM +0.58 %); MG1655 against AP027131 (no CSR batch loop) x0.993 at 16 threads
+  (VmHWM -0.37 %) and x0.987 at one; blastn and megablast of the 31,168 cDNAs (contiguous builds, dev's code) x0.997
+  and x1.007 at 16 threads, x0.995 and x0.997 at one, blastn's VmHWM -0.52 %, megablast's peak about 133 or 160 MB per
+  run in every arm. `=0` stays within the runs' range of dev in every case.
 - `LOSAT_X_BNHITGROUP=1` (BLASTN, speed, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (feature/manyq-reads): on unless it is `0`) the preliminary stage's collector (`blastn/blast_engine/run.rs`
   `PrelimHitCollector::x_add_grouped`) keeps one list per query, made at the first subject with an HSP, and visits only

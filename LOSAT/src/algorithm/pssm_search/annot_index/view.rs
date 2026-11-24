@@ -6,6 +6,7 @@
 //! position in the module and the variant of a CHOICE by its position (`asn_types::Value`), and
 //! the type table names them (`asn_types::members`).
 
+use super::{Refusal, Stop};
 use crate::report::serial::asn_types::{member_index, members, resolved, Kind, Value};
 use crate::seqid::ParsedSeqId;
 
@@ -19,6 +20,36 @@ pub(super) struct V<'a> {
 impl<'a> V<'a> {
     pub(super) fn new(ty: u16, value: &'a Value) -> Self {
         V { ty, value }
+    }
+
+    /// Whether the value is an element of a list of `CRef<>`s stated as `NULL`: the empty
+    /// reference that NCBI's list holds (`Value::Null`), which no getter reads.
+    pub(super) fn is_null(self) -> bool {
+        matches!(self.value, Value::Null)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+    /// The element of a list of `CRef<>`s that NCBI's code dereferences here through the
+    /// reference (`CCoreException::eNullPtr` for one stated as `NULL`: a report of memory
+    /// addresses, or of nothing after the stream failed, `Stop::NullPointer`; probe D3c-3b
+    /// `probe7`: the parts of a `mix` location, a feature's `ids` and `xref`, an annotation's `id`
+    /// and `desc`).
+    pub(super) fn deref(self) -> Result<V<'a>, Stop> {
+        match self.value {
+            Value::Null => Err(Stop::NullPointer(Refusal::NullElement)),
+            _ => Ok(self),
+        }
+    }
+
+    /// The element of a list of `CRef<>`s that NCBI's code reads here through a pointer it took
+    /// from the list (a crash for one stated as `NULL`: an alignment or a graph of an annotation,
+    /// probe D3c-3b `probe7`), or inside an alignment, where LOSAT does not follow which reads
+    /// throw and which crash: refused (`Refusal::NullElement`), also after the stream failed.
+    pub(super) fn deref_raw(self) -> Result<V<'a>, Stop> {
+        match self.value {
+            Value::Null => Err(Stop::Refuse(Refusal::NullElement)),
+            _ => Ok(self),
+        }
     }
 
     /// The member `name` of the SEQUENCE, when set (`IsSet<Member>()` then `Get<Member>()`).

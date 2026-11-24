@@ -13,12 +13,14 @@ const LABELS: Readonly<Record<RunStatus, string>> = {
   failed: 'Failed',
 };
 
-/** The phase of a run in the status block and for the screen reader; `printed`: the run prints help or version. */
-export function phaseLabel(status: RunStatus, printed: boolean): string {
-  return printed && status === 'running' ? 'Printing' : LABELS[status];
+/** The phase of a run in the status block and for the screen reader; `printed`: the run prints help or version; `tool`: a non-search tool run. */
+export function phaseLabel(status: RunStatus, printed: boolean, tool = false): string {
+  if (printed && status === 'running') return 'Printing';
+  if (tool && status === 'running') return 'Running';
+  return LABELS[status];
 }
 
 /** What closing or reloading the tab ends while the run has not finished. */
-export function tabWarning(printed: boolean): string {
-  return `Closing or reloading this tab ends the ${printed ? 'run' : 'search'}`;
+export function tabWarning(printed: boolean, tool = false): string {
+  return `Closing or reloading this tab ends the ${printed || tool ? 'run' : 'search'}`;
 }

@@ -8,19 +8,26 @@
   ],
   "parameters": [
    {
-    "flag": "-query",
-    "help": "",
+    "flag": "-task",
+    "help": "Task to execute",
     "takes_value": true,
-    "default": "-"
-   },
-   {
-    "flag": "-subject",
-    "help": "",
-    "takes_value": true
+    "default": "megablast",
+    "choices": [
+     "megablast",
+     "dc-megablast",
+     "blastn",
+     "blastn-short",
+     "rmblastn"
+    ]
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
+    "help": "BLAST database name",
+    "takes_value": true
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database ",
     "takes_value": true
    },
    {
@@ -39,18 +46,18 @@
     "takes_value": true
    },
    {
-    "flag": "-taxidlist",
-    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
-    "takes_value": true
-   },
-   {
     "flag": "-negative_taxids",
     "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
    },
    {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
     "flag": "-negative_taxidlist",
-    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants ",
     "takes_value": true
    },
    {
@@ -69,24 +76,70 @@
     "takes_value": true
    },
    {
-    "flag": "-dbsize",
-    "help": "Effective length of the database",
+    "flag": "-subject",
+    "help": "Subject sequence(s) to search",
     "takes_value": true
    },
    {
-    "flag": "-show_gis",
-    "help": "Show NCBI GIs in deflines?",
-    "takes_value": false
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
    },
    {
-    "flag": "-html",
-    "help": "Produce HTML output?",
-    "takes_value": false
+    "flag": "-query",
+    "help": "Input file name",
+    "takes_value": true,
+    "default": "-"
    },
    {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false
+    "flag": "-evalue",
+    "help": "Expectation value (E) threshold for saving hits. Default = 10 (1000 for blastn-short)",
+    "takes_value": true
+   },
+   {
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm (length of best perfect match)",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapopen",
+    "help": "Cost to open a gap",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap",
+    "takes_value": true
+   },
+   {
+    "flag": "-perc_identity",
+    "help": "Percent identity",
+    "takes_value": true
+   },
+   {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment",
+    "takes_value": true
    },
    {
     "flag": "-searchsp",
@@ -94,21 +147,28 @@
     "takes_value": true
    },
    {
-    "flag": "-task",
-    "help": "Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn",
-    "takes_value": true,
-    "default": "megablast",
-    "choices": [
-     "megablast",
-     "dc-megablast",
-     "blastn",
-     "blastn-short",
-     "rmblastn"
-    ]
+    "flag": "-penalty",
+    "help": "Penalty for a nucleotide mismatch",
+    "takes_value": true
+   },
+   {
+    "flag": "-reward",
+    "help": "Reward for a nucleotide match",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_greedy",
+    "help": "Use non-greedy dynamic programming extension",
+    "takes_value": false
+   },
+   {
+    "flag": "-min_raw_gapped_score",
+    "help": "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages",
+    "takes_value": true
    },
    {
     "flag": "-template_type",
-    "help": "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal",
+    "help": "Discontiguous MegaBLAST template type",
     "takes_value": true,
     "choices": [
      "coding",
@@ -118,7 +178,7 @@
    },
    {
     "flag": "-template_length",
-    "help": "Discontiguous MegaBLAST template length: 16, 18 or 21",
+    "help": "Discontiguous MegaBLAST template length",
     "takes_value": true,
     "choices": [
      "16",
@@ -127,95 +187,9 @@
     ]
    },
    {
-    "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and dc-megablast, 7 for blastn-short)",
-    "takes_value": true
-   },
-   {
-    "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)",
-    "takes_value": true
-   },
-   {
-    "flag": "-perc_identity",
-    "help": "Percent identity threshold for filtering HSPs (default: 0, no filtering)",
-    "takes_value": true
-   },
-   {
-    "flag": "-max_target_seqs",
-    "help": "Maximum number of aligned sequences to keep (default: 500)",
-    "takes_value": true
-   },
-   {
-    "flag": "-num_descriptions",
-    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
-    "takes_value": true
-   },
-   {
-    "flag": "-num_alignments",
-    "help": "Number of database sequences to show alignments for [default: 250]",
-    "takes_value": true
-   },
-   {
-    "flag": "-line_length",
-    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthits",
-    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthsps",
-    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
-    "takes_value": true
-   },
-   {
-    "flag": "-max_hsps",
-    "help": "Maximum number of HSPs per subject (unlimited when omitted)",
-    "takes_value": true
-   },
-   {
-    "flag": "-qcov_hsp_perc",
-    "help": "Percent query coverage per hsp",
-    "takes_value": true
-   },
-   {
-    "flag": "-reward",
-    "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)",
-    "takes_value": true
-   },
-   {
-    "flag": "-penalty",
-    "help": "Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the other tasks)",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapopen",
-    "help": "Cost to open a gap (default: 0 for megablast, 5 for the other tasks)",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapextend",
-    "help": "Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)",
-    "takes_value": true
-   },
-   {
     "flag": "-dust",
-    "help": "DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1; no for blastn-short)",
+    "help": "Filter query sequence with DUST (Format: 'yes', 'level window linker', or 'no' to disable) Default = '20 64 1' ('no' for blastn-short)",
     "takes_value": true
-   },
-   {
-    "flag": "-lcase_masking",
-    "help": "",
-    "takes_value": false
-   },
-   {
-    "flag": "-soft_masking",
-    "help": "Apply filtering locations as soft masks [default: true]",
-    "takes_value": true,
-    "default": "true"
    },
    {
     "flag": "-filtering_db",
@@ -233,34 +207,19 @@
     "takes_value": true
    },
    {
-    "flag": "-strand",
-    "help": "",
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks",
     "takes_value": true,
-    "default": "both",
-    "choices": [
-     "both",
-     "plus",
-     "minus"
-    ]
+    "default": "true"
    },
    {
-    "flag": "-query_loc",
-    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
-    "takes_value": true
-   },
-   {
-    "flag": "-subject_loc",
-    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
-    "takes_value": true
-   },
-   {
-    "flag": "-subject_besthit",
-    "help": "Apply subject best hit filtering (disabled by default)",
+    "flag": "-ungapped",
+    "help": "Perform ungapped alignment only?",
     "takes_value": false
    },
    {
     "flag": "-culling_limit",
-    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit",
     "takes_value": true
    },
    {
@@ -274,45 +233,86 @@
     "takes_value": true
    },
    {
-    "flag": "-ungapped",
-    "help": "Perform ungapped alignment only",
+    "flag": "-subject_besthit",
+    "help": "Return only the best HSP for each non overlapping query region",
     "takes_value": false
-   },
-   {
-    "flag": "-xdrop_ungap",
-    "help": "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap",
-    "help": "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap_final",
-    "help": "X-dropoff value (in bits) for final gapped alignment (default: 100)",
-    "takes_value": true
-   },
-   {
-    "flag": "-no_greedy",
-    "help": "Use non-greedy dynamic programming extension",
-    "takes_value": false
-   },
-   {
-    "flag": "-min_raw_gapped_score",
-    "help": "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages",
-    "takes_value": true
    },
    {
     "flag": "-window_size",
-    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm",
     "takes_value": true
    },
    {
     "flag": "-off_diagonal_range",
-    "help": "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)",
+    "help": "Number of off-diagonals to search for the 2nd hit, use 0 to turn off",
     "takes_value": true,
     "default": "0"
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "Use lower case filtering in query and subject sequence(s)?",
+    "takes_value": false
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-strand",
+    "help": "Query strand(s) to search against database/subject",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for\nNot applicable for outfmt > 4\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for\nDefault = `250'",
+    "takes_value": true
+   },
+   {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments\nNot applicable for outfmt > 4\nDefault = `60'",
+    "takes_value": true
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits:\nalignment view options:\n  0 = Sort by evalue,\n  1 = Sort by bit score,\n  2 = Sort by total score,\n  3 = Sort by percent identity,\n  4 = Sort by query coverage\nNot applicable for outfmt > 4\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps:\n  0 = Sort by hsp evalue,\n  1 = Sort by hsp score,\n  2 = Sort by hsp query start,\n  3 = Sort by hsp percent identity,\n  4 = Sort by hsp subject start\nNot applicable for outfmt != 0\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+    "takes_value": true
    }
   ],
   "defaults": {
@@ -455,19 +455,24 @@
   ],
   "parameters": [
    {
-    "flag": "-query",
-    "help": "",
+    "flag": "-task",
+    "help": "Task to execute",
     "takes_value": true,
-    "default": "-"
-   },
-   {
-    "flag": "-subject",
-    "help": "",
-    "takes_value": true
+    "default": "blastp",
+    "choices": [
+     "blastp",
+     "blastp-fast",
+     "blastp-short"
+    ]
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a protein database, with or without parsed Seq-ids)",
+    "help": "BLAST database name",
+    "takes_value": true
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database ",
     "takes_value": true
    },
    {
@@ -486,18 +491,18 @@
     "takes_value": true
    },
    {
-    "flag": "-taxidlist",
-    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
-    "takes_value": true
-   },
-   {
     "flag": "-negative_taxids",
     "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
    },
    {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
     "flag": "-negative_taxidlist",
-    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants ",
     "takes_value": true
    },
    {
@@ -516,89 +521,39 @@
     "takes_value": true
    },
    {
-    "flag": "-dbsize",
-    "help": "Effective length of the database",
+    "flag": "-subject",
+    "help": "Subject sequence(s) to search",
     "takes_value": true
    },
    {
-    "flag": "-show_gis",
-    "help": "Show NCBI GIs in deflines?",
-    "takes_value": false
-   },
-   {
-    "flag": "-html",
-    "help": "Produce HTML output?",
-    "takes_value": false
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false
-   },
-   {
-    "flag": "-searchsp",
-    "help": "Effective length of the search space",
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
     "takes_value": true
    },
    {
-    "flag": "-task",
-    "help": "",
+    "flag": "-query",
+    "help": "Input file name",
     "takes_value": true,
-    "default": "blastp",
-    "choices": [
-     "blastp",
-     "blastp-fast",
-     "blastp-short"
-    ]
+    "default": "-"
    },
    {
     "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]",
-    "takes_value": true
-   },
-   {
-    "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16 (PAM30's) for blastp-short]",
+    "help": "Expectation value (E) threshold for saving hits. Default = 10",
     "takes_value": true
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]",
+    "help": "Word size for wordfinder algorithm",
     "takes_value": true
    },
    {
-    "flag": "-max_target_seqs",
-    "help": "Maximum number of aligned sequences to keep [default: 500]",
+    "flag": "-gapopen",
+    "help": "Cost to open a gap",
     "takes_value": true
    },
    {
-    "flag": "-num_descriptions",
-    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
-    "takes_value": true
-   },
-   {
-    "flag": "-num_alignments",
-    "help": "Number of database sequences to show alignments for [default: 250]",
-    "takes_value": true
-   },
-   {
-    "flag": "-line_length",
-    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthits",
-    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthsps",
-    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
-    "takes_value": true
-   },
-   {
-    "flag": "-max_hsps",
-    "help": "",
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap",
     "takes_value": true
    },
    {
@@ -607,8 +562,55 @@
     "takes_value": true
    },
    {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
+    "flag": "-seg",
+    "help": "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable)",
+    "takes_value": true,
+    "default": "no"
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks",
+    "takes_value": true,
+    "default": "false"
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name (normally BLOSUM62)",
+    "takes_value": true
+   },
+   {
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table",
+    "takes_value": true
+   },
+   {
     "flag": "-culling_limit",
-    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit",
     "takes_value": true
    },
    {
@@ -627,71 +629,13 @@
     "takes_value": false
    },
    {
-    "flag": "-ungapped",
-    "help": "",
-    "takes_value": false
-   },
-   {
-    "flag": "-xdrop_ungap",
-    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap",
-    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap_final",
-    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
-    "takes_value": true
-   },
-   {
     "flag": "-window_size",
-    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm",
     "takes_value": true
-   },
-   {
-    "flag": "-matrix",
-    "help": "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapopen",
-    "help": "Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapextend",
-    "help": "Cost to extend a gap [default: 1, or the matrix's best value]",
-    "takes_value": true
-   },
-   {
-    "flag": "-comp_based_stats",
-    "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
-    "takes_value": true,
-    "default": "2"
-   },
-   {
-    "flag": "-seg",
-    "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]",
-    "takes_value": true,
-    "default": "no"
-   },
-   {
-    "flag": "-soft_masking",
-    "help": "Apply filtering locations as soft masks [default: false]",
-    "takes_value": true,
-    "default": "false"
    },
    {
     "flag": "-lcase_masking",
-    "help": "",
-    "takes_value": false
-   },
-   {
-    "flag": "-use_sw_tback",
-    "help": "",
+    "help": "Use lower case filtering in query and subject sequence(s)?",
     "takes_value": false
    },
    {
@@ -700,9 +644,65 @@
     "takes_value": true
    },
    {
-    "flag": "-subject_loc",
-    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for\nNot applicable for outfmt > 4\nDefault = `500'",
     "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for\nDefault = `250'",
+    "takes_value": true
+   },
+   {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments\nNot applicable for outfmt > 4\nDefault = `60'",
+    "takes_value": true
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits:\nalignment view options:\n  0 = Sort by evalue,\n  1 = Sort by bit score,\n  2 = Sort by total score,\n  3 = Sort by percent identity,\n  4 = Sort by query coverage\nNot applicable for outfmt > 4\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps:\n  0 = Sort by hsp evalue,\n  1 = Sort by hsp score,\n  2 = Sort by hsp query start,\n  3 = Sort by hsp percent identity,\n  4 = Sort by hsp subject start\nNot applicable for outfmt != 0\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-ungapped",
+    "help": "Perform ungapped alignment only?",
+    "takes_value": false
+   },
+   {
+    "flag": "-comp_based_stats",
+    "help": "Use composition-based statistics:\n    D or d: default (equivalent to 2 )\n    0 or F or f: No composition-based statistics\n    1: Composition-based statistics as in NAR 29:2994-3005, 2001\n    2 or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, conditioned on sequence properties\n    3: Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, unconditionally\n",
+    "takes_value": true,
+    "default": "2"
+   },
+   {
+    "flag": "-use_sw_tback",
+    "help": "Compute locally optimal Smith-Waterman alignments?",
+    "takes_value": false
    }
   ],
   "defaults": {
@@ -1060,24 +1060,23 @@
   ],
   "parameters": [
    {
-    "flag": "-query",
-    "help": "",
+    "flag": "-task",
+    "help": "Task to execute",
     "takes_value": true,
-    "default": "-"
-   },
-   {
-    "flag": "-subject",
-    "help": "",
-    "takes_value": true
-   },
-   {
-    "flag": "-subject_loc",
-    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
-    "takes_value": true
+    "default": "blastx",
+    "choices": [
+     "blastx",
+     "blastx-fast"
+    ]
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a protein database, with or without parsed Seq-ids)",
+    "help": "BLAST database name",
+    "takes_value": true
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database ",
     "takes_value": true
    },
    {
@@ -1096,18 +1095,18 @@
     "takes_value": true
    },
    {
-    "flag": "-taxidlist",
-    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
-    "takes_value": true
-   },
-   {
     "flag": "-negative_taxids",
     "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
    },
    {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
     "flag": "-negative_taxidlist",
-    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants ",
     "takes_value": true
    },
    {
@@ -1126,53 +1125,39 @@
     "takes_value": true
    },
    {
-    "flag": "-dbsize",
-    "help": "Effective length of the database",
+    "flag": "-subject",
+    "help": "Subject sequence(s) to search",
     "takes_value": true
    },
    {
-    "flag": "-show_gis",
-    "help": "Show NCBI GIs in deflines?",
-    "takes_value": false
-   },
-   {
-    "flag": "-html",
-    "help": "Produce HTML output?",
-    "takes_value": false
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false
-   },
-   {
-    "flag": "-searchsp",
-    "help": "Effective length of the search space",
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
     "takes_value": true
    },
    {
-    "flag": "-task",
-    "help": "",
+    "flag": "-query",
+    "help": "Input file name",
     "takes_value": true,
-    "default": "blastx",
-    "choices": [
-     "blastx",
-     "blastx-fast"
-    ]
+    "default": "-"
    },
    {
     "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits [default: 10]",
+    "help": "Expectation value (E) threshold for saving hits. Default = 10",
     "takes_value": true
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]",
+    "help": "Word size for wordfinder algorithm",
     "takes_value": true
    },
    {
-    "flag": "-max_hsps",
-    "help": "",
+    "flag": "-gapopen",
+    "help": "Cost to open a gap",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap",
     "takes_value": true
    },
    {
@@ -1181,71 +1166,66 @@
     "takes_value": true
    },
    {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
     "flag": "-sum_stats",
-    "help": "Use sum statistics [default: true]",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapopen",
-    "help": "Cost to open a gap [default: 11]",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapextend",
-    "help": "Cost to extend a gap [default: 1]",
+    "help": "Use sum statistics",
     "takes_value": true
    },
    {
     "flag": "-max_intron_length",
-    "help": "",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments",
     "takes_value": true,
     "default": "0"
    },
    {
     "flag": "-seg",
-    "help": "",
+    "help": "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable)",
     "takes_value": true,
     "default": "12 2.2 2.5"
    },
    {
     "flag": "-soft_masking",
-    "help": "",
+    "help": "Apply filtering locations as soft masks",
     "takes_value": true,
     "default": "false"
    },
    {
     "flag": "-matrix",
-    "help": "Scoring matrix name [default: BLOSUM62]",
+    "help": "Scoring matrix name (normally BLOSUM62)",
     "takes_value": true
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]",
-    "takes_value": true
-   },
-   {
-    "flag": "-window_size",
-    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_ungap",
-    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap",
-    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap_final",
-    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table",
     "takes_value": true
    },
    {
     "flag": "-culling_limit",
-    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit",
     "takes_value": true
    },
    {
@@ -1260,27 +1240,32 @@
    },
    {
     "flag": "-subject_besthit",
-    "help": "",
+    "help": "Return only the best HSP for each non overlapping query region",
     "takes_value": false
    },
    {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm",
+    "takes_value": true
+   },
+   {
     "flag": "-ungapped",
-    "help": "",
+    "help": "Perform ungapped alignment only?",
     "takes_value": false
    },
    {
     "flag": "-lcase_masking",
-    "help": "",
+    "help": "Use lower case filtering in query and subject sequence(s)?",
     "takes_value": false
    },
    {
-    "flag": "-use_sw_tback",
-    "help": "",
-    "takes_value": false
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
    },
    {
     "flag": "-strand",
-    "help": "",
+    "help": "Query strand(s) to search against database/subject",
     "takes_value": true,
     "default": "both",
     "choices": [
@@ -1290,51 +1275,66 @@
     ]
    },
    {
-    "flag": "-query_loc",
-    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
-    "takes_value": true
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false
    },
    {
     "flag": "-query_gencode",
-    "help": "",
+    "help": "Genetic code to use to translate query (see https://www.ncbi.nlm.nih.gov/Taxonomy/taxonomyhome.html/index.cgi?chapter=cgencodes for details)\n",
     "takes_value": true,
     "default": "1"
    },
    {
-    "flag": "-max_target_seqs",
-    "help": "Maximum number of aligned sequences to keep [default: 500]",
-    "takes_value": true
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false
    },
    {
     "flag": "-num_descriptions",
-    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
+    "help": "Number of database sequences to show one-line descriptions for\nNot applicable for outfmt > 4\nDefault = `500'",
     "takes_value": true
    },
    {
     "flag": "-num_alignments",
-    "help": "Number of database sequences to show alignments for [default: 250]",
+    "help": "Number of database sequences to show alignments for\nDefault = `250'",
     "takes_value": true
    },
    {
     "flag": "-line_length",
-    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
+    "help": "Line length for formatting alignments\nNot applicable for outfmt > 4\nDefault = `60'",
     "takes_value": true
    },
    {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false
+   },
+   {
     "flag": "-sorthits",
-    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
+    "help": "Sorting option for hits:\nalignment view options:\n  0 = Sort by evalue,\n  1 = Sort by bit score,\n  2 = Sort by total score,\n  3 = Sort by percent identity,\n  4 = Sort by query coverage\nNot applicable for outfmt > 4\n",
     "takes_value": true
    },
    {
     "flag": "-sorthsps",
-    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
+    "help": "Sorting option for hps:\n  0 = Sort by hsp evalue,\n  1 = Sort by hsp score,\n  2 = Sort by hsp query start,\n  3 = Sort by hsp percent identity,\n  4 = Sort by hsp subject start\nNot applicable for outfmt != 0\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
     "takes_value": true
    },
    {
     "flag": "-comp_based_stats",
-    "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
+    "help": "Use composition-based statistics:\n    D or d: default (equivalent to 2 )\n    0 or F or f: No composition-based statistics\n    1: Composition-based statistics as in NAR 29:2994-3005, 2001\n    2 or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, conditioned on sequence properties\n    3: Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, unconditionally\n",
     "takes_value": true,
     "default": "2"
+   },
+   {
+    "flag": "-use_sw_tback",
+    "help": "Compute locally optimal Smith-Waterman alignments?",
+    "takes_value": false
    }
   ],
   "query_gencodes": [
@@ -1612,19 +1612,23 @@
   ],
   "parameters": [
    {
-    "flag": "-query",
-    "help": "",
+    "flag": "-task",
+    "help": "Task to execute",
     "takes_value": true,
-    "default": "-"
-   },
-   {
-    "flag": "-subject",
-    "help": "",
-    "takes_value": true
+    "default": "tblastn",
+    "choices": [
+     "tblastn",
+     "tblastn-fast"
+    ]
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
+    "help": "BLAST database name",
+    "takes_value": true
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database ",
     "takes_value": true
    },
    {
@@ -1643,18 +1647,18 @@
     "takes_value": true
    },
    {
-    "flag": "-taxidlist",
-    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
-    "takes_value": true
-   },
-   {
     "flag": "-negative_taxids",
     "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
    },
    {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
     "flag": "-negative_taxidlist",
-    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants ",
     "takes_value": true
    },
    {
@@ -1673,106 +1677,8 @@
     "takes_value": true
    },
    {
-    "flag": "-dbsize",
-    "help": "Effective length of the database",
-    "takes_value": true
-   },
-   {
-    "flag": "-show_gis",
-    "help": "Show NCBI GIs in deflines?",
-    "takes_value": false
-   },
-   {
-    "flag": "-html",
-    "help": "Produce HTML output?",
-    "takes_value": false
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false
-   },
-   {
-    "flag": "-searchsp",
-    "help": "Effective length of the search space",
-    "takes_value": true
-   },
-   {
-    "flag": "-task",
-    "help": "",
-    "takes_value": true,
-    "default": "tblastn",
-    "choices": [
-     "tblastn",
-     "tblastn-fast"
-    ]
-   },
-   {
-    "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits [default: 10]",
-    "takes_value": true
-   },
-   {
-    "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapopen",
-    "help": "Cost to open a gap [default: 11, or the matrix's best value]",
-    "takes_value": true
-   },
-   {
-    "flag": "-gapextend",
-    "help": "Cost to extend a gap [default: 1, or the matrix's best value]",
-    "takes_value": true
-   },
-   {
-    "flag": "-db_gencode",
-    "help": "",
-    "takes_value": true,
-    "default": "1"
-   },
-   {
-    "flag": "-max_intron_length",
-    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
-    "takes_value": true,
-    "default": "0"
-   },
-   {
-    "flag": "-matrix",
-    "help": "Scoring matrix name [default: BLOSUM62]",
-    "takes_value": true
-   },
-   {
-    "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_ungap",
-    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap",
-    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
-    "takes_value": true
-   },
-   {
-    "flag": "-xdrop_gap_final",
-    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
-    "takes_value": true
-   },
-   {
-    "flag": "-comp_based_stats",
-    "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
-    "takes_value": true,
-    "default": "2"
-   },
-   {
-    "flag": "-query_loc",
-    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "flag": "-subject",
+    "help": "Subject sequence(s) to search",
     "takes_value": true
    },
    {
@@ -1781,70 +1687,29 @@
     "takes_value": true
    },
    {
-    "flag": "-seg",
-    "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: 12 2.2 2.5]",
+    "flag": "-query",
+    "help": "Input file name",
     "takes_value": true,
-    "default": "12 2.2 2.5"
+    "default": "-"
    },
    {
-    "flag": "-lcase_masking",
-    "help": "",
-    "takes_value": false
-   },
-   {
-    "flag": "-use_sw_tback",
-    "help": "",
-    "takes_value": false
-   },
-   {
-    "flag": "-soft_masking",
-    "help": "Apply filtering locations as soft masks [default: false]",
-    "takes_value": true,
-    "default": "false"
-   },
-   {
-    "flag": "-sum_stats",
-    "help": "Use sum statistics [default: true]",
+    "flag": "-evalue",
+    "help": "Expectation value (E) threshold for saving hits. Default = 10",
     "takes_value": true
    },
    {
-    "flag": "-window_size",
-    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]",
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm",
     "takes_value": true
    },
    {
-    "flag": "-max_target_seqs",
-    "help": "Maximum number of aligned sequences to keep [default: 500]",
+    "flag": "-gapopen",
+    "help": "Cost to open a gap",
     "takes_value": true
    },
    {
-    "flag": "-num_descriptions",
-    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
-    "takes_value": true
-   },
-   {
-    "flag": "-num_alignments",
-    "help": "Number of database sequences to show alignments for [default: 250]",
-    "takes_value": true
-   },
-   {
-    "flag": "-line_length",
-    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthits",
-    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthsps",
-    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
-    "takes_value": true
-   },
-   {
-    "flag": "-max_hsps",
-    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap",
     "takes_value": true
    },
    {
@@ -1853,8 +1718,77 @@
     "takes_value": true
    },
    {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_gencode",
+    "help": "Genetic code to use to translate database/subjects (see user manual for details)\n",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-ungapped",
+    "help": "Perform ungapped alignment only?",
+    "takes_value": false
+   },
+   {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments",
+    "takes_value": true,
+    "default": "0"
+   },
+   {
+    "flag": "-seg",
+    "help": "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable)",
+    "takes_value": true,
+    "default": "12 2.2 2.5"
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks",
+    "takes_value": true,
+    "default": "false"
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name (normally BLOSUM62)",
+    "takes_value": true
+   },
+   {
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table",
+    "takes_value": true
+   },
+   {
     "flag": "-culling_limit",
-    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit",
     "takes_value": true
    },
    {
@@ -1873,8 +1807,74 @@
     "takes_value": false
    },
    {
-    "flag": "-ungapped",
-    "help": "",
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm",
+    "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "Use lower case filtering in query and subject sequence(s)?",
+    "takes_value": false
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for\nNot applicable for outfmt > 4\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for\nDefault = `250'",
+    "takes_value": true
+   },
+   {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments\nNot applicable for outfmt > 4\nDefault = `60'",
+    "takes_value": true
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits:\nalignment view options:\n  0 = Sort by evalue,\n  1 = Sort by bit score,\n  2 = Sort by total score,\n  3 = Sort by percent identity,\n  4 = Sort by query coverage\nNot applicable for outfmt > 4\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps:\n  0 = Sort by hsp evalue,\n  1 = Sort by hsp score,\n  2 = Sort by hsp query start,\n  3 = Sort by hsp percent identity,\n  4 = Sort by hsp subject start\nNot applicable for outfmt != 0\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-comp_based_stats",
+    "help": "Use composition-based statistics:\n    D or d: default (equivalent to 2 )\n    0 or F or f: No composition-based statistics\n    1: Composition-based statistics as in NAR 29:2994-3005, 2001\n    2 or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, conditioned on sequence properties\n    3: Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, unconditionally\n",
+    "takes_value": true,
+    "default": "2"
+   },
+   {
+    "flag": "-use_sw_tback",
+    "help": "Compute locally optimal Smith-Waterman alignments?",
     "takes_value": false
    }
   ],
@@ -2170,19 +2170,13 @@
   ],
   "parameters": [
    {
-    "flag": "-query",
-    "help": "",
-    "takes_value": true,
-    "default": "-"
-   },
-   {
-    "flag": "-subject",
-    "help": "",
+    "flag": "-db",
+    "help": "BLAST database name",
     "takes_value": true
    },
    {
-    "flag": "-db",
-    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
+    "flag": "-dbsize",
+    "help": "Effective length of the database ",
     "takes_value": true
    },
    {
@@ -2201,18 +2195,18 @@
     "takes_value": true
    },
    {
-    "flag": "-taxidlist",
-    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
-    "takes_value": true
-   },
-   {
     "flag": "-negative_taxids",
     "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
    },
    {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
     "flag": "-negative_taxidlist",
-    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants ",
     "takes_value": true
    },
    {
@@ -2231,101 +2225,29 @@
     "takes_value": true
    },
    {
-    "flag": "-dbsize",
-    "help": "Effective length of the database",
+    "flag": "-subject",
+    "help": "Subject sequence(s) to search",
     "takes_value": true
    },
    {
-    "flag": "-show_gis",
-    "help": "Show NCBI GIs in deflines?",
-    "takes_value": false
-   },
-   {
-    "flag": "-html",
-    "help": "Produce HTML output?",
-    "takes_value": false
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false
-   },
-   {
-    "flag": "-searchsp",
-    "help": "Effective length of the search space",
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
     "takes_value": true
+   },
+   {
+    "flag": "-query",
+    "help": "Input file name",
+    "takes_value": true,
+    "default": "-"
    },
    {
     "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits [default: 10]",
-    "takes_value": true
-   },
-   {
-    "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion]",
-    "takes_value": true
-   },
-   {
-    "flag": "-matrix",
-    "help": "Scoring matrix name [default: BLOSUM62]",
+    "help": "Expectation value (E) threshold for saving hits. Default = 10",
     "takes_value": true
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3]",
-    "takes_value": true
-   },
-   {
-    "flag": "-query_gencode",
-    "help": "",
-    "takes_value": true,
-    "default": "1"
-   },
-   {
-    "flag": "-db_gencode",
-    "help": "",
-    "takes_value": true,
-    "default": "1"
-   },
-   {
-    "flag": "-max_intron_length",
-    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
-    "takes_value": true,
-    "default": "0"
-   },
-   {
-    "flag": "-max_target_seqs",
-    "help": "Maximum number of aligned sequences to keep (default: 500)",
-    "takes_value": true
-   },
-   {
-    "flag": "-num_descriptions",
-    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
-    "takes_value": true
-   },
-   {
-    "flag": "-num_alignments",
-    "help": "Number of database sequences to show alignments for [default: 250]",
-    "takes_value": true
-   },
-   {
-    "flag": "-line_length",
-    "help": "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthits",
-    "help": "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4",
-    "takes_value": true
-   },
-   {
-    "flag": "-sorthsps",
-    "help": "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0",
-    "takes_value": true
-   },
-   {
-    "flag": "-max_hsps",
-    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "help": "Word size for wordfinder algorithm",
     "takes_value": true
    },
    {
@@ -2334,51 +2256,56 @@
     "takes_value": true
    },
    {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments",
+    "takes_value": true,
+    "default": "0"
+   },
+   {
     "flag": "-seg",
-    "help": "SEG: no, yes, or WINDOW LOCUT HICUT",
+    "help": "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable)",
     "takes_value": true,
     "default": "12 2.2 2.5"
    },
    {
     "flag": "-soft_masking",
-    "help": "Apply filtering locations as soft masks [default: false]",
+    "help": "Apply filtering locations as soft masks",
     "takes_value": true,
     "default": "false"
    },
    {
-    "flag": "-sum_stats",
-    "help": "Use sum statistics [default: true]",
+    "flag": "-matrix",
+    "help": "Scoring matrix name (normally BLOSUM62)",
     "takes_value": true
    },
    {
-    "flag": "-lcase_masking",
-    "help": "",
-    "takes_value": false
-   },
-   {
-    "flag": "-strand",
-    "help": "",
-    "takes_value": true,
-    "default": "both",
-    "choices": [
-     "both",
-     "plus",
-     "minus"
-    ]
-   },
-   {
-    "flag": "-xdrop_ungap",
-    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
-    "takes_value": true
-   },
-   {
-    "flag": "-window_size",
-    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]",
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table",
     "takes_value": true
    },
    {
     "flag": "-culling_limit",
-    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit",
     "takes_value": true
    },
    {
@@ -2397,13 +2324,86 @@
     "takes_value": false
    },
    {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm",
+    "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "Use lower case filtering in query and subject sequence(s)?",
+    "takes_value": false
+   },
+   {
     "flag": "-query_loc",
     "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
     "takes_value": true
    },
    {
-    "flag": "-subject_loc",
-    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "flag": "-strand",
+    "help": "Query strand(s) to search against database/subject",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false
+   },
+   {
+    "flag": "-query_gencode",
+    "help": "Genetic code to use to translate query (see https://www.ncbi.nlm.nih.gov/Taxonomy/taxonomyhome.html/index.cgi?chapter=cgencodes for details)\n",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-db_gencode",
+    "help": "Genetic code to use to translate database/subjects (see user manual for details)\n",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for\nNot applicable for outfmt > 4\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for\nDefault = `250'",
+    "takes_value": true
+   },
+   {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments\nNot applicable for outfmt > 4\nDefault = `60'",
+    "takes_value": true
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits:\nalignment view options:\n  0 = Sort by evalue,\n  1 = Sort by bit score,\n  2 = Sort by total score,\n  3 = Sort by percent identity,\n  4 = Sort by query coverage\nNot applicable for outfmt > 4\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps:\n  0 = Sort by hsp evalue,\n  1 = Sort by hsp score,\n  2 = Sort by hsp query start,\n  3 = Sort by hsp percent identity,\n  4 = Sort by hsp subject start\nNot applicable for outfmt != 0\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
     "takes_value": true
    }
   ],

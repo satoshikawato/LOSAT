@@ -1,0 +1,81 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: pfx_utf8
+           3 sequences; 360 total letters
+
+
+
+Query= q0
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NSW0.1 strong                                                         326     1e-94
+
+
+>NSW0.1 strong
+Length=120
+
+ Score = 326 bits (684),  Expect = 1e-94
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+
+Query  1    CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVR  60
+            CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVR
+Sbjct  1    CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVR  60
+
+Query  61   KVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL  120
+            KVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL
+Sbjct  61   KVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL  120
+
+
+ Score = 12.8 bits (21),  Expect = 3.0
+ Identities = 3/10 (30%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+
+Query  76  WIRNMTAKSW  85
+           W R    ++W
+Sbjct  32  WDRQCFYQAW  41
+
+
+ Score = 12.8 bits (21),  Expect = 3.0
+ Identities = 3/10 (30%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+
+Query  32  WDRQCFYQAW  41
+           W R    ++W
+Sbjct  76  WIRNMTAKSW  85
+
+
+
+Lambda      K        H
+   0.328    0.136    0.479 
+
+
+Effective search space used: 21632
+
+
+  Database: pfx_utf8
+    Posted date:  Nov 17, 2026  5:18 AM
+  Number of letters in database: 360
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 11
+Window for multiple hits: 40

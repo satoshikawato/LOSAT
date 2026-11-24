@@ -7,7 +7,7 @@ import { sha256Hex } from 'losat';
 import type { ReactorAbi } from 'losat';
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from 'losat/domain';
 import { CountsLoader } from '../../src/application/counts';
-import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
+import { Coordinator, isToolRun, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
 import { COUNTS_HOST, countsName, countsUrl, parseTaxid } from '../../src/domain/counts';
@@ -188,11 +188,15 @@ describe('the draft and the counts of a taxonomy ID', () => {
     expect((await draft.submit()).ok).toBe(true);
     expect(requests[0]!.parameters).toEqual([[WINDOW_MASKER_TAXID_FLAG, '9606']]);
     expect(requests[0]!.windowMasker).toBe(counts);
-    const snapshot = coordinator.state.get().runs[0]!.snapshot;
+    const run0 = coordinator.state.get().runs[0]!;
+    if (isToolRun(run0)) throw new Error('expected search run');
+    const snapshot = run0.snapshot;
     expect(snapshot.argv.slice(-2)).toEqual(['-window_masker_taxid', '9606']);
     expect(snapshot.windowMasker).toEqual({ name: 'windowmasker/9606/wmasker.obinary', file: counts, size: 5000, lastModified: 1_760_000_000_000, origin });
     for (let i = 0; i < 200 && coordinator.state.get().runs[0]?.status !== 'completed'; i++) await new Promise((r) => setTimeout(r, 5));
-    const record = coordinator.state.get().runs[0]!.record;
+    const finished = coordinator.state.get().runs[0]!;
+    if (isToolRun(finished)) throw new Error('expected search run');
+    const record = finished.record;
     expect(record.windowMasker).toEqual({
       name: 'windowmasker/9606/wmasker.obinary',
       size: 5000,

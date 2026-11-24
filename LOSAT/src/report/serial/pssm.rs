@@ -54,8 +54,8 @@ pub use crate::seqid::model::ObjectId;
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
 #[derive(Debug, Clone, PartialEq)]
 pub struct PssmQuery {
-    /// The ids, read and written as every Seq-id of NCBI's ASN.1 text (`seqid::asn_text`,
-    /// `report::seqid::SeqId::Db`).
+    /// The ids, read by the table-driven reader's Seq-id model (`asn_types::seq_id`) and written
+    /// as every Seq-id of NCBI's ASN.1 text (`report::seqid::SeqId::Db`).
     pub ids: Vec<crate::seqid::ParsedSeqId>,
     /// `descr` (a `Seq-descr`, a set of `Seqdesc`) in the order read; `None` without the member.
     pub descr: Option<Vec<Seqdesc>>,
@@ -101,26 +101,31 @@ impl SeqEntry {
     }
 }
 
-/// One `Seqdesc` of the query: a `title`, or another variant as the generic reader read it (the
-/// `Seqdesc` CHOICE value).
+/// One `Seqdesc` of the query: a `title`, another variant as the generic reader read it (the
+/// `Seqdesc` CHOICE value), or an element of the list stated as `NULL` (`Empty`: the empty
+/// `CRef<CSeqdesc>` that NCBI's reader leaves for it, `asn_types::Value::Null`).
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:47-52
 #[derive(Debug, Clone, PartialEq)]
 pub enum Seqdesc {
     Title(Vec<u8>),
     Other(Value),
+    /// An empty reference: NCBI's query set-up dereferences it (`has_empty`), its writers throw
+    /// where they would write it (`Encoder::null_element`).
+    Empty,
 }
 
 impl Seqdesc {
-    /// The name of the descriptor's variant (`title`, `molinfo`, ...).
-    pub fn variant_name(&self) -> &'static str {
+    /// The name of the descriptor's variant (`title`, `molinfo`, ...); `None` for an empty one.
+    pub fn variant_name(&self) -> Option<&'static str> {
         match self {
-            Seqdesc::Title(_) => "title",
-            Seqdesc::Other(Value::Choice(index, _)) => {
+            Seqdesc::Title(_) => Some("title"),
+            Seqdesc::Other(Value::Choice(index, _)) => Some(
                 super::asn_types::members(super::asn_types::table::named::SEQDESC)
                     [usize::from(*index)]
-                .name()
-            }
+                .name(),
+            ),
             Seqdesc::Other(_) => unreachable!("a Seqdesc is a CHOICE"),
+            Seqdesc::Empty => None,
         }
     }
 }
@@ -133,7 +138,7 @@ impl PssmQuery {
             .flatten()
             .filter_map(|descriptor| match descriptor {
                 Seqdesc::Title(title) => Some(title.as_slice()),
-                Seqdesc::Other(_) => None,
+                Seqdesc::Other(_) | Seqdesc::Empty => None,
             })
             .collect()
     }
@@ -143,7 +148,15 @@ impl PssmQuery {
         self.descr
             .iter()
             .flatten()
-            .any(|descriptor| descriptor.variant_name() == "molinfo")
+            .any(|descriptor| descriptor.variant_name() == Some("molinfo"))
+    }
+
+    /// Whether a descriptor is empty (`Seqdesc::Empty`).
+    pub fn has_empty(&self) -> bool {
+        self.descr
+            .iter()
+            .flatten()
+            .any(|descriptor| *descriptor == Seqdesc::Empty)
     }
 }
 
@@ -482,14 +495,19 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
         enc.begin_named("Seq-descr");
         enc.begin_list(true);
         for descriptor in descr {
-            enc.element();
             match descriptor {
                 Seqdesc::Title(title) => {
+                    enc.element();
                     enc.variant("Seqdesc", "title", 4);
                     enc.visible_str(title);
                     enc.end_variant();
                 }
-                Seqdesc::Other(value) => write_generic(enc, named::SEQDESC, value),
+                Seqdesc::Other(value) => {
+                    enc.element();
+                    write_generic(enc, named::SEQDESC, value);
+                }
+                // NCBI's throw (`encoder::NullElement`), before the element's separator.
+                Seqdesc::Empty => enc.null_element(),
             }
         }
         enc.end_list();
@@ -754,33 +772,78 @@ pub fn asn_text_posting(
 }
 
 /// `asn_text_posting` of `value` with `karlin`, when given, in place of the six values of its
-/// `finalData` (`asn_text_with_karlin`).
+/// `finalData` (`asn_text_with_karlin`), for a PSSM that LOSAT made (an element stated as `NULL`,
+/// which only an `-in_pssm` file holds, is the error `SerialError::NullElement` here:
+/// `asn_text_written`).
 pub fn asn_text_posting_with_karlin(
     value: &PssmWithParameters,
     karlin: Option<FinalKarlin>,
 ) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
-    match asn_text_with_karlin(value, karlin) {
-        Err(super::encoder::SerialError::NonVisibleChar(_)) => asn_text_traced(value, karlin),
-        written => written.map(|bytes| (bytes, Vec::new())),
+    let written = asn_text_written(value, karlin)?;
+    match written.thrown {
+        Some(_) => Err(super::encoder::SerialError::NullElement),
+        None => Ok((written.bytes, written.replaced)),
     }
 }
 
-/// `asn_text_posting` through `Traced`.
+/// What psiblast's write of a PSSM to its file gives (`asn_text_written`).
+#[derive(Debug)]
+pub struct WrittenPssm {
+    /// The file's bytes: the document, or those that NCBI's stream wrote before it threw.
+    pub bytes: Vec<u8>,
+    /// NCBI's post of each byte that its stream replaced (`encoder::ReplacedChar`).
+    pub replaced: Vec<super::encoder::ReplacedChar>,
+    /// NCBI's throw at an element stated as `NULL` (an empty descriptor, `Seqdesc::Empty`, or the
+    /// reader's `Value::Null` in another list: `encoder::NullElement`), after the bytes and the
+    /// posts.
+    pub thrown: Option<Box<super::encoder::NullElement>>,
+}
+
+/// `asn_text_posting_with_karlin` of a PSSM that may hold an element stated as `NULL`, as psiblast
+/// writes the PSSM of `-in_pssm` (`SavePssmToFile`): a document that `asn_text_with_karlin` does
+/// not write as it is (a byte that the stream replaces, an element stated as `NULL`) is written
+/// again through
+/// `Traced`, which gives NCBI's posts and NCBI's throw.
+pub fn asn_text_written(
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) -> Result<WrittenPssm, super::encoder::SerialError> {
+    match asn_text_with_karlin(value, karlin) {
+        Err(
+            super::encoder::SerialError::NonVisibleChar(_)
+            | super::encoder::SerialError::NullElement,
+        ) => asn_text_traced(value, karlin),
+        written => written.map(|bytes| WrittenPssm {
+            bytes,
+            replaced: Vec::new(),
+            thrown: None,
+        }),
+    }
+}
+
+/// `asn_text_written` through `Traced`.
 #[cold]
 #[inline(never)]
 fn asn_text_traced(
     value: &PssmWithParameters,
     karlin: Option<FinalKarlin>,
-) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
+) -> Result<WrittenPssm, super::encoder::SerialError> {
     let mut out = Vec::new();
     let mut enc = super::encoder::Traced::new(super::asn_text::AsnTextEncoder::new(&mut out), 0);
     write_document(&mut enc, value, karlin);
-    if let Some(error) = enc.error() {
-        return Err(error);
+    let thrown = enc.take_thrown();
+    match enc.error() {
+        Some(super::encoder::SerialError::NullElement) if thrown.is_some() => {}
+        Some(error) => return Err(error),
+        None => {}
     }
     let replaced = enc.take_replaced_chars();
     drop(enc);
-    Ok((out, replaced))
+    Ok(WrittenPssm {
+        bytes: out,
+        replaced,
+        thrown,
+    })
 }
 
 /// `asn_text` of `value` with `karlin`, when given, in place of the six values of its `finalData`

@@ -137,7 +137,10 @@ through `prd_zunf.pal` (the lookup gives Y, whose kept definition line does not 
 (`gnl|BL_ORD_ID|0` stored with a text tag, which makes the lookup throw: NCBI warns and goes on) and its version 4 copy
 `prd_otag_4`; `prd_wk5` (Y `ref|AAA00001.1|` kept by nothing, C `gb|AAA00001.2|` read first and matched weakly to A) and
 `prd_ah4` (Y `lcl|AAA00001.1`, A `gb|AAA00001.1|`, Z `gb|ZZZ00001.1|` with `emb|AAA00001.1|` in its second definition
-line: another sequence also holds A's id); `prd_txself` (A itself, `gb|AAA00001.1|`, with taxid 99990 by
+line: another sequence also holds A's id), with `prd_ahz1` and `prd_aha1` (review 1 of line DBID holdrec, H3: the same shape with
+the packed numbers apart, Z `gb|ZZZ00001.1|` before A `gb|AAA00002.1|` in the prefetch's order, so that Z's second line
+registers A's id first and NCBI reads Z, and A `gb|AAA00001.1|` before Z `gb|ZZZ00002.1|`, so that A's lookup gives Y and
+NCBI warns); `prd_txself` (A itself, `gb|AAA00001.1|`, with taxid 99990 by
 `-taxid_map prd_txself.map`, B without; the PSSM's own load reads the taxonomy database).
 Review 2 of that line: `prd_xg0y` (Y `gnl|DB|OTHER ^A gnl|DB|SEQA`) and `prd_xga` (A `gnl|DB|SEQA`, B) through
 `prd_xg.pal` (NCBI's scope reads Y's second definition line, which holds A's id); `prd_tw0y` (Y
@@ -335,6 +338,7 @@ def build_pssmread(args: argparse.Namespace) -> None:
                                  ("prd_zunf0y", "prd_zunf0y.faa", "5"), ("prd_zunfa", "prd_zunfa.faa", "5"),
                                  ("prd_otag", "prd_otag.faa", "5"), ("prd_otag_4", "prd_otag.faa", "4"),
                                  ("prd_wk5", "prd_wk5.faa", "5"), ("prd_ah4", "prd_ah4.faa", "5"),
+                                 ("prd_ahz1", "prd_ahz1.faa", "5"), ("prd_aha1", "prd_aha1.faa", "5"),
                                  ("prd_txself", "prd_txself.faa", "5"),
                                  ("prd_xg0y", "prd_xg0y.faa", "5"), ("prd_xga", "prd_xga.faa", "5"),
                                  ("prd_tw0y", "prd_tw0y.faa", "5"), ("prd_twa", "prd_twa.faa", "5"),

@@ -15,7 +15,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 ## Input
 
 - `-input` names a nucleotide BLAST database, as `-db` does for a search. An alias database works too; each of its volumes gets its own index.
-- `-db_mask ID` leaves the regions masked by the database's masking algorithm `ID` out of the index. `-show_filters` lists the algorithms the database has, with their ids. Give the number: as in NCBI 2.17.0, a name such as `dust` is not found and the run stops with NCBI's error.
+- `-db_mask ID` leaves the regions masked by the database's masking algorithm `ID` out of the index. `-show_filters` lists the algorithms the database has, with their ids. Give the number: as in NCBI 2.17.0, a name such as `dust` is not found and the run stops with NCBI's error. On a database with GI-indexed masks ([`makeblastdb -gi_mask`](makeblastdb.md#gi-indexed-masks)), the names that `-show_filters` lists (those of `-gi_mask_name`) work too. A new-style index reads each volume of such a database alone, and the volumes do not name the masks: on a database of several volumes `-db_mask` stops with `unrecognized filter algorithm id`, as in NCBI 2.17.0, and `-old_style_index true -iformat blastdb` reads them.
 - With `-old_style_index true`, the input can also be FASTA (`-iformat fasta`, the default of that style): `-input FILE`, or the standard input without `-input`. Lower case letters are masked and left out of the index.
 
 ## Common options

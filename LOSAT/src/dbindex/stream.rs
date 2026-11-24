@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::mask::MaskRanges;
+use crate::seqdb::MaskBlock;
 use crate::seqdb::SeqType;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{BdbError, MaskBdbReader};
@@ -207,6 +208,9 @@ pub(crate) struct BlastDbStream {
     reader: MaskBdbReader,
     /// `filter_algo_id_` when `use_filter_`.
     filter: Option<i32>,
+    /// The buffers of the masks' reads, kept from one sequence to the next
+    /// (`SeqDb::mask_ranges_in`).
+    mask_block: MaskBlock,
     /// NCBI's warning 803.10 of the read of a header that took a UTF8String for a VisibleString
     /// (without its line feed), once in the run, to be posted before the sequence's messages.
     warnings: Vec<Vec<u8>>,
@@ -250,6 +254,7 @@ impl BlastDbStream {
         let mut stream = BlastDbStream {
             reader,
             filter: None,
+            mask_block: MaskBlock::default(),
             warnings: Vec::new(),
         };
         stream.filter = match filter {
@@ -307,9 +312,11 @@ impl BlastDbStream {
     }
 
     /// `GetMaskAlgorithmId` of the database (`seqdb_`) with `name`; its `CSeqDBException` is thrown
-    /// again as a `CSequenceIStream_Exception`.
+    /// again as a `CSequenceIStream_Exception`. Its text is the reader's (`MaskAlgorithms::id_of`):
+    /// the remapper's for mask columns, the names table of `MASKLIST` for GI-indexed masks.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:78-94
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2266
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2292-2296
     fn named_id(&self, name: &str) -> Result<i32, StreamError> {
         let found = self
             .reader
@@ -317,10 +324,10 @@ impl BlastDbStream {
             .mask_algorithms()
             .map(|algorithms| algorithms.id_of(name))
             .map_err(|error| bdb_error(self.reader.database_error(error)))?;
-        if let Some(id) = found {
-            return Ok(id);
-        }
-        let message = "Cannot find string algorithm id in algorithm map.";
+        let message = match found {
+            Ok(id) => return Ok(id),
+            Err(message) => message,
+        };
         let site = crate::seqdb::throw_site(message.as_bytes())
             .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
         Err(StreamError::Ncbi(
@@ -402,7 +409,7 @@ impl SequenceStream for BlastDbStream {
             let db = self.reader.db();
             let ranges = db
                 .locate_oid(oid)
-                .and_then(|at| db.mask_ranges_at(at, algo_id))
+                .and_then(|at| db.mask_ranges_in(at, algo_id, &mut self.mask_block))
                 .map_err(|error| bdb_error(self.reader.database_error(error)))?;
             match ranges {
                 MaskRanges::Ranges(ranges) => masks.push(

@@ -228,6 +228,8 @@ pub(crate) fn run_pair(
                                 false,
                                 None,
                                 xml_matrix,
+                                // ABI v1 reads no `-parse_deflines` (`parse_args`).
+                                None,
                                 // The queued batches are searched: the pool is free.
                                 Some(pool),
                             )?;
@@ -308,6 +310,8 @@ pub(crate) fn run_pair(
                     false,
                     None,
                     xml_matrix,
+                    // ABI v1 reads no `-parse_deflines` (`parse_args`).
+                    None,
                     x_pool,
                 )?;
                 processed += queries.len();

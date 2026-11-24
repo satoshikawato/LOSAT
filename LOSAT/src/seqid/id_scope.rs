@@ -227,3 +227,16 @@ pub(crate) fn version_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
     let versioned = text.version.is_some();
     Some((key(versioned), key(!versioned)))
 }
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67
+/// For a PDB Seq-id, the key of its molecule: `CSeq_id::Match` takes two ids of one molecule for
+/// one where either has no chain (`defline_set::compare`), though `scope_keys` tells them apart
+/// by the chain (`query_batch::QueryScopes::add_batch_records`).
+pub(crate) fn pdb_mol_key(id: &ParsedSeqId) -> Option<u64> {
+    let ParsedSeqId::Pdb(pdb) = id else {
+        return None;
+    };
+    let mut hasher = DefaultHasher::new();
+    (b"pdb mol", &pdb.mol).hash(&mut hasher);
+    Some(hasher.finish())
+}

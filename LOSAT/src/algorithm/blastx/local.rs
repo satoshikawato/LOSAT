@@ -1019,6 +1019,10 @@ fn write_run(
                 xml_scan.stops_after == Some(queries_before + queries.len()),
                 documents[index].as_mut(),
                 xml_matrix,
+                query_scopes
+                    .borrow()
+                    .as_ref()
+                    .map(|scopes| scopes.numbered_from(queries_before)),
                 pool,
                 Some(LocalReport {
                     probe: probe.as_mut(),

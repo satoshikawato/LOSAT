@@ -890,6 +890,10 @@ fn run_inner(
                     stops,
                     xml2.borrow_mut().as_mut(),
                     xml_failing,
+                    query_scopes
+                        .borrow()
+                        .as_ref()
+                        .map(|scopes| scopes.numbered_from(queries_before)),
                     pool,
                 )
                 .map_err(refused)
@@ -906,6 +910,10 @@ fn run_inner(
                 stops,
                 xml2.borrow_mut().as_mut(),
                 xml_failing,
+                query_scopes
+                    .borrow()
+                    .as_ref()
+                    .map(|scopes| scopes.numbered_from(queries_before)),
                 pool,
             )
             .map_err(refused),
@@ -1549,8 +1557,10 @@ pub(super) fn reported_batch(
                 spec.subject_fetch(crate::blastinput::app::Program::Blastx)
             }),
     );
+    // The record that the report shows (`query_batch::xml_shown_of`).
     let xml_cut = |query: usize| {
-        queries.get(query).is_some_and(|record| {
+        let shown = crate::blastinput::query_batch::xml_shown_of(query_scopes, query);
+        queries.get(shown).is_some_and(|record| {
             crate::report::blast_xml::names::iteration_cut_before_hits(
                 record.internal_id.as_bytes(),
                 record.warning_id(),

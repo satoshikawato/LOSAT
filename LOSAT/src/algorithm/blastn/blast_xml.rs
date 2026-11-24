@@ -56,6 +56,9 @@ pub(crate) struct BlastnXml<'a> {
     /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
     /// is not among them; the library takes several formats).
     pub only_xml2: bool,
+    /// Under `-parse_deflines`, the scopes of the call's queries, which say how each result is
+    /// shown (`query_batch::xml_show_of`); `None` otherwise.
+    pub query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -75,10 +78,12 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     // XML is never streamed, `x_rpt_stream::Off::Xml`, so the call is the run's last) never
     // writes the `-subject` report of its last query, which NCBI holds back, unless another
     // format of the call (outfmt 5) writes it (`written_queries`).
+    let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
     let reports = written_queries(
         xml.queries.len(),
         !xml.epilog,
         xml.only_xml2 && document.holds_back(),
+        crate::blastinput::query_batch::held_start_of(xml.query_scopes, xml.queries.len()),
     );
     let has_hits = |q_idx: usize| {
         hit_lists
@@ -92,6 +97,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         false,
         &xml.messages,
         has_hits,
+        |q_idx| shows(q_idx).names_unshown(),
     )?;
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
     // crashes on is refused here, before the first byte.
@@ -111,14 +117,15 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
-    for (q_idx, record) in xml.queries.iter().enumerate() {
+    for q_idx in 0..xml.queries.len() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
+        let show = shows(q_idx);
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
-            document.unwritten(&mut buf)?;
+            document.unwritten(&mut buf, show.joins_held)?;
             crate::report::query_warnings::write_document_posts(
                 &buf,
                 document.take_posts(),
@@ -129,14 +136,17 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             break;
         }
         let text = &texts[q_idx];
+        // The query whose id, title and length the result shows (`XmlShow::label`).
+        let label = show.label.unwrap_or(q_idx);
         let query = XmlQuery {
-            id: text.query_id(record.local_id.as_bytes()),
-            title: &text.title,
-            len: xml.searched_lengths[q_idx] as i32,
+            id: texts[label].query_id(xml.queries[label].local_id.as_bytes()),
+            title: &texts[label].title,
+            len: xml.searched_lengths[label] as i32,
             stats: xml.stats[q_idx],
             message: text.message.as_deref(),
             searched: xml.searched.get(q_idx).copied().unwrap_or(true),
             masks: xml.masks.get(q_idx).map_or(&[], Vec::as_slice),
+            joins_held: show.joins_held,
         };
         let hit_list = hit_lists.get(q_idx).and_then(Option::as_ref);
         let start = buf.len();

@@ -2257,8 +2257,11 @@ fn search(
             .first()
             .and_then(crate::api::local_blast::FormatOutput::report_format)
             == Some(crate::blastinput::app::ReportFormat::Xml);
+        // The record that the report shows (`query_batch::xml_shown_of`).
+        let shown_scopes = batches.query_scopes.as_ref().map(|s| s.numbered_from(0));
         let xml_cut = |query: usize| {
-            queries.get(query).is_some_and(|record| {
+            let shown = crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
+            queries.get(shown).is_some_and(|record| {
                 crate::report::blast_xml::names::iteration_cut_before_hits(
                     record.local_id.as_bytes(),
                     record.warning_id(),

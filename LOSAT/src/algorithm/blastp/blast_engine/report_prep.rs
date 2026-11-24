@@ -524,8 +524,10 @@ pub(super) fn prefetch_reported_subjects(
     // that the cut reports left (`shared::XmlReportsBefore`, from the reads of the queries'
     // reports modelled here).
     let xml_first = first_report == Some(crate::blastinput::app::ReportFormat::Xml);
+    // The record that the report shows (`query_batch::xml_shown_of`).
     let xml_cut = |query: usize| {
-        query_records.get(query).is_some_and(|record| {
+        let shown = crate::blastinput::query_batch::xml_shown_of(reports.query_scopes, query);
+        query_records.get(shown).is_some_and(|record| {
             crate::report::blast_xml::names::iteration_cut_before_hits(
                 record.local_id.as_bytes(),
                 record.warning_id(),

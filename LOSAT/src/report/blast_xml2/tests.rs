@@ -166,6 +166,7 @@ fn invalid_query(message: &[u8]) -> XmlQuery<'_> {
         message: Some(message),
         searched: false,
         masks: &[],
+        joins_held: false,
     }
 }
 
@@ -499,11 +500,17 @@ fn a_report_that_is_never_written_is_not_made_and_writes_the_one_held_before() {
             put(&mut skipped, report.as_bytes(), &mut without).unwrap();
         }
         put(&mut made, b"{lost}\n", &mut with_report).unwrap();
-        skipped.unwritten(&mut without).unwrap();
+        skipped.unwritten(&mut without, false).unwrap();
         assert_eq!(without, with_report, "{kind:?}");
+        // a last result that joins the held report is not a report of its own: nothing more
+        let mut joined = Vec::new();
+        skipped.unwritten(&mut joined, true).unwrap();
+        assert!(joined.is_empty(), "{kind:?}");
         // the run's only query: the start of the document alone
         let mut only = Vec::new();
-        Xml2Document::new(kind, true).unwritten(&mut only).unwrap();
+        Xml2Document::new(kind, true)
+            .unwritten(&mut only, false)
+            .unwrap();
         assert_eq!(only, framing::prolog_bytes(kind), "{kind:?}");
     }
     // The writer of a `-subject` search holds its reports back; BLAST XML and `-db` do not.
@@ -514,10 +521,16 @@ fn a_report_that_is_never_written_is_not_made_and_writes_the_one_held_before() {
     // The written reports of a call: all but the last only where the run stops and the document
     // holds it back.
     use crate::report::blast_xml::written_queries;
-    assert_eq!(written_queries(3, true, true), 2);
-    assert_eq!(written_queries(3, false, true), 3);
-    assert_eq!(written_queries(3, true, false), 3);
-    assert_eq!(written_queries(0, true, true), 0);
+    assert_eq!(written_queries(3, true, true, 2), 2);
+    assert_eq!(written_queries(3, false, true, 2), 3);
+    assert_eq!(written_queries(3, true, false, 2), 3);
+    assert_eq!(written_queries(0, true, true, 0), 0);
+    // The held report starts at the first query whose results the last joins
+    // (`query_batch::held_start_of`): none of them is written.
+    assert_eq!(written_queries(3, true, true, 1), 1);
+    assert_eq!(written_queries(3, true, true, 0), 0);
+    assert_eq!(written_queries(3, false, true, 0), 3);
+    assert_eq!(written_queries(3, true, false, 0), 3);
 }
 
 #[test]
@@ -607,6 +620,7 @@ fn one_hsp_named(
         message: None,
         searched: true,
         masks: &masks,
+        joins_held: false,
     };
     let mut out = Vec::new();
     writer
@@ -669,6 +683,7 @@ fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
             message: None,
             searched: true,
             masks: &[],
+            joins_held: false,
         };
         let mut out = Vec::new();
         writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
@@ -760,6 +775,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
         message: None,
         searched: true,
         masks: &masks,
+        joins_held: false,
     };
     let (hit_from, hit_to) = if minus { (10, 5) } else { (5, 10) };
     let mut out = Vec::new();
@@ -1281,6 +1297,7 @@ fn many_hits_16(
         message,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     let mut out = Vec::new();
     writer.start(None, &mut out).unwrap();
@@ -1464,4 +1481,63 @@ fn a_failed_report_keeps_its_separator_and_fails_where_it_is_written() {
         String::from_utf8(out).unwrap(),
         format!("{}</BlastXML2>\n", framing::header16())
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2376-2378
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
+/// Probes `sub.vpair` of line RG-KB item 7c (NCBI BLAST+ 2.17.0, `-parse_deflines`): the result of
+/// a query whose Seq-id matches that of the held report's first (`XmlQuery::joins_held`) is the
+/// report's next `Search`, shown with the first's id, title and length and with its own message;
+/// a run that stops at it writes neither result (`unwritten`).
+#[test]
+fn a_joined_result_is_the_next_search_of_the_held_report() {
+    let first = invalid_message();
+    let second = b"second message".to_vec();
+    let joined = XmlQuery {
+        id: b"Query_2",
+        title: b"other",
+        len: 40,
+        message: Some(&second),
+        joins_held: true,
+        ..invalid_query(&first)
+    };
+    let first_text = String::from_utf8(first.clone()).unwrap();
+    for (kind, alone, open, close, comma) in [
+        (
+            Xml2Kind::Single16,
+            INVALID_ONLY_16,
+            "\n            <Search>",
+            "</Search>",
+            "",
+        ),
+        (
+            Xml2Kind::Single15,
+            INVALID_ONLY_15,
+            "\n          {",
+            "\n          }",
+            ",",
+        ),
+    ] {
+        let run = run(None, "");
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
+        let mut out = Vec::new();
+        writer
+            .query(&run, &invalid_query(&first), &mut out, |_| Ok(()))
+            .unwrap();
+        writer.query(&run, &joined, &mut out, |_| Ok(())).unwrap();
+        writer.finish(&mut out).unwrap();
+        let start = alone.find(open).unwrap();
+        let end = start + alone[start..].find(close).unwrap() + close.len();
+        let next = alone[start..end].replace(&first_text, "second message");
+        let expected = format!("{}{comma}{next}{}", &alone[..end], &alone[end..]);
+        assert_eq!(String::from_utf8(out).unwrap(), expected, "{kind:?}");
+        // The run stops at the joined result: the document's start alone.
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
+        let mut out = Vec::new();
+        writer
+            .query(&run, &invalid_query(&first), &mut out, |_| Ok(()))
+            .unwrap();
+        writer.unwritten(&mut out, true).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+    }
 }

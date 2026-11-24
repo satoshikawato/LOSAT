@@ -643,7 +643,7 @@ impl ColumnBlobs {
     pub(super) fn into_error(self, oid: u32) -> SeqDbError {
         match self.error {
             Some((failed, error)) if oid >= failed => error,
-            _ => SeqDbError::Range(format!(
+            _ => SeqDbError::Internal(format!(
                 "LOSAT internal error: the blob of sequence {oid} was read"
             )),
         }

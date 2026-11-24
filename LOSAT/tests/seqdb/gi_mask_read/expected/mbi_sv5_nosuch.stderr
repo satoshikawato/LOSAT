@@ -1,0 +1,19 @@
+Error: (CSeqDBException::eInvalid) Filtering algorithm nosuch does not exist.
+
+Available filtering algorithm(s):
+
+Algorithm ID  Algorithm name                          
+    0         gm1                                     
+
+Error: (CSequenceIStream_Exception::database parameter error) unrecognised filter algorithm name
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            dust                                    window=64; level=20; linker=1           
+
+Error: (106.16) Application's execution failed (CSequenceIStream_Exception::database parameter error) unrecognised filter algorithm name
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            dust                                    window=64; level=20; linker=1           
+

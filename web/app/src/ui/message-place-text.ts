@@ -3,7 +3,7 @@
 // that the engine gave, never one guessed from the program or the argv. The run's diagnostics are its Warnings in Run
 // details; the file of its -logfile is a tab of the Outputs (TBLASTX writes the messages of its run there); a -logfile
 // that names no file writes them nowhere.
-import type { MessagePlace, OutputPlace } from 'losat/domain';
+import { runFileOption, type MessagePlace, type OutputPlace, type RunFile } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 
 /**
@@ -24,7 +24,9 @@ export function placeParts(place: OutputPlace, run: RunView): readonly PlacePart
     case 'diagnostics':
       return [{ text: 'under Warnings in Run details' }];
     case 'logfile': {
-      const names = (run.record.runFiles ?? []).map((file) => file.name).join(', ');
+      const names = logFiles(run)
+        .map((file) => file.name)
+        .join(', ');
       return [{ text: "in the file of the run's " }, LOGFILE, { text: `${names === '' ? '' : `, ${names},`} under Outputs` }];
     }
     case 'nowhere':
@@ -57,12 +59,18 @@ export function warningsPlaceParts(messages: MessagePlace, diagnostics: string, 
 }
 
 /**
- * Whether the files of the run (the file of its -logfile) are kept and hold nothing: a TBLASTX search without warnings
- * leaves the file empty, as the CLI's (line WQA's sweep, D7, 2026-11-20). Files that are not kept say nothing.
+ * Whether the file of the run's -logfile is kept and holds nothing: a TBLASTX search without warnings leaves the file
+ * empty, as the CLI's (line WQA's sweep, D7, 2026-11-20). A file that is not kept says nothing; the run's search
+ * strategy file (-export_search_strategy) holds no messages.
  */
 function emptyFile(run: RunView): boolean {
-  const files = run.record.runFiles;
-  return files !== undefined && files.length > 0 && files.every((file) => file.bytes.length === 0);
+  const files = logFiles(run);
+  return files.length > 0 && files.every((file) => file.bytes.length === 0);
+}
+
+/** The kept file of the run's -logfile (none or one), of the files that the run made (`RunRecord.runFiles`). */
+function logFiles(run: RunView): readonly RunFile[] {
+  return (run.record.runFiles ?? []).filter((file) => runFileOption(file) === 'logfile');
 }
 
 /** The words of `warningsPlaceParts` as one text, or undefined where Warnings says nothing besides the diagnostics. */

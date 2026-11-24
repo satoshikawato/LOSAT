@@ -220,9 +220,13 @@ LOSAT_X_NEWTONEXACT_PROF
   (the stages of a query batch in the order they run; `side` = batches searched on one thread beside others, times
   added over the threads; `alone` = a batch searched by itself, with the pool if there is one, wall times; `replay`
   hands the subjects to the sink in subject order and includes `scan_inline`) and
-  `[TIMING] blastx_batch_end_side:` / `blastx_batch_end_alone: init .. read .. kappa_spec .. kappa_serial .. loop .. finish .. (matches=N reused=N serial=N)`
+  `[TIMING] blastx_batch_end_side:` / `blastx_batch_end_alone: init .. read .. kappa_spec .. kappa_serial .. loop .. finish .. (matches=N reused=N serial=N ahead=N)`
   (inside the end of a batch: the composition-based redo made ahead on the pool, the redo done in the in-order loop,
-  and the hit lists after it).
+  and the hit lists after it; `matches` counts the batch ends' matches, `reused` those whose redo made ahead the loop
+  took, `serial` those it redid itself, `ahead` those the flow of `LOSAT_X_BXREDOFLOW` redid ahead, taken or not.
+  With the flow `kappa_spec` is the loop's wait for the flow's results, during which it redoes other matches ahead.
+  The redo is made ahead only in `alone` batches, so `side` has `reused=0 ahead=0`: a batch searched on one thread
+  beside others starts no parallel work).
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_X_STATS=1` with TBLASTX's default unit path: `[X_STATS] TBXSEED` lines at exit
   (`tblastx/x_unit_probe.rs`; with `LOSAT_TIMING` too, these take the place of the `x_unit` split). Per cell
@@ -434,6 +438,7 @@ export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
 export LOSAT_X_BXKAPPAFIT=1
 export LOSAT_X_BXPOOLN1=1
+export LOSAT_X_BXREDOFLOW=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_BXTASKRES=1
@@ -7326,6 +7331,42 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.017, x 8 proteins at 64 x1.011) were run 3's clock, which moved in 2.35 ms steps, and read x0.990-0.997 in run 4.
   The switch is not reached on 800 cDNAs x 2 proteins (no batch end with two matches) and takes the reference side on
   AP027131 x AP027133 and the fly rows.
+- `LOSAT_X_BXREDOFLOW=1` (BLASTX, speed of the composition redo; in the strict set from the pull request that
+  added it: on unless `=0` or `LOSAT_X_DEFAULT=0`; acts wherever the redo's matches are redone ahead on the pool,
+  `LOSAT_X_BXPAR`'s rule: a batch end in a pool of 2+ threads with 2 or more matches, not `-use_sw_tback` in e-value
+  mode): the matches ahead are redone as a flow (`utils::xahead`, `runtime/kappa_batch.rs`) instead of in fork-join
+  batches of 32 matches per worker. The loop's thread offers the next 32 x workers matches as it walks the stream
+  (the early-termination guess on the heaps as they are then), each worker (one per thread of the pool, as for the
+  batches, at most one per match: the loop's thread keeps one) takes the next match offered,
+  and the loop takes a match's result when it reaches it, redoing other offered matches while one is still being
+  redone; the helpers leave once every match is taken, and a thread with nothing to redo spins, yields, then sleeps
+  50 us at a time (`Ahead::x_new_napping`; a wasm thread keeps yielding). Why: each batch waited at its join for its longest redo; with
+  one batch end live the threads stood idle there (BLASTX `-use_sw_tback`, 200 queries of q200k against the 40
+  proteins of `ov_atha` at BATCH_SIZE 40000 and 4 threads: 2,103 matches in about 20 batches, 662 s of user time in
+  222 s of wall time, 74 % of the threads). Exactness: a match's result does not depend on the worker or the time it
+  is redone (`x_speculate_match`: a result that read its predecessor's matrix is dropped and the match is redone in
+  stream order, as with the batches); the loop tests and inserts in stream order as before.
+  `tests/blastx_unit_cap.rs` compares the reports with the switch on and off at 2, 4 and 8 threads with one thread's,
+  including two short hit lists where early termination skips most matches while the flow's ring wraps, and
+  `LOSAT_TIMING`'s `ahead=` counts the matches the flow redid ahead; `runtime/kappa_batch_tests.rs` runs both forms in
+  one process and compares every field of the hit lists and the loop's early-termination decisions.
+  Measured 2026-11-24 on the workstation, dev 9be4c0c5f against this change (f86e3e90e) and the same binary with `=0`
+  (node 1, n threads on n physical cores, 3 rounds in rotated order, medians of per-round ratios; every output the same
+  bytes in every arm and the same as NCBI BLAST+ 2.17.0's). Wall time, this change / dev: one 9,000-letter piece of
+  AP027131 against 595 proteins, `-use_sw_tback -max_target_seqs 3`, at 2 / 4 / 16 threads x0.704 / x0.656 / x0.998;
+  200 queries against the 40 proteins of `ov_atha`, `-use_sw_tback`, BATCH_SIZE 40000, at 4 / 8 / 16 / 32 threads x0.974
+  / x0.959 / x0.986 / x0.854, at the default batch size and 8 threads x1.007; 6 pieces of 60 kb of AP027131 against the
+  595 proteins, `-max_target_seqs 5`, at 4 / 8 / 16 threads x0.885 / x1.037 / x1.000 (runs of 0.2-0.5 s; `=0` read the
+  same x1.037 at 8); 16 and 32 pieces of 100 kb at 16 and 32 threads x0.918 / x0.948; AP027131 against 543 proteins at
+  2 / 8 threads x0.939 / x0.983; 800 fly cDNAs against 6,600 yeast proteins at 32 threads, `-subject` / `-db`, x0.971 /
+  x0.975; EDL933 against AMRProt (ABRicate's call) at 8 / 32 threads x1.000 / x0.998; 100 kb of AP027131 against
+  Swiss-Prot at 32 threads x1.003. A second run (7 rounds, 8 cores): the BATCH_SIZE 40000 row with 16 threads on 8 cores
+  x0.962 (6 of 7 rounds), at 8 threads x0.963 (7 of 7). Max RSS: the fly rows x0.699 / x0.722, the 100 kb pieces x0.832 /
+  x0.925, the BATCH_SIZE 40000 row at 32 threads x1.057 and the 9,000-letter row at 2 threads x1.123 (each below its time
+  gain), the others x0.95-x1.01. CPU time (user + system) x0.97-x1.01, except the 9,000-letter row at 2 threads (x1.083:
+  the second thread now redoes matches). A thread that waits sleeps after spinning and yielding, which keeps the
+  system time at 0.3-2.0 s a run where waits that only yield took 6-13 s (BATCH_SIZE 40000, 32 threads); with 16 threads
+  on 8 cores the yielding form was 2 % faster (6 of 7 rounds) for 2-6 s more system time a run.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

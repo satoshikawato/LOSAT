@@ -73,13 +73,13 @@ use std::io::{self, IoSlice, Seek, SeekFrom, Write};
 use std::ops::BitOr;
 use std::path::Path;
 
+use crate::cli::{NcbiBuffer, NcbiStdio};
 use crate::report::run_files::OpenedFile;
 
-/// `BUFSIZ` of the Linux x64 build: the file buffer's size. Its put area is one byte shorter.
-pub(crate) const BUFSIZ: usize = 8192;
-
-/// The bytes the put area holds: `BUFSIZ` less one.
-const PUT_AREA: usize = BUFSIZ - 1;
+/// `BUFSIZ` of the Linux x64 build: the file buffer's size. Its put area is one byte shorter,
+/// and when its bytes are written is the rule of NCBI's file buffer (`NcbiBuffer`,
+/// `NcbiStdio::File`), the one rule of the report stream too (line RG item T8a).
+pub(crate) const BUFSIZ: usize = crate::cli::NCBI_BUFSIZ;
 
 /// The stream state (`std::ios_base::iostate`): `goodbit`, `badbit` and `failbit`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,12 +237,21 @@ impl<F: RawFile> FileBuf<F> {
         }
     }
 
+    /// The file buffer's rule (`NcbiBuffer`) holding the bytes held here.
+    fn rule(&self) -> NcbiBuffer {
+        let mut rule = NcbiBuffer::new(NcbiStdio::File);
+        rule.set_held(self.held.len());
+        rule
+    }
+
     /// `sputn`: whether all `data` was taken (held or written).
     fn put_bytes(&mut self, data: &[u8]) -> bool {
+        let mut rule = self.rule();
         let Some(file) = self.file.as_mut() else {
             return data.is_empty();
         };
-        if data.len() < PUT_AREA - self.held.len().min(PUT_AREA) {
+        rule.sputn(data.len(), data);
+        if rule.held() == self.held.len() + data.len() {
             self.held.extend_from_slice(data);
             return true;
         }
@@ -257,12 +266,13 @@ impl<F: RawFile> FileBuf<F> {
 
     /// `sputc`.
     fn put_byte(&mut self, byte: u8) -> bool {
+        let mut rule = self.rule();
         let Some(file) = self.file.as_mut() else {
             return false;
         };
-        let overflow = self.held.len() >= PUT_AREA;
+        rule.sputc(&[byte]);
         self.held.push(byte);
-        if !overflow {
+        if rule.held() == self.held.len() {
             return true;
         }
         if FileBuf::write_all(file, &mut [&self.held], &mut self.closed_pipe) {

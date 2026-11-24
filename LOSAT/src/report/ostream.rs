@@ -290,8 +290,10 @@ struct Core {
     sigpipe: bool,
     /// A write met a closed pipe (`sigpipe`): that operation and every later one return its error.
     closed: bool,
-    /// Every write of NCBI's is made where NCBI makes it (the tests' reference of `pending`).
-    #[cfg(test)]
+    /// Every write of NCBI's is made where NCBI makes it, one device write each (no `pending`
+    /// writes made together): the tools' streams (`set_tool`), whose failed writes stop where
+    /// NCBI's do whatever write fails (`EAGAIN` of the k-th write on a non-blocking standard
+    /// output, line RG KD-11b2), and the tests' reference of `pending`.
     immediate: bool,
 }
 
@@ -411,11 +413,7 @@ fn failed_piece(
 impl Core {
     /// Whether NCBI's writes of the region being written may be made later (`Site::defers`).
     fn defers(&self) -> bool {
-        #[cfg(test)]
-        if self.immediate {
-            return false;
-        }
-        self.site.defers()
+        !self.immediate && self.site.defers()
     }
 
     /// One insertion (`NcbiBuffer::sputn`). One that NCBI's buffer takes without a write is held
@@ -515,7 +513,19 @@ impl Core {
             }
         } else {
             self.out = self.held.len();
-            self.emit(&buf[..written])?;
+            // Standard output's buffer (C's `stdout`), once made, is filled and written first,
+            // then the insertion's whole blocks that follow, in a write of their own.
+            let fill = match before.stream() {
+                NcbiStdio::Cout {
+                    block,
+                    lines: false,
+                } if before.room() > 0 && !self.defers() => (block - before.held()).min(written),
+                _ => written,
+            };
+            self.emit(&buf[..fill])?;
+            if fill < written {
+                self.emit(&buf[fill..written])?;
+            }
             self.held.extend_from_slice(&buf[written..]);
         }
         self.update_room();
@@ -1084,7 +1094,6 @@ impl ReportStream {
             object_start: None,
             sigpipe: false,
             closed: false,
-            #[cfg(test)]
             immediate: false,
         })))
     }
@@ -1215,11 +1224,13 @@ impl ReportStream {
         stream
     }
 
-    /// The tools' mode (`tool_file`): no exception mask, and the end at a closed pipe.
+    /// The tools' mode (`tool_file`): no exception mask, the end at a closed pipe, and each of
+    /// NCBI's writes made when NCBI makes it (`Core::immediate`).
     fn set_tool(&self) {
         let mut core = lock(&self.0);
         core.throws = false;
         core.sigpipe = true;
+        core.immediate = true;
     }
 
     /// Makes this the stream that a text on standard error makes NCBI's writes of first

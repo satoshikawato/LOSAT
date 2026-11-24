@@ -409,13 +409,7 @@ impl SetWriter<'_> {
 /// (`-parse_seqids`): `set` as makeblastdb serializes it. Bytes of the strings that a
 /// VisibleString cannot hold are written as `#` and appended to `bad`.
 pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
-    let mut w = SetWriter {
-        out: Vec::with_capacity(encoded_capacity(set)),
-        write_strings: true,
-        skipped: 0,
-        path: vec!["Blast-def-line-set"],
-        bad,
-    };
+    let mut w = SetWriter::new(set, true, bad);
     w.set(set);
     w.out
 }
@@ -426,17 +420,28 @@ pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
 /// `WriteDb::post_extracted_deflines`); computing them alone gives the same diagnostics (LOSAT's
 /// speed: the record is written once, for the header).
 pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
-    let mut w = SetWriter {
-        out: Vec::with_capacity(encoded_capacity(set)),
-        write_strings: false,
-        skipped: 0,
-        path: vec!["Blast-def-line-set"],
-        bad,
-    };
-    w.set(set);
+    SetWriter::new(set, false, bad).set(set);
 }
 
-impl SetWriter<'_> {
+/// The names of the deepest member path of a record, so that the path is allocated once and never
+/// grows (LOSAT's speed): `Blast-def-line-set.E.seqid.E` and four below it, as
+/// `pdb.rel.std.season` or `patent.cit.id.number`.
+const MEMBER_PATH_DEPTH: usize = 8;
+
+impl<'a> SetWriter<'a> {
+    /// The writer of the record of `set`, with or without the bytes of its strings.
+    fn new(set: &DeflineSet, write_strings: bool, bad: &'a mut Vec<BadChar>) -> Self {
+        let mut path = Vec::with_capacity(MEMBER_PATH_DEPTH);
+        path.push("Blast-def-line-set");
+        SetWriter {
+            out: Vec::with_capacity(encoded_capacity(set)),
+            write_strings,
+            skipped: 0,
+            path,
+            bad,
+        }
+    }
+
     /// The record of `set`: SEQUENCE OF Blast-def-line.
     fn set(&mut self, set: &DeflineSet) {
         self.open(TAG_SEQUENCE);

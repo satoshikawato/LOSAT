@@ -606,8 +606,7 @@ impl<R: Read> FastaReader<R> {
     /// without a second copy of the sequence; the next record is read into a buffer of the
     /// same capacity, as before.
     pub(crate) fn take_raw_residues(&mut self) -> Vec<u8> {
-        let capacity = self.state.seq_data.len();
-        std::mem::replace(&mut self.state.seq_data, Vec::with_capacity(capacity))
+        self.state.take_residues()
     }
 
     /// `GetLineReader().AtEOF()`.
@@ -1109,6 +1108,15 @@ impl RecordState {
         Ok(())
     }
 
+    /// The residues of the record, handed over with their buffer; the next record is read into a
+    /// buffer of their number's capacity, so that a record about as long as the one before does
+    /// not grow its buffer from empty a doubling at a time (LOSAT's speed). The new buffer holds no
+    /// residues: an allocation that is not written takes no memory pages.
+    fn take_residues(&mut self) -> Vec<u8> {
+        let capacity = self.seq_data.len();
+        std::mem::replace(&mut self.seq_data, Vec::with_capacity(capacity))
+    }
+
     /// `AssignMolType` without `fForceType`, `fAssumeNuc` or `fAssumeProt`: whether the record
     /// is a protein (`IsAa()`; a `mol` of `not-set`, for a record without residues, is not).
     ///
@@ -1372,7 +1380,7 @@ impl RecordState {
             return Ok((SeqInst::Virtual, is_aa));
         }
         if is_aa {
-            let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
+            let seq_data = SeqData::Ncbieaa(self.take_residues());
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
@@ -1413,7 +1421,7 @@ impl RecordState {
             };
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
-        let residues = std::mem::take(&mut self.seq_data);
+        let residues = self.take_residues();
         Ok((
             SeqInst::Delta {
                 length,

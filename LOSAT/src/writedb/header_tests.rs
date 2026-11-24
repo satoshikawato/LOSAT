@@ -384,3 +384,46 @@ mod parsed {
         );
     }
 }
+
+/// The title's diagnostics without the record are those of the record, for titles of every byte
+/// and of lengths whose BER length takes one to four bytes.
+#[test]
+fn bad_title_chars_are_those_of_the_record() {
+    let mut texts = crate::utils::byte_search::tests::search_texts();
+    for len in [127, 128, 255, 256, 65_535, 65_536, 1 << 24] {
+        let mut text = vec![b'a'; len];
+        text[0] = 0x80;
+        text[len / 2] = b'\t';
+        text[len - 1] = 0xff;
+        texts.push(text);
+    }
+    for text in texts {
+        let (mut alone, mut written) = (vec![], vec![]);
+        bad_title_chars(&text, &mut alone);
+        defline_set(&text, 7, 9606, &mut written);
+        assert_eq!(alone, written, "{} bytes", text.len());
+    }
+}
+
+/// The record fits the buffer it is written into: at most `DEFLINE_SET_OVERHEAD` bytes besides
+/// the title, with the longest lengths and integers.
+#[test]
+fn the_record_fits_its_buffer() {
+    for len in [0, 1, 127, 128, 255, 256, 65_535, 65_536, 1 << 24] {
+        let title = vec![b'a'; len];
+        for (oid, taxid) in [
+            (0, 0),
+            (u32::MAX, i32::MIN),
+            (0x7fff_ffff, i32::MAX),
+            (300, -129),
+        ] {
+            let record = defline_set(&title, oid, taxid, &mut Vec::new());
+            assert!(
+                record.len() - len <= 77,
+                "{len} {oid} {taxid}: {}",
+                record.len() - len
+            );
+            assert!(record.len() <= DEFLINE_SET_OVERHEAD + len);
+        }
+    }
+}

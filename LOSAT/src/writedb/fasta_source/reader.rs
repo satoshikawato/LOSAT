@@ -332,7 +332,7 @@ pub(crate) enum ReadError {
     /// the conversion writes past them (SIGSEGV in every program; survey 11d dm4, probe 2 s3n
     /// and s7n, probe 3 b4n and b5n). LOSAT's programs refuse it (`pack_overflow_what`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1466-1470,1519-1520
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1456-1458,1504
     /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:141-164,201-205
     PackOverflow,
 }

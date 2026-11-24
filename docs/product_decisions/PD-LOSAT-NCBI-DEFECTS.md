@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.93
+- Version: 1.94
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -513,7 +513,12 @@
   ends the search only where the composition-based or Smith-Waterman redo fetches it, rule 2: its
   list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
-  item O4b2-4's 1.92)
+  item O4b2-4's 1.92);
+  1.94 2026-11-24 (FASTA records past NCBI's 32-bit `TSeqPos`, line RG item KC-11d: rule 3 for a
+  nucleotide piece that NCBI's reader packs into 0 bytes and for `makembindex -old_style_index
+  true`'s chunk end past 2^32; `losat windowmasker` reads records of 4,294,967,296 letters or more
+  as NCBI's reader does instead of refusing them; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3111,8 +3116,8 @@ file would differ, and NCBI's programs still could not open the database).
     it and its loop reads past the table.
   - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
     checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
-    reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
-    positions NCBI counts in 32 bits.
+    reads past. (A FASTA record of 4,294,967,296 letters or more, refused here until version 1.94,
+    is read as NCBI's reader reads it, with its length modulo 2^32; see the packing item below.)
 - `losat makeprofiledb -dbtype rps` (version 1.82, 2026-11-22, psiblast line item PS10a, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): where NCBI's makeprofiledb 2.17.0 crashes,
   aborts, never ends or reads memory that is not its data. LOSAT refuses each (exit 1, "... is not
@@ -3183,6 +3188,29 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+
+- A nucleotide FASTA record that NCBI's `CFastaReader` packs into a segment of 4294967293 to
+  4294967295 bases of NCBI2na, or of 4294967295 bases of NCBI4na, in `losat makeblastdb -dbtype
+  nucl`, `dustmasker`, `windowmasker`, `makembindex` and `convert2blastmask` (version 1.94,
+  2026-11-24, line RG item KC-11d, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07): `AssembleSeq` packs the record's pieces with `CDelta_ext::AddAndSplit`
+  (`fasta.cpp:1456-1458,1504`), whose `CDelta_ext_PackTarget::NewSegment` sizes a segment as
+  `(length + 3) / 4` or `(length + 1) / 2` bytes in a `TSeqPos` (`Delta_ext.cpp:163-164`); that
+  wraps to 0 and the conversion writes past it. Every program ends with SIGSEGV (exit status 139;
+  probes `remaining-gaps-20261112/K/kc/p11d/p2` s3n and s7n, through the `N` of `>?` gap lines,
+  and `p3` b4n and b5n, 4294967295 letters of `ACGT` and of `ACGTN`, in dustmasker and
+  makeblastdb). LOSAT refuses (exit 1, "... is not supported by LOSAT's <program>") at that
+  record, after the substitution's `std::out_of_range`, which NCBI throws first. A protein is
+  stored unpacked and meets no such segment.
+- `losat makembindex -old_style_index true` of a FASTA record of 4,294,914,101 letters or more,
+  counting the letters of its `>?` gap lines and modulo 2^32 (same version, line and delegation):
+  `CSubjectMap_Factory_TBase::AddSequenceChunk` takes a chunk's end as
+  `(TSeqPos)(chunk_start + chunk_size_)` (`dbindex_factory.cpp:724-725`), which wraps for a chunk
+  that starts 4,289,967,296 letters or more into the sequence (the chunks are 5,000,000 letters,
+  4,999,900 apart); the chunk's one valid interval is then 5,000,000 letters from its start, past
+  the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
+  letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
+  sequence.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

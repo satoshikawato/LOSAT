@@ -90,7 +90,7 @@ pub mod api {
 
     /// API で使える program。blastx は LIB-1b から（§5）。psiblast と makedb は CLI のみ（§8）。
     pub enum Program { Blastn, Blastp, Tblastn, Tblastx, Blastx }
-    /// program の option と outfmt の一覧（adapter の describe.rs を移す。choices は NCBI の引数の表、既定値は NCBI の XML の `<default>`、help と takes_value は clap の定義から。2026-11-23）。
+    /// program の option と outfmt の一覧（adapter の describe.rs を移す。choices は NCBI の引数の表、既定値は NCBI の XML の `<default>`、2026-11-23。2026-11-24 の線 RG K4i-3a から、option の一覧・順（`-help` の usage 行の順）・種類・takes_value・help（NCBI の option の説明文を LOSAT の言葉で）も NCBI の引数の表から。clap は読まない）。
     pub fn describe(program: Program) -> Description;
 
     /// argv を CLI と同じ読み手で検証した結果。失敗は `Error::Argv`、文言は CLI が標準エラーに書くものそのまま（2026-11-23。NCBI の短い usage、`=` 72 個の行、空行、NCBI の 2 つの post。LOSAT が走らせない NCBI の option の断りは `Error: ` を除いた文）。
@@ -584,5 +584,5 @@ CLI は query を batch ごとに読む（`CBlastInput::GetNextSeqBatch`、`blas
 |---|---|
 | 引数の誤り | `Error::Argv`（Python は `ArgumentError`）。`message()` は CLI が標準エラーに書くものそのまま（`cli.stderr == [error.message(), b"\n"]`）：NCBI の短い usage、`=` 72 個の行、空行、`Error: <message>` と `Error:  <message>`（2 つ目は NCBI の `(CArgException::eX) ` を除く。PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 例外 12）。`-logfile` のある呼び出しでは CLI と同じく usage、`Error in command-line arguments. See error logs for more details.`、`=` の行が誤りで、2 つの post は `-logfile` の file に書く。`validate` は file を開かないので、`-logfile` の無い CLI の形（post を含む）を返す（K4i-2b round 2）。CLI の終了状態は 1（clap の時は 2） |
 | 断り | LOSAT が走らせない NCBI の option は、NCBI の読み手が命令行を受け取った後で `the NCBI BLAST+ option -NAME is not supported by LOSAT's PROGRAM`（理由があれば ` (why)`）。`Error::Argv` で、文は `Error: ` を除いたもの |
-| `describe` | choices は NCBI の引数の表（flag に choices は無い）、既定値は NCBI の XML の `<default>`（blastx・tblastx の `-evalue` は既定なし。help は `[default: 10]`）、`-template_type`・`-template_length` の choices は describe から。help・takes_value・引数の一覧は clap のまま（K4i-3 まで） |
+| `describe` | choices は NCBI の引数の表（flag に choices は無い）、既定値は NCBI の XML の `<default>`（`-evalue` は既定なし。NCBI の説明文が `Default = 10` と書く）、`-template_type`・`-template_length` の choices は describe から。help・takes_value・引数の一覧と順も NCBI の引数の表から（K4i-3a、2026-11-24。help は NCBI の説明文、順は `-help` の usage 行の順） |
 | Web | ABI v2 の検証の文は CLI の標準エラーの bytes（usage、`=` 72 個の行、post）か断りの文。form は post が挙げる欄に印を付ける。ABI v1（凍結）は自分の parser と文言のまま |

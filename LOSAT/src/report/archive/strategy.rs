@@ -646,7 +646,7 @@ impl StrategyExport {
     /// file back to the requests reached when NCBI's error ends the run. (Holding the requests'
     /// bytes until then instead would keep every request of a BLASTN XML run in memory: 2.6 MB on a
     /// run of 82 MB, review 1 of K4h gap 2; so only a sink that cannot be cut holds them,
-    /// `State::held`.)
+    /// `Shared::held`.)
     /// Returns false, calling nothing, when the request is not to be written (`takes`). The
     /// requests are made in the run's order, each starting where the one before ended, after
     /// the batch before was noted; anything else is LOSAT's internal error.
@@ -700,16 +700,30 @@ impl StrategyExport {
                         state.written += wrote;
                         sink.flush()
                     }
-                    None => {
-                        if let Some(waiting) = &shared.held {
+                    // A sink that cannot be cut is `Shared::held` (`with_refusal` makes one of
+                    // the two from the sink).
+                    None => match &shared.held {
+                        Some(waiting) => {
                             hook_lock(waiting).requests.push_back((queries.start, held));
+                            Ok(())
                         }
-                        Ok(())
-                    }
+                        None => Err(std::io::Error::other(
+                            "LOSAT internal error: the search strategy export has no sink",
+                        )),
+                    },
                 };
                 state.unreached.push_back((queries.start, state.written));
                 state.next_query = queries.end;
                 made_one = true;
+                // NCBI's stream threw while it wrote this request (an element stated as `NULL` in a
+                // PSSM query, `encoder::NullElement`): NCBI's error ends the run there, after the
+                // bytes its stream flushed, so the request is reached.
+                if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
+                    flushed?;
+                    state.reach_through(queries.start);
+                    shared.write_held(|at| at <= queries.start)?;
+                    return written;
+                }
                 written?;
                 flushed?;
                 Ok(())
@@ -728,13 +742,7 @@ impl StrategyExport {
     /// that cannot be cut gets them here.
     pub(crate) fn release_through(&self, first: usize) -> std::io::Result<()> {
         self.with_state(|state| {
-            while let Some(&(at, end)) = state.unreached.front() {
-                if at > first {
-                    break;
-                }
-                state.reached = end;
-                state.unreached.pop_front();
-            }
+            state.reach_through(first);
             self.0.write_held(|at| at <= first)
         })
     }
@@ -841,7 +849,9 @@ thread_local! {
 
 /// A lock that the panic hook takes too (`HOLDING`, `Shared::held`), counted for its thread: a
 /// thread that panics while it holds one does not wait for it in the hook, which would never end
-/// (`write_held_at_panic`). Each is held only for short steps that make no request.
+/// (`write_held_at_panic`). Each is held only for steps that make no request: `HOLDING` to add
+/// an export, `Shared::held` to add a request made or to write requests to the sink, which takes
+/// as long as the sink takes them (a FIFO whose reader stops reading holds it).
 struct HookLock<'a, T>(std::sync::MutexGuard<'a, T>);
 
 /// `HookLock` of `mutex`, which waits for it.
@@ -898,8 +908,8 @@ pub fn install_panic_hook() {
 }
 
 /// The panic hook's part (`install_panic_hook`): the exports of `HOLDING` (`write_held_of`),
-/// unless the panicking thread holds one of the hook's locks (a panic inside such a step: its
-/// requests are left as they are).
+/// unless the panicking thread holds one of the hook's locks (a panic inside such a step: the
+/// requests of every export are left as they are).
 fn write_held_at_panic() {
     if HOOK_LOCKS.get() > 0 {
         return;
@@ -1012,6 +1022,18 @@ fn replaced_posts(
 }
 
 impl State {
+    /// The run reaches the batches whose first queries are at most `first`
+    /// (`StrategyExport::release_through`).
+    fn reach_through(&mut self, first: usize) {
+        while let Some(&(at, end)) = self.unreached.front() {
+            if at > first {
+                break;
+            }
+            self.reached = end;
+            self.unreached.pop_front();
+        }
+    }
+
     /// `StrategyExport::takes`.
     fn takes(&self, queries: &Range<usize>) -> bool {
         queries.end > self.next_query && queries.start < self.stop

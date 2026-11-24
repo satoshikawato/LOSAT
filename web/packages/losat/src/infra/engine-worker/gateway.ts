@@ -19,6 +19,7 @@
 // the next worker when the one they went to ends.
 import type { CountsFile } from '../../domain/counts.js';
 import type { DirectoryFile, RegistryFile } from '../../domain/run-files.js';
+import { parseToolDescription, type ToolDescription } from '../../domain/tool-description.js';
 import {
   InputMismatchError,
   RunCancelledError,
@@ -41,7 +42,7 @@ import {
   type ValidationResult,
 } from '../../ports/engine.js';
 import { engineBuildName, type EngineAssets } from '../reactor/assets.js';
-import type { EngineControl } from '../reactor/control.js';
+import type { EngineControl, ToolControl } from '../reactor/control.js';
 import { loadReactor } from '../reactor/instance.js';
 import { watchLife, webLocks, type LifeLocks } from '../worker-life.js';
 import { InstanceUse } from './instance-use.js';
@@ -72,8 +73,8 @@ export type RuntimeEnd = 'at-once' | 'grown';
 
 export interface WasmEngineOptions {
   readonly assets: EngineAssets;
-  /** describe/start/validate: the Data worker's serial reactor (`reactorControl`). `validateTool` is not here: it runs on the Engine worker. */
-  readonly control: EngineControl;
+  /** describe/start/validate (and optional describeTool): the Data worker's serial reactor (`reactorControl`). `validateTool` is not here: it runs on the Engine worker. */
+  readonly control: EngineControl & Partial<ToolControl>;
   readonly hardwareConcurrency?: number;
   readonly renewal?: Partial<RenewalLimits>;
   /** Starts an Engine worker (tests may start a test build). */
@@ -182,6 +183,13 @@ export class WasmEngine implements EngineGateway, ToolEngine {
 
   describe(program: ProgramDescription['program']): Promise<ProgramDescription> {
     return this.options.control.describe(program);
+  }
+
+  async describeTool(tool: string): Promise<ToolDescription> {
+    if (this.options.control.describeTool !== undefined) return this.options.control.describeTool(tool);
+    const { status, stdout, stderr } = await this.runTool([tool, '-xmlhelp']);
+    if (status !== 0) throw new Error((await stderr.text()).trim() || `${tool} -xmlhelp exited with status ${status}`);
+    return parseToolDescription(await stdout.text());
   }
 
   start(argv: readonly string[]): Promise<StartResult> {

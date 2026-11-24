@@ -713,8 +713,8 @@ fn every_mask_parse_file_runs_end_to_end() {
             ("LengthError".to_string(), 3),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 4),
-            ("Read".to_string(), 163),
-            ("Serial".to_string(), 65),
+            ("Read".to_string(), 164),
+            ("Serial".to_string(), 92),
             ("UnknownEncoding".to_string(), 7),
         ]
     );

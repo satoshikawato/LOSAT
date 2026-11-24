@@ -541,8 +541,7 @@ fn run_of(report: &str, unit: &str) -> usize {
     let Some(start) = report.find(unit) else {
         return 0;
     };
-    report[start..]
-        .as_bytes()
+    report.as_bytes()[start..]
         .chunks(unit.len())
         .take_while(|chunk| *chunk == unit.as_bytes())
         .count()

@@ -17,7 +17,7 @@ fn fixture(variant: &str) -> PathBuf {
 /// The organism report's names of the taxonomy database in `dir` (as the search path's current
 /// directory and `BLASTDB`), opened at the first lookup.
 fn names_in(dir: &Path) -> TabularNames {
-    let path = SearchPath::new(dir, Some(dir.as_os_str()), None).unwrap();
+    let path = SearchPath::new(dir, Some(dir.as_os_str()), None);
     TabularNames::for_report(
         TaxNamesDb::new(
             std::sync::Arc::new(LazyTaxDb::new(path)),

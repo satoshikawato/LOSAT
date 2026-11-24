@@ -4805,7 +4805,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?;
+        );
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -4835,18 +4835,16 @@ fn subject_taxonomy(
     resolved: &mut ResolvedBlastpArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        args.app.name(),
         outputs
             .formats
             .iter()
             .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt, args.app)),
-    )?;
+    );
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
-    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -5294,7 +5292,7 @@ fn run_local_formats(
     outputs.open_out()?;
     let mut resolved = resolve_for_formats(&args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
-    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
+    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs);
     let xinclude = xinclude_format(&args, outputs)?;
     let scope = pssm_check_scope(&args);
     let args = resolved;
@@ -7965,7 +7963,7 @@ fn preliminary_search_error(
     query_batch_skipped: &[bool],
     first_batch: bool,
     database_name: &str,
-    text: &str,
+    text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
         return unsearched_batches_then_engine_error(
@@ -8415,7 +8413,7 @@ fn unsearched_batches_then_engine_error(
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
     database_name: &str,
-    text: &str,
+    text: &[u8],
 ) -> anyhow::Error {
     let first_searched = query_batches
         .iter()
@@ -8435,7 +8433,8 @@ fn unsearched_batches_then_engine_error(
             format!("the database {database_name}")
         };
         return anyhow::anyhow!(
-            "a search of {searched} that fails with NCBI BLAST+'s error \"{text}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            String::from_utf8_lossy(text),
             args.app.name()
         );
     };
@@ -9674,7 +9673,7 @@ fn run_call(
                 &query_batch_skipped,
                 first_batch,
                 database_name,
-                text,
+                text.as_bytes(),
             )
         };
     // An ungapped search's failures before the search of its first query batch

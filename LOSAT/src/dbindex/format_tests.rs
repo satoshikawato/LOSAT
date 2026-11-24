@@ -22,18 +22,16 @@ fn a_written_header_reads_back_and_gives_ncbis_minimum_word_size() {
 
 #[test]
 fn super_headers_and_volume_counts_read_as_ncbi() {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
+    let dir = crate::utils::test_dir::TempDir::new(&format!(
         "losat-dbindex-format-{}",
         crate::utils::test_dir::process_id()
     ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
     let shd = dir.join("v.shd");
     let header = SuperHeader {
         num_seq: 6,
         num_vol: 2,
     };
-    header.save(shd.to_str().unwrap());
+    header.save(shd.to_str().unwrap().as_bytes());
     assert_eq!(SuperHeader::load(&shd), Some(header));
     let mut bytes = std::fs::read(&shd).unwrap();
     bytes[4] = 2;

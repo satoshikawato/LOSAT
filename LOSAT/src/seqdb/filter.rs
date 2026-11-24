@@ -1435,7 +1435,7 @@ impl SeqDb {
         &mut self,
         setting: &crate::blastinput::ncbi_environment::ReadVerification,
     ) {
-        if *setting == Default::default() {
+        if !setting.turns_read_check_off() {
             return;
         }
         let setting = Arc::new(setting.clone());

@@ -40,10 +40,11 @@ pub(crate) use crate::report::serial::asn_ber_reader::{
     CONTEXT_CONSTRUCTED as TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
 };
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
-// `ExpectedMember`'s throw: the members' read functions (`ReadMissingSimpleMember`,
-// member.cpp:464-477) call it for a mandatory member that the record skips; it is the read check
-// that `SERIAL_VERIFY_DATA_READ` turns off (`object_frame::DataCheck`, the database reader's
-// refusal: `seqdb::SeqDb::refuse_unchecked_reads`).
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:464-477
+// `ExpectedMember`'s throw: the members' read functions (`ReadMissingSimpleMember`) call it for a
+// mandatory member that the record skips; it is the read check that `SERIAL_VERIFY_DATA_READ`
+// turns off (`object_frame::DataCheck`, the database reader's refusal:
+// `seqdb::SeqDb::refuse_unchecked_reads`).
 use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind, EXPECTED_MEMBER};
 pub(crate) const TAG_NUMBER_MASK: u8 = 31;
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;

@@ -107,8 +107,9 @@ pub(crate) const EXPECTED_MEMBER: ThrowSite = istr_site(
 // NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
-// The generated getters call `ThrowUnassigned` with the index, so the place is the `NCBI_THROW` of
-// serialobject.cpp:306 (`file_name` and `file_line` are 0). Its function is a `const` method,
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-306
+// The generated getters call `ThrowUnassigned` with the index, so the place is that function's
+// throw (`file_name` and `file_line` are 0). Its function is a `const` method,
 // whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
 // function then.
 /// `ThrowUnassigned`, the throw of the getter of a member that is not set (the get check,

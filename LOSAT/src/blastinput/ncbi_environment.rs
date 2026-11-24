@@ -1210,8 +1210,8 @@ pub fn verification_off(value: &str) -> bool {
 /// 58 inputs of every program with such a reader: the search programs, makeblastdb,
 /// makeprofiledb, blastdbcmd, the maskers and makembindex). Where NCBI's check
 /// stops a run, the same run with the check off goes on in ways LOSAT does not follow (an unset
-/// member that later code reads, another exception, a crash: makeblastdb `-input_type blastdb`
-/// ends by SIGABRT): LOSAT refuses the run there (`ReadVerification::refused`), where the check
+/// member that later code reads, another exception, makeblastdb `-input_type blastdb` stopping
+/// with an error while it writes the database): LOSAT refuses the run there (`ReadVerification::refused`), where the check
 /// would have stopped it, after what NCBI writes before that point.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReadVerification {
@@ -1236,6 +1236,12 @@ impl ReadVerification {
             read: off(read),
             get: off(get),
         }
+    }
+
+    /// Whether the setting turns the read check off (`SERIAL_VERIFY_DATA_READ`): the only check
+    /// that a database's header records meet (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub(crate) fn turns_read_check_off(&self) -> bool {
+        self.read.is_some()
     }
 
     /// What LOSAT refuses (the noun phrase before "is not supported by LOSAT's PSIBLAST") where

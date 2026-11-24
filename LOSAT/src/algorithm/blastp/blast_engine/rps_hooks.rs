@@ -364,10 +364,14 @@ pub(super) fn rps_search(
         }
     }
     let mut gapped_k = Vec::new();
-    let mut setup =
-        RpsVolumeSetup::new("RPSBLAST").with_database(database.name(), db_volumes.len());
-    // The workers' scratch, kept from volume to volume (`RpsWorkers`).
-    let workers = RpsWorkers::new(pool.threads());
+    // The volumes' set-up and the workers' scratch, kept from volume to volume and from search
+    // to search of the database (`RpsRunState`).
+    let mut state = database.rps_state();
+    let state = &mut *state;
+    let setup = state.setup.get_or_insert_with(|| {
+        RpsVolumeSetup::new("RPSBLAST").with_database(database.name(), db_volumes.len())
+    });
+    let workers = RpsWorkers::kept(&mut state.workers, pool.threads());
     // The first failing batch (its number and error) of the volumes searched so far.
     let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
     let mut failed: Option<(usize, anyhow::Error)> = None;
@@ -553,9 +557,9 @@ pub(super) fn rps_search(
         for (number, batch) in engine
             .search_volume(
                 &files,
-                &Consensus::new(&setup, volume, &files),
+                &Consensus::new(setup, volume, &files),
                 pool,
-                &workers,
+                workers,
             )?
             .batches(&spans)
             .into_iter()

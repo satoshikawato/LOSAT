@@ -335,25 +335,33 @@ fn run_queries(
             if plan.num_iterations != 1 {
                 carried_ascii = None;
             }
-            for query in batch_queries.clone() {
-                let ordinal = query_input.ordinal(query);
-                let record = &query_records[ordinal];
-                let id = crate::algorithm::psiblast::pssm::fasta_query_id(
-                    record,
-                    args.first_query_ordinal + ordinal + 1,
-                );
-                cdds.push(delta.cdd_pssm(
-                    args,
-                    &plan.request,
-                    &super::delta_hooks::CddQuery {
+            let records: Vec<(&FastaRecord, _)> = batch_queries
+                .clone()
+                .map(|query| {
+                    let ordinal = query_input.ordinal(query);
+                    let record = &query_records[ordinal];
+                    let id = crate::algorithm::psiblast::pssm::fasta_query_id(
                         record,
-                        id: &id,
-                        alone: batch_queries.len() == 1,
-                    },
-                    pool,
-                    &mut *outputs.diagnostics,
-                )?);
-            }
+                        args.first_query_ordinal + ordinal + 1,
+                    );
+                    (record, id)
+                })
+                .collect();
+            let cdd_queries: Vec<super::delta_hooks::CddQuery<'_>> = records
+                .iter()
+                .map(|(record, id)| super::delta_hooks::CddQuery {
+                    record,
+                    id,
+                    alone: batch_queries.len() == 1,
+                })
+                .collect();
+            cdds = delta.cdd_pssms(
+                args,
+                &plan.request,
+                &cdd_queries,
+                pool,
+                &mut *outputs.diagnostics,
+            )?;
             // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:328-353
             // NCBI saves the batch's first PSSM only (`SavePssmToFile` of the first query's), its
             // ASCII PSSM with the application's ancillary data (`m_AncillaryData`).

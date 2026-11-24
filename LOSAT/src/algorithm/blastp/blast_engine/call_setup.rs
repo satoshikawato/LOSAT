@@ -498,7 +498,15 @@ pub(super) fn call_lookup(
         reports,
         ..
     } = *setup;
-    let batch_size = args.query_batch_size()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:195-215
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+    // deltablast's domain search (`PrelimOnly::Domain`) searches the queries of its call as one
+    // batch: `CLocalBlast` of the deltablast batch's query factory, which no reader cuts and
+    // RPS-BLAST never splits.
+    let batch_size = match prelim {
+        Some(PrelimOnly::Domain(_)) => u32::MAX,
+        _ => args.query_batch_size()?,
+    };
     // The batches count whole records (`seq_range::QueryInput::batches`); the batches
     // here are those that NCBI searches (`read_query_batches`).
     let query_batches = ranges.query_input.batches(batch_size);

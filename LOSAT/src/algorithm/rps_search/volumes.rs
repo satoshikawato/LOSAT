@@ -882,6 +882,11 @@ pub(crate) struct RpsVolumeSetup {
     /// The `-db` value of a database of one volume, which NCBI's error of a missing `.freq`
     /// names (`with_database`); `None`: each volume's path.
     database_name: Option<String>,
+    /// The volumes (`canonical_volume_path`) whose files `check` or `open` has checked: `open`
+    /// opens them again as `reopen` does (series PR, item PS13a: deltablast's domain search opens
+    /// the volume for each query batch, with this set-up kept from search to search,
+    /// `engine::RpsRunState`).
+    checked: std::collections::BTreeSet<String>,
 }
 
 impl RpsVolumeSetup {
@@ -891,6 +896,7 @@ impl RpsVolumeSetup {
             first_costs: None,
             regrouped: std::collections::BTreeSet::new(),
             database_name: None,
+            checked: std::collections::BTreeSet::new(),
         }
     }
 
@@ -907,17 +913,24 @@ impl RpsVolumeSetup {
     /// The files of `volume` (with its frequency ratios when `cbs`, composition-based
     /// statistics) after LOSAT's checks (`check`): `Ok(Err(error))` is NCBI's own error of the
     /// files, which the caller reports where NCBI's search raises it; `Err` is LOSAT's refusal.
-    /// The consensus letters come when the search needs them (`Consensus`).
+    /// The consensus letters come when the search needs them (`Consensus`). A volume that this
+    /// set-up has checked opens as `reopen` opens it: its files are those it checked (the run's),
+    /// and NCBI's own errors of them come again where each search opens them.
     pub(crate) fn open(
         &mut self,
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
+        let path = canonical_volume_path(volume.base());
+        if self.checked.contains(&path) {
+            return self.reopen(volume, cbs);
+        }
         let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
         self.check_files(volume, &files)?;
+        self.checked.insert(path);
         Ok(Ok(files))
     }
 
@@ -950,6 +963,7 @@ impl RpsVolumeSetup {
             Err(error) => return Ok(Err(error)),
         };
         self.check_files(volume, &files)?;
+        self.checked.insert(canonical_volume_path(volume.base()));
         Ok(Ok(()))
     }
 

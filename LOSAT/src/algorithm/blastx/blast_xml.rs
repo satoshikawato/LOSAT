@@ -76,7 +76,7 @@ use crate::report::blast_xml2::{
     RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
 use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
-use crate::report::serial::seqalign::seqalign_evalue;
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 
 const PROGRAM: &str = "BLASTX";
 
@@ -1397,10 +1397,16 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 if let std::collections::hash_map::Entry::Vacant(slot) =
                     subject_cache.entry(list.oid)
                 {
-                    // A subject whose lookup throws where its `Hit` loads it keeps the
-                    // exception for the `Hit`; one that no report loads gets no names
+                    // A subject whose lookup throws where its `Hit` loads it has the names of
+                    // NCBI's `catch` with the exception; one that no report loads gets no names
                     // (`HitNames::of`).
-                    slot.insert(HitNames::of(loads, list.oid, || {
+                    let parsed = match shown {
+                        ShownSubjects::Database { reported, .. } => {
+                            reported.parsed_subject(list.oid)
+                        }
+                        ShownSubjects::Fasta { .. } => None,
+                    };
+                    slot.insert(HitNames::of(loads, list.oid, parsed, || {
                         subject_names(shown, &subjects[list.oid], list.oid)
                     })?);
                 }
@@ -1510,7 +1516,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    posts.hit(sink.position(), first as u32, |texts| {
+                    posts.hit(sink.position(), &hit, first as u32, |texts| {
                         taxdb_printer.at_names((batch.query_ordinal + qidx, first), names, texts)
                     })?;
                     sink.hit(&hit, |hsps| {
@@ -1525,6 +1531,17 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .iter()
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
+                                let identities = read_num_ident(hsp.identity as i64, None);
+                                // The `catch` of an HSP whose subject's lookup throws comes before
+                                // NCBI reads its rows (`HspSink::reads_alignment`).
+                                if hsps.unaligned([XmlHsp::unaligned(
+                                    hsp.hsp.score,
+                                    hsp.bit_score,
+                                    seqalign_evalue(hsp.evalue),
+                                    identities,
+                                )])? {
+                                    continue;
+                                }
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
@@ -1575,6 +1592,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     // strand, where the row runs backwards.
                                     query_first: if plus { query_from - 1 } else { query_to - 1 },
                                     query_step: if plus { 3 } else { -3 },
+                                    alignment_identities: identities,
                                 })?;
                             }
                         }

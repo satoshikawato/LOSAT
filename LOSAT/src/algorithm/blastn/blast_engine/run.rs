@@ -8893,11 +8893,8 @@ fn run_in_pool(
                 }
             }
             let read = (&mut titles, &mut warnings[start]);
-            let one_by_one = crate::algorithm::common::database::prefetch_may_be_off(
-                database::prefetch_format(&output_formats),
-            );
             if let Err(error) =
-                database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
+                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
             {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,

@@ -515,7 +515,7 @@ impl ReportedSubjects {
         batches: &[BatchResults],
         gapped: bool,
         pairwise: bool,
-        (earlier, one_by_one): (shared::EarlierUtf8, bool),
+        earlier: shared::EarlierUtf8,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -523,7 +523,7 @@ impl ReportedSubjects {
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         // The sources of the empty stored titles that NCBI makes from them.
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
-        let headers = shared::HeaderReader::new(&database.db, one_by_one);
+        let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
         headers.note_earlier(earlier);
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -789,7 +789,7 @@ impl ReportedSubjects {
                 let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
                     subject
-                        .fetched(taxonomy, one_by_one, loads.load(oid))
+                        .fetched(taxonomy, loads.load(oid))
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -801,6 +801,7 @@ impl ReportedSubjects {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
+                        loads.load(oid),
                         ordinal,
                         database.program,
                     )?;
@@ -1018,7 +1019,7 @@ impl ReportedSubjects {
     ) {
         if database.parsed_seqids() {
             let rows = loads.reported_rows();
-            database.taxdb.note_loaded(&database.db, batch, || {
+            database.taxdb.note_loaded(batch, || {
                 batches
                     .iter()
                     .flat_map(move |batch| {

@@ -396,10 +396,10 @@ pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
-    (earlier, one_by_one): (shared::EarlierUtf8, bool),
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db, one_by_one);
+    let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
     headers.note_earlier(earlier);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
@@ -740,7 +740,7 @@ pub(crate) fn note_loaded(
 ) {
     if database.parsed_seqids() {
         let batch = [queries];
-        database.taxdb.note_loaded(&database.db, start, || {
+        database.taxdb.note_loaded(start, || {
             loaded_subjects(
                 LoadedBefore {
                     hits: ordered,

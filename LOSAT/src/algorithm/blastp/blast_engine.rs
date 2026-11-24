@@ -10308,11 +10308,7 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let reads = database::CallTitles::new(
-        database,
-        &query_batches,
-        report_prep::prefetch_format(args.app, &requested_formats),
-    );
+    let reads = database::CallTitles::new(database, &query_batches);
     let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {

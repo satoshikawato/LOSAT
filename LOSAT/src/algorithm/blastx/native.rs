@@ -1212,13 +1212,7 @@ pub(super) fn batch_titles(
     let aligned = ReportedSubjects::drop_unaligned(database, results, gapped);
     let earlier = EarlierUtf8::of_batch(first_query, fetched, aligned);
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(
-        database,
-        results,
-        gapped,
-        asks.pairwise,
-        (earlier, asks.one_by_one),
-    );
+    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
     super::x_timing::run(XRun::Titles, x_t);
     if let Some(posts) = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),

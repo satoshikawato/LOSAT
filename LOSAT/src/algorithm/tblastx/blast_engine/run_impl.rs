@@ -3810,10 +3810,7 @@ fn run_batch_loop(
                 database,
                 ordered,
                 start,
-                (
-                    earlier,
-                    crate::algorithm::common::database::prefetch_may_be_off(prefetch_format),
-                ),
+                earlier,
                 &mut reports.titles.borrow_mut(),
             );
             match read {
@@ -4432,9 +4429,6 @@ impl BatchReports<'_> {
                         && !crate::algorithm::common::database::prefetch_always_off(
                             prefetch_format,
                         ),
-                    one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
-                        prefetch_format,
-                    ),
                 };
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine

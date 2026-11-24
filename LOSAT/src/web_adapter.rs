@@ -27,8 +27,8 @@ pub use crate::cli::{ArgvError, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
 
 // The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
 // made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
-// defaults it resolves.
-pub use crate::ncbi_app::args::{choices, default_value, genetic_codes, string_values};
+// defaults it resolves (the defaults and the choices come with `described_parameters`).
+pub use crate::ncbi_app::args::{genetic_codes, string_values};
 
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start (NCBI's reader, LOSAT's refusals,
@@ -427,6 +427,15 @@ pub use crate::blastinput::fasta_reader::{
 // the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
 // the refusal of a record longer than LOSAT reads.
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
+
+/// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
+/// command line's `-help`, as the library API's `describe` gives each (NCBI's argument tables,
+/// line RG DECISIONS K4i-3-1): the rows of the adapter's `describe`, which leaves out the options
+/// that the adapter sets itself. `api::describe` lists the same rows but those that the library
+/// API sets.
+pub fn described_parameters(program: crate::api::Program) -> Vec<crate::api::Parameter> {
+    crate::api::described_parameters(program).collect()
+}
 
 /// The options of `program`'s command line that the browser's searches of records do not take:
 /// tblastn's `-in_pssm` (the query as a PSSM file), which the browser refuses until line PS's PSW1

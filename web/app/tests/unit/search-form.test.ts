@@ -23,6 +23,7 @@ import {
   sectionsAt,
   setField,
   setFields,
+  taskDefault,
   writtenValue,
   type EngineOption,
   type FormValues,
@@ -341,7 +342,8 @@ describe('writtenValue', () => {
 
 describe("knownDefault: the defaults that the engine resolves (describe's defaults)", () => {
   // describe.json is the reactor's describe; its `defaults` come from the engine's resolution
-  // (web/adapter/src/defaults.rs, whose tests check each value against the CLI's help).
+  // (web/adapter/src/defaults.rs, whose tests check each value against the default that NCBI's argument table or
+  // NCBI's comment of the option states).
   const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
   const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
   const blastn = programById('blastn');
@@ -358,6 +360,16 @@ describe("knownDefault: the defaults that the engine resolves (describe's defaul
     expect(knownDefault(blastn, '-dust', { '-task': 'blastn-short' }, bn)).toEqual({ defaultValue: 'no' });
     // No default is known before `describe` comes.
     expect(knownDefault(blastn, '-word_size', {}, undefined)).toBeUndefined();
+  });
+
+  it("takes the engine's value for the task before NCBI's default, as the results do (taskDefault)", () => {
+    // NCBI's default is the same in every task; the engine resolves each task's own.
+    const option = { defaultValue: '10', resolvedDefault: { byTask: { megablast: '10', 'blastn-short': '1000' } } };
+    expect(taskDefault(option, 'blastn-short')).toBe('1000');
+    expect(taskDefault(option, 'megablast')).toBe('10');
+    expect(taskDefault(option, 'rmblastn')).toBe('10');
+    expect(taskDefault({ resolvedDefault: { byTask: { '': '500' } } }, '')).toBe('500');
+    expect(taskDefault({}, 'blastn')).toBeUndefined();
   });
 
   it("takes a set matrix's values from the engine's table", () => {

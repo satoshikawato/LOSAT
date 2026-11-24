@@ -4,10 +4,10 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import { runFileOption, type MessagePlace, type OutputPlace, type ProgramId, type RecordKey, type RunOutput, type SequenceKind } from 'losat/domain';
+import { runFileOption, type MessagePlace, type OutputPlace, type ProgramId, type RecordKey, type RunOutput, type SequenceKind, type ToolDescription } from 'losat/domain';
 import type { ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
-import { optionValue } from '../domain/argv';
+import { runTask } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
 import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { customOutfmt, runOutputs } from '../domain/output-format';
@@ -30,9 +30,11 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
+import { isTerminal } from '../domain/run';
+import { toolTakesValue } from '../domain/tools';
 import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
-import type { AppState, RunView } from './coordinator';
+import { isToolRun, type AnyRunView, type AppState, type RunView, type ToolRunView } from './coordinator';
 import { Store } from './store';
 
 /** The identity of an HSP: its run, its query record and its rank among the query's HSPs. */
@@ -150,6 +152,8 @@ export interface ResultsState {
   /** Why the run has no results to show (not completed, cancelled, failed, or a read error). */
   readonly message?: string;
   readonly loaded?: LoadedRun;
+  /** The selected tool run (WindowMasker), when a tool run is open in Results. */
+  readonly toolRun?: ToolRunView;
   /**
    * The options' grammar of the run's mode (`describe`: which options take a value), for its
    * command; also for a run without results. Undefined until the engine has described it.
@@ -183,6 +187,7 @@ export interface ResultsState {
 export interface ResultsDeps {
   readonly data: Pick<RunStore, 'readHitTable' | 'readOutput' | 'readOutputRange' | 'readDiagnostics'>;
   readonly describe: (program: ProgramId) => Promise<ProgramDescription>;
+  readonly describeTool?: (tool: string) => Promise<ToolDescription>;
   readonly runs: Store<AppState>;
   readonly verification: VerificationTable;
 }
@@ -226,6 +231,7 @@ export class ResultsBrowser {
   private headingReads = new Map<number, Promise<string | undefined>>();
   /** The options' grammar of each mode that the engine has described (one engine build: it does not change). */
   private readonly grammars = new Map<ProgramId, OptionGrammar>();
+  private readonly toolGrammars = new Map<string, OptionGrammar>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -237,10 +243,19 @@ export class ResultsBrowser {
     // run whose results could not be read ('failed') is not read again at each change of the runs.
     deps.runs.subscribe((app) => {
       const { runId, phase } = this.state.get();
-      if (runId === undefined || phase !== 'unavailable') return;
+      if (runId === undefined) return;
       const run = app.runs.find((r) => r.snapshot.runId === runId);
-      if (run?.status === 'completed') void this.open(runId);
-      else if (run !== undefined) this.set({ message: unavailableMessage(run) });
+      if (run === undefined) return;
+      if (isToolRun(run)) {
+        const hasOutputs = run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined);
+        if (phase === 'unavailable' && hasOutputs) void this.open(runId);
+        else if (phase === 'unavailable') this.set({ toolRun: run, message: unavailableMessage(run) });
+        else if (phase === 'ready') this.set({ toolRun: run });
+        return;
+      }
+      if (phase !== 'unavailable') return;
+      if (run.status === 'completed') void this.open(runId);
+      else this.set({ message: unavailableMessage(run) });
     });
   }
 
@@ -260,6 +275,23 @@ export class ResultsBrowser {
     this.headingQueue.length = 0;
     if (run === undefined) return;
     const filters = this.state.get().runId === runId ? this.state.get().filters : NO_FILTERS;
+    if (isToolRun(run)) {
+      const grammar = this.toolGrammars.get(run.snapshot.tool);
+      const ready =
+        isTerminal(run.status) &&
+        (run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined));
+      this.state.set({
+        ...INITIAL,
+        filters,
+        runId,
+        phase: ready ? 'ready' : 'unavailable',
+        toolRun: run,
+        ...(ready ? {} : { message: unavailableMessage(run) }),
+        ...(grammar === undefined ? {} : { grammar }),
+      });
+      if (grammar === undefined) this.describeToolGrammar(token, run.snapshot.tool);
+      return;
+    }
     const grammar = this.grammars.get(run.snapshot.program);
     if (run.status !== 'completed') {
       this.state.set({ ...INITIAL, filters, runId, phase: 'unavailable', message: unavailableMessage(run), ...(grammar === undefined ? {} : { grammar }) });
@@ -341,6 +373,26 @@ export class ResultsBrowser {
       },
       // The results report the engine's errors; the command keeps its words.
       () => undefined,
+    );
+  }
+
+  private describeToolGrammar(token: number, tool: string): void {
+    const fallback: OptionGrammar = { takesValue: toolTakesValue(undefined) };
+    const apply = (grammar: OptionGrammar): void => {
+      if (token === this.loadToken) this.set({ grammar });
+    };
+    if (this.deps.describeTool === undefined) {
+      this.toolGrammars.set(tool, fallback);
+      apply(fallback);
+      return;
+    }
+    this.deps.describeTool(tool).then(
+      (description) => {
+        const grammar: OptionGrammar = { takesValue: toolTakesValue(description) };
+        this.toolGrammars.set(tool, grammar);
+        apply(grammar);
+      },
+      () => apply(fallback),
     );
   }
 
@@ -721,7 +773,8 @@ export class ResultsBrowser {
  * Where the error of the output `output` of a run is when the run could not write it, as the engine said
  * (`ResultSetRef.failed`); undefined where the run wrote it, or has no result.
  */
-export function failedOutput(run: RunView, output: RunOutput): OutputPlace | undefined {
+export function failedOutput(run: AnyRunView, output: RunOutput): OutputPlace | undefined {
+  if (isToolRun(run)) return undefined;
   return run.result?.failed.find((failed) => failed.output === output)?.error;
 }
 
@@ -757,9 +810,9 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   return state.subjects.length === 0 ? 'filtered-out' : undefined;
 }
 
-/** The task of a run: the argv's -task, else the default that the engine describes (none for a program without tasks). */
+/** The task of a run (`runTask`): the argv's -task, else the default that the engine describes (none for a program without tasks). */
 export function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
-  const task = optionValue(argv, '-task') ?? description.parameters.find((p) => p.flag === '-task')?.defaultValue;
+  const task = runTask(argv, description.parameters);
   return task === undefined ? {} : { task };
 }
 
@@ -774,7 +827,7 @@ export function optionGrammar(description: ProgramDescription): OptionGrammar {
  * Why the stored results of a completed run could not be read: opening the results, and reading
  * one of its outputs in the Outputs, say it alike (WA2-BR-01).
  */
-export function unreadableResults(run: RunView, error: unknown): string {
+export function unreadableResults(run: AnyRunView, error: unknown): string {
   return `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}`;
 }
 
@@ -784,8 +837,23 @@ export function unreadableResults(run: RunView, error: unknown): string {
  * sweep, D15, 2026-11-20), the warnings that it wrote before it (D3, 2026-11-19) and the file of its `-logfile` (line
  * RG E1w-3b), and the page shows them under the sentence (ResultsPanel, OutputsView, RunFiles).
  */
-export function unavailableMessage(run: RunView): string {
+export function unavailableMessage(run: AnyRunView): string {
   const n = run.snapshot.number;
+  if (isToolRun(run)) {
+    switch (run.status) {
+      case 'cancelled':
+        return `Run ${n} was cancelled. A cancelled run keeps no results.`;
+      case 'failed':
+        if (run.record.exitStatus !== undefined) {
+          return `Run ${n} failed with exit status ${run.record.exitStatus}.`;
+        }
+        return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} It keeps no outputs.`;
+      case 'completed':
+        return '';
+      default:
+        return `Run ${n} has not finished yet. Its outputs appear when it completes.`;
+    }
+  }
   switch (run.status) {
     case 'cancelled':
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
@@ -809,12 +877,14 @@ export function unavailableMessage(run: RunView): string {
  * the output that the CLI's run of the argv leaves before its error, from which the engine dropped the others (place
  * `run`, ABI v2 §5). None for a run that kept none (`RunView.result`).
  */
-export function keptOutputs(run: RunView): readonly RunOutput[] {
+export function keptOutputs(run: AnyRunView): readonly RunOutput[] {
+  if (isToolRun(run)) return [];
   return run.result === undefined ? [] : runOutputs(run.snapshot.argv).filter((output) => failedOutput(run, output) !== 'run');
 }
 
 /** Whether a kept output of the run has bytes: an empty file is nothing that the run wrote before its error. */
-export function keptOutputsWritten(run: RunView): boolean {
+export function keptOutputsWritten(run: AnyRunView): boolean {
+  if (isToolRun(run)) return false;
   return keptOutputs(run).some((output) => (run.result?.byteLengths[output] ?? 0) > 0);
 }
 

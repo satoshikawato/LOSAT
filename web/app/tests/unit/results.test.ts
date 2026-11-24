@@ -224,15 +224,30 @@ describe('the HSP table and its index', () => {
 });
 
 describe('hitLimits', () => {
+  // The hit list options have no default in NCBI's argument table (BLAST+ tells them given from not
+  // given): describe's `defaults` give the values that the engine resolves, by task.
+  const resolved = (value: string) => ({ resolvedDefault: { byTask: { blastp: value, 'blastp-short': value } } });
   const described = [
-    { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep [default: 500]' },
-    { flag: '-max_hsps', help: 'Maximum number of HSPs per subject' },
+    { flag: '-task', defaultValue: 'blastp' },
+    { flag: '-max_target_seqs', ...resolved('500') },
+    { flag: '-max_hsps' },
   ];
 
   it('reads the limits of the argv, or the default that the engine describes', () => {
     expect(hitLimits(['blastp', '-query', 'q', '-subject', 's'], described)).toEqual({ maxTargetSeqs: 500 });
     expect(hitLimits(['blastp', '-max_target_seqs', '5', '-max_hsps', '2'], described)).toEqual({ maxTargetSeqs: 5, maxHsps: 2 });
-    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'x', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+    // The run's task chooses the resolved value: its -task, else the default task; '' for a program without -task.
+    const byTask = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', resolvedDefault: { byTask: { blastp: '500', 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], byTask)).toEqual({ maxTargetSeqs: 500 });
+    expect(hitLimits(['tblastx'], [{ flag: '-max_target_seqs', resolvedDefault: { byTask: { '': '500' } } }])).toEqual({ maxTargetSeqs: 500 });
+    // -task=blastp-short is the engine's blastp-short (runTask), and the engine's value for the task comes before
+    // NCBI's default, as in the search form (taskDefault).
+    expect(hitLimits(['blastp', '-task=blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    const both = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', defaultValue: '500', resolvedDefault: { byTask: { 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], both)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], both)).toEqual({ maxTargetSeqs: 500 });
   });
 
   // The tabular formats keep -max_target_seqs, else -num_alignments, else the default of -max_target_seqs;
@@ -241,8 +256,8 @@ describe('hitLimits', () => {
   it('reads the hit list sizes of -num_descriptions and -num_alignments', () => {
     const sized = [
       ...described,
-      { flag: '-num_descriptions', help: 'Number of descriptions [default: 500]' },
-      { flag: '-num_alignments', help: 'Number of alignments [default: 250]' },
+      { flag: '-num_descriptions', ...resolved('500') },
+      { flag: '-num_alignments', ...resolved('250') },
     ];
     const limits = (...words: string[]) => hitLimits(['blastp', '-query', 'q', '-subject', 's', ...words], sized);
     // -num_alignments is the tabular formats' hit list; outfmt 0 keeps 500 (the larger of 500 and 3).
@@ -280,7 +295,8 @@ describe('hitLimits', () => {
   });
 
   it('claims no limit that it cannot read', () => {
-    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'Maximum number' }])).toEqual({});
+    // NCBI's help text states a default (Default = `500'), but the limits read no help text.
+    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs' }])).toEqual({});
     expect(hitLimits(['blastp', '-max_target_seqs', '1e3'], [])).toEqual({});
   });
 });
@@ -418,7 +434,12 @@ const DESCRIPTION: ProgramDescription = {
   formats: [0, 6, 7],
   parameters: [
     { flag: '-task', help: 'Task', takesValue: true, defaultValue: 'megablast' },
-    { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep (default: 500)', takesValue: true },
+    {
+      flag: '-max_target_seqs',
+      help: "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+      takesValue: true,
+      resolvedDefault: { byTask: { megablast: '500' } },
+    },
     { flag: '-max_hsps', help: 'Maximum number of HSPs per subject', takesValue: true },
   ],
 };

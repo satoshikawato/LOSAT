@@ -303,22 +303,14 @@ impl TblastnArgs {
         )
         .map(|handle| handle.with_outfmt_text(&args.outfmt));
         // The search strategy's request, with the archive's options handle.
-        args.strategy = strategy_file
-            .map(|file| {
-                anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                    file,
-                    super::archive::option_inputs(&args),
-                    choice.number(),
-                    crate::report::archive::strategy::HitlistArgs {
-                        max_target_seqs: args.max_target_seqs,
-                        num_descriptions: args.num_descriptions,
-                        num_alignments: args.num_alignments,
-                    },
-                    args.database_name(),
-                    &options,
-                ))
-            })
-            .transpose()?;
+        args.strategy = strategy_file.map(|file| {
+            crate::report::archive::strategy::StrategyExport::for_args(
+                &args,
+                file,
+                choice.number(),
+                &options,
+            )
+        });
         let archive = args.archive.clone();
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
@@ -1140,7 +1132,7 @@ pub fn run_local(
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
     // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1148,45 +1140,58 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run_io`).
     if archive_requested {
         args.archive = super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let no_query =
-                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, query_end, subject_records, view)
-            });
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(args, query_records, query_end, subject_records, outputs)
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(args, query_records, query_end, subject_records, outputs)
+    })
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its TBLASTN does not write (`app::report_format`): the command line's
-/// checks before it opens `-out` (`run_io`). The formatting handler's come after (`read_formats`).
-fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?;
-    }
-    Ok(())
+/// rejection of a format that its TBLASTN does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run_io`). The formatting handler's come after
+/// (`read_formats`), and so does the error of a value left to it with a search strategy file.
+fn report_formats(outputs: &ReportOutputs<'_>, args: &TblastnArgs) -> Result<()> {
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Tblastn,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
 /// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
-/// `FormatOutput::side_out`).
-fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
+/// `FormatOutput::side_out`). `strategy`: the argv names a search strategy file, with which a value
+/// that does not parse is left to the formatting handler of the options
+/// (`TblastnArgs::check_options_for_formats`, which reads the arguments' `-outfmt`: LOSAT Web gives
+/// such a value as the run's one format and as the arguments' `-outfmt`); it has no number here.
+fn read_formats(
+    outputs: &ReportOutputs<'_>,
+    out: Option<&std::path::Path>,
+    strategy: bool,
+) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
+        let Some(choice) = app::early_format_choice(format.outfmt, strategy)?
+            .parsed()
+            .cloned()
+        else {
+            continue;
+        };
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
         // the XInclude formats without a file come after `Query is Empty!`
         // (`ReportOutputs::xinclude_check`).
@@ -1221,29 +1226,26 @@ pub fn run_local_database(
     super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run_io`).
     args.archive = super::archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let no_query =
-                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, query_end, settings, view)
-            });
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(args, query_records, query_end, settings, outputs),
-    }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(args, query_records, query_end, settings, outputs)
+    })
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -1261,7 +1263,11 @@ fn search_database(
     // `-out` (`run_to_file`) is made where the command line opens it (`run_io`); the formatting
     // handler's checks come after it.
     outputs.open_out()?;
-    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let outfmts = read_formats(
+        outputs,
+        args.out.as_deref(),
+        args.export_search_strategy.is_some(),
+    )?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     let joins_scope = resolved
         .pssm
@@ -1341,7 +1347,11 @@ fn run_local_formats(
     // `-out` (`run_to_file`) is made where the command line opens it (`run_io`); the formatting
     // handler's checks come after it.
     outputs.open_out()?;
-    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let outfmts = read_formats(
+        outputs,
+        args.out.as_deref(),
+        args.export_search_strategy.is_some(),
+    )?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();

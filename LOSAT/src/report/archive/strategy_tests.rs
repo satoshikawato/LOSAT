@@ -306,16 +306,20 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
 }
 
 /// A post of a request that no batch start wrote is LOSAT's internal error at the end of a run
-/// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text.
+/// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text. The end lets
+/// the posts go (each run ends once).
 #[test]
 fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
-    let (export, _) = export(None);
     let queries = [BioseqInput {
         title: b"q caf\xe9",
         defline: std::borrow::Cow::Borrowed(b">q caf\xe9"),
         ..protein("Query_1", b"MWCHWCMWCHWC")
     }];
-    export.write_request(0..1, &request(&queries, &[])).unwrap();
+    let written = || {
+        let (export, _) = export(None);
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export
+    };
     let native = || -> Result<()> {
         Err(crate::cli::NativeError {
             exit: 3,
@@ -324,16 +328,23 @@ fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
         .into())
     };
     for result in [Ok(()), native()] {
+        let export = written();
         let error = end_run(Some(&export), result).unwrap_err();
         assert!(
             error.to_string().starts_with("LOSAT internal error"),
             "{error}"
         );
+        assert!(export.take_all_posts().is_empty());
     }
-    let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
-    assert_eq!(refusal.to_string(), "not supported");
+    let export = written();
     assert!(!export.take_all_posts().is_empty());
     end_run(Some(&export), Ok(())).unwrap();
+    let export = written();
+    let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
+    assert_eq!(refusal.to_string(), "not supported");
+    assert!(export.take_all_posts().is_empty());
+    let export = written();
+    export.take_all_posts();
     let error = end_run(Some(&export), native()).unwrap_err();
     assert!(error.is::<crate::cli::NativeError>());
     end_run(None, Ok(())).unwrap();
@@ -524,10 +535,10 @@ fn the_file_is_created_and_its_refusal_kept() {
     let path = dir.join("s.asn");
     std::fs::write(&path, b"old").unwrap();
     let made = create_strategy_file(&path, None, "BLASTP").unwrap();
-    assert!(made.file.is_some() && made.refusal.is_none());
+    assert!(matches!(made.target, StrategyTarget::Disk(_)) && made.refusal.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), b"");
     let dash = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap();
-    assert!(dash.file.is_none());
+    assert!(matches!(dash.target, StrategyTarget::None));
     assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
     std::fs::write(&path, b"old").unwrap();
     let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap();
@@ -580,49 +591,289 @@ fn the_file_is_created_and_its_refusal_kept() {
 /// (once, before the next write) when the run ends before it.
 #[test]
 fn held_report_stream_waits_for_the_request_point() {
-    fn held(sink: &Sink) -> (ReportHold, HeldReport<Sink>) {
-        let hold = ReportHold::default();
-        (
-            hold.clone(),
-            HeldReport {
-                inner: sink.clone(),
-                hold,
-            },
-        )
+    fn held(holds: &ReportHolds, sink: &Sink) -> HeldReport<Sink> {
+        HeldReport {
+            inner: sink.clone(),
+            hold: holds.hold(),
+        }
     }
     // Held until the run ends: nothing reaches the stream before.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
     stream.flush().unwrap();
     assert!(sink.0.lock().unwrap().is_empty());
     // The run ends with NCBI's error: the held bytes, then what the error writes.
-    hold.end(true);
+    holds.end(true);
     stream.write_all(b"error\n").unwrap();
     assert_eq!(&*sink.0.lock().unwrap(), b"prolog\nerror\n");
     // The request point refuses the run: no byte ever.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
-    hold.drop_held();
+    holds.drop_held();
     stream.write_all(b"more\n").unwrap();
-    hold.end(true);
+    holds.end(true);
     drop(stream);
     assert!(sink.0.lock().unwrap().is_empty());
     // LOSAT's own refusal at the run's end: no byte either.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
-    hold.end(false);
+    holds.end(false);
     drop(stream);
     assert!(sink.0.lock().unwrap().is_empty());
     // A released stream writes its bytes when it is dropped without another write.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
-    hold.end(true);
+    holds.end(true);
     drop(stream);
     assert_eq!(&*sink.0.lock().unwrap(), b"prolog\n");
+}
+
+/// Each held stream of a run (LOSAT Web writes each format to its own) gets back only its own
+/// bytes, whichever stream writes first after the run's end; a stream held after the end or the
+/// request point takes the run's state at once.
+#[test]
+fn each_held_stream_gets_its_own_bytes() {
+    let holds = ReportHolds::default();
+    let (first, second) = (Sink::default(), Sink::default());
+    let mut one = HeldReport {
+        inner: first.clone(),
+        hold: holds.hold(),
+    };
+    let mut two = HeldReport {
+        inner: second.clone(),
+        hold: holds.hold(),
+    };
+    one.write_all(b"pairwise prolog\n").unwrap();
+    two.write_all(b"tabular\n").unwrap();
+    holds.end(true);
+    // The second stream writes first: its own bytes, not the first stream's.
+    two.write_all(b"error 2\n").unwrap();
+    one.write_all(b"error 1\n").unwrap();
+    let late = Sink::default();
+    let mut three = HeldReport {
+        inner: late.clone(),
+        hold: holds.hold(),
+    };
+    three.write_all(b"after\n").unwrap();
+    drop((one, two, three));
+    assert_eq!(&*first.0.lock().unwrap(), b"pairwise prolog\nerror 1\n");
+    assert_eq!(&*second.0.lock().unwrap(), b"tabular\nerror 2\n");
+    assert_eq!(&*late.0.lock().unwrap(), b"after\n");
+    // Held after the request point: dropped, as the others.
+    let holds = ReportHolds::default();
+    holds.drop_held();
+    let sink = Sink::default();
+    let mut stream = HeldReport {
+        inner: sink.clone(),
+        hold: holds.hold(),
+    };
+    stream.write_all(b"late\n").unwrap();
+    holds.end(true);
+    drop(stream);
+    assert!(sink.0.lock().unwrap().is_empty());
+}
+
+/// A run refused at NCBI's first request (`-`) that ends before it with an exception of NCBI's
+/// that a report's writer carries (the `-html` links' registry, `NcbiException::into_io_error`):
+/// the end takes it for NCBI's error, as the command line's exit does (`cli::NativeError::caught`,
+/// exit status 255), and the held prolog reaches the stream before the error (review 2 of line
+/// RG F1w, S-b: blastx, blastn and tblastx wrote no byte of NCBI's prolog); LOSAT's refusal drops
+/// it.
+#[test]
+fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
+    let exception = || {
+        anyhow::Error::from(
+            crate::ncbi_exception::NcbiException::new(
+                crate::ncbi_exception::ThrowSite {
+                    file: "src/corelib/ncbireg.cpp",
+                    line: 722,
+                    kind: "CRegistryException::eEntry",
+                    function: None,
+                },
+                "Invalid registry entry format",
+            )
+            .into_io_error(),
+        )
+    };
+    let error = exception();
+    let native = crate::cli::NativeError::caught(&error).expect("NCBI's error");
+    assert_eq!(native.exit, 255);
+    for (error, kept) in [
+        (exception(), &b"<HTML>prolog\n"[..]),
+        (anyhow::anyhow!("a refusal of LOSAT's"), &b""[..]),
+    ] {
+        let export = StrategyExport::for_run(
+            create_strategy_file(Path::new("-"), None, "BLASTX").unwrap(),
+            OptionInputs::new(Program::Blastx, "blastx"),
+            Some(0),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        let sink = Sink::default();
+        let mut stream = hold_report(Some(&export), Box::new(sink.clone()));
+        stream.write_all(b"<HTML>prolog\n").unwrap();
+        let message = error.to_string();
+        let ended = end_run(Some(&export), Err(error)).unwrap_err();
+        assert_eq!(ended.to_string(), message);
+        drop(stream);
+        assert_eq!(&*sink.0.lock().unwrap(), kept, "{message}");
+    }
+}
+
+/// The files that a receiver got (LOSAT Web's run files).
+#[derive(Default)]
+struct Received(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+
+impl FileReceiver for Received {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+impl Received {
+    fn files(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// LOSAT Web's strategy file (`RunFiles::Receiver`, line RG's F1w): the receiver gets it under
+/// the name as typed where the run ends (`end_run`, whatever still holds the export), with the bytes
+/// that the command line writes to the file;
+/// a made file dropped before its export (an error after it is made) is the empty file that the
+/// command line leaves; NCBI's error cuts it back as it cuts the command line's file
+/// (`end_run`).
+#[test]
+fn a_receiver_gets_the_file_when_the_export_ends() {
+    let received = Arc::new(Received::default());
+    let files = RunFiles::Receiver(received.clone());
+    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), None, "BLASTP", &[]);
+    let export = |file| {
+        StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastp, "blastp"),
+            None,
+            HitlistArgs::default(),
+            Some("in/db/bp"),
+            &OptionsHandle::default(),
+        )
+    };
+    let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+    let made = export(open("out/s.asn").unwrap());
+    assert!(!made.holds_report());
+    assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
+    // The run's end hands the file over, while a clone of the export is still held; the drop
+    // gives it no second time.
+    let kept = made.clone();
+    end_run(Some(&made), Ok(())).unwrap();
+    assert_eq!(
+        received.files(),
+        [(b"out/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
+    drop((made, kept));
+    assert_eq!(received.files().len(), 1);
+    // An error after the file is made: the file, empty.
+    received.0.lock().unwrap().clear();
+    drop(open("s.asn").unwrap());
+    assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+    // NCBI's error before the batch's start was reached: the request is cut away.
+    received.0.lock().unwrap().clear();
+    let cut = export(open("s.asn").unwrap());
+    assert!(cut.write_request(0..1, &request(&queries, &[])).unwrap());
+    let native = crate::cli::inaccessible("query", Path::new("q"));
+    assert!(end_run(Some(&cut), Err(native)).is_err());
+    drop(cut);
+    assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+    // A run that ends with the posts of a request not taken (an error between the request and its
+    // batch's start) still gives the file at its end.
+    received.0.lock().unwrap().clear();
+    let early = export(open("s.asn").unwrap());
+    assert!(early.write_request(0..1, &request(&queries, &[])).unwrap());
+    let refusal = anyhow::anyhow!("a refusal of LOSAT's");
+    assert!(end_run(Some(&early), Err(refusal)).is_err());
+    drop(early);
+    assert_eq!(
+        received.files(),
+        [(b"s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
+    // A file that does not reach the run's files is the run's internal error, not a run without
+    // it; a refusal of LOSAT's keeps its own text.
+    struct Closed;
+    impl FileReceiver for Closed {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Err(std::io::Error::other("the archive was closed"))
+        }
+    }
+    let closed = RunFiles::Receiver(Arc::new(Closed));
+    let lost = |result: Result<()>| {
+        let file = create_strategy_file_in(&closed, Path::new("s.asn"), None, "BLASTP", &[]);
+        end_run(Some(&export(file.unwrap())), result)
+            .unwrap_err()
+            .to_string()
+    };
+    let error = lost(Ok(()));
+    assert!(
+        error.starts_with("LOSAT internal error: the -export_search_strategy file did not reach")
+            && error.contains("the archive was closed"),
+        "{error}"
+    );
+    assert_eq!(
+        lost(Err(anyhow::anyhow!("a refusal of LOSAT's"))),
+        "a refusal of LOSAT's"
+    );
+}
+
+/// The names that LOSAT Web reads otherwise than as a file of the run (`RunFiles::strategy_target`):
+/// NCBI's error at once where the command line cannot open the name; the command line's refusals of
+/// `-` and of the standard output, raised at NCBI's first request with the report held; no file for
+/// the null device; LOSAT Web's refusal, at the same point, of the standard error and of the file of
+/// another option of the run, which names that option.
+#[test]
+fn a_receiver_refuses_what_the_command_line_refuses_or_has_no_file_for() {
+    let received = Arc::new(Received::default());
+    let files = RunFiles::Receiver(received.clone());
+    let query = [RunFileName {
+        option: "query",
+        name: std::ffi::OsStr::new("q.fa"),
+    }];
+    let open =
+        |name: &str| create_strategy_file_in(&files, Path::new(name), None, "BLASTX", &query);
+    let error = open("/etc/s.asn").unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(native.exit, 1);
+    assert_eq!(
+        native.message,
+        b"Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `/etc/s.asn'\n"
+    );
+    for (name, refusal) in [
+        ("-", "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTX; give a file name"),
+        ("/dev/stdout", "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's BLASTX: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"),
+        ("/dev/stderr", "-export_search_strategy /dev/stderr (a device or a file of the system, where the run has no file) is not supported in the browser; give a file name of the run's own"),
+        ("./q.fa", "-export_search_strategy ./q.fa (the file of -query too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"),
+    ] {
+        let file = open(name).unwrap();
+        assert_eq!(file.refusal.as_deref(), Some(refusal), "{name}");
+        let export = StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastx, "blastx"),
+            Some(0),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        assert!(export.holds_report(), "{name}");
+        let error = check_report_stream(Some(&export)).unwrap_err();
+        assert_eq!(error.to_string(), refusal);
+    }
+    let null = open("/dev/null").unwrap();
+    assert!(matches!(null.target, StrategyTarget::None) && null.refusal.is_none());
+    drop(null);
+    assert!(received.files().is_empty());
 }
 
 /// A panic (LOSAT's own failure; the release profile aborts) ends the run's strategy file as a

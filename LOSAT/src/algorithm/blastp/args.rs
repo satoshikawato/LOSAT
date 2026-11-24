@@ -413,8 +413,8 @@ pub struct BlastpArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
-    /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`strategy::StrategyExport::for_run`).
+    /// The run's search strategy export (`-export_search_strategy`), made by `run` and by LOSAT
+    /// Web's `web_adapter::give_strategy` (`strategy::StrategyExport::for_args`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The recorded options of the search strategy's requests of an application whose search is

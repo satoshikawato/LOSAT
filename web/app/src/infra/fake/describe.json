@@ -13,6 +13,11 @@
     "takes_value": true
    },
    {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "Task to execute",
     "takes_value": true,
@@ -462,6 +467,11 @@
    {
     "flag": "-import_search_strategy",
     "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
     "takes_value": true
    },
    {
@@ -1075,6 +1085,11 @@
     "takes_value": true
    },
    {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "Task to execute",
     "takes_value": true,
@@ -1629,6 +1644,11 @@
    {
     "flag": "-import_search_strategy",
     "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
     "takes_value": true
    },
    {
@@ -2192,6 +2212,11 @@
    {
     "flag": "-import_search_strategy",
     "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
     "takes_value": true
    },
    {

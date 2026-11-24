@@ -622,10 +622,11 @@
   1.97 2026-11-23 (rule-3 rejections of RPSBLAST and RPSTBLASTN at the traceback of a profile whose
   `.psq` letters differ from its `.rps` columns, psiblast line item PS10e: such a profile is searched
   with its `.pin` length, and a query batch whose hit makes NCBI's traceback leave the profile's data
-  is refused; the refusal at the volume's open narrowed to offsets that do not ascend; and one
-  rule-2 rejection pending the maintainer's decision, RPSTBLASTN without composition-based
-  statistics on an alignment that starts past such a profile's letters; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.96; first 1.87, then 1.90 at the merge of dev
+  is refused; the refusal at the volume's open narrowed to offsets that do not ascend; these
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; and one rule-2 rejection by
+  the maintainer's decision of 2026-11-24 (the answer 「Q-PS10e=A」, psiblast `DECISIONS.md` 103),
+  RPSTBLASTN without composition-based statistics on an alignment that starts past such a profile's
+  letters; numbered after 1.96; first 1.87, then 1.90 at the merge of dev
   that brought 1.86 to 1.89 (psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2), then 1.92
   at the merge of dev that brought line RG item T5d's 1.90 and line PS item PS12d's 1.91, then 1.93 at the merge of dev that
   brought line NP item O4b2-4's 1.92, then 1.97 at the merge of dev that brought line RG item
@@ -4242,7 +4243,8 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
 - RPSTBLASTN without composition-based statistics, an alignment that starts at or past the `.psq`
   letters of a profile whose letters are fewer than its `.rps` columns (version 1.97, 2026-11-23,
   psiblast line item PS10e, the rule-3 entry of such profiles above; not of the database class
-  above; pending the maintainer's decision, the Owner question of the pull request). NCBI's rows
+  above; decided by the maintainer on 2026-11-24, the answer 「Q-PS10e=A」 at 12:44 JST, psiblast
+  `DECISIONS.md` 103). NCBI's rows
   there are the mapped `.rps` rows from the profile's offset (`blast_traceback.c:1194-1198`), so its
   run ends with exit 0 and a clean valgrind unless the alignment then reads a profile letter of 28
   or more (read E of that entry), but its gapped traceback skips the extension to the
@@ -4250,13 +4252,13 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   the `.psq` bytes after the profile's letters, and prints HSPs whose columns, scores and identities
   disagree (probes N_AA1_nq1_c0: profile columns 1 to 10 of a 6-letter profile; N_AA1_nqt2_c0: a bit
   score of 0.0 with an e-value of 3.38e-11, columns 26 to 31 of a 22-column profile; N_P6d_nq1_c0:
-  the archive's `num_ident` 9 where the tabular formats count 6). LOSAT refuses it for now with the
+  the archive's `num_ident` 9 where the tabular formats count 6). LOSAT refuses it with the
   text of read D of that entry, "starts an alignment past the consensus" (rows
   `db.rpstbn.rej.odd.aa1.nq1c0` and `db.rpstbn.rej.odd.sc.nq2c0`; in the second NCBI's run goes on
   to read E of that entry and ends with SIGSEGV, probe N_SC_nq2_c0, as in E_NA1_nqi12_c0 to
   E_NA1_nqi14_c0 of the line's `PR/ps10e/probe2`), as its own arm
   (`ProfileRead::StartInMapping` of `LOSAT/src/algorithm/rps_search/profile.rs`). The other option,
-  to print NCBI's bytes, changes besides that arm: the profile's letters (NCBI's traceback reads the
+  which the maintainer rejected, to print NCBI's bytes, would have changed besides that arm: the profile's letters (NCBI's traceback reads the
   mapped `.psq` bytes after its `L_pin` letters: the profile's trailing 0, the next profile's
   letters, past the file's end the zeros of its last page; LOSAT holds the `L_pin` letters); the
   traceback's identities and positives on those bytes (`final_hsp` of

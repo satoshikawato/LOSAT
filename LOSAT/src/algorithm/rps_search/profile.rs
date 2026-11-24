@@ -31,9 +31,9 @@
 //! rpstblastn without composition-based statistics reads the mapped `.rps` rows from the offset,
 //! not a heap matrix: there an alignment that starts at or past `L_pin` stays in NCBI's mapping
 //! but gives HSPs whose coordinates, scores and identities disagree (PD-LOSAT-NCBI-DEFECTS, the
-//! rule-2 item pending the maintainer's decision). LOSAT refuses it for now, as its own arm
-//! (`ProfileRead::StartInMapping`). To print NCBI's bytes there instead would change, besides
-//! that arm: the letters (NCBI's traceback reads the mapped `.psq` bytes after the profile's
+//! rule-2 item, by the maintainer's decision of 2026-11-24, 「Q-PS10e=A」). LOSAT refuses it, as its
+//! own arm (`ProfileRead::StartInMapping`). The other option, which the maintainer rejected, to
+//! print NCBI's bytes there, would have changed besides that arm: the letters (NCBI's traceback reads the mapped `.psq` bytes after the profile's
 //! `L_pin` letters, its trailing 0, the next profile's letters and past the file's end the zeros
 //! of its last page, where `letters` holds `L_pin` letters, `ProfileLetters::of`); the
 //! traceback's identities on those bytes (`pssm_search::traceback0::final_hsp` and
@@ -44,7 +44,7 @@
 //! (sseq `IVLARI----` in N_P6d_nq1_c0, `-----B----` in N_AA1_nq1_c0) where LOSAT's renderer
 //! indexes the letters (`blastx::report::display_alignment`: sseq, the pairwise rows, btop and
 //! the XML and JSON hit sequences). Such a run whose alignment then reads a letter of 28 or more
-//! on those bytes still ends at read E, where NCBI crashes (probes N_SC_nq2_c0, E_NA1_nqi12_c0 to
+//! (the profile's own letters or those bytes) would still end at read E, where NCBI crashes (probes N_SC_nq2_c0, E_NA1_nqi12_c0 to
 //! E_NA1_nqi14_c0). The skipped extension to the right is LOSAT's already
 //! (`pssm_search::gapalign`, its `q_start < query_length` test). This list is what reading the
 //! code found: no such HSP has been run through LOSAT's later stages (the e-values and bit
@@ -80,7 +80,7 @@ pub(crate) enum ProfileRead {
     /// D: an alignment that starts at or past the `L_pin` rows of NCBI's heap matrix.
     Start,
     /// D of rpstblastn without composition-based statistics: the start at or past `L_pin` in
-    /// NCBI's mapped rows (rule 2, pending the maintainer's decision; module documentation).
+    /// NCBI's mapped rows (rule 2, the maintainer's decision of 2026-11-24; module documentation).
     StartInMapping,
     /// E: this profile letter (28 or more) in a substituted column of a traced alignment.
     Substitution(u8),

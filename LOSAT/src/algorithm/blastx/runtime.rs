@@ -364,18 +364,20 @@ pub(crate) fn x_search_internal_serial<'a>(
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchResults>> {
-    x_search_unit_serial(records, subjects, options, None)
+    x_search_unit_serial(records, subjects, options, None, None)
 }
 
 /// `x_search_internal_serial` for one unit of a reader batch of several, prepared in phase 1
 /// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
-/// Its callers are the several-batches-at-a-time paths, which need a pool (`parallel`).
+/// `scan_end` as in `x_search_unit_in_pool`. Its callers are the several-batches-at-a-time paths,
+/// which need a pool (`parallel`).
 #[cfg(feature = "parallel")]
 pub(crate) fn x_search_unit_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     prep: Option<UnitPrep>,
+    scan_end: Option<&dyn Fn()>,
 ) -> Result<Vec<BatchResults>> {
     let _serial = XInnerSerial::enter();
     x_search_unit_in_pool(
@@ -384,6 +386,7 @@ pub(crate) fn x_search_unit_serial<'a>(
         options,
         &crate::utils::threading::SearchPool::x_serial(),
         prep,
+        scan_end,
     )
 }
 
@@ -397,17 +400,22 @@ pub(crate) fn x_search_internal_in_pool<'a>(
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BatchResults>> {
-    x_search_unit_in_pool(records, subjects, options, pool, None)
+    x_search_unit_in_pool(records, subjects, options, pool, None, None)
 }
 
 /// `x_search_internal_in_pool` for one unit of a reader batch of several, prepared in phase 1
 /// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+/// `scan_end` is called on this thread when the scan of the unit's batch has ended, before its
+/// batch end (the redo and the traceback), which holds no lookup or diagonal table of its letters
+/// (`search::search_core`): the batch flow gives back the unit's places there (`native.rs`,
+/// `x_flow`).
 pub(crate) fn x_search_unit_in_pool<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
+    scan_end: Option<&dyn Fn()>,
 ) -> Result<Vec<BatchResults>> {
     let subjects = subjects.into();
     let mut observer = Noop;
@@ -425,7 +433,15 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         chunk: None,
         output: Vec::new(),
     };
-    search_core(records, subjects, options, &mut pipeline, pool, prep)?;
+    search_core(
+        records,
+        subjects,
+        options,
+        &mut pipeline,
+        pool,
+        prep,
+        scan_end,
+    )?;
     Ok(pipeline.output)
 }
 
@@ -452,7 +468,7 @@ pub(crate) fn search_internal_observed<'a>(
         output: Vec::new(),
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects, options, &mut pipeline, pool, None)
+        search_core(records, subjects, options, &mut pipeline, pool, None, None)
     })?;
     Ok(pipeline.output)
 }

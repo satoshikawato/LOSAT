@@ -7061,7 +7061,8 @@ Scheduling (each value computed by one thread with the original function; order 
   MelaMJNV x PemoMJNVA at 8 threads) and whole searches x0.97-0.99.
 - `LOSAT_X_TBXHITSTEP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-11-24; `=0` turns it off; `tblastx/x_tbx_hitbf.rs` `x_hits_steps`, `x_hits_run`, `x_hit_step`,
-  `x_entry`, `steps_on`; `tblastx/x_pair_par.rs` `XCells::lowest_diagonal`): the branch-free hit loop of
+  `x_entry`, `steps_on`, the `STEP` instances of `scan_unit_bf` and the batched and sliced scans;
+  `tblastx/x_pair_par.rs` `XCells::lowest_diagonal`): the branch-free hit loop of
   `LOSAT_X_TBXHITBF` writes a flag-0 cell's next value before the candidate test (`s >= raw` unsigned is
   `d >= 0` with both below 2^29; a candidate has `d < 0`, so its cell gets back the word it held before
   the per-hit body runs as before), finds an unmasked cell from 64-bit offsets (the table's address
@@ -7079,7 +7080,21 @@ Scheduling (each value computed by one thread with the original function; order 
   `tests/tblastx_hitbf.rs` `the_hit_steps_change_no_report`: the report of `=0` at one and two threads,
   in `scan_unit` and the batched scan, with and without the prefetch). Always: wherever
   `LOSAT_X_TBXHITBF`'s loop runs (`fits`), on every target (on wasm32 `x_hits_run` is a function of its
-  own, as `x_hits_bf_run`). MEASURED_PLACEHOLDER
+  own, as `x_hits_bf_run`). The switch is read once per unit by the unit path's dispatches and chooses
+  between instances of the scans (`const STEP`), each with one loop: `=0` runs dev's machine code. A
+  first form that read it once per batch and held both loops in each scan was slower than dev
+  (AP027131 x AP027133 x1.022, its `=0` x1.034). Measured (workstation, 2x Xeon Gold 6338, node 1, one
+  core, `-num_threads 1`, a warm-up and 5 rounds (VPT_auto 3), arm order rotated, medians of the
+  per-round ratios against dev 2cd5a1906 built in a tree path of the same length, every output the same
+  across arms): tblastx 40 Autographivirales genomes against their database (ViPTree's command,
+  BLOSUM45) x0.910 (43.72 -> 39.74 s; instructions x0.910), 40 Begomovirus genomes x0.972, AP027131 x
+  AP027133 (code 4) x0.993 (instructions x0.899: there the loop waits more than it issues on an idle
+  core); `=0` x0.997 / x0.997 / x0.998 (instructions x1.000). tblastn and blastx (one protein x the
+  human genome, 40 BUSCO proteins x yeast, 5 cDNAs and a 50 kb genome x dmel proteins), which do not
+  run this loop: x0.996-x1.006. Max RSS: AP027131 x AP027133 82,272 KiB in every arm; Autographivirales
+  within its run-to-run spread (dev 25.7-26.1 MB, `=0` 26.1-26.8 MB, new 26.1-27.1 MB; the loop
+  allocates nothing). Wasm (the serial WASI command, one Node process, arms `=1`, `=0` and `=1` again, a
+  warm-up and 6 rounds): AP027131 x AP027133 x0.974 (9.18 against 9.43 s; the second `=1` arm x0.975).
 - `LOSAT_X_TBXEXTBATCH=256` (TBLASTX, speed; a value switch, in the strict set from the pull request
   that added it, 2026-10-18; x86-64 only; `=0` turns it off) the unit scan of the unit path
   (`tblastx/x_tbx_extbatch.rs`, exactness argument in its header) holds back the two-hit extensions of

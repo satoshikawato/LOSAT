@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.93
+- Version: 1.94
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -503,9 +503,15 @@
   brought 1.83 to 1.88 (line NP items M4b-AX, O4b2-2 and M4b-3c, psiblast line items PS10c and PS10d, line RG
   item D1c-1), then 1.91 at the merge of dev that brought line NP item M4b-T2's 1.89 and line RG
   item T5d's 1.90);
-  1.92 2026-11-23 (approved exception 28, the Owner's decision of 2026-11-20 on line RG's question
+  1.92 2026-11-24 (BLASTP `-ungapped` under a negative seqid list, line NP item O4b2-4: the
+  sequence that the list keeps while removing all its lines, of 1.34, stays in its hit list
+  through the traceback's cut to the hit list size, its culling and best hit pipes and the prune
+  and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
+  header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
+  there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.93 2026-11-24 (approved exception 28, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
-  F2, `-import_search_strategy`; numbered after 1.91; first 1.70, taking exception 22 at the merge
+  F2, `-import_search_strategy`; numbered after 1.92; first 1.70, taking exception 22 at the merge
   of dev 540759a2f, then 1.71 at the merge of dev 194053478 that brought line RG item D1b-2's 1.70,
   then 1.72 at the merge of dev 1b6e05a0d that brought line DBID item pfoff-3's 1.71, then 1.74 at
   the merge of dev 2e9653a71 that brought line NP items M5a and M5b's 1.72 and line RG item X4b-1's
@@ -518,13 +524,14 @@
   brought line NP item M4b-AX's 1.83, psiblast line item PS10c's 1.84 and line RG item D1c-1's 1.85;
   then 1.92 and exception 28 at the merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27
   (psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2, line RG item T5d, line PS item
-  PS12d));
-  1.93 2026-11-24 (approved exception 29, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
+  PS12d); then 1.93 at the merge of dev 2cd5a1906 that brought line NP item O4b2-4's 1.92);
+  1.94 2026-11-24 (approved exception 29, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
   line RG's question Q-F2-28 (recommended A), 「Q-F2-28=A」: a negative `WindowSize` and a
   `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
-  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.92;
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.93;
   first 1.87 (then proposed as exception 28 and pending the Owner), then 1.93 and exception 29 at the
-  merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27)
+  merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27; then 1.94 at the merge of dev
+  2cd5a1906 that brought line NP item O4b2-4's 1.92)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1763,15 +1770,21 @@ file would differ, and NCBI's programs still could not open the database).
   (blast_hits.c:2651-2665). The sequence is searched and counts in the statistics; a gapped
   search's preliminary hit list holds it, and it takes no place in the final one; an ungapped
   search of a nucleotide database frees its HSPs before the preliminary hit list. A protein
-  subject of an ungapped search (blastx `-ungapped`) is fetched by none of them and leaves at the
-  Seq-aligns, as a positive list's does. Versions 1.6, 1.29 and 1.32 made this an explicit
+  subject of an ungapped search (blastx and blastp `-ungapped`) is fetched by none of them and
+  leaves at the Seq-aligns, as a positive list's does: it keeps its place in the hit list through
+  the traceback's cut to the hit list size, its culling and best hit pipes (its HSPs cull those of
+  other subjects) and the prune (`blast_traceback.c:1705-1777`, `blast_seqalign.cpp:1582-1586`;
+  version 1.92 for BLASTP, rows `db.ll2.bp.ug.*`, `db.ll2.bx.ug.*`). Versions 1.6, 1.29 and 1.32 made this an explicit
   rejection; version 1.34 reproduces it in the six search programs, each of which removes such
   subjects where NCBI fetches them (`SeqDb::excludes_lineless_at_fetch`,
   `algorithm::common::database::FetchExcluded`; line DBID item lineless2). Under such a list
   NCBI's fetch reads the header of every subject it fetches, so a header that cannot be read
   (a damaged record, a `BL_ORD_ID` line with a string tag in a later volume) ends NCBI's search
   there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
-  where the subject is not reported; LOSAT refuses such a search at the same place. The
+  where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
+  search of a protein database reads such a header at the Seq-aligns only, where the subject is
+  in the final hit list: there NCBI's Seq-align fails (exit 255), and LOSAT's report gives the
+  same error (rule 2). The
   composition-based redo fetches only the matches that its early termination test leaves, and
   LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
   NCBI ends it without reading that header.
@@ -3581,9 +3594,9 @@ past `Int4`)". Psiblast line item PS10a.
     `-in_pssm` use; their PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` and their
     threshold is an `Int4`, so their sums never leave `Int4` and their output does not change.
 
-## Approved exception 28 (an imported strategy's subjects at more than one thread, version 1.92)
+## Approved exception 28 (an imported strategy's subjects at more than one thread, version 1.93)
 
-Version 1.92, line RG item F2 (DECISIONS F2-Q1). The Owner
+Version 1.93, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -3621,9 +3634,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     `a_strategys_subjects_keep_the_threads_of_the_command_line`
     (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
 
-## Approved exception 29 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.93)
+## Approved exception 29 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.94)
 
-Version 1.93, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
+Version 1.94, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
 2026-11-24 at 00:04 JST, on the board, with the words 「Q-F2-28=A」 (option A of line RG's question
 Q-F2-28, the recommended one; proposed 2026-11-23 under the standing instruction of 2026-09-29, restated
 2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22

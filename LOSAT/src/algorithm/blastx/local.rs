@@ -352,7 +352,11 @@ fn scan_xml_titles(
         structured.contains(&5),
         "BLASTX",
     )
-    .map(|scopes| scopes.with_refusal(scope_refusal.cloned()));
+    .map(|scopes| {
+        scopes
+            .with_refusal(scope_refusal.cloned())
+            .with_xml_matrix_failure(xml_matrix)
+    });
     let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
     // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
@@ -702,6 +706,14 @@ fn write_run(
         xml_matrix,
         ..
     } = run;
+    // The query whose batch the run's XML failure stops, of the scopes read ahead
+    // (`QueryScopes::xml_failing_query`).
+    let xml_matrix = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            read_ahead_scopes.as_ref(),
+            failure,
+        )
+    });
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5 and
     // 13 to 16 the read before the search made them (`scan_xml_titles`, `QueryScopes::read_ahead`),
     // whose refusal comes where the loop takes its batch; else the batches add theirs where the loop

@@ -93,6 +93,10 @@ pub(crate) enum Refusal {
     TableRows,
     /// A Std-seg `dim` above `align::STD_DIM_LIMIT`.
     StdDim,
+    /// An element stated as `NULL` of a list that NCBI's object manager reads through the
+    /// reference before the stream failed (`RefElement::deref`), or through a pointer it took
+    /// from the list or inside an alignment (`RefElement::deref_raw`).
+    NullElement,
     /// A Seq-id handle twice in the query's entry of a search whose scope holds other sequences
     /// first (`-subject`), when a Seq-id of NCBI's message may be written as a subject spelled it
     /// (`entry::Tse::attach`, `seqid::mask_handle::handle_fasta_is_own`).
@@ -115,20 +119,22 @@ impl Refusal {
             Refusal::IdOrder => "a PSSM query whose annot has a location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
+            Refusal::NullElement => "a PSSM query entry with an element stated as NULL in a list that NCBI's object manager reads when the entry joins its scope (a member of a Bioseq-set, a Seq-id of a member, an annotation, a feature, an alignment or a graph, an annotation's id or desc, the parts of a location, a feature's ids or xref, a Seq-table column, a list inside an alignment), which it dereferences: a report of memory addresses or a crash",
             Refusal::DuplicateIdInScope => "a PSSM query entry with a Seq-id twice in a search of -subject records, when the entry's Bioseqs have a Seq-id that NCBI's duplicate Bioseq id exception may write as a subject record spelled it (a GenBank, EMBL or DDBJ accession alone, a name or a patent with a letter, more than 64 letters in a local or general id or an accession)",
         }
     }
 }
 
-/// What stops the index: an exception of NCBI's (`CException`, a `std::exception`), the null
-/// pointer of a table row (`Refusal::NullPointer` before the stream failed, a report of nothing
-/// after it), the failed write of an object's ASN.1 text to the failed stream
+/// What stops the index: an exception of NCBI's (`CException`, a `std::exception`), a null
+/// pointer that NCBI's code dereferences through a reference (`CCoreException::eNullPtr`: the
+/// refusal, a table row's `Refusal::NullPointer` or a list element's `Refusal::NullElement`,
+/// before the stream failed, a report of nothing after it), the failed write of an object's ASN.1 text to the failed stream
 /// (`Indexer::empty_region`), or LOSAT's refusal.
 #[derive(Debug)]
 pub(super) enum Stop {
     Exception(NcbiException),
     Std(&'static str),
-    NullPointer,
+    NullPointer(Refusal),
     FailedWrite,
     Refuse(Refusal),
 }
@@ -141,6 +147,58 @@ impl Stop {
     fn std_exception(what: &'static str) -> Stop {
         Stop::Std(what)
     }
+}
+
+/// How NCBI's object manager takes an element of a list of `CRef<>`s of the query's entry: the
+/// generic typed access (`asn_types::view::V`, whose `is_null` tells an element stated as `NULL`)
+/// with the index's stops for such an element (`Refusal::NullElement`).
+pub(super) trait RefElement: Sized {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+    /// The element of a list of `CRef<>`s that NCBI's code dereferences here through the
+    /// reference (`CCoreException::eNullPtr` for one stated as `NULL`: a report of memory
+    /// addresses, or of nothing after the stream failed, `Stop::NullPointer`; probe D3c-3b
+    /// `probe7`: the parts of a `mix` location, a feature's `ids` and `xref`, an annotation's `id`
+    /// and `desc`).
+    fn deref(self) -> Result<Self, Stop>;
+
+    /// The element of a list of `CRef<>`s that NCBI's code reads here through a pointer it took
+    /// from the list (a crash for one stated as `NULL`: an alignment or a graph of an annotation,
+    /// probe D3c-3b `probe7`), or inside an alignment, where LOSAT does not follow which reads
+    /// throw and which crash: refused (`Refusal::NullElement`), also after the stream failed.
+    fn deref_raw(self) -> Result<Self, Stop>;
+}
+
+impl RefElement for V<'_> {
+    fn deref(self) -> Result<Self, Stop> {
+        if self.is_null() {
+            Err(Stop::NullPointer(Refusal::NullElement))
+        } else {
+            Ok(self)
+        }
+    }
+
+    fn deref_raw(self) -> Result<Self, Stop> {
+        if self.is_null() {
+            Err(Stop::Refuse(Refusal::NullElement))
+        } else {
+            Ok(self)
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1227-1252 (`x_MapFeatIds`, after
+// the feature's locations are mapped: its `id`, each of its `ids`, a gene's names, then each of
+// its `xref`s)
+/// The elements of the feature `feat` that its index by its ids reads (`x_MapFeatIds`): each of
+/// its `ids` and of its `xref`s, through the reference (`RefElement::deref`). The index by ids
+/// changes no output of LOSAT's.
+fn feature_ids(feat: V<'_>) -> Result<(), Stop> {
+    for name in ["ids", "xref"] {
+        for element in feat.get(name).into_iter().flat_map(V::items) {
+            element.deref()?;
+        }
+    }
+    Ok(())
 }
 
 /// The message of an empty overlapping range: the annotation's kind
@@ -195,11 +253,11 @@ pub(crate) fn index_entry(
         Err(Stop::Refuse(refusal)) => return Err(refusal),
         Err(Stop::Exception(e)) => Some(crate::cli::NativeError::exception(&e)),
         Err(Stop::Std(what)) => Some(crate::cli::NativeError::std_exception(what)),
-        Err(Stop::NullPointer) if ix.muted => Some(crate::cli::NativeError {
+        Err(Stop::NullPointer(_)) if ix.muted => Some(crate::cli::NativeError {
             exit: 255,
             message: String::new().into(),
         }),
-        Err(Stop::NullPointer) => return Err(Refusal::NullPointer),
+        Err(Stop::NullPointer(refusal)) => return Err(refusal),
         // The failed write (`CIOException::eWrite`) ends the run with nothing more written and
         // its exit status unchanged, 0 (`cli::NativeError::silent_end`; `om/` cases f33, k04, k07,
         // k08, k09, k13, k16, k17).
@@ -260,7 +318,10 @@ impl Indexer<'_> {
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:403-427,474-500,646-663 (phase C:
     // `x_InitAnnotList` of each annotation in order makes a Seq-table's `CSeqTableInfo`; the other
-    // kinds only list their objects) and :639-668 (phase I, `x_InitAnnotKeys`)
+    // kinds only list their objects, a feature's by its type, through the reference) and :639-668
+    // (phase I, `x_InitAnnotKeys`)
+    // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:98-111 (a feature's type, read
+    // when phase C lists it)
     fn run(&mut self, tse: &entry::Tse<'_>, ids_known: bool) -> Result<(), Stop> {
         let annots = &tse.annots;
         let data: Vec<Option<(&'static str, V<'_>)>> = annots
@@ -279,11 +340,16 @@ impl Indexer<'_> {
                         .map(|id| Handle::of_run(id, &mut self.handles))
                         .collect();
                 }
-                entry::Made::Annot(index) => {
-                    if let Some(("seq-table", table)) = data[index] {
-                        tables[index] = Some(self.table_info(table)?);
+                entry::Made::Annot(index) => match data[index] {
+                    Some(("seq-table", table)) => tables[index] = Some(self.table_info(table)?),
+                    Some(("ftable", feats)) => {
+                        for feat in feats.items() {
+                            feat.deref()?;
+                        }
                     }
-                }
+                    _ => {}
+                },
+                entry::Made::Null => return Err(Stop::NullPointer(Refusal::NullElement)),
             }
         }
         tse.attach(&ids, &self.handles, ids_known)?;
@@ -296,13 +362,14 @@ impl Indexer<'_> {
                 }
                 Some(("align", aligns)) => {
                     for align in aligns.items() {
-                        self.index_align(align)?;
+                        self.index_align(align.deref_raw()?)?;
                     }
                 }
                 Some(("graph", graphs)) => {
                     for graph in graphs.items() {
+                        let graph = graph.deref_raw()?;
                         let loc = graph.field("loc");
-                        let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
+                        let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles)?;
                         self.refuse_empty(std::slice::from_ref(&map), Event::Graph, graph)?;
                         self.handles.end_object();
                     }
@@ -327,13 +394,18 @@ impl Indexer<'_> {
         } else {
             Mode::None
         };
+        // Both maps are made (`GetMaps`, the dereferences of their parts) before either is mapped.
+        let mut maps = Vec::with_capacity(2);
         for loc in [feat.get("location"), feat.get("product")]
             .into_iter()
             .flatten()
         {
-            let map = HandleRangeMap::of_location(loc, mode, &mut self.handles);
-            self.map_location(&map, Event::Feature, feat)?;
+            maps.push(HandleRangeMap::of_location(loc, mode, &mut self.handles)?);
         }
+        for map in &maps {
+            self.map_location(map, Event::Feature, feat)?;
+        }
+        feature_ids(feat)?;
         self.handles.end_object();
         Ok(())
     }
@@ -350,7 +422,7 @@ impl Indexer<'_> {
             let mut all = Vec::new();
             for sub in subs.items() {
                 let mut rows = Vec::new();
-                align::process_align(self, &mut rows, sub)?;
+                align::process_align(self, &mut rows, sub.deref_raw()?)?;
                 all.push(rows);
             }
             let mut total: Vec<(&Handle, Range)> = Vec::new();
@@ -392,7 +464,7 @@ impl Indexer<'_> {
                 .map(|(_, region)| region)
         });
         if let Some(region) = region {
-            let map = HandleRangeMap::of_location(region, Mode::None, &mut self.handles);
+            let map = HandleRangeMap::of_location(region, Mode::None, &mut self.handles)?;
             // The message writes the location set's one location (`info.GetLocs()`), not the
             // region.
             let loc = locs.item(0).expect("one location");
@@ -433,6 +505,10 @@ impl Indexer<'_> {
         if !self.muted {
             return Stop::Refuse(Refusal::EmptyRegion);
         }
+        // The one location of a `locs` stated as `NULL`, which the message writes.
+        if object.is_null() {
+            return Stop::Refuse(Refusal::NullElement);
+        }
         let (id, root) = match event {
             Event::Feature => ("1204.1", named::SEQ_FEAT),
             Event::Graph => ("1204.2", named::SEQ_GRAPH),
@@ -452,7 +528,7 @@ impl Indexer<'_> {
 
     /// The null pointer of a table row (`Stop::NullPointer`).
     fn null_pointer(&self) -> Stop {
-        Stop::NullPointer
+        Stop::NullPointer(Refusal::NullPointer)
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:741-786 (cited at

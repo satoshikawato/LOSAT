@@ -72,6 +72,18 @@ impl Param {
     }
 }
 
+/// What stops [`Request::from_strategy`].
+#[derive(Debug)]
+pub(crate) enum Stop {
+    /// `CImportStrategy`'s exception.
+    Exception(NcbiException),
+    /// An element stated as `NULL` in a list of `CRef<>`s of the search (`V::holds_null_element`:
+    /// the reader keeps it as the empty reference NCBI's list holds), which NCBI's import
+    /// dereferences where it reads that list and LOSAT does not: refused, as the reader's posts are
+    /// (`import::no_posts`).
+    NullElement,
+}
+
 /// The member `name` of the SEQUENCE `value` of the type `ty`, moved out.
 fn take(value: &mut Value, ty: u16, name: &str) -> Option<Value> {
     value.take_member(member_index(ty, name))
@@ -106,13 +118,13 @@ impl Request {
     /// `Blast4-request` the program read. A body that is not a `queue-search` stops it (an error
     /// archive's `get-request-info` too); its import never asks for `ident` (NCBI's exports
     /// write none; `E.*.ident` of line F2's probes: ignored), which is empty when the file has
-    /// none.
-    pub(crate) fn from_strategy(mut request: Value) -> Result<Request, NcbiException> {
+    /// none. A search with an element stated as `NULL` in a list is refused (`Stop::NullElement`).
+    pub(crate) fn from_strategy(mut request: Value) -> Result<Request, Stop> {
         let ty = named::BLAST4_REQUEST;
         let mut body = take(&mut request, ty, "body").expect("the mandatory body");
         let (variant, mut search) = take_variant(&mut body, named::BLAST4_REQUEST_BODY);
         if variant != "queue-search" {
-            return Err(NcbiException::new(
+            return Err(Stop::Exception(NcbiException::new(
                 ThrowSite {
                     file: "src/algo/blast/api/search_strategy.cpp",
                     line: 72,
@@ -120,9 +132,12 @@ impl Request {
                     function: Some("BLAST::ncbi::blast::CImportStrategy::CImportStrategy"),
                 },
                 "No body in CBlast4_request",
-            ));
+            )));
         }
         let ty = named::BLAST4_QUEUE_SEARCH_REQUEST;
+        if V::new(ty, &search).holds_null_element() {
+            return Err(Stop::NullElement);
+        }
         let mut text = |name: &str| {
             let mut value = take(&mut search, ty, name).expect("a mandatory string");
             take_str(&mut value)

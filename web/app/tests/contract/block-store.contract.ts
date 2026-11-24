@@ -210,6 +210,26 @@ export const BLOCK_STORE_CASES: readonly ContractCase<BlockStoreEnv>[] = [
     },
   },
   {
+    name: 'writeAt, truncate and readFile: POSIX overwrite, sparse hole, shrink/grow, and File view',
+    async run({ store }) {
+      const enc = new TextEncoder();
+      const writer = await store.create('tools/r1/out');
+      writer.writeAt(0, enc.encode('abcdef'));
+      writer.writeAt(2, enc.encode('CD'));
+      writer.writeAt(8, enc.encode('IJ'));
+      same(store.usage(), 10, 'usage after hole write');
+      writer.truncate(12);
+      writer.truncate(10);
+      same(await writer.seal(), 10, 'sealed length');
+      const expected = new Uint8Array([...enc.encode('abCDef'), 0, 0, ...enc.encode('IJ')]);
+      sameBytes(await store.read('tools/r1/out', 0, 10), expected, 'bytes');
+      const file = await store.readFile('tools/r1/out', 'wmasker.ascii', 'text/plain');
+      same(file.name, 'wmasker.ascii', 'file name');
+      same(file.size, 10, 'file size');
+      sameBytes(new Uint8Array(await file.arrayBuffer()), expected, 'file bytes');
+    },
+  },
+  {
     name: 'storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable',
     async run(env) {
       const { store } = env;

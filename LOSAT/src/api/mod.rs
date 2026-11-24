@@ -190,6 +190,7 @@ mod view;
 
 pub use crate::record::FastaRecord;
 pub use batches::{run_batches, Batch, Batches};
+pub(crate) use describe::parameters as described_parameters;
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use id::Id;

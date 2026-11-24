@@ -592,7 +592,7 @@ fn run_inner(
             query_range.as_ref(),
             holds_back,
             xml_matrix.is_none(),
-            query_scopes_of(),
+            query_scopes_of().map(|scopes| scopes.with_xml_matrix_failure(xml_matrix)),
         )?;
         query_file = file;
         stops_after = scan.stops_after;
@@ -616,6 +616,14 @@ fn run_inner(
             held.hold();
         }
     }
+    // The query whose batch the failure stops, of the scopes read ahead
+    // (`QueryScopes::xml_failing_query`).
+    let xml_failing = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            read_ahead_scopes.as_ref(),
+            failure,
+        )
+    });
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     let mut query_stream = query_settings.stream(query_file);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (cited at
@@ -914,7 +922,7 @@ fn run_inner(
                     queries_before,
                     stops,
                     xml2.borrow_mut().as_mut(),
-                    xml_matrix,
+                    xml_failing,
                     pool,
                 )
                 .map_err(refused)
@@ -930,7 +938,7 @@ fn run_inner(
                 queries_before,
                 stops,
                 xml2.borrow_mut().as_mut(),
-                xml_matrix,
+                xml_failing,
                 pool,
             )
             .map_err(refused),
@@ -1048,7 +1056,7 @@ fn run_inner(
         &shown_run,
         processed,
         xml2.borrow_mut().as_mut(),
-        xml_matrix,
+        xml_failing,
     )
     .map_err(report_error)?;
     writer.flush().map_err(output_error)?;
@@ -1760,7 +1768,9 @@ pub(crate) type BatchRender<'r> = dyn FnMut(
 /// program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
 /// `-export_search_strategy` (`export`) no request of the batch is written; else NCBI's error of
 /// the set-up of the batch's records that NCBI's set-up reads with their own letters
-/// (`reader_batch::set_up_error`, as `search_error` makes the search's), or the refusal.
+/// (`reader_batch::set_up_error`, as `search_error` makes the search's), else the batch's search
+/// where that set-up passes and the run's XML failure for its matrix name takes the refusal
+/// (`ScopeRefusal::xml_takes`), else the refusal.
 /// RPSTBLASTN's set-up reads its database's files first: refused. (Round 4 added the batch after
 /// its search, and wrote its request.) The reader's batches are NCBI's (`input::emit_fasta_batch`
 /// counts as `query_batch::BatchCount`; line WQA D10 round 6, 2026-11-20).
@@ -1781,19 +1791,20 @@ pub(super) fn add_batch_scope(
     // Every record read, those that the range skipped among them (`input::scope_records`).
     let ordered = super::input::scope_records(queries);
     let Some(scopes) = query_scopes.borrow_mut().as_mut().map(|scopes| {
-        scopes.add_batch_ids(
+        scopes.add_batch_records(
             ordered
                 .iter()
-                .map(|&(believed, length, _)| (believed, length)),
+                .map(|&(believed, length, place)| (believed, length, place.is_some())),
             queries_before,
         )
     }) else {
         return Ok(());
     };
-    scopes.map_err(|refusal| {
+    scopes.or_else(|refusal| {
+        use crate::blastinput::query_batch::BatchSetUp;
         crate::blastinput::query_batch::refused_batch_error(refusal, export, |first| {
             if options.rpstblastn.is_some() {
-                return None;
+                return BatchSetUp::Unknown;
             }
             let records: Vec<FastaRecord> = ordered
                 .iter()
@@ -1801,7 +1812,10 @@ pub(super) fn add_batch_scope(
                 .filter_map(|(&(_, _, place), &first)| place.filter(|_| first))
                 .map(|place| queries[place].clone())
                 .collect();
-            super::reader_batch::set_up_error(&records, options, subjects).map(search_error)
+            match super::reader_batch::set_up_error(&records, options, subjects) {
+                BatchSetUp::Fails(error) => BatchSetUp::Fails(search_error(error)),
+                other => other,
+            }
         })
     })
 }

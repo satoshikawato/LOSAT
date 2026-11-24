@@ -22,6 +22,43 @@ impl<'a> V<'a> {
         V { ty, value }
     }
 
+    /// Whether the value is an element of a list of `CRef<>`s stated as `NULL`: the empty
+    /// reference that NCBI's list holds (`Value::Null`), which no getter reads.
+    pub(crate) fn is_null(self) -> bool {
+        matches!(self.value, Value::Null)
+    }
+
+    /// Whether the value holds, at any depth, an element of a list of `CRef<>`s stated as `NULL`
+    /// (`is_null`; `Kind::List::refs`): what a reader that dereferences no such element checks
+    /// before it reads (the search strategy's import, `report::archive::read::request`). Walked
+    /// from a list on the heap, as values nest to any depth (`Value`).
+    pub(crate) fn holds_null_element(self) -> bool {
+        let mut todo = vec![self];
+        while let Some(v) = todo.pop() {
+            match (&resolved(v.ty).kind, v.value) {
+                (&Kind::List { element, refs, .. }, Value::List(values)) => {
+                    for value in values {
+                        if refs && matches!(value, Value::Null) {
+                            return true;
+                        }
+                        todo.push(V::new(element, value));
+                    }
+                }
+                (Kind::Sequence(_), Value::Sequence(set)) => {
+                    let members = members(v.ty);
+                    todo.extend(set.iter().map(|(position, value)| {
+                        V::new(members[usize::from(*position)].ty, value)
+                    }));
+                }
+                (Kind::Choice(_), Value::Choice(index, value)) => {
+                    todo.push(V::new(members(v.ty)[usize::from(*index)].ty, value));
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// The member `name` of the SEQUENCE, when set (`IsSet<Member>()` then `Get<Member>()`).
     pub(crate) fn get(self, name: &str) -> Option<V<'a>> {
         let index = member_index(self.ty, name);

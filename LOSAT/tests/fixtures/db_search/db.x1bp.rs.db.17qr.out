@@ -1,0 +1,4 @@
+@HD	VN:1.2	GO:query
+@SQ	SN:BL_ORD_ID:0	LN:16154
+@PG	ID:0	VN:2.17.0+	CL:/home/losatbench/losat-bench/tools/env_blast/bin/blastn -db tests/db_search/x1bp/rs -query tests/fasta/outfmt0/x1bo_R_q.fna -task megablast -xdrop_ungap 1e10 -outfmt 17 SQ SR -num_threads 1 	PN:blastn
+Query_2	0	BL_ORD_ID:0	125	255	62H3969M	*	0	0		*	AS:i:3969	EV:f:0	NM:i:0	PI:f:100.00	BS:f:7330.47

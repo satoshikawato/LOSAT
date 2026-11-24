@@ -4,10 +4,11 @@
 A maintainer tool: LOSAT's build does not run it, and users need nothing of it. It reads NCBI's
 ASN.1 modules (`c++/src/objects/**/*.asn`) and the storage overrides of their `.def` files, takes
 the closure of the types that the root types reach (by default NCBI-ScoreMat's
-`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`, and NCBI-Blast4's
+`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`, NCBI-BlastDL's
+`Blast-db-mask-info`, the mask file of makeblastdb `-mask_data`, and NCBI-Blast4's
 `Blast4-archive`, `Blast4-request` and `Blast4-get-search-strategy-reply`, the BLAST archive of
-`-outfmt 11` and the search strategy files), and writes the table that
-LOSAT's generic ASN.1 text reader runs on (`report::serial::asn_types`). Its companion check,
+`-outfmt 11` and the search strategy files), and writes the table that LOSAT's ASN.1 reader runs
+on (`report::serial::asn_types`). Its companion check,
 `asn_spec_check.py`, compares the table with the type information that NCBI's datatool generated
 (`*_.cpp`, `*_.hpp`) and must pass whenever the table is regenerated.
 
@@ -26,9 +27,10 @@ What the table holds, per type (named, or anonymous at its place of use):
   - per member or variant: its name (its tag is its position from 0, NCBI's automatic tags: a
     member with a tag of its own in the module stops the generator), OPTIONAL,
     DEFAULT (with the default value as written in the module) and the delayed flag (`_delay`);
-    per SEQUENCE member, whether the generated class keeps a set flag for it (`SET_FLAG`,
-    `->SetSetFlag(`): every member but a class held by reference (`ADD_NAMED_REF_MEMBER`, a
-    SEQUENCE, a CHOICE or a named SEQUENCE OF / SET OF, unless `.def` sets `_pointer` to false).
+    REF for a SEQUENCE member that NCBI's generated class holds by `CRef<>` (`ADD_NAMED_REF_MEMBER`:
+    a member whose type is a SEQUENCE, a CHOICE or a named SEQUENCE OF / SET OF, NCBI's implicit
+    class, directly or through a named alias; such a member has no set flag), and for a SEQUENCE OF
+    / SET OF whether its elements are `CRef<>`s (`STL_CRef`, elements of those kinds).
 
 The storage of an INTEGER is NCBI's C++ type, from the `.def` files: `TSeqPos` and `unsigned` are
 Uint4, `TSignedSeqPos` and `int` Int4, `TGi`, `TEntrezId`, `TIntId` and `Int8` Int8 (NCBI_INT8_GI,
@@ -451,7 +453,7 @@ class Entry:
     values: list[tuple[str, int]] = field(default_factory=list)
     integer: bool = False
     alias: bool = False  # a named type that is another named type (`A ::= B`)
-    by_value: set[str] = field(default_factory=set)  # members whose `.def` `_pointer` setting is `false`
+    by_value: set[str] = field(default_factory=set)  # members whose `.def` turns `_pointer` off
 
 
 class Table:
@@ -562,6 +564,27 @@ class Table:
         return self.add(built)
 
 
+def is_class(table: Table, ty: int) -> bool:
+    """Whether NCBI's generated code holds a value of the type `ty` by `CRef<>`: a SEQUENCE, a
+    CHOICE or a named SEQUENCE OF / SET OF (NCBI's implicit class), directly or through a named
+    alias (`Ref-ext ::= Seq-loc`). An alias of another kind (`PubMedId ::= INTEGER`) and an
+    anonymous list are held by value (the generated code registers such a member as a plain
+    class member or an STL list, without a reference; asn_spec_check.py checks it against the
+    generated code)."""
+    e = table.entries[ty]
+    while e.kind == "Alias":
+        e = table.entries[e.element]
+    return e.kind in ("Sequence", "Choice") or (e.kind == "List" and bool(e.name))
+
+
+def is_ref_member(table: Table, entry: Entry, name: str, ty: int) -> bool:
+    """Whether the member `name` (of the type `ty`) of the SEQUENCE `entry` is held by `CRef<>`
+    (`ADD_NAMED_REF_MEMBER`): a member of a class type (`is_class`) unless its `.def` entry
+    turns the `_pointer` attribute off (`Score.value`, seqalign.def: registered as a plain class
+    member with a set flag)."""
+    return is_class(table, ty) and name not in entry.by_value
+
+
 def const_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "_", name).upper()
 
@@ -585,28 +608,6 @@ class Names:
         return f"Name({self.at[name]}, {len(name.encode())})"
 
 
-def held_by_reference(table: Table, index: int) -> bool:
-    """Whether a member of the type `index` is a class that the generated code holds by reference
-    (`CRef<>`): a SEQUENCE, a CHOICE, a named SEQUENCE OF or SET OF (an implicit class), or a
-    named type that is one of these under another name."""
-    e = table.entries[index]
-    if e.kind in ("Sequence", "Choice"):
-        return True
-    if e.kind == "List":
-        return bool(e.name)
-    if e.kind == "Alias":
-        return held_by_reference(table, e.element)
-    return False
-
-
-def has_set_flag(table: Table, owner: Entry, name: str, index: int) -> bool:
-    """Whether the generated class of the SEQUENCE `owner` keeps a set flag for its member `name`
-    of the type `index` (`->SetSetFlag(`): every member but a class held by reference
-    (`ADD_NAMED_REF_MEMBER`); `.def` with `_pointer` set to false holds the class by value
-    (`ADD_NAMED_MEMBER` with `CLASS`, `Score.value`)."""
-    return not held_by_reference(table, index) or name in owner.by_value
-
-
 def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     names = Names()
     types: list[str] = []
@@ -626,8 +627,8 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
                     flags.append("DEFAULT")
                 if delayed:
                     flags.append("DELAYED")
-                if e.kind == "Sequence" and has_set_flag(table, e, spec.name, element):
-                    flags.append("SET_FLAG")
+                if e.kind == "Sequence" and is_ref_member(table, e, spec.name, element):
+                    flags.append("REF")
                 flag_text = " | ".join(flags) if flags else "0"
                 default = "None" if spec.default is None else f"Some({names(spec.default)})"
                 # NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1138-1145 (and the
@@ -649,7 +650,9 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
                                f"{e.name or e.path}.{spec.name}")
             kind = f"Kind::{e.kind}(Span({first}, {len(e.members)}))"
         elif e.kind == "List":
-            kind = f"Kind::List {{ element: {e.element}, set: {'true' if e.set_ else 'false'} }}"
+            refs = "true" if is_class(table, e.element) else "false"
+            kind = (f"Kind::List {{ element: {e.element}, set: {'true' if e.set_ else 'false'}, "
+                    f"refs: {refs} }}")
         elif e.kind == "Alias":
             kind = f"Kind::Alias({e.element})"
         elif e.kind == "Integer":
@@ -669,7 +672,7 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     w = out.append
     w("// GENERATED by scripts/asn_spec_gen.py: do not edit by hand.")
     w("//")
-    w("// The ASN.1 types that NCBI's text reader reads under the root types")
+    w("// The ASN.1 types that NCBI's readers read under the root types")
     for module, name in roots:
         w(f"// {module}::{name},")
     w("// from the ASN.1 modules and `.def` files of NCBI BLAST+ 2.17.0 (`c++/src/objects`, the pinned")
@@ -681,7 +684,7 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     w(f"// {len(members)} members and variants, {len(values)} named values.) The names are offsets into")
     w("// `NAMES` and the members and values spans of `MEMBERS` and `VALUES`: the table holds no pointer.")
     w("")
-    w("use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL, SET_FLAG};")
+    w("use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL, REF};")
     w("")
     w("/// The index in `TYPES` of each named type (the reader's hooks and the PSSM's typed boundary")
     w("/// name some of them).")
@@ -714,9 +717,11 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     return "\n".join(out)
 
 
-# The PSSM's root first: the types it reaches keep their indices when roots are added after it.
+# The PSSM's root first, then the mask file's: the types they reach keep their indices when roots
+# are added after them.
 DEFAULT_ROOTS = [
     ("NCBI-ScoreMat", "PssmWithParameters"),
+    ("NCBI-BlastDL", "Blast-db-mask-info"),
     ("NCBI-Blast4", "Blast4-archive"),
     ("NCBI-Blast4", "Blast4-request"),
     ("NCBI-Blast4", "Blast4-get-search-strategy-reply"),

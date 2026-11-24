@@ -208,8 +208,9 @@ pub struct XmlHsp<'a> {
     /// subject letters, `-` for a gap, equally long.
     pub qrow: &'a [u8],
     pub srow: &'a [u8],
-    /// The edit script of the rows (`None`: one segment of substitutions over the whole row), which
-    /// gives the Dense-seg segments that the mask loop walks.
+    /// The edit script of the rows (`None`: an ungapped HSP, one segment of substitutions over the
+    /// whole row and no gaps), which gives the Dense-seg segments that the mask loop walks and the
+    /// gaps (`writer::count_hsp`).
     pub ops: Option<&'a [GapEditOp]>,
     /// The 0-based record position of the query row's first residue and how the residues
     /// follow (`hsp::mask_query_row`): 1 for a protein or plus-strand nucleotide row, 3 for a

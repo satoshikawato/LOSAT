@@ -32,6 +32,8 @@ mod blastx_subject_flow;
 mod blastx_sw_tback;
 #[path = "../blastx_ungap_sent.rs"]
 mod blastx_ungap_sent;
+#[path = "../blastx_ungapped_short_link.rs"]
+mod blastx_ungapped_short_link;
 #[path = "../blastx_unit_cap.rs"]
 mod blastx_unit_cap;
 #[path = "../run_local_blastx.rs"]

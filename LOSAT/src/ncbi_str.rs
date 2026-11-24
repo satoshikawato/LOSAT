@@ -630,6 +630,11 @@ pub(crate) fn truncate_spaces_str(str: &str) -> &str {
     &str[beg..end]
 }
 
+/// The throw of `NStr::StringToBool` (a `CStringException` at position 0, "String cannot be
+/// converted to bool"), for a caller that throws it as NCBI's (the XML object stream's `nil`
+/// attribute, `report::serial::asn_types::read_xml`).
+pub(crate) const STRING_TO_BOOL: ThrowSite = convert_site(2837, "ncbi::NStr::StringToBool");
+
 /// `NStr::StringToBool`: `None` where NCBI throws.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839

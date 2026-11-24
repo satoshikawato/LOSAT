@@ -13,7 +13,7 @@
 //! NCBI wrote, `out_buffer::OutBuffer`, which keeps those 80 bytes): either way it holds every
 //! byte that the wrap looks at.
 
-use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
+use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, Stream, StreamPosition};
 use super::real::write_asn_text_double;
 
 /// The column after which a VisibleString is wrapped (`WrapAt` at 78 with `true`).
@@ -379,9 +379,15 @@ impl Encoder for AsnTextEncoder<'_> {
     fn unread_delayed(&mut self) {
         if self.error.is_none() {
             self.error = Some(SerialError::Unwritten(
-                "a member read from ASN.1 binary into a delay buffer whose value NCBI reads with \
-                 a message or an error",
+                "a member read into a delay buffer of another format whose value NCBI reads with an \
+                 error or with a message other than a replaced character",
             ));
+        }
+    }
+
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let (None, Some(first)) = (&self.error, posts.first()) {
+            self.error = Some(SerialError::NonVisibleChar(first.byte));
         }
     }
 
@@ -431,7 +437,7 @@ impl Encoder for AsnTextEncoder<'_> {
 
     /// The document's bytes stop where NCBI's stream throws (`encoder::NullElement`): the
     /// encoder's error; what it writes after is not NCBI's (`encoder::Traced` writes nothing).
-    fn null_element(&mut self) {
+    fn null_element(&mut self, _element_type: &str) {
         if self.error.is_none() {
             self.error = Some(SerialError::NullElement);
         }

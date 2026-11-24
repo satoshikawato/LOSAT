@@ -504,12 +504,15 @@ fn masks_are_read_from_each_volume_s_first_column() {
             "C",
         ]);
         assert_eq!(status, 1, "{names}: {err}");
+        // The column under the volume's name with its links followed, as NCBI's reader names it
+        // (`crate::utils::test_dir::ncbi_dir`): a `contains` of the path as given passed on macOS
+        // only because `/var/...` is the end of `/private/var/...`.
+        let column = crate::utils::test_dir::ncbi_dir(&tmp.0).join("u.paa");
         assert!(
-            err.starts_with("losat makeblastdb: ")
-                && err.contains(&format!(
-                    "{user}.paa: unsupported database: the first column of"
-                ))
-                && err.contains("not its mask data"),
+            err.starts_with(&format!(
+                "losat makeblastdb: {}: unsupported database: the first column of",
+                column.display()
+            )) && err.contains("not its mask data"),
             "{names}: {err}"
         );
     }

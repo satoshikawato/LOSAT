@@ -870,7 +870,99 @@ impl<T: Copy> XHeadFifo<T> {
     }
 }
 
+/// EXPERIMENT (LOSAT_X_MBCHAINPF): whether the scan of a contiguous table of chains sends its
+/// words with hits through `XChainFifo` (on unless it is `0`).
+pub(crate) fn x_mb_chain_pf() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBCHAINPF"))
+}
+
+/// No NCBI counterpart (scheduling only): the FIFO of the words with hits of the scan of a
+/// contiguous table of chains (LOSAT_X_MBCHAINPF), in two steps. A word enters after the prefetch
+/// of its head (`TwoStageLookup::x_prefetch_mb_head`); `X_HEAD_FIFO / 2` words later its head,
+/// in the cache by then, is read and the link of the chain's first element prefetched
+/// (`TwoStageLookup::x_prefetch_mb_link`); `X_HEAD_FIFO` words after it entered it leaves through
+/// `emit`, unchanged and in order, for its walk. NCBI's walk reads each element's link right
+/// after the element, a miss of its own on a chain array larger than the caches, one after the
+/// other: a chain of one element costs two dependent misses (its head and its link). The words,
+/// and so every pair and its order, are the scan's own. A slot no word has reached is
+/// uninitialised (never read).
+pub(crate) struct XChainFifo<T: Copy> {
+    buf: [std::mem::MaybeUninit<T>; X_HEAD_FIFO],
+    n: usize,
+}
+
+impl<T: Copy> XChainFifo<T> {
+    #[inline(always)]
+    pub(crate) fn new() -> Self {
+        Self {
+            buf: [std::mem::MaybeUninit::uninit(); X_HEAD_FIFO],
+            n: 0,
+        }
+    }
+
+    /// The word `w` enters; the word `X_HEAD_FIFO / 2` places back goes to `mid`, and the word
+    /// `X_HEAD_FIFO` places back leaves through `emit`.
+    #[inline(always)]
+    pub(crate) fn push(&mut self, w: T, mid: impl FnOnce(T), emit: &mut impl FnMut(T)) {
+        let n = self.n;
+        if n >= X_HEAD_FIFO / 2 {
+            // SAFETY: word `n - X_HEAD_FIFO / 2` was pushed, and the words pushed since then
+            // wrote other slots.
+            mid(unsafe { self.buf[(n - X_HEAD_FIFO / 2) & (X_HEAD_FIFO - 1)].assume_init() });
+        }
+        let slot = n & (X_HEAD_FIFO - 1);
+        if n >= X_HEAD_FIFO {
+            // SAFETY: word `n - X_HEAD_FIFO`, whose slot this is, was pushed and written; the
+            // `X_HEAD_FIFO - 1` words pushed since then wrote other slots.
+            emit(unsafe { self.buf[slot].assume_init() });
+        }
+        self.buf[slot] = std::mem::MaybeUninit::new(w);
+        self.n = n + 1;
+    }
+
+    /// The words still in the FIFO leave through `emit`, in order.
+    pub(crate) fn flush(&mut self, emit: &mut impl FnMut(T)) {
+        for m in self.n.saturating_sub(X_HEAD_FIFO)..self.n {
+            // SAFETY: `m < n` and `m >= n - X_HEAD_FIFO`: word `m` was pushed, and no later word
+            // wrote its slot.
+            emit(unsafe { self.buf[m & (X_HEAD_FIFO - 1)].assume_init() });
+        }
+        self.n = 0;
+    }
+}
+
 impl TwoStageLookup {
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): prefetches the head of a contiguous table's word, in its
+    /// chains' heads or a table's 3-byte heads (`XChainFifo`). A prefetch accesses no memory
+    /// architecturally, so any address is allowed.
+    #[inline(always)]
+    pub(crate) fn x_prefetch_mb_head(&self, index: u64) {
+        let mb = &self.mb_lookup;
+        match mb.x_narrow.as_ref() {
+            Some(narrow) => narrow.x_prefetch_head(index as usize),
+            None => x_dc_csr::prefetch(mb.hashtable.as_ptr().wrapping_add(index as usize)),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): reads the head of a contiguous table's word (prefetched
+    /// `X_HEAD_FIFO / 2` words before) and prefetches the link of its chain's first element
+    /// (`XChainFifo`).
+    #[inline(always)]
+    pub(crate) fn x_prefetch_mb_link(&self, index: u64) {
+        let mb = &self.mb_lookup;
+        match mb.x_narrow.as_ref() {
+            Some(narrow) => narrow.x_prefetch_link(index as usize),
+            None => {
+                if let Some(&head) = mb.hashtable.get(index as usize) {
+                    if head != 0 {
+                        x_dc_csr::prefetch(mb.next_pos.as_ptr().wrapping_add(head as usize));
+                    }
+                }
+            }
+        }
+    }
+
     /// No NCBI counterpart (scheduling only): prefetches the heads of a word's chains, its cell
     /// of `hashtable` and, for a second template's word `index2`, of `hashtable2` (`XHeadFifo`).
     /// A table without a first template's chains (`hashtable` empty: CSR) gets a prefetch of no

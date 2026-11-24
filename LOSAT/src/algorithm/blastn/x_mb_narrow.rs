@@ -159,6 +159,27 @@ impl Narrow {
     }
 
     /// EXPERIMENT (LOSAT_X_SEEDPIECE): `each` from the chain's element `from` (not 0) on.
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): prefetches the head of `cell` (`lookup::XChainFifo`).
+    #[inline(always)]
+    pub(super) fn x_prefetch_head(&self, cell: usize) {
+        super::x_dc_csr::prefetch(self.heads.as_ptr().cast::<u8>().wrapping_add(3 * cell));
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): reads the head of `cell` (prefetched before) and prefetches
+    /// the link of the chain's first element (`lookup::XChainFifo`).
+    #[inline(always)]
+    pub(super) fn x_prefetch_link(&self, cell: usize) {
+        let head = get(&self.heads, cell);
+        if head != 0 {
+            super::x_dc_csr::prefetch(
+                self.chain
+                    .as_ptr()
+                    .cast::<u8>()
+                    .wrapping_add(3 * head as usize),
+            );
+        }
+    }
+
     #[inline(always)]
     pub(super) fn each_from(&self, from: u32, mut callback: impl FnMut(u32)) {
         let mut q_off = from;

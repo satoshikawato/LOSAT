@@ -43,7 +43,7 @@ use super::{
     x_bn_pv_once, x_bn_rank_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct,
     OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
-use crate::algorithm::blastn::lookup::{TwoStageLookup, XHeadFifo};
+use crate::algorithm::blastn::lookup::{x_mb_chain_pf, TwoStageLookup, XChainFifo, XHeadFifo};
 use std::mem::MaybeUninit;
 
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
@@ -613,23 +613,58 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // before that batch's window lines.
         let every_word = debug_mode || blastn_debug;
         let mut words_without_hits = 0usize;
-        scan_subject_kmers_with_ranges(
-            search_seq_packed,
-            s_len,
-            word_length,
-            lut_word_length,
-            scan_step,
-            subject_seq_ranges,
-            subject_masked,
-            mb_scan_kind,
-            |kmer_start, s_range, current_lut_kmer| {
-                if every_word || pv_view.has_hits(current_lut_kmer) {
-                    on_word(kmer_start, s_range, current_lut_kmer, None);
-                } else {
-                    words_without_hits += 1;
-                }
-            },
-        );
+        if !every_word && x_mb_chain_pf() {
+            // EXPERIMENT (LOSAT_X_MBCHAINPF): a word with hits has its head prefetched and goes
+            // through the two-step FIFO (`lookup::XChainFifo`: half way, its head is read and the
+            // link of its chain's first element prefetched) to `on_word`, in the same order, so
+            // the same pairs and batches go out in the same order. With the debug output on,
+            // every word goes to `on_word` at once, as below.
+            let mut emit =
+                |(s_off, s_range, index): (usize, usize, u64)| on_word(s_off, s_range, index, None);
+            let mut fifo: XChainFifo<(usize, usize, u64)> = XChainFifo::new();
+            let (fifo_ref, emit_ref, without_ref) = (&mut fifo, &mut emit, &mut words_without_hits);
+            scan_subject_kmers_with_ranges(
+                search_seq_packed,
+                s_len,
+                word_length,
+                lut_word_length,
+                scan_step,
+                subject_seq_ranges,
+                subject_masked,
+                mb_scan_kind,
+                move |kmer_start, s_range, current_lut_kmer| {
+                    if pv_view.has_hits(current_lut_kmer) {
+                        two_stage.x_prefetch_mb_head(current_lut_kmer);
+                        fifo_ref.push(
+                            (kmer_start, s_range, current_lut_kmer),
+                            |w| two_stage.x_prefetch_mb_link(w.2),
+                            emit_ref,
+                        );
+                    } else {
+                        *without_ref += 1;
+                    }
+                },
+            );
+            fifo.flush(&mut emit);
+        } else {
+            scan_subject_kmers_with_ranges(
+                search_seq_packed,
+                s_len,
+                word_length,
+                lut_word_length,
+                scan_step,
+                subject_seq_ranges,
+                subject_masked,
+                mb_scan_kind,
+                |kmer_start, s_range, current_lut_kmer| {
+                    if every_word || pv_view.has_hits(current_lut_kmer) {
+                        on_word(kmer_start, s_range, current_lut_kmer, None);
+                    } else {
+                        words_without_hits += 1;
+                    }
+                },
+            );
+        }
         if debug_enabled {
             *dbg_total_s_positions += words_without_hits;
         }

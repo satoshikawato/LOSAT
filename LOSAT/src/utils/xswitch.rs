@@ -384,6 +384,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_GREEDYROWFUSE",
     "LOSAT_X_LISTSTEP",
     "LOSAT_X_MB24",
+    "LOSAT_X_MBCHAINPF",
     "LOSAT_X_MBCSR",
     "LOSAT_X_MBFILL",
     "LOSAT_X_MBHITPF",

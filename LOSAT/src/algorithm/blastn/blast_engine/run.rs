@@ -11331,9 +11331,7 @@ fn search_query_chunks(
     // 145-171): NCBI stops with a CCoreException that names its build's files where a chunk
     // would be split again, and otherwise searches chunk ranges with gaps between them.
     if batching.split.negative_chunk_size() && splits(batching.split, lengths.iter().sum()) {
-        anyhow::bail!(
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped (NCBI stops with a CCoreException that names its build's source files, or searches chunks with gaps between them), which is not supported by LOSAT's BLASTN"
-        );
+        anyhow::bail!(crate::algorithm::blastn::query_split::negative_split_refusal("BLASTN"));
     }
     let Some(chunks) = split_query_batch(
         &lengths,

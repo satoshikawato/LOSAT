@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod temp_support;
-use temp_support::{expected_losat_bytes, home_and_worker_log, unique_dir};
+use temp_support::{expected_losat_bytes, home_and_worker_log, undated_seqid_list, unique_dir};
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
@@ -256,16 +256,13 @@ fn starts_with_date_text(data: &[u8]) -> bool {
 /// `data`, the bytes of the file `path` below `d`, with the build's dates as `<DATE>`: the date
 /// field of an index file (`index_date`) and every date text (`starts_with_date_text`); in a
 /// metadata file (`.njs`, `.pjs`) `bytes-total` counts the index files it lists without their
-/// date fields, whose length changes with the date; in a binary seqid list (`.bsl`) its date with
-/// the date's length byte, and its 8-byte size, which counts the date, as zeros with its first
-/// byte (`make_fixtures.py`'s `undated`).
+/// date fields, whose length changes with the date; in a binary seqid list (`.bsl`) its date
+/// (`temp_support::undated_seqid_list`) (`make_fixtures.py`'s `undated`).
 fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
     let mut data = data.to_vec();
-    if path.ends_with(b".bsl") && data.len() > 21 && data[0] == 0 {
-        let date = 21 + u32::from_le_bytes(data[17..21].try_into().unwrap()) as usize;
-        if date < data.len() {
-            let end = (date + 1 + usize::from(data[date])).min(data.len());
-            data = [&[0u8; 9][..], &data[9..date], b"<DATE>", &data[end..]].concat();
+    if path.ends_with(b".bsl") {
+        if let Some(undated) = undated_seqid_list(&data) {
+            data = undated;
         }
     }
     if INDEX.iter().any(|end| path.ends_with(end.as_bytes())) {
@@ -430,6 +427,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 157, "the cases of cases.tsv");
+    assert_eq!(ran, 159, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

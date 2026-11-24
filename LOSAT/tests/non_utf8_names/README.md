@@ -76,6 +76,8 @@ that does not exist, and a name of 256 bytes that cannot be written: NCBI's `...
 directory), `-seqid_db` (in a directory, and a version 5 database renamed `p\xe9` whose `.pin` and
 LMDB file were patched to the new name: `patch`), `-seqid_file_info` (of `ids_db_e9.bsl`, which NCBI
 2.17.0 wrote on 2026-11-25 with `-seqid_db` of that renamed database, so its `DB Vols:` line holds the
-byte), `-logfile`, and constrained values (`-dbtype`, `-seqid_dbtype`) that NCBI's reader refuses with
-the bytes. With them the date of a binary seqid list (`.bsl`: its date and the date's length byte,
-and its 8-byte size, which counts the date) is masked too (`undated`).
+byte), `-logfile`, and constrained values (`-dbtype`, `-seqid_dbtype`) and numbers (`-num_volumes`,
+`-oid_masks`, added and frozen at 04:0x after review F3) that NCBI's reader refuses with the bytes.
+With them the date of a binary seqid list (`.bsl`: its date and the date's length byte) is masked
+too (`undated`), and its 8-byte size, which counts the date, is zeroed when it holds the length of
+the file, so a wrong size still differs (review F1; `undated_seqid_list` of `tests/temp_support`).

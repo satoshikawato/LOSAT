@@ -35,7 +35,9 @@ What they are: NCBI BLAST+ 2.17.0 `blastdb_aliastool` runs that `tests/blastdb_a
   LOSAT's with `losat::wording`) and `ncbi/<row>.files`: for each file the run made or changed (in `in/` too), its
   path, size and FNV-1a 64 digest, and `REMOVED` for each file of `in/` it removed. The date of an alias file
   (`# Alias file created <date>`) and of a binary seqid list (its 8-byte file size, zeroed, and its date with the
-  date's length byte) is replaced by `<DATE>` first and the size is `*`.
+  date's length byte) is replaced by `<DATE>` first and the size is `*`. Since 2026-11-25 (line RG item K10d, review
+  F1) the test zeroes a list's size field only when it holds the file's length, as NCBI's lists do, so the frozen
+  digests stay and a wrong size field differs (`undated_seqid_list` of `tests/temp_support`).
 
 ## Rows that wait for LOSAT's reader
 The rows `S02`, `S03`, `S05`, `S07`, `S09`, `S10`, `T01`, `T02`, `T05` and `T06` make an alias file with a seqid or

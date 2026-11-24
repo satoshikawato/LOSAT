@@ -813,8 +813,13 @@ impl Args {
 
     /// The value of the key `name` as its bytes (`AsString` of a name that a program opens):
     /// given, or its default, UTF-8 or not. The programs open a file by it (`output_file`,
-    /// `files::open_input_file`).
+    /// `files::open_input_file`). In a debug build `name` must be an argument of the program by
+    /// its own name (the values are kept by it), so that a misspelt key does not read as absent.
     pub(crate) fn os_value(&self, name: &str) -> Option<&OsStr> {
+        debug_assert!(
+            find_desc(self.arguments, name).is_some_and(|desc| desc.name.is(name)),
+            "-{name} is not an argument of the program"
+        );
         match self.values.get(name) {
             Some(Some(Value::Text(text))) => Some(OsStr::new(text.as_str())),
             Some(Some(Value::Bytes(bytes))) => Some(bytes.as_os_str()),

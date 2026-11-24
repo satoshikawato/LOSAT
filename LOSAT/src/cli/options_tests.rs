@@ -13,6 +13,12 @@ use crate::cli::Commands;
 use crate::ncbi_app::args::{checked, described, parse, Args, Dep, Kind};
 use crate::ncbi_app::Tool;
 
+/// The programs whose options this reader reads (`TOOLS`), for the tests of other modules that go
+/// over every one of them, so that a program added to the reader is in those tests too.
+pub(crate) fn programs() -> impl Iterator<Item = &'static str> {
+    TOOLS.iter().map(|tool| tool.program)
+}
+
 /// The names of the arguments that `tool`'s options read (`options`, `Args::names_read`), of a
 /// command line with only what the program needs (makeblastdb's mandatory `-dbtype`; `-in` takes
 /// its default): the tests that compare the arguments of the options with those of NCBI's XML,

@@ -8,18 +8,9 @@ use crate::ncbi_app::args::{refusal, Refusal};
 use std::ffi::OsString;
 
 /// The programs whose arguments NCBI's reader reads into their options (`cli::reader`).
-const READER_PROGRAMS: [&str; 10] = [
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "rpsblast",
-    "rpstblastn",
-    "makeblastdb",
-    "rpsbproc",
-];
+fn reader_programs() -> impl Iterator<Item = &'static str> {
+    crate::cli::reader::options_tests::programs()
+}
 
 /// NCBI's arguments that its application start reads before the arguments
 /// (`ncbi_environment::preparse`), which the parser of the Web engine (`try_parse_from`: no
@@ -72,7 +63,7 @@ fn dependencies(xml: &str) -> Vec<(String, String)> {
 // not refused (by name or at the run, `Refusal::Run`).
 #[test]
 fn the_xml_names_are_the_arguments_that_the_options_read() {
-    for program in READER_PROGRAMS {
+    for program in reader_programs() {
         let xml = xml_help_text(program).unwrap();
         let tool = crate::cli::reader::tool(program).unwrap();
         let read = crate::cli::reader::options_tests::names_read(tool);
@@ -117,7 +108,7 @@ fn run_refusals_name_the_argument_and_the_program() {
 // and the dependencies that name one are missing.
 #[test]
 fn the_xml_is_ncbis_without_the_refused_arguments() {
-    for program in READER_PROGRAMS {
+    for program in reader_programs() {
         // NCBI's XML in LOSAT's words (the program's description names LOSAT's version).
         let ncbi = crate::wording::losat_text(ncbi_xml(program).unwrap()).into_owned();
         let xml = xml_help_text(program).unwrap();
@@ -200,7 +191,7 @@ fn a_refused_name_takes_its_dependencies() {
 // XML (`the_web_engine_prints_the_command_lines_help`).
 #[test]
 fn the_library_refuses_xmlhelp() {
-    for program in READER_PROGRAMS {
+    for program in reader_programs() {
         let error = try_parse_from(["losat", program, "-xmlhelp"]).unwrap_err();
         let shown = crate::cli::reader::tool(program).unwrap().refusal_name;
         assert_eq!(

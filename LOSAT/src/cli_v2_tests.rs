@@ -2180,16 +2180,16 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
 // `argv[1]` names when it is one of `ENTRY_NAMES`, and runs a parsed command with that start
 // (`cli::main_entry`, which holds the start of every command it parses).
 #[test]
-fn every_command_is_an_entry_name() {
-    use clap::CommandFactory;
-    let command = Cli::command();
-    for sub in command.get_subcommands() {
-        for name in std::iter::once(sub.get_name()).chain(sub.get_all_aliases()) {
-            assert!(
-                crate::cli::ENTRY_NAMES.contains(&name),
-                "the command {name} is not one of ENTRY_NAMES"
-            );
-        }
+fn every_program_is_an_entry_name_on_the_reader() {
+    for (name, _) in crate::cli::PROGRAMS {
+        assert!(
+            crate::cli::ENTRY_NAMES.contains(&name),
+            "the program {name} is not one of ENTRY_NAMES"
+        );
+        assert!(
+            crate::cli::reader::tool(name).is_some(),
+            "the program {name} is not on the reader"
+        );
     }
 }
 

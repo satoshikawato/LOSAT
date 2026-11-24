@@ -66,7 +66,7 @@
 
 ## 2. 方針
 
-- **P1 検索条件は argv 1 本。** CLI と同じ NCBI の引数の読み手で読み（2026-11-23、線 RG の K4i-2b から。それまでは clap）、clap は読んだ引数を型にするだけ（`cli::try_parse_from`）。NCBI のオプション互換の実装を 1 か所に保つ。ABI v2 §7 と同じ。
+- **P1 検索条件は argv 1 本。** CLI と同じ NCBI の引数の読み手で読み（2026-11-23、線 RG の K4i-2b から。それまでは clap）、読んだ引数を各 program の option の型が自分で読む（`from_args`、`cli::try_parse_from`。2026-11-24、線 RG の K4i-3c から。それまでは clap が型にしていた）。NCBI のオプション互換の実装を 1 か所に保つ。ABI v2 §7 と同じ。
 - **P2 入力はメモリ上の FASTA か、`-db` の path。** メモリ入力は LOSAT 自前の `FastaRecord` を公開して受け、CLI / adapter と同じ reader（`FastaInputSource` と `ReaderConfig`）で読む。`-db` はファイルシステムのあるホストだけ（ネイティブ）。
 - **P3 出力は、要求した outfmt ごとのバイト列 + HSP レコード + 診断。** HSP レコードの項目は ABI v2 §8 と同じ。バイト列は CLI の出力と一致する（§6）。
 - **P4 公開面は `api` だけ（§10.2）。** 他のモジュールは `#[doc(hidden)]` を付け、semver の保証外と README に書く。`pub(crate)` 化は別の線（dead-code 警告が今は `allow(warnings)` で隠れていて、一斉に出る）。（2026-11-07 注: 保守者の決定で、段 P-V1〜P-V5 として段ごとに `pub(crate)` にする。§14）
@@ -143,7 +143,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 
 - `lib.rs` の `api` 以外の `pub mod` に `#[doc(hidden)]` を付ける。項目は今までどおり使えるが、docs.rs に出ず、semver の保証外（README と crate の doc に書く）。`api` が再 export する `FastaRecord` 等は `blastinput` の中にあるので、再 export の側だけを文書化する（これは rustdoc に出なかった。`FastaRecord` は §14.1 の P-D1 で crate 直下の private module に移した）。
 - 進捗バーは `ReportOutputs` に `progress: Option<...>` を足して CLI（`main.rs`）だけが渡すか、indicatif を optional dependency にして CLI の feature だけで有効にする（LIB-1 で決める）。
-- `anyhow::Error` は `api::Error` に包む。`clap` は argv が API なので必須 dependency のまま。
+- `anyhow::Error` は `api::Error` に包む。argv が API だが、2026-11-24（線 RG の K4i-3c）から argv は NCBI の引数の読み手と各 option の型の `from_args` が読み、native の build（CLI・library・pylosat）は `clap` を link しない。`clap` が残るのは LOSAT Web の凍結した ABI v1（wasm32、`web_v1_argv`）とその test だけ（derive feature 無し）。
 
 ## 4. 配布の 3 チャネル
 

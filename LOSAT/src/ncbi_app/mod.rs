@@ -1,8 +1,8 @@
 //! NCBI's application (`CNcbiApplication::AppMain`, c++/src/corelib/ncbiapp.cpp) for the programs
-//! that LOSAT reads with NCBI's argument reader rather than clap's: `losat blastdbcmd`, `losat
-//! dustmasker`, `losat segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat
-//! windowmasker`. Each program is a `Tool` (its name, version, frozen `-help` text; its argument
-//! XML is NCBI's) and a body, its `Run`; `run_with` does what NCBI's application does around it,
+//! that NCBI's application starts and runs: `losat blastdbcmd`, `losat dustmasker`, `losat
+//! segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat windowmasker`. Each
+//! program is a `Tool` (its name, version, frozen `-help` text; its argument XML is NCBI's) and
+//! a body, its `Run`; `run_with` does what NCBI's application does around it,
 //! in NCBI's order: the diagnostics of `-logfile`, the words taken before the reader (`-version`,
 //! `-conffile`, `-dryrun`), the configuration load, the arguments (`args`, NCBI's
 //! `CArgDescriptions`), the usage and the report of an argument error, and LOSAT's refusals of

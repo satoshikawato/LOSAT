@@ -573,8 +573,8 @@ impl Volume {
     /// name built again for each record. The record is lent from the thread's buffer of the reads
     /// of a range (`DbFile::with_range`): a read of one header per sequence allocates no record.
     /// Under a setting that turns a check of NCBI's reader off, `read`'s error is the one
-    /// `refused_read` makes; NCBI's default reads with `read` itself, so that a record that
-    /// decodes costs nothing more than the test of the setting.
+    /// `refused_read` makes (`read_header_record_under`); NCBI's default reads with `read`
+    /// itself, so that a record that decodes costs nothing more than the test of the setting.
     fn with_header_record<T>(
         &self,
         oid: u32,
@@ -582,10 +582,23 @@ impl Volume {
     ) -> Result<T, SeqDbError> {
         match self.read_verification.as_deref() {
             None => self.read_header_record(oid, read),
-            Some(setting) => self.read_header_record(oid, |record, path| {
-                read(record, path).map_err(|error| refused_read(setting, error))
-            }),
+            Some(setting) => self.read_header_record_under(setting, oid, read),
         }
+    }
+
+    /// `with_header_record` under `setting`, out of line: the readers of NCBI's default setting
+    /// hold none of its code.
+    #[cold]
+    #[inline(never)]
+    fn read_header_record_under<T>(
+        &self,
+        setting: &ReadVerification,
+        oid: u32,
+        read: impl FnOnce(&[u8], &Path) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        self.read_header_record(oid, |record, path| {
+            read(record, path).map_err(|error| refused_read(setting, error))
+        })
     }
 
     /// `with_header_record`'s read of the record.

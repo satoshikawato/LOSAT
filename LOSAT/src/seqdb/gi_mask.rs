@@ -10,10 +10,10 @@
 //! NCBI maps the files and reads its arrays in place. LOSAT reads the index, offset and `.nog`
 //! files, whose reads are binary searches and one GI per sequence, in chunks of 64 KiB on first
 //! use (`MappedFile`), kept for the life of the database as NCBI's mapping keeps the pages it
-//! touched. A data file is read through the reader's window (`DataWindow`, one per
-//! `mask::MaskBlock`): makeblastdb writes the records of the sequences in their order, so a
-//! reader that asks for one sequence after another reads each part of the file once and keeps
-//! one window, not the file.
+//! touched; a search reads its numbers in place from the chunk it holds (`View`). A data file
+//! is read through the reader's window (`DataWindow`, one per `mask::MaskBlock`): makeblastdb
+//! writes the records of the sequences in their order, so a reader that asks for one sequence
+//! after another reads each part of the file once and keeps one window, not the file.
 //!
 //! Errors: NCBI's `CSeqDBException` texts are NCBI's ([`SeqDbError::NotFound`],
 //! [`SeqDbError::Format`], [`SeqDbError::Range`], [`SeqDbError::MemoryMap`]). A failed
@@ -120,29 +120,13 @@ impl MappedFile {
         Ok(())
     }
 
-    /// The `N` bytes at `at`: from their chunk, a copy of a constant length, where one chunk
-    /// holds them all (every read of the arrays but one that crosses a chunk's end); otherwise
-    /// [`MappedFile::read_at`], with its error outside the file. The binary searches read the
-    /// arrays a number at a time, which a copy of a length known only at run time made a call
-    /// of `memmove` each (review round of M4c-2, 2026-11-24: 50 % of a masked search's cycles on
-    /// a database of 1,000,000 sequences).
-    fn array_at<const N: usize>(&self, at: i64) -> Result<[u8; N], SeqDbError> {
-        let mut bytes = [0u8; N];
-        if let Ok(start) = u64::try_from(at) {
-            let from = (start % CHUNK) as usize;
-            if from + N <= CHUNK as usize && start + N as u64 <= self.len() {
-                let chunk = self.chunk((start / CHUNK) as usize)?;
-                bytes.copy_from_slice(&chunk[from..from + N]);
-                return Ok(bytes);
-            }
+    /// A [`View`] of this file that holds no chunk yet.
+    fn view(&self) -> View<'_> {
+        View {
+            file: self,
+            held: u64::MAX,
+            bytes: &[],
         }
-        self.read_at(at, &mut bytes)?;
-        Ok(bytes)
-    }
-
-    /// The 4 bytes at `at` as a number in the host's order (the arrays of the GI-mask files).
-    fn u32_at(&self, at: i64) -> Result<u32, SeqDbError> {
-        self.array_at::<4>(at).map(u32::from_ne_bytes)
     }
 
     /// [`check_range`] of this file.
@@ -160,7 +144,7 @@ impl MappedFile {
             return Ok(None);
         }
         if end as u64 <= self.len() {
-            return self.array_at::<N>(at).map(Some);
+            return self.view().array::<N>(at).map(Some);
         }
         let mut bytes = [0u8; N];
         let held = self.len().saturating_sub(at as u64).min(N as u64) as usize;
@@ -168,6 +152,64 @@ impl MappedFile {
             self.read_at(at, &mut bytes[..held])?;
         }
         Ok(Some(bytes))
+    }
+}
+
+/// One reader's view of a [`MappedFile`] (one binary search and the record it finds, or one
+/// GI): the chunk it read last, kept, so that the numbers it reads next from that chunk are read
+/// in place, with no lookup of the chunk and no error to return. A binary search reads its
+/// numbers from one chunk (a page of the offset file, or an index of up to 16,384 pages), a few
+/// for a larger index. A number across a chunk's end, or outside the file, is read by
+/// [`MappedFile::read_at`], with its error. Before (review round of M4c-2, 2026-11-24), each
+/// number looked its chunk up and returned its own `Result`: 44 % of a masked search's cycles
+/// on a database of 1,000,000 sequences.
+struct View<'f> {
+    file: &'f MappedFile,
+    /// The index of the chunk held (`u64::MAX`: none) and its bytes.
+    held: u64,
+    bytes: &'f [u8],
+}
+
+impl View<'_> {
+    /// The `N` bytes at `at` of the file.
+    #[inline]
+    fn array<const N: usize>(&mut self, at: i64) -> Result<[u8; N], SeqDbError> {
+        // A negative `at` is a number of 2^63 or more here, whose chunk is never held.
+        let start = at as u64;
+        if start / CHUNK == self.held {
+            let from = (start % CHUNK) as usize;
+            if let Some(held) = self.bytes.get(from..from + N) {
+                let mut bytes = [0u8; N];
+                bytes.copy_from_slice(held);
+                return Ok(bytes);
+            }
+        }
+        self.array_outside::<N>(at)
+    }
+
+    /// [`View::array`] of a number outside the chunk held: from its chunk, held from now on,
+    /// where one chunk holds it; otherwise [`MappedFile::read_at`].
+    #[inline(never)]
+    fn array_outside<const N: usize>(&mut self, at: i64) -> Result<[u8; N], SeqDbError> {
+        let mut bytes = [0u8; N];
+        if let Ok(start) = u64::try_from(at) {
+            let from = (start % CHUNK) as usize;
+            if from + N <= CHUNK as usize && start + N as u64 <= self.file.len() {
+                let held = start / CHUNK;
+                self.bytes = self.file.chunk(held as usize)?;
+                self.held = held;
+                bytes.copy_from_slice(&self.bytes[from..from + N]);
+                return Ok(bytes);
+            }
+        }
+        self.file.read_at(at, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    /// The 4 bytes at `at` as a number in the host's order (the arrays of the GI-mask files).
+    #[inline]
+    fn u32(&mut self, at: i64) -> Result<u32, SeqDbError> {
+        self.array::<4>(at).map(u32::from_ne_bytes)
     }
 }
 
@@ -236,7 +278,7 @@ impl DataWindow {
 fn binary_search(
     n: i64,
     key: u32,
-    key_at: impl Fn(i64) -> Result<u32, SeqDbError>,
+    mut key_at: impl FnMut(i64) -> Result<u32, SeqDbError>,
 ) -> Result<(bool, i64), SeqDbError> {
     let (mut lower, mut upper) = (0i64, n - 1);
     if key > key_at(upper)? || key < key_at(lower)? {
@@ -416,14 +458,15 @@ impl GiMaskFiles {
     }
 
     /// The `(vol, off)` of the record of `key`, or `None` without one: the index, then the page
-    /// of the offset file (`GetMaskData`, cited at [`GiMaskFiles::ranges_into`]).
+    /// of the offset file (`GetMaskData`, cited at [`GiMaskFiles::ranges_into`]). Each search
+    /// and the record it finds read through one [`View`].
     fn locate(&self, key: u32) -> Result<Option<(i32, i32)>, SeqDbError> {
         let index_start = i64::from(self.index_start);
         let num_index = i64::from(self.num_index);
-        let (found, page) =
-            binary_search(num_index, key, |i| self.index.u32_at(index_start + 4 * i))?;
-        let (file, at) = if found {
-            (&self.index, index_start + 4 * (num_index + page * 2))
+        let mut index = self.index.view();
+        let (found, page) = binary_search(num_index, key, |i| index.u32(index_start + 4 * i))?;
+        let (mut file, at) = if found {
+            (index, index_start + 4 * (num_index + page * 2))
         } else {
             if page == -1 {
                 return Ok(None);
@@ -439,15 +482,15 @@ impl GiMaskFiles {
             let end = begin + pagesize * entry;
             self.offsets
                 .check_range(begin, end, "a page of the GI-mask offsets")?;
-            let (found, idx) =
-                binary_search(pagesize, key, |i| self.offsets.u32_at(begin + 4 * i))?;
+            let mut offsets = self.offsets.view();
+            let (found, idx) = binary_search(pagesize, key, |i| offsets.u32(begin + 4 * i))?;
             if !found {
                 return Ok(None);
             }
-            (&self.offsets, begin + 4 * (pagesize + idx * 2))
+            (offsets, begin + 4 * (pagesize + idx * 2))
         };
         // NCBI assigns the `Uint4` values to `int`s.
-        Ok(Some((file.u32_at(at)? as i32, file.u32_at(at + 4)? as i32)))
+        Ok(Some((file.u32(at)? as i32, file.u32(at + 4)? as i32)))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:73-112

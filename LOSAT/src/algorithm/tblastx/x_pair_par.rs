@@ -2514,7 +2514,7 @@ impl<M: TbxScore> XPairPar<M> {
                     let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
                     // Scan batches until the current subject offset advances past the end bound.
                     while scan_range[1] <= scan_range[2] {
-                        if !x_unit_batch::<S, XNoProbe, XUnmasked, _, false, false, 0>(
+                        if !x_unit_batch::<S, XNoProbe, XUnmasked, _, false, false, false, 0>(
                             table,
                             subject,
                             &seq_ranges,
@@ -2998,7 +2998,7 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
         probe: &mut P,
     ) {
-        self.scan_unit_hits::<S, P, PF, false, 0>(unit, inp, scratch, init_hsps, probe);
+        self.scan_unit_hits::<S, P, PF, false, false, 0>(unit, inp, scratch, init_hsps, probe);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -3012,6 +3012,7 @@ impl<M: TbxScore> XPairPar<M> {
         P: XProbe,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -3023,11 +3024,12 @@ impl<M: TbxScore> XPairPar<M> {
     ) {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (module doc).
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF, SENT>(
+            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF, STEP, SENT>(
                 unit, inp, scratch, init_hsps, probe, 0,
             ),
-            Some(mask) => self
-                .scan_unit_masked::<S, P, PF, BF, SENT>(unit, inp, scratch, init_hsps, probe, mask),
+            Some(mask) => self.scan_unit_masked::<S, P, PF, BF, STEP, SENT>(
+                unit, inp, scratch, init_hsps, probe, mask,
+            ),
         }
     }
 
@@ -3040,6 +3042,7 @@ impl<M: TbxScore> XPairPar<M> {
         P: XProbe,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -3050,7 +3053,7 @@ impl<M: TbxScore> XPairPar<M> {
         probe: &mut P,
         mask: u32,
     ) {
-        self.scan_unit_cells::<S, P, XMasked, PF, BF, SENT>(
+        self.scan_unit_cells::<S, P, XMasked, PF, BF, STEP, SENT>(
             unit, inp, scratch, init_hsps, probe, mask,
         );
     }
@@ -3099,6 +3102,7 @@ impl<M: TbxScore> XPairPar<M> {
         C: XCells,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -3201,7 +3205,7 @@ impl<M: TbxScore> XPairPar<M> {
             // Scan batches until the current subject offset advances past the end bound.
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, C, _, PF, BF, SENT>(
+                if !x_unit_batch::<S, P, C, _, PF, BF, STEP, SENT>(
                     group,
                     subject,
                     &seq_ranges,
@@ -3243,6 +3247,7 @@ fn x_unit_batch<
     M: TbxScore,
     const PF: bool,
     const BF: bool,
+    const STEP: bool,
     const SENT: usize,
 >(
     group: &XGroup,
@@ -3281,7 +3286,7 @@ fn x_unit_batch<
         // scratch.diag.len() as below; `fits` holds (the caller's rule). `x_hit` gets the cell of
         // its hit, as below.
         unsafe {
-            x_tbx_hitbf::x_hits_bf::<C, PF>(
+            x_tbx_hitbf::x_hits_bf::<C, PF, STEP>(
                 diag_ptr,
                 offset_pairs_ptr,
                 hits as usize,

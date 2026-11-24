@@ -108,7 +108,8 @@ unsafe fn rare_and_other(table: *mut DiagStruct, width: usize, cell: usize, s: u
 
 // No NCBI counterpart: the forms of the branch-free loop under test.
 /// Form 0 / 1: the loop before LOSAT_X_TBXHITSTEP (`x_hits_before`) without / with `PF`; 2: its
-/// wasm32 form `x_hits_bf_split`; 3 / 4: `x_hits_steps` without / with `PF`; 5: `x_hits_bf`.
+/// wasm32 form `x_hits_bf_split`; 3 / 4: `x_hits_steps` without / with `PF`; 5 / 6: `x_hits_bf`
+/// with `STEP` (and `PF`) / without.
 ///
 /// SAFETY: as `x_hits_bf` for the first `n` of `pairs`, `X_PREFETCH_AHEAD` entries after them.
 #[allow(clippy::too_many_arguments)]
@@ -133,7 +134,8 @@ unsafe fn run_form<C: XCells>(
             2 => x_hits_bf_split(ptr, pairs, n, cells, width, window, wordsize, rare),
             3 => x_hits_steps::<C, false>(ptr, pairs, n, cells, width, window, wordsize, rare),
             4 => x_hits_steps::<C, true>(ptr, pairs, n, cells, width, window, wordsize, rare),
-            _ => x_hits_bf::<C, false>(ptr, pairs, n, cells, width, window, wordsize, rare),
+            5 => x_hits_bf::<C, true, true>(ptr, pairs, n, cells, width, window, wordsize, rare),
+            _ => x_hits_bf::<C, false, false>(ptr, pairs, n, cells, width, window, wordsize, rare),
         }
     }
 }
@@ -287,10 +289,10 @@ fn x_hits_bf_takes_the_reference_outcomes() {
         }
 
         // The loop before LOSAT_X_TBXHITSTEP with and without `PF`, its wasm32 form
-        // (`x_hits_bf_split`), `x_hits_steps` with and without `PF`, and `x_hits_bf` (the switch's
-        // choice). LOSAT_X_TBXUNITMASK: the `XMasked` instances too, with the mask of all ones (the
-        // same cells as `XUnmasked`).
-        for form in 0..6 {
+        // (`x_hits_bf_split`), `x_hits_steps` with and without `PF`, and `x_hits_bf` with and
+        // without `STEP`. LOSAT_X_TBXUNITMASK: the `XMasked` instances too, with the mask of all
+        // ones (the same cells as `XUnmasked`).
+        for form in 0..7 {
             for masked in [false, true] {
                 let mut got = table.clone();
                 let mut log = Vec::new();
@@ -424,17 +426,39 @@ fn bf_scans_equal_the_reference_scans() {
                 for (o, c) in outcomes.iter_mut().zip(count.0) {
                     *o += c;
                 }
-                for pf in [false, true] {
+                // LOSAT_X_TBXHITSTEP: both forms of the loop (`STEP`).
+                for (pf, step) in [(false, true), (true, true), (false, false), (true, false)] {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    if pf {
-                        pp.scan_unit_bf::<_, true, 0>(&unit, &inp, &mut scratch, &mut got);
-                    } else {
-                        pp.scan_unit_bf::<_, false, 0>(&unit, &inp, &mut scratch, &mut got);
+                    match (pf, step) {
+                        (true, true) => {
+                            pp.scan_unit_bf::<_, true, true, 0>(&unit, &inp, &mut scratch, &mut got)
+                        }
+                        (false, true) => pp.scan_unit_bf::<_, false, true, 0>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                        ),
+                        (true, false) => pp.scan_unit_bf::<_, true, false, 0>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                        ),
+                        (false, false) => pp.scan_unit_bf::<_, false, false, 0>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                        ),
                     }
-                    assert_eq!(got, reference, "case {case} frame {f} group {g} pf {pf}");
+                    assert_eq!(
+                        got, reference,
+                        "case {case} frame {f} group {g} pf {pf} step {step}"
+                    );
                     assert!(
                         scratch.diag == reference_diag,
-                        "case {case} frame {f} group {g} pf {pf}: table"
+                        "case {case} frame {f} group {g} pf {pf} step {step}: table"
                     );
                 }
                 let mut compact: Vec<XUnitHsp> = Vec::new();
@@ -446,7 +470,7 @@ fn bf_scans_equal_the_reference_scans() {
                     &mut compact_ref,
                     &mut XNoProbe,
                 );
-                pp.scan_unit_bf::<_, false, 0>(&unit, &inp, &mut scratch, &mut compact);
+                pp.scan_unit_bf::<_, false, true, 0>(&unit, &inp, &mut scratch, &mut compact);
                 assert_eq!(
                     compact, compact_ref,
                     "case {case} frame {f} group {g}: compact"
@@ -459,7 +483,16 @@ fn bf_scans_equal_the_reference_scans() {
                 for len in [1, 3, 16] {
                     let mut got: Vec<InitHSP> = Vec::new();
                     if len == 3 {
-                        pp.scan_unit_batched_hits::<_, true, true, 0>(
+                        pp.scan_unit_batched_hits::<_, true, true, true, 0>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            len,
+                        );
+                    } else if len == 16 {
+                        // LOSAT_X_TBXHITSTEP=0's loop.
+                        pp.scan_unit_batched_hits::<_, false, true, false, 0>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -467,7 +500,7 @@ fn bf_scans_equal_the_reference_scans() {
                             len,
                         );
                     } else {
-                        pp.scan_unit_batched_hits::<_, false, true, 0>(
+                        pp.scan_unit_batched_hits::<_, false, true, true, 0>(
                             &unit,
                             &inp,
                             &mut scratch,

@@ -131,7 +131,7 @@ pub(super) fn x_reach_not_taken() {
 }
 
 // No NCBI counterpart: which form of the branch-free loop runs (scheduling only). Read once per
-// process, as `on`.
+// process, as `on`, and per unit by the dispatches below.
 /// LOSAT_X_TBXHITSTEP: a strict-set switch (`utils/xswitch.rs`).
 fn steps_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -142,8 +142,9 @@ fn steps_on() -> bool {
 const X_HIT_STEP: usize = 2;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (module doc)
-// The hit loop of `scan_unit` over one batch: `x_hits_steps` (LOSAT_X_TBXHITSTEP), or with
-// `LOSAT_X_TBXHITSTEP=0` the loop before it (`x_hits_before`). The switch is read once per batch.
+// The hit loop of `scan_unit` over one batch: with `STEP` `x_hits_steps` (LOSAT_X_TBXHITSTEP),
+// else the loop before it (`x_hits_before`). `STEP` is a parameter of the scan's instance, chosen
+// per unit (`scan_unit_or_bf` and the other dispatches below), so that each instance holds one loop.
 /// The two-hit test of the `n` hits at `pairs` on the unit table at `diag_ptr` (cell of a hit
 /// (q, s): `cells.cell(q, s)`, q - s - lo or, with LOSAT_X_TBXUNITMASK, that masked), with
 /// `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the test; `PF` prefetches the
@@ -158,7 +159,7 @@ const X_HIT_STEP: usize = 2;
 /// loop keeps no cell value across a call).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
+pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool, const STEP: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
     n: usize,
@@ -168,7 +169,7 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
     wordsize: i32,
     rare: impl FnMut(usize, u32, u32),
 ) {
-    if steps_on() {
+    if STEP {
         // SAFETY: the caller's bounds, passed on.
         unsafe { x_hits_steps::<C, PF>(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
     } else {
@@ -178,13 +179,13 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
 }
 
 // No NCBI counterpart (scheduling only): the loop of `x_hits_bf` before LOSAT_X_TBXHITSTEP
-// (`LOSAT_X_TBXHITSTEP=0`), in a function of its own: natively the one loop `x_hits_one`.
+// (`LOSAT_X_TBXHITSTEP=0`): natively the one loop `x_hits_one`.
 /// `x_hits_bf` with the loop before LOSAT_X_TBXHITSTEP.
 ///
 /// SAFETY: as `x_hits_bf`.
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
-#[inline(never)]
+#[inline(always)]
 unsafe fn x_hits_before<C: XCells, const PF: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
@@ -200,13 +201,13 @@ unsafe fn x_hits_before<C: XCells, const PF: bool>(
 }
 
 // No NCBI counterpart (scheduling only): the loop of `x_hits_bf` before LOSAT_X_TBXHITSTEP
-// (`LOSAT_X_TBXHITSTEP=0`) on wasm32 (LOSAT Web), in a function of its own: `x_hits_bf_split`.
+// (`LOSAT_X_TBXHITSTEP=0`) on wasm32 (LOSAT Web): `x_hits_bf_split`.
 /// `x_hits_bf` with the loop before LOSAT_X_TBXHITSTEP (`PF` prefetches on x86-64 only).
 ///
 /// SAFETY: as `x_hits_bf`.
 #[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
-#[inline(never)]
+#[inline(always)]
 unsafe fn x_hits_before<C: XCells, const PF: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
@@ -590,10 +591,9 @@ unsafe fn x_hits_bf_run<C: XCells>(
 
 impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the units without probes (`run_unit`,
-    // `run_unit_compact`) by the switch and `fits`. EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the
-    // branch-free loop's units by `x_unit_sent`, between the instances of `scan_unit_bf` (`SENT`:
-    // the search's word length, the walks `TbxScore::sent_two_hit_of` of 2 or 3 letters, or 0),
-    // so that the instance without the switch keeps the code it had before it.
+    // `run_unit_compact`) by the switch and `fits`; LOSAT_X_TBXHITSTEP: by `steps_on`, between the
+    // instances of `scan_unit_bf` (`STEP`), so that each keeps the loop of its form in its
+    // registers.
     /// `scan_unit` without probes, or its branch-free hit loop.
     #[inline(always)]
     pub(super) fn scan_unit_or_bf<S: XInitSink, const PF: bool>(
@@ -604,35 +604,55 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
     ) {
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            if self.x_unit_sent(unit, inp) {
-                // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
-                // only in another instance than BLOSUM62's (whose words have 3).
-                if !M::BLOSUM62 && self.sc.word() == 2 {
-                    self.scan_unit_bf::<S, PF, 2>(unit, inp, scratch, init_hsps);
-                } else {
-                    assert!(M::BLOSUM62 || self.sc.word() == 3);
-                    self.scan_unit_bf::<S, PF, 3>(unit, inp, scratch, init_hsps);
-                }
+            if steps_on() {
+                self.scan_unit_bf_of::<S, PF, true>(unit, inp, scratch, init_hsps);
             } else {
-                self.scan_unit_bf::<S, PF, 0>(unit, inp, scratch, init_hsps);
+                self.scan_unit_bf_of::<S, PF, false>(unit, inp, scratch, init_hsps);
             }
         } else {
             self.scan_unit::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, so that the loop gets its own registers; the
-    // units outside the switch run the instance of `scan_unit` without it.
-    /// `scan_unit` with the branch-free hit loop.
-    #[inline(never)]
-    fn scan_unit_bf<S: XInitSink, const PF: bool, const SENT: usize>(
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the branch-free loop's units by `x_unit_sent`, between the
+    // instances of `scan_unit_bf` (`SENT`: the search's word length, the walks
+    // `TbxScore::sent_two_hit_of` of 2 or 3 letters, or 0), so that the instance without the switch
+    // keeps the code it had before it.
+    /// `scan_unit_bf` with the hit loop `STEP` (LOSAT_X_TBXHITSTEP) and the walks of the unit.
+    #[inline(always)]
+    fn scan_unit_bf_of<S: XInitSink, const PF: bool, const STEP: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_hits::<S, XNoProbe, PF, true, SENT>(
+        if self.x_unit_sent(unit, inp) {
+            // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
+            // only in another instance than BLOSUM62's (whose words have 3).
+            if !M::BLOSUM62 && self.sc.word() == 2 {
+                self.scan_unit_bf::<S, PF, STEP, 2>(unit, inp, scratch, init_hsps);
+            } else {
+                assert!(M::BLOSUM62 || self.sc.word() == 3);
+                self.scan_unit_bf::<S, PF, STEP, 3>(unit, inp, scratch, init_hsps);
+            }
+        } else {
+            self.scan_unit_bf::<S, PF, STEP, 0>(unit, inp, scratch, init_hsps);
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, so that the loop gets its own registers; the
+    // units outside the switch run the instance of `scan_unit` without it.
+    /// `scan_unit` with the branch-free hit loop (`STEP`: LOSAT_X_TBXHITSTEP's form).
+    #[inline(never)]
+    fn scan_unit_bf<S: XInitSink, const PF: bool, const STEP: bool, const SENT: usize>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) {
+        self.scan_unit_hits::<S, XNoProbe, PF, true, STEP, SENT>(
             unit,
             inp,
             scratch,
@@ -642,8 +662,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the batched scan (LOSAT_X_TBXEXTBATCH) by the
-    // switch and `fits`; EXPERIMENT (LOSAT_X_TBXUNGAPSENT): and by `x_unit_sent`, as
-    // `scan_unit_or_bf`.
+    // switch and `fits`; LOSAT_X_TBXHITSTEP: by `steps_on`, as `scan_unit_or_bf`.
     /// `scan_unit_batched` with full batches, or its branch-free hit loop.
     #[inline(always)]
     pub(super) fn scan_unit_batched_or_bf<S: XInitSink, const PF: bool>(
@@ -654,34 +673,51 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
     ) {
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            if self.x_unit_sent(unit, inp) {
-                // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
-                // only in another instance than BLOSUM62's (whose words have 3).
-                if !M::BLOSUM62 && self.sc.word() == 2 {
-                    self.scan_unit_batched_bf::<S, PF, 2>(unit, inp, scratch, init_hsps);
-                } else {
-                    assert!(M::BLOSUM62 || self.sc.word() == 3);
-                    self.scan_unit_batched_bf::<S, PF, 3>(unit, inp, scratch, init_hsps);
-                }
+            if steps_on() {
+                self.scan_unit_batched_bf_of::<S, PF, true>(unit, inp, scratch, init_hsps);
             } else {
-                self.scan_unit_batched_bf::<S, PF, 0>(unit, inp, scratch, init_hsps);
+                self.scan_unit_batched_bf_of::<S, PF, false>(unit, inp, scratch, init_hsps);
             }
         } else {
             self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, x_tbx_extbatch::BATCH);
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
-    /// `scan_unit_batched` with full batches and the branch-free hit loop.
-    #[inline(never)]
-    fn scan_unit_batched_bf<S: XInitSink, const PF: bool, const SENT: usize>(
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): by `x_unit_sent`, as `scan_unit_bf_of`.
+    /// `scan_unit_batched_bf` with the hit loop `STEP` and the walks of the unit.
+    #[inline(always)]
+    fn scan_unit_batched_bf_of<S: XInitSink, const PF: bool, const STEP: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_batched_hits::<S, PF, true, SENT>(
+        if self.x_unit_sent(unit, inp) {
+            // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
+            // only in another instance than BLOSUM62's (whose words have 3).
+            if !M::BLOSUM62 && self.sc.word() == 2 {
+                self.scan_unit_batched_bf::<S, PF, STEP, 2>(unit, inp, scratch, init_hsps);
+            } else {
+                assert!(M::BLOSUM62 || self.sc.word() == 3);
+                self.scan_unit_batched_bf::<S, PF, STEP, 3>(unit, inp, scratch, init_hsps);
+            }
+        } else {
+            self.scan_unit_batched_bf::<S, PF, STEP, 0>(unit, inp, scratch, init_hsps);
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
+    /// `scan_unit_batched` with full batches and the branch-free hit loop (`STEP` as there).
+    #[inline(never)]
+    fn scan_unit_batched_bf<S: XInitSink, const PF: bool, const STEP: bool, const SENT: usize>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) {
+        self.scan_unit_batched_hits::<S, PF, true, STEP, SENT>(
             unit,
             inp,
             scratch,
@@ -691,8 +727,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the scan in slices (LOSAT_X_TBXQSLICE) by the
-    // switch and `fits`; EXPERIMENT (LOSAT_X_TBXUNGAPSENT): and by `x_unit_sent`, as
-    // `scan_unit_or_bf`.
+    // switch and `fits`; LOSAT_X_TBXHITSTEP: by `steps_on`, as `scan_unit_or_bf`.
     /// `scan_unit_sliced` (batched extensions with `B`, the prefetch with `PF`), or its
     /// branch-free hit loop.
     #[inline(always)]
@@ -705,27 +740,22 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
     ) {
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            if self.x_unit_sent(unit, inp) {
-                // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
-                // only in another instance than BLOSUM62's (whose words have 3).
-                if !M::BLOSUM62 && self.sc.word() == 2 {
-                    self.scan_unit_sliced_bf::<S, B, PF, 2>(group, unit, inp, scratch, init_hsps);
-                } else {
-                    assert!(M::BLOSUM62 || self.sc.word() == 3);
-                    self.scan_unit_sliced_bf::<S, B, PF, 3>(group, unit, inp, scratch, init_hsps);
-                }
+            if steps_on() {
+                self.scan_unit_sliced_bf_of::<S, B, PF, true>(group, unit, inp, scratch, init_hsps);
             } else {
-                self.scan_unit_sliced_bf::<S, B, PF, 0>(group, unit, inp, scratch, init_hsps);
+                self.scan_unit_sliced_bf_of::<S, B, PF, false>(
+                    group, unit, inp, scratch, init_hsps,
+                );
             }
         } else {
             self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
-    /// `scan_unit_sliced` with the branch-free hit loop.
-    #[inline(never)]
-    fn scan_unit_sliced_bf<S: XInitSink, const B: bool, const PF: bool, const SENT: usize>(
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): by `x_unit_sent`, as `scan_unit_bf_of`.
+    /// `scan_unit_sliced_bf` with the hit loop `STEP` and the walks of the unit.
+    #[inline(always)]
+    fn scan_unit_sliced_bf_of<S: XInitSink, const B: bool, const PF: bool, const STEP: bool>(
         &self,
         group: &XSliced,
         unit: &XUnit,
@@ -733,7 +763,40 @@ impl<M: TbxScore> XPairPar<M> {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, true, SENT>(group, unit, inp, scratch, init_hsps);
+        if self.x_unit_sent(unit, inp) {
+            // The walks of the search's word length (`XPairPar::sent`: 2 or 3 letters); 2
+            // only in another instance than BLOSUM62's (whose words have 3).
+            if !M::BLOSUM62 && self.sc.word() == 2 {
+                self.scan_unit_sliced_bf::<S, B, PF, STEP, 2>(group, unit, inp, scratch, init_hsps);
+            } else {
+                assert!(M::BLOSUM62 || self.sc.word() == 3);
+                self.scan_unit_sliced_bf::<S, B, PF, STEP, 3>(group, unit, inp, scratch, init_hsps);
+            }
+        } else {
+            self.scan_unit_sliced_bf::<S, B, PF, STEP, 0>(group, unit, inp, scratch, init_hsps);
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
+    /// `scan_unit_sliced` with the branch-free hit loop (`STEP` as in `scan_unit_bf`).
+    #[inline(never)]
+    fn scan_unit_sliced_bf<
+        S: XInitSink,
+        const B: bool,
+        const PF: bool,
+        const STEP: bool,
+        const SENT: usize,
+    >(
+        &self,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) {
+        self.scan_unit_sliced_hits::<S, B, PF, true, STEP, SENT>(
+            group, unit, inp, scratch, init_hsps,
+        );
     }
 }
 

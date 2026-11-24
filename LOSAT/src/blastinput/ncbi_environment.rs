@@ -532,8 +532,8 @@ impl PathRules {
         Self::Unix
     };
 
-    /// `DIR_SEPARATOR`.
-    fn separator(self) -> u8 {
+    /// `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`).
+    pub(crate) fn separator(self) -> u8 {
         match self {
             Self::Unix => b'/',
             Self::Windows => b'\\',
@@ -546,7 +546,7 @@ impl PathRules {
     }
 
     /// Whether `byte` is one of `ALL_SEPARATORS` (`CDirEntry::IsPathSeparator`).
-    fn is_separator(self, byte: u8) -> bool {
+    pub(crate) fn is_separator(self, byte: u8) -> bool {
         self.is_dir_separator(byte) || (self == Self::Windows && byte == b':')
     }
 
@@ -562,7 +562,7 @@ impl PathRules {
     /// `CDirEntry::Reset`: the path of the `CDirEntry` made from it, without its trailing separators, but a
     /// lone separator and (Windows) a disk's name of 2 or 3 bytes (`C:`, `C:\`) kept: `//` and
     /// `///` are empty, a path that no directory has.
-    fn reset(self, path: &[u8]) -> &[u8] {
+    pub(crate) fn reset(self, path: &[u8]) -> &[u8] {
         if path.len() == 1 && self.is_separator(path[0]) {
             return path;
         }
@@ -576,13 +576,50 @@ impl PathRules {
     /// `GetDir` of the `CDirEntry` of `path`: the directory of `path` as `reset` leaves it, up to and with
     /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
     /// empty one.
-    fn dir(self, path: &[u8]) -> Vec<u8> {
+    pub(crate) fn dir(self, path: &[u8]) -> Vec<u8> {
         let path = self.reset(path);
         match path.iter().rposition(|&byte| self.is_separator(byte)) {
             Some(at) => path[..=at].to_vec(),
             None if path.is_empty() => Vec::new(),
             None => vec![b'.', self.separator()],
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-377
+    /// The base and the extension of `path` as `SplitPath` cuts its name (the bytes after its
+    /// last separator) at the name's last `.`: the extension keeps its `.`; a name without one
+    /// has an empty extension.
+    pub(crate) fn base_and_ext(self, path: &[u8]) -> (&[u8], &[u8]) {
+        let name_at = path
+            .iter()
+            .rposition(|&byte| self.is_separator(byte))
+            .map_or(0, |at| at + 1);
+        let name = &path[name_at..];
+        match name.iter().rposition(|&byte| byte == b'.') {
+            Some(dot) => name.split_at(dot),
+            None => (name, &name[name.len()..]),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:455-462
+    /// `CDirEntry::AddTrailingPathSeparator`: `path` with `DIR_SEPARATOR` after it unless it is
+    /// empty or ends with one of `ALL_SEPARATORS`.
+    pub(crate) fn add_trailing_separator(self, path: &[u8]) -> Vec<u8> {
+        let mut path = path.to_vec();
+        if path.last().is_some_and(|&byte| !self.is_separator(byte)) {
+            path.push(self.separator());
+        }
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430
+    /// `CDirEntry::MakePath` of a directory and a name: the name after the directory with its
+    /// trailing separator (`add_trailing_separator`); the name alone after an empty directory.
+    /// An absolute name is joined as any other.
+    pub(crate) fn make_path(self, dir: &[u8], name: &[u8]) -> Vec<u8> {
+        let mut path = self.add_trailing_separator(dir);
+        path.extend_from_slice(name);
+        path
     }
 
     /// `s_Win_IsDiskPath`: `X:` and a separator. A byte past the end is the string's NUL.

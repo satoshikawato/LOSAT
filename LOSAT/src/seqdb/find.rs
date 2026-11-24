@@ -2,14 +2,12 @@
 //! names that end in `.pin`, `.pal`, `.nin` or `.nal`, in double quotes, sorted. The one owner of
 //! the walk: `losat blastdbcmd -list` and `losat blastdbcheck -dir` read it.
 
+use crate::blastinput::ncbi_environment::PathRules;
 use crate::utils::os_bytes::path_from_bytes;
 
 use std::collections::BTreeSet;
 
 use super::SeqType;
-
-/// The separator NCBI puts after a directory (`CDirEntry::GetPathSeparator`).
-const SEPARATOR: u8 = if cfg!(windows) { b'\\' } else { b'/' };
 
 /// A database the walk found (`SSeqDBInitInfo`): its name in double quotes, as NCBI keeps
 /// it, and its molecule type.
@@ -37,8 +35,11 @@ impl FoundDb {
 /// the flags `fFF_File` and `recursive`: the databases of the files of `dir` whose names end with
 /// one of `extensions` (`.pin` ...).
 fn find_files(dir: &[u8], extensions: &[&str], recursive: bool, found: &mut Vec<FoundDb>) {
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3879
-    // An empty directory is the current one, its names without a prefix (probes K36, K37).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3956-3961
+    // The `CDir` of `dir` drops its trailing separators (`//` becomes empty). An empty directory
+    // is the current one, its names without a prefix (probes K36, K37).
+    let dir = PathRules::HOST.reset(dir);
     let read = if dir.is_empty() {
         std::fs::read_dir(".")
     } else {
@@ -47,11 +48,7 @@ fn find_files(dir: &[u8], extensions: &[&str], recursive: bool, found: &mut Vec<
     let Ok(entries) = read else {
         return;
     };
-    let mut prefix = dir.to_vec();
-    let ends_in_separator = |b: u8| b == SEPARATOR || (cfg!(windows) && b == b'/');
-    if !prefix.is_empty() && !prefix.last().is_some_and(|&b| ends_in_separator(b)) {
-        prefix.push(SEPARATOR);
-    }
+    let prefix = PathRules::HOST.add_trailing_separator(dir);
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.as_encoded_bytes();

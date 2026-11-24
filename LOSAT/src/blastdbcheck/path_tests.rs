@@ -7,7 +7,7 @@ fn a_path_splits_into_its_directory_base_and_extension() {
     assert_eq!(file.base, b"gi.list");
     assert_eq!(file.ext, b".gil");
     let bare = FileParts::of(b"p5");
-    assert_eq!(bare.dir, [b'.', SEPARATOR]);
+    assert_eq!(bare.dir, [b'.', RULES.separator()]);
     assert_eq!(bare.base, b"p5");
     assert_eq!(bare.ext, b"");
     let dotted = FileParts::of(b"dir/.gil/");
@@ -25,7 +25,7 @@ fn make_path_joins_an_absolute_name_as_any_other() {
     assert_eq!(make_path(b"", b"x"), b"x");
     assert_eq!(
         make_path(b"d", b"x"),
-        [&b"d"[..], &[SEPARATOR], b"x"].concat()
+        [&b"d"[..], &[RULES.separator()], b"x"].concat()
     );
 }
 
@@ -33,5 +33,5 @@ fn make_path_joins_an_absolute_name_as_any_other() {
 fn the_entries_of_a_directory_are_named_after_its_reset_path() {
     assert_eq!(entries_base(b"/run/in//"), b"/run/in/");
     assert_eq!(entries_base(b"/"), b"/");
-    assert_eq!(entries_base(b""), [b'.', SEPARATOR]);
+    assert_eq!(entries_base(b""), [b'.', RULES.separator()]);
 }

@@ -181,3 +181,15 @@ a_signs	a	-	-	-db signs -verbosity 3 -stride 100
 m_pvm01	t	-	-	-db ../../in/pvm.01 -full -verbosity 4
 m_blastdb_rel	t	BLASTDB=../../in	-	-db p5 -verbosity 3
 m_blastdb_pmv	t	BLASTDB=../../in	-	-db pmv -verbosity 3
+mix1	mix	-	-	-db mix1 -verbosity 3 -stride 100
+mix2	mix	-	-	-db mix2 -verbosity 3 -stride 100
+dirslash	dsl	-	-	-dir sub// -verbosity 3 -stride 100
+dirslash2	dsl	-	-	-dir // -verbosity 3 -stride 100
+mix45_v5	mix45	-	-	-db both -verbosity 4 -ends 1
+mix45_v4	mix45	-	-	-db both5 -verbosity 4 -ends 1
+mix45_v4r	mix45	-	-	-db both5r -verbosity 4 -ends 1
+mix45_dir	mix45	-	-	-dir . -verbosity 3 -ends 1
+d_p4_pin_nucl_prot	d_p4_pin_nucl	-	-	-db p4 -dbtype prot -verbosity 3 -ends 1
+d_p4_pin_nucl_dir	d_p4_pin_nucl	-	-	-dir . -verbosity 3 -ends 1
+negtax	negtax	-	-	-db neg -must_have_taxids -full -verbosity 4
+negtax_v3	negtax	-	-	-db neg -must_have_taxids -full -verbosity 3

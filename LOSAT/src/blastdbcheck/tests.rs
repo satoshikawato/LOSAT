@@ -63,3 +63,23 @@ fn the_seeded_rows_draw_ncbis_sample() {
     }
     assert_eq!(checked, 4, "the seeded rows");
 }
+
+/// A `-db` or `-dir` that is not UTF-8 is LOSAT's refusal, which names the key, and nothing is
+/// written to the standard output.
+#[cfg(unix)]
+#[test]
+fn a_name_that_is_not_utf8_is_refused() {
+    use std::os::unix::ffi::OsStringExt;
+    for key in ["-db", "-dir"] {
+        let words = vec![OsString::from(key), OsString::from_vec(b"d\xe9".to_vec())];
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let status = super::run_with(&words, &mut std::io::empty(), &mut out, &mut err);
+        let err = String::from_utf8_lossy(&err);
+        assert_eq!(status, 1, "{key}: {err}");
+        assert!(
+            err.contains(&format!("the value of {key} is not UTF-8")),
+            "{key}: {err}"
+        );
+        assert!(out.is_empty(), "{key}");
+    }
+}

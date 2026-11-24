@@ -381,3 +381,29 @@ c_two	put	b2.pto	cdd/db.pto
 c_two	put	b2.rps	cdd/db.rps
 c_two	cp	b2.freq	b2.wcounts
 c_two	cp	b2.freq	b2.obsr
+mix	db	p5
+mix	tax	good
+mix	text	mix1.pal	DBLIST p5\nTITLE a\rNSEQ\nMAXLEN 5\n
+mix	text	mix2.pal	TITLE a\rDBLIST p5\nNSEQ\rMAXLEN 5\n
+dsl	db	p5
+dsl	db	p5	sub
+dsl	tax	good
+dsl	text	sub/bad.pal	DBLIST nosuch\n
+mix45	db	p4
+mix45	db	p5	sub
+mix45	db	p5
+mix45	db	p4	.	z
+mix45	tax	good
+mix45	text	both.pal	TITLE both\nDBLIST p4 sub/p5\n
+mix45	text	both5.pal	TITLE both5\nDBLIST p5 zp4\n
+mix45	text	both5r.pal	TITLE both5r\nDBLIST zp4 p5\n
+negtax	tax	good
+negtax	put	neg.phr	negtax/neg.phr
+negtax	put	neg.pin	negtax/neg.pin
+negtax	put	neg.pjs	negtax/neg.pjs
+negtax	put	neg.pnd	negtax/neg.pnd
+negtax	put	neg.pni	negtax/neg.pni
+negtax	put	neg.pog	negtax/neg.pog
+negtax	put	neg.psd	negtax/neg.psd
+negtax	put	neg.psi	negtax/neg.psi
+negtax	put	neg.psq	negtax/neg.psq

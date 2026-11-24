@@ -43,3 +43,23 @@ fn a_dblist_name_removes_every_name_that_holds_it() {
     assert!(contains(b"\"db/n55\"", b"n5"));
     assert!(contains(b"\"db/s18mv.00\"", b"s18mv.00"));
 }
+
+/// The `CDir` of the directory drops its trailing separators, so the names have one separator
+/// after it (review F2 of row RG-D2b: NCBI `"sub/bad"` for `-dir sub//`).
+#[test]
+fn the_directory_loses_its_trailing_separators() {
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/blastdb_aliastool/in"
+    );
+    let names = |given: &str| -> Vec<Vec<u8>> {
+        find_blast_dbs(given, "prot", false, false)
+            .iter()
+            .map(FoundDb::file_name)
+            .collect()
+    };
+    let plain = names(dir);
+    assert!(plain.contains(&format!("{dir}/p5").into_bytes()));
+    assert_eq!(names(&format!("{dir}//")), plain);
+    assert_eq!(names(&format!("{dir}///")), plain);
+}

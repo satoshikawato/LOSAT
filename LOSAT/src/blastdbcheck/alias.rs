@@ -1,6 +1,7 @@
 //! blastdbcheck's test of an alias file (`CAliasTest`): its lines, the files that its lists name,
 //! the pairing of its OID range and lists, and the database that it makes.
 
+use crate::blastinput::fasta_reader::stream::{FastaStream, LineReader};
 use crate::ncbi_str::{is_blank, string_to_int, string_to_int8};
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::utils::os_bytes::path_from_bytes;
@@ -9,19 +10,6 @@ use super::log::{Log, Stop, BRIEF, DETAILS};
 use super::path::{make_path, FileParts};
 use super::work::{caught, unknown_text};
 use super::PROGRAM;
-
-// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-182
-// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:219-298
-// `CStreamLineReader` of the default end-of-line style (`eEOL_unknown`) learns the style from the
-// first line and switches as it meets the other byte: whichever of CR and LF the style reads up
-// to, a line that holds the other is cut there and its rest read again. So each CR and each LF
-// ends a line; a CR LF ends one, or ends one and an empty line, and the test skips empty lines
-// (as it skips the empty piece after a last line end here). A file whose bytes cannot be read
-// gives no line (the stream's state ends the loop).
-/// The lines of an alias file as blastdbcheck reads them: its bytes cut at each CR and LF.
-fn lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
-    bytes.split(|&byte| byte == b'\n' || byte == b'\r')
-}
 
 /// The values of an alias file's keywords that the test checks after its lines; -1 for one that
 /// is absent or not a number, 0 for a list that is present.
@@ -113,7 +101,7 @@ fn decide(value: Both, test: impl Fn(i128) -> bool, name: &[u8], what: &str) -> 
 }
 
 /// The test of the alias file `name`: its faults.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:698-807
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:698-820
 pub(super) fn alias_file_test(
     log: &mut Log<'_>,
     name: &str,
@@ -143,80 +131,98 @@ pub(super) fn alias_file_test(
         last_oid: -1,
         maxoid: -1,
     };
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:724-780
+    // NCBI's `CStreamLineReader` over the file (its end-of-line style learnt from the first line):
+    // a line first, then the loop goes on while the reader is not at its end. A file whose bytes
+    // cannot be read gives one empty line, which the test skips.
     let bytes = std::fs::read(path_from_bytes(file.path)).unwrap_or_default();
-    for line in lines(&bytes) {
-        if line.first() == Some(&b'#') || is_blank(line) {
-            continue;
-        }
-        let tokens: Vec<&[u8]> = line
-            .split(|&byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
-            .filter(|token| !token.is_empty())
-            .collect();
-        // A line that is not blank holds a byte that is not a separator.
-        let Some(&keyword) = tokens.first() else {
-            continue;
-        };
-        if tokens.len() == 1 {
-            log.line(
-                BRIEF,
-                &[
-                    &prefix,
-                    b"  [ERROR] no value(s) found for keyword ",
-                    keyword,
-                ],
-            )?;
-            faults += 1;
-            continue;
-        }
-        match keyword {
-            b"DBLIST" | b"TITLE" | b"MASKLIST" | b"STATS_TOTLEN" | b"STATS_NSEQ" => {}
-            b"TAXIDLIST" => faults += check_files(log, &prefix, &file.dir, &tokens)?,
-            b"OIDLIST" => {
-                values.oidlist = 0;
-                faults += check_files(log, &prefix, &file.dir, &tokens)?;
-            }
-            b"GILIST" => {
-                values.gilist = 0;
-                faults += check_files(log, &prefix, &file.dir, &tokens)?;
-            }
-            b"NSEQ" | b"MEMB_BIT" | b"FIRST_OID" | b"LAST_OID" | b"MAXOID" | b"MAXLEN" => {
-                let value = match string_to_int(tokens[1], 0) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        not_a_number(log, &prefix, keyword)?;
-                        faults += 1;
-                        -1
-                    }
-                };
-                match keyword {
-                    b"NSEQ" => values.nseq = value,
-                    b"FIRST_OID" => values.first_oid = value,
-                    b"LAST_OID" => values.last_oid = value,
-                    b"MAXOID" => values.maxoid = value,
-                    _ => {}
-                }
-            }
-            b"LENGTH" => {
-                values.length = match string_to_int8(tokens[1], 0) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        not_a_number(log, &prefix, keyword)?;
-                        faults += 1;
-                        -1
-                    }
-                };
-            }
-            _ => {
-                log.line(
-                    BRIEF,
-                    &[&prefix, b"  [ERROR] unknown keyword encountered: ", keyword],
-                )?;
-                faults += 1;
-            }
+    let mut reader = LineReader::new(FastaStream::from_bytes(&bytes));
+    loop {
+        faults += keyword_line(log, &prefix, &file.dir, reader.next_line(), &mut values)?;
+        if reader.at_eof() {
+            break;
         }
     }
     faults += check_values(log, &prefix, name, &values)?;
     faults += open(log, &prefix, &file, path)?;
+    Ok(faults)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:728-778
+/// The check of one line of an alias file in the directory `dir`, its keyword's value kept in
+/// `values`: its faults. Comments and blank lines are skipped.
+fn keyword_line(
+    log: &mut Log<'_>,
+    prefix: &[u8],
+    dir: &[u8],
+    line: &[u8],
+    values: &mut Values,
+) -> Result<u32, Stop> {
+    if line.first() == Some(&b'#') || is_blank(line) {
+        return Ok(0);
+    }
+    let tokens: Vec<&[u8]> = line
+        .split(|&byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
+        .filter(|token| !token.is_empty())
+        .collect();
+    // A line that is not blank holds a byte that is not a separator.
+    let Some(&keyword) = tokens.first() else {
+        return Ok(0);
+    };
+    if tokens.len() == 1 {
+        log.line(
+            BRIEF,
+            &[prefix, b"  [ERROR] no value(s) found for keyword ", keyword],
+        )?;
+        return Ok(1);
+    }
+    let mut faults = 0u32;
+    match keyword {
+        b"DBLIST" | b"TITLE" | b"MASKLIST" | b"STATS_TOTLEN" | b"STATS_NSEQ" => {}
+        b"TAXIDLIST" => faults += check_files(log, prefix, dir, &tokens)?,
+        b"OIDLIST" => {
+            values.oidlist = 0;
+            faults += check_files(log, prefix, dir, &tokens)?;
+        }
+        b"GILIST" => {
+            values.gilist = 0;
+            faults += check_files(log, prefix, dir, &tokens)?;
+        }
+        b"NSEQ" | b"MEMB_BIT" | b"FIRST_OID" | b"LAST_OID" | b"MAXOID" | b"MAXLEN" => {
+            let value = match string_to_int(tokens[1], 0) {
+                Ok(value) => value,
+                Err(_) => {
+                    not_a_number(log, prefix, keyword)?;
+                    faults += 1;
+                    -1
+                }
+            };
+            match keyword {
+                b"NSEQ" => values.nseq = value,
+                b"FIRST_OID" => values.first_oid = value,
+                b"LAST_OID" => values.last_oid = value,
+                b"MAXOID" => values.maxoid = value,
+                _ => {}
+            }
+        }
+        b"LENGTH" => {
+            values.length = match string_to_int8(tokens[1], 0) {
+                Ok(value) => value,
+                Err(_) => {
+                    not_a_number(log, prefix, keyword)?;
+                    faults += 1;
+                    -1
+                }
+            };
+        }
+        _ => {
+            log.line(
+                BRIEF,
+                &[prefix, b"  [ERROR] unknown keyword encountered: ", keyword],
+            )?;
+            faults += 1;
+        }
+    }
     Ok(faults)
 }
 
@@ -232,7 +238,7 @@ fn not_a_number(log: &mut Log<'_>, prefix: &[u8], keyword: &[u8]) -> Result<(), 
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:832-871
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:832-868
 /// The check of the files that a list keyword's values name in the directory `dir` of the alias
 /// file (`x_CheckFile`): its faults.
 fn check_files(
@@ -290,7 +296,7 @@ fn check_files(
     Ok(faults)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:771-792
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:782-805
 /// The checks of the OID range, the lists and their counts after the lines: its faults.
 fn check_values(
     log: &mut Log<'_>,
@@ -366,7 +372,7 @@ fn check_values(
     Ok(faults)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:794-804
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:807-817
 /// The opening of the database of the alias file (`CSeqDB` of its path without the extension, as
 /// a protein database for an extension `.p..`): 1 fault where NCBI's reader throws.
 fn open(

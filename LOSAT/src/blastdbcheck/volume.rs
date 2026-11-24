@@ -11,6 +11,7 @@ use crate::ncbi_str::matches_mask;
 use crate::seqdb::lookup::SeqidLookup;
 use crate::seqdb::taxdb::LazyTaxDb;
 use crate::seqdb::{SeqDb, SeqDbError, SeqLocation, SeqType};
+use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::DeflineSet;
 use crate::utils::os_bytes::{path_bytes, path_from_bytes};
 use crate::writedb::convert::Random;
@@ -575,7 +576,7 @@ fn metadata_exception(
     Ok(1)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:417-445
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:425-453
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3958-4004
 // `CDir::GetEntries` with the mask `<name>.???` (case sensitive) lists the directory in the order
 // the system gives (`readdir`); a directory that cannot be read lists nothing.
@@ -617,11 +618,9 @@ fn check_read(oid: i32, set: &DeflineSet) -> Result<(), Stop> {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1210-1231
 // The Bioseq's taxid is that of its first source, and `GetBioseq` makes a source for each line of
 // a positive taxid. Without one, `GetTaxidForSeqid` of the Bioseq's first Seq-id (the first line's
-// first) takes the taxid of the first line that holds a Seq-id of its type that matches it and
-// has a taxid: the first line itself where it has one. Another line decides only where the first
-// has none, and then only a negative taxid passes; which line matches is `CSeq_id::Match`'s,
-// which LOSAT does not port: refused there. A first line without Seq-ids makes NCBI read through a
-// null reference.
+// first) takes the taxid of the first line whose first Seq-id of that type matches it
+// (`CSeq_id::Match`, `compare`) and that has a taxid: the first line itself where it has one. A
+// first line without Seq-ids makes NCBI read through a null reference.
 /// Whether the sequence `oid` of the definition lines `set` has a taxid (`-must_have_taxids`).
 fn has_taxid(oid: i32, set: &DeflineSet) -> Result<bool, Stop> {
     if set
@@ -631,30 +630,22 @@ fn has_taxid(oid: i32, set: &DeflineSet) -> Result<bool, Stop> {
     {
         return Ok(true);
     }
-    let first = &set.deflines[0];
-    let Some(first_id) = first.ids.first() else {
+    let Some(first_id) = set.deflines[0].ids.first() else {
         return Err(Stop::Refused(format!(
             "-must_have_taxids at OID {oid}, whose first definition line has no Seq-id (NCBI reads \
              a null reference there), which is not supported by LOSAT's {PROGRAM}"
         )));
     };
-    if let Some(taxid) = first.taxid {
-        return Ok(taxid != 0);
-    }
-    let kind = std::mem::discriminant(first_id);
-    let undecided = set.deflines[1..].iter().any(|defline| {
-        defline.taxid.is_some_and(|taxid| taxid < 0)
-            && defline
-                .ids
-                .iter()
-                .any(|id| std::mem::discriminant(id) == kind)
-    });
-    if undecided {
-        return Err(Stop::Refused(format!(
-            "-must_have_taxids at OID {oid}, whose taxid NCBI takes from another definition line \
-             with a negative taxid where its Seq-id matches the first (CSeq_id::Match), which is \
-             not supported by LOSAT's {PROGRAM}"
-        )));
+    for defline in &set.deflines {
+        let same_type = defline
+            .ids
+            .iter()
+            .find(|id| id.alternative() == first_id.alternative());
+        if let (Some(id), Some(taxid)) = (same_type, defline.taxid) {
+            if compare(id, first_id) == Sic::Yes {
+                return Ok(taxid != 0);
+            }
+        }
     }
     Ok(false)
 }

@@ -1,11 +1,31 @@
 use super::*;
 
+/// The lines of `bytes` as the test reads them (`alias_file_test`'s loop).
+fn read_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut reader = LineReader::new(FastaStream::from_bytes(bytes));
+    let mut lines = Vec::new();
+    loop {
+        lines.push(reader.next_line().to_vec());
+        if reader.at_eof() {
+            return lines;
+        }
+    }
+}
+
+/// NCBI's `CStreamLineReader` learns the end of line from the first line; the other byte inside a
+/// later line cuts it, and the rest after that byte runs into the next line (review F1 of row
+/// RG-D2b, rows mix1 and mix2: `unknown keyword encountered: NSEQMAXLEN`).
 #[test]
-fn every_carriage_return_and_line_feed_ends_a_line() {
-    let got: Vec<&[u8]> = lines(b"A 1\r\nB 2\rC 3\nD")
-        .filter(|line| !line.is_empty())
+fn the_rest_after_the_other_end_of_line_runs_into_the_next_line() {
+    let got = read_lines(b"DBLIST p5\nTITLE a\rNSEQ\nMAXLEN 5\n");
+    assert!(got.contains(&b"NSEQMAXLEN 5".to_vec()), "{got:?}");
+    let got = read_lines(b"A 1\r\nB 2\r\n");
+    let lines: Vec<&[u8]> = got
+        .iter()
+        .map(Vec::as_slice)
+        .filter(|l| !l.is_empty())
         .collect();
-    assert_eq!(got, [&b"A 1"[..], b"B 2", b"C 3", b"D"]);
+    assert_eq!(lines, [&b"A 1"[..], b"B 2"]);
 }
 
 /// Row a_ov1: FIRST_OID 65535 and LAST_OID 65535 multiply to 2^32, 0 in `int`: the exact and the

@@ -24,7 +24,10 @@ What they are: NCBI BLAST+ 2.17.0 `blastdbcheck` runs that `tests/blastdbcheck_f
   `two/{a1,b2}.{pin,pdb}` (the two files of the same database that differ when it is named `a1` or `b2`); `ord/o4.*`,
   `ord/o5.*` (a protein database without `-parse_seqids`, version 4 and 5); `ca/ca4.*`, `ca/ca5.*` (a few sequences, the first
   with two deflines joined by a control-A, `-parse_seqids`, taxid map only for the second defline: 9606); `alias/gi.gil`
-  (the 20-byte binary GI list of `in/gi_ok.bgl`); `junk/` (an 8-byte and a 12-byte `.pin`).
+  (the 20-byte binary GI list of `in/gi_ok.bgl`); `junk/` (an 8-byte and a 12-byte `.pin`); `negtax/neg.*` (one
+  sequence of two definition lines joined by a control-A, `gi|5|ref|NP_000001.1|` without a taxid and
+  `gi|99|ref|NP_000009.1|` with taxid -5, `makeblastdb -dbtype prot -parse_seqids -taxid_map -blastdb_version 4
+  -title neg`, clock frozen at 1700000000, made on 2026-11-25 for review F3 of row RG-D2b).
 
 ## Rows
 `cases.tsv`: `id`, `dir`, `env`, `seed`, `args`. `dir` is the case directory under `cases/` that is the working
@@ -33,12 +36,16 @@ depends on the time-seeded random sample (`-random N` with 0 < N < 200: `combo`,
 else `-`; the test skips the rows with a seed (a crate-internal test covers them); `args` are bash words with
 single quotes only, `<RUN>` standing for the run directory.
 
-Families (182 rows, 65 case directories): command line and frame (`help`, `xmlhelp`,
+Families (194 rows, 69 case directories): command line and frame (`help`, `xmlhelp`,
 `noargs`, `arg_*`, `m_bad_lf`); verbosity, sampling and selection on `p5` (`t_p5*`, `t_*_full_v4`, `rnd*`, `ends*`,
 `stride*`, `combo`, `fx_*`, `noisam`, `taxids_*`, `cdd`, `t_abs_p5`, `t_dir_v4`); MetaData (`nt_p5*`, `t_*` taxdb
 variants, `lf0`, `lf1`, `*legacy*`, `d_*_date`, `d_p4_totlen0`, `d_*_zero_oids*`); damaged volumes (`d_p4_*`,
 `d_p5_*`, `d_n4_*`, `d_n5_*`, `d_pmv_*`, `pp_*`, `d_p4_pnd_swap`); names, lists and directories (`m_*`, `r_*`,
-`nest`, `m_blastdb_*`); alias checks (`a_*`, `a_dir`, `a_dir_v1`, `a_ov1`, `a_ov2`, `a_ov3`, `a_signs`, `a_giabs`);
+`nest`, `m_blastdb_*`); alias checks (`a_*`, `a_dir`, `a_dir_v1`, `a_ov1`, `a_ov2`, `a_ov3`, `a_signs`, `a_giabs`); review rows of
+2026-11-25 (`mix1`, `mix2`: an alias file with the other end-of-line byte inside a line; `dirslash`, `dirslash2`:
+`-dir` with trailing separators; `mix45_*`: alias files over version 4 and version 5 volumes, in both orders;
+`d_p4_pin_nucl_prot`, `d_p4_pin_nucl_dir`: an index of the other molecule type; `negtax`, `negtax_v3`:
+`-must_have_taxids` with a negative taxid on a later definition line);
 CDD (`c_*`); other versions (`ord4`, `ord5`, `ca4`, `ca5`, `t_pmv_full_v4`).
 
 `legacy`, `legacy_atm`, `legacy_ab` and `nolegacy` each have one extra file next to `p5` (empty `p5.ptm`, non-empty
@@ -71,7 +78,8 @@ run created or changed, `relative/path<TAB>size<TAB>FNV-1a 64 digest (16 hex dig
 directory replaced by `<RUN>` (the rows with `-logfile`; empty for the others), and `ncbi/<id>.made/<path>` the bytes
 themselves: their exception texts are NCBI's words, which the test maps to LOSAT's before it takes the size and the
 digest. The freeze was run twice: the same bytes (the `.made` files were added on 2026-11-25 by a third run of the four
-`-logfile` rows, whose other files came out unchanged).
+`-logfile` rows, whose other files came out unchanged). The 12 review rows of 2026-11-25 (above) were frozen once more
+on that day, in a run of those rows only.
 
 `-version` and `-version-full` are not rows here: `tests/ncbi_toolkit_version.rs` checks them with LOSAT's own version
 line (the Owner, 2026-11-21).

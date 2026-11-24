@@ -15,7 +15,7 @@ use crate::ncbi_app::Diag;
 use crate::ncbi_exception::NcbiException;
 use crate::seqdb::find::find_blast_dbs;
 use crate::seqdb::taxdb::LazyTaxDb;
-use crate::seqdb::{throw_site, SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::writedb::convert::Random;
 use crate::writedb::time::LocalTime;
 
@@ -58,7 +58,7 @@ impl Caught {
 /// blastdbcheck takes it; `Err` where the error is LOSAT's (a database that LOSAT does not read,
 /// a damaged file whose bytes NCBI reads past its end), whose outcome in NCBI's program LOSAT does
 /// not know: LOSAT's refusal there. The text of a `CSeqDBException` is that of its place in NCBI's
-/// reader (`seqdb::throw_site`), where LOSAT knows the place.
+/// reader (`SeqDbError::throw_site`), where LOSAT knows the place.
 pub(super) fn caught(error: &SeqDbError) -> Result<Caught, Stop> {
     if let Some(exception) = error.ncbi_exception() {
         return Ok(Caught::ncbi(exception, false));
@@ -70,7 +70,9 @@ pub(super) fn caught(error: &SeqDbError) -> Result<Caught, Stop> {
         // NCBI's text of a failed integrity check names a line of its source; LOSAT's words do not.
         SeqDbError::Integrity { .. } => None,
         _ => error.ncbi_request_message().and_then(|message| {
-            throw_site(&message).map(|site| NcbiException::new(site, message).what())
+            error
+                .throw_site()
+                .map(|site| NcbiException::new(site, message).what())
         }),
     };
     Ok(Caught { seqdb: true, what })
@@ -164,6 +166,9 @@ fn check(
     log: &mut Log<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Stop> {
+    // Read first, so that LOSAT's refusal of a name comes before the report's first line.
+    let db = name_value(args, "db")?;
+    let dir = name_value(args, "dir")?;
     let target: Vec<u8> = match args.os_value("logfile") {
         Some(name) if args.given("logfile") => [
             b"file  (".as_slice(),
@@ -183,8 +188,6 @@ fn check(
             b")",
         ],
     )?;
-    let db = args.value("db").unwrap_or("");
-    let dir = args.value("dir").unwrap_or("");
     let dbtype = args.value("dbtype").unwrap_or("guess");
     if db.is_empty() == dir.is_empty() {
         log.line(BRIEF, &[b"error: Must specify exactly one of -dir or -db."])?;
@@ -280,6 +283,18 @@ fn check(
         walk.names(log, db, seqtype)?
     };
     Ok(if okay { 0 } else { 1 })
+}
+
+/// The value of the name key `key` (`-db`, `-dir`), read by its bytes (`""` where it is not
+/// given). NCBI takes any bytes; LOSAT's database reader takes UTF-8 names only: its refusal of
+/// others.
+fn name_value<'a>(args: &'a Args, key: &str) -> Result<&'a str, Stop> {
+    match args.os_value(key) {
+        None => Ok(""),
+        Some(value) => value
+            .to_str()
+            .ok_or_else(|| Stop::Refused(crate::cli::non_utf8_value_refusal(PROGRAM, key))),
+    }
 }
 
 /// The database search path of the run (`SeqDB_ResolveDbPath`'s: the current directory, `BLASTDB`

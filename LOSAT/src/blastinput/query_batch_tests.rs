@@ -1054,34 +1054,35 @@ fn xml_results_show_and_join_the_queries_whose_seq_ids_match() {
     }
 }
 
-/// A run whose queries' Seq-ids all differ keeps nothing per query for the XML family formats
-/// (`HeldIds`): no label and no join, and the second query is NCBI's `F`.
+/// Only an accession with and without its version, in any case, or a PDB molecule with and
+/// without its chain may be an earlier id of the scope in another form
+/// (`QueryScope::add_version_form`): two chains of one molecule, two versions or two accessions
+/// never are, nor ids of a scope that has none of the other form. A scope that takes another's
+/// ids takes their forms (`QueryScope::extend`).
 #[test]
-fn only_another_form_of_a_batch_s_seq_id_may_match_it() {
-    // An accession with and without its version, in any case; a PDB molecule with and without its
-    // chain. Two chains of one molecule, two versions or two accessions are never candidates.
+fn only_another_form_of_a_scope_s_id_may_match_it() {
     let fasta: &[u8] = b">ref|NP_000001.1| a\nMKV\n>ref|NP_000002.1| b\nMKV\n>ref|np_000001| c\nMKV\n>pdb|1ABC|A d\nMKV\n>pdb|1ABC|B e\nMKV\n>pdb|1ABC| f\nMKV\n>ref|NP_000002.2| g\nMKV\n>h x\nMKV\n";
     let records = parsed_records(fasta);
-    let mut held = super::HeldIds::default();
-    let others: Vec<bool> = records
-        .iter()
-        .map(|record| {
-            record
-                .believed()
-                .and_then(|believed| crate::seqid::id_scope::match_form(&believed.best))
-                .is_some_and(|form| held.other_form_before(form))
-        })
+    let ids = |n: usize| &records[n].believed().unwrap().ids;
+    let mut scope = super::QueryScope::default();
+    let others: Vec<bool> = (0..records.len())
+        .map(|n| scope.add(ids(n), (n, 3), "BLASTP").unwrap())
         .collect();
     assert_eq!(
         others,
         [false, false, true, false, false, true, false, false]
     );
-    held.forms.clear();
-    let first = records[2].believed().unwrap();
-    let form = crate::seqid::id_scope::match_form(&first.best).unwrap();
-    assert!(!held.other_form_before(form));
+    let mut first = super::QueryScope::default();
+    assert!(!first.add(ids(2), (0, 3), "BLASTP").unwrap());
+    let mut first = super::QueryScope::default();
+    first.add(ids(0), (0, 3), "BLASTP").unwrap();
+    let mut whole = super::QueryScope::default();
+    whole.extend(&first);
+    assert!(whole.add_after_refusal(ids(2), (1, 3)));
 }
 
+/// A run whose queries' Seq-ids all differ keeps nothing per query for the XML family formats
+/// (`HeldIds`): no label and no join, and the second query is NCBI's `F`.
 #[test]
 fn queries_of_different_seq_ids_keep_no_xml_lists() {
     use super::QueryScopeSpan::{Batch, Run};

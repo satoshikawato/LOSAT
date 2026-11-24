@@ -230,45 +230,27 @@ pub(crate) fn version_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:141-153
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67
-/// The form of a Seq-id among the Seq-ids that `CSeq_id::Match` takes for one though
-/// `defline_set::scope_keys` tells them apart (`match_form`): the `key` they share and one `bit`
-/// for each form.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MatchForm {
-    pub(crate) key: u64,
-    pub(crate) bit: u8,
+/// The bit of the form of a Seq-id among the Seq-ids that `CSeq_id::Match` takes for one though
+/// `defline_set::scope_keys` tells them apart (0 for any other Seq-id): for a text Seq-id with an
+/// accession, its accession with or without a version (`MATCH_FORMS_ACCESSION`); for a PDB Seq-id,
+/// its molecule with or without a `chain` and a `chain_id` (`MATCH_FORMS_PDB`). Two Seq-ids that
+/// `defline_set::compare` finds the same (`Sic::Yes`) with different `scope_keys` share the
+/// accession (`version_keys`) or the molecule and differ in the form: ids of one form match only
+/// where they are equal there (one accession with one version, one molecule with the same chains).
+pub(crate) fn match_form(id: &ParsedSeqId) -> u8 {
+    match id {
+        ParsedSeqId::Pdb(pdb) => {
+            1 << (2 + u8::from(pdb.chain.is_some()) + 2 * u8::from(pdb.chain_id.is_some()))
+        }
+        _ => id
+            .textseq()
+            .filter(|text| text.accession.is_some())
+            .map_or(0, |text| 1 << u8::from(text.version.is_some())),
+    }
 }
 
-/// For a text Seq-id with an accession, the form of its accession with or without a version; for
-/// a PDB Seq-id, the form of its molecule with or without a `chain` and a `chain_id`. Two Seq-ids
-/// that `defline_set::compare` finds the same (`Sic::Yes`) with different `scope_keys` share the
-/// `key` (the accession or the molecule in upper case) and differ in the form: ids of one form
-/// match only where they are equal there (one accession with one version, one molecule with the
-/// same chains). The key is a 64-bit hash, computed without an allocation, of a necessary
-/// condition only (`query_batch::QueryScopes::add_batch_records` compares the ids where it holds).
-pub(crate) fn match_form(id: &ParsedSeqId) -> Option<MatchForm> {
-    let (tag, value, form) = match id {
-        ParsedSeqId::Pdb(pdb) => (
-            b'P',
-            &pdb.mol,
-            2 + u8::from(pdb.chain.is_some()) + 2 * u8::from(pdb.chain_id.is_some()),
-        ),
-        _ => {
-            let text = id.textseq()?;
-            (
-                b'A',
-                text.accession.as_ref()?,
-                u8::from(text.version.is_some()),
-            )
-        }
-    };
-    let mut hasher = rustc_hash::FxHasher::default();
-    hasher.write_u8(tag);
-    for &letter in value.iter() {
-        hasher.write_u8(letter.to_ascii_uppercase());
-    }
-    Some(MatchForm {
-        key: hasher.finish(),
-        bit: 1 << form,
-    })
-}
+/// The forms of `match_form` of a text Seq-id's accession.
+pub(crate) const MATCH_FORMS_ACCESSION: u8 = 0b11;
+
+/// The forms of `match_form` of a PDB Seq-id.
+pub(crate) const MATCH_FORMS_PDB: u8 = 0b11_1100;

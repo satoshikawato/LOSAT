@@ -250,7 +250,7 @@ impl BatchCount {
 
 /// The ids of the query records of one scope (`QueryScopes`): the keys of each id
 /// (`seqid::defline_set::scope_keys`, and the own kind of `id_scope::version_keys` and
-/// `id_scope::name_keys`).
+/// `id_scope::name_keys`) and their forms (`forms`).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueryScope {
     keys: std::collections::HashSet<u64>,
@@ -260,6 +260,9 @@ pub(crate) struct QueryScope {
     first_records: std::collections::HashMap<u64, (usize, usize)>,
     /// The records of the batches added to the scope before the one being added.
     records: usize,
+    /// The forms of the scope's ids (`id_scope::match_form`), by which an earlier id may be one of
+    /// a record's in another form (`add_version_form`).
+    forms: u8,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
@@ -293,13 +296,14 @@ enum Meets {
 impl QueryScope {
     /// Adds the ids `ids` of a query record (`record`: its number in the scope and its letters), or
     /// LOSAT's refusal of a record whose id another record of the scope has
-    /// (`believed::duplicate_id`).
+    /// (`believed::duplicate_id`). Whether an earlier id of the scope may be one of `ids` in
+    /// another form (`add_version_form`).
     fn add(
         &mut self,
         ids: &[crate::seqid::ParsedSeqId],
         record: (usize, usize),
         program: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         if let Some(refusal) = crate::blastinput::fasta_reader::believed::duplicate_id(
             ids,
             &mut self.keys,
@@ -309,12 +313,12 @@ impl QueryScope {
             return Err(refusal);
         }
         // `duplicate_id` keeps the version's kind of two BLASTN queries only.
-        self.keys.extend(
-            ids.iter()
-                .filter_map(|id| crate::seqid::id_scope::version_keys(id).map(|(own, _)| own)),
-        );
+        let mut other_form = false;
+        for id in ids {
+            other_form |= self.add_version_form(id);
+        }
         self.note_first(ids, record);
-        Ok(())
+        Ok(other_form)
     }
 
     /// Notes `record` (its number in the scope and its letters) for the keys of `ids` that no
@@ -372,9 +376,15 @@ impl QueryScope {
 
     /// Adds the ids `ids` of a record (its number in the scope and its letters) whatever the scope
     /// holds (a record after LOSAT's refusal in its batch, `QueryScopes::add_batch_records`).
-    fn add_after_refusal(&mut self, ids: &[crate::seqid::ParsedSeqId], record: (usize, usize)) {
-        self.add_ids(ids);
+    /// Whether an earlier id of the scope may be one of `ids` in another form (`add_version_form`).
+    fn add_after_refusal(
+        &mut self,
+        ids: &[crate::seqid::ParsedSeqId],
+        record: (usize, usize),
+    ) -> bool {
+        let other_form = self.add_ids(ids);
         self.note_first(ids, record);
+        other_form
     }
 
     /// Adds the ids `ids` of query records (`BelievedIds`), whatever ids the scope has
@@ -464,23 +474,52 @@ impl QueryScope {
         scope
     }
 
-    /// Adds the keys that `add_ids_of` keeps of each of the Seq-ids `ids`.
-    fn add_ids(&mut self, ids: &[crate::seqid::ParsedSeqId]) {
+    /// Adds the keys that `add_ids_of` keeps of each of the Seq-ids `ids`. Whether an earlier id
+    /// of the scope may be one of `ids` in another form (`add_version_form`).
+    fn add_ids(&mut self, ids: &[crate::seqid::ParsedSeqId]) -> bool {
         let mut keys = Vec::new();
+        let mut other_form = false;
         for id in ids {
             keys.clear();
             crate::seqid::defline_set::scope_keys(id, &mut keys);
             self.keys.extend(keys.iter().copied());
             self.keys
                 .extend(crate::seqid::id_scope::name_keys(id).map(|(own, _)| own));
-            self.keys
-                .extend(crate::seqid::id_scope::version_keys(id).map(|(own, _)| own));
+            other_form |= self.add_version_form(id);
+        }
+        other_form
+    }
+
+    /// Adds the own kind of `id_scope::version_keys` of the Seq-id `id`, and its form (`forms`).
+    /// Whether an earlier id of the scope may be `id` in another form, which `CSeq_id::Match` can
+    /// take for it though `scope_keys` tells them apart (`id_scope::match_form`): its accession
+    /// with the other kind of `version_keys`, asked only where the scope has ids of that form; for
+    /// a PDB Seq-id, any of another form. A scope keeps nothing more per id for it.
+    fn add_version_form(&mut self, id: &crate::seqid::ParsedSeqId) -> bool {
+        use crate::seqid::id_scope::{MATCH_FORMS_ACCESSION, MATCH_FORMS_PDB};
+        let form = crate::seqid::id_scope::match_form(id);
+        let pdb = form & MATCH_FORMS_PDB != 0;
+        let kinds = if pdb {
+            MATCH_FORMS_PDB
+        } else {
+            MATCH_FORMS_ACCESSION
+        };
+        let other_forms = self.forms & kinds & !form != 0;
+        self.forms |= form;
+        match crate::seqid::id_scope::version_keys(id) {
+            Some((own, other)) => {
+                let other_form = other_forms && self.keys.contains(&other);
+                self.keys.insert(own);
+                other_form
+            }
+            None => pdb && other_forms,
         }
     }
 
-    /// Adds the keys of the queries of `other`.
+    /// Adds the keys and the forms of the queries of `other`.
     pub(crate) fn extend(&mut self, other: &QueryScope) {
         self.keys.extend(other.keys.iter().copied());
+        self.forms |= other.forms;
     }
 }
 
@@ -633,8 +672,8 @@ pub(crate) struct QueryScopes {
 ///   `XmlMatrixFailure::SecondQueryOrEnd`).
 ///
 /// Only the queries that match an earlier one are listed: a run whose Seq-ids all differ keeps
-/// nothing per query, and compares a query's Seq-id with another only where the scope or the
-/// forms of the batch's Seq-ids allow a match (`Meets`, `HeldIds::other_form_before`; a query of a
+/// nothing per query, and compares a query's Seq-id with another only where the scope allows a
+/// match (`Meets`, or another form of an earlier id, `QueryScope::add_version_form`; a query of a
 /// batch with the lead of an earlier batch while the held report is that batch's). The run's, not
 /// a batch's.
 #[derive(Debug, Default)]
@@ -650,10 +689,6 @@ struct HeldIds {
     joins: Vec<usize>,
     /// Each searched query whose result shows an earlier searched query of its batch, ascending.
     labels: Vec<Label>,
-    /// The forms of the Seq-ids of the batch's searched queries so far (`id_scope::match_form`),
-    /// a mask of the forms by key: emptied at each batch, whose queries alone it is asked for
-    /// (`other_form_before`), and kept for the next batch's.
-    forms: rustc_hash::FxHashMap<u64, u8>,
 }
 
 /// A searched query whose result shows an earlier searched query of its batch (`HeldIds::labels`).
@@ -674,21 +709,10 @@ struct Label {
 type BatchLead<'r> = Option<(usize, Option<&'r crate::seqid::ParsedSeqId>)>;
 
 impl HeldIds {
-    /// Notes the form `form` of the Seq-id of a searched query of the batch (`forms`); whether
-    /// an earlier searched query of the batch has a Seq-id of the same key in another form, the
-    /// only one of a scope's other records that `CSeq_id::Match` can take for it (`Meets::New`),
-    /// the same form matching only an equal id (`id_scope::match_form`).
-    fn other_form_before(&mut self, form: crate::seqid::id_scope::MatchForm) -> bool {
-        let forms = self.forms.entry(form.key).or_insert(0);
-        let other = *forms & !form.bit != 0;
-        *forms |= form.bit;
-        other
-    }
-
     /// Notes the searched query `query` with the Seq-id `id` (`None`: no ids of its own), which
     /// an earlier searched query of its batch may match where `candidate` (its ids meet the scope
-    /// other than `Meets::New`, or `other_form_before`); `earlier` gives the Seq-ids of the
-    /// searched queries of its batch before it, in order, the first being the run's query
+    /// other than `Meets::New`, or `QueryScope::add_version_form`); `earlier` gives the Seq-ids of
+    /// the searched queries of its batch before it, in order, the first being the run's query
     /// `batch_start`. Whether it is the run's first.
     fn note<'r>(
         &mut self,
@@ -1191,7 +1215,7 @@ impl QueryScopes {
     /// failure takes it (`ScopeRefusal::xml_takes`, `HeldIds::reaches`), and the searched queries'
     /// Seq-ids are noted for the XML family formats (`HeldIds`; `records` is walked again from the
     /// batch's start only for a query whose ids may match an earlier one: `Meets` other than
-    /// `Meets::New`, or `HeldIds::other_form_before`).
+    /// `Meets::New`, or another form of an earlier id, `QueryScope::add_version_form`).
     pub(crate) fn add_batch_records<'r>(
         &mut self,
         records: impl IntoIterator<
@@ -1237,17 +1261,46 @@ impl QueryScopes {
         let mut searched = 0;
         let mut holds_first = false;
         let mut lead: BatchLead<'r> = None;
-        self.held.forms.clear();
         let records = records.into_iter();
         let batch_records = records.clone();
         for (place, (believed, length, is_searched)) in records.enumerate() {
             records_read = place + 1;
             let meets = believed.map(|believed| scope.meets(&believed.ids, self.program));
+            let read = |meets: Meets| match meets {
+                _ if !is_searched => Some(SetUpRead::Skipped),
+                Meets::New => Some(SetUpRead::Own),
+                Meets::Repeat { first: Some(first) } if length <= first => Some(SetUpRead::InFirst),
+                Meets::Repeat { first: Some(_) } if self.program != "BLASTN" => {
+                    Some(SetUpRead::PastFirst)
+                }
+                _ => None,
+            };
+            // Whether an earlier id of the scope may be one of the record's in another form.
+            let mut other_form = false;
+            if let (Some(believed), Some(meets)) = (believed, meets) {
+                let follows = read(meets);
+                reads = reads.zip(follows).map(|(mut reads, follows)| {
+                    reads.push(follows);
+                    reads
+                });
+                let record = (before + place, length);
+                other_form = if message.is_some() {
+                    scope.add_after_refusal(&believed.ids, record)
+                } else {
+                    match scope.add(&believed.ids, record, self.program) {
+                        Ok(other_form) => other_form,
+                        Err(error) => {
+                            // `duplicate_id` stopped at the id it refuses: the record's other keys.
+                            message = Some(error.to_string());
+                            scope.add_after_refusal(&believed.ids, record)
+                        }
+                    }
+                };
+            } else if let Some(reads) = reads.as_mut() {
+                reads.extend(read(Meets::New));
+            }
             if is_searched {
                 let id = believed.map(|believed| &believed.best);
-                let other_form = id
-                    .and_then(crate::seqid::id_scope::match_form)
-                    .is_some_and(|form| self.held.other_form_before(form));
                 let candidate = other_form || (id.is_some() && meets != Some(Meets::New));
                 let earlier = batch_records
                     .clone()
@@ -1259,34 +1312,6 @@ impl QueryScopes {
                     self.held
                         .note(&mut lead, query, id, candidate, earlier, first_searched);
                 searched += 1;
-            }
-            let read = |meets: Meets| match meets {
-                _ if !is_searched => Some(SetUpRead::Skipped),
-                Meets::New => Some(SetUpRead::Own),
-                Meets::Repeat { first: Some(first) } if length <= first => Some(SetUpRead::InFirst),
-                Meets::Repeat { first: Some(_) } if self.program != "BLASTN" => {
-                    Some(SetUpRead::PastFirst)
-                }
-                _ => None,
-            };
-            let (Some(believed), Some(meets)) = (believed, meets) else {
-                if let Some(reads) = reads.as_mut() {
-                    reads.extend(read(Meets::New));
-                }
-                continue;
-            };
-            let follows = read(meets);
-            reads = reads.zip(follows).map(|(mut reads, follows)| {
-                reads.push(follows);
-                reads
-            });
-            let record = (before + place, length);
-            if message.is_some() {
-                scope.add_after_refusal(&believed.ids, record);
-            } else if let Err(error) = scope.add(&believed.ids, record, self.program) {
-                // `duplicate_id` stopped at the id it refuses: the record's other keys.
-                scope.add_after_refusal(&believed.ids, record);
-                message = Some(error.to_string());
             }
         }
         scope.records += records_read;

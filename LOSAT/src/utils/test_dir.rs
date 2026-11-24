@@ -1,7 +1,8 @@
-//! The directory of the tests' temporary files, and the number in their names.
+//! The directory of the tests' temporary files, the number in their names, and the name NCBI's
+//! database reader gives such a directory (`ncbi_dir`).
 //!
-//! No NCBI counterpart: test plumbing; the product code that needs a temporary directory handles
-//! WASI itself (`blastinput::input_files::temporary_directory`).
+//! No NCBI counterpart for the first two: test plumbing; the product code that needs a temporary
+//! directory handles WASI itself (`blastinput::input_files::temporary_directory`).
 
 /// `std::env::temp_dir()` off WASI. On WASI Rust's `temp_dir()` panics ("no filesystem on wasm",
 /// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), and the panic aborts the whole test binary
@@ -48,5 +49,23 @@ pub(crate) fn process_id() -> u32 {
             // starts gives the same number to both, which only a test run on a coarse clock meets.
             (since.as_secs() as u32).wrapping_mul(1_000_003) ^ since.subsec_nanos()
         })
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:325-335
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
+// `NormalizePath` with `eFollowLinks` reads the symbolic link of each component on Unix only; the
+// reader names the databases it opens (and with them their volumes, columns and alias files'
+// lists) and the directories of its search path (`BLASTDB`) through it.
+/// The directory `dir` as NCBI's database reader names it: its symbolic links followed on Unix,
+/// as it is elsewhere. On macOS the temporary directory lies under `/var`, a link to
+/// `private/var`, so NCBI and LOSAT name its files under `/private/var` (Platform checks
+/// 45315823856).
+pub(crate) fn ncbi_dir(dir: &std::path::Path) -> std::path::PathBuf {
+    if cfg!(unix) {
+        dir.canonicalize().unwrap()
+    } else {
+        dir.to_path_buf()
     }
 }

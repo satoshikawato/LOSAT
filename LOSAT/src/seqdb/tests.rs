@@ -14,6 +14,7 @@ use super::header::{decode_defline_set, decode_defline_taxids};
 use super::index::IndexFile;
 use super::*;
 use crate::core::blast_encoding::{encode_iupac_to_blastna, iupacna_to_ncbi4na};
+use crate::utils::test_dir::ncbi_dir;
 
 /// NCBIstdaa: the residue at position `i` has the code `i`
 /// (c++/src/algo/blast/core/blast_encoding.c:115-118, `NCBISTDAA_TO_AMINOACID`).
@@ -1407,23 +1408,6 @@ fn temp_dir(tag: &str) -> PathBuf {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:325-335
-// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
-// `NormalizePath` with `eFollowLinks` reads the symbolic link of each component on Unix only; the
-// reader names the databases it opens (and with them their alias files' lists) and the
-// directories of its search path (`BLASTDB`) through it.
-/// The directory `dir` as NCBI's reader names it: its symbolic links followed on Unix, as it is on
-/// Windows. On macOS the temporary directory lies under `/var`, a link to `private/var`, so NCBI
-/// and LOSAT name its files under `/private/var`.
-pub(super) fn ncbi_dir(dir: &Path) -> PathBuf {
-    if cfg!(unix) {
-        dir.canonicalize().unwrap()
-    } else {
-        dir.to_path_buf()
-    }
 }
 
 fn copy_database(name: &str, exts: &[&str], dir: &Path) {

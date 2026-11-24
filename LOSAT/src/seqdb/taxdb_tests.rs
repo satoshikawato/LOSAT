@@ -976,8 +976,8 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
         }
         let search = path_of(&dir);
         // The file in the directory of the search path, `BLASTDB` with its links followed
-        // (seqdbcommon.cpp:378-392, `crate::seqdb::tests::ncbi_dir`).
-        let named = crate::seqdb::tests::ncbi_dir(&dir).join(file);
+        // (seqdbcommon.cpp:378-392, `crate::utils::test_dir::ncbi_dir`).
+        let named = crate::utils::test_dir::ncbi_dir(&dir).join(file);
         let expect = |error: SeqDbError| match error {
             SeqDbError::TaxdbThrows {
                 path: failed,

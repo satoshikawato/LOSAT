@@ -4169,10 +4169,11 @@ impl HitLoads {
     }
 
     /// The loads of a run whose formats refuse a lookup that throws (`FormatThrow::Refused`):
-    /// every subject of `reports` is loaded, by the batches' prefetch ([`ScopeWalk::bulk`]) or
-    /// by its reports; LOSAT does not know the order of the loads of each format's run, so where
-    /// another sequence loaded before (the record's, `walk`) or in these reports holds an id that
-    /// NCBI's places take for a subject's Seq-align id (on any line by its exact handle, on its
+    /// every subject of `reports` is loaded, by the batches' prefetch ([`ScopeWalk::bulk`], whose
+    /// pass does not depend on the formats: in the walk's order) or by its reports; LOSAT does not
+    /// know the order of the loads of each format's run that reads one by one, so where another
+    /// sequence loaded before (the record's, `walk`) or in these reports holds an id that NCBI's
+    /// places take for such a subject's Seq-align id (on any line by its exact handle, on its
     /// loaded line by an id the scope takes for it or matches weakly), the subject is shown
     /// (`ShownBy::Order`).
     fn unordered<'p>(
@@ -4183,10 +4184,28 @@ impl HitLoads {
     ) {
         let mut subjects: Vec<(usize, &ParsedSubject)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for (_, keys) in reports {
-            for key in keys.keys() {
-                if seen.insert(key) {
-                    subjects.extend(parsed(key).map(|subject| (key, subject)));
+        let mut prefetched = None;
+        for (report, (read, keys)) in reports.iter().enumerate() {
+            walk.enter(read.batch);
+            if read.one_by_one {
+                for key in keys.keys() {
+                    if seen.insert(key) {
+                        subjects.extend(parsed(key).map(|subject| (key, subject)));
+                    }
+                }
+            } else if prefetched.is_none_or(|first| !same_batch(reports, first, report)) {
+                prefetched = Some(report);
+                let batch: Vec<(usize, &ParsedSubject)> = reports[report..]
+                    .iter()
+                    .enumerate()
+                    .take_while(|&(at, _)| at == 0 || same_batch(reports, report, report + at))
+                    .flat_map(|(_, (_, keys))| keys.keys())
+                    .filter_map(|key| parsed(key).map(|subject| (key, subject)))
+                    .collect();
+                for (key, answer) in walk.bulk(batch) {
+                    if let HitLoad::Shown(shown) = answer {
+                        self.shown.insert(key, shown);
+                    }
                 }
             }
         }

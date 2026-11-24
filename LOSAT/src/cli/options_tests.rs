@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 
 use super::{not_converted, options, refusal_after_read, tool, TOOLS};
-use crate::blastinput::ncbi_environment::{preparse, DiagTarget, Preparsed};
+use crate::blastinput::ncbi_environment::{preparse, Preparsed};
 use crate::cli::Commands;
 use crate::ncbi_app::args::{checked, described, parse, Args, Dep, Kind};
 use crate::ncbi_app::Tool;
@@ -93,6 +93,7 @@ fn an_excluded_query_is_its_table_default() {
 }
 
 /// A word that is not UTF-8: `a`, a byte (Unix) or an unpaired surrogate (Windows), `b`.
+#[cfg(any(unix, windows))]
 fn not_utf8() -> OsString {
     #[cfg(unix)]
     let word = {
@@ -118,7 +119,10 @@ fn a_dry_run_reads_a_value_that_is_not_utf8_as_its_lossy_text() {
         let mut argv: Vec<OsString> = ["losat", "blastn", "-db"].map(OsString::from).to_vec();
         argv.push(not_utf8());
         argv.extend(dry_run.then(|| OsString::from("-dryrun")));
-        crate::cli::try_parse_with_own_start(argv, &DiagTarget::Stderr)
+        crate::cli::try_parse_with_own_start(
+            argv,
+            &crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+        )
     };
     let db = match argv(true).unwrap().command {
         Commands::Blastn(args) => args.db,

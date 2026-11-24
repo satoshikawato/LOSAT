@@ -228,8 +228,8 @@ impl TblastnDatabase {
     /// sequences with parsed Seq-ids); the sequences of `hitlists` with HSPs are the reported
     /// ones (their subject index is the rank, `reported_subjects`), and those that the reports
     /// load are read (`ReportedSubjects::loads`: not the subject of a `Hit` that throws, nor those
-    /// after it in a query's report, which NCBI never loads, so that the taxonomy database's
-    /// one-time texts go with the next `Hit` that it loads; review 1 of DBID pfoff-1, H1).
+    /// after it in a query's report, which NCBI never loads; review 1 of DBID pfoff-1, H1). The
+    /// texts of the loads are the batches' prefetches' or reads', modelled before this call.
     pub(super) fn read_taxids(
         &self,
         reported: &ReportedSubjects,
@@ -295,9 +295,25 @@ impl TblastnDatabase {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
     }
 
-    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
-    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
-        self.taxdb.open_for_rows(&self.db, PROGRAM)
+    /// The open of the taxonomy database by the rows `rows` of the final hit lists `hitlists`
+    /// (subjects named by rank, `reported_subjects`) after their batch's prefetch
+    /// (`shared::RowLookups::open_after_prefetch`): the rows of a subject that the reports load
+    /// (`HitLoads::loaded`; a row whose load throws looks nothing up).
+    pub(super) fn open_for_rows(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+        rows: shared::RowLookups,
+    ) -> Result<()> {
+        let subjects = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| !list.hsps.hsps.is_empty() && reported.loads.loaded(list.oid as usize))
+            .map(|list| {
+                let rank = list.oid as usize;
+                (reported.ordinals[rank], reported.parsed_subject(rank))
+            });
+        rows.open_after_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
@@ -338,7 +354,7 @@ impl TblastnDatabase {
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         rows: SubjectFetch,
-        rows_open: bool,
+        row_lookups: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         let lists = hitlists
@@ -376,18 +392,14 @@ impl TblastnDatabase {
                     reported.parsed_subject(rank as usize),
                 )
             });
-        shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
+        shared::subject_read_texts(&self.db, &self.taxdb, subjects, row_lookups, PROGRAM)
     }
 
     /// The stop of the prefetch of the batch of `queries` whose reported
     /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
     /// LOSAT's refusal (`shared::batch_prefetch`, after the batches before, `before`: the run's
     /// record of what NCBI's BLAST database data loader loaded for them, `LoadedBefore`).
-    /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
-    /// before (as `read_taxids` reads them, the reported subjects that those reports load,
-    /// `ReportedSubjects::loads`, made of the batches before alone); TBLASTN writes those reports
-    /// after the stop. The outfmt 5 reports before the batch are the queries'
+    /// The outfmt 5 reports before the batch are the queries'
     /// (`shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn prefetch_stop_error(
         &self,
@@ -395,38 +407,15 @@ impl TblastnDatabase {
         before: LoadedBefore<'_>,
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
         queries: &shared::PrefetchQueries<'_>,
-        at_hits: bool,
     ) -> anyhow::Error {
         let subjects = subjects.iter().map(|(ordinal, parsed)| {
             shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
         });
-        let stopped = if at_hits {
-            let before = reported.into_iter().flat_map(|reported| {
-                reported_ranks(before.hits)
-                    .filter(|rank| reported.loads.loaded(*rank))
-                    .map(|rank| {
-                        shared::PrefetchSubject::unflipped(
-                            reported.ordinals[rank],
-                            reported.parsed_subject(rank),
-                        )
-                    })
-            });
-            shared::held_batch_prefetch_stop(
-                &self.db,
-                &self.taxdb,
-                before,
-                std::iter::empty(),
-                subjects,
-                PROGRAM,
-                queries,
-            )
-            .err()
-        } else {
-            let before = reported
-                .into_iter()
-                .flat_map(|reported| Self::loaded_subjects(reported, before));
-            shared::batch_prefetch(&self.db, &self.taxdb, before, subjects, PROGRAM, queries).err()
-        };
+        let before = reported
+            .into_iter()
+            .flat_map(|reported| Self::loaded_subjects(reported, before));
+        let stopped =
+            shared::batch_prefetch(&self.db, &self.taxdb, before, subjects, PROGRAM, queries).err();
         stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
     }
 
@@ -668,85 +657,11 @@ impl<'a> CallReads<'a> {
         }
     }
 
-    /// The batches `spans`, in order, each after the model of the loads reaches it
-    /// (`shared::CallUtf8::reach`): no load of the batch of the call's first read among the
-    /// batches' own, or of a later batch, posts its warning.
-    pub(super) fn reaching<'s>(
-        &'s self,
-        spans: &'s [std::ops::Range<usize>],
-    ) -> impl Iterator<Item = &'s std::ops::Range<usize>> + 's {
-        spans.iter().inspect(move |span| self.reach(span))
-    }
-
     /// `shared::CallUtf8::reach` before the model of the loads of the batch of the queries `span`.
     pub(super) fn reach(&self, span: &std::ops::Range<usize>) {
         if let Some(database) = self.database {
             self.utf8.reach(span, &database.db);
         }
-    }
-
-    /// The XML2 and JSON formats (`xml2`; whose prefetch is modelled only where it stops,
-    /// `prefetch_stop_error`): NCBI's warning of a UTF8String header that a load of the prefetch of
-    /// a batch (of `spans`, in order; their final hit lists in `results`) posts where it is on
-    /// (`shared::scope_utf8_prefetch_post`), by the batch's first query, for the batch's prefetch
-    /// posts, or where it is off a `Hit` of a query's report (`shared::scope_utf8_hit_reads`, in
-    /// `subject_reads`); none from the batch of the call's first read among the batches' own on
-    /// (`reaching`). Nothing for another format.
-    pub(super) fn xml2(
-        &self,
-        xml2: bool,
-        (reported, subject_reads): (
-            &ReportedSubjects,
-            &mut crate::report::query_warnings::SubjectReads,
-        ),
-        results: &[KappaResultHitList],
-        spans: &[std::ops::Range<usize>],
-        after: Option<crate::report::db_subject::RunThrow>,
-    ) -> Result<Vec<(usize, crate::report::diag_log::Posts)>> {
-        let mut posts = Vec::new();
-        let Some(database) = self
-            .database
-            .filter(|database| xml2 && database.scope_utf8_seen())
-        else {
-            return Ok(posts);
-        };
-        for span in self.reaching(spans) {
-            let Some(hitlists) = results.get(span.clone()) else {
-                break;
-            };
-            if shared::prefetch_off(reported.format, seq_aligns_of(hitlists, reported.gapped)) {
-                for (query, hitlist) in span.clone().zip(hitlists) {
-                    let subjects = hitlist.lists().iter().map(|list| {
-                        let rank = list.oid as usize;
-                        (
-                            rank as u32,
-                            reported.ordinals[rank],
-                            reported.parsed_subject(rank),
-                        )
-                    });
-                    let reads = shared::scope_utf8_hit_reads(
-                        &database.db,
-                        &database.taxdb,
-                        after,
-                        subjects,
-                        PROGRAM,
-                    );
-                    subject_reads.set(query, reads);
-                }
-                continue;
-            }
-            let subjects: Vec<shared::PrefetchSubject<'_>> =
-                TblastnDatabase::prefetch_subjects(reported, hitlists, SubjectFetch::Every)
-                    .collect();
-            let warning = shared::scope_utf8_prefetch_post(&database.db, &subjects, PROGRAM)?;
-            if !warning.is_empty() {
-                posts.push((
-                    span.start,
-                    crate::report::diag_log::Posts::of_lines(warning),
-                ));
-            }
-        }
-        Ok(posts)
     }
 
     /// NCBI's warning of the call's first read of a UTF8String header among its batches' own in
@@ -872,27 +787,12 @@ pub(super) struct ReportedSubjects {
     /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
-    /// The first format, whose prefetch the batches ask (`prefetch_format`).
-    pub(super) format: shared::PrefetchFormat,
 }
 
 impl ReportedSubjects {
     /// The sequence of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
-    }
-
-    /// Whether a row of `hitlists` (subjects by rank) loads its subject in the reports: only such
-    /// a row looks a taxonomy name up, and a row whose load throws keeps the names of the rows
-    /// before (`loads`; review 1 of line DBID pfoff-2, H1).
-    pub(super) fn loads_a_row(
-        &self,
-        hitlists: &[super::stage_d_results::KappaResultHitList],
-    ) -> bool {
-        hitlists
-            .iter()
-            .flat_map(super::stage_d_results::KappaResultHitList::lists)
-            .any(|list| !list.hsps.hsps.is_empty() && self.loads.loaded(list.oid as usize))
     }
 
     /// The reported sequences as the library's records name them (`shared::library_subjects`).
@@ -1379,7 +1279,6 @@ pub(super) fn reported_subjects(
         sources,
         loads,
         gapped,
-        format,
     })
 }
 

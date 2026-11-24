@@ -301,11 +301,6 @@ impl BlastpDatabase {
     ) -> Result<Option<crate::report::tabular::TabularNames>> {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, program)
     }
-
-    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
-    pub(super) fn open_for_tabular_rows(&self, program: &str) -> Result<()> {
-        self.taxdb.open_for_rows(&self.db, program)
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-848
@@ -1883,16 +1878,15 @@ impl ListedTitles<'_> {
     /// refusal made here, before any byte is written (a scientific name of any bytes is written
     /// as NCBI's streams write it).
     ///
-    /// NCBI's messages about the taxonomy database go to standard error: those of opening and of
-    /// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
-    /// x_GetTaxonomy`, once per volume and taxid) are returned as `TaxdbNotes`, which
-    /// `write_blastp_xml` writes at the first `Hit` that needs them, and those of the lookup of
-    /// each `Hit` are written there too.
+    /// NCBI's messages about the taxonomy database go to standard error: those of the loads are
+    /// the batches' prefetches' or reads' (`report_prep::prefetch_reported_subjects`, modelled
+    /// before this call); those of opening it where a `Hit`'s lookup opened it are returned as
+    /// `TaxdbNotes`, which `write_blastp_xml` writes at the first `Hit` that asks, and those of the
+    /// lookup of each `Hit` are written there too.
     ///
     /// Of the reported subjects, those that the reports load (`loads`, `hit_loads`: the reads of
-    /// a subject whose `Hit` throws, and of one shown only after it, are never made, so the texts
-    /// of opening the taxonomy database and of a volume's first lookup of a taxid go to the loads
-    /// that make them; review 1 of line DBID pfoff-1, H1).
+    /// a subject whose `Hit` throws, and of one shown only after it, are never made; review 1 of
+    /// line DBID pfoff-1, H1).
     pub(super) fn read_taxids(
         &self,
         database: &BlastpDatabase,
@@ -1943,7 +1937,7 @@ impl ListedTitles<'_> {
         &self,
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
-        rows_open: bool,
+        rows: shared::RowLookups,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         shared::subject_read_texts(
             &database.db,
@@ -1955,30 +1949,25 @@ impl ListedTitles<'_> {
                     self.parsed_subject(rank),
                 )
             }),
-            rows_open,
+            rows,
             self.program,
         )
     }
 
-    /// `shared::scope_utf8_hit_reads` of the subjects of ranks `ranks` (an XML2 or JSON report's
-    /// `Hit`s, in order, of a batch whose prefetch is off).
-    pub(super) fn scope_utf8_hit_reads(
+    /// The open of the taxonomy database by the rows `rows` of the subjects of ranks `ranks`, the
+    /// reports of a query batch whose prefetch is on, after it (`shared::RowLookups::open_after_prefetch`).
+    pub(super) fn open_for_rows(
         &self,
         database: &BlastpDatabase,
-        after: Option<crate::report::db_subject::RunThrow>,
+        rows: shared::RowLookups,
         ranks: impl IntoIterator<Item = usize>,
-    ) -> crate::report::query_warnings::QueryReads {
-        shared::scope_utf8_hit_reads(
+    ) -> Result<()> {
+        rows.open_after_prefetch(
             &database.db,
             &database.taxdb,
-            after,
-            ranks.into_iter().map(|rank| {
-                (
-                    rank as u32,
-                    self.listed.ordinals[rank],
-                    self.parsed_subject(rank),
-                )
-            }),
+            ranks
+                .into_iter()
+                .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank))),
             self.program,
         )
     }
@@ -2039,61 +2028,10 @@ impl ListedTitles<'_> {
         )
     }
 
-    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` (the batch of
-    /// `queries`), for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
-    /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
-    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`),
-    /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
-    /// traceback beyond the cut, which no report reads), recorded where the batch stops. Of both,
-    /// the subjects that those reports load (`loads`, `hit_loads` of `before`: not one whose
-    /// `Hit` throws, nor one shown only after it; review 1 of line DBID pfoff-1, H1). `Ok`: the
-    /// warning of a UTF8String header that a load of a batch that does not stop posts
-    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
-    pub(super) fn batch_prefetch_stop(
-        &self,
-        database: &BlastpDatabase,
-        before: &[Option<BlastpHitList>],
-        loaded: impl IntoIterator<Item = usize>,
-        loads: &HitLoads,
-        ranks: impl IntoIterator<Item = usize>,
-        queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<Vec<u8>> {
-        shared::held_batch_prefetch_stop(
-            &database.db,
-            &database.taxdb,
-            Self::reported_ranks(before)
-                .filter(|&rank| loads.loaded(rank))
-                .map(|rank| self.prefetch_subject(rank)),
-            loaded
-                .into_iter()
-                .filter(|&rank| loads.loaded(rank))
-                .map(|rank| self.prefetch_subject(rank)),
-            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
-            self.program,
-            queries,
-        )
-    }
-
-    /// NCBI's warning of a UTF8String header that a load of the prefetch of the subjects of ranks
-    /// `ranks` (a batch of the XML2 and JSON formats whose prefetch is on and does not stop) posts
-    /// (`shared::scope_utf8_prefetch_post`); empty where none.
-    pub(super) fn scope_utf8_prefetch(
-        &self,
-        database: &BlastpDatabase,
-        ranks: impl IntoIterator<Item = usize>,
-    ) -> Result<Vec<u8>> {
-        let subjects: Vec<shared::PrefetchSubject<'_>> = ranks
-            .into_iter()
-            .map(|rank| self.prefetch_subject(rank))
-            .collect();
-        shared::scope_utf8_prefetch_post(&database.db, &subjects, self.program)
-    }
-
     /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader
     /// loaded for a call's batches (`shared::TaxdbRun::note_loaded`): psiblast's round of a query,
-    /// a call of its own, for the stop of a later round's or query's prefetch, and the batches
-    /// before a stop of the XML2 and JSON formats; `batch`: the query batch of the loads (the
+    /// a call of its own, for the stop of a later round's or query's prefetch; `batch`: the query
+    /// batch of the loads (the
     /// round's query, `TaxdbRun::note_loaded`).
     pub(super) fn note_loaded<I: IntoIterator<Item = usize>>(
         &self,

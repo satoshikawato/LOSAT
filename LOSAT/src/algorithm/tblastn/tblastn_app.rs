@@ -2172,10 +2172,6 @@ fn search(
             .map(|format| super::stage_e_report::format_number(format.outfmt));
         let first_prefetches = first_number.is_some()
             && crate::algorithm::common::database::prefetches_subjects(Some(prefetch_format));
-        // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
-        // taxonomy texts at each `Hit`: of the prefetch only its stop
-        // (`shared::held_batch_prefetch_stop`).
-        let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
         // The query records that NCBI's scope holds at the prefetch of the batch of the searched
         // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): the PSSM's
         // query of `-in_pssm` (`PsiSearch::query_scope`), else the input records that NCBI's
@@ -2203,7 +2199,7 @@ fn search(
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
         // the batches before (below), which look the taxonomy up first.
-        let prefetch_stop = if database.is_some() && (first_prefetches || first_xml2) {
+        let prefetch_stop = if database.is_some() && first_prefetches {
             let spans: Vec<std::ops::Range<usize>> = query_input
                 .batches(batch_size)
                 .into_iter()
@@ -2421,23 +2417,11 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            let xml2_reads = (reported, &mut subject_reads);
-            let after = super::database::after_throw(
-                &outputs.formats,
-                (outputs.other_outfmts, resolved.html.is_some()),
-            );
-            prefetch_posts.extend(reads.xml2(
-                first_xml2,
-                xml2_reads,
-                &results,
-                &batch_spans,
-                after.run(),
-            )?);
             if first_prefetches && (taxdb_found || database.parsed_seqids()) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
-                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
-                // the taxonomy database before a later batch's prefetch
-                // (`TaxdbRun::open_for_rows`).
+                // taxid 0 too, and the XML2 and JSON `Hit`s each taxid that is not 0, which the
+                // prefetch does not: the rows of a batch with hits may open the taxonomy database
+                // before a later batch's prefetch (`shared::RowLookups`).
                 let first_spec = outputs
                     .formats
                     .first()
@@ -2456,15 +2440,18 @@ fn search(
                 let pairwise = first_report
                     .and_then(crate::report::pairwise::PairwiseView::of)
                     .and(pairwise_reading(&resolved, &outputs.formats));
-                let plural_names = taxdb_found
-                    && first_spec
-                        .as_ref()
-                        .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
+                let row_lookups = if taxdb_found {
+                    crate::algorithm::common::database::RowLookups::of_first_format(
+                        first_report,
+                        first_spec
+                            .as_ref()
+                            .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid),
+                    )
+                } else {
+                    crate::algorithm::common::database::RowLookups::None
+                };
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    if plural_names && reported.loads_a_row(hitlists) {
-                        database.open_for_tabular_rows()?;
-                    }
-                    Ok::<(), anyhow::Error>(())
+                    database.open_for_rows(reported, hitlists, row_lookups)
                 };
                 for span in &batch_spans {
                     // No batch after the run's end is prefetched, nor read one by one.
@@ -2512,7 +2499,7 @@ fn search(
                                             reported,
                                             shown,
                                             rows,
-                                            plural_names,
+                                            row_lookups,
                                             pairwise,
                                         )?,
                                     );
@@ -2599,7 +2586,6 @@ fn search(
                 &subjects,
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
                     .after_xml_reports(xml_before.as_ref()),
-                first_xml2,
             );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                 Ok(failure) => failed = Some((span, failure.error)),

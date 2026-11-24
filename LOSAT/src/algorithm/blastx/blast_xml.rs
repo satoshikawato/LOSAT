@@ -1510,7 +1510,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
                     posts.hit(sink.position(), &hit, first as u32, |texts| {
-                        taxdb_printer.at_names(first, names, texts)
+                        taxdb_printer.at_names(names, texts)
                     })?;
                     sink.hit(&hit, |hsps| {
                         for list in lists[range]

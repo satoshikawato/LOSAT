@@ -3432,14 +3432,6 @@ fn run_batch_loop(
             &query_runs.input_records[input],
         )
     };
-    // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
-    // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
-    let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
-        matches!(
-            report::output_format(format.outfmt),
-            report::TblastxOutputFormat::Xml2(_)
-        )
-    });
     // Whether the first format writes the texts of the subjects that a query's report reads one
     // by one where it reads each (`ReportFormat::places_subject_reads`).
     let first_report = outputs
@@ -3479,14 +3471,21 @@ fn run_batch_loop(
         crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
     );
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
-    // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
-    // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
-    let plural_names = outputs.formats.first().is_some_and(|format| {
-        matches!(
-            report::output_format(format.outfmt),
-            report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
-        )
-    });
+    // and the XML2 and JSON `Hit`s each taxid that is not 0, which the prefetch does not: the rows
+    // of a batch with hits may open the taxonomy database before a later batch's prefetch
+    // (`shared::RowLookups`).
+    let row_lookups = crate::algorithm::common::database::RowLookups::of_first_format(
+        outputs
+            .formats
+            .first()
+            .and_then(crate::api::local_blast::FormatOutput::report_format),
+        outputs.formats.first().is_some_and(|format| {
+            matches!(
+                report::output_format(format.outfmt),
+                report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
+            )
+        }),
+    );
     // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
     // formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a
     // custom tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
@@ -3943,55 +3942,6 @@ fn run_batch_loop(
                     }
                 }};
             }
-            let off = crate::algorithm::common::database::prefetch_off(
-                prefetch_format,
-                super::super::database::seq_aligns_of(ordered),
-            );
-            if xml2_prefetch && !run_loads.ended() && off {
-                let (titles, mut reads) = (reports.titles.borrow(), reports.reads.borrow_mut());
-                super::super::database::scope_utf8_hit_reads(
-                    database,
-                    ordered,
-                    &titles,
-                    start,
-                    run_loads.answer().run(),
-                    &mut reads,
-                );
-            }
-            if xml2_prefetch
-                && !run_loads.ended()
-                && database.parsed_seqids()
-                && !ordered.is_empty()
-                && !off
-            {
-                let scope = || batch_scope(input_start..input_end);
-                // The stop, or the warning of a UTF8String header that a load's lookup reads. The
-                // batches before: their queries (`done.spans`, in the numbering of `done.hits`),
-                // for what their reports load (`database::batch_prefetch_stop`).
-                match super::super::database::batch_prefetch_stop(
-                    database,
-                    &done.hits,
-                    done.searched.len(),
-                    &done.spans,
-                    (run_loads.answer(), prefetch_format),
-                    &|hsp| {
-                        super::super::database::hit_identities(
-                            &reports.stores.borrow(),
-                            hsp,
-                            query_records[reports.queries_written.get() + hsp.hit.q_idx as usize]
-                                .seq(),
-                            &query_code,
-                            &db_code,
-                        )
-                    },
-                    ordered,
-                    &reports.titles.borrow(),
-                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope),
-                ) {
-                    Ok(warning) => warnings[start].lines(&warning),
-                    Err(error) => prefetch_failed!(error),
-                }
-            }
             if prefetches && !run_loads.ended() && (taxdb_found || database.parsed_seqids()) {
                 // The batch's Seq-aligns (`database::seq_aligns_of`).
                 let seq_aligns = super::super::database::seq_aligns_of(ordered);
@@ -4077,7 +4027,7 @@ fn run_batch_loop(
                                     database,
                                     ordinals,
                                     &titles,
-                                    plural_names,
+                                    row_lookups,
                                 )?;
                                 drop(titles);
                                 let mut reads = reports.reads.borrow_mut();
@@ -4097,13 +4047,14 @@ fn run_batch_loop(
                             // Only a row whose subject a report loads looks a name up: a row
                             // whose load throws keeps the names of the rows before (review 1 of
                             // line DBID pfoff-2, H1).
-                            if plural_names
-                                && ordered[from..to]
+                            super::super::database::open_for_rows(
+                                database,
+                                row_lookups,
+                                ordered[from..to]
                                     .iter()
-                                    .any(|hsp| loads.loaded(hsp.hit.s_idx as usize))
-                            {
-                                database.open_for_tabular_rows()?;
-                            }
+                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize)),
+                                &reports.titles.borrow(),
+                            )?;
                         }
                     }
                 } else if !ordered.is_empty() {
@@ -4154,9 +4105,12 @@ fn run_batch_loop(
                         Ok(messages) => messages,
                         Err(error) => prefetch_failed!(error),
                     };
-                    if plural_names && !ordered.is_empty() {
-                        database.open_for_tabular_rows()?;
-                    }
+                    super::super::database::open_for_rows(
+                        database,
+                        row_lookups,
+                        ordered.iter(),
+                        &reports.titles.borrow(),
+                    )?;
                     warnings[start].append(&messages);
                 }
             }

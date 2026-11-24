@@ -390,6 +390,9 @@ pub(crate) struct ReportedSubjects {
     /// parsed Seq-ids, by rank (`shared::read_reported_taxonomy`; empty as `taxonomy`).
     parsed_taxonomy: Vec<Vec<HitTaxonomy>>,
     taxdb_notes: shared::TaxdbNotes,
+    /// The reported ranks whose taxonomy the XML2 and JSON reports read (`read_taxonomy`), those
+    /// that the reports load; `None` for another format.
+    xml_ranks: Option<std::collections::BTreeSet<usize>>,
     /// What the batch's reports do at the `Hit` of each subject, by rank (`HitLoads`, the one
     /// answer: a subject whose `Hit` throws, one that no report loads), which the refusals, the
     /// names, the taxonomy reads and the run's record of the loads take.
@@ -596,9 +599,8 @@ impl ReportedSubjects {
     /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
     /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
     /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
-    /// `prefetch_runs`: whether the batch's prefetch runs (`prefetched`, or the XML2 and JSON
-    /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
-    /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
+    /// The batch's prefetch stops the run where it reads a subject whose lookup fails on a file
+    /// with NCBI's exception (`prefetched`, `shared::batch_prefetch`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
     /// one by one (`shared::ParsedShown::one_by_one`). `cut`: the formatter's cut of each query's
     /// lists to the hit list size where RPSTBLASTN merges several volumes
@@ -630,7 +632,6 @@ impl ReportedSubjects {
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
         prefetched: bool,
-        prefetch_runs: bool,
         one_by_one: bool,
         cut: usize,
         after: (
@@ -648,7 +649,7 @@ impl ReportedSubjects {
         // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
         // run there (`shared::batch_prefetch`), before any of its reports: none of their checks
         // and reads is made.
-        let reports = !(prefetch_runs
+        let reports = !(prefetched
             && parsed
                 .values()
                 .any(|subject| subject.prefetch_stops().is_some()));
@@ -923,36 +924,18 @@ impl ReportedSubjects {
         reported.loads = loads.renamed(|oid| rank.get(&oid).copied());
         if reports && taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
-            // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
-            // sequences with a title are the reported ones.
-            // A sequence with parsed Seq-ids has the taxid of each definition line
-            // (`shared::read_reported_taxonomy`). Of the reported ones, those that the reports
-            // load (`HitLoads::loaded`): the reads of a subject whose `Hit` throws, and of one
-            // shown only after it, are never made, so the texts of opening the taxonomy database
-            // and of a volume's first lookup of a taxid go to the loads that make them, in this
-            // batch or a later one (review 1 of line DBID pfoff-1, H1).
-            let shown: std::collections::BTreeSet<usize> = listed
-                .iter()
-                .enumerate()
-                .filter(|(rank, (_, title))| title.is_some() && reported.loads.loaded(*rank))
-                .map(|(rank, _)| rank)
-                .collect();
-            // A taxonomy database LOSAT cannot read as NCBI does is LOSAT's refusal of the XML2
-            // document (a run that holds its output drops it).
-            (
-                reported.taxids,
-                reported.taxonomy,
-                reported.parsed_taxonomy,
-                reported.taxdb_notes,
-            ) = shared::read_reported_taxonomy(
-                &database.db,
-                &database.taxdb,
-                &reported.ordinals,
-                &shown,
-                &reported.parsed,
-                database.program,
-            )
-            .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
+            // JSON formats only, after the batch's prefetch (`read_taxonomy`); the sequences with
+            // a title are the reported ones. Of those, the ones that the reports load
+            // (`HitLoads::loaded`): the reads of a subject whose `Hit` throws, and of one shown
+            // only after it, are never made (review 1 of line DBID pfoff-1, H1).
+            reported.xml_ranks = Some(
+                listed
+                    .iter()
+                    .enumerate()
+                    .filter(|(rank, (_, title))| title.is_some() && reported.loads.loaded(*rank))
+                    .map(|(rank, _)| rank)
+                    .collect(),
+            );
         }
         Ok(reported)
     }
@@ -1045,30 +1028,6 @@ impl ReportedSubjects {
         }
     }
 
-    /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
-    /// and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`), after the
-    /// lookups of the reports of the batches before, which the run's record holds: BLASTX reads
-    /// each batch's taxonomy (`for_batch`) and writes its reports before it searches the next, and
-    /// a batch that stops reads none of its own. `Ok`: the warning of a UTF8String header that a
-    /// load of a batch that does not stop posts (`shared::batch_prefetch_stop`), written where the
-    /// batch's prefetch comes.
-    pub(crate) fn batch_prefetch_stop(
-        &self,
-        database: &BlastxDatabase,
-        batches: &[BatchResults],
-        gapped: bool,
-        queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<Vec<u8>> {
-        shared::batch_prefetch_stop(
-            &database.db,
-            &database.taxdb,
-            self.prefetch_subjects(batches, gapped),
-            database.program,
-            queries,
-        )
-    }
-
     /// The sequences that the prefetch of the query batch whose hit lists are `batches` reads: of
     /// the lists that the reports show (`report::reported`).
     fn prefetch_subjects<'s>(
@@ -1100,8 +1059,8 @@ impl ReportedSubjects {
     /// before the next is searched, so a run whose later rows may look a tax id up refuses at
     /// its first batch, before any byte (also where none of them does, as before).
     /// `places`: the format's writer writes each query's texts where it reads each subject
-    /// (`query_reads`; outfmt 0, 5 and the tabular rows); `rows_open`: the rows look the plural
-    /// names up (`shared::subject_read_texts`). The subjects are read in the order of the hit
+    /// (`query_reads`; outfmt 0, 5, 13 to 16 and the tabular rows); `row_lookups`: the rows that
+    /// look a taxid up (`shared::subject_read_texts`). The subjects are read in the order of the hit
     /// lists, or, for the pairwise report (`pairwise`: how it reads them), those that it shows in
     /// the order that it reads them (`pairwise_read_order`, `PairwiseReads::subjects`).
     #[allow(clippy::too_many_arguments)]
@@ -1112,7 +1071,7 @@ impl ReportedSubjects {
         gapped: bool,
         (rows, format): (SubjectFetch, shared::PrefetchFormat),
         places: bool,
-        rows_open: bool,
+        row_lookups: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
     ) -> Result<()> {
         if rows == SubjectFetch::Never && shared::prefetch_always_off(format) {
@@ -1160,7 +1119,7 @@ impl ReportedSubjects {
                     &database.db,
                     &database.taxdb,
                     subjects,
-                    rows_open,
+                    row_lookups,
                     database.program,
                 )?;
                 if reads.is_empty() {
@@ -1176,42 +1135,6 @@ impl ReportedSubjects {
             }
         }
         Ok(())
-    }
-
-    /// The XML2 and JSON formats, a batch whose prefetch is off (`batches`): each query's report's
-    /// `Hit` loads (`shared::scope_utf8_hit_reads`, the hit lists' reported subjects in order),
-    /// which the writer places at each `Hit` (`query_reads`).
-    pub(crate) fn scope_utf8_hit_reads(
-        &mut self,
-        database: &BlastxDatabase,
-        batches: &[BatchResults],
-        gapped: bool,
-        after: Option<crate::report::db_subject::RunThrow>,
-    ) {
-        if !database.db.scope_utf8_seen() {
-            return;
-        }
-        for batch in batches {
-            for (index, lists) in batch.queries.iter().enumerate() {
-                let subjects = lists
-                    .iter()
-                    .filter(|list| super::report::reads_list(list, gapped, SubjectFetch::Every))
-                    .map(|list| {
-                        let rank = list.oid;
-                        (rank as u32, self.ordinals[rank], self.parsed_subject(rank))
-                    });
-                let reads = shared::scope_utf8_hit_reads(
-                    &database.db,
-                    &database.taxdb,
-                    after,
-                    subjects,
-                    database.program,
-                );
-                if !reads.is_empty() {
-                    self.query_reads.insert(batch.query_ordinal + index, reads);
-                }
-            }
-        }
     }
 
     /// The messages of the query `ordinal`'s own fetches (`fetch_by_query`; empty where the
@@ -1425,6 +1348,35 @@ impl ReportedSubjects {
     /// batch.
     pub(crate) fn taxdb_notes(&self) -> &shared::TaxdbNotes {
         &self.taxdb_notes
+    }
+
+    /// The XML2 and JSON formats: the taxid of each reported sequence that the reports load
+    /// (`for_batch`), and what the taxonomy database says about it
+    /// (`shared::read_reported_taxonomy`; a sequence with parsed Seq-ids has the taxid of each
+    /// definition line), read after the batch's prefetch or its reports' reads one by one
+    /// (`native::reported_batch`), whose loads write their texts, so that the texts of opening the
+    /// database that a `Hit`'s lookup makes are the `Hit`'s (`TaxdbNotes`). A taxonomy database
+    /// LOSAT cannot read as NCBI does is LOSAT's refusal of the XML2 document (a run that holds its
+    /// output drops it). Nothing for another format.
+    pub(crate) fn read_taxonomy(&mut self, database: &BlastxDatabase) -> Result<()> {
+        let Some(ranks) = self.xml_ranks.take() else {
+            return Ok(());
+        };
+        (
+            self.taxids,
+            self.taxonomy,
+            self.parsed_taxonomy,
+            self.taxdb_notes,
+        ) = shared::read_reported_taxonomy(
+            &database.db,
+            &database.taxdb,
+            &self.ordinals,
+            &ranks,
+            &self.parsed,
+            database.program,
+        )
+        .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
+        Ok(())
     }
 
     /// What the batch's reports do at the `Hit` of each subject, by rank (`for_batch`).

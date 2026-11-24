@@ -1030,11 +1030,9 @@ pub(super) struct ReportedAsks {
     joined: bool,
     taxonomy: bool,
     words: crate::report::tabular::PrintedIds,
+    /// Whether the batches' prefetch reads the subjects where it is on: a subject whose lookup
+    /// fails on a file stops the run in it (`shared::batch_prefetch`).
     prefetched: bool,
-    /// Whether the batches' prefetch runs where it is on (`prefetched`, or the XML2 and JSON
-    /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
-    /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
-    prefetch_runs: bool,
     /// Whether the reports may read the reported sequences one by one
     /// (`common::database::prefetch_may_be_off` of the first format), for the reader of the
     /// headers (`HeaderReader::new`).
@@ -1076,11 +1074,6 @@ impl ReportedAsks {
             },
             // Outfmt 10 and 20 prefetch as 6 does (`ResolvedOptions::prefetch_format`).
             prefetched: prefetches_subjects(Some(options.prefetch_format()))
-                && !crate::algorithm::common::database::prefetch_always_off(
-                    options.prefetch_format(),
-                ),
-            prefetch_runs: (prefetches_subjects(Some(options.prefetch_format()))
-                || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(
                     options.prefetch_format(),
                 ),
@@ -1138,9 +1131,6 @@ impl ReportedAsks {
         asks.prefetched = options
             .first()
             .is_some_and(|options| Self::of(options).prefetched);
-        asks.prefetch_runs = options
-            .first()
-            .is_some_and(|options| Self::of(options).prefetch_runs);
         asks.one_by_one = options
             .first()
             .is_some_and(|options| Self::of(options).one_by_one);
@@ -1159,7 +1149,6 @@ impl ReportedAsks {
             taxonomy: self.taxonomy || other.taxonomy,
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
-            prefetch_runs: self.prefetch_runs || other.prefetch_runs,
             one_by_one: self.one_by_one || other.one_by_one,
             throw: self.throw.and(other.throw),
             changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
@@ -1422,7 +1411,6 @@ pub(super) fn reported_batch(
         asks.taxonomy,
         asks.words,
         asks.prefetched && !unfetched,
-        asks.prefetch_runs && !unfetched,
         unfetched,
         options.shown_lists(),
         (
@@ -1449,10 +1437,9 @@ pub(super) fn reported_batch(
     // texts of opening it at the run's first lookup, a volume's lookup of a
     // taxid once per run): after the reader's messages of the reader batch,
     // which every batch loop writes before it calls this, and before the
-    // warnings of its first query (`report::render_queries`). Outfmt 0, 5, 6
-    // and 7, and with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 and 12
-    // (`database::prefetches_subjects`); XML2 and JSON write theirs at
-    // each `Hit` (`TaxdbPrinter`). Without `taxdb.bti` nothing is read. A
+    // warnings of its first query (`report::render_queries`). Outfmt 0 to 7 and
+    // 13 to 18, and with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 and 12
+    // (`database::prefetches_subjects`). Without `taxdb.bti` nothing is read. A
     // refusal comes after the reports of the batches before, as the refusals
     // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of
     // the taxonomy database (`TaxonomyRefusal`) drops what an outfmt 5 run
@@ -1490,11 +1477,15 @@ pub(super) fn reported_batch(
             let first_report = ReportFormat::from_number(i32::from(options.outfmt));
             let places = first_report.is_some_and(ReportFormat::places_subject_reads);
             // A field list with a plural name and the organism report look every taxid up, taxid
-            // 0 too: the first row or report line opens the taxonomy database after the first
-            // read (`common::database::subject_read_texts`).
-            let rows_open = options
-                .tabular
-                .is_some_and(|spec| spec.looks_up_every_taxid());
+            // 0 too, and the XML2 and JSON `Hit`s each taxid that is not 0: the first such row,
+            // report line or `Hit` opens the taxonomy database after its read
+            // (`common::database::RowLookups`).
+            let row_lookups = crate::algorithm::common::database::RowLookups::of_first_format(
+                first_report,
+                options
+                    .tabular
+                    .is_some_and(|spec| spec.looks_up_every_taxid()),
+            );
             // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
             // reads them.
             let pairwise = options.pairwise_reading();
@@ -1504,7 +1495,7 @@ pub(super) fn reported_batch(
                 options.gapped,
                 (rows, prefetch_format),
                 places,
-                rows_open,
+                row_lookups,
                 pairwise,
             )?;
             if options.outfmt == 5 {
@@ -1524,24 +1515,10 @@ pub(super) fn reported_batch(
                 .map_err(reported_error)?;
             messages.write(diagnostics, None)?;
         }
-    } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
-        // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
-        // prefetch only its stop, or the warning of a UTF8String header that a load's lookup reads
-        // (`ReportedSubjects::batch_prefetch_stop`).
-        let warning = reported
-            .batch_prefetch_stop(database, results, options.gapped, prefetch_queries)
-            .map_err(reported_error)?;
-        diagnostics.write_all(&warning)?;
-    } else if matches!(options.outfmt, 13..=16) && database.parsed_seqids() {
-        // The XML2 and JSON formats, a batch whose prefetch is off: the `Hit`s load their subjects
-        // one by one.
-        reported.scope_utf8_hit_reads(
-            database,
-            results,
-            options.gapped,
-            crate::report::db_subject::FormatThrow::of_run([asks.throw]),
-        );
     }
+    // The XML2 and JSON formats: the taxonomy of the `Hit`s, after the batch's prefetch or its
+    // reports' reads (`ReportedSubjects::read_taxonomy`).
+    reported.read_taxonomy(database)?;
     // The batch's prefetch (or its reports' reads one by one) did not stop: the run's record of
     // what NCBI's data loader loaded for it, for a later batch's stop
     // (`ReportedSubjects::note_loaded`, `BatchPrefetch::loads`): the subjects of its Seq-aligns

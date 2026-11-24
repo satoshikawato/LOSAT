@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "losat_web_e2a"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "LOSAT" / "tests"))
+from losat_wording import losat_bytes, losat_output_bytes  # noqa: E402
 from run_oracle import ENGINE  # noqa: E402
 
 REJECTION_MARKERS = (b"which LOSAT does not reproduce", b"not supported by LOSAT")
@@ -574,6 +576,12 @@ def main() -> int:
                     run = subprocess.run(words, cwd=ENGINE, capture_output=True, input=stdin, env=env, timeout=60)
             except subprocess.TimeoutExpired as expired:
                 run = subprocess.CompletedProcess(expired.cmd, -9, b"", b"<timeout>")
+            # AGENTS.md rule 8: NCBI's bytes are compared in LOSAT's words (the `-out` file and the
+            # pipe's bytes are mapped on their own, before the `<out>`/`<fifo>` markers join the output).
+            words_of = label == "ncbi"
+            if words_of:
+                run.stdout = bytes(losat_output_bytes(run.stdout))
+                run.stderr = bytes(losat_bytes(run.stderr))
             if writer:
                 writer.kill()
                 writer.wait()
@@ -583,9 +591,14 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     reader.kill()
                     reader.wait()
-                run.stdout += b"<fifo>" + Path(f"{out_fifo}.read").read_bytes()
+                piped = Path(f"{out_fifo}.read").read_bytes()
+                run.stdout += b"<fifo>" + (bytes(losat_output_bytes(piped)) if words_of else piped)
             if "{OUT}" in argv:
-                run.stdout += b"<out>" + (out.read_bytes() if out.exists() else b"<missing>")
+                if not out.exists():
+                    run.stdout += b"<out><missing>"
+                else:
+                    written = out.read_bytes()
+                    run.stdout += b"<out>" + (bytes(losat_output_bytes(written)) if words_of else written)
             runs.append(run)
         ncbi, ours = runs
         result = "timeout" if -9 in (ncbi.returncode, ours.returncode) else classify(ncbi, ours)

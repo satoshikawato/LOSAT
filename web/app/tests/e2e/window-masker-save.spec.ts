@@ -426,7 +426,7 @@ test.describe('real reactors and native CLI parity', () => {
       const countsBytes = await downloadToolActiveTab(page);
       lastCountsBytes = countsBytes;
 
-      // Verify counts bytes match native windowmasker -mk_counts -sformat <fmt>.
+      // Check counts bytes match native windowmasker -mk_counts -sformat <fmt>.
       const nativeMk = runNativeWindowMasker(
         ['-mk_counts', '-sformat', fmt, '-in', 'genome.fa', '-out', `wmasker.${fmt}`],
         nativeDir,
@@ -481,7 +481,7 @@ test.describe('real reactors and native CLI parity', () => {
       });
       expect(sha256(warnings), `${fmt} BLASTN warnings`).toBe(nativeBn.stderrSha256);
 
-      // Verify Run details show made origin without a URL line.
+      // Check Run details show made origin without a URL line.
       await chooseRun(page, bnRun);
       await page.getByTestId('results-view-details').click();
       await expect(page.getByTestId('run-window-masker')).toContainText(

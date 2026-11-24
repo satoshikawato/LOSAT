@@ -215,7 +215,7 @@ test.describe('WindowMasker -mk_counts -sformat obinary local measurements', () 
       });
       const heapAfter = await readPageHeapBytes(page);
 
-      // Verify SHA-256 matches native byte-for-byte via Download.
+      // Check SHA-256 matches native byte-for-byte via Download.
       await pickRun(page, 1);
       await page.getByTestId('results-view-outputs').click();
       await page.getByTestId('tool-tab-file-0').click();

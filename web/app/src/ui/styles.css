@@ -2619,9 +2619,9 @@ pre.range-text {
 .replace-dialog {
   max-width: min(32rem, calc(100vw - 24px));
   padding: 16px 20px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--group);
   color: var(--fg);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
 }
@@ -2645,4 +2645,8 @@ pre.range-text {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.replace-dialog-actions .primary-action {
+  width: auto;
 }

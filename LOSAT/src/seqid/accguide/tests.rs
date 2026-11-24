@@ -161,10 +161,16 @@ fn bit_ranges_match_a_bit_vector_in_any_order() {
             let left = next(150);
             let right = left + next(10);
             let set = next(3) != 0;
-            if set {
-                bits.set_range(left, right);
+            // BitMagic takes the two ends in either order.
+            let (first, second) = if next(4) == 0 {
+                (right, left)
             } else {
-                bits.clear_range(left, right);
+                (left, right)
+            };
+            if set {
+                bits.set_range(first, second);
+            } else {
+                bits.clear_range(first, second);
             }
             plain[left as usize..=right as usize].fill(set);
             let mut expected = Vec::new();
@@ -578,5 +584,76 @@ fn special2_ranges_add_as_from_the_text() {
         };
         assert!(specials(&numeric) == specials(&text), "{letters}+{digits}");
         assert!(!specials(&numeric)[0].4.is_empty());
+    }
+}
+
+/// The emplace and set of `x_AddSpecial` for a small special as NCBI does it: the bits are
+/// cleared in the hinted option before the option of the value is searched.
+fn add_to_options_as_ncbi(
+    options: &mut Vec<(BitRanges, AccInfo)>,
+    prev: Option<usize>,
+    left: u32,
+    right: u32,
+    value: AccInfo,
+) -> usize {
+    let same = |option: &(BitRanges, AccInfo)| option.1 & !F_FALLBACK == value & !F_FALLBACK;
+    let mut index = match prev {
+        Some(prev) => {
+            options[prev].0.clear_range(left, right);
+            (0..=prev)
+                .rev()
+                .find(|&it| same(&options[it]))
+                .unwrap_or(prev + 1)
+        }
+        None => 0,
+    };
+    while index < options.len() && !same(&options[index]) {
+        index += 1;
+    }
+    if index == options.len() {
+        options.push((BitRanges::default(), value));
+    }
+    options[index].0.set_range(left, right);
+    options[index].1 = value;
+    index
+}
+
+/// `add_to_options` (which skips the clearing when the hinted option has the value) leaves
+/// the options and the hint as NCBI's order does, for random ranges, values and hints.
+#[test]
+fn small_special_options_add_as_ncbi_s() {
+    let mut state = 0x1234_5678_9abc_def1_u64;
+    let mut next = |bound: u32| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % u64::from(bound)) as u32
+    };
+    let values = [
+        acc(SEQID_EMBL, OTHER, PROT),
+        acc(SEQID_DDBJ, OTHER, PROT),
+        acc(SEQID_EMBL, OTHER, PROT) | F_FALLBACK,
+        acc(SEQID_GENBANK, OTHER, PROT),
+    ];
+    for round in 0..400 {
+        let (mut ours, mut ncbi) = (Vec::new(), Vec::new());
+        let mut hint = None;
+        for _ in 0..(round % 60 + 1) {
+            let left = next(200);
+            let right = left + next(12);
+            let value = values[next(4) as usize];
+            let prev = if next(5) == 0 { None } else { hint };
+            let a = AccGuide::add_to_options(&mut ours, prev, left, right, value);
+            let b = add_to_options_as_ncbi(&mut ncbi, prev, left, right, value);
+            assert_eq!(a, b, "round {round}");
+            let plain = |options: &Vec<(BitRanges, AccInfo)>| -> Vec<(Vec<(u32, u32)>, AccInfo)> {
+                options
+                    .iter()
+                    .map(|(bits, v)| (bits.0.clone(), *v))
+                    .collect()
+            };
+            assert_eq!(plain(&ours), plain(&ncbi), "round {round}");
+            hint = Some(a);
+        }
     }
 }

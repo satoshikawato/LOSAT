@@ -94,9 +94,21 @@ fn partition_point_from_end<T>(items: &[T], before: impl Fn(&T) -> bool) -> usiz
 }
 
 impl BitRanges {
-    /// `set_range(left, right)`.
+    /// `set_range(left, right)`: the bits from `left` to `right`, or from `right` to `left`.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:2377-2378
     fn set_range(&mut self, left: u32, right: u32) {
+        let (left, right) = (left.min(right), left.max(right));
         let ranges = &mut self.0;
+        // A range after every range is appended (most ranges: the guide lists the ranges of a
+        // key in increasing order).
+        if ranges
+            .last()
+            .is_none_or(|&(_, end)| end.saturating_add(1) < left)
+        {
+            ranges.push((left, right));
+            return;
+        }
         // The ranges that touch or overlap [left, right].
         let first = partition_point_from_end(ranges, |&(_, end)| end.saturating_add(1) < left);
         let last = partition_point_from_end(ranges, |&(start, _)| start <= right.saturating_add(1));
@@ -110,8 +122,12 @@ impl BitRanges {
         }
     }
 
-    /// `clear_range(left, right)`.
+    /// `clear_range(left, right)`, which is `set_range` to 0 (so with `left` and `right` in
+    /// either order).
+    ///
+    /// NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:1216-1217,2377-2378
     fn clear_range(&mut self, left: u32, right: u32) {
+        let (left, right) = (left.min(right), left.max(right));
         let ranges = &mut self.0;
         let first = partition_point_from_end(ranges, |&(_, end)| end < left);
         let last = partition_point_from_end(ranges, |&(start, _)| start <= right);
@@ -403,10 +419,32 @@ fn digits_value(digits: &[u8]) -> u32 {
         .fold(0, |number, &c| number * 10 + u32::from(c - b'0'))
 }
 
-/// `number` (of at least as many digits) with its last digits replaced by `digits`.
-fn with_last_digits(number: u32, digits: &[u8]) -> u32 {
+/// The digits of a range `<low>[-<high>]` as numbers with their counts (an empty high when
+/// there is no `-`), when both are ASCII digits alone, at most `max` (at most 9) of them.
+fn range_numbers(range: &[u8], max: usize) -> Option<[(u32, usize); 2]> {
+    let mut parts = [(0, 0); 2];
+    let mut part = 0;
+    for &c in range {
+        if c == b'-' && part == 0 {
+            part = 1;
+            continue;
+        }
+        let digit = c.wrapping_sub(b'0');
+        let (number, count) = &mut parts[part];
+        if digit > 9 || *count == max {
+            return None;
+        }
+        *number = *number * 10 + u32::from(digit);
+        *count += 1;
+    }
+    Some(parts)
+}
+
+/// `number` (of at least `count` digits) with its last `count` digits (at most 9) replaced by
+/// those of `digits`.
+fn with_last_digits(number: u32, (digits, count): (u32, usize)) -> u32 {
     // Divisions by constants (multiplications in the machine code).
-    let cleared = match digits.len() {
+    let cleared = match count {
         0 => number,
         1 => number / 10 * 10,
         2 => number / 100 * 100,
@@ -419,7 +457,7 @@ fn with_last_digits(number: u32, digits: &[u8]) -> u32 {
         9 => number / 1_000_000_000 * 1_000_000_000,
         _ => 0,
     };
-    cleared + digits_value(digits)
+    cleared + digits
 }
 
 /// Writes `number` (below 10 to the power of the length of `text`) into `text` as digits.
@@ -621,17 +659,36 @@ impl AccGuide {
         right: u32,
         value: AccInfo,
     ) {
-        let same = |option: &(BitRanges, AccInfo)| option.1 & !F_FALLBACK == value & !F_FALLBACK;
         let hint = hints
             .prev_small_special
             .filter(|&(slot, _)| specials.small_options[slot].0 == from_pfx);
-        let slot = match hint {
-            Some((slot, _)) => slot,
-            None => specials.slot(from_pfx),
+        let (slot, prev) = match hint {
+            Some((slot, prev)) => (slot, Some(prev)),
+            None => (specials.slot(from_pfx), None),
         };
         let options = &mut specials.small_options[slot].1;
-        let mut index = match hint {
-            Some((_, prev)) => {
+        let index = Self::add_to_options(options, prev, left, right, value);
+        hints.prev_small_special = Some((slot, index));
+    }
+
+    /// The bits `left` to `right` of a small special's key get `value` among the key's
+    /// `options`, given the option of the hint (`prev`, when the hint is of this key); the
+    /// option set, which the hint becomes.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1546-1583
+    /// When the option of the hint has the value, NCBI clears the bits there and sets them
+    /// again in the same option: the bits are those of setting them alone.
+    fn add_to_options(
+        options: &mut Vec<(BitRanges, AccInfo)>,
+        prev: Option<usize>,
+        left: u32,
+        right: u32,
+        value: AccInfo,
+    ) -> usize {
+        let same = |option: &(BitRanges, AccInfo)| option.1 & !F_FALLBACK == value & !F_FALLBACK;
+        let mut index = match prev {
+            Some(prev) if same(&options[prev]) => prev,
+            Some(prev) => {
                 options[prev].0.clear_range(left, right);
                 let mut it = prev;
                 loop {
@@ -654,7 +711,7 @@ impl AccGuide {
         }
         options[index].0.set_range(left, right);
         options[index].1 = value;
-        hints.prev_small_special = Some((slot, index));
+        index
     }
 
     /// `SAccGuide::AddRule` (with a rule and `hints`) for the lines of `rules.txt`; `ranges` gives the
@@ -886,22 +943,37 @@ impl AccGuide {
         let mut bit = (acc.len() == normal_size(fmt) && all_digits(&acc[key_len..]))
             .then(|| digits_value(&acc[key_len..]));
         let mut from = Vec::new();
+        // The hint while it is known to be of this key (set by the range before).
+        let mut known: Option<(usize, usize)> = None;
         for range in ranges {
-            let (low, high) = match range.iter().position(|&c| c == b'-') {
-                Some(dash) => (&range[..dash], &range[dash + 1..]),
-                None => (&range[..], &b""[..]),
-            };
             if let Some(number) = bit {
-                if low.len().max(high.len()) <= digits && all_digits(low) && all_digits(high) {
+                if let Some([low, high]) = range_numbers(range, digits) {
                     let left = with_last_digits(number, low);
                     let right = with_last_digits(left, high);
                     bit = Some(right);
-                    Self::add_small_special(specials, hints, &acc[..key_len], left, right, value);
+                    match known {
+                        Some((slot, prev)) => {
+                            let options = &mut specials.small_options[slot].1;
+                            let index =
+                                Self::add_to_options(options, Some(prev), left, right, value);
+                            hints.prev_small_special = Some((slot, index));
+                        }
+                        None => {
+                            let key = &acc[..key_len];
+                            Self::add_small_special(specials, hints, key, left, right, value);
+                        }
+                    }
+                    known = hints.prev_small_special;
                     continue;
                 }
                 write_digits(&mut acc[key_len..], number);
                 bit = None;
             }
+            known = None;
+            let (low, high) = match range.iter().position(|&c| c == b'-') {
+                Some(dash) => (&range[..dash], &range[dash + 1..]),
+                None => (range, &b""[..]),
+            };
             let end = acc.len();
             acc[end - low.len()..].copy_from_slice(low);
             from.clear();
@@ -1053,14 +1125,14 @@ impl<'a> RangeLines<'a> {
     }
 
     fn next_line(&mut self) -> Option<&[u8]> {
+        // The characters of the values below 12; 12 ends a line, 13 and more the block.
+        const CHARS: [u8; 12] = *b"0123456789- ";
         self.line.clear();
         loop {
-            match self.next_nibble() {
-                digit @ 0..=9 => self.line.push(b'0' + digit),
-                10 => self.line.push(b'-'),
-                11 => self.line.push(b' '),
-                12 => return Some(&self.line),
-                _ => return None,
+            let value = self.next_nibble();
+            match CHARS.get(usize::from(value)) {
+                Some(&c) => self.line.push(c),
+                None => return (value == 12).then_some(self.line.as_slice()),
             }
         }
     }

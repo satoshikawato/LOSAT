@@ -117,10 +117,13 @@ impl ReportSequences for AnchoredSequences<'_> {
 }
 
 /// The refusals of a pairwise format of a TBLASTX report call (outfmt 0 to 4, `view`), before
-/// its first byte (`run`, its final hits `hits` in report order with record coordinates and their
-/// Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`): with `-db`,
-/// a description line that shows what LOSAT does not write as NCBI
-/// (`common::database::refuse_described_lines`, line RG-KB item 12 review 1), and in the
+/// any byte of it that is not NCBI's own prefix (the prolog, and with the stream of
+/// `report_stream` the earlier batches) (`run`, its final hits `hits` in report order with record coordinates and their
+/// Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`): a
+/// description line that shows what LOSAT does not write as NCBI
+/// (`common::database::refuse_described_lines`, line RG-KB item 12 review 1; of the `-subject`
+/// records whose ids `-parse_deflines` read, `records`, `refuse_described_records`, review 2),
+/// and with `-db` in the
 /// query-anchored formats (outfmt 1 to 4) a reported sequence that NCBI's scope finds as a query
 /// of its batch, by its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its
 /// display id (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's
@@ -143,11 +146,17 @@ pub(crate) fn refuse_pairwise_reports(
     view: crate::report::pairwise::PairwiseView,
     sort: crate::report::hit_sort::ReportSort,
     num_descriptions: usize,
+    records: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
 ) -> anyhow::Result<()> {
-    let Some(database) = run.database else {
+    if run.database.is_none() && records.is_empty() {
         return Ok(());
-    };
-    let reported = database.reported;
+    }
+    // The report joins no hits of `-subject` records (those with one id are refused before it).
+    let joined: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] =
+        match run.database {
+            Some(database) => &database.reported.parsed,
+            None => &[],
+        };
     let query_hits = |q_idx: usize| {
         let from = hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < q_idx);
         let to = hits.partition_point(|hsp| (hsp.hit.q_idx as usize) <= q_idx);
@@ -183,7 +192,7 @@ pub(crate) fn refuse_pairwise_reports(
             &[],
             |previous, s_idx| {
                 crate::report::db_subject::rank_joins_as_copy(
-                    &reported.parsed,
+                    joined,
                     previous as usize,
                     s_idx as usize,
                 )
@@ -193,6 +202,16 @@ pub(crate) fn refuse_pairwise_reports(
         )
         .map_or_else(Vec::new, |group| group.described(num_descriptions).to_vec()))
     };
+    let Some(database) = run.database else {
+        return crate::algorithm::common::database::refuse_described_records(
+            run.queries.len(),
+            reported_ranks,
+            described,
+            records,
+            "TBLASTX",
+        );
+    };
+    let reported = database.reported;
     let oid_of = |rank: u32| database.oids.oid(reported.ordinals[rank as usize]);
     crate::algorithm::common::database::refuse_described_lines(
         run.queries.len(),

@@ -2137,6 +2137,23 @@ impl BlastpReport {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:409-445
+    /// Whether the call's reports `formats` resolve the subjects' Seq-align ids in NCBI's scope
+    /// (`common::database::ParsedShown::resolves_subject`), where a query of the batch that holds
+    /// such an id takes the subject's place (`ListedTitles::refuse_ids_of_queries`): a report
+    /// reads their Bioseqs, or the batches' prefetch loads them (the first format's, unless
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off for every batch). psiblast's rounds read the aligned
+    /// letters of the subjects from that scope for the next round's PSSM, whatever the format.
+    fn resolve_subjects(formats: &[BlastpReport], app: BlastpApp) -> bool {
+        app == BlastpApp::Psiblast
+            || formats.iter().any(|format| format.reads_subjects())
+            || (formats
+                .first()
+                .is_some_and(|format| format.prefetches_subjects())
+                && !crate::algorithm::common::database::prefetch_always_off())
+    }
+
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
     /// IDs (`report::tabular::writes_rows`: not the organism report).
     fn is_tabular(self) -> bool {
@@ -5415,15 +5432,19 @@ fn check_shown_subject_titles(
 /// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`,
 /// then `ListedTitles::refuse_described_lines` of the subjects of the final `hit_lists` whose
 /// description lines the report prints, `described`: line RG-KB item 12 review 1) or a FASTA
-/// set's (`check_shown_subject_titles`).
+/// set's (`check_shown_subject_titles`, then the same refusals of the description lines of the
+/// records whose ids `-parse_deflines` read, `records_parsed`: review 2, N2).
+#[allow(clippy::too_many_arguments)]
 fn check_pairwise_shown_titles(
     listed_titles: Option<&database::ListedTitles<'_>>,
     database: Option<&database::BlastpDatabase>,
     shown: &std::collections::BTreeSet<usize>,
     subject_records: &[FastaRecord],
+    records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     loads: &crate::report::db_subject::HitLoads,
     hit_lists: &[Option<BlastpHitList>],
     described: impl FnMut(usize) -> Result<Vec<u32>>,
+    program: &str,
 ) -> Result<()> {
     match listed_titles {
         Some(titles) => {
@@ -5434,7 +5455,27 @@ fn check_pairwise_shown_titles(
             )?;
             titles.refuse_described_lines(hit_lists, loads, described)
         }
-        None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+        None => {
+            check_shown_subject_titles(shown.iter().copied(), subject_records)?;
+            if records_parsed.is_empty() {
+                return Ok(());
+            }
+            crate::algorithm::common::database::refuse_described_records(
+                hit_lists.len(),
+                |query| match &hit_lists[query] {
+                    Some(hit_list) => hit_list
+                        .hsplist_array
+                        .iter()
+                        .take(hit_list.hsplist_count)
+                        .filter_map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx))
+                        .collect(),
+                    None => Vec::new(),
+                },
+                described,
+                records_parsed,
+                program,
+            )
+        }
     }
 }
 
@@ -10368,7 +10409,11 @@ fn run_call(
     let reads = database::CallTitles::new(database, &query_batches);
     let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
-    if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
+    if let (Some(titles), Some(scopes), true) = (
+        listed_titles.as_ref(),
+        reports.query_scopes,
+        BlastpReport::resolve_subjects(&requested_formats, args.app),
+    ) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }
     let (subject_records, subject_titles, shown_subjects) =
@@ -10887,6 +10932,7 @@ fn run_call(
                     database,
                     &shown,
                     subject_records,
+                    &records_parsed,
                     &prefetched.hit_loads,
                     &hit_lists,
                     report_prep::described_in(
@@ -10897,6 +10943,7 @@ fn run_call(
                         &listed_titles,
                         &psi_found_before,
                     ),
+                    args.app.name(),
                 );
                 if !format.refusal.check(checked)? {
                     continue;

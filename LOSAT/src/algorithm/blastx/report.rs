@@ -427,8 +427,9 @@ impl RecordsParsed {
     }
 
     /// The records of `records`. `pairwise` gets the parsed subjects first, for LOSAT's refusals of
-    /// them in outfmt 0 to 4 (`db_subject::check_pairwise_records`, each such format's), then come
-    /// the refusals of their tabular ids.
+    /// their titles in outfmt 0 to 4 (`db_subject::check_pairwise_records`, each such format's;
+    /// their description lines are refused where a report prints them, `write_pairwise`), then
+    /// come the refusals of their tabular ids.
     pub(crate) fn of(
         records: &[FastaRecord],
         show_gis: bool,
@@ -969,13 +970,38 @@ fn write_pairwise(
     let view = options
         .pairwise_view()
         .expect("a pairwise report is outfmt 0 to 4");
-    // Before the call's first byte, the refusals of what the description lines show
-    // (`common::database::refuse_described_lines`, line RG-KB item 12 review 1) and those of the
-    // query-anchored formats (outfmt 1 to 4, line RG T3c): a reported database sequence that
+    // Before any byte of the batch's report (the prolog and the earlier batches, which come
+    // before, are NCBI's own prefix), the refusals of what the description lines show
+    // (`common::database::refuse_described_lines`, line RG-KB item 12 review 1; of the `-subject`
+    // records whose ids `-parse_deflines` read, `refuse_described_records`, review 2) and those of
+    // the query-anchored formats (outfmt 1 to 4, line RG T3c): a reported database sequence that
     // NCBI's scope finds as a query of its batch, by its Seq-align id (a generated `lcl|Query_N`)
     // or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's and TBLASTN's): NCBI
     // shows the query in its place.
+    if !records_parsed.is_empty() {
+        crate::algorithm::common::database::refuse_described_records(
+            queries.len(),
+            |q_idx| {
+                hits.iter()
+                    .filter(|hit| hit.hit.q_idx as usize == q_idx)
+                    .map(|hit| hit.hit.s_idx)
+                    .collect()
+            },
+            |q_idx| {
+                Ok(crate::report::pairwise::blastp_described_subjects(
+                    view.report_sort(options.report_sort()),
+                    None,
+                    options.num_descriptions as usize,
+                    q_idx,
+                    hits,
+                    |_, _| false,
+                ))
+            },
+            records_parsed,
+            options.program().upper,
+        )?;
+    }
     if let ShownSubjects::Database { reported, .. } = shown {
         let parsed = reported.parsed();
         let described = |q_idx: usize| {

@@ -3189,7 +3189,13 @@ fn reported_header(
 /// `-in_pssm` whose Seq-id is not one local id): NCBI's scope finds the query instead, so its
 /// reports show the query's title and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
 /// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
-/// `oid` gives the sequence's OID, which the refusal names.
+/// `oid` gives the sequence's OID, which the refusal names. The callers ask only where the
+/// reports resolve the sequence's Seq-align id (`ParsedShown::resolves_subject`: a report reads
+/// its Bioseq, or the batches' prefetch loads it); the Seq-annots, the archive and a table of
+/// fields that read nothing of the subject, without the prefetch, write NCBI's bytes (review 2 of
+/// line RG-KB item 12, N1). A PDB id's key is its handle's (`defline_set::scope_keys`), so the
+/// query `pdb|1AB1|A` takes the place of a sequence whose Seq-align id is `pdb` 1AB1 with the chain
+/// 321 or 65 and no chain-id.
 pub(crate) fn refuse_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
     oid: impl Fn() -> crate::seqdb::Oid,
@@ -3404,15 +3410,21 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
 
 /// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
 /// in `scopes`, and a sequence that its report names, by ordinal id; `oids` the database's OIDs)
-/// whose header `titles` holds with parsed Seq-ids, with the scope of that query. A program calls it for each query batch
-/// after it reads the batch's titles: its cache of the titles keeps those of the batches before.
+/// whose header `titles` holds with parsed Seq-ids, with the scope of that query, where the
+/// reports `shown` resolve the sequences' Seq-align ids (`ParsedShown::resolves_subject`). A
+/// program calls it for each query batch after it reads the batch's titles: its cache of the
+/// titles keeps those of the batches before.
 pub(crate) fn refuse_reported_ids_of_queries(
     titles: &std::collections::BTreeMap<u32, ReportedHeader>,
     reported: impl IntoIterator<Item = (usize, u32)>,
     oids: crate::seqdb::OidMap<'_>,
     scopes: &crate::blastinput::query_batch::QueryScopes,
+    shown: ParsedShown,
     program: &str,
 ) -> Result<()> {
+    if !shown.resolves_subject() {
+        return Ok(());
+    }
     for (query, ordinal) in reported {
         if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
             refuse_id_of_a_query(
@@ -3661,10 +3673,10 @@ pub(crate) fn check_pairwise_parsed(
 /// as NCBI: a description id longer than 65 bytes (`description_start`, or of a subject whose
 /// load throws or whose Bioseq the scope does not get, `thrown_description`: NCBI's unsigned
 /// length wraps and NCBI BLAST+ 2.17.0 pads the line with spaces without end; probe of the ID2a
-/// review, `tests/db_search/ids/refuse.faa`), the `-show_gis` GI of a subject whose Bioseq the
-/// scope does not get, which NCBI never sets (`ParsedSubject::description_gi_unset`), and the
-/// title of another definition line than the Seq-align id's, of which NCBI's data loader makes the
-/// Bioseq (`ParsedSubject::handle_title_refusal`, line RG-KB item 12).
+/// review, `tests/db_search/ids/refuse.faa`), and the `-show_gis` GI of a subject whose Bioseq the
+/// scope does not get, which NCBI never sets (`ParsedSubject::description_gi_unset`). The title of
+/// a Bioseq that NCBI's data loader makes of another definition line than the Seq-align id's is
+/// that line's, as LOSAT writes it (`ParsedSubject::target`, line RG-KB item 12 review 2).
 pub(crate) fn description_line_refusal(
     subject: &crate::report::db_subject::ParsedSubject,
     load: crate::report::db_subject::HitLoad,
@@ -3678,33 +3690,72 @@ pub(crate) fn description_line_refusal(
     } else {
         subject.description_start().len()
     };
-    if id_length > 65 {
-        return Some(LONG_DESCRIPTION_ID.to_owned());
-    }
-    if unloaded {
-        return None;
-    }
-    subject.handle_title_refusal()
+    (id_length > 65).then(|| LONG_DESCRIPTION_ID.to_owned())
 }
 
 /// LOSAT's refusals of the outfmt 0 to 4 description lines that the reports of a call print
-/// (`description_line_refusal`), before the call's first byte: for each query `0..num_queries`
-/// whose final hit list (`reported`, by rank) holds a sequence with parsed Seq-ids (`parsed`, by
-/// rank; `load_of` its load in the pairwise reports, `oid_of` its OID) whose line LOSAT does not
-/// write as NCBI, the sequences whose description lines its report shows (`described`, by rank:
-/// `pairwise::blastp_described_subjects`, the first `-num_descriptions`); a sequence below
-/// `-num_descriptions` prints no line and is not refused (review 1 of line RG-KB item 12, R1).
-/// Nothing is asked where no sequence has such a line.
+/// (`description_line_refusal`), before any byte of the report that is not NCBI's own prefix (a
+/// program that writes its reports batch by batch asks at each batch, after the prolog and the
+/// earlier batches, which NCBI writes as LOSAT does before it pads the line): for each query
+/// `0..num_queries` whose final hit list (`reported`, by rank) holds a sequence with parsed Seq-ids
+/// (`parsed`, by rank; `load_of` its load in the pairwise reports, `oid_of` its OID) whose line
+/// LOSAT does not write as NCBI, the sequences whose description lines its report shows
+/// (`described`, by rank: `pairwise::blastp_described_subjects`, the first `-num_descriptions`); a
+/// sequence below `-num_descriptions` prints no line and is not refused (review 1 of line RG-KB
+/// item 12, R1). Nothing is asked where no sequence has such a line. The `-subject` records go
+/// through the same refusals (`refuse_described_records`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_described_lines(
     num_queries: usize,
-    mut reported: impl FnMut(usize) -> Vec<u32>,
-    mut described: impl FnMut(usize) -> Result<Vec<u32>>,
+    reported: impl FnMut(usize) -> Vec<u32>,
+    described: impl FnMut(usize) -> Result<Vec<u32>>,
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     load_of: impl Fn(u32) -> crate::report::db_subject::HitLoad,
     oid_of: impl Fn(u32) -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
+    match described_refusal(num_queries, reported, described, parsed, load_of)? {
+        Some((rank, reason)) => Err(parsed_refusal(oid_of(rank), &reason, program)),
+        None => Ok(()),
+    }
+}
+
+/// `refuse_described_lines` of the `-subject` records of a run under `-parse_deflines`
+/// (`records`, `db_subject::parsed_records`, by subject index: each is its own Bioseq), whose
+/// refusal names the record (`ParsedSubject::record_refusal`); `reported` and `described` give
+/// subject indexes. One owner with the database's sequences: a record whose description line no
+/// report prints is not refused (review 2 of line RG-KB item 12, N2).
+pub(crate) fn refuse_described_records(
+    num_queries: usize,
+    reported: impl FnMut(usize) -> Vec<u32>,
+    described: impl FnMut(usize) -> Result<Vec<u32>>,
+    records: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    program: &str,
+) -> Result<()> {
+    // A record that the reports show as one read without `-parse_deflines` has its local id there
+    // (`ParsedSubject::shown_as_record`).
+    let shown: Vec<_> = records
+        .iter()
+        .map(|record| record.clone().filter(|record| !record.shown_as_record()))
+        .collect();
+    let loaded = |_| crate::report::db_subject::HitLoad::Loaded;
+    match described_refusal(num_queries, reported, described, &shown, loaded)? {
+        Some((index, reason)) => Err(shown[index as usize]
+            .as_deref()
+            .expect("a refused record has parsed ids")
+            .record_refusal(&reason, program)),
+        None => Ok(()),
+    }
+}
+
+/// The first refused description line of `refuse_described_lines`: its rank and the reason.
+fn described_refusal(
+    num_queries: usize,
+    mut reported: impl FnMut(usize) -> Vec<u32>,
+    mut described: impl FnMut(usize) -> Result<Vec<u32>>,
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    load_of: impl Fn(u32) -> crate::report::db_subject::HitLoad,
+) -> Result<Option<(u32, String)>> {
     let refusals: std::collections::BTreeMap<u32, String> = parsed
         .iter()
         .enumerate()
@@ -3715,7 +3766,7 @@ pub(crate) fn refuse_described_lines(
         })
         .collect();
     if refusals.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     for query in 0..num_queries {
         if !reported(query)
@@ -3726,11 +3777,11 @@ pub(crate) fn refuse_described_lines(
         }
         for rank in described(query)? {
             if let Some(reason) = refusals.get(&rank) {
-                return Err(parsed_refusal(oid_of(rank), reason, program));
+                return Ok(Some((rank, reason.clone())));
             }
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// What the reports of a run show of their reported database sequences, for LOSAT's refusals of
@@ -3815,6 +3866,16 @@ impl ParsedShown {
     /// fields that read nothing of the subject write the Seq-align id or nothing of it.
     pub(crate) fn reads_bioseq(self) -> bool {
         self.tabular || self.pairwise || self.structured || self.sam || self.taxonomy
+    }
+
+    /// Whether NCBI's scope resolves the subject's Seq-align id: a report reads its Bioseq
+    /// (`reads_bioseq`), or the batches' prefetch loads it (`prefetched`), whose texts (the
+    /// taxonomy database's lookups, the warnings and errors of the load) are those of the record
+    /// that the scope finds. Where a query of the batch holds the id, the scope finds the query
+    /// (`refuse_id_of_a_query`); the Seq-annots, the archive and a table of fields that read
+    /// nothing of the subject, without the prefetch, write the Seq-align id alone.
+    pub(crate) fn resolves_subject(self) -> bool {
+        self.reads_bioseq() || self.prefetched
     }
 }
 
@@ -4133,7 +4194,10 @@ pub(crate) fn reports_may_refuse(
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
                 // A description line that LOSAT refuses where a report prints it
-                // (`refuse_described_lines`, after the search).
+                // (`refuse_described_lines`, after the search). The pre-pass reads no `-show_gis`:
+                // the GI that NCBI never sets (`ParsedSubject::description_gi_unset`) is refused in
+                // the batch that reports it, after the earlier batches' reports, which are NCBI's
+                // own prefix (review 2 of line RG-KB item 12, D1).
                 if shown.pairwise
                     && description_line_refusal(
                         &subject,
@@ -4151,7 +4215,7 @@ pub(crate) fn reports_may_refuse(
                 {
                     return Err(ReportRefusal::Headers);
                 }
-                if let Some(queries) = queries {
+                if let Some(queries) = queries.filter(|_| shown.resolves_subject()) {
                     refuse_id_of_a_query(&subject, || db.oid(ordinal), queries, program)
                         .map_err(|_| ReportRefusal::Headers)?;
                 }

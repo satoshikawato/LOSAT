@@ -975,8 +975,9 @@ pub(super) fn refuse_unreportable(
     // query's title there (review 3 of T3a, D1): refused here, with the abort above
     // (`ListedTitles::refuse_generated_query_ids`). Under `-parse_deflines` every query has a
     // believed id (generated for a record without one) and the refusal of a reported sequence with
-    // a query's id is the scopes' of the batches, for every format by its Seq-align id
-    // (`ListedTitles::refuse_ids_of_queries` above) and for outfmt 0 to 4 by its display id
+    // a query's id is the scopes' of the batches, by its Seq-align id where the reports resolve
+    // it (`ListedTitles::refuse_ids_of_queries` above, `BlastpReport::resolve_subjects`) and for
+    // outfmt 0 to 4 by its display id
     // (below). A `-subject` search cannot meet it: without `-parse_deflines` the subjects are
     // `lcl|Subject_N`, and with it a subject with a query's id is the reader's refusal
     // (`id_scope`) unless it is the query's own record (the abort above). NCBI's display of such a
@@ -1094,8 +1095,8 @@ pub(super) fn refuse_unreportable(
     // query's id of the batch that reports it as its display id (`gi|779|lcl|abc` and a query
     // `lcl|abc`), where NCBI shows the query's title (review 3 of line RG T3a, D1): refused here
     // with the refusals above, before any format is written
-    // (`ListedTitles::refuse_display_ids_of_queries`; by its Seq-align id in every format,
-    // `ListedTitles::refuse_ids_of_queries`). It runs in the search of all queries, as the
+    // (`ListedTitles::refuse_display_ids_of_queries`; by its Seq-align id where the reports
+    // resolve it, `ListedTitles::refuse_ids_of_queries`). It runs in the search of all queries, as the
     // refusal above: before any byte of the call, in a psiblast round after the first after the
     // earlier rounds' output.
     if let (false, Some(titles), Some(scopes)) = (

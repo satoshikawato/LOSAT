@@ -381,6 +381,11 @@ pub(crate) struct ReportedSubjects {
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
     /// holds the title of their first definition line.
     parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// Whether the batch's reports resolve the subjects' Seq-align ids in NCBI's scope
+    /// (`shared::ParsedShown::resolves_subject`: a report reads their Bioseqs, or the batch's
+    /// prefetch loads them), where a query of the batch that holds such an id takes the
+    /// subject's place (`refuse_ids_of_queries`).
+    resolves_subjects: bool,
     /// The sources from which NCBI makes the empty stored titles of the others, by rank
     /// (`shared::StoredTitle::source`; empty when none has one).
     sources: Vec<crate::report::defline::SourceTaxname>,
@@ -742,7 +747,13 @@ impl ReportedSubjects {
             },
         );
         let taxdb_found = database.db.taxdb_found();
-        let mut reported = ReportedSubjects::default();
+        // The formats that read the subject's Bioseq; the Seq-annots and the archive write its
+        // Seq-align id alone.
+        let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
+        let mut reported = ReportedSubjects {
+            resolves_subjects: reads || prefetched,
+            ..ReportedSubjects::default()
+        };
         for (&oid, title) in &listed {
             let ordinal = u32::try_from(oid)?;
             let shown = title.is_some();
@@ -756,9 +767,6 @@ impl ReportedSubjects {
                 )?;
             }
             if let Some(subject) = parsed.get(&oid) {
-                // The formats that read the subject's Bioseq; the Seq-annots and the archive
-                // write its Seq-align id alone.
-                let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
                     subject
                         .fetched(taxonomy, one_by_one, loads.load(oid))
@@ -1421,14 +1429,15 @@ impl ReportedSubjects {
     /// with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists named by
     /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
     /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
-    /// from the reader batch, and the query's index).
+    /// from the reader batch, and the query's index), where the reports resolve the subjects'
+    /// Seq-align ids (`resolves_subjects`).
     pub(crate) fn refuse_ids_of_queries(
         &self,
         batches: &[BatchResults],
         gapped: bool,
         scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
     ) -> Result<()> {
-        if self.parsed.is_empty() {
+        if self.parsed.is_empty() || !self.resolves_subjects {
             return Ok(());
         }
         for batch in batches {

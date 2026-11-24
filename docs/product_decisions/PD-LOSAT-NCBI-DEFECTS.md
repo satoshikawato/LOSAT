@@ -518,9 +518,9 @@
   chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
   every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
   in the class of 1.37, of its printed `-show_gis` description line, whose GI NCBI never sets,
-  and of a handle that another id of the sequence holds: the title of another definition line in
-  the description line and organism report, and NCBI's throw where no line holds it; line
-  RG-KB item 12, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; first
+  and of NCBI's throw where another id of the sequence holds the handle's id but no definition
+  line does as NCBI's load reads the ids (where another definition line holds it, the reports
+  show that line's title as NCBI's, review 2); line RG-KB item 12, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; first
   1.92, then 1.93 at the merge of dev that brought line NP item O4b2-4's 1.92, then 1.94 at the
   merge of dev that brought line RG item D1c-1c's 1.93, then 1.95 for line NP item M4c-2's 1.94,
   which dev took after that merge)
@@ -1892,11 +1892,15 @@ file would differ, and NCBI's programs still could not open the database).
   that load). Where another id of the same sequence compares equal to the handle's id, NCBI's load
   makes the Bioseq of the first definition line that holds it as `s_SeqDB_SeqIdIn` reads the ids,
   which stops at the first id of the line that does not match (`seqdbvol.cpp:1328-1359`): another
-  definition line than the Seq-align id's (probe `e15_twoline` of review 1 of item 12) gives NCBI's
-  description line (outfmt 0 to 4) and the generated title of its organism report (outfmt 18, a
-  line without a title) that line's title, which LOSAT refuses where they show it (rule 3
-  below), while the heading, the tables and the XML documents show the sequence's own lines as
-  NCBI's (outfmt 5, 6, 8, 15 and the field lists of the probe the same); no definition line (one
+  definition line than the Seq-align id's (probes `e15_twoline` of review 1 of item 12 and `e15nt`
+  of review 2) makes the Bioseq of the reports of that line: its title is NCBI's description line's
+  (outfmt 0 to 4), the generated title of the organism report (outfmt 18) and the generated title
+  of a line without one in the alignment's heading (`showalign.cpp:2250-2255`,
+  `taxFormat.cpp:915-926`), while the heading lists the sequence's own lines, as do the tables and
+  the XML documents (outfmt 5, 6, 8, 15 and the field lists of the probes). LOSAT writes them all
+  from that Bioseq's line (`ParsedSubject::target`, the line of `DeflineSet::bioseq_defline` of
+  the handle's id; review 2, N3, where review 1 had refused the description line and the
+  organism report); no definition line (one
   line with the chain 321 before the chain 65, `e15b_oneline`) makes NCBI's load throw, in every
   format that reads the Bioseq or prefetches it (outfmt 0, 1, 2, 5, 6, 7, 10, 15, 16 and 18 of the
   probe), which LOSAT refuses
@@ -2623,19 +2627,26 @@ file would differ, and NCBI's programs still could not open the database).
   `-num_descriptions 0`, or where the subject's rank is past it, the output is NCBI's (row
   `db.pdbchain.only.blastp.0g`).
 - A database sequence whose pdb Seq-align id's handle another id of the same sequence holds (rule
-  2 above; version 1.95, 2026-11-24, line RG-KB item 12, review 1, Owner-delegated, standing
+  2 above; version 1.95, 2026-11-24, line RG-KB item 12, reviews 1 and 2, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). Where another definition line than the Seq-align
-  id's holds it, NCBI's outfmt 0 to 4 description line and outfmt 18's generated title show that
-  line's title: LOSAT refuses (exit 1, "... a definition line other than the Seq-align id's holds
-  (NCBI BLAST+ 2.17.0's description line and organism report show that line's title)") where a
-  report prints such a description line or that title (`ParsedSubject::handle_title_refusal`).
-  Where no definition line holds it as NCBI's load reads the ids, NCBI stops with "BLAST Database
-  error: Error: oid headers do not contain target gi/seq_id." (exit status 2, in the same bytes in
-  each run, after the prolog of outfmt 2 and 16): LOSAT refuses (exit 1, "... its load throws:
+  id's holds it, the reports show that line's title as NCBI's (rule 2 above; review 1 refused the
+  description line and the organism report, review 2 writes them). Where no definition line holds
+  it as NCBI's load reads the ids, NCBI stops with "BLAST Database error: Error: oid headers do
+  not contain target gi/seq_id." (exit status 2, in the same bytes in each run, after the prolog
+  of outfmt 0 to 4, 15 and 16, before any byte of outfmt 5): LOSAT refuses (exit 1, "... its load throws:
   BLAST Database error: Error: oid headers do not contain target gi/seq_id.") in the formats that
   read the Bioseq or prefetch it (`ParsedSubject::handle_load_refusal`), not NCBI's error and exit
   status: NCBI's throw comes from the batch's prefetch, whose stop LOSAT makes in line DBID's
-  `prefetch_stop`, which item 12 leaves to that line (open point of review 1, R6).
+  `prefetch_stop`, which item 12 leaves to that line (open point of review 1, R6). Item 12 keys a
+  pdb id by its handle in NCBI's scope (`defline_set::scope_keys`), so a query `pdb|1AB1|A` read
+  with `-parse_deflines` holds the Seq-align id of a sequence whose pdb id has the chain 321 and
+  no chain-id: the refusal of a sequence with the id of a query
+  (`common::database::refuse_id_of_a_query`, PD-LOSAT-DATABASE-SEARCH) covers it, since review 2
+  (N1) only in the formats in which NCBI's scope looks the sequence up by its Seq-align id (a
+  report that reads its Bioseq, or the batch's prefetch; psiblast every format). The Seq-annots
+  and the archive (outfmt 8, 9, 11, 12) write NCBI's bytes, as on dev; the organism report and
+  the field lists that read the subject's Bioseq stay refused: NCBI shows the query's Bioseq for
+  the sequence there (`6 sseqid stitle` of probe `c321`: `pdb|1AB1|A` and `N/A`).
 - makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
   length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the

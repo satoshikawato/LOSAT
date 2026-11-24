@@ -40,6 +40,17 @@ read as a signed char for a chain without a chain-id: chain 66 with chain-id "A"
 stored id does not match (no Bioseq), as chain 200 without a chain-id looks up -56. Chain 66 with chain-id "A" and
 a date of month 16 or a season, and chain 65 with chain-id "A" and a date of month 13, load.
 
+In `pdbtwo` (review 2 of item 12, N3) each record has two definition lines: the first holds `pdb|1AB<n>|B` rewritten to
+chain 321 without a chain-id (the Seq-align id, whose handle looks up chain 65 = `A`), the second `pdb|1AB<n>|A` (chain
+65, chain-id `A`) with the title `t1`; the first line of `1AB1` has no title, that of `1AB2` the title `t0` (TWO_LINES).
+NCBI's data loader serves the sequence by the second line, so the reports' Bioseq is made of it: the description line,
+the organism report and the heading's generated title of an untitled line show `t1`, the heading lists both lines.
+Each line has its own taxid (`-taxid_map`: 100001 for `B`, 100002 for `A`). Its keys are not patched: the first line's
+`b` key leads to no lookup that the reports make.
+
+`q_norm0.faa` is the query of the letters of `pdbnorm`'s first record (`1ab6`, which has no Bioseq): its alignment comes
+first, before that of `1AB8`, whose label NCBI's BLAST XML cannot write.
+
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
 `CPDB_seq_id` forms the chain of a Seq-id without a chain-id), lower case, the keys the search looks
@@ -140,8 +151,11 @@ NORMALIZED = [
 # ones and leaves out those without a Bioseq.
 TAXIDS = [9606, 10090, 9606, 10090, 9606, 10090]
 
+# The records of `pdbtwo`: (molecule, the title of the first definition line or None).
+TWO_LINES = [("1AB1", None), ("1AB2", "t0")]
+
 # The databases: name -> whether each record has the gb Seq-id before the pdb one.
-DATABASES = {"pdbchain": True, "pdbonly": False, "pdbnorm": False}
+DATABASES = {"pdbchain": True, "pdbonly": False, "pdbnorm": False, "pdbtwo": False}
 
 
 def ctx(tag, content):
@@ -185,10 +199,18 @@ def with_pdb(record, mol, chain, rel, chain_id):
     return record[:seq + 2] + new + record[end - 2:]
 
 
+def with_first_pdb(record, mol, chain):
+    """`record` (a `Blast-def-line-set`) with its first pdb Seq-id `{ mol, chain }` (no chain-id)."""
+    at = record.index(b"\xae\x80\x30\x80")
+    end = tlv_end(record, at)
+    new = ctx(0, visible(mol)) + ctx(1, integer(chain))
+    return record[:at] + b"\xae\x80\x30\x80" + new + b"\x00\x00\x00\x00" + record[end:]
+
+
 def patch(base, db):
     """Rewrites the stored deflines of the version 4 protein database `base` (one record each of CHAINS, or
-    of NORMALIZED for `pdbnorm`) and the header offsets of its index file."""
-    rows = NORMALIZED if db == "pdbnorm" else CHAINS
+    of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`) and the header offsets of its index file."""
+    rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES}.get(db, CHAINS)
     index = bytearray(open(f"{base}.pin", "rb").read())
     version, = struct.unpack(">I", index[0:4])
     assert version == 4, version
@@ -204,6 +226,8 @@ def patch(base, db):
     if db == "pdbnorm":
         records = [with_pdb(record, mol, chain, rel, chain_id)
                    for record, (mol, _, chain, rel, chain_id) in zip(records, rows)]
+    elif db == "pdbtwo":
+        records = [with_first_pdb(record, mol, 321) for record, (mol, _) in zip(records, rows)]
     else:
         records = [with_chain(record, chain) for record, (_, _, chain) in zip(records, rows)]
     offsets = [0]
@@ -239,35 +263,52 @@ def patch_keys(base, db):
     open(f"{base}.psd", "wb").write(b"\n".join(out) + b"\n")
 
 
+def record_letters(seq, k):
+    """The letters of the database records' k-th record: `seq` with one letter changed."""
+    changed = list(seq)
+    at = 10 * (k + 1)
+    changed[at] = "Y" if changed[at] == "W" else "W"
+    return "".join(changed)
+
+
 def main(ncbi_bin, names):
     work = os.path.join(HERE, "work")
     os.makedirs(work, exist_ok=True)
     env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
     seq = letters(PDUP)
+    with open(os.path.join(HERE, "q_norm0.faa"), "w") as f:
+        f.write(">qn0 the letters of pdbnorm's first record\n" + record_letters(seq, 0) + "\n")
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
-        names = [(mol.upper(), letter) for mol, letter, *_ in NORMALIZED] if db == "pdbnorm" else \
-            [(name, letter) for name, letter, _ in CHAINS]
+        if db == "pdbtwo":
+            lines = [f"pdb|{mol}|B{'' if title is None else ' ' + title}\x01pdb|{mol}|A t1"
+                     for mol, title in TWO_LINES]
+        else:
+            ids = [(mol.upper(), letter) for mol, letter, *_ in NORMALIZED] if db == "pdbnorm" else \
+                [(name, letter) for name, letter, _ in CHAINS]
+            lines = [(f"gb|AB60000{k + 1}.1|" if DATABASES[db] else "") + f"pdb|{name}|{letter}"
+                     for k, (name, letter) in enumerate(ids)]
         with open(fasta, "w") as f:
-            for k, (name, letter) in enumerate(names):
-                changed = list(seq)
-                at = 10 * (k + 1)
-                changed[at] = "Y" if changed[at] == "W" else "W"
-                gb = f"gb|AB60000{k + 1}.1|" if DATABASES[db] else ""
-                f.write(f">{gb}pdb|{name}|{letter}\n" + "".join(changed) + "\n")
+            for k, line in enumerate(lines):
+                f.write(f">{line}\n" + record_letters(seq, k) + "\n")
         base = os.path.join(HERE, db)
         taxids = []
-        if db == "pdbnorm":
+        if db in ("pdbnorm", "pdbtwo"):
             taxid_map = os.path.join(work, f"{db}.taxids")
             with open(taxid_map, "w") as f:
-                for (name, letter), taxid in zip(names, TAXIDS):
-                    f.write(f"pdb|{name}|{letter} {taxid}\n")
+                if db == "pdbnorm":
+                    for (name, letter), taxid in zip(ids, TAXIDS):
+                        f.write(f"pdb|{name}|{letter} {taxid}\n")
+                else:
+                    for mol, _ in TWO_LINES:
+                        f.write(f"pdb|{mol}|B 100001\npdb|{mol}|A 100002\n")
             taxids = ["-taxid_map", taxid_map]
         subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
                         "-blastdb_version", "4", "-title", db, "-out", base] + taxids,
                        check=True, env=env, stdout=subprocess.DEVNULL)
         patch(base, db)
-        patch_keys(base, db)
+        if db != "pdbtwo":
+            patch_keys(base, db)
     for name in os.listdir(work):
         os.remove(os.path.join(work, name))
     os.rmdir(work)

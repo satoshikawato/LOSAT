@@ -310,21 +310,7 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let pairwise = format.is_pairwise();
-    let shown = crate::algorithm::common::database::ParsedShown {
-        tabular: format.tabular_reads_subject(),
-        pairwise,
-        structured: format.is_structured_xml(),
-        joined: pairwise || format.tabular_joins_subjects(),
-        sam: false,
-        taxonomy: format.writes_taxonomy(),
-        words: format.printed_ids(),
-        stops_at_failed_lookup: format.is_tabular()
-            && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec()),
-        prefetched: format.prefetches_subjects()
-            && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-    };
+    let shown = crate::algorithm::tblastx::database::parsed_shown(&[format]);
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();
     if prefetch && database.cache_may_refuse() {

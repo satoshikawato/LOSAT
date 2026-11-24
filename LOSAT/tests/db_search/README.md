@@ -2569,12 +2569,18 @@ chain 66 chain-id `A`, `1AB7` chain 66 chain-id `A` with a date of month 13 (a d
 month 1-15, day 1-31, hour 0-30, minute and second 0-62, no season), and `1AB8` chain 200 without a chain-id (a chain
 in 128..255, the byte 0xC8 in its label) have no Bioseq (the handle looks up chain 65, 65 and -56); `1AB9` chain 66
 chain-id `A` with month 16, `1ABA` the same with the season `spring` (dates that do not normalize) and `1ABB` chain 65
-chain-id `A` with month 13 (the normalized chain is the stored one) load. Two refusals of a pdb Seq-align id whose
-handle another id of the same sequence holds have no row here (they need two ids of one sequence, which the review
-probe `i12/review/p3` builds): another definition line than the Seq-align id's holds it (NCBI's description line and
-organism report show that line's title; LOSAT refuses where they show it), or no definition line does as NCBI's load
-reads the ids (one line with chain 321 then chain 65: NCBI's load throws `oid headers do not contain target
-gi/seq_id`; LOSAT refuses the formats that read the Bioseq or prefetch it, outfmt 8 is NCBI's).
+chain-id `A` with month 13 (the normalized chain is the stored one) load. `pdbchain/q_norm0.faa` (row
+`db.pdbchain.norm.blastp.5q`, review 2 of item 12) is the query of `1ab6`'s letters, whose BLAST XML `Hit` of the
+`catch` (`Unknown`) comes before NCBI's exception at `1AB8`'s label.
+`pdbchain/pdbtwo` (line RG-KB item 12, review 2; rows `db.pdbchain.two.*`) holds two records of two definition lines
+each: the first `pdb 1AB1` or `1AB2` chain 321 without a chain-id (the Seq-align id; untitled for `1AB1`, `t0` for
+`1AB2`), the second `pdb|1AB<n>|A` titled `t1`, which holds the Seq-id of the handle (taxids 100001 and 100002; the
+organism report takes `BLASTDB=tests/seqdb/taxdb/t5`). NCBI's data loader makes the reports' Bioseq of the second line:
+the description lines, the organism report's generated title and the heading's generated title of the untitled line
+show `t1`, while the heading, the tables and the XML documents list the sequence's own lines. Where no definition line
+holds the handle's id as NCBI's load reads the ids (one line with chain 321 then chain 65, the review probe
+`i12/review/p3` `e15b_oneline`), NCBI's load throws `oid headers do not contain target gi/seq_id`: LOSAT refuses the
+formats that read the Bioseq or prefetch it, outfmt 8 is NCBI's (no row here).
 - `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
   and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
   the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,

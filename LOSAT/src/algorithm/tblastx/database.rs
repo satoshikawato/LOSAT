@@ -1010,6 +1010,37 @@ fn batches_prefetch(
     })
 }
 
+/// What the reports `formats` show of a reported sequence with parsed Seq-ids
+/// (`reported_subjects`, `report_stream`'s check of each format, the batches' refusal of a
+/// subject with the id of a query): the first format's batches prefetch the subjects.
+pub(crate) fn parsed_shown(formats: &[super::report::TblastxOutputFormat]) -> ParsedShown {
+    let pairwise = formats.iter().any(|format| format.is_pairwise());
+    ParsedShown {
+        tabular: formats.iter().any(|format| format.tabular_reads_subject()),
+        stops_at_failed_lookup: formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+        }),
+        pairwise,
+        structured: formats.iter().any(|format| format.is_structured_xml()),
+        joined: pairwise
+            || formats
+                .iter()
+                .any(|format| format.is_structured_xml() || format.tabular_joins_subjects()),
+        sam: false,
+        taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
+        words: formats.iter().fold(
+            crate::report::tabular::PrintedIds::default(),
+            |words, format| words.or(format.printed_ids()),
+        ),
+        prefetched: formats
+            .first()
+            .is_some_and(|format| format.prefetches_subjects())
+            && !shared::prefetch_always_off(),
+        one_by_one: shared::prefetch_may_be_off(),
+    }
+}
+
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index

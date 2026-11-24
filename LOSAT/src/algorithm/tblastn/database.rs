@@ -991,7 +991,7 @@ pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList], gapped: bool) -> us
 /// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
 /// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
 /// subjects.
-fn parsed_shown(
+pub(super) fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
     let numbers: Vec<i32> = formats

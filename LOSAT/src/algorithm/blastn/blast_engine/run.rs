@@ -5670,6 +5670,14 @@ fn post_process_hits_and_write(
         // The check reads the hits' segments only, not the rows' masks of `-html`'s spans.
         &|queries| rows_of(queries, None),
     )?;
+    report_write::refuse_described_records(
+        output_formats,
+        &mut outputs.formats,
+        report,
+        &hit_lists,
+        pairwise_hits.as_deref().map(Vec::as_slice),
+        &|queries| rows_of(queries, None),
+    )?;
     // The queries' result warnings that a structured first format does not write are each later
     // format's that writes them, to the caller's receiver of that format's
     // (`ReportOutputs::later_warnings`).
@@ -8969,6 +8977,7 @@ fn run_in_pool(
                     }),
                 database.oid_map(),
                 scopes,
+                database::parsed_shown(&output_formats),
                 "BLASTN",
             );
             if let Err(error) = refused {

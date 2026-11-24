@@ -48,19 +48,8 @@ pub(super) fn refuse_anchored_reports(
     // (`common::database::refuse_query_ids_of_anchored_reports`): NCBI shows the query in its
     // place. NCBI's bytes before an abort depend on its buffers, so LOSAT writes none of the call's.
     let sort = report.formatting.report_sort();
-    let rows_of_query = |q_idx: usize| -> Result<std::borrow::Cow<'_, [PairwiseHit]>> {
-        Ok(match pairwise_hits {
-            Some(hits) => std::borrow::Cow::Borrowed(hits),
-            None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
-        })
-    };
-    let reported_ranks = |q_idx: usize| -> Vec<u32> {
-        hit_lists[q_idx]
-            .iter()
-            .flat_map(|hit_list| &hit_list.hsplist_array)
-            .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
-            .collect()
-    };
+    let rows_of_query = |q_idx: usize| query_rows(pairwise_hits, rows_of, q_idx);
+    let reported_ranks = |q_idx: usize| reported_subjects(hit_lists, q_idx);
     let described = |view: crate::report::pairwise::PairwiseView, q_idx: usize| {
         let rows = rows_of_query(q_idx)?;
         Ok(crate::report::pairwise::blastp_described_subjects(
@@ -164,6 +153,73 @@ pub(super) fn refuse_anchored_reports(
                 "BLASTN",
             )?;
         }
+    }
+    Ok(())
+}
+
+/// The rows of the hits that the reports of query `q_idx` show: every query's where the call made
+/// them (`pairwise_hits`), else that query's (`rows_of`).
+fn query_rows<'h>(
+    pairwise_hits: Option<&'h [PairwiseHit]>,
+    rows_of: &dyn Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
+    q_idx: usize,
+) -> Result<std::borrow::Cow<'h, [PairwiseHit]>> {
+    Ok(match pairwise_hits {
+        Some(hits) => std::borrow::Cow::Borrowed(hits),
+        None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+    })
+}
+
+/// The subjects of query `q_idx`'s final hit list (`hit_lists`), by rank or subject index.
+fn reported_subjects(hit_lists: &[Option<BlastnHitList>], q_idx: usize) -> Vec<u32> {
+    hit_lists[q_idx]
+        .iter()
+        .flat_map(|hit_list| &hit_list.hsplist_array)
+        .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
+        .collect()
+}
+
+/// The refusals of the description lines of the `-subject` records whose ids `-parse_deflines`
+/// read (`report.database_parsed` of a call without `-db`;
+/// `common::database::refuse_described_records`, review 2 of line RG-KB item 12, N2), before any
+/// format of the call is written: each pairwise format's own (`FormatRefusal`), as the refusal of
+/// their titles (`db_subject::check_pairwise_records`). The report joins no hits of `-subject`
+/// records.
+pub(super) fn refuse_described_records(
+    output_formats: &[BlastnOutputFormat],
+    formats: &mut [crate::api::local_blast::FormatOutput<'_>],
+    report: &BlastnReportInputs<'_>,
+    hit_lists: &[Option<BlastnHitList>],
+    pairwise_hits: Option<&[PairwiseHit]>,
+    rows_of: &dyn Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
+) -> Result<()> {
+    if report.database_reader.is_some() || report.database_parsed.is_empty() {
+        return Ok(());
+    }
+    let sort = report.formatting.report_sort();
+    for (format, output_format) in formats.iter_mut().zip(output_formats) {
+        let BlastnOutputFormat::Pairwise(view) = output_format else {
+            continue;
+        };
+        format.refusal.check(
+            crate::algorithm::common::database::refuse_described_records(
+                hit_lists.len(),
+                |q_idx| reported_subjects(hit_lists, q_idx),
+                |q_idx| {
+                    let rows = query_rows(pairwise_hits, rows_of, q_idx)?;
+                    Ok(crate::report::pairwise::blastp_described_subjects(
+                        view.report_sort(sort),
+                        None,
+                        report.num_descriptions,
+                        q_idx,
+                        &rows,
+                        |_, _| false,
+                    ))
+                },
+                report.database_parsed,
+                "BLASTN",
+            ),
+        )?;
     }
     Ok(())
 }

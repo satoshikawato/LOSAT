@@ -2313,6 +2313,7 @@ fn write_tblastx_outputs(
                     *view,
                     view.report_sort(args.formatting.report_sort()),
                     args.report_counts.num_descriptions,
+                    &records_parsed,
                 ))?;
         }
     }
@@ -3852,6 +3853,13 @@ fn run_batch_loop(
                         .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
                     database.oid_map(),
                     scopes,
+                    super::super::database::parsed_shown(
+                        &outputs
+                            .formats
+                            .iter()
+                            .map(|format| report::output_format(format.outfmt))
+                            .collect::<Vec<_>>(),
+                    ),
                     "TBLASTX",
                 )?;
             }
@@ -4381,33 +4389,7 @@ impl BatchReports<'_> {
                     .iter()
                     .map(|format| report::output_format(format.outfmt))
                     .collect();
-                let pairwise_shown = formats.iter().any(|format| format.is_pairwise());
-                let shown = crate::algorithm::common::database::ParsedShown {
-                    tabular: formats.iter().any(|format| format.tabular_reads_subject()),
-                    stops_at_failed_lookup: formats.iter().any(|format| {
-                        format.is_tabular()
-                            && crate::report::tabular::may_stop_at_failed_lookup(
-                                format.tabular_spec(),
-                            )
-                    }),
-                    pairwise: pairwise_shown,
-                    structured: formats.iter().any(|format| format.is_structured_xml()),
-                    joined: pairwise_shown
-                        || formats.iter().any(|format| {
-                            format.is_structured_xml() || format.tabular_joins_subjects()
-                        }),
-                    sam: false,
-                    taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
-                    words: formats.iter().fold(
-                        crate::report::tabular::PrintedIds::default(),
-                        |words, format| words.or(format.printed_ids()),
-                    ),
-                    prefetched: formats
-                        .first()
-                        .is_some_and(|format| format.prefetches_subjects())
-                        && !crate::algorithm::common::database::prefetch_always_off(),
-                    one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
-                };
+                let shown = super::super::database::parsed_shown(&formats);
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine
                 // identities tell which rows of `nident` alone read a subject.

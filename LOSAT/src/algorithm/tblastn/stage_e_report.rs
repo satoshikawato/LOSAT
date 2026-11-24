@@ -602,6 +602,47 @@ pub(super) fn render(
                 .and_then(crate::report::pairwise::PairwiseView::of)
         })
         .collect();
+    // The description lines of the `-subject` records whose ids `-parse_deflines` read
+    // (`common::database::refuse_described_records`, review 2 of line RG-KB item 12): each pairwise
+    // format's refusal (`FormatRefusal`), as the refusal of their titles
+    // (`db_subject::check_pairwise_records`). The report joins no hits of `-subject` records.
+    if let (ShownSubjects::Fasta { parsed, .. }, Some(rows)) = (shown, pairwise_hits.as_deref()) {
+        if !parsed.is_empty() {
+            for format in outputs.formats.iter_mut() {
+                let Some(view) =
+                    crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
+                        .and_then(crate::report::pairwise::PairwiseView::of)
+                else {
+                    continue;
+                };
+                format.refusal.check(
+                    crate::algorithm::common::database::refuse_described_records(
+                        query_records.len(),
+                        |q_idx| {
+                            hitlists[q_idx]
+                                .lists()
+                                .iter()
+                                .filter(|list| !list.hsps.hsps.is_empty())
+                                .filter_map(|list| u32::try_from(list.oid).ok())
+                                .collect()
+                        },
+                        |q_idx| {
+                            Ok(crate::report::pairwise::blastp_described_subjects(
+                                view.report_sort(formatting.report_sort()),
+                                None,
+                                report_counts.num_descriptions,
+                                q_idx,
+                                rows,
+                                |_, _| false,
+                            ))
+                        },
+                        parsed,
+                        program,
+                    ),
+                )?;
+            }
+        }
+    }
     if let (ShownSubjects::Database { reported, .. }, Some(rows)) =
         (shown, pairwise_hits.as_deref())
     {

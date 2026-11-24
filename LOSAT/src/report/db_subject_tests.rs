@@ -2489,34 +2489,45 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
         assert!(!served.description_line(true).2);
     }
     // Where the handle's Seq-id is held by another definition line than the Seq-align id's, the
-    // Bioseq NCBI builds is made of that line: its title is refused only where the description
-    // line or the organism report shows it; the tables, the heading and the XML documents show
-    // the sequence's own lines (review 1 of line RG-KB item 12, R2: probe `e15_twoline`).
+    // Bioseq NCBI builds is made of that line: the description line, the organism report and the
+    // heading's title of an untitled line show its title; the heading lists the sequence's own
+    // lines (review 2 of line RG-KB item 12, N3: probes `e15_twoline`, `e15nt`).
     use crate::algorithm::common::database::description_line_refusal;
-    let other_line = ParsedSubject::new(DeflineSet {
-        deflines: vec![
-            BlastDefline {
-                title: Some(b"t".to_vec()),
-                ids: vec![pdb_id("1AB1", Some(321), None)],
-                ..BlastDefline::default()
-            },
-            BlastDefline {
-                title: Some(b"u".to_vec()),
-                ids: vec![pdb_id("1AB1", Some(65), Some("A"))],
-                ..BlastDefline::default()
-            },
-        ],
-        utf8: false,
-    })
-    .unwrap();
+    let two_lines = |first: Option<&[u8]>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                BlastDefline {
+                    title: first.map(<[u8]>::to_vec),
+                    ids: vec![pdb_id("1AB1", Some(321), None)],
+                    ..BlastDefline::default()
+                },
+                BlastDefline {
+                    title: Some(b"u".to_vec()),
+                    ids: vec![pdb_id("1AB1", Some(65), Some("A"))],
+                    ..BlastDefline::default()
+                },
+            ],
+            utf8: false,
+        })
+        .unwrap()
+    };
+    let other_line = two_lines(Some(b"t"));
     assert!(!other_line.scope_finds_none());
-    assert!(other_line
-        .handle_title_refusal()
-        .unwrap()
-        .contains("a definition line other than the Seq-align id's"));
-    assert!(description_line_refusal(&other_line, HitLoad::Loaded)
-        .unwrap()
-        .contains("description line and organism report"));
+    assert_eq!(description_line_refusal(&other_line, HitLoad::Loaded), None);
+    let (start, title, caught) = other_line.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "u", false)
+    );
+    assert_eq!(
+        text(&other_line.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A t\n 1AB1_A u\n"
+    );
+    let untitled = two_lines(None);
+    assert_eq!(
+        text(&untitled.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A u\n 1AB1_A u\n"
+    );
     assert_eq!(other_line.fetched(true, false, HitLoad::Loaded), Ok(()));
     assert!(matches!(other_line.prefetched(), Prefetched::Itself));
     // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
@@ -2553,7 +2564,9 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
 // `-num_descriptions`; review 1 of line RG-KB item 12, R1).
 #[test]
 fn a_description_line_is_refused_only_where_a_report_prints_it() {
-    use crate::algorithm::common::database::{description_line_refusal, refuse_described_lines};
+    use crate::algorithm::common::database::{
+        description_line_refusal, refuse_described_lines, refuse_described_records,
+    };
     let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
     assert_eq!(description_line_refusal(&unserved, HitLoad::Loaded), None);
     let unserved = unserved.showing_gis(true);
@@ -2587,6 +2600,24 @@ fn a_description_line_is_refused_only_where_a_report_prints_it() {
     assert!(refuse(vec![]).is_ok());
     let error = refuse(vec![0, 1]).unwrap_err().to_string();
     assert!(error.contains("never sets"), "{error}");
+    // The `-subject` records whose ids `-parse_deflines` read, by subject index: the same rule
+    // (review 2 of line RG-KB item 12, N2; `-num_descriptions 0` prints no line).
+    let records = vec![None, Some(std::sync::Arc::new(long))];
+    let refuse_records = |described: Vec<u32>| {
+        refuse_described_records(
+            1,
+            |_| vec![1],
+            |_| Ok(described.clone()),
+            &records,
+            "BLASTP",
+        )
+    };
+    assert!(refuse_records(vec![]).is_ok());
+    let error = refuse_records(vec![1]).unwrap_err().to_string();
+    assert!(
+        error.contains("subject record") && error.contains("longer than 65 bytes"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -902,7 +902,8 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
 
 // Line RG item T7-W (review 3 of line RG T7): with `-parse_deflines`, LOSAT refuses outfmt 0 of a
 // `-subject` record whose description id is longer than 65 bytes, where NCBI BLAST+ 2.17.0 pads
-// the description line without end (`db_subject::check_pairwise_records`). The refusal is outfmt
+// the description line without end (`common::database::refuse_described_records`, where the
+// report prints that line: review 2 of line RG-KB item 12, N2). The refusal is outfmt
 // 0's: a call in which outfmt 0 fails alone (`FormatRefusal::FailsAlone`, a LOSAT Web format that
 // the argv does not ask for) writes outfmt 6, and one in which it fails the call (the command
 // line's one format) fails with it.

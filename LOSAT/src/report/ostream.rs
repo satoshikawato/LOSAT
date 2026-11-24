@@ -1224,7 +1224,7 @@ impl ReportStream {
 
     /// Makes this the stream that a text on standard error makes NCBI's writes of first
     /// (`tie_standard_output`, `sync_report`): a tool's stream of the command line's process
-    /// (`cli::is_command_line_run`), as `of_cli` registers the searches'. A library run's stream
+    /// (`ncbi_app::run`, `OpenFiles::of_command_line`), as `of_cli` registers the searches'. A library run's stream
     /// is not tied (`api::run_dustmasker` and the others: the caller's diagnostics).
     pub(crate) fn tie_to_process(&self) {
         *lock(&TIED_REPORT) = Some(std::sync::Arc::downgrade(&self.0));

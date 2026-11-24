@@ -475,7 +475,7 @@ pub(crate) fn tool_stream(opened: Option<OpenedFile>, files: &OpenFiles) -> Repo
         Some(file) => ReportStream::tool_file(Box::new(file), ""),
         None => ReportStream::tool_standard_output(""),
     };
-    if crate::cli::is_command_line_run() {
+    if files.command_line() {
         stream.tie_to_process();
     }
     files.keep_stream(stream.share());
@@ -488,7 +488,7 @@ pub(crate) fn standard_output_file<'a>(
     stdout: &'a mut dyn Write,
     files: &OpenFiles,
 ) -> OutputFile<'a> {
-    if crate::cli::is_command_line_run() {
+    if files.command_line() {
         OutputFile::Stream(tool_stream(None, files))
     } else {
         OutputFile::Caller(CallerOutput {

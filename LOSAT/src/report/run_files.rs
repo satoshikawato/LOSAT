@@ -143,6 +143,9 @@ fn received_log_target(name: Option<&OsStr>, file: impl FnOnce(&[u8]) -> DiagTar
 pub(crate) struct OpenFiles {
     table: Option<Arc<FileTable>>,
     streams: Arc<Mutex<Vec<crate::report::ostream::ReportStream>>>,
+    /// The run is the command line's process (`ncbi_app::run`, `of_command_line`): its output
+    /// streams are NCBI's and tied to its standard error (`ncbi_app::files::tool_stream`).
+    command_line: bool,
 }
 
 impl std::fmt::Debug for OpenFiles {
@@ -183,7 +186,21 @@ impl OpenFiles {
                 })),
             },
             streams: Arc::default(),
+            command_line: false,
         }
+    }
+
+    /// The run's files as the command line's process's (`ncbi_app::run`): its standard output
+    /// and its `-out` are NCBI's streams, tied to its standard error (`command_line`).
+    pub(crate) fn of_command_line(mut self) -> Self {
+        self.command_line = true;
+        self
+    }
+
+    /// Whether the run is the command line's process (`of_command_line`); a library run or a run
+    /// of LOSAT Web writes to its caller's writers.
+    pub(crate) fn command_line(&self) -> bool {
+        self.command_line
     }
 
     /// The files of a run on the file system (`RunFiles::Disk`).
@@ -191,6 +208,7 @@ impl OpenFiles {
         OpenFiles {
             table: None,
             streams: Arc::default(),
+            command_line: false,
         }
     }
 

@@ -482,6 +482,7 @@ pub(crate) fn run(
         // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
         &RunFiles::Disk,
+        true,
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -541,6 +542,7 @@ pub(crate) fn run_with(
         body,
         (&start, None),
         &RunFiles::Disk,
+        false,
     )
 }
 
@@ -573,6 +575,7 @@ pub(crate) fn run_in(
         body,
         (&start, Some(crate::cli::xml_help_text)),
         files,
+        false,
     )
 }
 
@@ -581,7 +584,9 @@ pub(crate) fn run_in(
 /// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
 /// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML. The
 /// run's files go to `files`: the file of `-logfile` and the files that the program opens by name
-/// (`Args::files`), through the run's `OpenFiles`.
+/// (`Args::files`), through the run's `OpenFiles`. `command_line`: the run is the command line's
+/// process (`run`), whose standard output and `-out` are NCBI's streams tied to its standard error
+/// (`OpenFiles::of_command_line`).
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
@@ -589,11 +594,17 @@ fn run_app(
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
     files: &RunFiles,
+    command_line: bool,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
     // The files that the run opens by name, which end when the run ends (`OpenFiles`).
     let files = OpenFiles::new(files);
+    let files = if command_line {
+        files.of_command_line()
+    } else {
+        files
+    };
     let mut target = files.log_target(log_file(words));
     start.write_log_setup(&mut target, err);
     let (words, dryrun) = match preparse(words) {

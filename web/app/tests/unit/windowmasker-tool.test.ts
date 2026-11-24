@@ -18,6 +18,10 @@ import { Coordinator, isToolRun, type SearchRequest, type ToolRequest } from '..
 import { SearchDraft } from '../../src/application/draft';
 import { ResultsBrowser } from '../../src/application/results';
 import { SessionFiles } from '../../src/application/session-files';
+import { countsLockName } from '../../src/domain/counts';
+import { webCountsLocks } from '../../src/infra/browser/counts-locks';
+import type { CountsLocks } from '../../src/ports/counts';
+import { MemoryOpfs } from './support/memory-opfs';
 import { ToolDraft } from '../../src/application/tool-draft';
 import {
   buildWindowMaskerArgv,
@@ -87,7 +91,11 @@ function makeData(store = new MemoryBlockStore()) {
   return { data, store };
 }
 
-function makeCoordinator(engine: EngineGateway & Partial<ToolEngine> = new FakeEngine(), dataWorkerEnded?: Promise<Error>) {
+function makeCoordinator(
+  engine: EngineGateway & Partial<ToolEngine> = new FakeEngine(),
+  dataWorkerEnded?: Promise<Error>,
+  countsLocks?: CountsLocks,
+) {
   const { data, store } = makeData();
   const saved: Array<{ readonly fileName: string; readonly bytes: Uint8Array }> = [];
   const downloader: Downloader = {
@@ -105,6 +113,7 @@ function makeCoordinator(engine: EngineGateway & Partial<ToolEngine> = new FakeE
     newRunId: () => `run-${++id}`,
     digest: sha256Hex,
     ...(dataWorkerEnded === undefined ? {} : { dataWorkerEnded }),
+    ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   return { coordinator, data, store, saved };
 }
@@ -1107,5 +1116,48 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(maskRun.status).toBe('completed');
     expect(readTexts).toContain('mask.fa:>mask_in\nACGT\n');
     expect(dropped).toEqual([firstTok, maskTok]);
+  });
+});
+
+describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
+  it('hold the taxonomy ID in shared mode from enqueue until each run ends (completed, or cancelled while queued)', async () => {
+    const opfs = new MemoryOpfs();
+    const finishes: Array<() => void> = [];
+    const engine = stubEngine(new FakeEngine(), {
+      cancel: () => undefined,
+      async runTool() {
+        await new Promise<void>((resolve) => finishes.push(resolve));
+        return { status: 0, stdout: new Blob(), stderr: new Blob(), files: [] };
+      },
+    });
+    const { coordinator } = makeCoordinator(engine, undefined, webCountsLocks(opfs));
+    const held = async () => {
+      await sleep(0);
+      return (await opfs.query()).held.filter((entry) => entry.name === countsLockName(562) && entry.mode === 'shared').length;
+    };
+    const masking = (): ToolRequest => ({
+      tool: 'windowmasker',
+      stage: 'mask',
+      argv: ['windowmasker', '-ustat', 'wmasker.obinary', '-in', 'a.fa', '-out', 'a.out'],
+      directory: [
+        { name: 'wmasker.obinary', file: new Blob([new Uint8Array(4)]), origin: { kind: 'saved', taxid: 562 } },
+        { name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } },
+      ],
+    });
+    const first = (await coordinator.enqueueTool(masking())).runId!;
+    const second = (await coordinator.enqueueTool(masking())).runId!;
+    expect(await held()).toBe(2);
+    coordinator.cancel(second);
+    expect(await held()).toBe(1);
+    for (let i = 0; i < 100 && finishes.length === 0; i++) await sleep(1);
+    finishes[0]!();
+    expect((await waitTerminal(coordinator, first)).status).toBe('completed');
+    expect(await held()).toBe(0);
+    // A tool run that reads no saved copy holds nothing.
+    const plain = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    expect(await held()).toBe(0);
+    for (let i = 0; i < 100 && finishes.length < 2; i++) await sleep(1);
+    finishes[1]!();
+    await waitTerminal(coordinator, plain);
   });
 });

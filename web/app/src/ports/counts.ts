@@ -67,8 +67,10 @@ export type CountsStart =
       readonly replace?: boolean;
     };
 
-/** The name of the error that `beginCounts` rejects with when another tab writes the same file. */
+/** The name of the error that `beginCounts` or `deleteCounts` rejects with when another tab writes the same file. */
 export const COUNTS_BUSY = 'CountsBusyError';
+/** The name of the error that `beginCounts` or `deleteCounts` rejects with when a queued or running search uses the same file. */
+export const COUNTS_IN_USE = 'CountsInUseError';
 /** The name of the error that `beginCounts` rejects with when the saved part is not the one asked to continue. */
 export const COUNTS_CHANGED = 'CountsChangedError';
 /** The name of the error that `beginCounts` rejects with when `replace` is false and a copy is already stored. */
@@ -119,6 +121,8 @@ export type CountsResult =
   | { readonly ok: false; readonly reason: 'refused'; readonly status: number }
   /** Another tab is downloading the same file. */
   | { readonly ok: false; readonly reason: 'busy' }
+  /** A queued or running search uses the saved counts for this taxonomy ID. */
+  | { readonly ok: false; readonly reason: 'in-use' }
   /** Another tab changed the saved part between its look-up and the download. */
   | { readonly ok: false; readonly reason: 'changed' }
   /** The storage refused the bytes (it is full), or could not be written. */
@@ -127,6 +131,18 @@ export type CountsResult =
 export interface CountsDownloader {
   /** Rejects only when `signal` aborts (the bytes saved so far stay). */
   download(request: CountsRequest, onProgress: (progress: DownloadProgress) => void, signal: AbortSignal): Promise<CountsResult>;
+}
+
+/**
+ * Holds a shared Web Lock on a taxonomy ID's saved counts while a queued or running run reads
+ * them, so Replace, Delete and download refuse in place until the run ends.
+ */
+export interface CountsLocks {
+  /**
+   * Acquires the taxonomy ID's lock in shared mode (`ifAvailable: true`) and returns a release
+   * function that lets it go once. Returns `undefined` when an exclusive writer holds the lock.
+   */
+  holdShared(taxid: number): Promise<(() => void) | undefined>;
 }
 
 /**

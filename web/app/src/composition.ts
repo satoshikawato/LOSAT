@@ -15,6 +15,7 @@ import { ToolDraft } from './application/tool-draft';
 import type { Downloader } from './ports/download';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
 import { browserCountsChanges } from './infra/browser/counts-changes';
+import { browserCountsLocks } from './infra/browser/counts-locks';
 import { BrowserCountsDownloader } from './infra/browser/counts-downloader';
 import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
@@ -70,6 +71,7 @@ export function createApp(options: AppOptions = {}): App {
           ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
         });
   const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
+  const countsLocks = browserCountsLocks();
   const toolRuntime =
     ENGINE_ASSETS === null
       ? { path: 'fake' as const, engineBuild: 'fake-engine' }
@@ -84,6 +86,7 @@ export function createApp(options: AppOptions = {}): App {
     dataWorkerEnded,
     toolRuntime,
     sessionFiles,
+    ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   const draft = new SearchDraft({
     engine,

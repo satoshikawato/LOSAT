@@ -55,6 +55,7 @@ import {
 } from '../domain/run';
 import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
 import { toolOutputFileName, type ToolId, type WindowMaskerStage } from '../domain/tools';
+import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
@@ -174,6 +175,12 @@ export interface CoordinatorDeps {
   readonly toolRuntime?: { readonly path: 'serial' | 'fake'; readonly engineBuild: string };
   /** Shared holder tracker for inflated session files used by WindowMasker tool runs. */
   readonly sessionFiles?: SessionFiles;
+  /**
+   * The taxonomy IDs' locks on saved counts: a run that reads a saved copy holds its ID's lock in shared mode from
+   * enqueue to its end, so that Replace, Delete and a download of that ID refuse while it is queued or running.
+   * Without it (a browser without Web Locks), runs hold nothing, as before.
+   */
+  readonly countsLocks?: CountsLocks;
 }
 
 /** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
@@ -207,6 +214,8 @@ export class Coordinator {
   private readonly conffiles = new Map<string, Blob>();
   /** Working directory files held for queued/running tool runs; cleared when the run finishes or is cancelled. */
   private readonly toolDirectories = new Map<string, readonly DirectoryFile[]>();
+  /** The releases of the saved-counts locks that each queued or running run holds (holdCounts), by run. */
+  private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
   /**
    * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
@@ -304,6 +313,14 @@ export class Coordinator {
         ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: requests.length }) }),
       }),
     );
+    const refused = await this.holdCounts(
+      snapshots.flatMap((snapshot, index) =>
+        requests[index]!.directory.flatMap((entry) =>
+          entry.origin.kind === 'saved' ? [{ runId: snapshot.runId, taxid: entry.origin.taxid, file: entry.file }] : [],
+        ),
+      ),
+    );
+    if (refused !== undefined) return { ok: false, message: refused };
     this.nextNumber += snapshots.length;
     this.setRuns([
       ...this.state.get().runs,
@@ -441,6 +458,14 @@ export class Coordinator {
       );
       conffiles.push(conffile?.file);
     }
+    const refused = await this.holdCounts(
+      snapshots.flatMap((snapshot, index) => {
+        const taxid = snapshot.windowMasker?.origin?.taxid;
+        const file = prepared[index]!.request.windowMasker;
+        return taxid === undefined || file === undefined ? [] : [{ runId: snapshot.runId, taxid, file }];
+      }),
+    );
+    if (refused !== undefined) return { ok: false, message: refused };
     // The numbers that the names were made with are taken only now, so that a request that fails leaves no gap.
     this.nextNumber += snapshots.length;
     const numbered = snapshots;
@@ -478,6 +503,7 @@ export class Coordinator {
       this.conffiles.delete(runId);
       this.toolDirectories.delete(runId);
       this.deps.sessionFiles?.release(`run:${runId}`);
+      this.releaseCounts(runId);
       if (isToolRun(view)) {
         this.updateTool(runId, { status: 'cancelled', record: { ...view.record, endedAt: this.deps.now() } });
       } else {
@@ -727,6 +753,49 @@ export class Coordinator {
     }
   }
 
+  /**
+   * Takes, for runs about to be queued, the shared lock of each taxonomy ID whose saved counts they read, and checks
+   * that each such file can still be read (a copy replaced or removed after it was chosen cannot). From then until a
+   * run ends, Replace, Delete and a download of that ID refuse (the counts store takes the lock exclusive with
+   * `ifAvailable`), in this tab and the others. Returns why the runs cannot be queued, having let go what it took, or
+   * undefined when each run holds its locks. Without `countsLocks`, runs hold nothing.
+   */
+  private async holdCounts(uses: ReadonlyArray<{ readonly runId: string; readonly taxid: number; readonly file: Blob }>): Promise<string | undefined> {
+    const locks = this.deps.countsLocks;
+    if (locks === undefined || uses.length === 0) return undefined;
+    const taken: Array<{ readonly runId: string; readonly release: () => void }> = [];
+    const refuse = (message: string): string => {
+      for (const { release } of taken) release();
+      return message;
+    };
+    for (const { runId, taxid, file } of uses) {
+      const release = await locks.holdShared(taxid);
+      if (release === undefined) return refuse(`The saved counts for ${taxid} are being written or removed. Run again when that ends.`);
+      taken.push({ runId, release });
+      if (!(await readable(file))) return refuse(`The saved counts for ${taxid} were replaced or removed after they were chosen. Run again.`);
+    }
+    for (const { runId, release } of taken) {
+      const before = this.countsHolds.get(runId);
+      this.countsHolds.set(
+        runId,
+        before === undefined
+          ? release
+          : () => {
+              before();
+              release();
+            },
+      );
+    }
+    return undefined;
+  }
+
+  /** Lets go the saved-counts locks of a run that ended or left the queue. */
+  private releaseCounts(runId: string): void {
+    const release = this.countsHolds.get(runId);
+    this.countsHolds.delete(runId);
+    release?.();
+  }
+
   private pump(): void {
     if (this.active !== undefined) return;
     const next = this.queue.shift();
@@ -846,6 +915,7 @@ export class Coordinator {
       this.stopActive = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
+      this.releaseCounts(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();
@@ -947,6 +1017,7 @@ export class Coordinator {
       this.toolAbort = undefined;
       this.toolDirectories.delete(runId);
       this.deps.sessionFiles?.release(`run:${runId}`);
+      this.releaseCounts(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();
@@ -988,6 +1059,8 @@ export class Coordinator {
   }
 
   private update(runId: string, change: Partial<Omit<SearchRunView, 'snapshot'>>): void {
+    // A run that ends lets go of the saved counts before it is shown as ended, so that a Replace pressed then is not refused.
+    if (change.status !== undefined && isTerminal(change.status)) this.releaseCounts(runId);
     this.setRuns(
       this.state.get().runs.map((run) =>
         run.snapshot.runId === runId && !isToolRun(run)
@@ -998,6 +1071,7 @@ export class Coordinator {
   }
 
   private updateTool(runId: string, change: Partial<Omit<ToolRunView, 'snapshot'>>): void {
+    if (change.status !== undefined && isTerminal(change.status)) this.releaseCounts(runId);
     this.setRuns(
       this.state.get().runs.map((run) =>
         run.snapshot.runId === runId && isToolRun(run)
@@ -1061,4 +1135,18 @@ function errorMessage(error: unknown): string {
 /** Why the engine could not check the options of a request: a part of LOSAT that is unavailable is said as the page says it. */
 function uncheckedOptions(error: unknown): string {
   return isUnavailable(error) ? failureText(error) : `The options could not be checked: ${errorMessage(error)}`;
+}
+
+/**
+ * Whether a file chosen earlier can still be read: its last byte is read. A file of the browser's storage that was
+ * written or removed since it was opened refuses to be read (or, where the browser reads the current file, comes
+ * shorter).
+ */
+async function readable(file: Blob): Promise<boolean> {
+  if (file.size === 0) return true;
+  try {
+    return (await file.slice(file.size - 1, file.size).arrayBuffer()).byteLength === 1;
+  } catch {
+    return false;
+  }
 }

@@ -9,12 +9,13 @@
 // `losat-web:windowmasker:<taxid>` from `beginCounts` to its end (or the tab's), so two tabs never
 // write one file. It writes with synchronous access handles, which exist only in dedicated
 // workers: it runs in the Data worker.
-import { COUNTS_FILE, parseTaxid, type CountsMadeMeta } from '../../domain/counts';
+import { COUNTS_FILE, COUNTS_LOCK_PREFIX, countsLockName, parseTaxid, type CountsMadeMeta } from '../../domain/counts';
 import { dateOf } from '../../domain/download-sentences';
 import {
   COUNTS_BUSY,
   COUNTS_CHANGED,
   COUNTS_EXISTS,
+  COUNTS_IN_USE,
   type CountsCopy,
   type CountsStart,
   type CountsStore,
@@ -28,8 +29,7 @@ import type { SessionLocks } from './session';
 
 /** The OPFS directory of the saved counts. Shared by every release. */
 export const COUNTS_DIRECTORY = 'windowmasker';
-/** Lock name prefix; shared by every release. */
-export const COUNTS_LOCK_PREFIX = 'losat-web:windowmasker:';
+export { COUNTS_LOCK_PREFIX };
 
 const DATA_NAME = COUNTS_FILE;
 const META_NAME = 'meta.json';
@@ -56,6 +56,8 @@ export class OpfsCountsStore implements CountsStore {
     private readonly locks: SessionLocks,
     private readonly newToken: () => string = () => crypto.randomUUID(),
     private readonly now: () => number = () => Date.now(),
+    /** The browser's estimate for the site (`navigator.storage.estimate`), read before a made copy is written. */
+    private readonly estimate?: () => Promise<{ readonly usage: number; readonly quota: number } | undefined>,
   ) {}
 
   async readCounts(taxid: number): Promise<SavedCounts | undefined> {
@@ -74,7 +76,8 @@ export class OpfsCountsStore implements CountsStore {
       try {
         release = await this.acquire(taxid, true);
       } catch (error) {
-        if ((error as { name?: unknown }).name === COUNTS_BUSY) return undefined;
+        const name = (error as { name?: unknown }).name;
+        if (name === COUNTS_BUSY || name === COUNTS_IN_USE) return undefined;
         throw error;
       }
       try {
@@ -140,6 +143,7 @@ export class OpfsCountsStore implements CountsStore {
             throw named(COUNTS_EXISTS, 'counts are already saved for this taxonomy ID');
           }
         }
+        await this.checkRoom(directory, start.size);
         // Meta first: a copy that is begun again is never read as the whole file of before.
         await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
       } else if (start.from > 0) {
@@ -203,11 +207,38 @@ export class OpfsCountsStore implements CountsStore {
   }
 
   async deleteCounts(taxid: number): Promise<void> {
-    const release = await this.acquire(taxid, false);
+    // A queued or running search that reads the copy refuses the deletion (COUNTS_IN_USE); a writing (a download or a
+    // save, here or in another tab) is waited for, as before, and its copy deleted after it.
+    let release: () => void;
+    try {
+      release = await this.acquire(taxid, true);
+    } catch (error) {
+      if ((error as { name?: unknown }).name !== COUNTS_BUSY) throw error;
+      release = await this.acquire(taxid, false);
+    }
     try {
       await removeEntry(this.root, String(taxid));
     } finally {
       release();
+    }
+  }
+
+  /**
+   * Refuses a made copy that the storage has no room for, before anything is changed: the site's free bytes
+   * (quota − usage, the browser's estimate) and the bytes of the copy it replaces must hold the new file. Where the
+   * browser gives no estimate, the writing goes on and a full storage refuses it part by part, as before.
+   */
+  private async checkRoom(directory: FileSystemDirectoryHandle, size: number): Promise<void> {
+    const estimate = await this.estimate?.().catch(() => undefined);
+    if (estimate === undefined) return;
+    let before = 0;
+    try {
+      before = (await (await directory.getFileHandle(DATA_NAME)).getFile()).size;
+    } catch (error) {
+      ignoreNotFound(error);
+    }
+    if (estimate.quota - estimate.usage + before < size) {
+      throw new Error("The browser's storage has no room for these counts: nothing was changed.");
     }
   }
 
@@ -228,30 +259,47 @@ export class OpfsCountsStore implements CountsStore {
   }
 
   /**
-   * Takes the taxonomy ID's lock and keeps it until the returned function is called. With
-   * `ifAvailable`, rejects with COUNTS_BUSY when another tab holds it; without, waits for it.
+   * Takes the taxonomy ID's lock in exclusive mode and keeps it until the returned function is
+   * called. With `ifAvailable`, rejects with COUNTS_IN_USE when a queued or running search holds
+   * the lock in shared mode, or COUNTS_BUSY when another writer holds it exclusively.
    */
-  private acquire(taxid: number, ifAvailable = true): Promise<() => void> {
-    return new Promise((resolve, reject) => {
-      this.locks
-        .request(COUNTS_LOCK_PREFIX + taxid, { ifAvailable }, (lock) => {
-          if (lock === null) {
-            reject(named(COUNTS_BUSY, 'another tab is downloading the counts'));
-            return Promise.resolve();
-          }
-          return new Promise<void>((held) => resolve(() => held()));
-        })
-        .catch(reject);
-    });
+  private async acquire(taxid: number, ifAvailable = true): Promise<() => void> {
+    const name = countsLockName(taxid);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const release = await new Promise<(() => void) | null>((resolve, reject) => {
+        this.locks
+          .request(name, { mode: 'exclusive', ifAvailable }, (lock) => {
+            if (lock === null) {
+              resolve(null);
+              return Promise.resolve();
+            }
+            return new Promise<void>((held) => resolve(() => held()));
+          })
+          .catch(reject);
+      });
+      if (release !== null) return release;
+      const snapshot = await this.locks.query?.().catch(() => undefined);
+      const holders = (snapshot?.held ?? []).filter((entry) => entry.name === name);
+      if (holders.some((entry) => entry.mode === 'shared')) {
+        throw named(COUNTS_IN_USE, 'a search that uses the counts is queued or running');
+      }
+      if (holders.some((entry) => entry.mode === 'exclusive') || snapshot === undefined || attempt === 1) {
+        throw named(COUNTS_BUSY, 'another tab is downloading the counts');
+      }
+    }
+    throw named(COUNTS_BUSY, 'another tab is downloading the counts');
   }
 }
 
 /** The saved counts in this origin's OPFS (windowmasker/). Rejects when this browser has no usable OPFS. */
-export async function opfsCountsStore(locks: SessionLocks): Promise<OpfsCountsStore> {
+export async function opfsCountsStore(
+  locks: SessionLocks,
+  estimate?: () => Promise<{ readonly usage: number; readonly quota: number } | undefined>,
+): Promise<OpfsCountsStore> {
   const storage = (globalThis.navigator as Navigator | undefined)?.storage;
   if (typeof storage?.getDirectory !== 'function') throw new Error('this browser has no Origin Private File System');
   const root = await (await storage.getDirectory()).getDirectoryHandle(COUNTS_DIRECTORY, { create: true });
-  return new OpfsCountsStore(root, locks);
+  return new OpfsCountsStore(root, locks, undefined, undefined, estimate);
 }
 
 /** Builds the `listCounts` summary of one complete saved copy. */

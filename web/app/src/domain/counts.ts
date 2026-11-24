@@ -10,6 +10,14 @@ export const COUNTS_HOST = 'ftp.ncbi.nlm.nih.gov';
 /** The name of the file in NCBI's directory of the ID, and of the saved file. */
 export const COUNTS_FILE = 'wmasker.obinary';
 
+/** Web Lock name prefix for saved WindowMasker counts; shared by every release. */
+export const COUNTS_LOCK_PREFIX = 'losat-web:windowmasker:';
+
+/** The Web Lock name of a taxonomy ID's saved counts. */
+export function countsLockName(taxid: number): string {
+  return COUNTS_LOCK_PREFIX + taxid;
+}
+
 /** The URL of the counts of a taxonomy ID. The request carries nothing but this URL. */
 export function countsUrl(taxid: number): string {
   return `https://${COUNTS_HOST}/blast/windowmasker_files/${taxid}/${COUNTS_FILE}`;

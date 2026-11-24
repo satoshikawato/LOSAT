@@ -80,10 +80,11 @@ class DirectoryHandle {
   }
 }
 
-/** The tree (`root`) and the locks of one origin. */
+/** The tree (`root`) and the locks of one origin (Web Locks: exclusive and shared modes, `ifAvailable`, `query`). */
 export class MemoryOpfs implements SessionLocks {
   readonly root = new DirectoryHandle();
-  private readonly held = new Set<string>();
+  /** The held locks: the mode of each name and how many hold it (shared locks are held by several). */
+  private readonly held = new Map<string, { mode: 'exclusive' | 'shared'; count: number }>();
   private readonly waiting = new Map<string, Array<() => void>>();
 
   private find(path: readonly string[]): MemoryFile | DirectoryHandle | undefined {
@@ -111,17 +112,38 @@ export class MemoryOpfs implements SessionLocks {
     file.bytes = bytes;
   }
 
-  async request(name: string, options: { readonly ifAvailable?: boolean }, callback: (lock: object | null) => Promise<void>): Promise<unknown> {
-    if (this.held.has(name)) {
+  async request(
+    name: string,
+    options: { readonly ifAvailable?: boolean; readonly mode?: 'exclusive' | 'shared' },
+    callback: (lock: object | null) => Promise<void>,
+  ): Promise<unknown> {
+    const mode = options.mode ?? 'exclusive';
+    const grantable = () => {
+      const now = this.held.get(name);
+      return now === undefined || (mode === 'shared' && now.mode === 'shared' && (this.waiting.get(name)?.length ?? 0) === 0);
+    };
+    if (!grantable()) {
       if (options.ifAvailable === true) return callback(null);
-      await new Promise<void>((resolve) => this.waiting.set(name, [...(this.waiting.get(name) ?? []), resolve]));
+      while (!grantable()) {
+        await new Promise<void>((resolve) => this.waiting.set(name, [...(this.waiting.get(name) ?? []), resolve]));
+      }
     }
-    this.held.add(name);
+    const now = this.held.get(name);
+    if (now === undefined) this.held.set(name, { mode, count: 1 });
+    else now.count += 1;
     try {
       return await callback({});
     } finally {
-      this.held.delete(name);
-      this.waiting.get(name)?.shift()?.();
+      const after = this.held.get(name)!;
+      after.count -= 1;
+      if (after.count === 0) {
+        this.held.delete(name);
+        this.waiting.get(name)?.shift()?.();
+      }
     }
+  }
+
+  async query(): Promise<{ readonly held: ReadonlyArray<{ readonly name: string; readonly mode: 'exclusive' | 'shared' }> }> {
+    return { held: [...this.held].flatMap(([name, { mode, count }]) => Array.from({ length: count }, () => ({ name, mode }))) };
   }
 }

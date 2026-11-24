@@ -16,7 +16,7 @@ import type {
   SavedCountsEntry,
   SavedCountsOrigin,
 } from '../../ports/counts';
-import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_EXISTS } from '../../ports/counts';
+import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_EXISTS, COUNTS_IN_USE } from '../../ports/counts';
 import type { DownloadProgress } from '../../ports/example';
 
 interface Entry {
@@ -36,6 +36,8 @@ export class MemoryCountsStore implements CountsStore {
   private tokens = 0;
   /** The error that the next appends reject with (a full storage). */
   appendError: Error | undefined;
+  /** The taxonomy IDs whose copy a queued or running search reads (the real store sees their shared lock). */
+  readonly inUse = new Set<number>();
 
   /** `persistent: false` keeps nothing, as a browser without OPFS or Web Locks. */
   constructor(private readonly options: { readonly persistent: boolean; readonly now?: () => number } = { persistent: true }) {}
@@ -69,6 +71,7 @@ export class MemoryCountsStore implements CountsStore {
 
   async beginCounts(taxid: number, start: CountsStart): Promise<string | undefined> {
     if (!this.options.persistent) return undefined;
+    if (this.inUse.has(taxid)) throw named(COUNTS_IN_USE, 'in use');
     if (this.isLocked(taxid)) throw named(COUNTS_BUSY, 'busy');
     const entry = this.entries.get(taxid);
     if (start.made !== undefined) {
@@ -127,6 +130,7 @@ export class MemoryCountsStore implements CountsStore {
   }
 
   async deleteCounts(taxid: number): Promise<void> {
+    if (this.inUse.has(taxid)) throw named(COUNTS_IN_USE, 'in use');
     this.entries.delete(taxid);
   }
 

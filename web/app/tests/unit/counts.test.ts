@@ -14,6 +14,7 @@ import { COUNTS_FILE, COUNTS_HOST, countsName, countsUrl, parseTaxid, type Count
 import { changedFields, formControlOf, formParameters, setFields, type EngineOption } from '../../src/domain/parameters';
 import { programById } from '../../src/domain/programs';
 import { BrowserCountsDownloader } from '../../src/infra/browser/counts-downloader';
+import { webCountsLocks } from '../../src/infra/browser/counts-locks';
 import { OpfsCountsStore } from '../../src/infra/data/counts-store';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -22,7 +23,7 @@ import { FakeCountsChangeChannel, FakeCountsDownloader, MemoryCountsStore, type 
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_EXISTS, type CountsCopy, type CountsStore } from '../../src/ports/counts';
+import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_EXISTS, COUNTS_IN_USE, type CountsCopy, type CountsStore, type SavedCountsEntry } from '../../src/ports/counts';
 import type { DownloadProgress } from '../../src/ports/example';
 import { MemoryOpfs } from './support/memory-opfs';
 import { NodeInflater } from './support/node-inflater';
@@ -725,6 +726,87 @@ describe('CountsLoader', () => {
     expect(other.state.get().list).toEqual([]);
   });
 
+  it('refuses a save, a Replace and a Delete in place while a queued or running search reads the copy, and keeps the copy', async () => {
+    const { loader, store, draftState } = setup();
+    expect(await loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    store.inUse.add(562);
+    const refusal = 'A search that uses the counts for 562 is queued or running.';
+    const other = new File([bytesOf(400, 2)], 'b.obinary');
+    expect(await loader.saveMade(562, other, madeMeta(2))).toEqual({ ok: false, reason: 'in-use', message: refusal });
+    expect(await loader.saveMade(562, other, madeMeta(2), { replace: true })).toEqual({ ok: false, reason: 'in-use', message: refusal });
+    await loader.delete(562);
+    expect(loader.state.get().refusal).toEqual({ taxid: 562, text: refusal });
+    expect(loader.state.get().note).toBeUndefined();
+    expect(loader.state.get().saved[562]).toMatchObject({ complete: true, size: 300, made: madeMeta(1) });
+    expect(draftState.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(1) } });
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, size: 300, origin: 'made' }]);
+    // Once the search ends, Delete removes the copy and the refusal goes.
+    store.inUse.delete(562);
+    await loader.delete(562);
+    expect(loader.state.get().refusal).toBeUndefined();
+    expect(loader.state.get().saved[562]).toBeNull();
+    expect(draftState.has(562)).toBe(false);
+  });
+
+  it('keeps the copy and says why when the storage cannot remove it, and the ID can be used again (no wait on itself)', async () => {
+    const { loader, store } = setup();
+    expect(await loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    const remove = store.deleteCounts.bind(store);
+    store.deleteCounts = async () => {
+      throw new Error('the entry is held');
+    };
+    await loader.delete(562);
+    await loader.idle();
+    expect(loader.state.get().note).toEqual({ taxid: 562, text: 'The saved counts could not be removed: the entry is held' });
+    expect(loader.state.get().saved[562]).toMatchObject({ complete: true, size: 300 });
+    store.deleteCounts = remove;
+    expect(await loader.saveMade(562, new File([bytesOf(400, 2)], 'b.obinary'), madeMeta(2), { replace: true })).toMatchObject({ ok: true });
+  });
+
+  it('says that the copy of before is no longer kept when a Replace fails after it started, and not for a first save', async () => {
+    const { loader, store } = setup();
+    expect(await loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    const full = 'The browser refused to keep the counts: its storage is full.';
+    store.appendError = new Error(full);
+    expect(await loader.saveMade(562, new File([bytesOf(400, 2)], 'b.obinary'), madeMeta(2), { replace: true })).toEqual({
+      ok: false,
+      reason: 'failed',
+      message: `${full} The counts saved before for 562 are no longer kept.`,
+    });
+    expect(loader.state.get().saved[562]).toBeNull();
+    expect(await loader.saveMade(1280, new File([bytesOf(400, 2)], 'c.obinary'), madeMeta(3))).toEqual({ ok: false, reason: 'failed', message: full });
+  });
+
+  it('keeps the list of the latest read when an earlier read of the list ends after it', async () => {
+    const memory = new MemoryCountsStore({ persistent: true, now: () => Date.UTC(2026, 10, 12) });
+    const gates: Array<() => void> = [];
+    const store: CountsStore = {
+      readCounts: (taxid) => memory.readCounts(taxid),
+      listCounts: () => {
+        const list = memory.listCounts();
+        return new Promise<readonly SavedCountsEntry[]>((resolve) => gates.push(() => resolve(list)));
+      },
+      beginCounts: (taxid, start) => memory.beginCounts(taxid, start),
+      appendCounts: (token, bytes) => memory.appendCounts(token, bytes),
+      finishCounts: (token) => memory.finishCounts(token),
+      closeCounts: (token) => memory.closeCounts(token),
+      deleteCounts: (taxid) => memory.deleteCounts(taxid),
+    };
+    const loader = new CountsLoader({ downloader: new FakeCountsDownloader(memory, {}), store, draft: { setCounts: () => undefined } });
+    // The tab opens and reads the list (nothing is saved yet); a save then reads it again.
+    loader.refreshList();
+    const saving = loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1));
+    for (let i = 0; i < 100 && gates.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(gates).toHaveLength(2);
+    gates[1]!();
+    expect(await saving).toMatchObject({ ok: true });
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, size: 300 }]);
+    // The first read, of the empty list, ends last: it is dropped.
+    gates[0]!();
+    await loader.idle();
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, size: 300 }]);
+  });
+
   it('offers the saved taxonomy ID for "Use in BLASTN" only while the stored copy matches the saved run identity', async () => {
     const { loader } = setup({ files: { 562: COUNTS } });
     const stored = () => loader.state.get().saved[562];
@@ -956,5 +1038,82 @@ describe('OpfsCountsStore', () => {
     await store.closeCounts(token);
     opfs.write(['9606', 'wmasker.obinary'], new Uint8Array(10));
     expect(await store.readCounts(HUMAN)).toBeUndefined();
+  });
+
+  it('refuses a made copy, a download and a deletion with COUNTS_IN_USE while searches hold the ID in shared mode, and leaves the copy', async () => {
+    const { opfs, store } = await make();
+    const a = (await store.beginCounts(HUMAN, start()))!;
+    await store.appendCounts(a, COUNTS.bytes);
+    await store.finishCounts(a);
+    const locks = webCountsLocks(opfs);
+    const first = (await locks.holdShared(HUMAN))!;
+    const second = (await locks.holdShared(HUMAN))!;
+    await expect(store.beginCounts(HUMAN, { made: madeMeta(1), size: 10, from: 0, replace: true })).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    await expect(store.beginCounts(HUMAN, start())).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    await expect(store.deleteCounts(HUMAN)).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    expect(opfs.read(['9606', 'wmasker.obinary'])).toEqual(COUNTS.bytes);
+    expect(await store.readCounts(HUMAN)).toMatchObject({ copy: { complete: true, size: 5000 } });
+    // Another ID is free.
+    const other = (await store.beginCounts(562, { made: madeMeta(1), size: 0, from: 0 }))!;
+    await store.closeCounts(other);
+    // The ID is free once every holder let go (a release is let go once).
+    first();
+    first();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(store.deleteCounts(HUMAN)).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    second();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await store.deleteCounts(HUMAN);
+    expect(opfs.has(['9606'])).toBe(false);
+  });
+
+  it('gives no shared hold while a writing holds the ID, and a deletion waits for the writing', async () => {
+    const { opfs, store } = await make();
+    const locks = webCountsLocks(opfs);
+    const token = (await store.beginCounts(HUMAN, start()))!;
+    expect(await locks.holdShared(HUMAN)).toBeUndefined();
+    let deleted = false;
+    const deletion = store.deleteCounts(HUMAN).then(() => {
+      deleted = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deleted).toBe(false);
+    // A search asks while the deletion waits: still refused.
+    expect(await locks.holdShared(HUMAN)).toBeUndefined();
+    await store.appendCounts(token, COUNTS.bytes.slice(0, 10));
+    await store.closeCounts(token);
+    await deletion;
+    expect(opfs.has(['9606'])).toBe(false);
+  });
+
+  it('refuses a made copy that the storage has no room for before changing anything, counting the copy it replaces', async () => {
+    const opfs = new MemoryOpfs();
+    let tokens = 0;
+    let estimate: { usage: number; quota: number } | undefined = { usage: 1000, quota: 1300 };
+    const store = new OpfsCountsStore(
+      opfs.root as unknown as FileSystemDirectoryHandle,
+      opfs,
+      () => `t${++tokens}`,
+      () => Date.UTC(2026, 10, 22),
+      async () => estimate,
+    );
+    const made = (run: number, size: number) => ({ made: madeMeta(run), size, from: 0 as const, replace: true });
+    // 300 bytes free: a copy of 301 is refused, one of 300 is written.
+    await expect(store.beginCounts(562, made(1, 301))).rejects.toThrow("The browser's storage has no room for these counts: nothing was changed.");
+    expect(opfs.has(['562', 'meta.json'])).toBe(false);
+    const t1 = (await store.beginCounts(562, made(1, 300)))!;
+    await store.appendCounts(t1, bytesOf(300, 1));
+    await store.finishCounts(t1);
+    // The storage is full now; a Replace of 300 fits in the bytes of the copy it replaces, one of 301 does not.
+    estimate = { usage: 1300, quota: 1300 };
+    await expect(store.beginCounts(562, made(2, 301))).rejects.toThrow('nothing was changed');
+    expect(await store.readCounts(562)).toMatchObject({ copy: { complete: true, size: 300, made: madeMeta(1) } });
+    expect(opfs.read(['562', 'wmasker.obinary'])).toEqual(bytesOf(300, 1));
+    const t2 = (await store.beginCounts(562, made(2, 300)))!;
+    await store.closeCounts(t2);
+    // Without an estimate, the writing starts.
+    estimate = undefined;
+    const t3 = (await store.beginCounts(562, made(3, 5000)))!;
+    await store.closeCounts(t3);
   });
 });

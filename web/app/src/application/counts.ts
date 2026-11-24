@@ -11,6 +11,7 @@ import { dateOf, refusedSentence, unreachableSentence } from '../domain/download
 import {
   COUNTS_BUSY,
   COUNTS_EXISTS,
+  COUNTS_IN_USE,
   type CountsChanges,
   type CountsCopy,
   type CountsDownloader,
@@ -35,6 +36,7 @@ export type SaveCountsResult =
   | { readonly ok: true; readonly copy: CountsCopy; readonly kept: boolean }
   | { readonly ok: false; readonly reason: 'exists'; readonly existing: CountsCopy }
   | { readonly ok: false; readonly reason: 'busy'; readonly message: string }
+  | { readonly ok: false; readonly reason: 'in-use'; readonly message: string }
   | { readonly ok: false; readonly reason: 'failed'; readonly message: string };
 
 export interface CountsState {
@@ -46,6 +48,8 @@ export interface CountsState {
   readonly inTab: Readonly<Record<string, true>>;
   /** A word on a taxonomy ID's copy: why it could not be removed. */
   readonly note?: { readonly taxid: number; readonly text: string };
+  /** Why the last Delete of a taxonomy ID's copy was refused (a search uses it, or another tab writes it); it stays. */
+  readonly refusal?: { readonly taxid: number; readonly text: string };
   /** Complete saved copies available in this browser, ordered by taxonomy ID. */
   readonly list: readonly SavedCountsEntry[];
 }
@@ -123,6 +127,8 @@ export class CountsLoader {
   private readonly deleting = new Map<number, Promise<void>>();
   /** The files that this tab holds and the browser does not keep. */
   private readonly local = new Map<number, { readonly copy: CountsCopy; readonly file: File }>();
+  /** The number of the latest read of the list (reloadList): an earlier read that ends later is dropped. */
+  private listRead = 0;
 
   constructor(private readonly deps: CountsDeps) {
     deps.changes?.subscribe((taxid) => this.onRemoteChange(taxid));
@@ -216,13 +222,12 @@ export class CountsLoader {
       this.deps.store.beginCounts(taxid, { made: plainMade, size: file.size, from: 0, replace: allowReplace });
 
     let token: string | undefined;
+    // Whether a copy of before is overwritten: a failure after the start then says that it is gone.
+    let replacing = replace;
     try {
       token = await begin(replace);
     } catch (error) {
       const name = (error as { name?: unknown }).name;
-      if (name === COUNTS_BUSY) {
-        return { ok: false, reason: 'busy', message: `Another tab is downloading the counts for ${taxid}.` };
-      }
       if (name === COUNTS_EXISTS) {
         const existing = accepted(await this.deps.store.readCounts(taxid).catch(() => undefined), taxid);
         if (existing !== undefined) {
@@ -231,14 +236,12 @@ export class CountsLoader {
         // A download from an older/other URL does not count as a saved copy for this release: overwrite it.
         try {
           token = await begin(true);
+          replacing = true;
         } catch (retryError) {
-          if ((retryError as { name?: unknown }).name === COUNTS_BUSY) {
-            return { ok: false, reason: 'busy', message: `Another tab is downloading the counts for ${taxid}.` };
-          }
-          return { ok: false, reason: 'failed', message: messageOf(retryError) };
+          return refusedSave(retryError, taxid);
         }
       } else {
-        return { ok: false, reason: 'failed', message: messageOf(error) };
+        return refusedSave(error, taxid);
       }
     }
 
@@ -282,7 +285,8 @@ export class CountsLoader {
       await this.deps.store.closeCounts(token).catch(() => undefined);
       await this.reread(taxid);
       await this.reloadList();
-      return { ok: false, reason: 'failed', message: messageOf(error) };
+      const gone = replacing ? ` The counts saved before for ${taxid} are no longer kept.` : '';
+      return { ok: false, reason: 'failed', message: `${messageOf(error)}${gone}` };
     }
   }
 
@@ -291,11 +295,16 @@ export class CountsLoader {
     // The file goes from the draft first, so that no search is queued with a file about to go.
     this.deps.draft.setCounts(taxid, undefined);
     this.holdInTab(taxid, false);
+    if (this.state.get().refusal?.taxid === taxid) this.update({ refusal: undefined });
     try {
       await this.deps.store.deleteCounts(taxid);
     } catch (error) {
-      this.update({ note: { taxid, text: `The saved counts could not be removed: ${messageOf(error)}` } });
-      await this.reread(taxid);
+      // Refused in place (a queued or running search uses the copy, or another tab writes it): the copy stays.
+      const refusal = inUseOrBusy(error, taxid);
+      if (refusal !== undefined) this.update({ refusal: { taxid, text: refusal } });
+      else this.update({ note: { taxid, text: `The saved counts could not be removed: ${messageOf(error)}` } });
+      // Not reread: it waits for the deletions of the ID, and this is one of them.
+      await this.readBack(taxid);
       await this.reloadList();
       return;
     }
@@ -313,9 +322,14 @@ export class CountsLoader {
     this.track(this.reloadList());
   }
 
-  /** Reads the copy from the storage and tells the draft whether a whole copy is present. */
+  /** Reads the copy from the storage, after a deletion of the ID, and tells the draft whether a whole copy is present. */
   private async reread(taxid: number): Promise<void> {
     await this.deleting.get(taxid);
+    await this.readBack(taxid);
+  }
+
+  /** Reads the copy from the storage and tells the draft whether a whole copy is present. */
+  private async readBack(taxid: number): Promise<void> {
     const kept = this.local.get(taxid);
     if (kept !== undefined) {
       this.deps.draft.setCounts(taxid, { file: kept.file, origin: originOf(kept.copy) });
@@ -337,7 +351,10 @@ export class CountsLoader {
   }
 
   private async reloadList(): Promise<void> {
+    const read = ++this.listRead;
     const persisted = await this.deps.store.listCounts().catch(() => []);
+    // A later read started while this one ran: its list is the newer one.
+    if (read !== this.listRead) return;
     const byTaxid = new Map<number, SavedCountsEntry>();
     for (const entry of persisted) {
       if (entry.origin === 'made' || entry.copy.url === countsUrl(entry.taxid)) {
@@ -358,7 +375,7 @@ export class CountsLoader {
       if (!signal.aborted) this.update({ load: { taxid, progress: next } });
     };
     const fail = (message: string) => progress({ state: 'failed', message });
-    this.update({ note: undefined });
+    this.update({ note: undefined, ...(this.state.get().refusal?.taxid === taxid ? { refusal: undefined } : {}) });
     progress({ state: 'reading' });
     // A copy being deleted is gone first.
     await this.deleting.get(taxid);
@@ -446,12 +463,38 @@ function problem(result: Exclude<CountsResult, { ok: true }>, taxid: number): st
     case 'refused':
       return result.status === 404 ? `${COUNTS_HOST} has no WindowMasker counts for ${taxid}.` : refusedSentence(COUNTS_HOST, result.status);
     case 'busy':
-      return `Another tab is downloading the counts for ${taxid}.`;
+      return busySentence(taxid);
+    case 'in-use':
+      return inUseSentence(taxid);
     case 'changed':
       return `Another tab changed the saved counts for ${taxid}: press Continue again.`;
     case 'not-kept':
       return `Not kept: ${result.detail}`;
   }
+}
+
+function busySentence(taxid: number): string {
+  return `Another tab is downloading the counts for ${taxid}.`;
+}
+
+function inUseSentence(taxid: number): string {
+  return `A search that uses the counts for ${taxid} is queued or running.`;
+}
+
+/** The sentence of a refusal in place (the ID's lock is held), or undefined for another error. */
+function inUseOrBusy(error: unknown, taxid: number): string | undefined {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === COUNTS_IN_USE) return inUseSentence(taxid);
+  if (name === COUNTS_BUSY) return busySentence(taxid);
+  return undefined;
+}
+
+/** A save that could not start: refused in place (the ID's lock is held), or failed. */
+function refusedSave(error: unknown, taxid: number): Extract<SaveCountsResult, { ok: false }> {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === COUNTS_IN_USE) return { ok: false, reason: 'in-use', message: inUseSentence(taxid) };
+  if (name === COUNTS_BUSY) return { ok: false, reason: 'busy', message: busySentence(taxid) };
+  return { ok: false, reason: 'failed', message: messageOf(error) };
 }
 
 function messageOf(error: unknown): string {

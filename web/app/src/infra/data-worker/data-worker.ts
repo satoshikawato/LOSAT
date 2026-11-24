@@ -124,7 +124,7 @@ const examples = started.then(async (session): Promise<ExampleStore> => {
 const counts = started.then(async (session): Promise<CountsStore> => {
   if (session.fallbackReason === undefined && locks !== undefined) {
     try {
-      return await opfsCountsStore(locks);
+      return await opfsCountsStore(locks, estimateStorage);
     } catch {
       // No OPFS for counts: nothing is kept.
     }

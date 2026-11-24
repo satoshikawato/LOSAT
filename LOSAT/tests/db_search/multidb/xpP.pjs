@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "xpP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "xpP.fa",
+  "number-of-letters": 300,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-24T04:51:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49806,
+  "bytes-to-cache": 398,
+  "files": [
+    "xpP.pdb",
+    "xpP.phr",
+    "xpP.pin",
+    "xpP.pnd",
+    "xpP.pni",
+    "xpP.pog",
+    "xpP.pos",
+    "xpP.pot",
+    "xpP.psq",
+    "xpP.ptf",
+    "xpP.pto"
+  ]
+}

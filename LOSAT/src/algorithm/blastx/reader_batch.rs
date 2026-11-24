@@ -1,5 +1,6 @@
 //! The values that NCBI computes over a whole query batch (LOSAT's reader batch, `BATCH_SIZE`
-//! letters) and LOSAT's search units of at most 10002 letters must share.
+//! letters) and LOSAT's search units (which end at the first query that brings them to 10002
+//! letters) must share.
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
@@ -219,11 +220,11 @@ pub(crate) fn set_up_error(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2450-2453
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
 // NCBI sets up and searches a reader batch (one `BATCH_SIZE` query batch) as a whole, so these
-// values are taken over all its contexts. LOSAT searches the batch in units of at most 10002
-// letters. Phase 1 prepares every unit (translation, filtering, the statistical blocks of the
-// contexts, and the unit's cutoff minima with the batch's average length, which the layout of the
-// records gives), reduces the batch's values, and hands each unit its preparation with the shape
-// attached; phase 2 searches the units as before, from these. A batch with no valid context is
+// values are taken over all its contexts. LOSAT searches the batch in units that end at the first
+// query that brings them to 10002 letters. Phase 1 prepares every unit (translation, filtering,
+// the statistical blocks of the contexts, and the unit's cutoff minima with the batch's average
+// length, which the layout of the records gives), reduces the batch's values, and hands each unit
+// its preparation with the shape attached; phase 2 searches the units as before, from these. A batch with no valid context is
 // not searched, and a database refused before its sequences are read (`Subjects::Unreadable`)
 // ends the search before they are used, so the minima are not taken then.
 /// Phase 1 for one unit (`queries`) of a reader batch of `layout`. The unit's preparation has
@@ -307,13 +308,16 @@ pub(crate) fn prepare_unit(
 /// A reader batch of one unit prepared: its queries translated and filtered, and the statistical
 /// blocks of its contexts. `search::search_core` prepares such a batch with it when it is searched,
 /// and the capped batch flow (`LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`) ahead of its search. Such a batch
-/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce.
+/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce. `on_pool`: a
+/// reader batch searched whole, whose contexts' blocks are computed on the pool
+/// (`parameters::score_block_for_in`).
 pub(crate) fn prepare_lone_unit(
     queries: &[FastaRecord],
     options: &ResolvedOptions,
+    on_pool: bool,
 ) -> Result<UnitPrep> {
     let prepared = prepare_queries(queries, options)?;
-    let params = score_block_for(&prepared, options.scoring);
+    let params = super::parameters::score_block_for_in(&prepared, options.scoring, on_pool);
     Ok(UnitPrep {
         prepared,
         params,

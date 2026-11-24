@@ -876,6 +876,18 @@ fn add_profiles(
 // `-index false` the writer puts `gnl|BL_ORD_ID|<oid>` in place of the first id of the first
 // definition line: NCBI writes it past the end of an empty list (undefined behaviour), which
 // LOSAT refuses. With `-index true` a sequence without ids stops at the writer's duplicate check.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1001-1012
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1878-1901
+/// A query descriptor stated as `NULL` that a loop over the descriptors dereferences
+/// (`BioseqDeflinesError::NullDescriptor`): the `CCoreException` of a NULL `CRef`, which `Run`'s
+/// handler reports as a `CException` (`Error: ERROR: Attempt to access NULL pointer.`, exit status
+/// 255); the volume begun is closed as at any error (makeprofiledb 2.17.0, probe D3c-3c `probeB`:
+/// nothing for the first profile, the closed volume of the profiles before for a later one). The
+/// message is the one owner's (`ncbi_exception::NULL_POINTER`).
+fn null_descriptor() -> RunError {
+    RunError::Exception(crate::ncbi_exception::NULL_POINTER.as_bytes().to_vec())
+}
+
 /// The profile's query added to the database: its definition lines (the query's descriptors,
 /// else one line of its ids), their taxids, the sequence.
 fn add_to_database(
@@ -897,11 +909,7 @@ fn add_to_database(
                     "binary definition lines (a user object ASN1_BlastDefLine) that LOSAT's \
                      reader of database headers does not read ({reason})"
                 )),
-                BioseqDeflinesError::NullDescriptor => RunError::Refused(
-                    "a query descriptor stated as NULL (an empty element of Seq-descr), which \
-                     NCBI's makeprofiledb dereferences where it makes the definition lines"
-                        .to_string(),
-                ),
+                BioseqDeflinesError::NullDescriptor => null_descriptor(),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
             if !extracted.binary {
@@ -920,9 +928,12 @@ fn add_to_database(
     };
     if !params.user_taxids {
         let first_id = query.ids.first();
-        if let (Some(taxid), Some(first_id)) =
-            (query.descr.as_deref().and_then(first_org_taxid), first_id)
-        {
+        let taxid = match query.descr.as_deref().map(first_org_taxid) {
+            Some(Err(_)) => return Err(null_descriptor()),
+            Some(Ok(taxid)) => taxid,
+            None => None,
+        };
+        if let (Some(taxid), Some(first_id)) = (taxid, first_id) {
             let mut warnings = Vec::new();
             params
                 .taxids

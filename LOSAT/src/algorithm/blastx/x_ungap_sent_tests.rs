@@ -124,7 +124,7 @@ fn two_hit_is_the_reference_with<const W: usize>(matrix: ScoringMatrix) {
         for _ in 0..200 {
             let q = rng.below(q_ref.len() as u64 + 2) as usize;
             let s = rng.below(s_ref.len() as u64 + 2) as usize;
-            let s_left = rng.below(s as u64 + 4) as usize;
+            let s_left = rng.below(s as u64 + 4) as i32;
             let dropoff = [1, 7, 16, 40, 127, 128, 300][rng.below(7) as usize];
             let want = extend_two_hit(matrix, q_ref, s_ref, s_left, s, q, dropoff, W);
             let got = match (&blosum62, &other) {

@@ -744,9 +744,9 @@ fn next_hard_chunk(hard: &mut HardSplitState, chunk_overlap: usize) -> SubjectCh
         None => SubjectChunkStatus::Done,
         Some(chunk) => SubjectChunkStatus::Ok(SubjectChunk {
             offset: chunk.offset,
-            length: chunk.length,
+            length: chunk.letters(),
             seq_ranges: SeqRanges::Inline {
-                range: (chunk.residual as i32, chunk.length as i32),
+                range: (chunk.residual as i32, chunk.length),
             },
             masked: true,
             overlap: chunk.overlap,
@@ -6481,7 +6481,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -6929,15 +6930,15 @@ fn run_local_formats(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // `run_local` searches subject records (the library, `api::run`; the WebAssembly adapter,
-    // `web/adapter`; ABI v1, which refuses `-db` before in `web_api.rs`, `parse_blastn_args`);
+    // `web/adapter`; ABI v1, which refuses `-db` earlier: `parse_blastn_args` in `web_api.rs`);
     // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is run by run_local_database, not run_local");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     // The counts file of `-window_masker_db` is read through the caller's counts source
     // (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter` gives
     // its registered counts files); a caller of `run_local` that sets none has no counts
-    // source; ABI v1 refuses `-window_masker_db` before (`web_api.rs`, `parse_blastn_args`).
+    // source; ABI v1 refuses `-window_masker_db` earlier (`parse_blastn_args` in `web_api.rs`).
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
             "-window_masker_db (a WindowMasker counts file) needs its counts source set before calling run_local (BlastnArgs::window_masker_counts)"
@@ -6947,8 +6948,8 @@ fn run_local_formats(
     // registry (`BlastnArgs::window_masker_registry`, from the run's settings) and counts
     // source (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter`
     // gives its registered counts files); a caller of `run_local` that omits either cannot
-    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` before (`web_api.rs`,
-    // `parse_blastn_args`).
+    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` earlier (`parse_blastn_args` in
+    // `web_api.rs`).
     if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
         && (args.window_masker_registry.is_none() || args.window_masker_counts.is_none())
     {
@@ -6959,7 +6960,7 @@ fn run_local_formats(
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
     // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
     // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
-    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
+    // no repeat search; ABI v1 refuses the option earlier (`parse_blastn_args` in `web_api.rs`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
             "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
@@ -8041,7 +8042,8 @@ enum BatchStage<'a> {
     ///
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
-    /// (`x_lut_drop::after_prelim`).
+    /// (`x_lut_drop::after_prelim`), and its `qs` (LOSAT_X_CSRQSKEEP) once the batch's tables are
+    /// built (`BatchStage::x_last_tables`).
     ///
     /// `setup_only`: the set-up of the batch alone, up to its checks of the subjects
     /// (`context_statistics`), which ends with `SetUpOnly` where they pass: the set-up of a batch
@@ -8059,13 +8061,29 @@ enum BatchStage<'a> {
     /// spaces of the batch's contexts.
     ///
     /// EXPERIMENT (LOSAT_X_CSRQSKEEP) `x_last`: the last chunk of the batch loop's last batch, after
-    /// whose tables no build follows, so the loop's keep takes no `qs` back when they drop
+    /// whose tables no build follows (`BatchStage::x_last_tables`), so the loop's keep frees the
+    /// `qs` it holds once they are built and takes none back when they drop
     /// (`x_mb_lut_keep::Keep::close_qs`).
     ChunkPrelim {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
         x_last: bool,
     },
+}
+
+impl BatchStage<'_> {
+    /// Whether the batch loop builds no lookup table after this call's (EXPERIMENT
+    /// LOSAT_X_MBLUTKEEP, LOSAT_X_CSRQSKEEP; no NCBI counterpart, memory only): the loop's last
+    /// batch (`Search`'s `last`; a split one builds none of its own, after its chunks') or the last
+    /// chunk of a split last batch (`ChunkPrelim`'s `x_last`). The one test of it for the loop's
+    /// keep: it closes the keep to `qs` once these tables are built and frees its table after the
+    /// last batch's preliminary stage.
+    fn x_last_tables(self) -> bool {
+        matches!(
+            self,
+            BatchStage::Search { last: true, .. } | BatchStage::ChunkPrelim { x_last: true, .. }
+        )
+    }
 }
 
 /// The end of a batch's set-up alone (`BatchStage::Search::setup_only`) whose checks pass: no
@@ -8341,6 +8359,7 @@ fn run_in_pool(
     let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
         &output_formats,
         outputs.other_outfmts,
+        args.html_links.is_some(),
     ));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
@@ -8383,6 +8402,12 @@ fn run_in_pool(
         // the prologs that come with them), before the batch's messages and its error.
         macro_rules! write_reports_before {
             () => {{
+                // EXPERIMENT (LOSAT_X_CSRQSKEEP): the loop builds no table after this, so its keep
+                // frees the `qs` it holds before the reports are written (`Keep::close_qs`;
+                // nothing with the switch off). No NCBI counterpart (memory only).
+                if let Some(keep) = &x_lut_keep {
+                    keep.close_qs();
+                }
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                 // written when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8758,6 +8783,11 @@ fn run_in_pool(
                 // The reports of the batches before are written, then the error, which
                 // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
                 Ok(ErrorAfterInvalidBatches(error)) => {
+                    // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees
+                    // the `qs` it holds first. No NCBI counterpart (memory only).
+                    if let Some(keep) = &x_lut_keep {
+                        keep.close_qs();
+                    }
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                     // written when the loop took them.
                     let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8863,8 +8893,11 @@ fn run_in_pool(
                 }
             }
             let read = (&mut titles, &mut warnings[start]);
+            let one_by_one = crate::algorithm::common::database::prefetch_may_be_off(
+                database::prefetch_format(&output_formats),
+            );
             if let Err(error) =
-                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
+                database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
             {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
@@ -8907,6 +8940,11 @@ fn run_in_pool(
         if let Err(error) = crate::blastinput::app::check_prefetch_environment(
             outputs.only_archive() || args.hits_only,
         ) {
+            // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees the `qs`
+            // it holds first. No NCBI counterpart (memory only).
+            if let Some(keep) = &x_lut_keep {
+                keep.close_qs();
+            }
             write_before_failed_batch(
                 &args,
                 queries.before(&kept, start),
@@ -9010,11 +9048,8 @@ fn run_in_pool(
                     _ => batch_records.input(),
                 })
             };
-            // A call of the library's batches after the first (`api::run_batches`) searched the
-            // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0)
                     .where_reports_unchanged_by_load_throws(
                         database::reports_unchanged_by_load_throws(&output_formats),
                     );
@@ -9054,7 +9089,6 @@ fn run_in_pool(
                         &output_formats,
                         args.formatting.report_sort(),
                         args.report_counts,
-                        args.html,
                     ),
                     pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
@@ -9078,7 +9112,10 @@ fn run_in_pool(
                 // later batch's refusal comes after the reports of the batches before, as the
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
-                let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                let prefetch = if crate::algorithm::common::database::prefetch_off(
+                    database::prefetch_format(&output_formats),
+                    seq_aligns,
+                ) {
                     if !taxdb_found && !database.db.scope_utf8_seen() {
                         // No prefetch, and the reports' fetches look nothing up nor post a warning.
                         Ok(Posts::new())
@@ -9135,6 +9172,7 @@ fn run_in_pool(
                             database::LoadedBefore {
                                 hits: &hit_lists,
                                 spans: &batch_spans,
+                                format: database::prefetch_format(&output_formats),
                                 rows: first_rows,
                                 cuts: xml_cuts,
                             },
@@ -9161,7 +9199,10 @@ fn run_in_pool(
                     &titles,
                     &hit_lists,
                     &batch_spans,
-                    run_loads.answer(),
+                    (
+                        run_loads.answer(),
+                        database::prefetch_format(&output_formats),
+                    ),
                     &batch_hit_lists,
                     !args.ungapped,
                     &prefetch_queries,
@@ -9200,7 +9241,13 @@ fn run_in_pool(
             // prefetches' `before`): the run's record of what NCBI's data loader loaded for the
             // batch (`BlastnDatabase::note_loaded`; nothing for a database that cannot stop).
             if stream.acting() {
-                database.note_loaded(&titles, &batch_hit_lists, !args.ungapped, first_rows);
+                database.note_loaded(
+                    &titles,
+                    &batch_hit_lists,
+                    start,
+                    !args.ungapped,
+                    (database::prefetch_format(&output_formats), first_rows),
+                );
             }
         }
         // The batch numbers its queries from 0.
@@ -9840,14 +9887,20 @@ fn write_reports_untimed(
                 subjects.titles,
                 &mut hit_lists,
                 letters,
-                database::parsed_shown(output_formats),
                 (
-                    database::after_throw(output_formats, outputs.other_outfmts),
+                    database::parsed_shown(output_formats),
+                    database::prefetch_format(output_formats),
+                ),
+                (
+                    database::after_throw(
+                        output_formats,
+                        outputs.other_outfmts,
+                        args.html_links.is_some(),
+                    ),
                     database::pairwise_reading(
                         output_formats,
                         args.formatting.report_sort(),
                         args.report_counts,
-                        args.html,
                     ),
                 ),
                 results.batches,
@@ -10800,6 +10853,14 @@ fn search_query_batch<const UNGAPPED: bool>(
             // without an index, `partial`, and never reads it: every OID is the index's.)
             split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
+    // EXPERIMENT (LOSAT_X_CSRQSKEEP): the loop builds no table after these
+    // (`BatchStage::x_last_tables`), so its keep frees the `qs` it still holds (these tables are
+    // chains, which take none) before their scan, and takes none back from here on: a last CSR took
+    // the kept `qs` and frees its `qs` when its tables drop, as before the switch. No NCBI
+    // counterpart (memory only).
+    if let (true, Some(keep)) = (stage.x_last_tables(), x_keep) {
+        keep.close_qs();
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
     // Cutoff scores are computed per subject in the main loop; no global map needed.
@@ -11183,14 +11244,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
     subject_space_overflow.check()?;
-    if let BatchStage::ChunkPrelim { x_last, .. } = stage {
-        // EXPERIMENT (LOSAT_X_CSRQSKEEP): the last chunk of the loop's last batch: no build
-        // follows, so its CSR frees its `qs` when its tables drop at this return, as before the
-        // switch (`x_lut_drop::after_prelim` for a batch that is not split). No NCBI counterpart
-        // (memory only).
-        if let (true, Some(keep)) = (x_last, x_keep) {
-            keep.close_qs();
-        }
+    if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
@@ -11199,9 +11253,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // The keep of LOSAT_X_MBLUTKEEP frees its table too when no later batch builds one on it.
     x_lut_drop::after_prelim(
         lookup_tables,
-        x_keep
-            .filter(|_| matches!(stage, BatchStage::Search { last: true, .. }))
-            .map(|keep| &**keep),
+        x_keep.filter(|_| stage.x_last_tables()).map(|keep| &**keep),
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
     // NCBI frees the initial (ungapped) hit list at the end of its preliminary search. No NCBI

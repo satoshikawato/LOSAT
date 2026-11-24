@@ -307,6 +307,9 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
+        // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
+        // (`TblastnArgs::write_verification`).
+        args.write_verification = settings.write_verification.clone();
         // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
         // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
         // refuses it there (`args::check_search_limits`).
@@ -761,7 +764,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -1145,9 +1149,9 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
-    // The host has no database files; LOSAT Web searches the records it gives.
+    // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
@@ -1243,6 +1247,7 @@ pub fn run_local_database(
     super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
+    args.write_verification = settings.write_verification.clone();
     report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
@@ -1554,9 +1559,9 @@ fn filter_final_hitlists(
 #[allow(clippy::too_many_arguments)]
 /// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
 /// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
-/// `-num_descriptions`, `-num_alignments` and `-html`; the formats of a run whose loads they
-/// make share one view's order, `FormatThrow::and`), for the loads of a subject whose lookup
-/// throws and the texts of its reads (line DBID item pfoff-3); `None` without one.
+/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
+/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
+/// texts of its reads (line DBID item pfoff-3); `None` without one.
 fn pairwise_reading(
     resolved: &ResolvedTblastnArgs,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
@@ -1572,7 +1577,6 @@ fn pairwise_reading(
             descriptions: resolved.num_descriptions,
             alignments: resolved.num_alignments,
         },
-        resolved.html.is_some(),
     ))
 }
 
@@ -1955,7 +1959,13 @@ fn search(
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
-        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
+        // The first format, whose prefetch each batch asks (`database::prefetch_format`).
+        let prefetch_format = super::database::prefetch_format(&outputs.formats);
+        let reads = super::database::CallReads::of(
+            database,
+            || query_input.batches(batch_size),
+            prefetch_format,
+        );
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2200,12 +2210,8 @@ fn search(
             .formats
             .first()
             .map(|format| super::stage_e_report::format_number(format.outfmt));
-        let first_prefetches = first_number.is_some_and(|number| {
-            crate::algorithm::common::database::prefetches_subjects(Some(match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            }))
-        });
+        let first_prefetches = first_number.is_some()
+            && crate::algorithm::common::database::prefetches_subjects(Some(prefetch_format));
         // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
         // taxonomy texts at each `Hit`: of the prefetch only its stop
         // (`shared::held_batch_prefetch_stop`).
@@ -2244,13 +2250,17 @@ fn search(
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
-            super::database::prefetch_stop(&titles, &results, &spans, resolved.gapped).filter(
-                |(span, _)| {
-                    failed
-                        .as_ref()
-                        .is_none_or(|(range, _)| span.start < range.start)
-                },
+            super::database::prefetch_stop(
+                &titles,
+                &results,
+                &spans,
+                (prefetch_format, resolved.gapped),
             )
+            .filter(|(span, _)| {
+                failed
+                    .as_ref()
+                    .is_none_or(|(range, _)| span.start < range.start)
+            })
         } else {
             None
         };
@@ -2386,7 +2396,7 @@ fn search(
                         hard_masked,
                     ),
                     &outputs.formats,
-                    outputs.other_outfmts,
+                    (outputs.other_outfmts, resolved.html.is_some()),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                     resolved.gapped,
@@ -2452,7 +2462,10 @@ fn search(
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
             let xml2_reads = (reported, &mut subject_reads);
-            let after = super::database::after_throw(&outputs.formats, outputs.other_outfmts);
+            let after = super::database::after_throw(
+                &outputs.formats,
+                (outputs.other_outfmts, resolved.html.is_some()),
+            );
             prefetch_posts.extend(reads.xml2(
                 first_xml2,
                 xml2_reads,
@@ -2513,7 +2526,8 @@ fn search(
                     // lookups are made here before any report is written, so the run's refusal
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
-                    if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns)
+                    {
                         // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
                             continue;
@@ -2574,6 +2588,7 @@ fn search(
                         super::database::LoadedBefore {
                             hits: &results[..span.start],
                             spans: &batch_spans,
+                            format: prefetch_format,
                             rows: first_rows,
                             cuts: xml_cuts,
                         },
@@ -2581,7 +2596,6 @@ fn search(
                         &crate::algorithm::common::database::PrefetchQueries::new(
                             span.start, &scope,
                         )
-                        .after_unrecorded_calls(args.first_query_ordinal > 0)
                         .after_xml_reports(xml_before.as_ref())
                         .where_reports_unchanged_by_load_throws(
                             crate::report::db_subject::unchanged_by_load_throws_outfmts(
@@ -2618,12 +2632,12 @@ fn search(
                 super::database::LoadedBefore {
                     hits: &results,
                     spans: &batch_spans,
+                    format: prefetch_format,
                     rows: first_rows,
                     cuts: xml_cuts,
                 },
                 &subjects,
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0)
                     .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
             );

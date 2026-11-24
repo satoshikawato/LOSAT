@@ -325,30 +325,81 @@ pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
     dst
 }
 
-/// Appends the NCBI8na codes of the residues of a delta literal, as `s_FixBioseqDeltas`
-/// gets them from the literal's NCBI2na or NCBI4na data. Both ways give the NCBI4na code
-/// of the letter: an NCBI2na literal holds only `A`, `C`, `G`, `T`, `U`, whose codes 0 to
-/// 3 `C2naTo8na` turns into 1, 2, 4, 8, and `C4naTo8na` splits a byte into its two codes
+/// `s_FixBioseqDeltas`' `seq8na` and its NCBI4na copy in one: the NCBI4na bytes of the
+/// NCBI8na codes appended, two letters to a byte, the first in the high half (`C8naTo4na`).
+/// NCBI makes `seq8na` (1 byte a letter) and converts it; LOSAT writes the NCBI4na bytes
+/// (half a byte a letter) as the codes come, the same bytes without the `seq8na`.
+///
+/// The NCBI8na codes of a literal's residues are the NCBI4na codes of its letters, as
+/// `s_FixBioseqDeltas` gets them from the literal's NCBI2na or NCBI4na data: an NCBI2na
+/// literal holds only `A`, `C`, `G`, `T`, `U`, whose codes 0 to 3 `C2naTo8na` turns into 1,
+/// 2, 4, 8, and `C4naTo8na` splits a byte into its two codes
 /// (`tests::ncbi8na_of_both_codings`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
-pub(super) fn append_ncbi8na(seq8na: &mut Vec<u8>, src: &[u8]) {
-    seq8na.extend(src.iter().map(|&residue| NCBI4NA_CODES[residue as usize]));
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
+pub(super) struct Ncbi4naBuilder {
+    bytes: Vec<u8>,
+    /// The last byte holds one letter, in its high half.
+    odd: bool,
 }
 
-/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
-/// The length of `src` can be one that the input states rather than holds (a gap line),
-/// so the allocation of the result can fail without the process being short of memory
-/// for anything else; that failure is returned (`fix_bioseq_deltas`).
-pub(super) fn ncbi8na_to_ncbi4na(src: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
-    let mut dst = Vec::new();
-    dst.try_reserve_exact(src.len().div_ceil(2))?;
-    let mut chunks = src.chunks_exact(2);
-    dst.extend((&mut chunks).map(|two| two[0] << 4 | two[1]));
-    if let [last] = chunks.remainder() {
-        dst.push(last << 4);
+impl Ncbi4naBuilder {
+    /// The builder of `letters` letters, whose bytes are reserved at once. The count can be
+    /// one that the input states rather than holds (a gap line), so the allocation can fail
+    /// without the process being short of memory for anything else; that failure is
+    /// returned (`fix_bioseq_deltas`), and no later growth can fail.
+    pub(super) fn with_letters(letters: usize) -> Result<Self, std::collections::TryReserveError> {
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(letters.div_ceil(2))?;
+        Ok(Self { bytes, odd: false })
     }
-    Ok(dst)
+
+    fn push_code(&mut self, code: u8) {
+        match self.bytes.last_mut() {
+            Some(last) if self.odd => *last |= code,
+            _ => self.bytes.push(code << 4),
+        }
+        self.odd = !self.odd;
+    }
+
+    /// `run` letters of the NCBI8na code `code` (a gap: 15).
+    pub(super) fn push_run(&mut self, code: u8, mut run: usize) {
+        if run > 0 && self.odd {
+            self.push_code(code);
+            run -= 1;
+        }
+        self.bytes
+            .resize(self.bytes.len() + run / 2, code << 4 | code);
+        if run % 2 == 1 {
+            self.push_code(code);
+        }
+    }
+
+    /// The NCBI8na codes of IUPACna residues of a literal.
+    pub(super) fn push_iupacna(&mut self, mut src: &[u8]) {
+        if let (true, [first, rest @ ..]) = (self.odd, src) {
+            self.push_code(NCBI4NA_CODES[*first as usize]);
+            src = rest;
+        }
+        let mut chunks = src.chunks_exact(2);
+        self.bytes.extend(
+            (&mut chunks)
+                .map(|two| NCBI4NA_CODES[two[0] as usize] << 4 | NCBI4NA_CODES[two[1] as usize]),
+        );
+        if let [last] = chunks.remainder() {
+            self.push_code(NCBI4NA_CODES[*last as usize]);
+        }
+    }
+
+    /// The count of letters appended.
+    pub(super) fn letters(&self) -> usize {
+        self.bytes.len() * 2 - usize::from(self.odd)
+    }
+
+    pub(super) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
 }
 
 #[cfg(test)]

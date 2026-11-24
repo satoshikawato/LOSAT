@@ -274,7 +274,8 @@ fn extract_title(
 /// The delta of a protein is the caller's (`DeltaFix::ProteinDelta`), and a literal without a
 /// length or a `Seq-loc` other than null does not occur. A delta whose first piece is not a
 /// literal (a gap of unknown length) is returned as it is, without `seq-data`. The NCBI8na
-/// codes of a literal are those of its letters (`pack::append_ncbi8na`).
+/// codes of a literal are those of its letters, and the NCBI4na bytes are made as they come
+/// (`pack::Ncbi4naBuilder`), without NCBI's `seq8na`.
 ///
 /// NCBI appends every piece to `seq8na`, a gap as that many NCBI8na 15 and a gap of unknown
 /// length as one, and takes its size, an `int` (`length`), as the `TSeqPos` of the letters it
@@ -315,27 +316,23 @@ fn fix_bioseq_deltas(
             });
             // Below 2^32, so a `usize` on every target.
             let letters = (size % (1 << 32)) as usize;
-            let mut seq8na = Vec::new();
-            seq8na.try_reserve_exact(letters)?;
+            let mut seq4na = pack::Ncbi4naBuilder::with_letters(letters)?;
             for piece in pieces {
-                let room = letters - seq8na.len();
+                let room = letters - seq4na.letters();
                 if room == 0 {
                     break;
                 }
                 match piece {
-                    DeltaSeq::LocNull => seq8na.push(0x0f),
-                    DeltaSeq::Gap { length } => {
-                        let run = (length as usize).min(room);
-                        seq8na.resize(seq8na.len() + run, 0x0f);
-                    }
+                    DeltaSeq::LocNull => seq4na.push_run(0x0f, 1),
+                    DeltaSeq::Gap { length } => seq4na.push_run(0x0f, (length as usize).min(room)),
                     DeltaSeq::Literal(segment) => {
                         let start = segment.start as usize;
                         let run = (segment.length as usize).min(room);
-                        pack::append_ncbi8na(&mut seq8na, &residues[start..start + run]);
+                        seq4na.push_iupacna(&residues[start..start + run]);
                     }
                 }
             }
-            let seq4na = pack::ncbi8na_to_ncbi4na(&seq8na)?;
+            let seq4na = seq4na.into_bytes();
             let fix = (letters as u64 != length).then_some(DeltaFix::Length(letters as u64));
             (length, Some(SeqData::Ncbi4na(seq4na)), fix)
         }

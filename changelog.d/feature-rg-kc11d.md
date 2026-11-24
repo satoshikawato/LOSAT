@@ -9,3 +9,6 @@
   memory on it.
 - Reading a nucleotide record whose letters change between unambiguous and ambiguous often takes
   1 byte of memory for each change instead of 16 (`makeblastdb`, the maskers, `makembindex`).
+- `losat makeblastdb` builds a nucleotide record with gaps or ambiguous letters without a copy
+  of 1 byte a letter: 38 % less peak memory on the longest chromosome of GRCz11 (123 MB, was
+  200 MB), the same database.

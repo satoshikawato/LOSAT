@@ -6,5 +6,5 @@
   the HTML report, the registry's error and exit status 255. Before, they printed LOSAT's refusal of
   `-` with exit status 1 and nothing on standard output. A refusal that comes after that point (for
   example a database title or a query ID that BLAST+ shows wrongly) now follows the report's start on
-  standard output, as BLAST+ writes it before the search. With `-out` on a full disk these programs
-  now stop before the search, at the report's start, as BLAST+ does.
+  standard output, as BLAST+ writes it before the search. With `-out` on a full disk they now stop
+  at once, without running the search first.

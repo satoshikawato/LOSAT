@@ -1983,19 +1983,16 @@ fn tblastx_database_name(args: &TblastxArgs) -> String {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173-178
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before
-/// the search (`before_search`), before NCBI reads the first query batch (a failed write
-/// stops the run there), or, for a run that stops before any report, of the others.
+/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink before the search (a library
+/// `File` sink is kept for the run, `api::local_blast::KeptFile`), before NCBI reads the first
+/// query batch (a failed write stops the run there).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     args: &TblastxArgs,
     subjects: &ShownSubjects<'_>,
-    before_search: bool,
 ) -> Result<()> {
     for format in outputs.formats.iter_mut() {
-        if report::output_format(format.outfmt).is_pairwise()
-            && format.sink.prolog_before_search() == before_search
-        {
+        if report::output_format(format.outfmt).is_pairwise() {
             let flush = crate::report::pairwise::flushes_after_prolog(
                 args.html_links.is_some(),
                 !format.sink.is_writer(),
@@ -2432,7 +2429,6 @@ fn write_tblastx_outputs(
             }
         });
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
-        let prolog = !format.sink.prolog_before_search();
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
         // The format's report, whose error goes to its refusal (below).
@@ -2490,7 +2486,8 @@ fn write_tblastx_outputs(
                         // A search that stops at a query batch (`Empty CBlastQueryVector` with
                         // `-query_loc`) writes no epilog (tblastx_app.cpp:209, `PrintEpilog`).
                         epilog: run.epilog,
-                        prolog,
+                        // Written before the search (`write_pairwise_prologs`).
+                        prolog: false,
                         parsed_subjects: match &run.database {
                             Some(database) => database.reported.parsed.clone(),
                             None => records_parsed.clone(),
@@ -3094,7 +3091,7 @@ fn run_in_pool(
         );
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173
-    write_pairwise_prologs(outputs, &args, &subjects.shown, true)?;
+    write_pairwise_prologs(outputs, &args, &subjects.shown)?;
     if no_batch {
         return reports.write(outputs, SearchedBatches::default(), &[], true);
     }
@@ -4582,8 +4579,8 @@ impl BatchReports<'_> {
 
     /// Writes what NCBI has written when a query batch fails, before its error: the reports
     /// of the batches before (`done`; without the epilog), or, for the first batch, the
-    /// outfmt 0 prolog of the sinks that write it with the reports (the others wrote it
-    /// before the search, `write_pairwise_prologs`). Where the loop wrote the batches before
+    /// prologs that come with the reports (outfmt 0's came before the search,
+    /// `write_pairwise_prologs`). Where the loop wrote the batches before
     /// when it took them (`report_stream`), nothing remains. (The failing batch's search strategy
     /// request, when NCBI made its query factory, was written before its search,
     /// `run_batch_loop`.)
@@ -4604,7 +4601,6 @@ impl BatchReports<'_> {
         if self.queries_written.get() > 0 {
             Ok(())
         } else if done.searched.is_empty() || xml_matrix_failed {
-            write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
             // The XML2 and JSON documents start with their prolog too, and outfmt 20 with its line
             // of the field names (and its formatter's warning, `tabular::write_tabular_prolog`).
             for format in outputs.formats.iter_mut() {

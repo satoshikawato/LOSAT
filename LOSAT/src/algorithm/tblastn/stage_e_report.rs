@@ -775,7 +775,6 @@ pub(super) fn render(
         let side_sink = format.sink.side_files().cloned();
         // The format's report, whose error goes to its refusal (below).
         let written = (|| -> Result<()> {
-            let prolog_written = format.sink.prolog_before_search();
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             match format_number(format.outfmt) {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
@@ -848,7 +847,6 @@ pub(super) fn render(
                     anchored.as_ref(),
                     tabular.html.as_ref(),
                     html_masks.as_deref(),
-                    !prolog_written,
                 )?,
                 // BLAST XML: one document per run, a header before the first query and a
                 // trailer after the last (`blast_xml`).
@@ -1455,9 +1453,6 @@ fn write_pairwise(
     // (`pairwise_hits`).
     html: Option<&Arc<crate::report::html_ids::HtmlLinks>>,
     html_masks: Option<&[crate::report::query_anchored::HspMasks]>,
-    // Whether the report starts with the prolog: false where the search wrote it before
-    // (`tblastn_app::write_first_batch_prologs`, `OutputSink::prolog_before_search`).
-    prolog: bool,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1570,11 +1565,6 @@ fn write_pairwise(
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     write_tblastn_pairwise_report(
-        if pssm.is_some() {
-            super::in_pssm::PROGRAM
-        } else {
-            "TBLASTN"
-        },
         hits,
         writer,
         &config,
@@ -1589,7 +1579,6 @@ fn write_pairwise(
         shown.pairwise_database(),
         probe,
         warnings,
-        prolog,
         ranges.epilog,
         anchored.map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         html_masks,

@@ -7085,16 +7085,6 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // An outfmt 0 to 4 report to a file sink, whose prolog comes with its report and not before
-    // the search (`OutputSink::prolog_before_search`): the blocks write each sink as a writer
-    // (`XBlockSink`), which no longer tells that the first block's report starts with it.
-    if outputs.formats.iter().any(|format| {
-        !format.sink.prolog_before_search()
-            && crate::blastinput::app::parse_formatting_string(format.outfmt)
-                .is_ok_and(|choice| blastp_pairwise_view_of(args.app, choice.number).is_some())
-    }) {
-        return None;
-    }
     // Several outputs, the hit records or an observer. Each
     // output of several is a writer of the caller: the search of all queries writes each output's
     // whole report in turn and opens its sink just before (`OutputSink::open`), while the block
@@ -7734,15 +7724,15 @@ fn blastp_scan_mode_definition(tag: &str) -> String {
 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:191-199
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// Writes the prologs of the formats (`PrintProlog`). `before_search`: the outfmt 0 to 4 prolog
-/// (1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`) of every sink whose prolog comes
-/// before the search (`OutputSink::prolog_before_search`), where NCBI writes it in blastp,
+/// (1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`) of every sink (a library `File`
+/// sink is kept for the run, `api::local_blast::KeptFile`), where NCBI writes it in blastp,
 /// psiblast and rpsblast: before the first query batch and its search strategy request, so that
 /// the prolog's error (a malformed `./.ncbirc` under `-html`) and a failed write end the run
 /// there, before LOSAT's refusal of a strategy file on the report stream; flushed as every
 /// program's (`pairwise::flushes_after_prolog`). Otherwise, for a run that stops at its first
-/// query batch, the prologs that come with the first report, written and flushed: those of the
-/// file sinks of outfmt 0 to 4, the start of the XML2 and JSON documents, and outfmt 20's line of
-/// the field names (its formatter's warning came before the search, `search`).
+/// query batch, the prologs that come with the first report, written and flushed: the start of
+/// the XML2 and JSON documents, and outfmt 20's line of the field names (its formatter's warning
+/// came before the search, `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -7757,14 +7747,13 @@ fn write_pairwise_prologs(
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(args.app, number).is_some() {
-            if format.sink.prolog_before_search() != before_search {
+            if !before_search {
                 continue;
             }
-            let flush = !before_search
-                || crate::report::pairwise::flushes_after_prolog(
-                    args.html.is_some(),
-                    !format.sink.is_writer(),
-                );
+            let flush = crate::report::pairwise::flushes_after_prolog(
+                args.html.is_some(),
+                !format.sink.is_writer(),
+            );
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
@@ -7805,9 +7794,9 @@ fn write_pairwise_prologs(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259,294-295
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
-/// The reports of a run without a query batch: the outfmt 0 epilog (and the prolog of a file
-/// sink, which the search did not write before, `write_pairwise_prologs`), the outfmt 7 count of
-/// 0 queries, nothing for outfmt 6.
+/// The reports of a run without a query batch: the outfmt 0 epilog (after the prolog that the
+/// search wrote before, `write_pairwise_prologs`), the outfmt 7 count of 0 queries, nothing for
+/// outfmt 6.
 fn write_reports_without_queries(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -7876,8 +7865,6 @@ fn write_reports_without_queries(
             Some(_) => OutputFormat::Pairwise,
             None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,
         };
-        // The search wrote the prolog before (`write_pairwise_prologs`) unless the sink is a file.
-        let prolog = !format.sink.prolog_before_search();
         let mut writer = format.sink.open()?;
         match outfmt {
             OutputFormat::Pairwise => {
@@ -7954,7 +7941,8 @@ fn write_reports_without_queries(
                     pairwise_database.as_ref(),
                     None,
                     Some(&mut warnings),
-                    prolog,
+                    // The search wrote the prolog before (`write_pairwise_prologs`).
+                    false,
                     true,
                     None,
                     &crate::report::db_subject::HitLoads::default(),
@@ -8563,8 +8551,10 @@ struct BlastpReports<'a> {
     /// when IDENTITY reset the composition mode, none otherwise.
     identity_warned: usize,
     epilog: bool,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the outfmt 0 report starts with the prolog
-    /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the call's reports start with the prologs that
+    /// come with the first report (the start of the XML2 and JSON documents, the tabular
+    /// reports' header lines; outfmt 0 to 4's came before the search, `write_pairwise_prologs`):
+    /// false for the blocks after the first of the block search (`x_query_blocks.rs`).
     x_prolog: bool,
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).

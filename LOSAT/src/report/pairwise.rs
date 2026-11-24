@@ -2250,9 +2250,9 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:396-441
 /// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
-/// `html`, the report is `-html`; `own_buffer`, the writer is a buffer that its sink opened for
-/// the prolog alone (`OutputSink::open` of a library call's `Stdout` or `File` sink), flushed so
-/// that its write errors show. A plain report flushes there in every program (blastp's driver and
+/// `html`, the report is `-html`; `own_buffer`, the writer is a buffer of LOSAT's, not a stream
+/// of NCBI's (`OutputSink::open` of a library call's `Stdout` sink, or of a `File` sink's file
+/// kept for the run, `api::local_blast::KeptFile`), flushed so that its write errors show. A plain report flushes there in every program (blastp's driver and
 /// tblastn too since line RG item T4b-f, which writes their prolog before the search, where NCBI
 /// writes it: their write failure now shows there, as NCBI's at its prolog's first flush). An
 /// `-html` report does not flush there: NCBI's `PrintProlog` flushes `cout` with the `NcbiEndl`
@@ -2289,7 +2289,8 @@ pub(crate) fn flushes_after_prolog(html: bool, own_buffer: bool) -> bool {
 /// keeps each program's flushes of dev for the plain report: the reports that share the
 /// translated programs' prolog (blastx, rpstblastn, tblastn, tblastx, the blastn tasks other than
 /// megablast and matrix-only scoring) flush there, blastp's driver (blastp, psiblast, rpsblast)
-/// and megablast do not and flush later. A flush moves the point where these bytes reach the
+/// and megablast do not, and flush at the end of the prolog, before the search
+/// (`flushes_after_prolog`). A flush moves the point where these bytes reach the
 /// output and where a write failure shows, so the difference stays data here, not a change of
 /// this groundwork. An `-html` prolog flushes at both in every program, as NCBI's: its references
 /// post on the diagnostics (below), which a failed write of the output must not precede (line RG
@@ -2906,9 +2907,10 @@ fn write_final_database_report<W: Write>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
-/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
-/// false for the query blocks after the first of blastp's block search, whose first block wrote
-/// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
+/// The report of `queries`: the prolog when `prolog` is set (false in the reports of blastp's
+/// driver, whose search writes it before the first query batch, `write_pairwise_prologs`, also
+/// in every query block of the block search, EXPERIMENT (LOSAT_X_BPQBLOCK)), each query's
+/// section, and the epilog when `epilog` is set. `query_gapped_k` is
 /// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
 /// blastp and psiblast (the report's `gapped_karlin`).
 pub fn write_blastp_pairwise_report<W: Write>(
@@ -5368,11 +5370,10 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
 /// `query_titles` and `subject_titles` are the title bytes of the records by query and
 /// subject index (`Query=`, the description table and the alignment headings; `subject_sources`
 /// the sources from which NCBI makes an empty stored title, `stored_source`); the
-/// `query_name` of `queries` is not read. `program` is the program line's name (`TBLASTN`, or
-/// `PSITBLASTN` with `-in_pssm`). The report starts with the prolog when `prolog` is set (false
-/// where the caller wrote it before the search, as NCBI does).
+/// `query_name` of `queries` is not read. The prolog is not part of it: the search writes it
+/// before the first query batch, as NCBI does (`write_tblastn_pairwise_prolog`,
+/// `tblastn_app::search`).
 pub fn write_tblastn_pairwise_report<W: Write>(
-    program: &str,
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -5386,8 +5387,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
-    prolog: bool,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
@@ -5407,19 +5407,6 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         ));
     }
     let mut writer = io::BufWriter::new(writer);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
-    if prolog {
-        write_tblastn_pairwise_prolog(
-            &mut writer,
-            program,
-            &report.version,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            database,
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // Each hit keeps its index in `hits` (the final result order), which identifies it

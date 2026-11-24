@@ -10,7 +10,7 @@ There are five reasons for a refusal:
 - The option is not implemented yet.
 - The option is not part of what v0.2.0 provides.
 
-A refusal comes before the first byte of output unless an item says otherwise. In several items LOSAT first writes what NCBI writes before it fails (apart from the version line, which names LOSAT), and then stops with the error.
+A refusal comes before the first byte of output unless an item says otherwise. With `-outfmt` 0 to 4, every program writes the start of the report (the program and version line, the references and the database lines) before it reads the first query batch (with `-in_pssm`, after it reads the PSSM), as NCBI BLAST+ does, so a refusal found in a query batch, in the search or in the report comes after it. In several items LOSAT first writes what NCBI writes before it fails (apart from the version line, which names LOSAT), and then stops with the error.
 
 ## What you see
 
@@ -301,7 +301,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` with a profile whose Smith-Waterman alignment starts with a gap in the query's row | Refused, at the same place. No search has been found that gives one, so there is no NCBI output to follow. An alignment that starts with a gap in the profile's row is written as NCBI writes it: the warning that the sequence data could not be pre-fetched, and `-outfmt 0` to `5` and `13` to `16` stop where NCBI's do. |
 | The database refusals of `rpsblast` above, with its alias-file cases | Refused. |
 
-NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come before the first byte of output, as `rpsblast`'s do, also for queries without a valid frame, which NCBI does not search.
+NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come where `rpsblast`'s come (before the first byte of output, or with `-outfmt` 0 to 4 after the start of the report for one found in the search), also for queries without a valid frame, which NCBI does not search.
 
 ## rpsbproc
 

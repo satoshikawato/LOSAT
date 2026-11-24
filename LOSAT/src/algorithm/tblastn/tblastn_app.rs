@@ -1432,15 +1432,14 @@ fn run_local_formats(
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-280
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// The prologs of the formats (`formatter.PrintProlog()`). `before_search`: the outfmt 0 to 4
-/// prolog of every sink whose prolog comes before the search
-/// (`OutputSink::prolog_before_search`), where NCBI writes it: before it reads the first query
-/// batch and writes its search strategy request, so that the prolog's error (a malformed
-/// `./.ncbirc` under `-html`) and a failed write end the run there, before LOSAT's refusal of a
-/// strategy file on the report stream; flushed as every program's
-/// (`pairwise::flushes_after_prolog`). Otherwise, for a run that fails in its first query batch,
-/// the prologs that come with the first report, written and flushed: those of the file sinks of
-/// outfmt 0 to 4, the start of the XML2 and JSON documents, and outfmt 20's line of the field
-/// names with its formatter's warning. `subject_path` names a FASTA subject set of
+/// prolog of every sink (a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`), where NCBI writes it: before it reads the first query batch and
+/// writes its search strategy request, so that the prolog's error (a malformed `./.ncbirc` under
+/// `-html`) and a failed write end the run there, before LOSAT's refusal of a strategy file on
+/// the report stream; flushed as every program's (`pairwise::flushes_after_prolog`). Otherwise,
+/// for a run that fails in its first query batch, the prologs that come with the first report,
+/// written and flushed: the start of the XML2 and JSON documents, and outfmt 20's line of the
+/// field names with its formatter's warning. `subject_path` names a FASTA subject set of
 /// `num_subjects` records (`subject_letters`); a database search shows its `Database:` lines
 /// (`database`).
 #[allow(clippy::too_many_arguments)]
@@ -1467,14 +1466,13 @@ pub(super) fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
-            if format.sink.prolog_before_search() != before_search {
+            if !before_search {
                 continue;
             }
-            let flush = !before_search
-                || crate::report::pairwise::flushes_after_prolog(
-                    html.is_some(),
-                    !format.sink.is_writer(),
-                );
+            let flush = crate::report::pairwise::flushes_after_prolog(
+                html.is_some(),
+                !format.sink.is_writer(),
+            );
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,

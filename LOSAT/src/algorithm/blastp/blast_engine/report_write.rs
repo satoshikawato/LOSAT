@@ -775,9 +775,6 @@ pub(super) fn write_pairwise(
         prolog_only,
         ..
     } = *report_view;
-    // The first call's report starts with the prolog where the search did not write it before
-    // (`write_pairwise_prologs`, `OutputSink::prolog_before_search`).
-    let prolog = reports.x_prolog && !format.sink.prolog_before_search();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68,71,90-92
     let mut writer = format.sink.open()?;
     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:187
@@ -1016,7 +1013,8 @@ pub(super) fn write_pairwise(
                 pairwise_database.as_ref(),
                 probe.as_mut(),
                 warnings.as_mut(),
-                prolog,
+                // The search wrote the prolog before (`write_pairwise_prologs`).
+                false,
                 crate::report::pairwise::psiblast_round::ReportRound {
                     number: io.state.number(),
                     found_before: psi_found_before
@@ -1043,7 +1041,8 @@ pub(super) fn write_pairwise(
             pairwise_database.as_ref(),
             probe.as_mut(),
             warnings.as_mut(),
-            prolog,
+            // The search wrote the prolog before (`write_pairwise_prologs`).
+            false,
             reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences

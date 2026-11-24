@@ -148,6 +148,7 @@ fn entry_program_description(name: &str) -> &'static str {
         }
         "makembindex" => "Create a BLAST database index.",
         "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
+        "blastdb_aliastool" => "Application to create BLAST database aliases",
         _ => "",
     }
 }

@@ -272,7 +272,14 @@ pub fn run_makeblastdb(
     };
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
     let mut diag = crate::ncbi_app::Diag::new(&opened.target, &mut recorded, tool);
-    let read = crate::ncbi_app::read(tool, &words, output, &mut diag, None);
+    let read = crate::ncbi_app::read(
+        tool,
+        &words,
+        output,
+        &mut diag,
+        None,
+        &crate::report::run_files::OpenFiles::disk(),
+    );
     drop(diag);
     let args = match read {
         Ok(args) => args,

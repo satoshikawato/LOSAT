@@ -313,7 +313,14 @@ pub(crate) fn read_argv(
         Caller::PrintingStart => Some(super::xml_help_text as fn(&str) -> Option<String>),
         Caller::NoStart | Caller::OwnStart => None,
     };
-    let args = match crate::ncbi_app::read(tool, &words, &mut out, &mut diag, xml_help) {
+    let args = match crate::ncbi_app::read(
+        tool,
+        &words,
+        &mut out,
+        &mut diag,
+        xml_help,
+        &crate::report::run_files::OpenFiles::disk(),
+    ) {
         Ok(args) => args,
         Err(ReadEnd::Exit(0)) => {
             return Err(ArgvError::Printed(

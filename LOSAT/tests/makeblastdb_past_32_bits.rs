@@ -1,12 +1,12 @@
 //! `losat makeblastdb` on FASTA records of 4,294,967,296 letters or more (gaps included), whose
-//! length NCBI's `CFastaReader` counts in a 32-bit `TSeqPos` (line RG DECISIONS K3-6, K3-8),
-//! against the bytes of makeblastdb 2.17.0 (the official Linux x64 release, whose build tree the
-//! exception reports name; probe of 2026-11-13, remaining-gaps-20261112/K/k3/f2probe/cli/gen.py).
-//! None of these inputs makes NCBI allocate the letters of its gaps: `AddSequences` skips the
-//! record (a gi above 4294967295, a length of 0 modulo 2^32, a delta that starts with a gap of
-//! unknown length), stops at its wrapped length (above 2,147,483,647), or `s_FixBioseqDeltas`
-//! throws for a protein whose gaps stayed a delta. A record whose data NCBI builds from more
-//! letters than its length is LOSAT's refusal (`refused_where_ncbi_builds_the_letters`).
+//! length NCBI's `CFastaReader` counts in a 32-bit `TSeqPos` (line RG DECISIONS K3-6, K3-8,
+//! KC-11d-2), against the bytes of makeblastdb 2.17.0 (the official Linux x64 release, whose build
+//! tree the exception reports name; probes of 2026-11-13, remaining-gaps-20261112/K/k3/f2probe/cli/gen.py,
+//! and of 2026-11-24, K/kc/p11d/p2). `AddSequences` skips the record (a gi above 4294967295, a
+//! length of 0 modulo 2^32, a delta that starts with a gap of unknown length), stops at its
+//! wrapped length (above 2,147,483,647), `s_FixBioseqDeltas` throws for a protein whose gaps
+//! stayed a delta, or the record is built with its wrapped length: NCBI first makes the letters of
+//! its gaps (4 GiB or more) and keeps the first letters; LOSAT makes only the letters it keeps.
 //!
 //! Each case runs the `losat` binary in a directory of its own. The standard error stream and the
 //! exit status are compared as they are; the standard output with the time, the run directory and
@@ -34,7 +34,7 @@ struct Case {
 }
 
 #[rustfmt::skip]
-const CASES: [Case; 9] = [
+const CASES: [Case; 11] = [
     Case { name: "big_gi_nucl", input: ">gi|4294967296 big gi\nA\n>?4294967295\n>?1\nA\n>b\nACGTACGT\n".as_bytes(), dbtype: "nucl", parse_seqids: true, status: 0, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nIgnoring gi '4294967296' as it has value larger then 4294967295\nAdding sequences from FASTA; added 1 sequences in <S> seconds.\n\n\n", stderr: "" },
     Case { name: "big_gi_prot", input: ">gi|4294967296 big gi\nM\n>?4294967295\n>?1\nK\n>b\nMKVLAAGG\n".as_bytes(), dbtype: "prot", parse_seqids: true, status: 0, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nIgnoring gi '4294967296' as it has value larger then 4294967295\nAdding sequences from FASTA; added 1 sequences in <S> seconds.\n\n\n", stderr: "" },
     Case { name: "wrapped_to_0_nucl", input: ">a\nA\n>?4294967295\n>b\nACGTACGT\n".as_bytes(), dbtype: "nucl", parse_seqids: false, status: 0, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nIgnoring sequence 'lcl|1' as it has no sequence data\nAdding sequences from FASTA; added 1 sequences in <S> seconds.\n\n\n", stderr: "" },
@@ -44,6 +44,8 @@ const CASES: [Case; 9] = [
     Case { name: "too_long_after_wrap", input: ">a\n>?4294967295\n>?4294967295\n>b\nACGTACGT\n".as_bytes(), dbtype: "nucl", parse_seqids: false, status: 1, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n", stderr: "LOSAT database creation error: Sequences longer than 2,147,483,647 bases are not supported.  Offending sequence is lcl|1\n" },
     Case { name: "protein_delta", input: ">p\nMKV\n>?4294967295\n>?1\nKKKK\n".as_bytes(), dbtype: "prot", parse_seqids: false, status: 255, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n", stderr: "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/objtools/blast/seqdb_writer/build_db.cpp\", line 303: Error: (CMultisourceException::eArgErr) BLASTDB::ncbi::s_FixBioseqDeltas() - lcl|1: Protein delta sequences are not supported.\n\n" },
     Case { name: "protein_delta_parsed_id", input: ">q\nMKVL\n>sp|P12345|ABC_HUMAN x\nM\n>?2147483648\n>?2147483648\nK\n".as_bytes(), dbtype: "prot", parse_seqids: true, status: 255, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\n\n\n", stderr: "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/objtools/blast/seqdb_writer/build_db.cpp\", line 303: Error: (CMultisourceException::eArgErr) BLASTDB::ncbi::s_FixBioseqDeltas() - sp|P12345|ABC_HUMAN: Protein delta sequences are not supported.\n\n" },
+    Case { name: "delta_built_wrapped", input: ">a\nACGT\n>?4294967295\n>?4294967295\nAC\n".as_bytes(), dbtype: "nucl", parse_seqids: false, status: 0, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 1 sequences in <S> seconds.\n\n\n", stderr: "" },
+    Case { name: "substituted_wrapped_prot", input: ">p\nMKV\n>?4294967295\n>?2\nKKKK\n".as_bytes(), dbtype: "prot", parse_seqids: false, status: 0, stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 1 sequences in <S> seconds.\n\n\n", stderr: "" },
 ];
 
 /// A directory of its own for `name`, removed when the value is dropped.
@@ -139,41 +141,6 @@ fn records_past_32_bits_end_as_makeblastdb_ends() {
             case.stdout,
             "{}",
             case.name
-        );
-    }
-}
-
-/// A nucleotide record whose delta starts with a literal, and a protein whose `>?` lines do not
-/// sum to a multiple of 2^32: NCBI builds their data from the letters of the gaps (4 GiB or
-/// more; "BLAST ran out of memory" under a cap), LOSAT refuses the record and allocates nothing.
-#[test]
-fn refused_where_ncbi_builds_the_letters() {
-    for (name, input, dbtype, id, length) in [
-        (
-            "nucl",
-            &b">a\nACGT\n>?4294967295\n>?4294967295\nAC\n"[..],
-            "nucl",
-            "lcl|1",
-            "8,589,934,596",
-        ),
-        (
-            "prot",
-            b">p\nMKV\n>?4294967295\n>?2\nKKKK\n",
-            "prot",
-            "lcl|1",
-            "4,294,967,304",
-        ),
-    ] {
-        let output = makeblastdb(name, input, dbtype, false);
-        assert_eq!(output.status.code(), Some(255), "{name}");
-        assert_eq!(
-            String::from_utf8_lossy(&output.stderr),
-            format!(
-                "Error: a FASTA record of 4,294,967,296 letters or more, counting the letters of its \
-                 gaps ({id}: {length} letters; NCBI counts the length of a record in 32 bits, which \
-                 wrap there), is not supported by LOSAT's makeblastdb\n"
-            ),
-            "{name}"
         );
     }
 }

@@ -31,6 +31,7 @@ Other programs (losat <program> -help shows each one's options):
   convert2blastmask  Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb
   makembindex        Create a BLAST database index.
   makeprofiledb      Application to create databases for rpsblast, cobalt and deltablast
+  blastdb_aliastool  Application to create BLAST database aliases
 
 To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:
   losat -install-shims [DIR]   (default: the directory of this executable)

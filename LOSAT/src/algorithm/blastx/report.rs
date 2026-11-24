@@ -742,7 +742,7 @@ pub(super) fn render_queries_with(
             first_hsp, pool, html_posts,
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
     // BLAST XML (outfmt 5): the Iterations of the batch's queries; the header comes with the
     // first query of the run and the end of the document with the epilog. The XML2 and JSON
     // documents (outfmt 15 and 16) are the reports of the batch's queries through the run's

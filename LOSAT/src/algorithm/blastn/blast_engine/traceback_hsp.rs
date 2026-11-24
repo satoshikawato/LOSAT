@@ -555,7 +555,7 @@ pub(super) fn trace_align_one(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
             // N02 scheduling only: speculative values have no externally visible effects;
             // the original ordered contains/materialize/add sequence remains authoritative.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:273-286,558-585
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:273-297,558-585
             // Endpoint replacement can invalidate batch-start containment. A newly eligible
             // HSP therefore runs the unchanged DP here, at its original sequential position.
             if x_fence::x_fenced(x_fenced) {

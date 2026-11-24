@@ -1067,7 +1067,7 @@ fn diag_hash_insert_window(window_size: usize, scan_range: usize, word_length: u
 struct OffsetPair {
     q_off: usize,
     s_off: usize,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:614-621
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:630-637
     // Each seed must carry the current subject range boundary used by the
     // original NCBI extension call.
     s_range: usize,
@@ -2975,7 +2975,7 @@ impl UngappedHit {
             query_idx: ctx.query_idx,
             query_frame: ctx.frame,
             query_context_offset: ctx.query_offset,
-            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:135-149
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:142-145
             // The word hit lies in its context, so its offset is not negative.
             seed_q_off: (q_off - ctx.query_offset as usize) as u32,
             seed_s_off: s_off as u32,
@@ -3133,7 +3133,7 @@ fn x_sort_idle_bytes() -> usize {
     *IDLE.get_or_init(|| crate::utils::x_mapped::x_idle_bytes("LOSAT_X_SORTIDLE", X_SORT_IDLE_MIB))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:336-355
 /// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED with the capacity of
 /// `x_mapped::x_reserve_mapped`.
 #[inline(always)]
@@ -3224,7 +3224,7 @@ fn score_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering
 
 type PrelimHitCompare = fn(&PrelimHit, &PrelimHit) -> std::cmp::Ordering;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2321
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2286-2320
 fn query_offset_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering {
     a.context_idx
         .cmp(&b.context_idx)
@@ -3235,7 +3235,7 @@ fn query_offset_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::O
         .then_with(|| b.prelim_se.cmp(&a.prelim_se))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2327-2383
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2351-2386
 fn query_end_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering {
     a.context_idx
         .cmp(&b.context_idx)
@@ -3317,7 +3317,7 @@ fn contained_in_hsp<T: PartialOrd>(a: T, b: T, c: T, d: T, e: T, f: T) -> bool {
     a <= c && b >= c && d <= f && e >= f
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1533
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1487-1531
 fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool) -> bool {
     // NCBI's `Int4` query offsets (`PrelimHit::prelim_qs`, which may lie outside the context).
     let (q1, q2) = (hsp1.prelim_qs as isize, hsp2.prelim_qs as isize);
@@ -3779,7 +3779,7 @@ struct SubjectScratch {
     // that holds its working memory. A helper never uses the caller's scratch. Reuse only.
     // No NCBI counterpart: scratch memory of the look-ahead helpers.
     x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
     // No NCBI counterpart: the scratch of the speculative traceback batches, one pair per thread
     // of the pool, kept with the rest of this scratch so that each subject's traceback reuses it
     // instead of making it again. Reuse only, as `x_ahead_scratch`.
@@ -3916,7 +3916,7 @@ struct QueryContextIndex {
     min_length: usize,
     max_length: usize,
     // Direct mapping from query offset to context index for fast lookup.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (BSearchContextInfo)
     direct_map: Vec<u32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
     // NCBI finds the context of a query offset by this binary search over the `query_offset` of the
@@ -3953,7 +3953,7 @@ impl QueryContextIndex {
                 .unwrap_or(0)
         };
         let max_length = contexts.iter().map(|ctx| ctx.len).max().unwrap_or(0);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (BSearchContextInfo)
         let total_len = contexts
             .iter()
             .map(|ctx| ctx.query_offset.max(0) as usize + ctx.len)
@@ -4060,7 +4060,7 @@ impl QueryContextIndex {
         self.x_context_for_offset_ref(n)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (BSearchContextInfo)
     // The forms besides the constant-time one (LOSAT_X_CTXO1), out of line as `context_for_offset` was.
     #[inline(never)]
     fn x_context_for_offset_ref(&self, n: usize) -> usize {
@@ -5460,7 +5460,7 @@ fn post_process_hits_and_write(
         })
         .sum();
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:877-892
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:877-893
     if let Some(timing) = timing {
         let post_elapsed = chain_start.elapsed();
         let post_elapsed_ns = post_elapsed.as_nanos() as u64;
@@ -6979,7 +6979,8 @@ fn run_local_formats(
             "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
-    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    // The command line has checked `-strand` when it read it (NCBI's argument reader); a caller of
+    // `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
         outputs
@@ -7048,7 +7049,8 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     crate::algorithm::blastn::args::BLASTN_TASK.check(&mut args.task)?;
-    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    // The command line has checked `-strand` when it read it (NCBI's argument reader); a caller of
+    // `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
         outputs

@@ -37,12 +37,14 @@ pub(crate) enum NestPart {
 /// A level of the nest that [`TypedReader::nest`] reads (`TypedReader::nest`, on the heap): the
 /// list variant of the CHOICE whose elements are being read, whether the element being read was
 /// stated as `:Type` (in `ReadPointer`'s named frame, which its end leaves), and the named frames
-/// of the list's type (`begin_names`: the XML stream's, `Input::NAMED_TYPES`; none in the others).
+/// of the CHOICE and of the list's type (`begin_names`: the XML stream's, `Input::NAMED_TYPES`;
+/// none in the others).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct NestLevel {
     variant: u16,
     other: bool,
     names: u8,
+    list_names: u8,
 }
 
 /// Where [`TypedReader::nest`] stands: at the start of a value of the CHOICE, at the next element
@@ -355,6 +357,8 @@ impl<I: Input> TypedReader<I> {
     /// an element stated as `NULL` (`Null`). An error leaves the frames of every open level from
     /// the innermost out (`unwind`), as it leaves NCBI's recursion: the frames of the levels above
     /// the error each add what they add to it.
+    /// A value that is not a list (most of them: an interval, a `packed-int`) is read by the
+    /// steps of `choice` alone (`nest_begin`); the levels begin at its first list.
     pub(crate) fn nest(
         &mut self,
         ty: u16,
@@ -366,16 +370,66 @@ impl<I: Input> TypedReader<I> {
         let Kind::Choice(span) = type_info(ty).kind else {
             unreachable!("{} is a CHOICE", type_info(ty).name())
         };
-        let (depth, levels) = (self.depth(), self.nest.len());
-        let result = self.nest_steps(named, ty, span.members(), &nests, &mut read, levels);
+        let variants = span.members();
+        let depth = self.depth();
+        match self.nest_begin(named, ty, variants, &nests, &mut read) {
+            Ok(false) => return Ok(()),
+            Ok(true) => {}
+            Err(fail) => return Err(self.unwind(depth, fail)),
+        }
+        let levels = self.nest.len() - 1;
+        let result = self.nest_steps(named, ty, variants, &nests, &mut read, levels);
         self.nest.truncate(levels);
         result.map_err(|fail| self.unwind(depth, fail))
     }
 
-    /// The steps of `nest` above its `base` levels, to the end of its value or an error, which
-    /// leaves the frames of the open levels on the stack. Each value of the CHOICE (`ty`, named
-    /// `named`) and each list is read in the named frames of its type, as `choice` and `list`
-    /// read them (`names_begin`).
+    /// The start of a value of the CHOICE `ty` (named `named`) in a nest: its named frames and
+    /// `choice_begin`; a variant that is not a list read to the end of the value (`false`), or, for
+    /// a list, its named frames and `list_begin`, as a new level of `self.nest` (`true`). An error
+    /// can leave frames pushed here on the stack, which `nest` leaves (`unwind`).
+    #[inline(always)]
+    fn nest_begin(
+        &mut self,
+        named: u16,
+        ty: u16,
+        variants: &'static [Member],
+        nests: &impl Fn(usize) -> bool,
+        read: &mut impl FnMut(&mut Self, NestPart) -> R<()>,
+    ) -> R<bool> {
+        let names = self.names_begin(named)?;
+        let index = self.choice_begin(ty, variants)?;
+        if !nests(index) {
+            let value = read(self, NestPart::Value(index, variants[index].ty));
+            let value = self.choice_end(value);
+            self.names_end(names, value)?;
+            return Ok(false);
+        }
+        let list_names = self.names_begin(variants[index].ty)?;
+        let (element, set, _) = Self::nest_list(ty, variants, index);
+        self.list_begin(element, set)?;
+        self.nest.push(NestLevel {
+            variant: index as u16,
+            other: false,
+            names,
+            list_names,
+        });
+        Ok(true)
+    }
+
+    /// The element type, `set` and `refs` of the list of the variant `variant` of the CHOICE `ty`
+    /// (of the variants `variants`) in a nest: a list of the CHOICE itself.
+    #[inline(always)]
+    fn nest_list(ty: u16, variants: &'static [Member], variant: usize) -> (u16, bool, bool) {
+        let list = alias_target(variants[variant].ty);
+        let Kind::List { element, set, refs } = type_info(list).kind else {
+            unreachable!("{} is a SEQUENCE OF or SET OF", type_info(list).name())
+        };
+        debug_assert_eq!(alias_target(element), ty, "a list of the CHOICE itself");
+        (element, set, refs)
+    }
+
+    /// The steps of `nest` above its `base` levels, from the first element of the innermost list to
+    /// the end of its value or an error, which leaves the frames of the open levels on the stack.
     #[inline(always)]
     fn nest_steps(
         &mut self,
@@ -386,43 +440,20 @@ impl<I: Input> TypedReader<I> {
         read: &mut impl FnMut(&mut Self, NestPart) -> R<()>,
         base: usize,
     ) -> R<()> {
-        let list_of = |variant: usize| {
-            let list = alias_target(variants[variant].ty);
-            let Kind::List { element, set, refs } = type_info(list).kind else {
-                unreachable!("{} is a SEQUENCE OF or SET OF", type_info(list).name())
-            };
-            debug_assert_eq!(alias_target(element), ty, "a list of the CHOICE itself");
-            (element, set, refs)
-        };
-        // the named frames of `named`, the same at every level
-        let mut names = 0;
-        let mut step = NestStep::Begin;
+        let mut step = NestStep::Element;
         loop {
             step = match step {
                 NestStep::Begin => {
-                    names = self.names_begin(named)?;
-                    let index = self.choice_begin(ty, variants)?;
-                    if nests(index) {
-                        let list_names = self.names_begin(variants[index].ty)?;
-                        let (element, set, _) = list_of(index);
-                        self.list_begin(element, set)?;
-                        self.nest.push(NestLevel {
-                            variant: index as u16,
-                            other: false,
-                            names: list_names,
-                        });
+                    if self.nest_begin(named, ty, variants, nests, read)? {
                         NestStep::Element
                     } else {
-                        let value = read(self, NestPart::Value(index, variants[index].ty));
-                        let value = self.choice_end(value);
-                        self.names_end(names, value)?;
                         NestStep::End
                     }
                 }
                 NestStep::Element => {
                     let level = self.nest.len() - 1;
                     let variant = usize::from(self.nest[level].variant);
-                    let (element, _, refs) = list_of(variant);
+                    let (element, _, refs) = Self::nest_list(ty, variants, variant);
                     match self.element_begin(element, refs)? {
                         Some(Pointee::Null) => {
                             read(self, NestPart::Null(variant))?;
@@ -435,7 +466,9 @@ impl<I: Input> TypedReader<I> {
                             NestStep::Begin
                         }
                         None => {
-                            let list_names = self.nest[level].names;
+                            let NestLevel {
+                                names, list_names, ..
+                            } = self.nest[level];
                             let result = self.list_end(element, Ok(()));
                             self.names_end(list_names, result)?;
                             self.nest.pop();

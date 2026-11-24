@@ -161,7 +161,7 @@ pub(super) fn write_tblastx_tabular(
             lengths: &lengths,
             taxonomy: run.tabular_taxonomy,
             loads: &database.reported.loads,
-            seen: Default::default(),
+            seen: database.seen,
         },
     };
     // The subjects of the report's rows in report order, each once per run of its HSPs.

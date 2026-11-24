@@ -1969,6 +1969,9 @@ pub(crate) struct ReportDatabase<'a> {
     pub reported: &'a super::super::database::ReportedSubjects,
     /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
     pub oids: crate::seqdb::OidMap<'a>,
+    /// The query Bioseqs that NCBI's scope finds for the reported sequences
+    /// (`report::query_bioseq`), by the report's query and the ordinal id.
+    pub seen: crate::report::query_bioseq::SeenFrom<'a>,
 }
 
 /// The `Database:` text of the reports of a local `-subject` search.
@@ -2255,14 +2258,26 @@ fn write_tblastx_outputs(
             parsed,
             loads,
         ) {
+            // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
+            let row = |q_idx: usize, s_idx: usize| match &run.database {
+                Some(database) => database.seen.row(
+                    q_idx,
+                    database.reported.ordinals.get(s_idx).copied(),
+                    s_idx,
+                ),
+                None => s_idx,
+            };
             let checked = crate::report::tabular::check_failed_lookups(
                 spec,
                 (0..run.queries.len()).map(|q_idx| {
                     hits.iter()
                         .filter(move |hsp| hsp.hit.q_idx as usize == q_idx)
-                        .map(|hsp| hsp.hit.s_idx as usize)
+                        .map(move |hsp| row(q_idx, hsp.hit.s_idx as usize))
                 }),
                 |s_idx| {
+                    if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                        return None;
+                    }
                     crate::algorithm::common::tabular::subject_lookup_failure(
                         spec,
                         &subject_ids,
@@ -3073,6 +3088,7 @@ fn run_in_pool(
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
         reads: std::cell::RefCell::default(),
+        seen: std::cell::RefCell::default(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
     // A reader at the end of its input reads no batch (its `End()` is true): the report of no
@@ -3871,6 +3887,28 @@ fn run_batch_loop(
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
             let ordered = batch.hits.as_slice();
             if let Some(scopes) = query_scopes.as_ref() {
+                let formats: Vec<report::TblastxOutputFormat> = outputs
+                    .formats
+                    .iter()
+                    .map(|format| report::output_format(format.outfmt))
+                    .collect();
+                // The batch's searched queries (`start..end`), the scope's span.
+                let record = |query: usize| {
+                    let record = query_records.get(query).filter(|_| query < end)?;
+                    Some(crate::report::query_bioseq::QueryRecordRef {
+                        believed: record.believed()?,
+                        title: &record.title,
+                        length: record.seq().len(),
+                    })
+                };
+                let run = crate::report::query_bioseq::SeenRun {
+                    shows: formats.iter().all(|format| format.shows_query_bioseqs())
+                        && !input.placements.ranged()
+                        && !database.loads_write_texts(),
+                    known: start..usize::MAX,
+                    record: &record,
+                    protein: false,
+                };
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &reports.titles.borrow(),
                     ordered
@@ -3878,16 +3916,9 @@ fn run_batch_loop(
                         .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
                     database.oid_map(),
                     scopes,
-                    super::super::database::parsed_shown(
-                        &outputs
-                            .formats
-                            .iter()
-                            .map(|format| report::output_format(format.outfmt))
-                            .collect::<Vec<_>>(),
-                        prefetch_format,
-                    ),
-                    &mut Default::default(),
-                    &crate::report::query_bioseq::SeenRun::REFUSED,
+                    super::super::database::parsed_shown(&formats, prefetch_format),
+                    &mut reports.seen.borrow_mut(),
+                    &run,
                     "TBLASTX",
                 )?;
             }
@@ -4352,6 +4383,10 @@ struct BatchReports<'a> {
     /// The texts of the subjects that each query's report reads one by one (its batch's prefetch
     /// off), by query, where the first format places them (`TblastxReportRun::query_reads`).
     reads: std::cell::RefCell<Vec<crate::report::query_warnings::QueryReads>>,
+    /// `-db`: the query Bioseqs that NCBI's scope finds for reported sequences, by the run's
+    /// searched query (`report::query_bioseq`), noted at each batch's refusal of a sequence with
+    /// the id of a query of its scope.
+    seen: std::cell::RefCell<crate::report::query_bioseq::QueryBioseqs>,
 }
 
 impl BatchReports<'_> {
@@ -4397,6 +4432,8 @@ impl BatchReports<'_> {
             &batch_runs
         };
         let mut hits = done.hits;
+        // `-db`: the query Bioseqs that the scope finds for reported sequences.
+        let seen = self.seen.borrow();
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).
         let reported_subjects;
@@ -4482,6 +4519,7 @@ impl BatchReports<'_> {
                         pairwise,
                         reported: &reported_subjects,
                         oids: database.oid_map(),
+                        seen: seen.numbered_from(first),
                     }),
                 )
             }

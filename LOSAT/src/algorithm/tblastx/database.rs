@@ -68,6 +68,12 @@ impl TblastxDatabase {
         self.db.oid_map()
     }
 
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(crate) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);

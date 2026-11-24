@@ -138,7 +138,7 @@ fn parse_extra_args(raw: &str) -> Vec<&str> {
     raw.split('\0').filter(|value| !value.is_empty()).collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:36-37
 //
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 fn web_outfmt_or_default(outfmt: &str) -> &str {
@@ -172,7 +172,7 @@ fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
 /// any other word.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2234-2236,2570-2572
 fn take_search_space_arg(
     args: &[&str],
     index: &mut usize,

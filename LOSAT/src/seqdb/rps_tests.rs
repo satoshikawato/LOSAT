@@ -172,7 +172,7 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     write_freq(&base, 28);
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     files.open_freq(&base, "RPSBLAST", None).unwrap();
-    files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
+    assert!(files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap());
     assert_eq!(ratios.len(), 2);
     assert_eq!(ratios[0][0], 4000.0 / 1e9);
     assert_eq!(ratios[1][27], 5027.0 / 1e9);
@@ -184,7 +184,7 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     write_freq(&base, 28);
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     files.open_freq(&base, "RPSBLAST", None).unwrap();
-    files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
+    assert!(files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap());
     let flat: Vec<i32> = (0..7)
         .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
         .collect();
@@ -275,11 +275,38 @@ fn ncbis_errors_come_in_ncbis_file_order() {
 fn inconsistent_files_are_refused() {
     let dir = scratch("refused");
     let base = write_volume(&dir, 28, AUX);
-    // The consensus lengths of the sequence part differ.
-    assert!(matches!(
-        RpsVolumeFiles::open(&base, &[3, 3]),
-        Err(RpsOpenError::Refused(_))
-    ));
+    // `.pin` lengths other than the profiles' columns open: NCBI reads them only in the traceback,
+    // where `rps_search::profile` asks each read (series PR, item PS10e).
+    let files = RpsVolumeFiles::open(&base, &[3, 3]).unwrap();
+    drop(files);
+    // A profile without its sentinel row: offsets that do not ascend.
+    let rps = std::fs::read(base.with_extension("rps")).unwrap();
+    let mut flat = rps.clone();
+    flat[12..16].copy_from_slice(&0i32.to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &flat).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that do not ascend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and 0 do not ascend)"
+        ),
+        "{text}"
+    );
+    // Offsets that descend (a hand-edited `.rps`): the same text, no row count below 0.
+    let mut descending = rps.clone();
+    descending[12..16].copy_from_slice(&(-3i32).to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &descending).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that descend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and -3 do not ascend)"
+        ),
+        "{text}"
+    );
+    std::fs::write(base.with_extension("rps"), &rps).unwrap();
     // Too few K values.
     std::fs::write(base.with_extension("aux"), AUX.replace("2\n3.9e-02\n", "")).unwrap();
     assert!(matches!(

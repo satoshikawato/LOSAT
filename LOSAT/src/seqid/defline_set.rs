@@ -124,30 +124,27 @@ impl DeflineSet {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:956-1019
     /// The title of the Bioseq: the first definition line's title, then ` >` with the FASTA
     /// strings of the ids of each later one (joined by `|`) and its title.
+    /// Each line's part (NCBI's `oss`) is appended to the title as it is written.
     pub fn bioseq_title(&self) -> Vec<u8> {
         let mut title = Vec::new();
-        let mut first_defline = true;
-        for defline in &self.deflines {
-            let mut oss = Vec::new();
+        for (line, defline) in self.deflines.iter().enumerate() {
             if !title.is_empty() {
-                oss.push(b' ');
+                title.push(b' ');
             }
             let mut wrote_seqids = false;
-            if !first_defline {
+            if line > 0 {
                 for (at, id) in defline.ids.iter().enumerate() {
-                    oss.push(if at == 0 { b'>' } else { b'|' });
-                    fasta(id, &mut oss);
+                    title.push(if at == 0 { b'>' } else { b'|' });
+                    fasta(id, &mut title);
                     wrote_seqids = true;
                 }
             }
-            first_defline = false;
             if let Some(text) = &defline.title {
                 if wrote_seqids {
-                    oss.push(b' ');
+                    title.push(b' ');
                 }
-                oss.extend_from_slice(text);
+                title.extend_from_slice(text);
             }
-            title.extend_from_slice(&oss);
         }
         title
     }
@@ -588,7 +585,7 @@ pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
 // packed key of an accession, `ParseAcc` at 825-880, holds its prefix without case, its digits
 // and its version, not the alternative)
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:767-768 (`CSeq_id_Local_Tree`),
-// 919-925 (`CSeq_id_General_Tree`) and 998-1008 (`CSeq_id_Patent_Tree`)
+// 920-925 (`CSeq_id_General_Tree`) and 999-1008 (`CSeq_id_Patent_Tree`)
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3467-3481 (the PDB tree's key;
 // `CSeq_id_PDB_Info::Normalize` upper-cases the molecule after its first letter and sets
 // `chain_id` from `chain`, then the tree compares the normalized ids, `Equals`)

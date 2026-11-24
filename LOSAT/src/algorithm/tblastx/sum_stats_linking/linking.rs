@@ -199,7 +199,7 @@ fn translated_context_group(hit: &UngappedHit) -> usize {
     hit.q_idx as usize * 2 + usize::from(hit.q_frame < 0)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:331-375
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:330-376
 fn rev_compare_hsps_tbx(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     translated_context_group(a)
         .cmp(&translated_context_group(b))
@@ -224,7 +224,7 @@ fn rev_compare_hsps_tbx_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:234-263
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:233-264
 fn rev_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     translated_context_group(a)
         .cmp(&translated_context_group(b))
@@ -515,7 +515,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2722-2725
     //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752,865-867
     // Keep per-context logK available for the exact NCBI xsum expression below.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
@@ -1889,7 +1889,7 @@ fn link_hsp_group_ncbi(
                 // NCBI lines 863-895: Update this HSP's link info (the sum in i64, see LhHelper)
                 let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_big));
                 let ctx_idx = pool_hsp_links[i].ctx_idx;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:866-867
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:865-867
                 // Preserve C's left-associative evaluation order; adding `score` times `Lambda`
                 // less `logK` as one group changes 1-ULP chain E-value ties.
                 let new_xsum = h_xsum
@@ -1924,9 +1924,9 @@ fn link_hsp_group_ncbi(
                 pool_lh_helpers[h_lh_idx].maxsum1 =
                     pool_lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
 
-                // Update next_larger for this entry (NCBI lines 876-884)
+                // Update next_larger for this entry (NCBI lines 877-884)
                 //
-                // NCBI `c++/src/algo/blast/core/link_hsps.c` (s_BlastEvenGapLinkHSPs) lines 876-885:
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:877-884 (s_BlastEvenGapLinkHSPs)
                 let cur_sum = new_sum;
                 let mut prev = h_lh_idx - 1;
                 let mut prev_sum = pool_lh_helpers[prev].sum[1];

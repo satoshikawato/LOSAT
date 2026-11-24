@@ -1692,6 +1692,31 @@ pub struct TabularHsp<'a> {
     pub qcovhsp: i32,
 }
 
+impl TabularHsp<'_> {
+    /// The row of an HSP whose edit script is `ops` and whose `length`, `gaps` and `gap_opens` are
+    /// the whole alignment's, with the three as NCBI's tables count them
+    /// (`serial::seqalign::AlignLengths::within_query_range`; `pident` and `ppos` then divide by
+    /// the shorter length, `mismatch` stays).
+    pub(crate) fn within_query_range(self, ops: &[crate::common::GapEditOp]) -> Self {
+        let crate::report::serial::seqalign::AlignLengths {
+            length,
+            gaps,
+            gap_opens,
+        } = crate::report::serial::seqalign::AlignLengths {
+            length: self.length,
+            gaps: self.gaps,
+            gap_opens: self.gap_opens,
+        }
+        .within_query_range(ops);
+        Self {
+            length,
+            gaps,
+            gap_opens,
+            ..self
+        }
+    }
+}
+
 /// `NStr::Quote` with its default quote (`"`) and escape (`\`) characters.
 fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
     if text.is_empty() {

@@ -1586,3 +1586,26 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
     assert_eq!(rows(of.of(4)), html);
     assert!(HtmlRowMasks::new(None, 0).of(0).is_none());
 }
+
+/// The `Gaps =` of an HSP's header counts the gap columns inside the query row's aligned range
+/// (`PairwiseHit::shown_gaps`, NCBI's `x_GetNumGaps`): a Smith-Waterman alignment's end gaps in
+/// the query's row are left out, the subject row's and an X-drop script's inner gaps stay.
+#[test]
+fn header_gaps_leave_out_the_query_rows_end_gaps() {
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    let shown = |length: usize, ops: Vec<crate::common::GapEditOp>| {
+        PairwiseHit::from(Hit {
+            length,
+            mismatch: 5,
+            gap_info: Some(ops),
+            ..make_hit()
+        })
+        .shown_gaps()
+    };
+    // 95 identities and 5 mismatches in each: the rest of `length` are gap columns.
+    assert_eq!(shown(195, vec![Del(95), Sub(100)]), 0);
+    assert_eq!(shown(105, vec![Sub(60), Ins(2), Sub(40), Del(3)]), 2);
+    assert_eq!(shown(104, vec![Ins(4), Sub(100)]), 4);
+    assert_eq!(shown(103, vec![Sub(50), Del(3), Sub(50)]), 3);
+    assert_eq!(PairwiseHit::from(make_hit()).shown_gaps(), 0);
+}

@@ -1067,11 +1067,10 @@ fn a_database_title_outside_the_visible_range_is_written_with_ncbis_posts() {
     assert!(report.windows(title.len()).any(|window| window == title));
 }
 
-/// The mapper of a `-subject` search's remap leaves out a first and a last Std-seg with a gap
-/// row (seq_align_mapper_base.cpp:1568-1580, `std_seg_kept`); a database search keeps every
-/// segment. (BLAST's edit scripts start and end with a substitution; this script does not.)
+/// The Std-segs of a translated HSP are one per segment of its records with either subject: a
+/// `-subject` report's records come mapped (`mapped_script`), so the writer drops none.
 #[test]
-fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
+fn std_segs_are_written_for_every_segment_of_the_records() {
     let ops = [Del(2), Sub(10), Ins(1), Sub(5), Ins(3)];
     let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 12, 0), &ops);
     let segments = |db_title: Option<&'static [u8]>| {
@@ -1100,8 +1099,139 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
             text.matches("empty local").count(),
         )
     };
-    assert_eq!(segments(None), (3, 1));
+    assert_eq!(segments(None), (5, 3));
     assert_eq!(segments(Some(b"db")), (5, 3));
+}
+
+/// The mapper of a `-subject` search leaves out the first and the last Std-seg when it has a gap
+/// row, once each (seq_align_mapper_base.cpp:1568-1580): `mapped_script` gives the kept operations
+/// and the letters left out at each end; an X-drop script (a substitution at each end) and an
+/// ungapped HSP (no script) keep everything.
+#[test]
+fn mapped_script_leaves_out_an_end_segment_with_a_gap_row_once() {
+    use super::seqalign::{mapped_script, MappedScript};
+    let ops = [Del(2), Sub(10), Ins(1), Sub(5), Ins(3)];
+    assert_eq!(
+        mapped_script(&ops),
+        MappedScript {
+            kept: 1..4,
+            start: [0, 2],
+            end: [3, 0],
+        }
+    );
+    assert!(mapped_script(&ops).drops(&ops));
+    // The Smith-Waterman alignment of the probe: 95 subject letters before the query's first.
+    let sw = [Del(95), Sub(190)];
+    assert_eq!(
+        mapped_script(&sw),
+        MappedScript {
+            kept: 1..2,
+            start: [0, 95],
+            end: [0, 0],
+        }
+    );
+    // Only the first segment goes, though the next one has a gap row too.
+    let two = [Ins(4), Del(2), Sub(7)];
+    assert_eq!(
+        mapped_script(&two),
+        MappedScript {
+            kept: 1..3,
+            start: [4, 0],
+            end: [0, 0],
+        }
+    );
+    let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
+    let kept = mapped_script(&xdrop);
+    assert_eq!(kept.kept, 0..5);
+    assert!(!kept.drops(&xdrop));
+    assert_eq!((kept.start, kept.end), ([0, 0], [0, 0]));
+    assert_eq!(mapped_script(&[]).kept, 0..0);
+    // A script of one gap segment (never made) keeps nothing.
+    assert_eq!(mapped_script(&[Del(3)]).kept, 1..1);
+}
+
+/// The end gaps of each row (`row_end_gaps`): the row's gap operations before its first letter
+/// and after its last (a `Del` in the query's row, an `Ins` in the subject's), which NCBI's
+/// `GetAlignLengths` and `x_GetNumGaps` leave out of the query row's counts; the inner gaps and
+/// the other row's are not.
+#[test]
+fn row_end_gaps_are_the_rows_gap_operations_outside_its_letters() {
+    use super::seqalign::{gapped_row_range, row_end_gaps, AlignRow, RowEndGaps, RowRangeError};
+    // A gap start in the query's row (the probe's Smith-Waterman alignment).
+    let query_start = [Del(95), Sub(190)];
+    assert_eq!(
+        row_end_gaps(&query_start, AlignRow::Query),
+        RowEndGaps {
+            leading: 95,
+            trailing: 0,
+            opens: 1,
+        }
+    );
+    assert_eq!(
+        row_end_gaps(&query_start, AlignRow::Subject),
+        RowEndGaps::default()
+    );
+    assert_eq!(
+        gapped_row_range(&query_start, AlignRow::Query),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(gapped_row_range(&query_start, AlignRow::Subject), None);
+    // A gap start and a gap end in the subject's row: the query row has letters in the first and
+    // the last operation, so its deletions are inner gaps.
+    let ends = [Ins(3), Del(2), Sub(10), Del(1), Sub(4), Del(5), Ins(6)];
+    assert_eq!(
+        row_end_gaps(&ends, AlignRow::Subject),
+        RowEndGaps {
+            leading: 3,
+            trailing: 6,
+            opens: 2,
+        }
+    );
+    assert_eq!(row_end_gaps(&ends, AlignRow::Query), RowEndGaps::default());
+    assert_eq!(row_end_gaps(&ends, AlignRow::Subject).span(31), (3, 25));
+    assert_eq!(
+        gapped_row_range(&ends, AlignRow::Subject),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(gapped_row_range(&ends, AlignRow::Query), None);
+    // A gap end in the query's row (two operations), after an inner gap that stays.
+    let query_end = [Sub(10), Del(1), Sub(4), Del(5), Del(2)];
+    assert_eq!(
+        row_end_gaps(&query_end, AlignRow::Query),
+        RowEndGaps {
+            leading: 0,
+            trailing: 7,
+            opens: 2,
+        }
+    );
+    assert_eq!(row_end_gaps(&query_end, AlignRow::Query).columns(), 7);
+    assert_eq!(row_end_gaps(&query_end, AlignRow::Query).span(22), (0, 15));
+    assert_eq!(
+        row_end_gaps(&query_end, AlignRow::Subject),
+        RowEndGaps::default()
+    );
+    assert_eq!(gapped_row_range(&query_end, AlignRow::Query), None);
+    // An X-drop script has none: its inner gaps stay in the counts.
+    let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
+    for row in [AlignRow::Query, AlignRow::Subject] {
+        assert_eq!(row_end_gaps(&xdrop, row), RowEndGaps::default());
+        assert_eq!(row_end_gaps(&xdrop, row).span(21), (0, 21));
+    }
+    assert_eq!(row_end_gaps(&[], AlignRow::Query), RowEndGaps::default());
+}
+
+/// The query frame of a translated query's section (`HspStrands::master_frame`): the HSP's own,
+/// or, where the query row starts with a gap, the minus frame of the record's length (NCBI
+/// BLAST+ 2.17.0 shows queries of 570, 571 and 572 nucleotides under -1, -2 and -3).
+#[test]
+fn a_query_row_that_starts_with_a_gap_takes_the_frame_of_the_records_length() {
+    use crate::report::query_anchored::HspStrands;
+    for frame in [1, 2, 3, -1, -2, -3] {
+        assert_eq!(HspStrands::master_frame(frame, false, 570), frame);
+    }
+    assert_eq!(HspStrands::master_frame(1, true, 570), -1);
+    assert_eq!(HspStrands::master_frame(2, true, 571), -2);
+    assert_eq!(HspStrands::master_frame(-1, true, 572), -3);
 }
 
 /// An ungapped translated search writes one `diags` Seq-align per subject (no `dim`, no
@@ -1329,4 +1459,57 @@ fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
     assert!(tblastn.contains("str \"psitblastn\""), "{tblastn}");
     assert!(tblastn.contains("int 11"), "{tblastn}");
     assert!(tblastn.contains("num_ident"), "{tblastn}");
+}
+
+/// The Dense-seg of a translated HSP's rows (`translated_row_segments`, NCBI's
+/// `CreateDensegFromStdseg`) gives each row the strand of its first segment with one in every
+/// segment: a minus-frame query row that starts with a gap (whose first Std-seg has an empty
+/// location) is on the minus strand, so outfmt 0 counts its positions down; the protein row has
+/// no strand, and an X-drop script's rows keep theirs.
+#[test]
+fn a_translated_rows_leading_gap_takes_the_rows_strand() {
+    use super::seqalign::{translated_row_segments, Segments, Strand};
+    let strands = |frame: i32, ops: Vec<GapEditOp>| {
+        let hit = crate::common::Hit {
+            identity: 100.0,
+            length: 285,
+            mismatch: 0,
+            gapopen: 1,
+            q_start: 1,
+            q_end: 570,
+            s_start: 1,
+            s_end: 285,
+            e_value: 1e-100,
+            bit_score: 353.0,
+            num_ident: 190,
+            query_frame: frame,
+            query_length: 570,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 906,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: true,
+            gap_info: Some(ops),
+            num_positives: 190,
+        };
+        let mut segments = Segments::default();
+        translated_row_segments(&hit, Some((frame as i8, 570)), None, &mut segments);
+        segments.strands().to_vec()
+    };
+    let (minus, plus, none) = (Strand::Minus, Strand::Plus, Strand::Unknown);
+    assert_eq!(
+        strands(-1, vec![Del(95), Sub(190)]),
+        [minus, none, minus, none]
+    );
+    assert_eq!(
+        strands(1, vec![Del(95), Sub(190)]),
+        [plus, none, plus, none]
+    );
+    assert_eq!(
+        strands(-1, vec![Sub(100), Ins(5), Sub(85)]),
+        [minus, none, minus, none, minus, none]
+    );
 }

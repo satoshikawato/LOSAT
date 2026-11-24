@@ -12,6 +12,7 @@
 use anyhow::Result;
 
 use crate::report::serial::encoder::Encoder;
+use crate::report::serial::seqalign::AlignRow;
 use crate::report::serial::xml::{XmlEncoder, XmlPost, XmlThrow};
 
 use super::hsp::{mask_query_row, recount, round6, MaskLetter};
@@ -254,6 +255,8 @@ fn query_def(title: &[u8]) -> &[u8] {
 #[derive(Default)]
 pub(crate) struct Scratch {
     pub(crate) masked: Vec<u8>,
+    /// The subject row as written (`count_hsp`: its end gaps spaces).
+    pub(crate) hseq: Vec<u8>,
     pub(crate) midline: Vec<u8>,
     pub(crate) columns: Vec<usize>,
     pub(crate) segments: Vec<(usize, usize)>,
@@ -734,7 +737,8 @@ fn fill_segments(segments: &mut Vec<(usize, usize)>, ops: Option<&[GapEditOp]>, 
 /// What the XML and JSON writers count again from an HSP's rows (s_SeqAlignSetToXMLHsps,
 /// blastxml_format.cpp:268-331, blastxml2_format.cpp:268-321): the masked query row
 /// (`scratch.masked`: the regions of `masks` with the HSP's frame, in `mask_letter`), the
-/// midline (`scratch.midline`) and the three counts.
+/// subject row as written (`scratch.hseq`), the midline (`scratch.midline`) and the three
+/// counts. Both rows show their end gaps (`end_gaps_as_spaces`).
 pub(crate) struct HspCounts {
     pub identity: i32,
     pub positive: i32,
@@ -764,6 +768,11 @@ pub(crate) fn count_hsp(
         &mut scratch.columns,
     );
     let (identity, positive) = recount(hsp.qrow, hsp.srow, positives, &mut scratch.midline);
+    let ops = hsp.ops.unwrap_or_default();
+    end_gaps_as_spaces(&mut scratch.masked, ops, AlignRow::Query);
+    scratch.hseq.clear();
+    scratch.hseq.extend_from_slice(hsp.srow);
+    end_gaps_as_spaces(&mut scratch.hseq, ops, AlignRow::Subject);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:238-241
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:225-230, 258-260
     // The gaps of the Seq-align's segments (also for a translated search, lines 259-260): the
@@ -782,6 +791,19 @@ pub(crate) fn count_hsp(
         positive,
         gaps,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:279-303
+/// The row `row` (`AlignRow`) of an HSP whose edit script is `ops`, with its end gaps
+/// (`serial::seqalign::row_end_gaps`: a Smith-Waterman alignment of `-use_sw_tback`) the end
+/// character of `GetWholeAlnSeqString`, a space, as `Hsp_qseq` and `Hsp_hseq` show them. The
+/// query row's masking and the midline read the row before (the masking counts the residues by
+/// their `-`); the midline already has a space there.
+fn end_gaps_as_spaces(written: &mut [u8], ops: &[GapEditOp], row: AlignRow) {
+    let (lo, hi) = crate::report::serial::seqalign::row_end_gaps(ops, row).span(written.len());
+    written[..lo].fill(b' ');
+    written[hi..].fill(b' ');
 }
 
 impl HspWrite for Xml5Hsps<'_, '_> {
@@ -823,7 +845,7 @@ impl HspWrite for Xml5Hsps<'_, '_> {
         int_member(enc, "gaps", 14, counts.gaps);
         int_member(enc, "align-len", 15, hsp.qrow.len() as i32);
         string_member(enc, "qseq", 17, &scratch.masked);
-        string_member(enc, "hseq", 18, hsp.srow);
+        string_member(enc, "hseq", 18, &scratch.hseq);
         string_member(enc, "midline", 19, &scratch.midline);
         enc.end_sequence();
         Ok(())

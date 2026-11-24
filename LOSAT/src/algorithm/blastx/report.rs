@@ -554,6 +554,7 @@ pub(crate) fn render_queries(
     xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
+    sort_lists(batches, SubjectLoc::of(shown) == SubjectLoc::Interval);
     render_queries_with(
         writer,
         stderr,
@@ -592,14 +593,22 @@ pub(super) struct LocalReport<'a, 'p> {
 }
 
 /// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
-/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`).
+/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`); then,
+/// for a report of `-subject` records (`remaps`), maps them as `-subject`'s Seq-loc mapper does
+/// (`HspList::map_subject_alignments`). Each batch's report calls it once, before any format reads
+/// the lists (`render_queries`, the archive's `native::ArchiveBatch::write`, `run_local`'s batch):
+/// the mapper leaves out a first and a last segment with a gap row once each, so it is not
+/// repeated.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-pub(super) fn sort_lists(batches: &mut [BatchResults]) {
+pub(super) fn sort_lists(batches: &mut [BatchResults], remaps: bool) {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
             for list in lists {
                 list.sort_evalue();
+                if remaps {
+                    list.map_subject_alignments();
+                }
             }
         }
     }
@@ -658,7 +667,8 @@ fn check_failed_lookups(
     Ok(())
 }
 
-/// `render_queries`, with what `run_local` adds (`local`).
+/// `render_queries`, with what `run_local` adds (`local`), of `batches` whose lists are in the
+/// order of the reports (`sort_lists`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_queries_with(
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -675,7 +685,6 @@ pub(super) fn render_queries_with(
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
-    sort_lists(batches);
     let (probe, first_hsp, made_hits, mut refusal, html_posts) = match local {
         Some(local) => (
             local.probe,
@@ -1129,8 +1138,9 @@ fn write_pairwise(
 /// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
 /// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
-/// `x_pairwise_par::alignment_end`); a write error stays.
-fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
+/// `x_pairwise_par::alignment_end`); a write error stays. TBLASTN's outfmt 0 maps its writer's
+/// errors with it too.
+pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
     use crate::report::pairwise::EmptyRowsStop;
     match error
         .get_ref()

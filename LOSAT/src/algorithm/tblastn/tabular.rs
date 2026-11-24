@@ -28,13 +28,16 @@ use super::stage_e_report::{
     aligned_sequences_into, record_coordinates, ReportRanges, ShownSubjects,
 };
 use super::x_subject_store::SubjectLetters;
+use crate::algorithm::blastx::empty_rows::row_range_exception;
 use crate::algorithm::common::tabular::{TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::cli::NativeError;
 use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
+use crate::report::serial::seqalign::{std_seg_row_range, AlignRow};
 use crate::report::tabular::{
     coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,
     TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
@@ -340,6 +343,28 @@ pub(super) fn write_tblastn_tabular(
         )?;
         writer.write_all(&buf)?;
         buf.clear();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
+        // `qcovs` reads the query range of every HSP of the query before its first row: a query
+        // row that starts with a gap throws there, after outfmt 7's lines (`-subject`'s mapping
+        // drops such a first segment, `KappaResultHitList::map_subject_alignments`).
+        if needs.qcovs {
+            let unranged = hitlist
+                .lists()
+                .iter()
+                .flat_map(|list| list.hsps.hsps.iter().zip(&list.payloads))
+                .find_map(|(linked, payload)| {
+                    std_seg_row_range(
+                        i64::from(linked.hsp.q_start),
+                        i64::from(linked.hsp.q_end),
+                        &payload.edit_script,
+                        AlignRow::Query,
+                    )
+                });
+            if let Some(error) = unranged {
+                writer.flush()?;
+                return Err(NativeError::exception(&row_range_exception(error)).into());
+            }
+        }
         // The query's formatter (`TabularRows`).
         let mut rows = TabularRows::default();
         for list in hitlist.lists() {
@@ -516,7 +541,8 @@ pub(super) fn write_tblastn_tabular(
                     stored_gaps: [&query_gaps, &[]],
                     // The protein query's residues, in the HSP's context and in the Seq-align.
                     qcovhsp: qcovhsp.of_hsp(hsp.q_end - hsp.q_start, hsp.q_end - hsp.q_start),
-                };
+                }
+                .within_query_range(&payload.edit_script);
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_deref_mut() {
                     writer.flush()?;

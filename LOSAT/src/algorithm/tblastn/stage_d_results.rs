@@ -179,6 +179,42 @@ impl KappaResultHitList {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1632-1638
+    /// `-subject`'s Seq-loc mapper (`s_RemapToSubjectLoc`) on the HSPs of the lists, after the
+    /// report's sort (`sort_hsps_for_report`; the mapper works on the sorted Seq-aligns): each HSP
+    /// as `serial::seqalign::mapped_script` keeps it, an end segment with a gap row left out (a
+    /// Smith-Waterman alignment of `-use_sw_tback` that starts with a gap): the starts move past
+    /// the left-out letters, the ends back before them, and the alignment's columns, gap openings
+    /// and gap letters lose them; the scores and the identities stay. Every format reads the
+    /// mapped HSP (`stage_e_report::render` maps once, before any format).
+    pub(super) fn map_subject_alignments(&mut self) {
+        for list in &mut self.lists {
+            for (linked, payload) in list.hsps.hsps.iter_mut().zip(&mut list.payloads) {
+                let script = &payload.edit_script;
+                let mapped = crate::report::serial::seqalign::mapped_script(script);
+                if !mapped.drops(script) {
+                    continue;
+                }
+                // The left-out operations are gaps (`std_seg_kept`).
+                let dropped = script[..mapped.kept.start]
+                    .iter()
+                    .chain(&script[mapped.kept.end..]);
+                let (opens, letters) = dropped.fold((0, 0), |(opens, letters), op| {
+                    (opens + 1, letters + op.num() as usize)
+                });
+                let hsp = &mut linked.hsp;
+                hsp.q_start += mapped.start[0] as i32;
+                hsp.s_start += mapped.start[1] as i32;
+                hsp.q_end -= mapped.end[0] as i32;
+                hsp.s_end -= mapped.end[1] as i32;
+                payload.align_length -= letters;
+                payload.gap_letters -= letters;
+                payload.gap_opens -= opens;
+                payload.edit_script = payload.edit_script[mapped.kept].to_vec();
+            }
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:672-674
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
     /// Leaves out the HSPs of score 0 (kept by a very large -evalue), which have no

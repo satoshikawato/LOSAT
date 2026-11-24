@@ -837,7 +837,7 @@ fn write_run(
         // search strategy request holds (`take` below).
         batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
-        report::sort_lists(results);
+        report::sort_lists(results, database.is_none());
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
         // `native::run_inner`'s batches)
         // A database: the titles of the batch's reported sequences, read in NCBI's traceback

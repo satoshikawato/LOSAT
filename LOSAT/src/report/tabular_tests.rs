@@ -1321,3 +1321,51 @@ fn the_sequence_exception_names_the_codings_of_the_query() {
         );
     }
 }
+
+/// A table row counts only the columns inside the query row's aligned range
+/// (`TabularHsp::within_query_range`, NCBI's `GetAlignLengths`): the query row's end gaps of a
+/// Smith-Waterman alignment come off `length`, `gaps` and `gapopen`; a subject row's end gaps and
+/// the inner gaps of an X-drop script stay.
+#[test]
+fn table_counts_leave_out_the_query_rows_end_gaps() {
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    let row = |length, gap_opens, gaps| TabularHsp {
+        q_start: 1,
+        q_end: 190,
+        s_start: 1,
+        s_end: 285,
+        evalue: 1e-100,
+        bit_score: 380.0,
+        score: 990,
+        length,
+        gap_opens,
+        gaps,
+        num_ident: 190,
+        q_frame: 0,
+        s_frame: 0,
+        rows: None,
+        end_gaps: true,
+        stored_gaps: [&[], &[]],
+        qcovhsp: 100,
+    };
+    let counts = |hsp: TabularHsp<'_>| (hsp.length, hsp.gaps, hsp.gap_opens);
+    // The probe's alignment: 95 gaps before the query's first letter.
+    assert_eq!(
+        counts(row(285, 1, 95).within_query_range(&[Del(95), Sub(190)])),
+        (190, 0, 0)
+    );
+    // A gap end in the query's row, with an inner gap that stays.
+    assert_eq!(
+        counts(row(20, 2, 6).within_query_range(&[Sub(10), Ins(2), Sub(4), Del(4)])),
+        (16, 2, 1)
+    );
+    // The subject row's end gaps are inside the query row's range.
+    assert_eq!(
+        counts(row(14, 2, 4).within_query_range(&[Ins(3), Sub(10), Ins(1)])),
+        (14, 4, 2)
+    );
+    // An X-drop script (a substitution at each end) and an ungapped HSP keep their counts.
+    let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
+    assert_eq!(counts(row(21, 2, 3).within_query_range(&xdrop)), (21, 3, 2));
+    assert_eq!(counts(row(190, 0, 0).within_query_range(&[])), (190, 0, 0));
+}

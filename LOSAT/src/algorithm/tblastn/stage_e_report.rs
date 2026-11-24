@@ -342,6 +342,10 @@ pub(super) fn render(
     for hitlist in hitlists.iter_mut() {
         hitlist.sort_hsps_for_report();
         hitlist.drop_zero_score_hsps();
+        // `-subject`'s Seq-loc mapper, once, before any format reads the HSPs.
+        if matches!(shown, ShownSubjects::Fasta { .. }) {
+            hitlist.map_subject_alignments();
+        }
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
@@ -1071,8 +1075,16 @@ fn write_tabular(
                     oid,
                     (hsp.q_start + 1, hsp.q_end, s_start, s_end),
                 )?;
+                // The columns inside the query row's range (a Smith-Waterman alignment's end gaps
+                // in the query's row are left out), as every table counts them.
+                let counts = crate::report::serial::seqalign::AlignLengths {
+                    length: payload.align_length,
+                    gaps: payload.gap_letters,
+                    gap_opens: payload.gap_opens,
+                }
+                .within_query_range(&payload.edit_script);
                 let percent =
-                    format_percent_identity_ncbi(payload.report_num_ident, payload.align_length, 3);
+                    format_percent_identity_ncbi(payload.report_num_ident, counts.length, 3);
                 let bits = format_bitscore_ncbi(payload.bit_score);
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:
@@ -1097,9 +1109,9 @@ fn write_tabular(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     percent,
-                    payload.align_length,
+                    counts.length,
                     payload.report_mismatches,
-                    payload.gap_opens,
+                    counts.gap_opens,
                     q_start,
                     q_end,
                     s_start,
@@ -1592,8 +1604,10 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => &reported.loads,
         },
     )
-    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
-    .map_err(crate::cli::NativeError::of_writer)?;
+    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
+    // sort or the description table may stop at a query row that starts with a gap
+    // (`EmptyRowsStop`, `TblastnSections::head`).
+    .map_err(crate::algorithm::blastx::report::empty_rows_stop)?;
     Ok(())
 }
 

@@ -516,7 +516,7 @@ pub(crate) fn subject_rows_all_empty(list: &super::results::HspList, gapped: boo
 /// one that starts with a gap, of a gapped HSP as the engine made it (`-db`: RPSTBLASTN's
 /// Smith-Waterman redo, also among the HSPs that left its lists past the formatter's cut,
 /// `BatchResults::unlisted_subject_row_throws`; `-subject`'s mapper leaves out a first segment
-/// with a gap row, `serial::seqalign::std_seg_kept`). The prefetch catches it with its warning
+/// with a gap row, `serial::seqalign::mapped_script`). The prefetch catches it with its warning
 /// (`common::database::prefetch_warning`) and has read no subject, as a batch whose prefetch is
 /// off: the reports then read the subjects one by one (`-subject`'s are in the scope already).
 pub(crate) fn prefetch_reads_unranged_row(

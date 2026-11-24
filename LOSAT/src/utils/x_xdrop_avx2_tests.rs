@@ -17,6 +17,8 @@ enum Kern {
     V256,
     /// LOSAT_X_DPEMASK=0: the 8-bit lanes' row end of before (16-bit lanes: the same kernel)
     V256Z,
+    /// LOSAT_X_DPEDGE=0: the 8-bit lanes' lane mask in every block (16-bit lanes: the same kernel)
+    V256L,
     W128,
 }
 
@@ -54,33 +56,43 @@ unsafe fn run(
         }
         (Kern::V256, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256, false, Some(m)) => {
-            align8::<false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
-        (Kern::V256 | Kern::V256Z, true, None) => {
+        (Kern::V256L, true, Some(m)) => {
+            if sc.x_nib {
+                align8::<true, true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            } else {
+                align8::<true, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+        }
+        (Kern::V256L, false, Some(m)) => {
+            align8::<false, true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+        }
+        (Kern::V256 | Kern::V256Z | Kern::V256L, true, None) => {
             if sc.x_nib {
                 align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             } else {
                 align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
         }
-        (Kern::V256 | Kern::V256Z, false, None) => {
+        (Kern::V256 | Kern::V256Z | Kern::V256L, false, None) => {
             align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::V256Z, true, Some(m)) => {
             if sc.x_nib {
-                align8::<true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             } else {
-                align8::<true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, false, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
         }
         (Kern::V256Z, false, Some(m)) => {
-            align8::<false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            align8::<false, false, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
         }
         (Kern::W128, true, Some(m)) => {
             w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -223,6 +235,7 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         XdropScratch::new(),
         XdropScratch::new(),
     );
+    let mut sc256l = XdropScratch::new();
     // [width 8 / 16][tb][reverse]
     let mut handled = [[[0usize; 2]; 2]; 2];
     let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
@@ -234,9 +247,11 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
         sc128.x_test_rows(lanes);
         sc256.x_test_rows(lanes);
         sc256z.x_test_rows(lanes);
+        sc256l.x_test_rows(lanes);
         // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
         let nib = case % 2 == 0;
         (sc128.x_nib, sc256.x_nib, sc256z.x_nib) = (nib, nib, nib);
+        sc256l.x_nib = nib;
         let n = if rng.below(2) == 0 { 16 } else { 28 };
         let scale = if rng.below(3) == 0 { 32 } else { 1 };
         let long = rng.below(6) == 0;
@@ -427,6 +442,33 @@ fn avx2_kernels_match_scalar_loops_on_random_problems() {
                     assert_eq!(r256, r256z, "{tag}: 256 vs 256 with the E clearing");
                     if wide8 && r256.is_some() {
                         assert_eq!(sc256.ops, sc256z.ops, "{tag}: 256 vs 256z ops");
+                    }
+                    if wide8 {
+                        // SAFETY: AVX2 detected above.
+                        let r256l = unsafe {
+                            run(
+                                Kern::V256L,
+                                m,
+                                tb,
+                                &rows,
+                                &cols,
+                                &scores,
+                                len1,
+                                len2,
+                                go,
+                                ge,
+                                x,
+                                tb,
+                                &mut sc256l,
+                            )
+                        };
+                        assert_eq!(
+                            r256, r256l,
+                            "{tag}: 256 vs 256 with the mask in every block"
+                        );
+                        if r256.is_some() {
+                            assert_eq!(sc256.ops, sc256l.ops, "{tag}: 256 vs 256l ops");
+                        }
                     }
                     match (r128, r256) {
                         (Some(a), Some(b)) => {
@@ -791,7 +833,7 @@ fn replay_captured_problems() {
                         let sc = match k {
                             Kern::V128 => &mut sa,
                             Kern::W128 => &mut sw,
-                            Kern::V256 | Kern::V256Z => &mut sb,
+                            Kern::V256 | Kern::V256Z | Kern::V256L => &mut sb,
                         };
                         let total = if warm {
                             let mut ns = 0f64;

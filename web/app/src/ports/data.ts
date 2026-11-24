@@ -193,6 +193,65 @@ export interface StorageInfo {
   readonly cleanup: CleanupState;
 }
 
-export interface DataGateway extends DatasetStore, RunStore {
+/** Inflated session file stored in session OPFS (`tmp/`) without keeping inflated bytes in page memory. */
+export interface SessionFileRef {
+  /** Storage token for `dropSessionFile`; undefined when the input file was plain and kept as-is. */
+  readonly token?: string;
+  readonly file: File;
+  readonly name: string;
+  readonly size: number;
+  /** Original compressed file name when inflated (for example `genome.fa.gz`). */
+  readonly inflatedFrom?: string;
+}
+
+/** One sealed output kept for a tool run in the Data worker's session storage. */
+export interface StoredToolFile {
+  readonly key: string;
+  readonly name: string;
+  readonly size: number;
+}
+
+/** Result of sealing a tool run's outputs in the Data worker. */
+export interface ToolOutputsSummary {
+  readonly stdoutSize: number;
+  readonly stderrSize: number;
+  readonly files: readonly StoredToolFile[];
+}
+
+/** Messages sent over the dedicated `MessagePort` returned by `DataGateway.openToolRun`. */
+export type ToolOutputCommand =
+  | { readonly id: number; readonly op: 'stdout'; readonly bytes: Uint8Array }
+  | { readonly id: number; readonly op: 'stderr'; readonly bytes: Uint8Array }
+  | { readonly id: number; readonly op: 'open'; readonly key: string; readonly name: string }
+  | { readonly id: number; readonly op: 'write'; readonly key: string; readonly offset: number; readonly bytes: Uint8Array }
+  | { readonly id: number; readonly op: 'truncate'; readonly key: string; readonly length: number }
+  | { readonly id: number; readonly op: 'close'; readonly key: string }
+  | { readonly id: number; readonly op: 'commit' }
+  | { readonly id: number; readonly op: 'discard' };
+
+export type ToolOutputReply =
+  | { readonly id: number; readonly ok: true; readonly summary?: ToolOutputsSummary }
+  | { readonly id: number; readonly ok: false; readonly error: { readonly name: string; readonly message: string } };
+
+export interface ToolRunStore {
+  /**
+   * Stages a tool run in session storage (`tmp/`) and returns a dedicated `MessagePort` that accepts
+   * `ToolOutputCommand` messages (with transferred buffers for zero-copy streaming).
+   */
+  openToolRun(runId: string): Promise<MessagePort>;
+  /** Reads bytes `[start, end)` of a sealed output (`'stdout'`, `'stderr'`, or `'file:N'`) of a tool run. */
+  readToolOutputRange(runId: string, key: string, start: number, end: number): Promise<Uint8Array>;
+  /** Returns a disk/OPFS-backed `File` for a sealed tool output (for Download, "Use in BLASTN", or Mask). */
+  getToolOutputFile(runId: string, key: string, fileName: string): Promise<File>;
+  /**
+   * Inflates a compressed file (`.gz`, `.bz2`, `.zst`) directly into session OPFS (`tmp/`) and returns
+   * an OPFS-backed `File` under its plain name. A plain file is returned as-is without copying.
+   */
+  inflateToSessionFile(file: File): Promise<SessionFileRef>;
+  /** Drops a session file created by `inflateToSessionFile`. Unknown tokens are ignored. */
+  dropSessionFile(token: string): Promise<void>;
+}
+
+export interface DataGateway extends DatasetStore, RunStore, ToolRunStore {
   storageInfo(): Promise<StorageInfo>;
 }

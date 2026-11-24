@@ -2067,7 +2067,8 @@ pub(crate) fn build_disc_mb_lookup(
 
 /// `build_disc_mb_lookup` with the batch loop's keep (EXPERIMENT LOSAT_X_MBLUTKEEP,
 /// `x_mb_lut_keep::Keep`): a one-template table takes its CSR's `offsets` or its chains' head table
-/// from the kept table, which gets it back when the table is dropped.
+/// from the kept table, which gets it back when the table is dropped (and, LOSAT_X_CSRQSKEEP, its
+/// CSR's `qs` from the kept `qs`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_disc_mb_lookup_kept(
     queries_blastna: &[&[u8]],
@@ -2122,6 +2123,9 @@ pub(crate) fn build_disc_mb_lookup_kept(
         x_clock.fill();
         let (x_offsets, x_length, x_dirty) =
             x_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(hashsize + 1));
+        // EXPERIMENT (LOSAT_X_CSRQSKEEP): and the kept `qs`, which the build takes where it has
+        // room for its own (`x_mb_lut_keep::qs_buffer`). No NCBI counterpart (memory only).
+        let x_qs = x_keep.and_then(|keep| keep.take_qs());
         let (csr, on_pool) = match x_disc_lookup_par::parts() {
             Some(parts) => x_disc_lookup_par::csr(
                 parts,
@@ -2131,6 +2135,7 @@ pub(crate) fn build_disc_mb_lookup_kept(
                 pv_array_bts,
                 &mut helper_array,
                 x_offsets,
+                x_qs,
             ),
             None => {
                 // EXPERIMENT (LOSAT_X_DCQSAHEAD): no pool (one thread): the serial build places as
@@ -2146,13 +2151,14 @@ pub(crate) fn build_disc_mb_lookup_kept(
                         pv_array_bts,
                         &mut helper_array,
                         x_offsets,
+                        x_qs,
                     ),
                     false,
                 )
             }
         };
         let csr = match x_keep {
-            Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),
+            Some(keep) => csr.x_kept_with_qs(keep, (x_length, x_dirty)),
             None => csr,
         };
         x_clock.chain();

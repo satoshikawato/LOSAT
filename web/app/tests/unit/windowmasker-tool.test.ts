@@ -804,4 +804,95 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect((await waitTerminal(coordinator, r3)).status).toBe('cancelled');
     expect(dropped).toEqual([token1, token2, token3]);
   });
+
+  it('cleans up Data-side staged tool runs when cancelled in preparing or finalizing', async () => {
+    const baseStore = new MemoryBlockStore();
+    let sealGate: Promise<void> | undefined;
+    let releaseSeal: (() => void) | undefined;
+    let sealedWaiting = false;
+    const store: typeof baseStore = Object.assign(Object.create(Object.getPrototypeOf(baseStore)), baseStore, {
+      async create(path: string) {
+        const writer = await baseStore.create(path);
+        return {
+          append: (bytes: Uint8Array) => writer.append(bytes),
+          writeAt: (offset: number, bytes: Uint8Array) => writer.writeAt(offset, bytes),
+          truncate: (length: number) => writer.truncate(length),
+          async seal() {
+            if (path.endsWith('/stdout') && sealGate !== undefined) {
+              sealedWaiting = true;
+              await sealGate;
+            }
+            return writer.seal();
+          },
+        };
+      },
+      read: (path: string, offset: number, length: number) => baseStore.read(path, offset, length),
+      readFile: (path: string, name: string, type?: string) => baseStore.readFile(path, name, type),
+      removeAll: (prefix: string) => baseStore.removeAll(prefix),
+      usage: () => baseStore.usage(),
+      get backend() {
+        return baseStore.backend;
+      },
+    });
+    const { data } = makeData(store);
+
+    let openGate: Promise<void> | undefined;
+    let releaseOpen: (() => void) | undefined;
+    const origOpenToolRun = data.openToolRun.bind(data);
+    data.openToolRun = async (runId: string) => {
+      if (openGate !== undefined) await openGate;
+      return origOpenToolRun(runId);
+    };
+
+    const engine = new FakeEngine();
+    let id = 0;
+    const coordinator = new Coordinator({
+      engine,
+      data,
+      downloader: { save: () => undefined },
+      now: () => 10_000,
+      newRunId: () => `cf-run-${++id}`,
+      digest: sha256Hex,
+    });
+
+    // Case 1: Cancel during preparing (delayed openToolRun).
+    openGate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const prepId = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    await sleep(20);
+    expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === prepId)?.status).toBe('preparing');
+    coordinator.cancel(prepId);
+    releaseOpen!();
+    openGate = undefined;
+    const prepDone = await waitTerminal(coordinator, prepId);
+    expect(prepDone.status).toBe('cancelled');
+    await sleep(30);
+    expect(baseStore.usage()).toBe(0);
+    await expect(data.readToolOutputRange(prepId, 'stdout', 0, 0)).rejects.toThrow();
+    // Re-opening the same runId succeeds only when DataService holds 0 entries for it.
+    const probe1 = await origOpenToolRun(prepId);
+    probe1.close();
+    await data.deleteRun(prepId);
+
+    // Case 2: Cancel during finalizing (delayed commit seal).
+    sealGate = new Promise<void>((resolve) => {
+      releaseSeal = resolve;
+    });
+    const finId = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    for (let i = 0; i < 40 && !sealedWaiting; i++) await sleep(10);
+    expect(sealedWaiting).toBe(true);
+    expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === finId)?.status).toBe('finalizing');
+    coordinator.cancel(finId);
+    const finDone = await waitTerminal(coordinator, finId);
+    expect(finDone.status).toBe('cancelled');
+    releaseSeal!();
+    sealGate = undefined;
+    await sleep(40);
+    expect(baseStore.usage()).toBe(0);
+    await expect(data.readToolOutputRange(finId, 'stdout', 0, 0)).rejects.toThrow();
+    const probe2 = await origOpenToolRun(finId);
+    probe2.close();
+    await data.deleteRun(finId);
+  });
 });

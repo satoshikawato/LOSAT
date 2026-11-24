@@ -865,12 +865,20 @@ export class Coordinator {
     stopped.catch(() => undefined);
     const controller = new AbortController();
     this.toolAbort = controller;
+    let staged = false;
+    let committing = false;
     let sink: ToolStorageSink | undefined;
     try {
       this.updateTool(runId, { status: 'preparing', record: { startedAt, phaseTimes: { preparing: startedAt } } });
-      const port = await Promise.race([this.deps.data.openToolRun(runId), stopped]);
+      // Same order as search's openRun: wait for openToolRun instead of racing it so a cancel in
+      // preparing always closes the port and deletes the staged tool run on the Data side.
+      const port = await this.deps.data.openToolRun(runId);
+      staged = true;
+      if (stop !== undefined) {
+        port.close();
+        throw stop;
+      }
       sink = new ToolStorageSink(port);
-      if (stop !== undefined) throw stop;
       const runningAt = this.deps.now();
       this.updateTool(runId, { status: 'running', record: { phaseTimes: { preparing: startedAt, running: runningAt } } });
       const runTool = this.deps.engine.runTool;
@@ -887,7 +895,13 @@ export class Coordinator {
         status: 'finalizing',
         record: { phaseTimes: { preparing: startedAt, running: runningAt, finalizing: finalizingAt } },
       });
-      const summary = await Promise.race([sink.commit(), stopped]);
+      committing = true;
+      const commit = sink.commit();
+      const summary = await Promise.race([commit, stopped]).catch((error: unknown) => {
+        // Outputs sealed after the run ended are deleted (same order as search's commitRun).
+        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
+        throw error;
+      });
       const stdout: ToolOutputEntry = Object.freeze({ key: 'stdout', name: 'stdout', size: summary.stdoutSize });
       const stderr: ToolOutputEntry = Object.freeze({ key: 'stderr', name: 'stderr', size: summary.stderrSize });
       const files: ToolOutputEntry[] = summary.files.map((file) => {
@@ -917,9 +931,8 @@ export class Coordinator {
       });
     } catch (error) {
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
-      sink?.fail(error);
-      void sink?.discard().catch(() => undefined);
-      void this.deps.data.deleteRun(runId).catch(() => undefined);
+      if (!committing) sink?.fail(error);
+      if (staged) void this.deps.data.deleteRun(runId).catch(() => undefined);
       this.updateTool(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {

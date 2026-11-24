@@ -1631,6 +1631,9 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// (`GetStackTrace()`) that NCBI's message names (`posted`).
     /// A string that is read and not kept (`keep`) is read into one buffer of the reader
     /// (`unkept`, emptied after each), and is empty.
+    /// Inlined into its two callers: for the many short strings of values not kept, the call
+    /// cost more than the body (ann50000: +3.2 M Ir as a call).
+    #[inline(always)]
     pub(super) fn string(&mut self, kind: StringKind, skip: bool) -> R<Vec<u8>> {
         let TypedReader {
             inp,

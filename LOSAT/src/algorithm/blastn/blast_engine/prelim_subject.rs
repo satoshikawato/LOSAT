@@ -791,11 +791,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // The chunk's HSP list from its initial hits (`chunk_hsp_list`), whose count sizes the next
     // batch; then the diagonal table's offset moves on after the chunk, also after a chunk
     // without an initial hit (`Blast_ExtendWordExit` runs inside the word finder, before
-    // NCBI's `continue`). A mixed search counts the initial hits of its scans by volume
-    // (`mb_index_seeds::IndexSeeds::check`).
-    if let Some(index) = batch.mb_index {
-        index.note_scanned_hits(s_idx as u32, subject_scratch.ungapped_hits.len());
-    }
+    // NCBI's `continue`).
     let chunk_prelim_hits = chunk_hsp_list::<UNGAPPED>(
         batch,
         subject,

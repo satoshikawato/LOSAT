@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.100
+- Version: 1.101
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -667,7 +667,16 @@
   2026-09-29, restated 2026-10-07; numbered after 1.99; first 1.94, then 1.97 at the merge of dev that brought
   line NP item M4c-2's 1.94, line NP item M4b-3b's 1.95 and line DBID item pfoff-4's 1.96, then 1.99 at
   the merge of dev that brought line RG items X-short-bat's 1.97 and X-bpgap's 1.98, then 1.100 at
-  the merge of dev that brought line RG item X-short-tbx-link's 1.99)
+  the merge of dev that brought line RG item X-short-tbx-link's 1.99);
+  1.101 2026-11-24 (approved exception 30, the Owner's answer of 2026-11-24 12:44 JST 「Q-MIXIDX=C」 to
+  line RG's question Q-MIXIDX: `losat blastn -use_index true` with a MegaBLAST index of only some
+  database volumes searches each index volume that a query batch or query chunk reaches with that
+  search's query, where NCBI BLAST+ 2.17.0 gives later searches the first search's used results of
+  some volumes; the item of rule 2 and the explicit rejection of rule 3 of 1.74 removed; line RG
+  item D5c; first 1.95, then 1.99 at the merge of dev of 2026-11-24 that brought 1.95 to 1.98, line
+  NP item M4b-3b, line DBID item pfoff-4, line RG items X-short-bat and X-bpgap, then 1.100 at the
+  merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.101 at the
+  merge of dev of 2026-11-24 that brought 1.100, line RG item KC-11d)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2307,27 +2316,6 @@ file would differ, and NCBI's programs still could not open the database).
   hard chunks are disjoint), the out-of-range `double` to `Int4`
   conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
-- `losat blastn -use_index true` with a MegaBLAST index of only some database volumes (version
-  1.74, 2026-11-22, line RG item D5b-3, Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07). NCBI keeps an index volume's seeds while a search thread may still need them and
-  counts a volume down as a thread passes it, but a thread that goes on to a database volume
-  without an index counts none down (`blast_dbindex.cpp:812-857`). So the last index volume that
-  the search reaches before each such volume that it reaches (all of them, or those with a
-  sequence in the database's OID list) keeps the seeds of the first search for the rest of the
-  run, and a later query batch or query chunk takes them as the first search's word finder left
-  them: every list moved out and empty (`blast_extend.c:248-259`). There it finds no seed: a
-  sequence whose list the first search had is read and searched without seeds, the others are
-  skipped, and the hits of the later queries in that volume are lost (fixture rows `m_part_b1`,
-  `m_part_one` and `m_part_c2000` of `tests/blastn_mb_index`; NCBI's `-num_threads 1` writes the
-  same bytes in every run). LOSAT reproduces this with NCBI's counts in one thread's order
-  (`mb_index_seeds::plan_search`). A first search, and an index of every volume, are not
-  affected. With more threads, which volumes keep their results depends on which thread passes
-  which volume, and NCBI's result can differ from its one-thread result (with `-num_threads 4`,
-  row `m_mixed1_t4` crashed, exit status 139, in 8 of 8 runs, where its `-num_threads 1` search
-  completes); LOSAT gives the one-thread result at every thread count, by the Owner's rule of
-  2026-10-13 (「DB-3: NCBI の 1 スレッド。LOSAT はどのスレッド数でも同じ出力」; rows `m_mixed1_t4`
-  and `m_part_b1_t4` are compared with NCBI's `-num_threads 1` files).
-
 - `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
   item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
   but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):
@@ -3575,19 +3563,6 @@ file would differ, and NCBI's programs still could not open the database).
     volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
     is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
     negative ones too, end and are reproduced.
-- `losat blastn -use_index true` with a MegaBLAST index of only some database volumes, in a later
-  query batch or query chunk that reads the results NCBI keeps (version 1.74, 2026-11-22, line RG
-  item D5b-3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; the kept
-  results are reproduced, rule 2 above), where NCBI's search thread holds the empty list of the
-  kept results as its list of initial hits, of no memory. The scan of a database volume without an
-  index then saves its first initial hit with a reallocation of 0 bytes, which glibc answers with a
-  block of one hit, and its second with another, which frees the list (`blast_extend.c:325-356`);
-  NCBI then writes to and frees freed memory: `double free detected` (exit status 134, rows
-  `m_part_two` and `m_part_c1200`), a crash (139, row `m_mixed2`), or a result read from freed
-  memory. LOSAT refuses (exit 1) a search whose scan saves a second initial hit into such a list,
-  at that batch or chunk after the output of the batches before (`IndexSeeds::check`), at every
-  thread count by the list of NCBI's one thread; one hit, or none, is searched as NCBI does (row
-  `m_part_one`).
 
 - `losat windowmasker` (version 1.72, 2026-11-22, line NP items M5a and M5b, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07). LOSAT refuses each (exit status 1, the
@@ -4219,6 +4194,63 @@ out of the search are not read.
     with every masked letter replaced at random). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
     `the_masks_are_of_their_own_sequence` (`LOSAT/src/dbindex/search_tests.rs`), and the placement
     tests of `LOSAT/src/algorithm/blastn/blast_engine/mb_index_seeds_tests.rs`.
+
+## Approved exception 30 (BLASTN `-use_index true` with a MegaBLAST index of only some database volumes, every query batch searched with the index, version 1.101)
+
+Version 1.101, line RG item D5c. The Owner decided on 2026-11-24 12:44 JST: the answer 「Q-MIXIDX=C」 (the
+whole answer 「Q-AGVI-CAP=A Q-FM-R2=B Q-D23=A Q-KD-1=A Q-MIXIDX=C Q-GBHELP=A Q-DL-TIE=B Q-DL-QLOC=B
+Q-PS7c-SPOUGE=B Q-PS10e=A」) to line RG's question Q-MIXIDX (the query batches and query chunks after
+the first of a search with an index of only some database volumes), whose option C read
+「どのバッチでも種を失わない正しい検索を行う（11-22 の `Q-HARDIDX=C` と同一方針。PD 例外更新＋`RG-D5` 再開で 1 PR）」
+(a correct search that loses no seeds in any batch, the course of the answer C to Q-HARDIDX of
+2026-11-22; this record updated and line RG item D5 resumed, in one PR). Not taken: option A, the
+form of versions 1.74 to 1.94: NCBI's kept results reproduced (rule 2) at every thread count as its
+one thread keeps them, and the explicit rejection (rule 3) of a later search whose scan saves initial
+hits into the list that NCBI frees.
+
+30. **BLASTN `-use_index true` with a MegaBLAST index of only some database volumes, after the first
+    search.** NCBI keeps an index volume's seeds while a search thread may still need them and counts
+    a volume down as a thread passes it, but a thread that goes on to a database volume without an
+    index counts none down (`blast_dbindex.cpp:812-857`). So the last index volume that the search
+    reaches before each such volume that it reaches (all of them, or those with a sequence in the
+    database's OID list) keeps the seeds of the first search for the rest of the run, and each later
+    query batch or query chunk takes them as the first search's word finder left them: every list
+    moved out and empty (`blast_extend.c:248-259`). There it finds no seed: a sequence whose list the
+    first search had is read and searched without seeds, the others are skipped, and the later
+    queries' hits in that volume are lost. NCBI's search thread then holds the empty list as its list
+    of initial hits, of no memory: the scan of a database volume without an index saves its first
+    initial hit with a reallocation of 0 bytes, which glibc answers with a block of one hit, and its
+    second with another, which frees the list (`blast_extend.c:325-356`); NCBI then writes to and
+    frees freed memory: `double free detected` (exit status 134), a crash (139), or a result read
+    from freed memory. With more threads, which volumes keep their results depends on which thread
+    passes which volume (NCBI's `-num_threads 4` search of the fixture row `m_mixed1_t4` crashed, exit
+    status 139, in 8 of 8 runs, where its `-num_threads 1` search completes). LOSAT searches each index
+    volume that a search reaches with that search's query, the first search and the later ones alike
+    (`mb_index_seeds::IndexSeeds`), as NCBI's first search does: no seed is lost, no such search is
+    refused, and the result does not depend on `-num_threads`. A first search, and an index of every
+    volume, keep NCBI's result. Evidence: the rows `batch NAME` of
+    `LOSAT/tests/blastn_mb_index/cases.tsv` (`m_mixed1`, `m_mixed1_t4`, `m_mixed2`, `m_mixed1_win` of
+    `-window_size 40`, `m_part_b1`, `m_part_b1_t4`, `m_part_two`) give NCBI's own search with the index
+    of the same queries as one query batch (`BATCH_SIZE=1000000000`, rows `NAME_1b`), a first search:
+    759 rows of `m_mixed1`, where NCBI's search writes 755 (and crashes at 4 threads); 759 of
+    `m_mixed2`, where it crashes after 35; 95 of the two-hit `m_mixed1_win`, where it writes 92; 5 of
+    `m_part_two`, where it stops after 3 (134). The rows `plain NAME` of query chunks (`m_part_c1200`
+    and `m_part_c2000`, `CHUNK_SIZE` 1200 and 2000), whose later chunks no NCBI search with the index
+    searches anew, give NCBI's search without the index (5 rows; NCBI's search with the index writes
+    4, or none and stops with 134). Each of NCBI's own outputs of these rows (`ncbi/<row>.*`) is that
+    whole list less hits in the volume that keeps the results, or a beginning of it before a crash
+    (`ncbi_loses_seeds_after_the_first_search` of `LOSAT/tests/blastn_mb_index_fixtures.rs`).
+    Random comparison `remaining-gaps-20261112/D/d5/probe/d5c/rand_d5c.py` (596 random databases, 537
+    of them of 2 to 9 volumes with 1 to all but one of their `.shd` files removed; queries in several
+    query batches (`BATCH_SIZE` 1, 300, 1,000 or 2,500, or NCBI's own) in 405 runs and in query chunks
+    (`CHUNK_SIZE` 600 to 2,500, one-hit) in 132; 121 two-hit searches; nmer 8 to 12, 163 indexes of
+    `-legacy false` with a stride; 1 and 4 threads): each LOSAT run gave the oracle's rows (NCBI's
+    search with the index as one query batch, or for query chunks its search without the index);
+    NCBI's own run of the same command lost rows in 163 and stopped with 134 or 139 in 25. Two-hit
+    searches in query chunks, which no NCBI search of such a database gives anew, were compared where
+    every volume without an index comes before the index volumes, so that NCBI keeps no results
+    (`rand_d5c2.py`, 267 databases of 2 to 9 volumes, `CHUNK_SIZE` 600 to 2,500, 1 and 4 threads):
+    each LOSAT run gave NCBI's output.
 
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 

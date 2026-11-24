@@ -224,7 +224,7 @@ fn losat_lmdb_line(name: &str, bytes: &[u8]) -> Option<String> {
         return None;
     }
     let page = recorded_page_size(bytes)?;
-    Some(pages_line(name, bytes.len() % page == 0, page))
+    Some(pages_line(name, bytes.len().is_multiple_of(page), page))
 }
 
 /// The line of NCBI's LMDB file `name` of `length` bytes (frozen on Linux) on a host of other

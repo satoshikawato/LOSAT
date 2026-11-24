@@ -3022,7 +3022,8 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
     let dir = temp_dir("parsed-unreadable");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let name = dir.join("prot_v4").to_str().unwrap().to_string();
-    let phr = dir.join("prot_v4.phr");
+    // The header file under the name the reader opens it by, its links followed (`ncbi_dir`).
+    let phr = ncbi_dir(&dir).join("prot_v4.phr");
     let len = std::fs::metadata(&phr).unwrap().len();
     file::refused_reads::refuse(&phr, &dir);
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
@@ -3048,7 +3049,7 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
         &std::fs::read(later.join("prot_v4.phr")).unwrap()[..1],
     )
     .unwrap();
-    file::refused_reads::refuse(&later.join("prot_v4.phr"), &short);
+    file::refused_reads::refuse(&ncbi_dir(&later).join("prot_v4.phr"), &short);
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
     assert!(!db.has_parsed_seqids().unwrap());
     let error = db.deflines(0).expect_err("the header is not read");

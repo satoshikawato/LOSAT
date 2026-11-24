@@ -10,10 +10,10 @@ fn volume_numbers_have_at_least_two_digits() {
 
 #[test]
 fn dir_entry_name_is_the_part_after_the_last_separator() {
-    assert_eq!(dir_entry_name("in/pmv.00"), "pmv.00");
-    assert_eq!(dir_entry_name("pmv.00"), "pmv.00");
-    assert_eq!(dir_entry_name("a/b/"), "");
-    assert_eq!(dir_entry_name(""), "");
+    assert_eq!(dir_entry_name(b"in/pmv.00"), b"pmv.00");
+    assert_eq!(dir_entry_name(b"pmv.00"), b"pmv.00");
+    assert_eq!(dir_entry_name(b"a/b/"), b"");
+    assert_eq!(dir_entry_name(b""), b"");
 }
 
 #[test]

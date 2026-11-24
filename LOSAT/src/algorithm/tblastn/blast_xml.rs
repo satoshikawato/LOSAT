@@ -22,8 +22,6 @@
 //! (`PrintOneResultSet` is called once per query's result set, the accumulated lists hold that
 //! one query.)
 
-use std::io::Write;
-
 use anyhow::{ensure, Context, Result};
 
 use super::database::XmlTaxa;
@@ -436,7 +434,7 @@ impl PreparedXml {
     pub(super) fn write<W: StructuredXml>(
         &self,
         document: &mut W,
-        writer: &mut dyn Write,
+        writer: &mut dyn crate::report::ostream::ReportWrite,
         query_records: &[FastaRecord],
         subject_letters: SubjectLetters<'_>,
         hitlists: &[KappaResultHitList],

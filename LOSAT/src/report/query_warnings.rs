@@ -645,22 +645,42 @@ pub fn write_marked(
     report: &[u8],
     reads: &[(usize, u32)],
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> io::Result<()> {
-    let posts = HitPosts {
-        every: true,
-        marks: reads.to_vec(),
-        ends: vec![0; reads.len()],
-        ..HitPosts::default()
-    };
+    write_marked_cuts(
+        report,
+        &crate::report::ostream::Cuts::default(),
+        reads,
+        query,
+        writer,
+        warnings,
+    )
+}
+
+/// `write_marked` of a part with NCBI's regions and flushes `cuts`.
+pub fn write_marked_cuts(
+    report: &[u8],
+    cuts: &crate::report::ostream::Cuts,
+    reads: &[(usize, u32)],
+    query: usize,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<()> {
     match warnings {
         Some(warnings) => {
+            let posts = HitPosts {
+                every: true,
+                marks: reads.to_vec(),
+                ends: vec![0; reads.len()],
+                cuts: cuts.clone(),
+                ..HitPosts::default()
+            };
             let QueryWarnings { reads, sink, .. } = warnings;
             write_reads(report, &posts, query, writer, &mut **sink, reads.as_mut())
         }
         // Marks alone post nothing of their own.
-        None => writer.write_all(report),
+        None => cuts.cursor().write(writer, report, 0, report.len()),
     }
 }
 
@@ -693,6 +713,9 @@ pub struct HitPosts {
     caught: Vec<u8>,
     /// The exception that ends the run after these posts (`DocumentPosts::ends_run`).
     ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
+    /// Where NCBI's insertions end in the report, and its regions and flushes
+    /// (`DocumentPosts::cuts`).
+    cuts: crate::report::ostream::Cuts,
 }
 
 impl HitPosts {
@@ -747,8 +770,14 @@ impl HitPosts {
             cut,
             ends_run,
             caught_at: _,
+            cuts,
         } = posts;
-        self.document.extend(posts);
+        if self.document.is_empty() {
+            self.document = posts;
+        } else {
+            self.document.extend(posts);
+        }
+        self.cuts.extend(cuts);
         self.cut |= cut;
         if ends_run.is_some() {
             self.ends_run = ends_run;
@@ -772,23 +801,25 @@ impl HitPosts {
     /// bytes before it: `read` of its subject (the model's text, to `sink`; `writer` is the
     /// report) and the texts the writer made there, to `sink` after `writer` is flushed; the
     /// document's posts (`document`) likewise at their places.
+    /// The report's bytes are written as NCBI inserts them (`ostream::Cuts`, `cuts`).
     pub fn write(
         &self,
         report: &[u8],
-        writer: &mut dyn Write,
+        writer: &mut dyn crate::report::ostream::ReportWrite,
         sink: &mut dyn Write,
         mut read: impl FnMut(u32, &mut dyn Write, &mut dyn Write) -> io::Result<()>,
     ) -> io::Result<()> {
         let (mut index, mut from) = (0, 0);
         let mut document = self.document.iter().peekable();
+        let mut cuts = self.cuts.cursor();
         let mut written = 0;
         for &(at, subject) in &self.marks {
             while let Some(post) = document.next_if(|post| post.at < at) {
-                writer.write_all(&report[written..post.at])?;
+                cuts.write(writer, report, written, post.at)?;
                 written = post.at;
                 write_after(writer, &mut *sink, &post.text)?;
             }
-            writer.write_all(&report[written..at])?;
+            cuts.write(writer, report, written, at)?;
             written = at;
             read(subject, writer, &mut *sink)?;
             let end = self.ends[index];
@@ -798,11 +829,11 @@ impl HitPosts {
             write_after(writer, &mut *sink, texts)?;
         }
         for post in document {
-            writer.write_all(&report[written..post.at])?;
+            cuts.write(writer, report, written, post.at)?;
             written = post.at;
             write_after(writer, &mut *sink, &post.text)?;
         }
-        writer.write_all(&report[written..])
+        cuts.write(writer, report, written, report.len())
     }
 }
 
@@ -812,7 +843,7 @@ impl HitPosts {
 pub fn write_document_posts(
     report: &[u8],
     posts: crate::report::blast_xml::DocumentPosts,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();
@@ -855,7 +886,7 @@ pub fn write_hit_posts(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     match warnings {
@@ -883,35 +914,49 @@ pub fn write_hit_posts(
 /// (`HitPosts::caught`) comes after them; an exception of NCBI's XML stream that ends the run is
 /// returned after the posts (`blast_xml::writer::run_ending_exception`), and no text of a read is
 /// written after it.
+/// A failed write of the report's stream that NCBI's writer catches
+/// (`ostream::is_caught_report_write_failure`: an `Iteration` of BLAST XML, whose post the stream
+/// made) ends the report there as a cut one (no later `Hit` is made, nor its subject loaded); the
+/// run goes on.
 pub fn write_posts_to(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     sink: &mut dyn Write,
     mut reads: Option<&mut ReadCursor<'_>>,
 ) -> Result<()> {
-    write_reads(
+    let caught = match write_reads(
         report,
         hits,
         query,
         writer,
         &mut *sink,
         reads.as_deref_mut(),
-    )?;
+    ) {
+        // The catch returns to the formatter, whose region the next insertions are in.
+        Err(error) if crate::report::ostream::is_caught_report_write_failure(&error) => {
+            writer.site(crate::report::ostream::Site::Report)?;
+            true
+        }
+        written => {
+            written?;
+            false
+        }
+    };
     if let Some(cursor) = reads {
-        if hits.ends_run.is_some() {
+        if hits.ends_run.is_some() && !caught {
             cursor.end_run();
-        } else if hits.cut {
+        } else if hits.cut || caught {
             cursor.cut(query, writer, &mut *sink)?;
         }
     }
     write_after(writer, sink, &hits.caught)?;
     match &hits.ends_run {
-        Some(thrown) => Err(crate::report::blast_xml::writer::run_ending_exception(
+        Some(thrown) if !caught => Err(crate::report::blast_xml::writer::run_ending_exception(
             thrown,
         )),
-        None => Ok(()),
+        _ => Ok(()),
     }
 }
 
@@ -920,7 +965,7 @@ fn write_reads(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     sink: &mut dyn Write,
     mut reads: Option<&mut ReadCursor<'_>>,
 ) -> io::Result<()> {
@@ -970,8 +1015,14 @@ pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: 
     ) || (html && format.is_some_and(ReportFormat::writes_html_links))
 }
 
-/// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).
-fn write_after(report: &mut dyn Write, sink: &mut dyn Write, text: &[u8]) -> io::Result<()> {
+/// Writes `text` to `sink` after `report` is flushed (nothing for an empty text): LOSAT's flush,
+/// which hands the report written so far to its stream; the command line's diagnostics then make
+/// NCBI's writes before the text where NCBI's would come before it (`ostream::cerr_post`).
+fn write_after<R: Write + ?Sized>(
+    report: &mut R,
+    sink: &mut dyn Write,
+    text: &[u8],
+) -> io::Result<()> {
     if text.is_empty() {
         return Ok(());
     }
@@ -1000,31 +1051,19 @@ pub(crate) fn html_posts_sink<'s, W: Write + ?Sized>(
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:543-544
 /// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report, to
-/// `posts` (`html_posts_sink`); before it, the report written so far (`report`) is flushed where
-/// the post goes to the standard error. NCBI's posts go to `cerr` (its default handler), which
-/// the C++ library ties to `cout`, so the report reaches standard output first; the posts of a
-/// run whose messages follow `-logfile` (tblastx, rpsblast, rpstblastn:
-/// `ncbi_environment::run_messages_follow_log`) go to that file and flush nothing, which LOSAT
-/// knows by the standard error that the file replaced (`ncbi_environment::terminal_stderr`).
-/// NCBI BLAST+ 2.17.0 (line RG T4a2 review e S1, probe `T/t4/review_t4a2_e/out/txlog.rep.*`,
-/// `tblastx -html -logfile` with both streams in one pipe): `GETURL_DEBUG`'s `REGISTRY:` line
-/// after the version line's flush (166 bytes), where a flush at each post put it after the
-/// first description table's head (1,037). A library call's posts go to its diagnostics, never
-/// a process stream: its report is flushed before each, as the command line's without
-/// `-logfile`.
+/// `posts` (`html_posts_sink`), after the report written so far (`report`), as every post of the
+/// report (`write_after`). NCBI's posts go to `cerr` (its default handler), which the C++ library
+/// ties to `cout`, so the report reaches standard output first (the command line's diagnostics,
+/// `ostream::cerr_post`); the posts of a run whose messages follow `-logfile` (tblastx, rpsblast,
+/// rpstblastn: `ncbi_environment::run_messages_follow_log`) go to that file and flush nothing
+/// (`cerr_post` there; line RG T4a2 review e S1). A library call's posts go to its diagnostics,
+/// never a process stream: its report is flushed before each.
 pub(crate) fn write_html_post<R: Write + ?Sized>(
     report: &mut R,
     posts: &mut dyn Write,
     text: &[u8],
 ) -> io::Result<()> {
-    if text.is_empty() {
-        return Ok(());
-    }
-    if crate::blastinput::ncbi_environment::terminal_stderr().is_none() {
-        report.flush()?;
-    }
-    posts.write_all(text)?;
-    posts.flush()
+    write_after(report, posts, text)
 }
 
 impl Drop for QueryWarnings<'_> {
@@ -1085,24 +1124,28 @@ impl<'a> QueryWarnings<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
     /// Writes `line`, what NCBI's formatter writes to the process's standard error itself in a
-    /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post): with C's `fprintf` to
-    /// `stderr`, which does not flush `cout`, so the report written so far is not flushed (in a
-    /// pipe of both streams the line comes before the report's bytes since its last flush; line
-    /// RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 writes it after the prolog's last
-    /// `NcbiEndl`, probes `T/t4/fix2/out/c4.*`). It goes to the terminal where the run's messages
-    /// follow `-logfile` (tblastx: `ncbi_environment::terminal_stderr`, the standard error before
-    /// the command line made it the file; NCBI's posts go to the file, its own line to the
-    /// terminal), else to the sink of the report's posts (`html_posts_sink`). A library call's
-    /// messages have no terminal of their own: that sink.
-    pub fn html_stderr_line(&mut self, line: &[u8]) -> io::Result<()> {
-        match crate::blastinput::ncbi_environment::terminal_stderr() {
-            Some(mut terminal) => terminal.write_all(line),
-            None => {
-                let sink = self.html_posts_sink();
-                sink.write_all(line)?;
-                sink.flush()
-            }
+    /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post), after the report written so
+    /// far (`report`, LOSAT's flush: it reaches its stream): with C's `fprintf` to `stderr`, which
+    /// does not flush `cout`, so in a pipe of both streams the line comes before the bytes that
+    /// NCBI's buffer holds since its last flush (`ostream::c_stderr_write`: the prolog's last
+    /// `NcbiEndl`, line RG T4a2 fix round 2, review c C4, probes `T/t4/fix2/out/c4.*`; the footer's
+    /// `NcbiEndl` of a first query without hits, review e S1, probes
+    /// `T/t4/review_t4a2_e/out/nh1.*`, `nhx.*`). On the command line it is the process's C
+    /// `stderr` (`c_stderr_write`; the terminal where the run's messages follow `-logfile`, tblastx:
+    /// NCBI's posts go to the file, its own line to the terminal), apart from the run's
+    /// diagnostics; a library call has no C `stderr` of its own: the sink of the report's posts
+    /// (`html_posts_sink`).
+    pub fn html_stderr_line(&mut self, line: &[u8], report: &mut dyn Write) -> io::Result<()> {
+        if line.is_empty() {
+            return Ok(());
         }
+        report.flush()?;
+        if crate::cli::is_command_line_run() {
+            return crate::report::ostream::c_stderr_write(line);
+        }
+        let sink = self.html_posts_sink();
+        sink.write_all(line)?;
+        sink.flush()
     }
 
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),

@@ -1,0 +1,18 @@
+{
+  "version": "1.2",
+  "dbname": "ndbé",
+  "dbtype": "Nucleotide",
+  "db-version": 4,
+  "description": "xb nucleotides",
+  "number-of-letters": 180,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-15T11:38:00",
+  "number-of-volumes": 1,
+  "bytes-total": 216,
+  "bytes-to-cache": 143,
+  "files": [
+    "pé/ndbé.nhr",
+    "pé/ndbé.nin",
+    "pé/ndbé.nsq"
+  ]
+}

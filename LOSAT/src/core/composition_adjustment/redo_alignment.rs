@@ -1169,8 +1169,8 @@ pub fn is_contained(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:936-1013
-fn extend_right(
-    query_seq: &[u8],
+fn extend_right<Q: WalkLetters>(
+    query_seq: Q,
     subject_seq: &[u8],
     max_shift: usize,
 ) -> (usize, usize, usize, usize) {
@@ -1184,7 +1184,7 @@ fn extend_right(
         let mut matched = false;
         while q_pos < query_seq.len()
             && s_pos < subject_seq.len()
-            && query_seq[q_pos] == subject_seq[s_pos]
+            && query_seq.at(q_pos) == subject_seq[s_pos]
         {
             num_identical += 1;
             q_pos += 1;
@@ -1196,8 +1196,8 @@ fn extend_right(
                 break;
             }
 
-            if query_seq[q_pos + n] == subject_seq[s_pos + n]
-                && query_seq[q_pos + n + 1] == subject_seq[s_pos + n + 1]
+            if query_seq.at(q_pos + n) == subject_seq[s_pos + n]
+                && query_seq.at(q_pos + n + 1) == subject_seq[s_pos + n + 1]
             {
                 q_pos += n + 2;
                 s_pos += n + 2;
@@ -1206,8 +1206,8 @@ fn extend_right(
             }
 
             if !matched
-                && query_seq[q_pos + n] == subject_seq[s_pos]
-                && query_seq[q_pos + n + 1] == subject_seq[s_pos + 1]
+                && query_seq.at(q_pos + n) == subject_seq[s_pos]
+                && query_seq.at(q_pos + n + 1) == subject_seq[s_pos + 1]
             {
                 q_pos += n + 2;
                 s_pos += 2;
@@ -1217,8 +1217,8 @@ fn extend_right(
             }
 
             if !matched
-                && query_seq[q_pos] == subject_seq[s_pos + n]
-                && query_seq[q_pos + 1] == subject_seq[s_pos + n + 1]
+                && query_seq.at(q_pos) == subject_seq[s_pos + n]
+                && query_seq.at(q_pos + 1) == subject_seq[s_pos + n + 1]
             {
                 q_pos += 2;
                 s_pos += n + 2;
@@ -1242,8 +1242,8 @@ fn extend_right(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1025-1103
-fn extend_left(
-    query_seq: &[u8],
+fn extend_left<Q: WalkLetters>(
+    query_seq: Q,
     subject_seq: &[u8],
     max_shift: usize,
 ) -> (usize, usize, usize, usize) {
@@ -1260,7 +1260,7 @@ fn extend_left(
     loop {
         let mut matched = false;
 
-        while q_pos > 0 && s_pos > 0 && query_seq[q_pos] == subject_seq[s_pos] {
+        while q_pos > 0 && s_pos > 0 && query_seq.at(q_pos) == subject_seq[s_pos] {
             num_identical += 1;
             q_pos -= 1;
             s_pos -= 1;
@@ -1271,8 +1271,8 @@ fn extend_left(
                 break;
             }
 
-            if query_seq[q_pos - n] == subject_seq[s_pos - n]
-                && query_seq[q_pos - n - 1] == subject_seq[s_pos - n - 1]
+            if query_seq.at(q_pos - n) == subject_seq[s_pos - n]
+                && query_seq.at(q_pos - n - 1) == subject_seq[s_pos - n - 1]
             {
                 q_pos -= n + 2;
                 s_pos -= n + 2;
@@ -1281,8 +1281,8 @@ fn extend_left(
             }
 
             if !matched
-                && query_seq[q_pos - n] == subject_seq[s_pos]
-                && query_seq[q_pos - n - 1] == subject_seq[s_pos - 1]
+                && query_seq.at(q_pos - n) == subject_seq[s_pos]
+                && query_seq.at(q_pos - n - 1) == subject_seq[s_pos - 1]
             {
                 q_pos -= n + 2;
                 s_pos -= 2;
@@ -1292,8 +1292,8 @@ fn extend_left(
             }
 
             if !matched
-                && query_seq[q_pos] == subject_seq[s_pos - n]
-                && query_seq[q_pos - 1] == subject_seq[s_pos - n - 1]
+                && query_seq.at(q_pos) == subject_seq[s_pos - n]
+                && query_seq.at(q_pos - 1) == subject_seq[s_pos - n - 1]
             {
                 q_pos -= 2;
                 s_pos -= n + 2;
@@ -1319,9 +1319,9 @@ fn extend_left(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1124-1204
-fn find_num_identical(
-    query_seq: &[u8],
-    query_hashes: &[u64],
+fn find_num_identical<Q: WalkLetters, W: WalkWords>(
+    query_seq: Q,
+    query_hashes: W,
     subject_seq: &[u8],
     max_shift: usize,
 ) -> usize {
@@ -1331,10 +1331,9 @@ fn find_num_identical(
     //
     // `s_FindNumIdentical` indexes `query_hashes` only up to
     // `query_len - word_size - 1`, so a query slice of length `L` needs
-    // exactly `L - word_size` usable hashes here.
-    let required_query_hashes = query_seq.len().saturating_sub(NEAR_IDENTICAL_WORD_SIZE);
+    // exactly `L - word_size` usable hashes here (`WalkWords::missing`).
     if query_seq.len() < NEAR_IDENTICAL_WORD_SIZE
-        || query_hashes.len() < required_query_hashes
+        || query_hashes.missing(query_seq.len())
         || subject_seq.len() < NEAR_IDENTICAL_WORD_SIZE
     {
         return 0;
@@ -1355,7 +1354,7 @@ fn find_num_identical(
             }
             query_positions
                 .into_iter()
-                .find(|&q_pos| query_hashes[q_pos] == hash)
+                .find(|&q_pos| query_hashes.word(q_pos) == hash)
         },
     )
 }
@@ -1364,8 +1363,8 @@ fn find_num_identical(
 /// The loop of `s_FindNumIdentical`, on `query_seq` and `subject_seq` of at least the word size.
 /// `find` gets the subject position, whether the hash loop must hash the word afresh, and the query
 /// positions to test in order; it returns the first of them whose word equals the subject's.
-fn num_identical_by(
-    query_seq: &[u8],
+fn num_identical_by<Q: WalkLetters>(
+    query_seq: Q,
     subject_seq: &[u8],
     max_shift: usize,
     mut find: impl FnMut(usize, bool, std::ops::Range<usize>) -> Option<usize>,
@@ -1388,13 +1387,13 @@ fn num_identical_by(
         if let Some(query_start) = matched_q {
             let subject_start = s_pos;
             let (left_identical, _query_left_len, _subject_left_len, _align_len_left) = extend_left(
-                &query_seq[query_from..query_start],
+                query_seq.range(query_from, query_start),
                 &subject_seq[subject_from..subject_start],
                 max_shift,
             );
             let (right_identical, query_right_len, subject_right_len, _align_len_right) =
                 extend_right(
-                    &query_seq[query_start + NEAR_IDENTICAL_WORD_SIZE..],
+                    query_seq.range(query_start + NEAR_IDENTICAL_WORD_SIZE, query_seq.len()),
                     &subject_seq[subject_start + NEAR_IDENTICAL_WORD_SIZE..],
                     max_shift,
                 );
@@ -1474,7 +1473,7 @@ pub fn test_near_identical(
     near_identical_by(
         seq_data,
         seq_offset,
-        query_data,
+        query_data.data(),
         query_offset,
         align,
         |query_word_start, query_seq, subject_seq| {
@@ -1510,7 +1509,7 @@ pub(crate) fn x_test_near_identical_on_residues(
     near_identical_by(
         seq_data,
         seq_offset,
-        query_data,
+        query_data.data(),
         query_offset,
         align,
         |query_word_start, query_seq, subject_seq| {
@@ -1531,15 +1530,44 @@ pub(crate) fn x_test_near_identical_on_residues(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1258-1312
-/// The statements of `s_TestNearIdentical`; `find_identical` is its call of `s_FindNumIdentical`
-/// (the query words' start, the query's middle slice, the subject's middle slice).
-fn near_identical_by(
+/// `test_near_identical` with the query's copy and words of an RPS-BLAST redo (`NearIdenticalCopy`:
+/// the profile's letters, which can be fewer than the columns of its preliminary alignments): the
+/// same walk, its reads past the copy or the words reported by `copy` instead of panicking.
+pub(crate) fn test_near_identical_on_copy(
     seq_data: &BlastCompoSequenceData,
     seq_offset: i32,
-    query_data: &BlastCompoSequenceData,
+    copy: NearIdenticalCopy<'_>,
     query_offset: i32,
     align: &BlastCompoAlignment,
-    find_identical: impl FnOnce(usize, &[u8], &[u8]) -> usize,
+) -> bool {
+    near_identical_by(
+        seq_data,
+        seq_offset,
+        copy.letters(),
+        query_offset,
+        align,
+        |query_word_start, query_seq, subject_seq| {
+            find_num_identical(
+                query_seq,
+                copy.words_from(query_word_start),
+                subject_seq,
+                NEAR_IDENTICAL_MAX_SHIFT,
+            )
+        },
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1258-1312
+/// The statements of `s_TestNearIdentical` on the query letters `query` (NCBI's query data
+/// pointer, from its first letter); `find_identical` is its call of `s_FindNumIdentical` (the query words'
+/// start, the query's middle part, the subject's middle slice).
+fn near_identical_by<Q: WalkLetters>(
+    seq_data: &BlastCompoSequenceData,
+    seq_offset: i32,
+    query: Q,
+    query_offset: i32,
+    align: &BlastCompoAlignment,
+    find_identical: impl FnOnce(usize, Q, &[u8]) -> usize,
 ) -> bool {
     let q_start_i32 = align.query_start - query_offset;
     let q_end_i32 = align.query_end - query_offset - 1;
@@ -1554,15 +1582,13 @@ fn near_identical_by(
     let s_start = s_start_i32 as usize;
     let s_end = s_end_i32 as usize;
 
-    if q_end >= query_data.data().len()
-        || s_end >= seq_data.data().len()
-        || q_start > q_end
-        || s_start > s_end
-    {
+    if s_end >= seq_data.data().len() || q_start > q_end || s_start > s_end {
         return false;
     }
+    let Some(query_seq) = query.window(q_start, q_end) else {
+        return false;
+    };
 
-    let query_seq = &query_data.data()[q_start..=q_end];
     let subject_seq = &seq_data.data()[s_start..=s_end];
     let align_len = query_seq.len().min(subject_seq.len());
     if align_len == 0 {
@@ -1576,7 +1602,7 @@ fn near_identical_by(
     }
 
     let (left_identical, query_left_len, subject_left_len, _) = extend_left(
-        &query_seq[query_right_len..],
+        query_seq.range(query_right_len, query_seq.len()),
         &subject_seq[subject_right_len..],
         NEAR_IDENTICAL_MAX_SHIFT,
     );
@@ -1595,11 +1621,213 @@ fn near_identical_by(
     // into an immediate `false`.
     num_identical += find_identical(
         q_start + query_right_len,
-        &query_seq[query_right_len..query_seq.len() - query_left_len],
+        query_seq.range(query_right_len, query_seq.len() - query_left_len),
         &subject_seq[subject_right_len..subject_seq.len() - subject_left_len],
     );
 
     (num_identical as f64) / (align_len as f64) > MIN_FRACTION_NEAR_IDENTICAL
+}
+
+/// The query letters that the near-identical walk reads (`s_TestNearIdentical`,
+/// `s_ExtendRight`, `s_ExtendLeft`, `s_FindNumIdentical`): a slice (BLASTP, PSIBLAST, TBLASTN,
+/// BLASTX and RPS-BLAST's consistent profiles alike), or an RPS-BLAST profile's copy of fewer
+/// letters than its alignments' columns (`NearIdenticalCopy`). Each function of the walk is one
+/// generic function; the slice's instance is the walk on slices as before.
+pub(crate) trait WalkLetters: Copy {
+    /// The number of letters the walk may read (NCBI's `query_len` of the part).
+    fn len(self) -> usize;
+    /// Whether `len` is 0.
+    #[inline(always)]
+    fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+    /// The letter at `i` (below `len`).
+    fn at(self, i: usize) -> u8;
+    /// The letters `from..to` of these (NCBI's pointer plus `from`, with the length `to - from`).
+    fn range(self, from: usize, to: usize) -> Self;
+    /// The letters `start..=end` of the whole query that `s_TestNearIdentical` walks, `None` where
+    /// LOSAT's slice ends before them (the walk then returns `false`).
+    fn window(self, start: usize, end: usize) -> Option<Self>;
+}
+
+impl WalkLetters for &[u8] {
+    #[inline(always)]
+    fn len(self) -> usize {
+        <[u8]>::len(self)
+    }
+
+    #[inline(always)]
+    fn at(self, i: usize) -> u8 {
+        self[i]
+    }
+
+    #[inline(always)]
+    fn range(self, from: usize, to: usize) -> Self {
+        &self[from..to]
+    }
+
+    #[inline(always)]
+    fn window(self, start: usize, end: usize) -> Option<Self> {
+        self.get(start..=end)
+    }
+}
+
+/// The query words that `s_FindNumIdentical` reads (`s_CreateWordArray`'s table, from the walk's
+/// start): a slice, or an RPS-BLAST profile's (`NearIdenticalCopy::words_from`).
+pub(crate) trait WalkWords: Copy {
+    /// Whether `s_FindNumIdentical` returns 0 before it reads a word of a part of `query_len`
+    /// letters: NCBI's test of a null table; a slice of fewer words than its loop reads.
+    fn missing(self, query_len: usize) -> bool;
+    /// The word at `i`.
+    fn word(self, i: usize) -> u64;
+}
+
+impl WalkWords for &[u64] {
+    #[inline(always)]
+    fn missing(self, query_len: usize) -> bool {
+        self.len() < query_len.saturating_sub(NEAR_IDENTICAL_WORD_SIZE)
+    }
+
+    #[inline(always)]
+    fn word(self, i: usize) -> u64 {
+        self[i]
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1671-1708
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2242-2262
+/// The copy of the query that NCBI's redo hands the near-identical walk (`s_SequenceGetRange`:
+/// the letters, U as C, between two zero bytes in a block of the length plus 2) and its word table
+/// (`s_CreateWordArray`: length minus 7 words, none below 8 letters, where NCBI's table is a null
+/// pointer), read where the walk reads them: RPS-BLAST's redo of a profile whose `.psq` letters
+/// are fewer than the columns of its preliminary alignments, where NCBI's walk can read past the
+/// block or the table (`rps_search::profile`, read C). A letter at or past the block's last byte
+/// and a word past the table, or of the null table at a start other than 0, read as 0 and are
+/// reported in `read_past` (NCBI's read is out of bounds; LOSAT then refuses the query batch).
+#[derive(Clone, Copy)]
+pub(crate) struct NearIdenticalCopy<'a> {
+    /// The block from its second byte: the letters and the zero byte after them.
+    bytes: &'a [u8],
+    /// The length of the query (the copy's letters).
+    length: usize,
+    words: Option<&'a [u64]>,
+    read_past: &'a Cell<bool>,
+}
+
+impl<'a> NearIdenticalCopy<'a> {
+    /// The copy `query` (`BlastCompoSequenceData::from_ncbistdaa` of the letters, U as C) and the
+    /// words of its letters (`build_query_word_hashes`, empty below 8 letters).
+    pub(crate) fn new(
+        query: &'a BlastCompoSequenceData,
+        words: &'a [u64],
+        read_past: &'a Cell<bool>,
+    ) -> Self {
+        Self {
+            bytes: &query.buffer[query.data_offset..],
+            length: query.length as usize,
+            words: (!words.is_empty()).then_some(words),
+            read_past,
+        }
+    }
+
+    fn letters(self) -> CopyLetters<'a> {
+        CopyLetters {
+            bytes: self.bytes,
+            len: self.length,
+            read_past: self.read_past,
+        }
+    }
+
+    /// The word table from the start `start` (NCBI's table of query words from that word).
+    fn words_from(self, start: usize) -> CopyWords<'a> {
+        CopyWords {
+            words: self
+                .words
+                .and_then(|words| words.get(start..))
+                .unwrap_or(&[]),
+            null: self.words.is_none() && start == 0,
+            read_past: self.read_past,
+        }
+    }
+}
+
+/// A read of the walk past a `NearIdenticalCopy` (its letters or its words): recorded in
+/// `read_past`, out of the walk's loops.
+#[cold]
+#[inline(never)]
+fn copy_read_past(read_past: &Cell<bool>) {
+    read_past.set(true);
+}
+
+/// Letters of a `NearIdenticalCopy` from a start: `bytes` the block's bytes from there (none when
+/// the start lies past the block), `len` the letters the walk takes.
+#[derive(Clone, Copy)]
+struct CopyLetters<'a> {
+    bytes: &'a [u8],
+    len: usize,
+    read_past: &'a Cell<bool>,
+}
+
+impl WalkLetters for CopyLetters<'_> {
+    #[inline]
+    fn len(self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    fn at(self, i: usize) -> u8 {
+        match self.bytes.get(i) {
+            Some(&letter) => letter,
+            None => {
+                copy_read_past(self.read_past);
+                0
+            }
+        }
+    }
+
+    #[inline]
+    fn range(self, from: usize, to: usize) -> Self {
+        Self {
+            bytes: self.bytes.get(from..).unwrap_or(&[]),
+            len: to - from,
+            ..self
+        }
+    }
+
+    // NCBI's walk takes the alignment's range whatever the copy's length (`s_TestNearIdentical`).
+    #[inline]
+    fn window(self, start: usize, end: usize) -> Option<Self> {
+        Some(self.range(start, end + 1))
+    }
+}
+
+/// Words of a `NearIdenticalCopy` from a word start: `words` the table from there (none when the
+/// table is null or ends before it), `null` whether NCBI's pointer is the null table itself.
+#[derive(Clone, Copy)]
+struct CopyWords<'a> {
+    words: &'a [u64],
+    null: bool,
+    read_past: &'a Cell<bool>,
+}
+
+impl WalkWords for CopyWords<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1161-1166
+    // Only a null table at offset 0 is a null pointer; a null table plus a start passes the test.
+    #[inline]
+    fn missing(self, _query_len: usize) -> bool {
+        self.null
+    }
+
+    #[inline]
+    fn word(self, i: usize) -> u64 {
+        match self.words.get(i) {
+            Some(&word) => word,
+            None => {
+                copy_read_past(self.read_past);
+                0
+            }
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1053-1097

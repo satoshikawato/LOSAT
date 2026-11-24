@@ -42,9 +42,9 @@ fn database(name: &str, taxdb: Option<&Path>) -> Opened {
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&cwd).unwrap();
-    let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
     let path = root().join("fixtures/outfmt16/db").join(name);
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap();
+    let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
     Opened { db, cwd }
 }
 
@@ -75,9 +75,9 @@ fn parsed_subjects(db: &SeqDb) -> Vec<crate::report::db_subject::ParsedSubject> 
 /// The database `name` of `tests/db_search` opened with `BLASTDB=taxdb` (`None`: not set),
 /// from the empty current directory `cwd`.
 fn db_search(name: &str, taxdb: Option<&Path>, cwd: &Path) -> SeqDb {
-    let search = SearchPath::new(cwd, taxdb.map(Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.map(Path::as_os_str), None);
     let path = root().join("db_search").join(name);
-    SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+    SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap()
 }
 
 #[test]
@@ -167,8 +167,8 @@ fn a_later_volume_whose_isam_does_not_open_leaves_the_other_holders_unknown() {
             .collect::<Vec<_>>()
             .join(" ");
         let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
-        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
-        SeqDb::open_in(&names, SeqType::Protein, &search).unwrap()
+        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None);
+        SeqDb::open_in(names.as_bytes(), SeqType::Protein, &search).unwrap()
     };
     let subject_of = |db: &SeqDb, ordinal: u32| {
         let headers = HeaderReader::new(db, false);
@@ -492,9 +492,14 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
     }
     // `lcl|777` before `gi|777`: the formatters do not find the Bioseq, which the prefetch
     // reads as itself; it fails where it asks for the length (a minus-strand alignment).
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     let path = root().join("db_search/ids/nrefuse_v5");
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     let headers = HeaderReader::new(&db, false);
     let ReportedHeader::Parsed(subject) = read_header(&headers, 0, 0, "TBLASTX").unwrap() else {
         panic!("nrefuse_v5 0: a sequence with parsed Seq-ids");
@@ -543,9 +548,14 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
     std::fs::create_dir_all(&cwd).unwrap();
     let taxdb = root().join("seqdb/taxdb/offset_last_past_end");
     let open = |name: &str, taxdb: Option<&Path>| {
-        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let path = root().join("db_search/ids").join(name);
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap()
+        SeqDb::open_in(
+            path.to_str().unwrap().as_bytes(),
+            SeqType::Nucleotide,
+            &search,
+        )
+        .unwrap()
     };
     let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
     let warning = "Warning: [blastn] Error pre-fetching sequence data\n";
@@ -702,7 +712,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let open = |names: &[&str]| {
-        let search = SearchPath::new(&cwd, None, None).unwrap();
+        let search = SearchPath::new(&cwd, None, None);
         let list: Vec<String> = names
             .iter()
             .map(|name| {
@@ -714,7 +724,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
                     .to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
@@ -1119,7 +1129,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let open = |names: &[&str], taxdb: Option<&Path>| {
-        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let list: Vec<String> = names
             .iter()
             .map(|name| {
@@ -1131,7 +1141,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
                     .to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
     let headers_of =
@@ -1337,7 +1347,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
     std::fs::create_dir_all(&cwd).unwrap();
     let bad_magic = root().join("seqdb/taxdb/bad_magic");
     let open = |names: &[&str]| {
-        let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None).unwrap();
+        let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None);
         let list: Vec<String> = names
             .iter()
             .map(|name| {
@@ -1349,7 +1359,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
                     .to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
     let headers_of =
@@ -1589,7 +1599,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let bad_magic = root().join("seqdb/taxdb/bad_magic");
-    let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None);
     let list: Vec<String> = ["ldb", "ldd", "ldp"]
         .iter()
         .map(|name| {
@@ -1601,7 +1611,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
                 .to_owned()
         })
         .collect();
-    let db = SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap();
+    let db = SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap();
     let headers = HeaderReader::new(&db, false);
     let parsed: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> = (0..db
         .num_seqs())
@@ -1758,12 +1768,12 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let open = |names: &[&str], taxdb: Option<&Path>| {
-        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let list: Vec<String> = names
             .iter()
             .map(|name| root().join(name).to_str().unwrap().to_owned())
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Nucleotide, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Nucleotide, &search).unwrap()
     };
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
@@ -2174,10 +2184,15 @@ fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
         }
     }
     // The first sequence of `nord_v5` holds `gnl|BL_ORD_ID|3`: the database has parsed Seq-ids.
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     for name in ["nord_v5", "nord_v4"] {
         let path = root().join("db_search/ids").join(name);
-        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        let db = SeqDb::open_in(
+            path.to_str().unwrap().as_bytes(),
+            SeqType::Nucleotide,
+            &search,
+        )
+        .unwrap();
         assert!(db.has_parsed_seqids().unwrap(), "{name}");
         assert!(matches!(
             db.read_header(1).unwrap(),
@@ -2249,9 +2264,9 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
         ),
     ] {
         let taxdb = taxdb.map(variant);
-        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None);
         let path = root().join(name);
-        let db = SeqDb::open_in(path.to_str().unwrap(), seq_type, &search).unwrap();
+        let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), seq_type, &search).unwrap();
         let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Stored(stored) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence without parsed Seq-ids");
@@ -2416,7 +2431,7 @@ fn real_ncbi_taxdb_walk() {
         return;
     };
     let cwd = crate::utils::test_dir::temp_dir();
-    let search = SearchPath::new(&cwd, Some(&dir), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(&dir), None);
     let taxdb = LazyTaxDb::new(search);
     let entries = taxdb.entry_count().unwrap();
     for _ in 0..3 {
@@ -2817,9 +2832,14 @@ fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
 fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
     let cwd = empty_cwd("xml2_cache");
     let open = |taxdb: &str| {
-        let search = SearchPath::new(&cwd, Some(variant(taxdb).as_os_str()), None).unwrap();
+        let search = SearchPath::new(&cwd, Some(variant(taxdb).as_os_str()), None);
         let path = root().join("db_search/nz_rep");
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap()
+        SeqDb::open_in(
+            path.to_str().unwrap().as_bytes(),
+            SeqType::Nucleotide,
+            &search,
+        )
+        .unwrap()
     };
     let read = |db: &SeqDb, run: &TaxdbRun, ranks: &[usize]| {
         let parsed: Vec<_> = parsed_subjects(db)
@@ -2854,9 +2874,14 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
     }
     // nz_repo: a1 to d1 without parsed Seq-ids (the taxid of the definition line).
     let taxdb = variant("offset_last_past_end");
-    let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None);
     let path = root().join("db_search/nz_repo");
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
     for (ranks, refused) in [(&[0][..], true), (&[1, 3], true), (&[3], false)] {
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
@@ -3116,7 +3141,7 @@ fn the_scope_holds_the_line_of_a_load_and_the_loader_every_line() {
     use crate::report::db_subject::{Holders, ParsedSubject};
     let cwd = empty_cwd("failed_holders");
     let open = |names: &str| {
-        let search = SearchPath::new(&cwd, None, None).unwrap();
+        let search = SearchPath::new(&cwd, None, None);
         let list: Vec<String> = names
             .split(' ')
             .map(|name| {
@@ -3124,7 +3149,7 @@ fn the_scope_holds_the_line_of_a_load_and_the_loader_every_line() {
                 path.to_str().unwrap().to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     let subject = |db: &SeqDb, ordinal: u32| -> Option<std::sync::Arc<ParsedSubject>> {
         match read_header(&HeaderReader::new(db, true), ordinal, 0, "BLASTP").unwrap() {

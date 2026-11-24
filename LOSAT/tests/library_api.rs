@@ -3272,9 +3272,11 @@ fn search_of_files(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
 /// `run_to_file` to a file whose writes fail (`/dev/full`, through a link in a directory of the
 /// test, where outfmt 13 and 14 write their side files) ends as the command line's `-out` (line
-/// LIB E1, fix 1), in every program and every outfmt: where the report's stream throws (the outfmt
-/// 0 to 4 formatter's, the organism report's), NCBI's `BLAST failed to write output` and its
-/// newline (exit status 6), elsewhere the write's error as the command line writes it. The warning
+/// LIB E1, fix 1; line RG item T6a, the command line's stream), in every program and every outfmt:
+/// the call succeeds where the command line exits 0, with the posts that it writes in the
+/// diagnostics; where the command line exits 6, the message is NCBI's text of that end (the
+/// failed region's posts, `BLAST failed to write output` and its newline, and for outfmt 11 the
+/// error archive's write fault after it); where it aborts, `std::terminate`'s text. The warning
 /// of `-max_target_seqs 1`, which the command line writes before the failure, is in the
 /// diagnostics and not in the message.
 #[cfg(target_os = "linux")]
@@ -3346,9 +3348,17 @@ fn a_report_that_cannot_be_written_fails_as_the_command_lines_out() {
                 );
             }
             if cli.status.code() == Some(6) {
-                assert_eq!(
-                    error.message(),
-                    b"BLAST failed to write output\n",
+                // The posts of the failed region, NCBI's `BLAST failed to write output`, and for
+                // outfmt 11 the write fault of the error archive written on the failed stream.
+                const FAILED: &[u8] = b"BLAST failed to write output\n";
+                let message = error.message();
+                let end = message
+                    .windows(FAILED.len())
+                    .position(|window| window == FAILED)
+                    .map(|at| at + FAILED.len());
+                assert!(
+                    end.is_some_and(|end| end == message.len()
+                        || (number == 11 && message[end..].starts_with(b"Error: (802.5) "))),
                     "{context}: {error:?}"
                 );
             }

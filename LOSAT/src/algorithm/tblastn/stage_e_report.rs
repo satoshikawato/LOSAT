@@ -952,7 +952,7 @@ pub(super) fn render(
 // CBlastTabularInfo::PrintNumProcessed appends the final query count.
 #[allow(clippy::too_many_arguments)]
 fn write_tabular(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     // The program of outfmt 7's first line (`TBLASTN`, `PSITBLASTN`).
     program: &str,
     comments: bool,
@@ -1129,12 +1129,16 @@ fn write_tabular(
                 hsp_index += 1;
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog.
     if comments && ranges.epilog {
         writeln!(writer, "# BLAST processed {} queries", query_records.len())?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1439,7 +1443,7 @@ fn pairwise_hits(
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     hits: &[PairwiseHit],
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],

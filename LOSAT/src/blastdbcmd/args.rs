@@ -8,8 +8,8 @@
 
 /// `NStr::StringToInt8` of `value` (`ncbi_str::string_to_int8`): the number, or the message of
 /// NCBI's exception as `GetMsg` gives it (without the position).
-pub(super) fn string_to_int8_message(value: &str) -> Result<i64, String> {
-    crate::ncbi_str::string_to_int8(value.as_bytes(), 0)
+pub(super) fn string_to_int8_message(value: impl AsRef<[u8]>) -> Result<i64, String> {
+    crate::ncbi_str::string_to_int8(value.as_ref(), 0)
         .map_err(|error| String::from_utf8_lossy(error.get_msg()).into_owned())
 }
 

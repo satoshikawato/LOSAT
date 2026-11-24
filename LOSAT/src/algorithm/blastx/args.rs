@@ -274,7 +274,7 @@ pub struct BlastxArgs {
     /// The position in the whole input of the first of these records, where the library searches
     /// each query batch as a call of its own (`api::run_batches`); 0 on the command line, whose
     /// records are the whole input. A later call's prefetch has no record of the loads of the
-    /// calls before (`local::DatabaseReports::unrecorded_calls`). Not a public option.
+    /// calls before (`common::database::TaxdbRun::note_calls_before`). Not a public option.
     #[arg(skip)]
     pub first_query_ordinal: usize,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
@@ -441,8 +441,8 @@ impl ResolvedOptions {
     }
 
     /// How the pairwise report reads each query's subjects, as its writer reads them
-    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions`,
-    /// `-num_alignments` and `-html`), `None` for the other formats.
+    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions` and
+    /// `-num_alignments`), `None` for the other formats.
     pub(crate) fn pairwise_reading(&self) -> Option<crate::report::pairwise::PairwiseReading> {
         self.pairwise_view().map(|view| {
             view.reading(
@@ -451,9 +451,24 @@ impl ResolvedOptions {
                     descriptions: usize::try_from(self.num_descriptions).unwrap_or(0),
                     alignments: usize::try_from(self.num_alignments).unwrap_or(0),
                 },
-                self.html.is_some(),
             )
         })
+    }
+
+    /// The format as NCBI's prefetch of each query batch asks it
+    /// (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches): outfmt
+    /// 10, 18 and 20 as the tabular 6, which NCBI prefetches for alike (`s_IsPrefetchFormat`).
+    pub(crate) fn prefetch_format(&self) -> crate::algorithm::common::database::PrefetchFormat {
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self.outfmt {
+                10 | 18 | 20 => 6,
+                outfmt => i32::from(outfmt),
+            },
+            match self.rpstblastn {
+                Some(_) => crate::report::archive::options::RequestKind::Rpstblastn,
+                None => crate::report::archive::options::RequestKind::Blastx,
+            },
+        )
     }
 }
 

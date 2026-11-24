@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "spP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "spP.fa",
+  "number-of-letters": 45,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-24T04:20:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49551,
+  "bytes-to-cache": 143,
+  "files": [
+    "spP.pdb",
+    "spP.phr",
+    "spP.pin",
+    "spP.pnd",
+    "spP.pni",
+    "spP.pog",
+    "spP.pos",
+    "spP.pot",
+    "spP.psq",
+    "spP.ptf",
+    "spP.pto"
+  ]
+}

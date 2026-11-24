@@ -283,6 +283,14 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
         hit: &XmlHit<'_>,
         hsps: &mut dyn FnMut(&mut HspSink<'_>) -> Result<()>,
     ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417 (cited
+        // at `report::db_subject::ParsedSubject::lookup_throws`)
+        // The `catch` of the `Hit` whose subject's lookup throws loads the subject again outside
+        // any `catch` of the hit: the exception leaves the query's report (`CaughtException`),
+        // before anything of the `Hit` is made.
+        if let Some(exception) = hit.lookup_throws {
+            return Err(crate::report::blast_xml::CaughtException(exception.clone()).into());
+        }
         self.hits += 1;
         let database = self.params.target == Xml2Target::Database;
         let enc = &mut *self.enc;

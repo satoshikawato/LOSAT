@@ -6,6 +6,7 @@
 mod blastn;
 mod blastp;
 mod blastx;
+mod database_refusal;
 mod later_warnings;
 mod outfmt13_14;
 mod support;

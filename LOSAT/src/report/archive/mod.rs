@@ -862,8 +862,7 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
     // `BLAST options error:` is that report of an options error that the search raises inside
     // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
-    // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
-    // refuses `-outfmt 11`).
+    // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`).
     // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
     // `catch_all` below, `cli::NativeError::exception`.)
     const PREFIXES: [&[u8]; 5] = [

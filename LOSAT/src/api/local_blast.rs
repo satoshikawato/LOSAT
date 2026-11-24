@@ -15,6 +15,12 @@ use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
+/// What every program's `run_local` returns when its arguments name `-db` (no NCBI counterpart:
+/// the caller contract of LOSAT's entries). `run_local` searches the caller's subject records; a
+/// `-db` search runs through the program's `run_local_database` (or the command line's `run`).
+pub(crate) const RUN_LOCAL_DB_REFUSAL: &str =
+    "-db (a database search) is run by run_local_database, not run_local";
+
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
 pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119

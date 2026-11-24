@@ -705,9 +705,24 @@ impl HitPosts {
         }
     }
 
-    /// The `Hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes the
-    /// texts that the writer makes there.
+    /// The `Hit` `hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes
+    /// the texts that the writer makes there. A `Hit` whose subject's lookup throws
+    /// (`XmlHit::lookup_throws`) loads nothing: no read and no text of it (`post` is not called).
     pub fn hit(
+        &mut self,
+        at: usize,
+        hit: &crate::report::blast_xml::XmlHit<'_>,
+        subject: u32,
+        post: impl FnOnce(&mut Vec<u8>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if hit.lookup_throws.is_some() {
+            return Ok(());
+        }
+        self.mark(at, subject, post)
+    }
+
+    /// `hit` of a `Hit` that loads its subject.
+    fn mark(
         &mut self,
         at: usize,
         subject: u32,

@@ -470,7 +470,7 @@ impl<'a> IndexSeeds<'a> {
             if let Some(list) = seeds.seeds(subj, number) {
                 self.moved[at].store(true, Ordering::Relaxed);
                 for seed in list {
-                    if seed.s_off as usize >= chunk.length {
+                    if seed.s_off as usize >= chunk.letters() {
                         let path = &self.index.volumes[at].path;
                         self.fail(
                             at,
@@ -599,7 +599,7 @@ impl HardSeeds {
             chunks.push(HardSlot {
                 offset: chunk.offset,
                 residual: chunk.residual,
-                length: chunk.length,
+                length: chunk.letters(),
                 range: chunk.range,
                 seeds: Vec::new(),
             });

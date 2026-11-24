@@ -117,7 +117,7 @@ fn erfc_ncbi(z: f64) -> f64 {
         return 2.0;
     }
     // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
-    // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
+    // BLAST_SpougeEtoS (blast_stat.c:5236-5269) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
     // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:252-255
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5216,5223-5223,5248-5254
@@ -580,7 +580,7 @@ impl SpougeCutoffOverflow {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5282
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
 // The first upper bound is NCBI's cast of the double (`ncbi_int4_from_double`: `INT_MIN` past
 // `Int4`, then 2). The doubling and the bisection stop with `SpougeCutoffOverflow` where NCBI's
 // `Int4` arithmetic would overflow (`b *= 2` above 2^30 - 1, `a + b` above 2^31 - 1); every other

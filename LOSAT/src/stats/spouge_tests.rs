@@ -561,7 +561,7 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
 // Line PS item PS7c, review B1: a gapped Lambda that makes NCBI's search pass `Int4` is
 // `SpougeCutoffOverflow`, at the doubling (where NCBI's x86-64 build never ends) or at the
 // bisection's sum; the first upper bound is NCBI's cast (a quotient past `Int4` starts at 2).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5282
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
 #[test]
 fn a_cutoff_search_that_passes_int4_is_an_overflow() {
     let gbp = BlastGumbelBlk {
@@ -617,7 +617,7 @@ fn a_cutoff_search_that_passes_int4_is_an_overflow() {
 // bisection); where NCBI's bisection adds past `Int4` (tblastn's 4e-9: 876,829,330 + 1,753,658,660,
 // which NCBI wraps to the cutoff -832,239,653; psiblast's 6e-9) or its doubling passes it
 // (psiblast's 1e-9, where NCBI never ends) the search is `SpougeCutoffOverflow`.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5282
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
 #[test]
 fn ncbi_s_cutoff_searches_of_the_rnd_pssm_overflow_where_ncbi_s_do() {
     let gbp = |db_length: i64| BlastGumbelBlk {

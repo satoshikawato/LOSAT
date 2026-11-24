@@ -198,8 +198,8 @@ use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
 use super::blast_engine::{
-    preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, sw_batch_failed,
-    sw_endless, FetchExcludedMatch, FetchNotes,
+    preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, sw_batch_failed_after,
+    sw_endless_after, FetchExcludedMatch, FetchNotes,
 };
 use super::gapalign::{BlastpPreliminaryHsp, GapAlignScratch};
 use super::hsp::{
@@ -1394,8 +1394,10 @@ where
 /// `XRedoParSearch::sw_excluded`); at the batch's end a failed status fails the search there
 /// (`redo_run::sw_batch_failed`), and the next batch starts at 0. It is kept across windows: a
 /// window may end inside a batch. Both errors carry the warning of a header that the batch's
-/// fetches read before them, as the one-thread loop's do (`FetchNotes::fetched_before_failure`,
-/// on the heaps as the replay left them, which are the loop's there).
+/// fetches read before them, or give way to LOSAT's refusal where such a fetch read a header that
+/// cannot be read, with the one-thread loop's own functions (`redo_run::sw_batch_failed_after`,
+/// `redo_run::sw_endless_after`, on the heaps as the replay left them, which are the loop's
+/// there).
 struct XSwBatch<'a> {
     /// The marks of the excluded lists of the queries that the replay has not passed yet.
     excluded: &'a [FetchExcludedMatch],
@@ -1464,13 +1466,12 @@ impl<'a> XSwBatch<'a> {
             }
             if next.is_none_or(|next| !batch.contains(&next)) {
                 if self.status.failed() {
-                    let utf8 = self.notes.fetched_before_failure(
-                        heaps,
+                    return Err(sw_batch_failed_after(
+                        self.notes,
                         batch.clone(),
+                        heaps,
                         batch.end - 1,
-                        usize::MAX,
-                    );
-                    return Err(sw_batch_failed(batch.start, &heaps[batch.start], utf8));
+                    ));
                 }
                 self.status = SwBatchStatus::default();
             }
@@ -1496,9 +1497,7 @@ impl<'a> XSwBatch<'a> {
         let notes = self.notes;
         let batch = query_batches[matched.q_idx].clone();
         self.status.redone(result, || {
-            let utf8 =
-                notes.fetched_before_failure(heaps, batch.clone(), matched.q_idx, matched.position);
-            sw_endless(batch.start, utf8)
+            sw_endless_after(notes, batch.clone(), heaps, matched.q_idx, matched.position)
         })
     }
 }

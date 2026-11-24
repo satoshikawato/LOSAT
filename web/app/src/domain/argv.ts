@@ -260,8 +260,25 @@ export function optionNames(
   });
 }
 
-/** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */
+/**
+ * The value of an option in an argv as the engine reads it (NCBI's reader takes `-flag value` and
+ * `-flag=value`): the word after its last occurrence, or the text after `=` where that occurrence is
+ * `-flag=value`; undefined where it is not given.
+ */
 export function optionValue(argv: readonly string[], flag: string): string | undefined {
-  const at = argv.lastIndexOf(flag);
-  return at < 0 || at + 1 >= argv.length ? undefined : argv[at + 1];
+  for (let at = argv.length - 1; at >= 0; at--) {
+    const word = argv[at]!;
+    if (word === flag) return argv[at + 1];
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The task that the engine runs for an argv: its -task (`-task value` or `-task=value`), else the
+ * default task of the program's options (`describe`'s `default` of -task); undefined for a program
+ * without -task, and where the options are unknown and the argv gives none.
+ */
+export function runTask(argv: readonly string[], options: ReadonlyArray<{ readonly flag: string; readonly defaultValue?: string }>): string | undefined {
+  return optionValue(argv, '-task') ?? options.find((option) => option.flag === '-task')?.defaultValue;
 }

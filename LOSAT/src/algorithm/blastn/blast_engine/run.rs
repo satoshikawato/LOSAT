@@ -6175,22 +6175,14 @@ pub fn run(
     )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // The search strategy's request, with the archive's options handle.
-    args.strategy = strategy_file
-        .map(|file| {
-            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                file,
-                archive::option_inputs(&args, args.dust_filtering.as_deref()),
-                choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs,
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.database_name(),
-                &options,
-            ))
-        })
-        .transpose()?;
+    args.strategy = strategy_file.map(|file| {
+        crate::report::archive::strategy::StrategyExport::for_args(
+            &args,
+            file,
+            choice.number(),
+            &options,
+        )
+    });
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -6806,18 +6798,18 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
 }
 
 /// The report of the CLI's `-outfmt`, read as NCBI reads it before its option handlers run
-/// (`run`; `blastinput/app.rs` `parse_formatting_string`, `report_format`). A format that
+/// (`run`; `blastinput/app.rs` `app::early_format_choice`, `report_format`). A format that
 /// NCBI itself rejects later has no report: the run stops at NCBI's error, the formatting
 /// handler's in `process_options` (AIRR rearrangement, FASTA) or the XInclude formats' in
-/// `search` (13 and 14 to standard output).
+/// `search` (13 and 14 to standard output). Nor has a value that does not parse where the argv
+/// names a search strategy file (`strategy`): the formatting handler reads it again
+/// (`process_options`) and fails there, after the query options.
 fn cli_output_formats(
     outfmt: &str,
     out: Option<&std::path::Path>,
+    strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    output_formats_of(
-        &app::EarlyFormat::Parsed(app::parse_formatting_string(outfmt)?),
-        out,
-    )
+    output_formats_of(&app::early_format_choice(outfmt, strategy)?, out)
 }
 
 /// The report of the choice `choice` that `app::early_format_choice` read (`cli_output_formats`):
@@ -6836,18 +6828,19 @@ fn output_formats_of(
 }
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
-/// `-outfmt` (`cli_output_formats`): NCBI's parse and LOSAT's refusals, before `-out` is opened. A
-/// format without a report (`app::report_format`: one that NCBI rejects later) is left out, as on
-/// the command line: NCBI's formatting handler rejects it after `-out` is opened
-/// (`process_options`), or `search` (the XInclude formats without a file). `out`: the file of
-/// `api::run_to_file`, or the `-out` of the caller's receiver of the side files of a format
-/// (`FormatOutput::side_out`).
+/// `-outfmt` (`cli_output_formats`; `strategy`: the argv names a search strategy file): NCBI's
+/// parse and LOSAT's refusals, before `-out` is opened. A format without a report
+/// (`app::report_format`: one that NCBI rejects later) is left out, as on the command line: NCBI's
+/// formatting handler rejects it after `-out` is opened (`process_options`), or `search` (the
+/// XInclude formats without a file). `out`: the file of `api::run_to_file`, or the `-out` of the
+/// caller's receiver of the side files of a format (`FormatOutput::side_out`).
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = (&'a str, Option<&'a std::path::Path>)>,
+    strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
     let mut output_formats = Vec::new();
     for (outfmt, out) in formats {
-        output_formats.extend(cli_output_formats(outfmt, out)?);
+        output_formats.extend(cli_output_formats(outfmt, out, strategy)?);
     }
     Ok(output_formats)
 }
@@ -6908,24 +6901,24 @@ pub fn run_local(
         app::parse_formatting_string(format.outfmt)
             .is_ok_and(|choice| choice.number == app::output_format::ARCHIVE_FORMAT)
     });
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
         args.archive = archive::handle_for(
             &args,
             args.dust_filtering.as_deref(),
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, query_end, subject_records, view)
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(args, query_records, query_end, subject_records, outputs)
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(args, query_records, query_end, subject_records, outputs)
+    })
 }
 
 fn run_local_formats(
@@ -6979,6 +6972,7 @@ fn run_local_formats(
             .formats
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
+        args.export_search_strategy.is_some(),
     )?;
     // The thread count is checked before the inputs are read, as on the command line (`run`).
     crate::utils::threading::validate_threads(args.num_threads)?;
@@ -7047,32 +7041,23 @@ pub fn run_local_database(
             .formats
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
+        args.export_search_strategy.is_some(),
     )?;
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     args.archive = archive::handle_for(
         &args,
         args.dust_filtering.as_deref(),
         output_formats.contains(&BlastnOutputFormat::Archive),
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(
-                    args,
-                    query_records,
-                    query_end,
-                    output_formats,
-                    settings,
-                    view,
-                    None,
-                )
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(
             args,
             query_records,
             query_end,
@@ -7080,8 +7065,8 @@ pub fn run_local_database(
             settings,
             outputs,
             None,
-        ),
-    }
+        )
+    })
 }
 
 /// The repeat search of blastn's `-filtering_db` (`repeat_filter`): `args` (the search's options,
@@ -7144,7 +7129,7 @@ pub(crate) fn repeat_search_hits(
             hits: Some(&mut on_hits),
             observer: None,
         };
-        parse_output_formats(std::iter::once(("6", None))).and_then(|output_formats| {
+        parse_output_formats(std::iter::once(("6", None)), false).and_then(|output_formats| {
             search_database(
                 args,
                 query_records,
@@ -8072,9 +8057,14 @@ enum BatchStage<'a> {
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
     /// spaces of the batch's contexts.
+    ///
+    /// EXPERIMENT (LOSAT_X_CSRQSKEEP) `x_last`: the last chunk of the batch loop's last batch, after
+    /// whose tables no build follows, so the loop's keep takes no `qs` back when they drop
+    /// (`x_mb_lut_keep::Keep::close_qs`).
     ChunkPrelim {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
+        x_last: bool,
     },
 }
 
@@ -10720,6 +10710,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             query_offsets,
             lower_case_before,
             masks_outside,
+            last,
             ..
         } if any_valid_context && !UNGAPPED => {
             let chunks = search_query_chunks(
@@ -10737,7 +10728,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 batching,
                 first_batch,
                 posts,
-                x_keep,
+                (x_keep, last),
             )?;
             // A batch with a valid context whose chunks have none (the chunks' own masks would
             // cover the letters that the batch's leave open) meets `BLAST_GapAlignSetUp` first
@@ -11192,7 +11183,14 @@ fn search_query_batch<const UNGAPPED: bool>(
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
     subject_space_overflow.check()?;
-    if let BatchStage::ChunkPrelim { .. } = stage {
+    if let BatchStage::ChunkPrelim { x_last, .. } = stage {
+        // EXPERIMENT (LOSAT_X_CSRQSKEEP): the last chunk of the loop's last batch: no build
+        // follows, so its CSR frees its `qs` when its tables drop at this return, as before the
+        // switch (`x_lut_drop::after_prelim` for a batch that is not split). No NCBI counterpart
+        // (memory only).
+        if let (true, Some(keep)) = (x_last, x_keep) {
+            keep.close_qs();
+        }
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
     // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
@@ -11251,7 +11249,9 @@ fn search_query_batch<const UNGAPPED: bool>(
 /// diagnostics (a split batch gives the next batch size 0 initial hits), and NCBI drops its
 /// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error. With the
 /// merged lists it returns whether a chunk had a valid context (its set-up checked the subjects
-/// and the greedy set-up).
+/// and the greedy set-up). `x_keep`: the batch loop's keep (LOSAT_X_MBLUTKEEP) and whether the
+/// batch is the loop's last (`BatchStage::Search`'s `last`; LOSAT_X_CSRQSKEEP, the chunks'
+/// `x_last`).
 #[allow(clippy::too_many_arguments)]
 fn search_query_chunks(
     args: &BlastnArgs,
@@ -11268,7 +11268,7 @@ fn search_query_chunks(
     batching: QueryBatching,
     first_batch: bool,
     posts: &mut Posts,
-    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    (x_keep, last_batch): (Option<&Arc<x_mb_lut_keep::Keep>>, bool),
 ) -> Result<Option<(PrelimHitLists, bool)>> {
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
@@ -11305,7 +11305,7 @@ fn search_query_chunks(
     // Whether a chunk had a valid context, so that its set-up (`context_statistics`) checked the
     // subjects and the greedy set-up.
     let mut chunk_set_up = false;
-    for chunk in &chunks {
+    for (index, chunk) in chunks.iter().enumerate() {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
         anyhow::ensure!(
@@ -11378,6 +11378,7 @@ fn search_query_chunks(
             BatchStage::ChunkPrelim {
                 query_masks: &part_masks,
                 batch_eff_searchsp,
+                x_last: last_batch && index + 1 == chunks.len(),
             },
             &mut *posts,
             x_keep,

@@ -383,7 +383,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
-// (`GetLowestEvalue`, cited at `input_msa`): the e-value counts as at most
+// (`GetLowestEvalue`, cited at `seqalign_pssm_evalue`): the e-value counts as at most
 // BLAST_EXPECT_VALUE (10), and a NaN as 10.
 #[test]
 fn an_e_value_from_10_on_counts_as_10() {

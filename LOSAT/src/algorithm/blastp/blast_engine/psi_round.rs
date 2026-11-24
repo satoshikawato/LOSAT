@@ -30,8 +30,8 @@ use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::common::database::HeaderReadError;
 use crate::algorithm::psiblast::pssm::{
-    ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmQueryRecord, PssmScoring,
-    QueryPssm,
+    ncbistdaa_letters, query_pssm, seqalign_pssm_evalue, PssmAlignment, PssmAncillary,
+    PssmQueryRecord, PssmScoring, QueryPssm,
 };
 use crate::algorithm::psiblast::rounds::{
     HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome,
@@ -882,19 +882,6 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 /// subjects whose letters the PSSM reads (`ListedTitles::pssm_reads`).
 pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
     seqalign_pssm_evalue(e_value) < inclusion_ethresh
-}
-
-/// The E-value that the PSSM reads of an HSP (`GetLowestEvalue`: the lowest `e_value` or `sum_e`
-/// score of the Seq-align, 10 where it has none, `seqalign_evalue_absent`); any other value of
-/// 1e-180 or less, a negative one of a database with a negative size too, is 0 in it.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545
-pub(crate) fn seqalign_pssm_evalue(e_value: f64) -> f64 {
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
-    if crate::report::serial::seqalign::seqalign_evalue_absent(e_value) {
-        return BLAST_EXPECT_VALUE;
-    }
-    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
 }
 
 #[cold]

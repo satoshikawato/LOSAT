@@ -60,7 +60,7 @@ pub(crate) fn process_id() -> u32 {
 // lists) and the directories of its search path (`BLASTDB`) through it.
 /// The directory `dir` as NCBI's database reader names it: its symbolic links followed on Unix,
 /// as it is elsewhere. On macOS the temporary directory lies under `/var`, a link to
-/// `private/var`, so NCBI and LOSAT name its files under `/private/var` (Platform checks
+/// `/private/var`, so NCBI and LOSAT name its files under `/private/var` (Platform checks
 /// 45315823856).
 pub(crate) fn ncbi_dir(dir: &std::path::Path) -> std::path::PathBuf {
     if cfg!(unix) {

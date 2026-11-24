@@ -2815,7 +2815,7 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
     let gi = ParsedSubject::new(one_defline(vec![ParsedSeqId::Gi(1234)])).unwrap();
     for subject in [gi.clone(), gi.showing_gis(true)] {
         let (start, title) = subject.thrown_description();
-        assert_eq!(start, subject.description_start(true));
+        assert_eq!(start, subject.description_start());
         let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
@@ -3277,7 +3277,6 @@ fn the_description_walk_meets_a_line_without_a_seq_id_until_it_passes_4096_bytes
         } else {
             assert!(line.text.starts_with(b"s"), "{total}");
         }
-        assert_eq!(subject.description_start(true), start);
     }
 }
 

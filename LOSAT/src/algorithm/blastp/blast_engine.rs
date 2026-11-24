@@ -2529,8 +2529,8 @@ fn blastp_seq_aligns(hit_lists: &[Option<BlastpHitList>], gapped: bool) -> usize
 /// Seq-ids (a database's listed titles'); `loads`: the reports' loads (`HitLoads::of`), whose
 /// throwing subjects are refused where the first row of a report stops NCBI
 /// (`TabularSpec::may_stop_at_failed_lookup`). NCBI's run stops in the batch of the query whose
-/// row it has no result for, after the reports of the batches before: a refusal that fails the
-/// call is that batch's failure (`database::HeaderReadError` of the query, `failed_lookup_batch`).
+/// row it has no result for, after the reports of the batches before: the caller makes a refusal
+/// that fails the call that batch's failure (`failed_lookup_batch`).
 #[allow(clippy::too_many_arguments)]
 fn check_tabular_lookups(
     formats: &mut [crate::api::local_blast::FormatOutput<'_>],
@@ -2557,10 +2557,6 @@ fn check_tabular_lookups(
         ) {
             continue;
         }
-        // The queries of the result sets, in their order.
-        let queries: Vec<usize> = (0..hit_lists.len())
-            .filter(|&query| hit_lists[query].is_some())
-            .collect();
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
             hit_lists.iter().flatten().map(|hit_list| {
@@ -2594,34 +2590,83 @@ fn check_tabular_lookups(
             },
             application,
         );
-        let checked = match format.refusal {
-            crate::api::local_blast::FormatRefusal::FailsCall => {
-                checked.map_err(|error| failed_lookup_batch(error, &queries))
-            }
-            _ => checked,
-        };
         format.refusal.check(checked)?;
     }
     Ok(())
 }
 
-/// A refusal of `report::tabular::check_failed_lookups` (`FailedLookupRefusal`, at the result set
-/// of `queries[set]`) as the failure of that query's batch (`database::HeaderReadError`): the
-/// call writes the reports of the batches before, as NCBI's run does before it stops (the Owner's
-/// form of 2026-11-16 for line RG's Q-X2c). Any other error stays.
-fn failed_lookup_batch(error: anyhow::Error, queries: &[usize]) -> anyhow::Error {
+/// What the failure of the batch of a query whose tabular row NCBI has no result for needs
+/// (`failed_lookup_batch`), of the call's reports.
+struct LookupStop<'a> {
+    /// The call's hit lists, by query (the result sets of the check are those that are `Some`).
+    hit_lists: &'a [Option<BlastpHitList>],
+    /// The call's query batches.
+    batches: &'a [seq_range::RangedBatch],
+    /// The warning lines of each query (`report_prep::query_warning_lines`), whose first bytes in
+    /// a batch's first query are the batch's reader messages (`reader`, by query).
+    lines: &'a [Vec<u8>],
+    reader: &'a [Vec<u8>],
+    /// The texts of each batch's prefetch, with its first query (`PrefetchedSubjects::posts`).
+    prefetches: &'a [(usize, crate::report::diag_log::Posts)],
+    /// The call's first read of a header that holds a UTF8String (`CallTitles::utf8`).
+    utf8: Option<&'a database::Utf8Read>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// A refusal of `report::tabular::check_failed_lookups` that fails the call (`FailedLookupRefusal`,
+/// at a result set of `stop.hit_lists`) as the failure of that query's batch
+/// (`database::HeaderReadError`): the call writes the reports of the batches before, then the
+/// batch's reader messages, the posts of its search strategy request and its UTF8String warning
+/// (`utf8`, where the batch's Seq-aligns read the call's first), as NCBI's run does before it
+/// stops (the Owner's form of 2026-11-16 for line RG's Q-X2c), and then what NCBI writes of the
+/// batch's reports up to that row (`database::ErrorAfterPosts`): the batch's prefetch texts and
+/// the own warnings of its queries up to the row's query. Any other error stays.
+fn failed_lookup_batch(error: anyhow::Error, stop: &LookupStop<'_>) -> anyhow::Error {
     let query = error
         .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
-        .and_then(|refusal| queries.get(refusal.set()).copied());
-    match query {
-        Some(query) => database::HeaderReadError {
-            query,
-            error,
-            utf8: None,
-        }
-        .into(),
-        None => error,
+        .and_then(|refusal| {
+            (0..stop.hit_lists.len())
+                .filter(|&query| stop.hit_lists[query].is_some())
+                .nth(refusal.set())
+        });
+    let Some(query) = query else {
+        return error;
+    };
+    let batch = stop
+        .batches
+        .iter()
+        .map(|batch| batch.searched.clone())
+        .find(|span| span.contains(&query))
+        .unwrap_or(query..query + 1);
+    // The own warnings of the batch's queries up to `query`, after the batch's reader messages.
+    let lines = (batch.start..=query)
+        .map(|query| {
+            let lines = stop.lines.get(query).map_or(&[][..], Vec::as_slice);
+            let reader = stop.reader.get(query).map_or(0, Vec::len).min(lines.len());
+            lines[reader..].to_vec()
+        })
+        .collect();
+    let prefetch = stop
+        .prefetches
+        .iter()
+        .filter(|(first, _)| *first == batch.start)
+        .map(|(_, posts)| (0, posts.clone()))
+        .collect();
+    let mut posts = crate::report::diag_log::Posts::new();
+    for query_posts in
+        crate::report::query_warnings::query_posts(lines, Vec::new(), prefetch, |_| 0, None)
+    {
+        posts.append(&query_posts);
     }
+    database::HeaderReadError {
+        query,
+        error: anyhow::Error::new(database::ErrorAfterPosts { posts, error }),
+        utf8: stop
+            .utf8
+            .filter(|read| batch.contains(&read.query))
+            .cloned(),
+    }
+    .into()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -6988,7 +7033,11 @@ fn search(
             }) {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
-            Err(failure.error)
+            Err(database::ErrorAfterPosts::written(
+                failure.error,
+                &mut *outputs.diagnostics,
+                args.archive.as_ref(),
+            )?)
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
@@ -10630,7 +10679,23 @@ fn run_call(
         listed_titles.as_ref(),
         subject_records,
         args.app.name(),
-    )?;
+    )
+    .map_err(|error| {
+        let (lines, reader) = (&query_warning_lines, reports.reader_warnings);
+        let (prefetches, utf8) = (&prefetched.posts, reads.utf8());
+        let (hit_lists, batches) = (&hit_lists, &query_batches);
+        failed_lookup_batch(
+            error,
+            &LookupStop {
+                hit_lists,
+                batches,
+                lines,
+                reader,
+                prefetches,
+                utf8,
+            },
+        )
+    })?;
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).

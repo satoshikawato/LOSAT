@@ -617,13 +617,14 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
 
 /// LOSAT's refusals of the tabular report (`options.tabular`, `None`: the default fields) of the
 /// batches' rows whose subject lookup fails where NCBI has no result
-/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set).
+/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set), with the
+/// query (its index in the batch's queries) whose row NCBI stops at.
 fn check_failed_lookups(
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
-) -> Result<()> {
+) -> std::result::Result<(), (usize, anyhow::Error)> {
     if !crate::report::tabular::may_stop_at_failed_lookup(options.tabular) {
         return Ok(());
     }
@@ -655,7 +656,52 @@ fn check_failed_lookups(
                 }
             },
             options.program().upper,
-        )?;
+        )
+        .map_err(|error| {
+            let set = error
+                .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+                .map_or(0, crate::report::tabular::FailedLookupRefusal::set);
+            (batch.query_ordinal + set, error)
+        })?;
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// What NCBI writes to `stderr` before it stops at the tabular row of the query `stop` (its index
+/// in the batch's queries) that LOSAT refuses: the batch's warning of `-subject`'s prefetch, then
+/// each query's warnings up to `stop`, as the tabular report writes them before each query's rows
+/// (`tabular::write_blastx_tabular`; the batch's reader messages and `-db` prefetch texts came
+/// before the report).
+fn posts_before_lookup_stop(
+    stderr: &mut dyn Write,
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+    stop: usize,
+) -> Result<()> {
+    if !options.gapped
+        && SubjectLoc::of(shown) == SubjectLoc::Interval
+        && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
+    {
+        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
+            options.program().lower,
+        ))?;
+    }
+    for batch in batches {
+        for qidx in 0..batch.queries.len() {
+            let ordinal = batch.query_ordinal + qidx;
+            if ordinal > stop {
+                return Ok(());
+            }
+            stderr.write_all(&query_warning(
+                options,
+                &queries[ordinal],
+                batch.search_skipped,
+            ))?;
+            stderr.write_all(shown.query_fetches(ordinal))?;
+        }
     }
     Ok(())
 }
@@ -712,13 +758,26 @@ pub(super) fn render_queries_with(
     // The rows of subjects whose lookup fails where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before the batch's tabular report and before
     // the format writes a warning of the batch (the prefetch's below, the queries'), so that a
-    // format that fails alone leaves them to the next (`local::write_run`).
+    // format that fails alone leaves them to the next (`local::write_run`); a refusal that fails
+    // the call comes after those warnings up to the row's query (`posts_before_lookup_stop`).
     if options
         .tabular_report()
         .is_some_and(crate::report::tabular::TabularSpec::writes_rows)
-        && !writes(check_failed_lookups(options, subjects, shown, batches))?
     {
-        return Ok(());
+        let (stop, checked) = match check_failed_lookups(options, subjects, shown, batches) {
+            Ok(()) => (None, Ok(())),
+            Err((stop, error)) => (Some(stop), Err(error)),
+        };
+        match writes(checked) {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(error) => {
+                if let Some(stop) = stop {
+                    posts_before_lookup_stop(stderr, options, queries, shown, batches, stop)?;
+                }
+                return Err(error);
+            }
+        }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (cited at
     // `native::reported_batch`)

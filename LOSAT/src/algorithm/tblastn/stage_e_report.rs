@@ -512,8 +512,10 @@ pub(super) fn render(
     }
     // A refusal that fails the call at a query batch after the first comes after the reports of
     // the batches before, as NCBI's run stops in that batch's report
-    // (`FailedLookupRefusal::batch_start`): those queries' reports, without the epilog, then the
-    // refusal.
+    // (`FailedLookupRefusal::batch_start`): those queries' reports, without the epilog, then what
+    // NCBI writes before each query's report of the batch up to the row's query (its posts: the
+    // batch's reader messages, request posts, UTF8String warning and prefetch texts with its first
+    // query, then each query's own warnings), then the refusal.
     if let Some(error) = lookup_stop {
         let before = crate::report::tabular::FailedLookupRefusal::batch_start(
             &error,
@@ -571,6 +573,15 @@ pub(super) fn render(
                     .iter()
                     .take_while(|&&start| start < before)
                     .count()],
+            )?;
+        }
+        let stop = error
+            .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+            .map_or(before, crate::report::tabular::FailedLookupRefusal::set);
+        for posts in query_posts.iter().take(stop + 1).skip(before) {
+            posts.write(
+                &mut *outputs.diagnostics,
+                archive.map(|archive| archive.handle),
             )?;
         }
         return Err(error);

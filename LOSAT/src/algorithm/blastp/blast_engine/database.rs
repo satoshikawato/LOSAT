@@ -32,7 +32,7 @@ use rayon::prelude::*;
 use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{
-    HeaderReadError, PreliminaryReadError, Utf8Read,
+    ErrorAfterPosts, HeaderReadError, PreliminaryReadError, Utf8Read,
 };
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;

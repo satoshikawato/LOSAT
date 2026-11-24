@@ -1913,10 +1913,10 @@ impl ParsedSubject {
         matches!(self.alignment_id, ParsedSeqId::Local(_))
     }
 
-    /// The start of the outfmt 0 description line (`description_line`; the Seq-align id's on the
-    /// line of NCBI's `catch`).
-    pub fn description_start(&self, protein: bool) -> Vec<u8> {
-        self.description_line(protein).0
+    /// The start of the outfmt 0 description line (`description`) where its title does not make it
+    /// the line of NCBI's `catch` (`description_line`).
+    pub fn description_start(&self) -> Vec<u8> {
+        self.description_id().0
     }
 
     /// `description`'s start and whether `gi|N|` was written.

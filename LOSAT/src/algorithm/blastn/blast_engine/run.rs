@@ -5206,6 +5206,43 @@ fn tabular_subject_ids(
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// What NCBI writes before it stops at a tabular row that LOSAT refuses (`error`, a
+/// `FailedLookupRefusal` at a result set of `hit_lists`: those that are `Some`): the posts before
+/// each query's report (`query_warnings`) of that row's batch up to the row's query (the batch's
+/// reader messages, its UTF8String warning and prefetch texts with its first query, then each
+/// query's own warnings). The batches of the call are `report.batch_spans` (none: the call is one
+/// batch, the stream's).
+fn posts_before_lookup_stop(
+    error: &anyhow::Error,
+    hit_lists: &[Option<BlastnHitList>],
+    query_warnings: &[Posts],
+    outputs: &mut ReportOutputs<'_>,
+    report: &BlastnReportInputs<'_>,
+) -> Result<()> {
+    let Some(stop) = error
+        .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+        .and_then(|refusal| {
+            (0..hit_lists.len())
+                .filter(|&query| hit_lists[query].is_some())
+                .nth(refusal.set())
+        })
+    else {
+        return Ok(());
+    };
+    let first = report
+        .batch_spans
+        .iter()
+        .map(|span| span.start)
+        .take_while(|&start| start <= stop)
+        .last()
+        .unwrap_or(0);
+    for posts in query_warnings.iter().take(stop + 1).skip(first) {
+        posts.write(&mut *outputs.diagnostics, report.archive)?;
+    }
+    Ok(())
+}
+
 /// The check of the rows of `hit_lists` whose subjects' lookups fail where NCBI has no result
 /// (`report::tabular::check_failed_lookups`), for each tabular format of `output_formats` (the
 /// formats of `outputs`, whose refusal each is: `FormatRefusal::check`), before any format is
@@ -5631,17 +5668,21 @@ fn post_process_hits_and_write(
             std::borrow::Cow::Owned(Vec::new())
         };
     // The rows of subjects whose lookups fail where NCBI has no result, before any format is
-    // written.
+    // written; a refusal that fails the call after what NCBI writes before each query's report of
+    // the batch up to the row's query (`posts_before_lookup_stop`).
     if tabular
         && crate::algorithm::common::tabular::lookups_may_fail(&subject_ids, report.database_parsed)
     {
-        check_tabular_lookups(
+        if let Err(error) = check_tabular_lookups(
             &mut outputs.formats,
             output_formats,
             &hit_lists,
             &subject_ids,
             report,
-        )?;
+        ) {
+            posts_before_lookup_stop(&error, &hit_lists, query_warnings, outputs, report)?;
+            return Err(error);
+        }
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273

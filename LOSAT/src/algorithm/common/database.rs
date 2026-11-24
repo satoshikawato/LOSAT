@@ -720,6 +720,44 @@ pub(crate) struct HeaderReadError {
     pub(crate) utf8: Option<Utf8Read>,
 }
 
+/// The error of a `HeaderReadError` whose batch NCBI's run stops in after more of the batch's
+/// posts than a failed search writes (the batch's reader messages, its search strategy request's
+/// posts and its UTF8String warning, which the caller writes): a tabular row at which NCBI stops
+/// in the batch's report (`report::tabular::FailedLookupRefusal`), after the batch's prefetch
+/// texts and the own warnings of its queries up to that row's query (`posts`), which NCBI writes
+/// before each query's report.
+#[derive(Debug)]
+pub(crate) struct ErrorAfterPosts {
+    pub(crate) posts: crate::report::diag_log::Posts,
+    pub(crate) error: anyhow::Error,
+}
+
+impl ErrorAfterPosts {
+    /// The error of a batch's failure (`HeaderReadError::error`), its posts written first to
+    /// `diagnostics` (and the archive's messages) where it is an `ErrorAfterPosts`.
+    pub(crate) fn written(
+        error: anyhow::Error,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> Result<anyhow::Error> {
+        match error.downcast::<Self>() {
+            Ok(after) => {
+                after.posts.write(diagnostics, archive)?;
+                Ok(after.error)
+            }
+            Err(error) => Ok(error),
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorAfterPosts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl std::error::Error for ErrorAfterPosts {}
+
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
 /// NCBI's first read, in a run of reported sequences' headers (`HeaderReader`), of a record that
 /// holds a UTF8String where a VisibleString is expected: the query whose hit list reached it
@@ -4020,8 +4058,11 @@ pub(crate) fn check_shown_parsed_subject(
     program: &str,
 ) -> Result<()> {
     let generated = subject.heading_generates_title();
-    if protein {
-        let (_, title) = subject.description(protein);
+    // The description line is made once, where its title is checked (protein) or where a line
+    // without a Seq-id can make it the line of NCBI's `catch`, whose start is the Seq-align id's
+    // (`description_line`); any other subject's start is its display id's, as it was.
+    let line = (protein || subject.has_lineless_line()).then(|| subject.description_line(protein));
+    if let Some((_, title, _)) = line.as_ref().filter(|_| protein) {
         let heading_reads_past_end = generated
             && subject
                 .bioseq_title(protein, false)
@@ -4037,7 +4078,8 @@ pub(crate) fn check_shown_parsed_subject(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-917
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
-    if subject.description_start(protein).len() > 65 {
+    let start = line.map_or_else(|| subject.description_start(), |(start, _, _)| start);
+    if start.len() > 65 {
         return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
     }
     if subject.pairwise_title_reads_source(protein, taxdb_found) {

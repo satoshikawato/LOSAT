@@ -83,11 +83,15 @@ pub fn query_error(message: &str) -> anyhow::Error {
 /// 2026-11-16 on line RG's Q-X2c: "the results of the query batches before are written") and
 /// TBLASTN's (`tblastn::tblastn_app::batch_failure`). Any other refusal of a batch's search comes
 /// before the run's first byte. A tabular row at which NCBI stops in a batch's report
-/// (`report::tabular::FailedLookupRefusal`) comes after the reports of the batches before too:
-/// TBLASTN and TBLASTX, which check every batch's rows at once, write those reports first
-/// (`FailedLookupRefusal::batch_start`), BLASTP and PSIBLAST fail that query's batch
-/// (`common::database::HeaderReadError`), and BLASTX and BLASTN check each batch's rows when they
-/// write them.
+/// (`report::tabular::FailedLookupRefusal`) comes after the reports of the batches before too,
+/// then what NCBI writes to stderr of the failing batch before that row (its reader messages, its
+/// search strategy posts, its UTF8String warning, its prefetch texts and the own warnings of its
+/// queries up to the row's): TBLASTN and TBLASTX, which check every batch's rows at once, write
+/// those reports first (`FailedLookupRefusal::batch_start`), then the posts of the failing batch's
+/// queries up to the row's; BLASTP and PSIBLAST fail that query's batch
+/// (`common::database::HeaderReadError`, whose `ErrorAfterPosts` holds the posts after the
+/// batch's own); BLASTX and BLASTN check each batch's rows when they write them, after the posts
+/// before each query's report up to the row's.
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
 

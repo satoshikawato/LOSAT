@@ -2254,7 +2254,10 @@ fn write_tblastx_outputs(
     // the batches before, as NCBI's run stops in that batch's report
     // (`FailedLookupRefusal::batch_start`; checked before the hits are shifted and counted, so
     // that those of the batches before are written as they are): those queries' reports, without
-    // the epilog, then the refusal.
+    // the epilog, then what NCBI writes before each query's report of the batch up to the row's
+    // query (`warnings`: the batch's reader messages, UTF8String warning and prefetch texts with
+    // its first query, then each query's own; as `run_batch_loop` writes them before an XML
+    // matrix failure), then the refusal.
     if let Some(error) = lookup_stop {
         let before = crate::report::tabular::FailedLookupRefusal::batch_start(
             &error,
@@ -2284,6 +2287,12 @@ fn write_tblastx_outputs(
                     ..*run
                 },
             )?;
+        }
+        let stop = error
+            .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+            .map_or(before, crate::report::tabular::FailedLookupRefusal::set);
+        for posts in run.warnings.iter().take(stop + 1).skip(before) {
+            posts.write(&mut *outputs.diagnostics, run.args.archive.as_ref())?;
         }
         return Err(error);
     }

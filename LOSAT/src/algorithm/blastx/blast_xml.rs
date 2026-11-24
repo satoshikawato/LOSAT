@@ -34,7 +34,7 @@
 //!   in each batch's prefetch, `ReportedSubjects::batch_prefetch`: checked once before the
 //!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
 //!   fetches may be refused for NCBI's taxonomy cache (`BlastxDatabase::cache_may_refuse`: outfmt
-//!   5's prefetch, and the XML2 and JSON lookups of a batch that reports a subject with a
+//!   5's prefetch, and the XML2 and JSON reports' loads of a batch that reports a subject with a
 //!   positive taxid, `read_reported_taxonomy`; after the prolog), so that a later batch could
 //!   refuse it,
 //!   the run holds the document in memory (`HeldOutput`; with outfmt 13 and 14 the side files'
@@ -1262,7 +1262,7 @@ pub(super) fn xml_matrix_failure(
 /// other byte NCBI's stream writes or fails at by itself (`report::serial::xml`). A run that stops after
 /// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
 /// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
-/// the first `Hit` that needs them.
+/// the first `Hit` that needs them, those of the batch's prefetch where it begins.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_xml<W: StructuredXml>(
     writer: &mut impl Write,
@@ -1455,6 +1455,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 }
                 break;
             };
+            // NCBI's prefetch of the batch, where it begins (`TaxdbPrinter::batch_texts`).
+            let prefetch = taxdb_printer.batch_texts(batch.query_ordinal + qidx);
+            if !prefetch.is_empty() {
+                writer.flush()?;
+                diagnostics.write_all(&prefetch)?;
+                diagnostics.flush()?;
+            }
             let length = query.sequence.len();
             // A record cut to `-query_loc`: `query-len` is the interval's, the coordinates and
             // frames the record's (`RemapToQueryLoc`, `report::alignment`).
@@ -1511,7 +1518,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
                     posts.hit(sink.position(), &hit, first as u32, |texts| {
-                        taxdb_printer.at_names(first, names, texts)
+                        taxdb_printer.at_names((batch.query_ordinal + qidx, first), names, texts)
                     })?;
                     sink.hit(&hit, |hsps| {
                         for list in lists[range]

@@ -481,7 +481,7 @@ fn evalue_lengths(
 /// offset up, subject end down, query offset up, query end down) when not sorted already, stable
 /// as glibc's qsort.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1350
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1354
 pub(super) fn sort_by_score(hsps: &mut [BlastpHsp]) {
     let compare = |a: &BlastpHsp, b: &BlastpHsp| {
         b.raw_score

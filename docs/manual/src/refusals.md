@@ -130,7 +130,12 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | An infinite `-evalue` (`+inf`, `1e999`) | Refused. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) with composition-based statistics (`-comp_based_stats` 1 to 3) | Refused. NCBI's `blastp` crashes on some inputs with it. With `-comp_based_stats 0` or `-matrix IDENTITY` it runs. |
 | `-db_hard_mask` on a database with more than 5,000,000 letters between two masks | Refused. NCBI searches them in overlapping parts, which LOSAT does not do yet. |
-| `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
+| `-db_hard_mask` on a database with a part between overlapping masks that is shorter than the word, where NCBI's gapped search of the seed it saves there never ends | Refused when the search reaches it (exit status 1). Other such parts are searched as NCBI searches them. |
+| `-db_hard_mask` on a database with a part shorter than the word whose alignments NCBI joins with those of another part by a merge across their overlap | Refused when the search reaches it (exit status 1). LOSAT does not do that merge yet. |
+| `-db_hard_mask` on a database whose masks are stored out of order, when the part after the later-stored mask starts before the end of a part before the earlier one and both can hold a word | Refused. NCBI joins the alignments of the two parts by a merge across that overlap, which LOSAT does not do yet. |
+| `-db_hard_mask` on a database with a mask that runs to the end of its sequence after the part from its start, with masks stored after that mask | Refused. NCBI does not apply the later masks when it searches that part, but applies them to the letters of its alignments. |
+| `-db_hard_mask` on a database with a mask that ends before it starts, or that ends past its sequence (`makeblastdb` never writes either) | Refused. |
+| `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#blastp).
 
@@ -145,7 +150,9 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
-| `-db_hard_mask` on a database with more than 5,000,000 letters between two masks, and the mask checks of `blastn` | Refused, as in `blastp`. |
+| `-db_hard_mask` on a database with more than 5,000,000 letters between two masks | Refused, as in `blastp`. |
+| `-db_hard_mask` on a database with a part shorter than the word whose seed NCBI's gapped search never ends on or whose alignments NCBI merges with another part's, with masks out of order whose parts NCBI merges across an overlap, with a mask that runs to the end with masks stored after it, or with a mask that ends before it starts or past its sequence | Refused, as in `blastp`. Other databases whose masks overlap or are stored out of order are searched as NCBI searches them; one refused sequence refuses the whole database. |
+| `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. |
 | `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` allows) | Refused at the first query batch that is searched. NCBI crashes there, whether the batch has hits or not. |
 | `-use_sw_tback` on a query batch that NCBI never finishes or crashes on | Refused, as in `blastp` and `tblastn`. See [Rare and pathological inputs](refusals-edge-cases.md#blastx). |
 

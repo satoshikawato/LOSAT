@@ -744,9 +744,9 @@ fn next_hard_chunk(hard: &mut HardSplitState, chunk_overlap: usize) -> SubjectCh
         None => SubjectChunkStatus::Done,
         Some(chunk) => SubjectChunkStatus::Ok(SubjectChunk {
             offset: chunk.offset,
-            length: chunk.length,
+            length: chunk.letters(),
             seq_ranges: SeqRanges::Inline {
-                range: (chunk.residual as i32, chunk.length as i32),
+                range: (chunk.residual as i32, chunk.length),
             },
             masked: true,
             overlap: chunk.overlap,

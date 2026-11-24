@@ -53,15 +53,15 @@ fn the_tax_ids_of_a_set_are_the_union_of_each_line_s() {
 #[test]
 fn an_empty_basename_has_no_lmdb_file_name() {
     assert_eq!(
-        build_lmdb_file_name("db", true).ok().as_deref(),
-        Some("db.pdb")
+        build_lmdb_file_name(b"db", true).ok().as_deref(),
+        Some(b"db.pdb".as_slice())
     );
     assert_eq!(
-        build_lmdb_file_name("db.00", false).ok().as_deref(),
-        Some("db.00.ndb")
+        build_lmdb_file_name(b"db.00", false).ok().as_deref(),
+        Some(b"db.00.ndb".as_slice())
     );
     assert!(matches!(
-        build_lmdb_file_name("", true),
+        build_lmdb_file_name(b"", true),
         Err(WriteDbError::InvalidArgument("Basename is empty"))
     ));
 }

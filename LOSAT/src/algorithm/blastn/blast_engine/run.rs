@@ -6531,7 +6531,7 @@ fn open_search_database(
                 settings,
             )),
             output_formats,
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -6555,17 +6555,15 @@ fn subject_taxonomy(
     args: &mut BlastnArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     output_formats: &[BlastnOutputFormat],
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTN",
         output_formats
             .iter()
             .filter_map(|format| format.tabular_spec()),
-    )?;
+    );
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
-    Ok(())
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
@@ -7002,7 +7000,7 @@ fn run_local_formats(
     process_options(&mut args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
-    subject_taxonomy(&mut args, setting.as_ref(), &output_formats)?;
+    subject_taxonomy(&mut args, setting.as_ref(), &output_formats);
     search(
         args,
         SearchQueries::Records(query_records),
@@ -7094,7 +7092,6 @@ pub(crate) fn repeat_search_hits(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> std::result::Result<Vec<Arc<Vec<PairwiseHit>>>, super::super::repeat_filter::RepeatError> {
     use super::super::repeat_filter::RepeatError;
-    use crate::algorithm::common::database::DatabaseOpenError;
     // The search's `CSeqDB`, without a list, meets the errors of the alias files' counts where it
     // opens the database (`common::database::restrict_database`).
     let opened = crate::algorithm::common::database::open_search_database(
@@ -7104,8 +7101,7 @@ pub(crate) fn repeat_search_hits(
     );
     let failed = match opened {
         Ok(database) => database.check_alias_values().err(),
-        Err(DatabaseOpenError::Reader(error)) => Some(error),
-        Err(DatabaseOpenError::Registry(_)) => None,
+        Err(error) => Some(error),
     };
     if let Some(error) = failed {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639

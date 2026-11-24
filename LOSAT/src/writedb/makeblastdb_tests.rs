@@ -1,5 +1,7 @@
 use super::*;
 use crate::blastinput::ncbi_environment::DiagTarget;
+use crate::utils::test_dir::TempDir;
+use crate::writedb::tests::base_in;
 
 /// The refusals of an index file that NCBI cannot read as a database are LOSAT's own, printed
 /// with makeblastdb's prefix and ended with exit status 1, and their text is the one of
@@ -222,8 +224,8 @@ fn the_variable_that_changes_stored_titles_is_refused() {
 /// directory have no log.
 #[test]
 fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
-    let tmp = crate::writedb::tests::TempDir::new("log-one-file");
-    let name = tmp.base("mk.log");
+    let tmp = TempDir::unique("writedb-log-one-file");
+    let name = base_in(&tmp, "mk.log");
     std::fs::write(&name, b"before\n").unwrap();
     let target = diag_target(Some(std::ffi::OsStr::new(&name)));
     assert!(matches!(target, DiagTarget::File(_)));
@@ -244,7 +246,7 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
         std::fs::read(&name).unwrap(),
         b"before\nlog 1\ndiagnostic\nlog 2\ndiagnostic 2\n"
     );
-    for missing in [String::new(), tmp.base("nodir/mk.log")] {
+    for missing in [String::new(), base_in(&tmp, "nodir/mk.log")] {
         assert!(log_of(&missing).is_none(), "{missing:?}");
     }
 }
@@ -258,25 +260,22 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
 #[cfg(unix)]
 #[test]
 fn the_log_is_the_name_as_the_system_opens_it() {
-    let tmp = crate::writedb::tests::TempDir::new("log-two-files");
-    std::fs::create_dir_all(tmp.0.join("sub/deep")).unwrap();
-    std::os::unix::fs::symlink(tmp.0.join("sub/deep"), tmp.0.join("a")).unwrap();
-    let name = tmp.base("a/../mk.log");
+    let tmp = TempDir::unique("writedb-log-two-files");
+    std::fs::create_dir_all(tmp.join("sub/deep")).unwrap();
+    std::os::unix::fs::symlink(tmp.join("sub/deep"), tmp.join("a")).unwrap();
+    let name = base_in(&tmp, "a/../mk.log");
     let target = diag_target(Some(std::ffi::OsStr::new(&name)));
     let mut log = log_of(&name).expect("the log of a file that opens");
     target.write_text(b"diagnostic\n", &mut std::io::sink());
     log.write_all(b"log\n").unwrap();
-    assert_eq!(
-        std::fs::read(tmp.0.join("mk.log")).unwrap(),
-        b"diagnostic\n"
-    );
-    assert_eq!(std::fs::read(tmp.0.join("sub/mk.log")).unwrap(), b"log\n");
-    let name = tmp.base("logs/");
+    assert_eq!(std::fs::read(tmp.join("mk.log")).unwrap(), b"diagnostic\n");
+    assert_eq!(std::fs::read(tmp.join("sub/mk.log")).unwrap(), b"log\n");
+    let name = base_in(&tmp, "logs/");
     assert!(matches!(
         diag_target(Some(std::ffi::OsStr::new(&name))),
         DiagTarget::File(_)
     ));
-    assert!(tmp.0.join("logs").is_file());
+    assert!(tmp.join("logs").is_file());
     assert!(log_of(&name).is_none());
 }
 

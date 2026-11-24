@@ -18,7 +18,6 @@ use clap::Args;
 use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
-use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::lmdb_read::ReadError;
@@ -273,8 +272,9 @@ impl DbFilterArgs {
     // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file
     // that is not there resolves to the empty name, whose memory map throws a
     // `CFileException` (not a database error): the search program reports it as
-    // `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`). The reader's own errors
-    // (an empty file, a damaged binary list) are `BLAST Database error: ...`, exit status 2.
+    // `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`), as is `CMemoryFile`'s exception
+    // of a file there that does not open. The reader's own errors (an empty file, a damaged binary
+    // list) are `BLAST Database error: ...`, exit status 2.
     /// `CSeqDBFileGiList(fn, eSiList)` of the `-seqidlist` / `-negative_seqidlist` file.
     fn resolve_seqid_list(
         &self,
@@ -283,10 +283,13 @@ impl DbFilterArgs {
         path: &SearchPath,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
-        let bytes = path
-            .resolve_file(value.as_bytes())
-            .and_then(|file| std::fs::read(crate::utils::os_bytes::path_of_bytes(&file)).ok())
-            .ok_or_else(|| NativeError::exception(&missing_seqidlist_exception()))?;
+        let bytes =
+            seqidlist::read_resolved(value.as_bytes(), path).map_err(|error| {
+                match error.ncbi_exception() {
+                    Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
+                    None => anyhow::Error::msg(error.to_string()),
+                }
+            })?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,
@@ -301,29 +304,6 @@ impl DbFilterArgs {
         }
         Ok(Some(DbList::Seqids(SeqidList { negative, file })))
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5748-5755
-// NCBI 2.17.0 (the conda build) writes `Error: NCBI C++ Exception:\n    T0
-// "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbifile.cpp", line 5754:
-// Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory
-// mapped the file must exist: ''\n\n` (dropin-survey-20261029/DI8 probe S22); LOSAT names the
-// build tree of the official Linux x64 release (`ncbi_exception::NCBI_BUILD_ROOT`), as the
-// Seq-id parser's exceptions do.
-const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
-    file: "src/corelib/ncbifile.cpp",
-    line: 5754,
-    kind: "CFileException::eMemoryMap",
-    function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
-};
-
-/// The exception of a seqid list file that is not on the search path (the resolved name is
-/// empty): the `CFileException` of its memory map.
-fn missing_seqidlist_exception() -> NcbiException {
-    NcbiException::new(
-        MEMORY_MAP_MISSING,
-        "To be memory mapped the file must exist: ''",
-    )
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:152-172

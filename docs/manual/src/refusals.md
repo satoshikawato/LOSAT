@@ -441,9 +441,19 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A profile stored by row without scores whose query length is 4,294,967,295 letters (`numColumns -1`) | Refused. NCBI's `makeprofiledb` writes before its matrix. |
 | An error after which the database's writer fails again as it closes (a missing input file after the first with an empty `-out` in a version 5 database; a query without definition lines in a version 5 database) | Refused. NCBI's `makeprofiledb` aborts. |
 
+## blastdb_aliastool
+
+`blastdb_aliastool` runs every option of its `-help` (`-xmlhelp` on the command line only).
+
+| Input | What happens |
+| :--- | :--- |
+| An alias file of `-seqidlist` or `-taxidlist` over a version 5 database | Refused when the new alias file is opened to count its sequences, and the alias file is removed: LOSAT does not yet read these lists over a version 5 database (see Alias files and database arithmetic above). Over a version 4 database they are written as NCBI's. |
+| A value that is not UTF-8 of any option but `-gi_file_out` and `-logfile` | Refused, after NCBI's own argument errors and `-dryrun`. The error names the option. NCBI reads the bytes. `-gi_file_out` and `-logfile` take such a name and write that file, as NCBI's. |
+| A line of `-dblist_file` that is not UTF-8 | Refused before the alias file is written. NCBI writes the name's bytes into the alias file. The lines of `-vdblist_file` are written as they are, as NCBI's. |
+
 ## Programs LOSAT does not provide
 
-`blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
+`blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 
 ## On the list for a later release
 

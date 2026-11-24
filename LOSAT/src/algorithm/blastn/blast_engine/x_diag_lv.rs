@@ -95,7 +95,7 @@
 //! diagonal and no cell for any other diagonal. Only the strips folds of LOSAT_X_PAIRPARDISC keep
 //! and read the memo: each of their stages makes it again from the bounds at its start
 //! (`x_lv2_reset`: no latest insert, `other` the bucket's bound), so the reference fold
-//! (`extend_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, a masked chunk, and
+//! (`extend_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, and
 //! every worker with many subjects) runs the code before the switch and need not keep it.
 //!
 //! Why the output is the same:

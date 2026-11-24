@@ -1943,7 +1943,7 @@ impl SeqDb {
         let mut ids: Vec<Vec<u8>> = Vec::with_capacity(list.file.ids.len());
         for id in &list.file.ids {
             ids.push(isam::simplify_accession_for_isam(id).map_err(|error| {
-                SeqDbError::Unsupported {
+                SeqDbError::NcbiThrows {
                     path: self.volumes[0].base().to_path_buf(),
                     message: format!(
                         "the id {} of the seqid list throws in NCBI's SeqDB_SimplifyAccession: {}",

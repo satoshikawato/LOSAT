@@ -222,13 +222,16 @@ impl std::fmt::Display for MakedbError {
     }
 }
 
-/// Whether `error` is LOSAT's refusal of a database where NCBI crashes or gives a result that
-/// depends on its memory ([`SeqDbError::NcbiCrashes`], [`SeqDbError::Unsupported`]), which is
-/// printed as the other refusals of makeblastdb are, with exit status 1.
+/// Whether `error` is LOSAT's refusal of a database where NCBI crashes, throws what LOSAT does
+/// not report or gives a result that depends on its memory ([`SeqDbError::NcbiCrashes`],
+/// [`SeqDbError::NcbiThrows`], [`SeqDbError::Unsupported`]), which is printed as the other
+/// refusals of makeblastdb are, with exit status 1.
 fn is_refusal(error: &SeqDbError) -> bool {
     matches!(
         error,
-        SeqDbError::NcbiCrashes { .. } | SeqDbError::Unsupported { .. }
+        SeqDbError::NcbiCrashes { .. }
+            | SeqDbError::NcbiThrows { .. }
+            | SeqDbError::Unsupported { .. }
     )
 }
 

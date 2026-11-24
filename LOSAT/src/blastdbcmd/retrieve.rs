@@ -1090,9 +1090,11 @@ impl Run<'_, '_, '_> {
     /// OIDs. Its first check sets NCBI's OID list up: the sequences the database includes,
     /// and, where the iteration range of the only alias file of `-db` leaves listed OIDs out,
     /// also the first listed OID up to the range's end and the OID at the range's end (line RG
-    /// D1a-2, survey A, pattern 3).
+    /// D1a-2, survey A, pattern 3). The sequences are read in the order of their OIDs, a window
+    /// of each volume file at a time (`seqdb::file::in_order_reads`).
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
         let db = self.source.db;
+        let _in_order = crate::seqdb::file::in_order_reads();
         for oid in db.oid_walk()? {
             self.write(oid, config, None)?;
         }

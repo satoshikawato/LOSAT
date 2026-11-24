@@ -698,6 +698,7 @@ pub(in super::super) fn run(
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
         parts,
+        latest: None,
     });
     let stats = seed_stage(
         x,

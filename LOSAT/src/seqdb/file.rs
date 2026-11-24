@@ -39,10 +39,97 @@ enum RangeBuffer<'a> {
 pub struct DbFile {
     path: PathBuf,
     len: u64,
+    /// The file's own number in the process, which names it among a thread's windows
+    /// ([`in_order_reads`]).
+    id: u64,
+    /// Whether a read in OID order takes this file a window at a time ([`in_order_reads`]): a
+    /// volume's index, header and sequence files ([`DbFile::read_in_order`]).
+    in_order: bool,
     #[cfg(any(unix, windows))]
     file: File,
     #[cfg(not(any(unix, windows)))]
     file: std::sync::Mutex<File>,
+}
+
+/// The bytes that a read in OID order takes from a file at once ([`in_order_reads`]), and the
+/// reads that it serves: those of fewer bytes.
+const IN_ORDER_WINDOW: usize = 16 * 1024;
+
+/// The windows that a thread keeps while it reads in OID order ([`in_order_reads`]): one for each
+/// place a sequence's reads take (the index file's header and sequence offsets, and a
+/// nucleotide's ambiguity offsets; the header file; the sequence file's letters and ambiguity
+/// data), with room for a second volume.
+const IN_ORDER_WINDOWS: usize = 8;
+
+/// The number of the next file opened ([`DbFile::id`]).
+static NEXT_FILE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// `IN_ORDER_WINDOW` bytes of a file from `start`, which a read in OID order serves its reads
+/// from.
+struct Window {
+    /// The file's number ([`DbFile::id`]); 0 for none.
+    file: u64,
+    start: u64,
+    bytes: Vec<u8>,
+    /// When the window last served a read (`InOrder::tick`): the window least recently used is
+    /// the one read again.
+    used: u64,
+}
+
+/// A thread's reads in OID order ([`in_order_reads`]).
+struct InOrder {
+    /// The guards alive ([`InOrderReads`]).
+    depth: u32,
+    /// The reads served so far (`Window::used`).
+    tick: u64,
+    windows: Vec<Window>,
+}
+
+thread_local! {
+    static IN_ORDER: std::cell::RefCell<InOrder> = const {
+        std::cell::RefCell::new(InOrder {
+            depth: 0,
+            tick: 0,
+            windows: Vec::new(),
+        })
+    };
+}
+
+// No NCBI counterpart: NCBI maps a database file whole and reads a sequence through a pointer into
+// the mapping, where LOSAT reads each range by position (the module's comment). A reader of one
+// sequence after another (`blastdbcmd -entry all`) read every sequence's two index offsets, its
+// header and its letters with a system call each: 900,000 reads for 300,000 proteins, 43 % of
+// the run's time in the system (line DT, DT1-14).
+/// Reads in OID order on this thread until the guard is dropped: a read of fewer than
+/// `IN_ORDER_WINDOW` bytes of a file opened [`DbFile::read_in_order`] is served from the
+/// `IN_ORDER_WINDOW` bytes of the file that one read took from where a read last missed,
+/// `IN_ORDER_WINDOWS` windows kept (as `MADV_SEQUENTIAL` asks of a mapping). The bytes and the
+/// errors of every read are those of the file: a range is checked as before, and a window that
+/// cannot be read leaves the read to the file. Other files (the taxonomy's, the lookups', a
+/// column's), whose reads come in no order, are read as before. The windows are dropped with the
+/// last guard.
+pub fn in_order_reads() -> InOrderReads {
+    IN_ORDER.with_borrow_mut(|reads| reads.depth += 1);
+    InOrderReads {
+        _thread: std::marker::PhantomData,
+    }
+}
+
+/// The guard of [`in_order_reads`], kept on the thread that took it.
+#[must_use = "the reads are in OID order only while the guard lives"]
+pub struct InOrderReads {
+    _thread: std::marker::PhantomData<*const ()>,
+}
+
+impl Drop for InOrderReads {
+    fn drop(&mut self) {
+        IN_ORDER.with_borrow_mut(|reads| {
+            reads.depth -= 1;
+            if reads.depth == 0 {
+                reads.windows = Vec::new();
+            }
+        });
+    }
 }
 
 impl DbFile {
@@ -99,6 +186,8 @@ impl DbFile {
         let opened = Self {
             path: path.to_path_buf(),
             len,
+            id: NEXT_FILE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            in_order: false,
             #[cfg(any(unix, windows))]
             file,
             #[cfg(not(any(unix, windows)))]
@@ -121,6 +210,13 @@ impl DbFile {
     #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn with_handle(path: &Path, file: File, len: u64) -> Result<Self, SeqDbError> {
         Self::opened(path, file, len)
+    }
+
+    /// The file, read a window at a time where its reads are in OID order ([`in_order_reads`]):
+    /// a volume's index, header and sequence files.
+    pub(crate) fn read_in_order(mut self) -> Self {
+        self.in_order = true;
+        self
     }
 
     /// Path this file was opened with.
@@ -160,11 +256,69 @@ impl DbFile {
                 ),
             });
         }
+        if self.in_order
+            && !buf.is_empty()
+            && buf.len() < IN_ORDER_WINDOW
+            && self.read_from_window(buf, offset)
+        {
+            return Ok(());
+        }
         self.read_exact_at_impl(buf, offset)
             .map_err(|source| SeqDbError::Read {
                 path: self.path.clone(),
                 source,
             })
+    }
+
+    /// Fills `buf` with the bytes at `offset` (inside the file) from a window of this thread's
+    /// reads in OID order ([`in_order_reads`]), the window read first where none holds them;
+    /// false where the thread does not read in order or the window cannot be read.
+    fn read_from_window(&self, buf: &mut [u8], offset: u64) -> bool {
+        IN_ORDER.with_borrow_mut(|reads| {
+            if reads.depth == 0 {
+                return false;
+            }
+            reads.tick += 1;
+            let end = offset + buf.len() as u64;
+            let held = reads.windows.iter().position(|window| {
+                window.file == self.id
+                    && window.start <= offset
+                    && end <= window.start + window.bytes.len() as u64
+            });
+            let at = match held {
+                Some(at) => at,
+                None => {
+                    let at = if reads.windows.len() < IN_ORDER_WINDOWS {
+                        reads.windows.push(Window {
+                            file: 0,
+                            start: 0,
+                            bytes: Vec::new(),
+                            used: 0,
+                        });
+                        reads.windows.len() - 1
+                    } else {
+                        let least = reads.windows.iter().enumerate().min_by_key(|(_, w)| w.used);
+                        least.map_or(0, |(at, _)| at)
+                    };
+                    let window = &mut reads.windows[at];
+                    // `end` is inside the file (`read_exact_at`), so the window holds the read.
+                    let len = (self.len - offset).min(IN_ORDER_WINDOW as u64) as usize;
+                    window.file = 0;
+                    window.bytes.resize(len, 0);
+                    if self.read_exact_at_impl(&mut window.bytes, offset).is_err() {
+                        return false;
+                    }
+                    window.file = self.id;
+                    window.start = offset;
+                    at
+                }
+            };
+            let window = &mut reads.windows[at];
+            window.used = reads.tick;
+            let from = (offset - window.start) as usize;
+            buf.copy_from_slice(&window.bytes[from..from + buf.len()]);
+            true
+        })
     }
 
     /// The bytes of `start..end` as a new buffer.

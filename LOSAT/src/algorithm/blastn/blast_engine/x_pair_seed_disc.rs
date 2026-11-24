@@ -47,6 +47,7 @@ use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
     packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct, UngappedHit,
 };
+use super::latest::{self, DiagLatest, Found};
 use super::{
     part, plan_strips, pool_threads, run_strips, seed_of_pair, Cut, DiagArray, FoldCounts, Inputs,
     PartScratch, Resume, Seed, SeedOut, StageStats, StripJob,
@@ -106,6 +107,77 @@ fn seed_lean_on() -> bool {
 fn one_thread_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDCONE"))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_DCLATEST once (a strict-set switch since 2026-11-23: on
+/// unless it is `0`). With it the strips stage of the diagonal hash folds into maps of each
+/// diagonal's latest insert (`x_dc_latest.rs`: the owner's map without partitions, each
+/// partition's with LOSAT_X_PAIRPARFOLD) instead of the diagonal hash, and the partitioned merge
+/// writes back no table. Each seed makes the decisions of the reference fold (the proof in the
+/// module comment of `x_dc_latest.rs`), so it does not change any value NCBI computes.
+fn latest_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCLATEST"))
+}
+
+/// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_DCLATEST, which acts in the strips stage of the
+/// diagonal hash only: `own_path` where it folds into the maps, false where the chunk goes to the
+/// reference fold. Nothing while the switch is off.
+fn reach_latest(own_path: bool) {
+    if latest_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DCLATEST", own_path);
+    }
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_DCLATEST) the level bound (`x_diag_lv::LvSeeds`) of
+/// the first position of the chunk's stage, where every position of the chunk has one (module
+/// comment of `x_dc_latest.rs`, (ii) and (vii)). Every chunk has: its positions lie between the
+/// hash offset and the offset plus its length, the offset at least the window and below
+/// a quarter of the largest Int4 plus a chunk (NCBI's clear), and a chunk at most twice `MAX_DBSEQ_LEN` letters,
+/// far below `i32::MAX` less a word. `None` would send the chunk to the chains.
+fn latest_bound(x: &Inputs<'_>) -> Option<i32> {
+    let seeds =
+        super::super::x_diag_lv::LvSeeds::new(true, x.two_stage.word_length(), x.window_size);
+    let first = x.diag_offset as usize;
+    let bound0 = seeds.bound(first);
+    (bound0 != i32::MIN && seeds.bound(first + x.s_len) != i32::MIN).then_some(bound0)
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+/// EXPERIMENT (LOSAT_X_DCLATEST) whether the chunk's scan ranges, in the order the stage scans
+/// them (`plan_strips`: the reference's walk, `first_scan_range` and the ranges after it), never
+/// step back: each range with positions starts at or past the last position of the one before.
+/// The maps need S never decreasing (module comment of `x_dc_latest.rs`, (vi)). A subject of
+/// `-db` with `-db_soft_mask` has the complement of its stored masks in their stored order
+/// (`subject_split.rs`), which can step back (masks stored 600-699 then 100-199); NCBI scans them
+/// in that order, and which cells its chains still hold after the step back depends on the order
+/// of their take-overs, so such a chunk goes to the chains. One pass over the chunk's ranges.
+fn latest_ranges_ascend(x: &Inputs<'_>, template_length: usize) -> bool {
+    if x.subject_seq_ranges.is_empty() {
+        return true;
+    }
+    let first = super::super::first_scan_range(
+        x.subject_seq_ranges,
+        x.s_len,
+        template_length,
+        template_length,
+        x.subject_masked,
+    );
+    let mut last: Option<usize> = None;
+    let mut ascend = true;
+    super::super::scan_subject_kmers_with_offsets(
+        x.subject_seq_ranges,
+        template_length,
+        template_length,
+        first,
+        |start, end| {
+            if last.is_some_and(|last| start < last) {
+                ascend = false;
+            }
+            last = Some(end);
+        },
+    );
+    ascend
 }
 
 /// No NCBI counterpart: whether LOSAT_TIMING is set (read once). The stages time themselves when
@@ -380,6 +452,206 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     cut.stop.get()
 }
 
+/// No NCBI counterpart (the layout of the table only): where `fold_two_hit_on` keeps the
+/// diagonals' inserts. `Latest` is the map of each diagonal's latest insert of LOSAT_X_DCLATEST
+/// (`x_dc_latest.rs`); `Chains` (tests only) is NCBI's diagonal hash, on which the tests run
+/// `fold_two_hit_on` against `fold_two_hit_t`. The fold makes the same statements in the same order
+/// on either.
+trait FoldTable {
+    /// Whether the fold gives `ahead` the seed `latest::AHEAD` places after the one being folded
+    /// (not for the chains, whose fold then has no code for it).
+    const AHEAD: bool = false;
+
+    /// A hint for the seed `latest::AHEAD` places after the one being folded.
+    #[inline(always)]
+    fn ahead(&self, _seed: &Seed) {}
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-836
+    /// The retrieve of the seed's own diagonal at `s_off_pos`: `last_hit` and `hit_saved` (0 and
+    /// false with no cell).
+    fn retrieve(&mut self, diag: i32, s_off_pos: usize) -> (i32, bool);
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:861-885
+    /// The retrieve of another diagonal in the off-diagonal loop (`last_hit`, `hit_len`,
+    /// `hit_saved`), which runs no iteration in the scope (`scan_range == 0`).
+    fn retrieve_off(&self, diag: i32) -> Option<(i32, i32, bool)>;
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
+    /// The insert at the end of the seed (`part::insert_t`'s arguments).
+    #[allow(clippy::too_many_arguments)]
+    fn insert(
+        &mut self,
+        out: &mut part::PartOut,
+        key: u64,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    );
+}
+
+/// The diagonal hash of a fold (NCBI's table) for the tests of `fold_two_hit_on`: with `PT` a
+/// partition's table (LOSAT_X_PAIRPARFOLD), `LEAN` and `MEMO` as for `fold_two_hit`, `TRACK` as for
+/// `fold_two_hit_t`; with LOSAT_X_DIAGLV's bounds (`x_lv`) the retrieve skips the walks below the
+/// seed's bound.
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct Chains<'a, const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool> {
+    hash: &'a mut DiagHashTable,
+    x_lv: bool,
+    x_lv_seeds: super::super::x_diag_lv::LvSeeds,
+}
+
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<'a, const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>
+    Chains<'a, PT, LEAN, MEMO, TRACK>
+{
+    /// The table of a fold of the seeds of `x`.
+    #[inline(always)]
+    fn new(x: &Inputs<'_>, hash: &'a mut DiagHashTable) -> Self {
+        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the table has level bounds; the bound's
+        // constants of these seeds.
+        let x_lv = hash.x_lv_on();
+        let x_lv_seeds = super::super::x_diag_lv::LvSeeds::new(
+            x.window_size > 0,
+            x.two_stage.word_length(),
+            x.window_size,
+        );
+        Chains {
+            hash,
+            x_lv,
+            x_lv_seeds,
+        }
+    }
+}
+
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool> FoldTable
+    for Chains<'_, PT, LEAN, MEMO, TRACK>
+{
+    #[inline(always)]
+    fn retrieve(&mut self, diag: i32, s_off_pos: usize) -> (i32, bool) {
+        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
+        // of a bucket below the bound (the `last_hit` test and the window test).
+        let (level, _hit_len, hit_saved) = if self.x_lv {
+            self.hash
+                .retrieve_below::<MEMO>(diag, &self.x_lv_seeds, s_off_pos)
+        } else {
+            self.hash.retrieve(diag)
+        }
+        .unwrap_or((0, 0, false));
+        (level, hit_saved)
+    }
+
+    #[inline(always)]
+    fn retrieve_off(&self, diag: i32) -> Option<(i32, i32, bool)> {
+        self.hash.retrieve(diag)
+    }
+
+    #[inline(always)]
+    fn insert(
+        &mut self,
+        out: &mut part::PartOut,
+        key: u64,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) {
+        part::insert_t::<PT, LEAN, MEMO, TRACK>(
+            self.hash,
+            out,
+            key,
+            diag,
+            level,
+            hit_len,
+            hit_saved,
+            s_off,
+            window_size,
+        );
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_DCLATEST, `x_dc_latest.rs`): the map of the latest insert of each diagonal
+/// as a fold's table (the owner's, or a partition's), with the level bounds of the fold's seeds
+/// (`x_diag_lv::LvSeeds`, the bound below which an entry is dead) and the place `find` gave the
+/// seed's insert.
+struct Latest<'a> {
+    map: &'a mut DiagLatest,
+    seeds: super::super::x_diag_lv::LvSeeds,
+    found: Found,
+}
+
+impl<'a> Latest<'a> {
+    /// The map of a fold of the seeds of `x` (in the scope: two hits and `scan_range == 0`, which
+    /// the map needs, module comment of `x_dc_latest.rs` (i)).
+    #[inline(always)]
+    fn new(x: &Inputs<'_>, map: &'a mut DiagLatest) -> Self {
+        debug_assert!(x.window_size > 0 && x.scan_range == 0);
+        Latest {
+            map,
+            seeds: super::super::x_diag_lv::LvSeeds::new(
+                true,
+                x.two_stage.word_length(),
+                x.window_size,
+            ),
+            found: Found::NONE,
+        }
+    }
+}
+
+impl FoldTable for Latest<'_> {
+    const AHEAD: bool = true;
+
+    #[inline(always)]
+    fn ahead(&self, seed: &Seed) {
+        self.map
+            .prefetch((seed.s as isize - seed.q as isize) as i32);
+    }
+
+    #[inline(always)]
+    fn retrieve(&mut self, diag: i32, s_off_pos: usize) -> (i32, bool) {
+        self.found = self.map.find(diag, s_off_pos as i32);
+        (self.found.level, self.found.saved)
+    }
+
+    fn retrieve_off(&self, _diag: i32) -> Option<(i32, i32, bool)> {
+        unreachable!("LOSAT_X_DCLATEST: an off-diagonal retrieve with scan_range 0")
+    }
+
+    #[inline(always)]
+    fn insert(
+        &mut self,
+        _out: &mut part::PartOut,
+        _key: u64,
+        diag: i32,
+        level: i32,
+        _hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        _window_size: i32,
+    ) {
+        let bound = self.seeds.bound(s_off as usize);
+        self.map
+            .put(self.found, diag, level, hit_saved, s_off, bound);
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-841
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:882-895,923-941
 /// Phase 2 (owner only): the rest of `pair_extend::extend_offset_pairs` for the seeds of one
@@ -429,7 +701,13 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
 
 /// `fold_two_hit`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` the inserts of a partition
 /// do not record the buckets they change (`part::insert_t`; the merge then writes back every
-/// bucket of the partition).
+/// bucket of the partition). The fold on the chains, the code before LOSAT_X_DCLATEST, written out
+/// here and not through `FoldTable`: every form of `fold_two_hit_on` on the chains that was tried
+/// (a table struct holding the hash; the trait on `DiagHashTable` itself, with the fold's
+/// constants in a struct or in the locals of this function) compiled to other code than this, and
+/// the struct form cost about 4 % more cycles at 8 and 16 threads with LOSAT_X_DCLATEST=0 (FD-3,
+/// 2026-11-24). The tests run `fold_two_hit_on` on the chains against this function (hits and
+/// table).
 #[allow(clippy::too_many_arguments)]
 fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
     x: &Inputs<'_>,
@@ -733,6 +1011,328 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
     }
 }
 
+/// EXPERIMENT (LOSAT_X_DCLATEST): `fold_two_hit` on the map of the latest inserts `map` (the
+/// owner's, or with `PT` a partition's): the inserts change no `DiagHashTable`, and the fold brings
+/// in the map's bucket of the seed `latest::AHEAD` places ahead. The function of the fold on a
+/// map, `map` its argument (`fold_two_hit_on` inlined with `Latest`).
+#[allow(clippy::too_many_arguments)]
+fn fold_two_hit_latest<const PT: bool, const LEAN: bool>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    map: &mut DiagLatest,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_two_hit_on::<PT, LEAN, _>(
+        x,
+        seeds,
+        &mut Latest::new(x, map),
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// The body of `fold_two_hit_latest` on the table `table`, inlined into it (so that the table's
+/// fields and the place `find` gave a seed stay in registers): the statements of `fold_two_hit_t`
+/// in the same order, through `FoldTable` (the tests run it on the chains, `Chains`, against
+/// `fold_two_hit_t`).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn fold_two_hit_on<const PT: bool, const LEAN: bool, T: FoldTable>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    table: &mut T,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    let two_stage = x.two_stage;
+    let lut_word_length = two_stage.lut_word_length();
+    let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
+    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
+    let x_tow = LEAN && word_length == lut_word_length;
+    let s_len = x.s_len;
+    let search_seq_packed = x.search_seq_packed;
+    let diag_offset = x.diag_offset;
+    let diag_hash_window = x.diag_hash_window;
+    let window_size = x.window_size;
+    let scan_range = x.scan_range;
+    let two_hits = window_size > 0;
+    let timing_enabled = timing.is_some();
+    counts.seeds += seeds.len() as u64;
+    for (x_k, seed) in seeds.iter().enumerate() {
+        // EXPERIMENT (LOSAT_X_DCLATEST): the map's bucket of a later seed (a hint only).
+        if T::AHEAD {
+            if let Some(later) = seeds.get(x_k + latest::AHEAD) {
+                table.ahead(later);
+            }
+        }
+        // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the seed's place in the stage.
+        let x_key = if PT { out.key(pos, x_k) } else { 0 };
+        let context_idx = seed.context as usize;
+        let ctx = &x.query_contexts[context_idx];
+        let q_idx = context_idx as u32;
+        let q_context_start = ctx.query_offset as usize;
+        let q_context_end = q_context_start + ctx.len;
+        let cutoff_score = x.cutoff_scores[context_idx];
+        let q_ext_start = seed.q as usize;
+        let s_ext_start = seed.s as usize;
+        let s_range = seed.s_range as usize;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839
+        let diag = s_ext_start as isize - q_ext_start as isize;
+        let s_off_pos = s_ext_start + diag_offset as usize;
+        let s_off_pos_i32 = s_off_pos as i32;
+        let (last_hit, hit_saved) = table.retrieve(diag as i32, s_off_pos);
+
+        // Hit within explored area should be rejected
+        if s_off_pos_i32 < last_hit {
+            counts.skipped += 1;
+            continue;
+        }
+
+        let mut q_off = q_ext_start;
+        let mut s_off = s_ext_start;
+        let mut s_end = s_ext_start + word_length;
+        let mut s_end_pos = s_end + diag_offset as usize;
+        let mut off_found = false;
+        let mut hit_ready = true;
+        let query_mask = ctx.masks.as_slice();
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
+        let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
+            if s_pos + lut_word_length > s_len {
+                return true;
+            }
+            let kmer = mask_lookup_index(
+                packed_kmer_at_seed_mask(search_seq_packed, s_pos, lut_word_length),
+                lut_word_length,
+            );
+            if !two_stage.has_hits(kmer) {
+                return true;
+            }
+            let q_off_1 = (q_pos + 1) as u32;
+            !two_stage.contains_hit(kmer, q_off_1)
+        };
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:841-851
+        let s_end_pos_i32 = s_end_pos as i32;
+        let window_end = last_hit + window_size as i32;
+        if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
+            let (word_type, extended, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    true, // check for double-word extension
+                    &mut is_seed_masked,
+                )
+            };
+            q_off = q_off_adj;
+            s_off = s_off_adj;
+
+            // Skip this seed when `word_type` is zero (non-word).
+            if word_type == 0 {
+                continue;
+            }
+
+            // Advance `s_end` and `s_end_pos` by `extended`.
+            s_end += extended;
+            s_end_pos += extended;
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:853-886
+            // (`scan_range` is 0 in the scope, so `Delta` is 0 and the loop runs no
+            // iteration; the statements are kept as the reference has them.)
+            if word_type == 1 {
+                let delta_calc = window_size as isize - word_length as isize;
+                let delta_max = if delta_calc < 0 {
+                    0
+                } else {
+                    scan_range.min(delta_calc as usize) as isize
+                };
+                let s_a = s_off_pos as isize + word_length as isize - window_size as isize;
+                let s_b = s_end_pos as isize - 2 * word_length as isize;
+                let diag_i32 = diag as i32;
+                for delta in 1..=delta_max {
+                    if let Some((off_s_end, off_s_l, _)) =
+                        table.retrieve_off(diag_i32 + delta as i32)
+                    {
+                        if off_s_l > 0
+                            && (off_s_end as isize - delta) >= s_a
+                            && (off_s_end as isize - off_s_l as isize) <= s_b
+                        {
+                            off_found = true;
+                            break;
+                        }
+                    }
+                    if let Some((off_s_end, off_s_l, _)) =
+                        table.retrieve_off(diag_i32 - delta as i32)
+                    {
+                        if off_s_l > 0
+                            && (off_s_end as isize) >= s_a
+                            && (off_s_end as isize - off_s_l as isize + delta) <= s_b
+                        {
+                            off_found = true;
+                            break;
+                        }
+                    }
+                }
+                if !off_found {
+                    hit_ready = false;
+                }
+            }
+        } else {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:887-895
+            let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    false, // skip double-word check (not in two-hit block)
+                    &mut is_seed_masked,
+                )
+            };
+            if wt == 0 {
+                continue;
+            }
+            q_off = q_off_adj;
+            s_off = s_off_adj;
+            s_end += ext;
+            s_end_pos += ext;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:897,939-941
+        if !hit_ready {
+            table.insert(
+                out,
+                x_key,
+                diag as i32,
+                s_end_pos as i32,
+                (s_end_pos - s_off_pos) as i32,
+                false,
+                s_off_pos as i32,
+                diag_hash_window,
+            );
+            continue;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-920
+        let x_dropoff = x.x_dropoff_scores[context_idx];
+        let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
+        let ungapped_start = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        let ungapped = if exact_ungapped {
+            extend_hit_ungapped_exact_ncbi(
+                x.encoded_query_concat_blastna,
+                search_seq_packed,
+                q_off,
+                s_off,
+                s_len,
+                x_dropoff,
+                x.score_matrix,
+            )
+        } else {
+            extend_hit_ungapped_approx_ncbi(
+                x.encoded_query_concat_blastna,
+                search_seq_packed,
+                q_off,
+                s_off,
+                s_end,
+                s_len,
+                x_dropoff,
+                x.nucl_score_table,
+                reduced_cutoff,
+                x.score_matrix,
+            )
+        };
+        if let Some(ungapped_start) = ungapped_start {
+            let elapsed_ns = ungapped_start.elapsed().as_nanos() as u64;
+            if PT {
+                // a partition's own counters, added to the shared ones once per stage
+                out.ungapped_ns += elapsed_ns;
+                out.ungapped_calls += 1;
+            } else if let Some(timing) = timing {
+                timing.ungapped_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+                timing.ungapped_calls.fetch_add(1, Ordering::Relaxed);
+            }
+            *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
+        }
+        let ungapped_se = ungapped.s_start + ungapped.length;
+        let ungapped_score = ungapped.score;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:928-929
+        let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:923-932,939-941
+        if !(off_found || ungapped_score >= cutoff_score) {
+            hit_ready = false;
+            table.insert(
+                out,
+                x_key,
+                diag as i32,
+                s_end_pos as i32,
+                if hit_ready {
+                    0
+                } else {
+                    (s_end_pos - s_off_pos) as i32
+                },
+                hit_ready,
+                s_off_pos as i32,
+                diag_hash_window,
+            );
+            continue;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:924-927
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit::saved(q_idx, ctx, q_off, s_off, &ungapped),
+        );
+        if PT {
+            out.hit_keys.push(x_key);
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
+        table.insert(
+            out,
+            x_key,
+            diag as i32,
+            ungapped_s_end_pos as i32,
+            0,
+            true,
+            s_off_pos as i32,
+            diag_hash_window,
+        );
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1327-1331
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
 /// its pool): the scan ranges of `scan_subject_disc_words_with_ranges` (the whole subject, or
@@ -763,25 +1363,73 @@ fn seed_stage(
     }
     let lists = seed_lean_on();
     match (lean_on(), memo) {
-        (false, false) => seed_stage_of::<false, false>(
-            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        (false, false) => seed_stage_of::<false, false, false>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists, None,
         ),
-        (false, true) => seed_stage_of::<false, true>(
-            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        (false, true) => seed_stage_of::<false, true, false>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists, None,
         ),
-        (true, false) => seed_stage_of::<true, false>(
-            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        (true, false) => seed_stage_of::<true, false, false>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists, None,
         ),
-        (true, true) => seed_stage_of::<true, true>(
-            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        (true, true) => seed_stage_of::<true, true, false>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists, None,
         ),
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_DCLATEST): `seed_stage` on maps of the latest inserts (`x_dc_latest.rs`)
+/// instead of the diagonal hash `hash`, which the stage neither reads nor changes: with `parts`
+/// (LOSAT_X_PAIRPARFOLD) each partition's map (`part::PartState::latest`), else the owner's
+/// (`PartScratch::latest`); each starts the stage at `bound0`, the level bound of the stage's
+/// first position (`latest_bound`). No memo (LOSAT_X_DIAGLV2) is made. `lean`: LOSAT_X_FOLDLEAN,
+/// `lists`: LOSAT_X_DCSEEDLEAN's partitioned stage (`run` passes the switches).
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_latest(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    threads: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+    scratch: &mut PartScratch,
+    parts: Option<usize>,
+    bound0: i32,
+    lean: bool,
+    lists: bool,
+) -> StageStats {
+    let (fold_part, owner) = match parts {
+        Some(parts) => (
+            Some(part::FoldPart {
+                scratch,
+                parts,
+                latest: Some(bound0),
+            }),
+            None,
+        ),
+        None => {
+            scratch.latest.begin(bound0);
+            (None, Some(&mut scratch.latest))
+        }
+    };
+    if lean {
+        seed_stage_of::<true, false, true>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists, owner,
+        )
+    } else {
+        seed_stage_of::<false, false, true>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists, owner,
+        )
     }
 }
 
 /// `seed_stage` for one pair of LOSAT_X_FOLDLEAN (`LEAN`) and the table's memo of
 /// LOSAT_X_DIAGLV2 (`MEMO`); `lists`: LOSAT_X_DCSEEDLEAN's partitioned stage (`seed_stage_lists`).
+/// EXPERIMENT (LOSAT_X_DCLATEST): with `MAP` the folds keep the maps of the latest inserts
+/// (`seed_stage_latest`: `owner` without partitions), not `hash`.
 #[allow(clippy::too_many_arguments)]
-fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
+fn seed_stage_of<const LEAN: bool, const MEMO: bool, const MAP: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     threads: usize,
@@ -791,6 +1439,7 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
     lists: bool,
+    mut owner: Option<&mut DiagLatest>,
 ) -> StageStats {
     let jobs = plan_strips(
         x.subject_seq_ranges,
@@ -808,7 +1457,7 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
         // the folds that do not record their buckets.
         if lists {
             crate::utils::xreach::x_reach!("LOSAT_X_DCSEEDLEAN", true);
-            let r = seed_stage_lists::<LEAN, MEMO>(
+            let r = seed_stage_lists::<LEAN, MEMO, MAP>(
                 x, disc, &jobs, threads, hash, hits, timing, timed, fold_part,
             );
             part::record(part::TWO_HITS, parts, &r);
@@ -821,19 +1470,35 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
                 out,
                 counts,
                 scan_pause_ns,
+                latest: map,
                 ..
             } = st;
-            fold_two_hit::<true, LEAN, MEMO>(
-                x,
-                seeds,
-                hash,
-                hits,
-                timing,
-                scan_pause_ns,
-                counts,
-                out,
-                pos,
-            );
+            if MAP {
+                // EXPERIMENT (LOSAT_X_DCLATEST): the partition's map.
+                fold_two_hit_latest::<true, LEAN>(
+                    x,
+                    seeds,
+                    map,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            } else {
+                fold_two_hit::<true, LEAN, MEMO>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            }
         };
         let r = part::seed_stage_part(
             jobs.len(),
@@ -868,17 +1533,35 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            fold_two_hit::<false, LEAN, MEMO>(
-                x,
-                seeds,
-                hash,
-                hits,
-                timing,
-                scan_pause_ns,
-                counts,
-                &mut part::PartOut::default(),
-                &[],
-            );
+            if MAP {
+                // EXPERIMENT (LOSAT_X_DCLATEST): the owner's map.
+                let map = owner
+                    .as_deref_mut()
+                    .expect("LOSAT_X_DCLATEST: a stage without the owner's map");
+                fold_two_hit_latest::<false, LEAN>(
+                    x,
+                    seeds,
+                    map,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    &mut part::PartOut::default(),
+                    &[],
+                );
+            } else {
+                fold_two_hit::<false, LEAN, MEMO>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    &mut part::PartOut::default(),
+                    &[],
+                );
+            }
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -896,8 +1579,9 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
 /// into one list cut by partition, and the folds do not record the buckets they change
 /// (`fold_two_hit_t` without `TRACK`), the merge writing back every bucket of each partition
 /// (`part::seed_stage_part_lists`). Each partition folds the same seeds in the same order.
+/// EXPERIMENT (LOSAT_X_DCLATEST): with `MAP` into the partitions' maps (`seed_stage_latest`).
 #[allow(clippy::too_many_arguments)]
-fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
+fn seed_stage_lists<const LEAN: bool, const MEMO: bool, const MAP: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     jobs: &[StripJob],
@@ -923,19 +1607,35 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
             out,
             counts,
             scan_pause_ns,
+            latest: map,
             ..
         } = st;
-        fold_two_hit_t::<true, LEAN, MEMO, false>(
-            x,
-            seeds,
-            hash,
-            hits,
-            timing,
-            scan_pause_ns,
-            counts,
-            out,
-            pos,
-        );
+        if MAP {
+            // EXPERIMENT (LOSAT_X_DCLATEST): the partition's map.
+            fold_two_hit_latest::<true, LEAN>(
+                x,
+                seeds,
+                map,
+                hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                out,
+                pos,
+            );
+        } else {
+            fold_two_hit_t::<true, LEAN, MEMO, false>(
+                x,
+                seeds,
+                hash,
+                hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                out,
+                pos,
+            );
+        }
     };
     part::seed_stage_part_lists(
         jobs.len(),
@@ -978,6 +1678,7 @@ pub(super) fn run(
     if !in_scope(x) {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
         reach_lean(false);
+        reach_latest(false);
         return false;
     }
     let threads = match pool_threads() {
@@ -990,32 +1691,67 @@ pub(super) fn run(
         None => {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
             reach_lean(false);
+            reach_latest(false);
             return false;
         }
     };
     crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
     reach_lean(true);
+    // EXPERIMENT (LOSAT_X_DCLATEST): the folds keep maps of the latest inserts (every chunk of
+    // the stage has the bounds, `latest_bound`), unless the chunk's scan ranges step back
+    // (`latest_ranges_ascend`: those go to the chains).
+    let latest = if latest_on() {
+        latest_bound(x).filter(|_| {
+            let ascend = latest_ranges_ascend(x, disc.template_length);
+            latest::count_stage(ascend);
+            ascend
+        })
+    } else {
+        None
+    };
+    reach_latest(latest.is_some());
     if super::super::x_diag_lv::lv2_on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV2", !diag_hash.x_last.is_empty());
+        // (the maps keep no memo)
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_DIAGLV2",
+            latest.is_none() && !diag_hash.x_last.is_empty()
+        );
     }
     let timing = x.timing;
     let timed = timing.is_some() || timing_env();
     let t_start = timed.then(std::time::Instant::now);
     // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads.
-    let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
-        scratch: fold_scratch,
-        parts,
-    });
-    let stats = seed_stage(
-        x,
-        disc,
-        threads,
-        diag_hash,
-        ungapped_hits,
-        timing,
-        timed,
-        fold_part,
-    );
+    let parts = part::partitions(threads);
+    let stats = match latest {
+        Some(bound0) => seed_stage_latest(
+            x,
+            disc,
+            threads,
+            diag_hash,
+            ungapped_hits,
+            timing,
+            timed,
+            fold_scratch,
+            parts,
+            bound0,
+            lean_on(),
+            seed_lean_on(),
+        ),
+        None => seed_stage(
+            x,
+            disc,
+            threads,
+            diag_hash,
+            ungapped_hits,
+            timing,
+            timed,
+            parts.map(|parts| part::FoldPart {
+                scratch: fold_scratch,
+                parts,
+                latest: None,
+            }),
+        ),
+    };
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as
         // the reference counts its scan (which also leaves out the last flush). With
@@ -1490,6 +2226,9 @@ pub(super) fn summary() {
             s(&X_WAIT_NS),
             part::timing_fields(part::TWO_HITS)
         );
+        if latest_on() {
+            eprintln!("[TIMING] x_dc_latest:{}", latest::timing_fields());
+        }
     }
     if arr_on() && std::env::var_os("LOSAT_TIMING").is_some() {
         let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;

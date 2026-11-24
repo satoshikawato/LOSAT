@@ -1210,6 +1210,11 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   id and by the other, and `tm_hd`'s handles in that order look 99990 up again after 150 (the offset error twice), while
   `tm_hdr`'s other order gives it once. `tm_hd_q2.faa` holds the query of `tm_cache_q.faa` twice: a second batch
   (`BATCH_SIZE=1`) loads nothing again. Rows `db.tm.hd.*`.
+- `tm_hdg.pal` (`DBLIST tm_hdg_a tm_hdg_b`), line NP item O4b2-7 (review 1, M2): as `tm_hd`, but the second volume's
+  `gb|XYZ00002.1|` (562) is on the first line of `tm_hdg_a`'s sequence, `gi|5|gb|XYZ00002.1|` (99990), whose second line
+  is `gb|CCC00003.1|` (150); built as above (`for v in tm_hdg_a tm_hdg_b`). Each Seq-align id gives that sequence's
+  first line, so the Bioseq of either load holds the other's id; the prefetch still loads both blobs (it asks its scope
+  only for ids resolved before it): the offset error twice. Rows `db.tm.hd.g.*`.
 
 Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
 NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of

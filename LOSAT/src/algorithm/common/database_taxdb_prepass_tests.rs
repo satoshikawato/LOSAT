@@ -3021,12 +3021,68 @@ fn a_group_of_loads_takes_both_cases_of_a_load_made_or_not() {
     let (one, two) = (load(0, 0, &[L], by(0)), load(1, 0, &[L], by(1)));
     let misses = record.unordered_slot(0, &[&one, &two], L).unwrap();
     assert_eq!(misses, vec![(0, vec![true]), (1, vec![false])]);
-    // The second id found in the first load's Bioseq: made or not, it comes after L.
+    // The second id found in the first load's Bioseq: in one prefetch a load of its own all the
+    // same (NCBI's prefetch asks its scope only for ids resolved before it; review 1 of item
+    // O4b2-7, M2).
     let mut record = VolumeLookups::default();
     let two = load(1, 0, &[L], found_in(1, 0));
     let misses = record.unordered_slot(0, &[&one, &two], L).unwrap();
     assert_eq!(misses, vec![(0, vec![true]), (1, vec![false])]);
-    assert!(!record.slot_blobs[&0][1].sure);
+    assert!(record.slot_blobs[&0][1].sure);
+}
+
+/// [`by`] of `id`, whose Bioseq also holds the Seq-ids of `others` (by their handles).
+fn holding(id: u32, others: &[u32]) -> BlobName {
+    let mut name = by(id);
+    name.holds.handles = std::iter::once(id)
+        .chain(others.iter().copied())
+        .map(|id| id.to_le_bytes().to_vec())
+        .collect();
+    name
+}
+
+/// `VolumeLookups::prefetch_slots`: one prefetch loads every handle of a sequence, also one that
+/// the Bioseq of its first load holds (NCBI's prefetch asks its scope only for the ids that it
+/// resolved before, then its loader; review 1 of item O4b2-7, M2), each for certain: a later
+/// batch's prefetch of both loads nothing where NCBI keeps every sequence, and a read of the
+/// reports by an id that the first Bioseq holds may be given it without a load.
+#[test]
+fn a_prefetch_loads_each_handle_of_a_sequence() {
+    const L: i32 = 99990;
+    let loads = || {
+        [(0, 1, holding(0, &[1, 3])), (1, 2, by(1))].map(|(ordinal, order, name)| SlotLoad {
+            ordinal,
+            blob: 0,
+            volume: 0,
+            lookups: vec![L, 150],
+            order,
+            name,
+        })
+    };
+    for kept in [false, true] {
+        let mut record = VolumeLookups {
+            kept,
+            ..VolumeLookups::default()
+        };
+        let misses = record.prefetch_slots(&loads(), |_| false, L).unwrap();
+        assert_eq!(misses[&0], vec![true, false]);
+        assert_eq!(misses[&1], vec![true, false]);
+        assert!(record.prefetch_from.is_none());
+        assert!(record.slot_blobs[&0].iter().all(|blob| blob.sure));
+        let after = (record.offset_slots.clone(), record.slot_blobs.clone());
+        let again = record.prefetch_slots(&loads(), |_| false, L);
+        if kept {
+            let again = again.unwrap();
+            assert_eq!(again[&0], vec![false, false]);
+            assert_eq!(again[&1], vec![false, false]);
+        } else {
+            assert!(again.is_err());
+        }
+        // A read of the reports by id 3, whose handle the first Bioseq holds: given it or loaded.
+        (record.offset_slots, record.slot_blobs) = after;
+        assert_eq!(record.blob_read(0, &by(3)), BlobRead::Again);
+        assert!(record.offset_slot(0, 0, &by(3), &[L, 150], L).is_err());
+    }
 }
 
 /// The bounds of NCBI's object manager: a database of at most 10 sequences keeps every load, of

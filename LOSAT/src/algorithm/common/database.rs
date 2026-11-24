@@ -5056,24 +5056,33 @@ struct VolumeLookups {
     /// NCBI keeps every sequence that the run loads ([`keeps_every_load`] of the run's database,
     /// set at each use, [`TaxdbRun::volume_lookups`]): a read again loads nothing.
     kept: bool,
+    /// While the loads of one batch's prefetch are walked ([`Self::prefetch_slots`]): the number
+    /// of blobs that each sequence had before it, the only ones that [`Self::blob_read`] meets
+    /// (NCBI's prefetch asks its scope only for the ids that it resolved before, then its loader
+    /// for every other handle: no blob of one prefetch stands in for another of it).
+    prefetch_from: Option<rustc_hash::FxHashMap<u32, usize>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:209-209
-// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:441-460
-// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:332-385
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:441-462
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2224-2246
 // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:986-1006
 // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1489-1491
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:832-882
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1785
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1371
 // NCBI's data source answers an id by its BLAST database data loader first, which names a blob by
-// the OID with the id's Seq-id handle and loads a blob that the data source does not hold; only
-// the scope gives a Bioseq that it holds for the id without the loader, by the ids of that Bioseq
-// (those of the definition line that its load targeted) or a handle that matches the id. So a
-// read of a sequence by another Seq-align id than its loads before is a load of its own where no
-// Bioseq of those loads holds that id (probe of line NP item O4b2-7, `tm_hd` and `tm_hdr`, four
-// heap layouts: `gb|XYZ00002.1|` of the second volume, which the loader gives as the first
-// sequence that holds it in its second line, looks that sequence's slot up again after its load
-// by `gb|AAA00001.1|`: twice; with the handles' order the other way round, once).
+// the OID with the id's Seq-id handle and loads a blob that the data source does not hold. A read
+// of the reports finds a Bioseq that the scope holds without the loader, by the ids of that
+// Bioseq (those of the definition line that its load targeted) or a handle that matches the id; a
+// prefetch only by an id that the scope resolved before, and asks the loader for the batch's
+// other handles. So a read of a sequence by another Seq-align id than its loads before is a load
+// of its own where no Bioseq of those loads holds that id, and in one prefetch always (probe of
+// line NP item O4b2-7, `tm_hd` and `tm_hdr`, four heap layouts: `gb|XYZ00002.1|` of the second
+// volume, which the loader gives as the first sequence that holds it in its second line, looks
+// that sequence's slot up again after its load by `gb|AAA00001.1|`: twice; with the handles'
+// order the other way round, once).
 /// NCBI's name of the blob that a load of a sequence reads for a Seq-align id
 /// ([`VolumeLookups::offset_slot`]): the id's Seq-id handle, and the keys by which NCBI's scope
 /// matches that id with the ids of a Bioseq that it holds ([`blob_name`]).
@@ -5311,14 +5320,19 @@ impl VolumeLookups {
     /// blobs of the run before whose loads looked up a taxid of the slot (`slot_blobs`): the same
     /// handle's blob is held where NCBI keeps every sequence of the run and loaded it for certain
     /// (`Kept`), else a load or none (`Again`); another handle's is a load of its own (`Fresh`)
-    /// unless NCBI's scope can give one of those blobs' Bioseqs for its id (`Again`). A sequential
-    /// run loads at every read.
+    /// unless NCBI's scope can give one of those blobs' Bioseqs for its id (`Again`). In a
+    /// prefetch, only the blobs before it count ([`Self::prefetch_from`]). A sequential run loads
+    /// at every read.
     fn blob_read(&self, ordinal: u32, name: &BlobName) -> BlobRead {
         if self.sequential {
             return BlobRead::Fresh;
         }
         let (Some(blobs), Some(handle)) = (self.slot_blobs.get(&ordinal), &name.handle) else {
             return BlobRead::Fresh;
+        };
+        let blobs = match &self.prefetch_from {
+            Some(from) => &blobs[..from.get(&ordinal).copied().unwrap_or(0)],
+            None => &blobs[..],
         };
         if let Some(same) = blobs.iter().find(|blob| &blob.handle == handle) {
             return if same.sure && self.kept {
@@ -5451,8 +5465,28 @@ impl VolumeLookups {
     /// `unordered`: the batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids, or
     /// such a load's id is another subject's too). A load of its own key follows the slot
     /// ([`VolumeLookups::offset_slot`]); loads of one key are one step ([`Self::unordered_slot`]).
-    /// `Err`: the volume and the load whose texts NCBI's order or scope decides.
+    /// A blob of the prefetch is loaded whatever the prefetch loaded before it
+    /// ([`Self::prefetch_from`]). `Err`: the volume and the load whose texts NCBI's order or scope
+    /// decides.
     fn prefetch_slots(
+        &mut self,
+        loads: &[SlotLoad],
+        unordered: impl Fn(usize) -> bool,
+        last: i32,
+    ) -> std::result::Result<rustc_hash::FxHashMap<u32, Vec<bool>>, (usize, SlotUncertain)> {
+        self.prefetch_from = Some(
+            self.slot_blobs
+                .iter()
+                .map(|(&ordinal, blobs)| (ordinal, blobs.len()))
+                .collect(),
+        );
+        let misses = self.prefetch_walks(loads, unordered, last);
+        self.prefetch_from = None;
+        misses
+    }
+
+    /// [`Self::prefetch_slots`] once [`Self::prefetch_from`] is set.
+    fn prefetch_walks(
         &mut self,
         loads: &[SlotLoad],
         unordered: impl Fn(usize) -> bool,
@@ -5496,9 +5530,10 @@ impl VolumeLookups {
     /// held another taxid before the group; only the boundaries between the loads depend on their
     /// order ([`unordered_boundary_misses`]). A load of a blob that NCBI holds from before loads
     /// nothing ([`BlobRead::Kept`]), as does a second load of one handle in the group (NCBI's map
-    /// holds a handle once); one that NCBI makes or not ([`BlobRead::Again`], or one whose id
-    /// NCBI's scope can find in the Bioseq of another load of its sequence in the group, as their
-    /// order decides) is counted both ways (review 1 of line NP item O4b2-3, F2). Where every
+    /// holds a handle once); another handle of a sequence of the group is a load of its own (the
+    /// prefetch asks the loader for every handle that its scope had not resolved before it); one
+    /// that NCBI makes or not ([`BlobRead::Again`]) is counted both ways (review 1 of line NP item
+    /// O4b2-3, F2). Where every
     /// order and every such choice gives the same number of misses (from each state the slot may
     /// hold before), the texts are the same in every case: each load gets the misses of the
     /// batch's order with every such load made (the prefetch writes the texts of its loads as one,
@@ -5571,10 +5606,6 @@ impl VolumeLookups {
                     .any(|other| other.name.handle == load.name.handle)
                 {
                     BlobRead::Kept
-                } else if group.iter().filter(of_sequence).any(|other| {
-                    other.name.handle != load.name.handle && load.name.found_in(&other.name.holds)
-                }) {
-                    BlobRead::Again
                 } else {
                     self.blob_read(load.blob, &load.name)
                 }
@@ -5590,20 +5621,8 @@ impl VolumeLookups {
             .filter(|&at| reads[at] == BlobRead::Again)
             .collect();
         if maybe.len() > UNORDERED_CHOICES {
-            let load = group[maybe[0]];
-            let other = group
-                .iter()
-                .find(|other| other.blob != load.blob)
-                .map_or(load.blob, |other| other.blob);
-            return Err(refusal(
-                load,
-                true,
-                Some(SlotOrder {
-                    first: load.blob,
-                    second: other,
-                    taxid,
-                }),
-            ));
+            // More cases than LOSAT counts: the first of those loads, which NCBI makes or not.
+            return Err(refusal(group[maybe[0]], true, None));
         }
         // Each load's lookups of the slot (`true` for `L`).
         let marks: Vec<Vec<bool>> = group
@@ -8843,29 +8862,30 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
     let mut shared = std::collections::HashSet::new();
     let mut ids = 0;
     for (subject, (_, handle)) in subjects.iter().zip(&keys) {
+        // An id without a handle that LOSAT knows (`prefetch_load_key`) counts once for each of
+        // its Seq-aligns: NCBI makes a new handle for each Seq-align of a Textseq-id with neither
+        // accession nor name (review 1 of line NP item O4b2-3, F6; for a giim id, an upper bound).
+        // Such a handle's key is unpacked: its place among the unpacked handles is their
+        // addresses' order ([`LoadPlace::order_unknown`], [`LoadOrder::before`]).
+        let Some(handle) = handle else {
+            ids += 1;
+            continue;
+        };
         if !ordinals.insert(subject.ordinal) {
             continue;
         }
-        match handle {
-            Some(handle) => match handles.entry(handle) {
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(subject.ordinal);
-                    ids += 1;
-                }
-                std::collections::hash_map::Entry::Occupied(entry) => {
-                    shared.insert(*entry.get());
-                    shared.insert(subject.ordinal);
-                }
-            },
-            None => ids += 1,
+        match handles.entry(handle) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(subject.ordinal);
+                ids += 1;
+            }
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                shared.insert(*entry.get());
+                shared.insert(subject.ordinal);
+            }
         }
     }
-    // An id without a handle that LOSAT knows (`prefetch_load_key`): NCBI makes a new handle for
-    // each Seq-align of a Textseq-id with neither accession nor name, so the number of handles in
-    // its map, and with it the order of the map, is not known (review 1 of line NP item O4b2-3,
-    // F6).
-    let unnamed = keys.iter().any(|(_, handle)| handle.is_none());
-    let many = ids > PREFETCH_ONE_MAP_IDS || unnamed;
+    let many = ids > PREFETCH_ONE_MAP_IDS;
     let places = subjects
         .iter()
         .zip(&keys)
@@ -8879,9 +8899,7 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
             }),
             many,
             stops: stops(subject),
-            unknown: if unnamed {
-                Some("a Seq-align id of the batch has no Seq-id handle that LOSAT knows (NCBI makes one for each Seq-align of a text id with neither accession nor name), so the number of ids in NCBI's map, which decides whether its prefetch sorts them by CSortableSeq_id in pieces of 100, is not known")
-            } else if many {
+            unknown: if many {
                 Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100")
             } else if shared.contains(&subject.ordinal) {
                 Some("another subject of the batch has the same Seq-align id")

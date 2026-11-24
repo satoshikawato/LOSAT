@@ -87,24 +87,26 @@ fn every_gi_of_ncbi_files_finds_its_record() {
             }
         };
         let gis: std::collections::BTreeSet<u32> = big_endian.iter().map(|e| e.0).collect();
-        // One window for every lookup (in the order of the offset file, not of the data file),
-        // and a new one for each.
+        // One lookup and one window for every lookup (in the order of the offset file, not of
+        // the data file), and a new lookup and window for each.
+        let mut lookup = files.lookup();
         let mut window = DataWindow::default();
         for &(gi, vol, off) in &big_endian {
             let data = std::fs::read(dir.join(data_name(vol))).unwrap();
             let mut got = Vec::new();
-            files.ranges_into(gi, &mut got, &mut window).unwrap();
+            lookup.ranges_into(gi, &mut got, &mut window).unwrap();
             assert_eq!(got, record(&data, off as usize, be), "{name} gi {gi}");
             assert!(!got.is_empty(), "{name} gi {gi}");
             let mut alone = Vec::new();
             files
+                .lookup()
                 .ranges_into(gi, &mut alone, &mut DataWindow::default())
                 .unwrap();
             assert_eq!(alone, got, "{name} gi {gi}");
             for other in [gi.wrapping_sub(1), gi.wrapping_add(1)] {
                 if !gis.contains(&other) {
                     let mut none = Vec::new();
-                    files.ranges_into(other, &mut none, &mut window).unwrap();
+                    lookup.ranges_into(other, &mut none, &mut window).unwrap();
                     assert!(none.is_empty(), "{name} gi {other}");
                 }
             }
@@ -241,7 +243,12 @@ fn reads_across_chunks_and_windows_are_the_file_s_bytes() {
             "{start}"
         );
         assert_eq!(
-            file.mapped::<4>(start as i64).unwrap(),
+            view.mapped::<4>(start as i64).unwrap(),
+            Some(want),
+            "{start}"
+        );
+        assert_eq!(
+            file.view().mapped::<4>(start as i64).unwrap(),
             Some(want),
             "{start}"
         );

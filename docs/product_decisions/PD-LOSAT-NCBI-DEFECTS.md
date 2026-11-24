@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.94
+- Version: 1.95
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -509,15 +509,21 @@
   and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
   header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
   there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.94 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 28, a mask file whose
+  1.93 2026-11-24 (under a negative seqid list, a subject whose header NCBI's fetch cannot read
+  ends the search only where the composition-based or Smith-Waterman redo fetches it, rule 2: its
+  list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
+  item O4b2-4's 1.92);
+  1.95 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 28, a mask file whose
   Seq-locs nest deeper than NCBI's stack holds, read to any depth, rule 1, as approved exception 15
   reads a PSSM; approved by the Owner's answer 「Q-MDEPTH=B」 of 2026-11-24 to question Q-MDEPTH; the
-  refusal of nests deeper than 400 object frames removed; numbered after 1.93, which line NP item
-  M4c-2 took after dev's 1.92; first 1.77 (exception
+  refusal of nests deeper than 400 object frames removed; numbered after 1.94, which line NP item
+  M4c-2 took after dev's 1.93 (line RG item D1c-1c); first 1.77 (exception
   24), then 1.81 (exception 25) at the merge of dev that brought 1.76 to 1.80 (line RG items X4b-2,
   D3c-3a and D5b-5, line NP item O4c, line PS item PS12c), then 1.92 (exception 28) at the merge of
   dev that brought 1.81 to 1.91 and exceptions 25 to 27, then 1.93 at the merge of dev that
-  brought line NP item O4b2-4's 1.92, then 1.94)
+  brought line NP item O4b2-4's 1.92, then 1.94, then 1.95 at the merge of dev that brought line RG
+  item D1c-1c's 1.93)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1230,9 +1236,9 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 
-## Approved exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.94)
+## Approved exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.95)
 
-Version 1.94, line NP item M (b). The Owner answered on 2026-11-24 (09:13 JST, through the session
+Version 1.95, line NP item M (b). The Owner answered on 2026-11-24 (09:13 JST, through the session
 board, record ce1e4751-4972-4b38-bd21-36be4d8fbd98) 「Q-MDEPTH=B」. The question Q-MDEPTH was
 「入れ子の深いマスクファイルを makeblastdb -mask_data でどこまで読むか」 (how deep should makeblastdb
 `-mask_data` read a mask file whose Seq-locs nest?), and its option B read 「B: 深さに関係なく読む（推奨）」
@@ -1825,10 +1831,13 @@ file would differ, and NCBI's programs still could not open the database).
   where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
   search of a protein database reads such a header at the Seq-aligns only, where the subject is
   in the final hit list: there NCBI's Seq-align fails (exit 255), and LOSAT's report gives the
-  same error (rule 2). The
-  composition-based redo fetches only the matches that its early termination test leaves, and
-  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
-  NCBI ends it without reading that header.
+  same error (rule 2). The composition-based redo (and the Smith-Waterman redo) fetches only the
+  matches that its early termination test leaves: since version 1.93 such a subject's list stays
+  in the redo's stream (also one whose lines LOSAT refuses where it reads them) and LOSAT refuses
+  the search only where NCBI's redo fetches it, after the reports of the query batches before (as
+  NCBI's search ends in that batch), so a search whose redo frees that match unfetched writes
+  NCBI's output (BLASTP, PSIBLAST, BLASTX, TBLASTN; line RG item D1c-1c, rows `db.il.*.lr*`,
+  `db.il.*.ls*`).
 
 - TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.40,
   2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and

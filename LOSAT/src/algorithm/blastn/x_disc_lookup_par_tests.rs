@@ -1447,32 +1447,47 @@ fn check_csr(case: &Case, combo: (usize, DiscWordType, usize), parts: usize, chu
     // EXPERIMENT (LOSAT_X_DCSEEDLEAN): `csr_on_pool` and `csr_on_pool_steps`, the latter with and
     // without LOSAT_X_DCQSAHEAD's `qs` ahead.
     for (steps, qs_ahead) in [(false, false), (true, false), (true, true)] {
+        let build = |pv: &mut [PvArrayType], helper: &mut [u32], x_qs: Option<Vec<u32>>| {
+            if steps {
+                csr_on_pool_steps(
+                    parts,
+                    &words,
+                    cells,
+                    pv,
+                    pv_array_bts,
+                    helper,
+                    chunk,
+                    Vec::new(),
+                    x_qs,
+                    qs_ahead,
+                )
+            } else {
+                csr_on_pool(
+                    parts,
+                    &words,
+                    cells,
+                    pv,
+                    pv_array_bts,
+                    helper,
+                    chunk,
+                    Vec::new(),
+                    x_qs,
+                )
+            }
+        };
         let mut pv = vec![0; reference.pv_array.len()];
         let mut helper = vec![0; reference.helper_array.len()];
-        let csr = if steps {
-            csr_on_pool_steps(
-                parts,
-                &words,
-                cells,
-                &mut pv,
-                pv_array_bts,
-                &mut helper,
-                chunk,
-                Vec::new(),
-                qs_ahead,
-            )
-        } else {
-            csr_on_pool(
-                parts,
-                &words,
-                cells,
-                &mut pv,
-                pv_array_bts,
-                &mut helper,
-                chunk,
-                Vec::new(),
-            )
-        };
+        let csr = build(&mut pv, &mut helper, None);
+        // EXPERIMENT (LOSAT_X_CSRQSKEEP): on a kept `qs` of stale values, the same CSR.
+        super::super::x_dc_csr::x_assert_same_on_a_kept_qs(
+            &csr,
+            |x_qs| {
+                let mut pv = vec![0; reference.pv_array.len()];
+                let mut helper = vec![0; reference.helper_array.len()];
+                build(&mut pv, &mut helper, x_qs)
+            },
+            &format!("parts {parts} chunk {chunk} steps {steps} qs_ahead {qs_ahead}"),
+        );
         super::super::x_dc_csr::x_assert_runs_are_the_chains(
             &words,
             &csr,
@@ -1526,6 +1541,7 @@ fn csr_on_a_pool_lists_the_chains() {
                 7,
                 &mut helper,
                 Vec::new(),
+                None,
             );
             assert!(on_pool, "threads {threads}");
             Ok(())
@@ -1537,7 +1553,16 @@ fn csr_on_a_pool_lists_the_chains() {
     let words = words_of(&case, &query_refs, (11, DiscWordType::Coding, 16));
     let mut pv = vec![0; 1 << 15];
     let mut helper = vec![0; (1 << 22) / 2048];
-    let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, 7, &mut helper, Vec::new());
+    let (_, on_pool) = csr(
+        4,
+        &words,
+        1 << 22,
+        &mut pv,
+        7,
+        &mut helper,
+        Vec::new(),
+        None,
+    );
     assert!(!on_pool, "off a pool");
 }
 

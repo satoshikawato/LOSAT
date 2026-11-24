@@ -35,6 +35,10 @@ pub use reader::ArgvError;
 mod stdio_buffer;
 pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
+// The process's standard output with no buffer of Rust's, under the command line's writers.
+mod standard_output;
+pub(crate) use standard_output::standard_output;
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it.
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
@@ -189,10 +193,11 @@ fn top_level_after_help() -> &'static str {
 // No NCBI counterpart: `losat <program>` names the program, and a run builds the clap command of
 // that program only (`ProgramParser`).
 // LOSAT's command line, `losat <program> <words>` (`Commands`). Its command (`CommandFactory`) is
-// `cli_command`'s: `Cli::command()` has every program's arguments, which the readers of the
-// definitions walk (`api::describe`, LOSAT Web's `describe`), and clap converts a command line
-// with only its program's arguments (`command_of`, `ProgramParser::program_command`). A
-// doc comment here would be clap's description of the top level (`long_about`).
+// `cli_command`'s: `Cli::command()` has every program's arguments (`api::describe`, which reads
+// NCBI's argument tables, has a test that its options are these, line RG item K4i-3a), and clap
+// converts a command line with only its program's arguments (`command_of`,
+// `ProgramParser::program_command`). A doc comment here would be clap's description of the top
+// level (`long_about`).
 #[derive(clap::Args, Debug)]
 #[command(
     version,
@@ -797,6 +802,22 @@ impl NativeError {
             exit: 255,
             message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384 (cited at
+    // `report::serial::encoder::NullElement`)
+    /// The end of a run whose ASN.1 text stream threw at an element that holds no object
+    /// (`encoder::NullElement`, the application `application`): the stream's post of its first
+    /// failure, then `CATCH_ALL`'s report of the exception (`exception`, exit status 255).
+    pub(crate) fn null_element(
+        application: &str,
+        thrown: &crate::report::serial::encoder::NullElement,
+    ) -> NativeError {
+        let mut error = Self::exception(&thrown.exception());
+        let mut message = thrown.post(Some(application));
+        message.append(&mut error.message);
+        error.message = message;
+        error
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263

@@ -1139,7 +1139,7 @@ test('the header, and the "?" help that shows on hover or keyboard focus and sta
   await expect(help).toHaveCount(0);
   // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
   await toggle.hover();
-  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn');
+  await expect(help).toHaveText('Task to execute');
   await expect(help).toHaveAttribute('data-pinned', 'false');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.mouse.move(0, 0);

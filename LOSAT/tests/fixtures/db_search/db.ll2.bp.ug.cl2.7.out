@@ -1,0 +1,7 @@
+# BLASTP 2.17.0+
+# Query: qp query
+# Database: tests/db_search/ll2/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qp	BAA100002.1	99.333	300	2	0	1	300	1	300	0.0	794
+# BLAST processed 1 queries

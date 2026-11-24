@@ -308,6 +308,11 @@ check goes to the next worker; a check that three workers ended through no run's
 stops ends the worker as a run's does: that check rejects, a run posted behind it on that worker fails with "Run the search
 again.", and the next run starts a new worker.
 
+`engine.describeTool(tool)` reads a tool's options, defaults, value lists, ranges and exclusions by running
+`[tool, '-xmlhelp']` (on the control reactor when `reactorControl` provides it, else through `runTool`) and parsing the
+XML with `parseToolDescription`. `parseToolDescription(xml)` is also exported from `losat` and `losat/domain` and needs
+no `DOMParser`, so it works in workers and in Node.
+
 ## License
 
 LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).

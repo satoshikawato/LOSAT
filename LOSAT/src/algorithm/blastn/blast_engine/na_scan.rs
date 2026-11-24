@@ -17,7 +17,7 @@
 //! small table, :1828-1829 for the na table)
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
-//! `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`, `select_mb_scan_kind`,
+//! `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`,
 //! `diag_hash_insert_window`, `x_push_ungapped`, `mask_lookup_index` and
 //! `packed_kmer_at_seed_mask`). Its function is the statements of the branch of `prelim_chunk_hits`
 //! that were there, in their order; the fold of LOSAT_X_PAIRPARNA (`x_pair_seed_na.rs` `fold_na_t`)
@@ -30,8 +30,8 @@ use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
     blastn_trace, diag_hash_insert_window, extend_hit_ungapped_approx_ncbi,
-    extend_hit_ungapped_exact_ncbi, scan_subject_kmers_with_ranges, select_mb_scan_kind,
-    x_push_ungapped, DiagHashTable, DiagStruct, SubjectChunk, UngappedHit,
+    extend_hit_ungapped_exact_ncbi, scan_subject_kmers_with_ranges, x_push_ungapped, DiagHashTable,
+    DiagStruct, SubjectChunk, UngappedHit,
 };
 
 /// What the scan of one subject chunk with a table that is not two-stage reads: the batch's word
@@ -168,7 +168,9 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         None
     };
     let mut scan_pause_ns: u64 = 0;
-    let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
+    // The batch's scanner (`ScanBatch::mb_scan_kind`: for these tables the word and lookup word
+    // lengths are `safe_k`).
+    let mb_scan_kind = scan.mb_scan_kind(subject_masked);
     // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants of the seeds
     // (`s_end` adds `safe_k`) are the batch's (`scan.x_lv_seeds`: the word length is `safe_k`
     // without a two-stage table).

@@ -27,21 +27,20 @@
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
 //! `OffsetPair`, `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`,
-//! `scan_subject_disc_words_with_ranges`, `select_mb_scan_kind`, `x_mb_hit_prefetch`,
-//! `x_bn_pv_once` and `OFFSET_ARRAY_SIZE`). Its function is the statements of the branch of
-//! `prelim_chunk_hits` that were there, in their order; the strips scans of PAIRPAR
-//! (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup hits
-//! in the order `on_word` does. What the scan reads is `TwoStageScanInputs` (the batch's word
+//! `scan_subject_disc_words_with_ranges`, `x_mb_hit_prefetch`, `x_bn_pv_once`, `x_bn_pv_once_of`,
+//! `x_bn_rank_once`, `x_bn_rank_once_on` and `OFFSET_ARRAY_SIZE`). Its function is the statements
+//! of the branch of `prelim_chunk_hits` that were there, in their order; the strips scans of
+//! PAIRPAR (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup
+//! hits in the order `on_word` does. What the scan reads is `TwoStageScanInputs` (the batch's word
 //! finder, `prelim_subject::ScanBatch` or its copy per subject, and the chunk's own values), and
-//! what it writes is `TwoStageScanState`, both built once per chunk. Nothing here runs on the
-//! pool.
+//! what it writes is `TwoStageScanState`, both built once per chunk. Nothing here runs on the pool.
 
 use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
-    scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, select_mb_scan_kind,
-    x_bn_pv_once, x_bn_rank_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct,
-    OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
+    scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, x_bn_pv_once,
+    x_bn_pv_once_of, x_bn_rank_once, x_bn_rank_once_on, x_dc_csr, x_mb_hit_prefetch, DiagHashTable,
+    DiagStruct, OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
 use crate::algorithm::blastn::lookup::{TwoStageLookup, XHeadFifo};
 use std::mem::MaybeUninit;
@@ -211,7 +210,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     let mut offset_pairs_len = 0usize;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:451-497
-    let x_hit_prefetch = x_mb_hit_prefetch();
+    let x_hit_prefetch = scan.x_hit_prefetch;
     // What the steps of the offset pairs of this chunk
     // (`pair_extend::extend_offset_pairs`) read besides the batch's word finder (`scan`, a
     // parameter of their own): the chunk's values, built once per chunk.
@@ -245,235 +244,18 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         dbg_gapped_attempted: &mut *dbg_gapped_attempted,
     };
 
-    let mut on_word = |kmer_start: usize,
-                       s_range: usize,
-                       current_lut_kmer: u64,
-                       second_template_index: Option<u64>| {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-        if debug_enabled {
-            *dbg_total_s_positions += 1;
-        }
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-        if debug_mode || blastn_debug {
-            // DEBUG: Track processing time
-            let _dbg_start = std::time::Instant::now();
-        }
-
-        // Lookup using lut_word_length k-mer
-        let matches_len = if debug_mode || blastn_debug {
-            two_stage.count_hits(current_lut_kmer)
-        } else {
-            0
-        };
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-        // DEBUG: Log max matches
-        if (debug_mode || blastn_debug) && matches_len > 1000 {
-            eprintln!(
-                "[WARN] Large matches_slice: len={} for kmer at position {}",
-                matches_len, kmer_start
-            );
-        }
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
-        if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-            pair_extend::extend_offset_pairs(
-                scan,
-                &pair_inputs,
-                &mut pair_state,
-                offset_pairs,
-                &mut offset_pairs_len,
-                &mut scan_pause_ns,
-                true,
-            );
-        }
-
-        // For each match, add to the offset_pairs buffer.
-        two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
-            if debug_enabled {
-                *dbg_seeds_found += 1;
-            }
-            if q_off_1 != 0 {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-                offset_pairs[offset_pairs_len] = OffsetPair {
-                    q_off: q_off_1 as usize - 1,
-                    s_off: kmer_start,
-                    s_range,
-                };
-                offset_pairs_len += 1;
-            }
-        });
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
-        // The second template's hits of the same subject offset follow
-        // the first template's (`longest_chain` counts both chains).
-        if let Some(second_template_index) = second_template_index {
-            two_stage.for_each_hit2(second_template_index, |q_off_1| {
-                if debug_enabled {
-                    *dbg_seeds_found += 1;
-                }
-                offset_pairs[offset_pairs_len] = OffsetPair {
-                    q_off: q_off_1 as usize - 1,
-                    s_off: kmer_start,
-                    s_range,
-                };
-                offset_pairs_len += 1;
-            });
-        }
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
-        if offset_pairs_len >= offset_array_size {
-            pair_extend::extend_offset_pairs(
-                scan,
-                &pair_inputs,
-                &mut pair_state,
-                offset_pairs,
-                &mut offset_pairs_len,
-                &mut scan_pause_ns,
-                true,
-            );
-        }
-    };
     // The presence vector and its shift, held by the scans' per-word closures by value
     // (`lookup::XPvView`), which test each word there before they call out.
     let pv_view = two_stage.x_pv_view();
-    if let Some(disc) = two_stage.disc() {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1684
-        // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains; its
-        // words go through `x_on_word_csr`, `on_word`'s statements for one template
-        // with the cell's run (the chain's offsets in the chain's order) instead of
-        // the chain walk, in the same order, each `RING` words late through the ring
-        // that prefetches their cells' offsets and runs (`lookup::x_dc_csr`). `on_word`
-        // keeps its two callers, so its code is the one without the switch.
-        if let Some(csr) = disc.x_csr() {
-            let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64)| {
-                if debug_enabled {
-                    *dbg_total_s_positions += 1;
-                }
-                let run: &[u32] = if two_stage.has_hits(index) {
-                    csr.run(index as usize)
-                } else {
-                    &[]
-                };
-                if (debug_mode || blastn_debug) && run.len() > 1000 {
-                    eprintln!(
-                        "[WARN] Large matches_slice: len={} for kmer at position {}",
-                        run.len(),
-                        kmer_start
-                    );
-                }
-                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-                    pair_extend::extend_offset_pairs(
-                        scan,
-                        &pair_inputs,
-                        &mut pair_state,
-                        offset_pairs,
-                        &mut offset_pairs_len,
-                        &mut scan_pause_ns,
-                        true,
-                    );
-                }
-                for &q_off_1 in run {
-                    if debug_enabled {
-                        *dbg_seeds_found += 1;
-                    }
-                    offset_pairs[offset_pairs_len] = OffsetPair {
-                        q_off: q_off_1 as usize - 1,
-                        s_off: kmer_start,
-                        s_range,
-                    };
-                    offset_pairs_len += 1;
-                }
-                if offset_pairs_len >= offset_array_size {
-                    pair_extend::extend_offset_pairs(
-                        scan,
-                        &pair_inputs,
-                        &mut pair_state,
-                        offset_pairs,
-                        &mut offset_pairs_len,
-                        &mut scan_pause_ns,
-                        true,
-                    );
-                }
-            };
-            let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> = x_dc_csr::Ring::new(csr);
-            // A word without hits (its presence bit, which `x_on_word_csr` tests first) does not
-            // enter the ring: tested here, inline in the scan, it costs neither the ring's
-            // prefetches nor a place in it, and is only counted for the debug summary. The words
-            // with hits leave in the same order, so the same pairs go out in the same order (a
-            // batch that reached `OFFSET_ARRAY_SIZE` goes before the next word with hits, with
-            // the same pairs and state). With the debug output on, every word still enters, as
-            // the warning for a long run comes before that batch's window lines.
-            let every_word = debug_mode || blastn_debug;
-            let mut words_without_hits = 0usize;
-            scan_subject_disc_words_with_ranges(
-                search_seq_packed,
-                s_len,
-                disc,
-                subject_seq_ranges,
-                subject_masked,
-                |s_off, s_range, index, index2| {
-                    debug_assert!(index2.is_none());
-                    if !every_word && !pv_view.has_hits(index) {
-                        words_without_hits += 1;
-                        return;
-                    }
-                    ring.push(
-                        (s_off, s_range, index),
-                        |w| w.2 as usize,
-                        &mut x_on_word_csr,
-                    );
-                },
-            );
-            ring.flush(&mut x_on_word_csr);
-            if debug_enabled {
-                *dbg_total_s_positions += words_without_hits;
-            }
-        } else {
-            // A word whose chains are both empty (the presence vector, which `for_each_hit` and
-            // `for_each_hit2` test first) adds no pair: tested here, inline in the scan, so such a
-            // word makes no call to `on_word` and is only counted for the debug summary. A batch
-            // of pairs that reached `OFFSET_ARRAY_SIZE` then goes before the next word with hits
-            // (`on_word`: before the next word), with the same pairs and the same state, so every
-            // value is the same. With the debug output on, every word still goes to `on_word`,
-            // whose warning for a long chain comes before that batch's window lines.
-            // A word that calls `on_word` has its chains' heads prefetched and goes through the
-            // FIFO (`lookup::XHeadFifo`) to `on_word`, in the same order, so the same pairs and
-            // batches go out in the same order (with the debug output on, its lines too).
-            let every_word = debug_mode || blastn_debug;
-            let mut words_without_hits = 0usize;
-            let mut emit = |(s_off, s_range, index, index2): (usize, usize, u64, Option<u64>)| {
-                on_word(s_off, s_range, index, index2)
-            };
-            let mut fifo: XHeadFifo<(usize, usize, u64, Option<u64>)> = XHeadFifo::new();
-            // (the closure holds the flag, the presence vector and the table by value, and the
-            // rest by reference: its values stay in registers over the scan's loop instead of
-            // being read again every word through references to the locals here)
-            let (fifo_ref, emit_ref, without_ref) = (&mut fifo, &mut emit, &mut words_without_hits);
-            scan_subject_disc_words_with_ranges(
-                search_seq_packed,
-                s_len,
-                disc,
-                subject_seq_ranges,
-                subject_masked,
-                move |s_off, s_range, index, index2| {
-                    if every_word
-                        || pv_view.has_hits(index)
-                        || index2.is_some_and(|i2| pv_view.has_hits(i2))
-                    {
-                        two_stage.x_prefetch_heads(index, index2);
-                        fifo_ref.push((s_off, s_range, index, index2), emit_ref);
-                    } else {
-                        *without_ref += 1;
-                    }
-                },
-            );
-            fifo.flush(&mut emit);
-            if debug_enabled {
-                *dbg_total_s_positions += words_without_hits;
-            }
-        }
-    } else if let Some(csr) = two_stage.x_mb_csr() {
+    // The sides of the forms this chunk's scan takes, recorded while the run records them
+    // (`ScanBatch::x_recording`, the batch's; `record_forms`).
+    if scan.x_recording {
+        record_forms(scan, two_stage);
+    }
+    // The batch's form of a contiguous table laid out as CSR (`ScanBatch::x_mb_head`, chosen
+    // once per batch by `MbCsrHead::choose`), tested before `on_word` is made: the scans of
+    // that form do not call it, and made before the test it was stored in each of their chunks.
+    if let Some(x_head) = scan.x_mb_head {
         // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no
         // chains; its words with hits (the presence test of `for_each_hit` first)
         // go through `x_on_word_csr`, `on_word`'s statements with the cell's run
@@ -503,7 +285,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // one element per cell), whose `emit` gets the word only.
         // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
         // keeps a word `k` for the ring when `test` holds (`XWordBatch`).
-        let rank_once = x_bn_rank_once(true);
+        let rank_once = scan.x_rank_once;
         macro_rules! x_scan_csr {
             ($head:expr, |$k:ident| $has:expr) => {{
                 use x_dc_csr::XHead;
@@ -557,7 +339,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                     }
                 };
                 let mut ring = head.ring::<(usize, usize, u64)>();
-                let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+                let mb_scan_kind = scan.mb_scan_kind(subject_masked);
                 // The per-word closure holds what it reads by value (`move`: the debug switch,
                 // the presence vector and its shift, or the packed head) and the places it
                 // writes as its own references, so the scan keeps them in registers across the
@@ -591,47 +373,276 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 x_dc_csr::XRing::flush(&mut ring, |w| w.2 as usize, &mut x_on_word_csr);
             }};
         }
-        match csr.x_packed() {
-            Some(packed) if x_bn_pv_once(&packed) => {
+        match x_head {
+            MbCsrHead::PackedOnce(packed) => {
                 x_scan_csr!(packed, |k| packed.x_present(k as usize))
             }
-            Some(packed) => {
+            MbCsrHead::Packed(packed) => {
                 x_scan_csr!(packed, |k| pv_view.has_hits(k)
                     && packed.x_present(k as usize))
             }
-            None => x_scan_csr!(csr, |k| pv_view.has_hits(k)),
+            MbCsrHead::Csr(csr) => x_scan_csr!(csr, |k| pv_view.has_hits(k)),
         }
     } else {
-        x_bn_rank_once(false);
-        let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
-        // A word whose chain is empty (the presence vector, which `for_each_hit` tests first)
-        // adds no pair: tested here, inline in the scan, so such a word makes no call to
-        // `on_word` and is only counted for the debug summary (as the disc scans above). A batch
-        // of pairs that reached `OFFSET_ARRAY_SIZE` then goes before the next word with hits,
-        // with the same pairs and the same state, so every value is the same. With the debug
-        // output on, every word still goes to `on_word`, whose warning for a long chain comes
-        // before that batch's window lines.
-        let every_word = debug_mode || blastn_debug;
-        let mut words_without_hits = 0usize;
-        scan_subject_kmers_with_ranges(
-            search_seq_packed,
-            s_len,
-            word_length,
-            lut_word_length,
-            scan_step,
-            subject_seq_ranges,
-            subject_masked,
-            mb_scan_kind,
-            |kmer_start, s_range, current_lut_kmer| {
-                if every_word || pv_view.has_hits(current_lut_kmer) {
-                    on_word(kmer_start, s_range, current_lut_kmer, None);
-                } else {
-                    words_without_hits += 1;
+        let mut on_word = |kmer_start: usize,
+                           s_range: usize,
+                           current_lut_kmer: u64,
+                           second_template_index: Option<u64>| {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
+            if debug_enabled {
+                *dbg_total_s_positions += 1;
+            }
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
+            if debug_mode || blastn_debug {
+                // DEBUG: Track processing time
+                let _dbg_start = std::time::Instant::now();
+            }
+
+            // Lookup using lut_word_length k-mer
+            let matches_len = if debug_mode || blastn_debug {
+                two_stage.count_hits(current_lut_kmer)
+            } else {
+                0
+            };
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
+            // DEBUG: Log max matches
+            if (debug_mode || blastn_debug) && matches_len > 1000 {
+                eprintln!(
+                    "[WARN] Large matches_slice: len={} for kmer at position {}",
+                    matches_len, kmer_start
+                );
+            }
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
+            if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                pair_extend::extend_offset_pairs(
+                    scan,
+                    &pair_inputs,
+                    &mut pair_state,
+                    offset_pairs,
+                    &mut offset_pairs_len,
+                    &mut scan_pause_ns,
+                    true,
+                );
+            }
+
+            // For each match, add to the offset_pairs buffer.
+            two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
+                if debug_enabled {
+                    *dbg_seeds_found += 1;
                 }
-            },
-        );
-        if debug_enabled {
-            *dbg_total_s_positions += words_without_hits;
+                if q_off_1 != 0 {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+                    offset_pairs[offset_pairs_len] = OffsetPair {
+                        q_off: q_off_1 as usize - 1,
+                        s_off: kmer_start,
+                        s_range,
+                    };
+                    offset_pairs_len += 1;
+                }
+            });
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
+            // The second template's hits of the same subject offset follow
+            // the first template's (`longest_chain` counts both chains).
+            if let Some(second_template_index) = second_template_index {
+                two_stage.for_each_hit2(second_template_index, |q_off_1| {
+                    if debug_enabled {
+                        *dbg_seeds_found += 1;
+                    }
+                    offset_pairs[offset_pairs_len] = OffsetPair {
+                        q_off: q_off_1 as usize - 1,
+                        s_off: kmer_start,
+                        s_range,
+                    };
+                    offset_pairs_len += 1;
+                });
+            }
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
+            if offset_pairs_len >= offset_array_size {
+                pair_extend::extend_offset_pairs(
+                    scan,
+                    &pair_inputs,
+                    &mut pair_state,
+                    offset_pairs,
+                    &mut offset_pairs_len,
+                    &mut scan_pause_ns,
+                    true,
+                );
+            }
+        };
+        if let Some(disc) = two_stage.disc() {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1684
+            // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains; its
+            // words go through `x_on_word_csr`, `on_word`'s statements for one template
+            // with the cell's run (the chain's offsets in the chain's order) instead of
+            // the chain walk, in the same order, each `RING` words late through the ring
+            // that prefetches their cells' offsets and runs (`lookup::x_dc_csr`). `on_word`
+            // keeps its two callers, so its code is the one without the switch.
+            if let Some(csr) = disc.x_csr() {
+                let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64)| {
+                    if debug_enabled {
+                        *dbg_total_s_positions += 1;
+                    }
+                    let run: &[u32] = if two_stage.has_hits(index) {
+                        csr.run(index as usize)
+                    } else {
+                        &[]
+                    };
+                    if (debug_mode || blastn_debug) && run.len() > 1000 {
+                        eprintln!(
+                            "[WARN] Large matches_slice: len={} for kmer at position {}",
+                            run.len(),
+                            kmer_start
+                        );
+                    }
+                    if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                        pair_extend::extend_offset_pairs(
+                            scan,
+                            &pair_inputs,
+                            &mut pair_state,
+                            offset_pairs,
+                            &mut offset_pairs_len,
+                            &mut scan_pause_ns,
+                            true,
+                        );
+                    }
+                    for &q_off_1 in run {
+                        if debug_enabled {
+                            *dbg_seeds_found += 1;
+                        }
+                        offset_pairs[offset_pairs_len] = OffsetPair {
+                            q_off: q_off_1 as usize - 1,
+                            s_off: kmer_start,
+                            s_range,
+                        };
+                        offset_pairs_len += 1;
+                    }
+                    if offset_pairs_len >= offset_array_size {
+                        pair_extend::extend_offset_pairs(
+                            scan,
+                            &pair_inputs,
+                            &mut pair_state,
+                            offset_pairs,
+                            &mut offset_pairs_len,
+                            &mut scan_pause_ns,
+                            true,
+                        );
+                    }
+                };
+                let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> = x_dc_csr::Ring::new(csr);
+                // A word without hits (its presence bit, which `x_on_word_csr` tests first) does
+                // not enter the ring: tested here, inline in the scan, it costs neither the ring's
+                // prefetches nor a place in it, and is only counted for the debug summary. The
+                // words with hits leave in the same order, so the same pairs go out in the same
+                // order (a batch that reached `OFFSET_ARRAY_SIZE` goes before the next word with
+                // hits, with the same pairs and state). With the debug output on, every word still
+                // enters, as the warning for a long run comes before that batch's window lines.
+                let every_word = debug_mode || blastn_debug;
+                let mut words_without_hits = 0usize;
+                scan_subject_disc_words_with_ranges(
+                    search_seq_packed,
+                    s_len,
+                    disc,
+                    subject_seq_ranges,
+                    subject_masked,
+                    |s_off, s_range, index, index2| {
+                        debug_assert!(index2.is_none());
+                        if !every_word && !pv_view.has_hits(index) {
+                            words_without_hits += 1;
+                            return;
+                        }
+                        ring.push(
+                            (s_off, s_range, index),
+                            |w| w.2 as usize,
+                            &mut x_on_word_csr,
+                        );
+                    },
+                );
+                ring.flush(&mut x_on_word_csr);
+                if debug_enabled {
+                    *dbg_total_s_positions += words_without_hits;
+                }
+            } else {
+                // A word whose chains are both empty (the presence vector, which `for_each_hit` and
+                // `for_each_hit2` test first) adds no pair: tested here, inline in the scan, so
+                // such a word makes no call to `on_word` and is only counted for the debug summary.
+                // A batch of pairs that reached `OFFSET_ARRAY_SIZE` then goes before the next word
+                // with hits (`on_word`: before the next word), with the same pairs and the same
+                // state, so every value is the same. With the debug output on, every word still
+                // goes to `on_word`, whose warning for a long chain comes before that batch's
+                // window lines. A word that calls `on_word` has its chains' heads prefetched and
+                // goes through the FIFO (`lookup::XHeadFifo`) to `on_word`, in the same order, so
+                // the same pairs and batches go out in the same order (with the debug output on,
+                // its lines too).
+                let every_word = debug_mode || blastn_debug;
+                let mut words_without_hits = 0usize;
+                let mut emit =
+                    |(s_off, s_range, index, index2): (usize, usize, u64, Option<u64>)| {
+                        on_word(s_off, s_range, index, index2)
+                    };
+                let mut fifo: XHeadFifo<(usize, usize, u64, Option<u64>)> = XHeadFifo::new();
+                // (the closure holds the flag, the presence vector and the table by value, and the
+                // rest by reference: its values stay in registers over the scan's loop instead of
+                // being read again every word through references to the locals here)
+                let (fifo_ref, emit_ref, without_ref) =
+                    (&mut fifo, &mut emit, &mut words_without_hits);
+                scan_subject_disc_words_with_ranges(
+                    search_seq_packed,
+                    s_len,
+                    disc,
+                    subject_seq_ranges,
+                    subject_masked,
+                    move |s_off, s_range, index, index2| {
+                        if every_word
+                            || pv_view.has_hits(index)
+                            || index2.is_some_and(|i2| pv_view.has_hits(i2))
+                        {
+                            two_stage.x_prefetch_heads(index, index2);
+                            fifo_ref.push((s_off, s_range, index, index2), emit_ref);
+                        } else {
+                            *without_ref += 1;
+                        }
+                    },
+                );
+                fifo.flush(&mut emit);
+                if debug_enabled {
+                    *dbg_total_s_positions += words_without_hits;
+                }
+            }
+        } else {
+            let mb_scan_kind = scan.mb_scan_kind(subject_masked);
+            // A word whose chain is empty (the presence vector, which `for_each_hit` tests first)
+            // adds no pair: tested here, inline in the scan, so such a word makes no call to
+            // `on_word` and is only counted for the debug summary (as the disc scans above). A
+            // batch of pairs that reached `OFFSET_ARRAY_SIZE` then goes before the next word with
+            // hits, with the same pairs and the same state, so every value is the same. With the
+            // debug output on, every word still goes to `on_word`, whose warning for a long chain
+            // comes before that batch's window lines.
+            let every_word = debug_mode || blastn_debug;
+            let mut words_without_hits = 0usize;
+            scan_subject_kmers_with_ranges(
+                search_seq_packed,
+                s_len,
+                word_length,
+                lut_word_length,
+                scan_step,
+                subject_seq_ranges,
+                subject_masked,
+                mb_scan_kind,
+                |kmer_start, s_range, current_lut_kmer| {
+                    if every_word || pv_view.has_hits(current_lut_kmer) {
+                        on_word(kmer_start, s_range, current_lut_kmer, None);
+                    } else {
+                        words_without_hits += 1;
+                    }
+                },
+            );
+            if debug_enabled {
+                *dbg_total_s_positions += words_without_hits;
+            }
         }
     }
 
@@ -671,6 +682,63 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                     elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
                     dbg_seeds_found, dbg_total_s_positions);
         }
+    }
+}
+
+/// The head of a contiguous two-stage table laid out as CSR (LOSAT_X_BNCSR) in the form its scan
+/// takes (`scan_two_stage_lookup`'s `x_scan_csr!`), chosen once per batch (`MbCsrHead::choose`,
+/// for `ScanBatch::x_mb_head`), as NCBI chooses a table's scanner once: a packed head
+/// (LOSAT_X_BNCSRPACK) whose presence bits are each word's only test (LOSAT_X_BNPVONCE,
+/// `PackedOnce`), a packed head behind the presence vector (`Packed`), or a head of one element per
+/// cell (`Csr`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1022-1026 (the scanner chosen
+/// once for the search)
+/// The forms of the head have no NCBI counterpart (layout only).
+#[derive(Clone, Copy)]
+pub(super) enum MbCsrHead<'a> {
+    PackedOnce(x_dc_csr::XPacked<'a>),
+    Packed(x_dc_csr::XPacked<'a>),
+    Csr(&'a x_dc_csr::Csr),
+}
+
+impl<'a> MbCsrHead<'a> {
+    /// The form of the batch's table `two_stage` (`None` without a two-stage table, for a
+    /// discontiguous one and for a table with chains), and whether a word's run is the element
+    /// that the ring hands over with it (LOSAT_X_BNRANKONCE, for a table with a CSR head: `false`
+    /// otherwise, where no scan reads it). The sides are recorded by the chunks' scans
+    /// (`record_forms`), as they were recorded when each chunk chose them.
+    pub(super) fn choose(two_stage: Option<&'a TwoStageLookup>) -> (Option<Self>, bool) {
+        let Some(csr) = two_stage
+            .filter(|table| table.disc().is_none())
+            .and_then(|table| table.x_mb_csr())
+        else {
+            return (None, false);
+        };
+        let head = match csr.x_packed() {
+            Some(packed) if x_bn_pv_once_of(&packed) => MbCsrHead::PackedOnce(packed),
+            Some(packed) => MbCsrHead::Packed(packed),
+            None => MbCsrHead::Csr(csr),
+        };
+        (Some(head), x_bn_rank_once_on())
+    }
+}
+
+/// No NCBI counterpart: the sides of the switches whose forms a chunk's scan with the two-stage
+/// table `two_stage` takes (`LOSAT_X_REACH`), called by `scan_two_stage_lookup` only while the run
+/// records them (`ScanBatch::x_recording`): LOSAT_X_MBHITPF; for a contiguous table
+/// LOSAT_X_BNRANKONCE (a CSR head or chains) and, for a packed head, LOSAT_X_BNPVONCE; the sides
+/// each chunk recorded where it chose its forms (`MbCsrHead::choose` chooses them once now).
+#[cold]
+#[inline(never)]
+fn record_forms(scan: &ScanBatch<'_>, two_stage: &TwoStageLookup) {
+    x_mb_hit_prefetch();
+    if two_stage.disc().is_some() {
+        return;
+    }
+    x_bn_rank_once(scan.x_mb_head.is_some());
+    if let Some(packed) = two_stage.x_mb_csr().and_then(|csr| csr.x_packed()) {
+        x_bn_pv_once(&packed);
     }
 }
 

@@ -3032,13 +3032,19 @@ fn x_bn_mapped() -> bool {
 /// first extension of a hit reads the query at a place the hit's cell chose, a cache miss for a
 /// query of megabases; the loop over the offset pairs prefetches the line of the hit `X_HIT_AHEAD`
 /// places on. It changes no value.
-fn x_mb_hit_prefetch() -> bool {
+///
+/// Its value, read once per batch (`prelim_subject::ScanBatch::new`); a chunk's scan records its
+/// side (`x_mb_hit_prefetch`) only while the run records the sides.
+fn x_mb_hit_prefetch_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        let on = crate::utils::xswitch::on("LOSAT_X_MBHITPF");
-        crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", on);
-        on
-    })
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBHITPF"))
+}
+
+/// `x_mb_hit_prefetch_on`, with its side recorded (`LOSAT_X_REACH`).
+fn x_mb_hit_prefetch() -> bool {
+    let on = x_mb_hit_prefetch_on();
+    crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", on);
+    on
 }
 const X_HIT_AHEAD: usize = 16;
 
@@ -3048,11 +3054,16 @@ const X_HIT_AHEAD: usize = 16;
 /// vector in front. The words it keeps are the words with hits either way (the presence vector
 /// only skips words without hits). It changes no value.
 fn x_bn_pv_once(head: &x_dc_csr::XPacked<'_>) -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNPVONCE"));
-    let once = on && head.x_bits_bytes() <= X_PV_ONCE_MAX_BITS;
+    let once = x_bn_pv_once_of(head);
     crate::utils::xreach::x_reach!("LOSAT_X_BNPVONCE", once);
     once
+}
+
+/// `x_bn_pv_once` without the record of its side: the batch's form (`ScanBatch::new`).
+fn x_bn_pv_once_of(head: &x_dc_csr::XPacked<'_>) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNPVONCE"));
+    on && head.x_bits_bytes() <= X_PV_ONCE_MAX_BITS
 }
 const X_PV_ONCE_MAX_BITS: usize = 1 << 20;
 
@@ -3072,13 +3083,20 @@ pub(super) fn x_bn_ext_first() -> bool {
 /// ranked once, where it enters the ring, not again where it leaves. The words, their runs and
 /// every value are the same. Recorded (`LOSAT_X_REACH`) where a scan chooses the table's form.
 pub(super) fn x_bn_rank_once(csr: bool) -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNRANKONCE"));
+    let on = x_bn_rank_once_on();
     if on {
         crate::utils::xreach::x_reach!("LOSAT_X_BNRANKONCE", csr);
     }
     on && csr
 }
+
+/// Whether LOSAT_X_BNRANKONCE is on, without the record of a side: the batch's form
+/// (`ScanBatch::new`).
+fn x_bn_rank_once_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNRANKONCE"))
+}
+
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).

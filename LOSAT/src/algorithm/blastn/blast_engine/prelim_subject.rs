@@ -54,11 +54,12 @@ use super::{
     advance_diag_table_offset, build_subject_seq_ranges_from_masks,
     calculate_blastn_context_statistics, database, diag_hash_insert_window,
     encode_iupac_to_blastna, merge_prelim_hit_lists, na_scan, next_subject_chunk, prelim_hsp_list,
-    prelim_subject_best_hit, read_db_seq_ranges, two_stage_scan, ungapped_subject_stage, x_diag_lv,
-    x_pair_seed, BlastnSubjectRef, BlastnTiming, ContextKarlin, DiagStruct, GapAlignScratch,
-    HspListSplit, PrelimHit, PrelimReap, QueryContext, QueryContextIndex, SubjectChunk,
-    SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState, COMPRESSION_RATIO,
-    DBSEQ_CHUNK_OVERLAP,
+    prelim_subject_best_hit, read_db_seq_ranges, select_mb_scan_kind, two_stage_scan,
+    ungapped_subject_stage, x_diag_lv, x_mb_hit_prefetch_on, x_pair_seed, BlastnSubjectRef,
+    BlastnTiming, ContextKarlin, DiagHashTable, DiagStruct, GapAlignScratch, HspListSplit,
+    MbScanSubjectKind, PrelimHit, PrelimReap, QueryContext, QueryContextIndex, SubjectChunk,
+    SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState, UngappedHit,
+    COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
@@ -283,6 +284,34 @@ pub(super) struct ScanBatch<'a> {
     pub(super) min_ungapped_score: i32,
     pub(super) timing_ref: Option<&'a BlastnTiming>,
     pub(super) timing_enabled: bool,
+    /// The word finder's forms, chosen once for the batch from its table, switches and
+    /// diagnostics, as NCBI chooses the lookup table's scanner and extension once for the search
+    /// (below), so that a chunk's word finder reads them instead of deciding them again: the head
+    /// of a contiguous two-stage table laid out as CSR in the form its scan takes
+    /// (`two_stage_scan::MbCsrHead`; `None` for a table with chains, a discontiguous table and
+    /// the other tables) and whether a word's run is the ring's element (LOSAT_X_BNRANKONCE);
+    /// whether the steps of the pairs prefetch the query line of a later pair (LOSAT_X_MBHITPF,
+    /// for a two-stage table); the megablast scanner of an unmasked and of a masked chunk
+    /// (`select_mb_scan_kind`, the masked one as NCBI's word finder falls back to the scanner of
+    /// any offset); the part of PAIRPAR's scope that is the same for every chunk
+    /// (`x_pair_seed::owner_scope`); and whether the run records the switches' sides
+    /// (`xreach::recording`): a chunk records the sides of its forms only then, where it recorded
+    /// them before (`two_stage_scan::record_forms`, `x_pair_seed::wants`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1022-1026 (the scanner
+    /// and the extension chosen once, `BlastChooseNucleotideScanSubject` at
+    /// c++/src/algo/blast/core/blast_nascan.c:2982-2992, for a megablast table
+    /// `s_MBChooseScanSubject` at :2602-2680, and `BlastChooseNaExtend` at
+    /// c++/src/algo/blast/core/na_ungapped.c:1791-1836) and
+    /// c++/src/algo/blast/core/na_ungapped.c:1651-1667 (a masked chunk's scanner)
+    /// The CSR head's forms, the prefetch, PAIRPAR and the records have no NCBI counterpart.
+    pub(super) x_mb_head: Option<two_stage_scan::MbCsrHead<'a>>,
+    pub(super) x_rank_once: bool,
+    pub(super) x_hit_prefetch: bool,
+    pub(super) mb_scan_kind: Option<MbScanSubjectKind>,
+    pub(super) mb_scan_kind_masked: Option<MbScanSubjectKind>,
+    pub(super) x_pair_scope: bool,
+    pub(super) x_recording: bool,
 }
 
 impl<'a> ScanBatch<'a> {
@@ -304,6 +333,10 @@ impl<'a> ScanBatch<'a> {
         let two_hits = window_size > 0;
         let debug_enabled = batch.debug_mode || batch.blastn_debug;
         let exact_ungapped = batch.matrix_only || word_length < 11;
+        let diagnostics =
+            debug_enabled || batch.blastn_trace_enabled || batch.debug_window.is_some();
+        // The word finder's forms (the fields' comment).
+        let (x_mb_head, x_rank_once) = two_stage_scan::MbCsrHead::choose(two_stage_lookup_ref);
         ScanBatch {
             batch,
             two_stage_lookup_ref,
@@ -366,12 +399,34 @@ impl<'a> ScanBatch<'a> {
             debug_enabled,
             blastn_trace_enabled: batch.blastn_trace_enabled,
             debug_window: batch.debug_window,
-            diagnostics: debug_enabled
-                || batch.blastn_trace_enabled
-                || batch.debug_window.is_some(),
+            diagnostics,
             min_ungapped_score: batch.min_ungapped_score,
             timing_ref: batch.timing_ref,
             timing_enabled: batch.timing_ref.is_some(),
+            x_mb_head,
+            x_rank_once,
+            x_hit_prefetch: two_stage_lookup_ref.is_some() && x_mb_hit_prefetch_on(),
+            mb_scan_kind: select_mb_scan_kind(lut_word_length, batch.scan_step, false),
+            mb_scan_kind_masked: select_mb_scan_kind(lut_word_length, batch.scan_step, true),
+            x_pair_scope: x_pair_seed::owner_scope(
+                use_array_indexing,
+                window_size,
+                batch.scan_range,
+                !batch.small_na_compressed_query.is_empty(),
+                diagnostics,
+            ),
+            x_recording: crate::utils::xreach::recording(),
+        }
+    }
+
+    /// The megablast scanner of a chunk (`mb_scan_kind`, or `mb_scan_kind_masked` for a masked
+    /// chunk).
+    #[inline(always)]
+    pub(super) fn mb_scan_kind(&self, subject_masked: bool) -> Option<MbScanSubjectKind> {
+        if subject_masked {
+            self.mb_scan_kind_masked
+        } else {
+            self.mb_scan_kind
         }
     }
 }
@@ -551,7 +606,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         let x_lv_ref = diag_hash.x_lv_on() && !scan.diagnostics;
         // The sides are recorded only when LOSAT_X_REACH is set (`xreach::recording`, one test for
         // the two marks of every chunk).
-        if crate::utils::xreach::recording() && diag_hash.x_lv_on() {
+        if scan.x_recording && diag_hash.x_lv_on() {
             crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", !use_array_indexing && x_lv_ref);
             // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
             // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read
@@ -616,53 +671,21 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // inputs and makes no call.
             if x_pair_seed::wants(
                 two_stage.disc().is_some(),
-                use_array_indexing,
-                scan.window_size,
-                scan.scan_range,
-                !scan.small_na_compressed_query.is_empty(),
-                scan.diagnostics,
+                scan.x_pair_scope,
                 !batch.use_parallel && reuse_prelim_hits,
-            ) && x_pair_seed::run(
-                &x_pair_seed::Inputs {
-                    two_stage,
-                    search_seq_packed,
-                    s_len,
-                    subject_seq_ranges,
-                    subject_masked,
-                    scan_step: scan.scan_step,
-                    query_context_index: scan.query_context_index,
-                    query_contexts: scan.query_contexts,
-                    encoded_query_concat_blastna: scan.encoded_query_concat_blastna,
-                    encoded_query_concat_blastna_with_sentinels: scan
-                        .encoded_query_concat_blastna_with_sentinels,
-                    cutoff_scores: scan.cutoff_scores,
-                    x_dropoff_scores: scan.x_dropoff_scores,
-                    reduced_cutoff_scores: scan.reduced_cutoff_scores,
-                    score_matrix: scan.score_matrix,
-                    nucl_score_table: scan.nucl_score_table,
-                    exact_ungapped: scan.exact_ungapped,
-                    diag_offset,
-                    diag_hash_window: diag_hash_insert_window(
-                        scan.window_size,
-                        scan.scan_range,
-                        two_stage.word_length(),
-                    ),
-                    use_array_indexing,
-                    window_size: scan.window_size,
-                    scan_range: scan.scan_range,
-                    small_na_word: !scan.small_na_compressed_query.is_empty(),
-                    diagnostics: scan.diagnostics,
-                    one_subject_owner: !batch.use_parallel && reuse_prelim_hits,
-                    timing: scan.timing_ref,
-                },
+                scan.x_recording,
+            ) && pair_par_chunk(
+                scan,
+                two_stage,
+                search_seq_packed,
+                s_len,
+                subject_seq_ranges,
+                subject_masked,
+                diag_offset,
+                !batch.use_parallel && reuse_prelim_hits,
                 diag_hash,
-                x_pair_seed::DiagArray {
-                    levels: &mut *hit_level_array,
-                    lens: &mut *hit_len_array,
-                    length: scan.diag_table_length as isize,
-                    mask: scan.diag_table_mask,
-                    size: diag_array_size,
-                },
+                &mut *hit_level_array,
+                &mut *hit_len_array,
                 ungapped_hits,
                 &mut subject_scratch.x_pair_fold,
             ) {
@@ -716,39 +739,14 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 scan.scan_range,
                 scan.diagnostics,
                 !batch.use_parallel && reuse_prelim_hits,
-            ) && x_pair_seed::run_na(
-                &x_pair_seed::NaInputs {
-                    pv_direct_lookup: scan.pv_direct_lookup_ref,
-                    na_lookup: scan.na_lookup_ref,
-                    use_direct_lookup: scan.use_direct_lookup,
-                    word_length: scan.safe_k,
-                    search_seq_packed,
-                    s_len,
-                    subject_seq_ranges,
-                    subject_masked,
-                    scan_step: scan.scan_step,
-                    query_context_index: scan.query_context_index,
-                    query_contexts: scan.query_contexts,
-                    encoded_query_concat_blastna: scan.encoded_query_concat_blastna,
-                    cutoff_scores: scan.cutoff_scores,
-                    x_dropoff_scores: scan.x_dropoff_scores,
-                    reduced_cutoff_scores: scan.reduced_cutoff_scores,
-                    score_matrix: scan.score_matrix,
-                    nucl_score_table: scan.nucl_score_table,
-                    exact_ungapped: scan.exact_ungapped,
-                    diag_offset,
-                    diag_hash_window: diag_hash_insert_window(
-                        scan.window_size,
-                        scan.scan_range,
-                        scan.safe_k,
-                    ),
-                    use_array_indexing,
-                    window_size: scan.window_size,
-                    scan_range: scan.scan_range,
-                    diagnostics: scan.diagnostics,
-                    one_subject_owner: !batch.use_parallel && reuse_prelim_hits,
-                    timing: scan.timing_ref,
-                },
+            ) && pair_par_chunk_na(
+                scan,
+                search_seq_packed,
+                s_len,
+                subject_seq_ranges,
+                subject_masked,
+                diag_offset,
+                !batch.use_parallel && reuse_prelim_hits,
                 diag_hash,
                 ungapped_hits,
                 &mut subject_scratch.x_pair_fold,
@@ -828,6 +826,136 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         &mut subject_scratch.diag_hash,
     );
     chunk_prelim_hits
+}
+
+/// The strips dispatch of PAIRPAR for a chunk with a two-stage table (`x_pair_seed::run` with
+/// its inputs, the chunk's values and the batch's word finder `scan`), for a chunk that
+/// `x_pair_seed::wants` sends to it: whether the strips took the chunk. Out of line, so that the
+/// chunk's search that never takes the strips (every chunk of a database search) reads none of
+/// the inputs: inline, the loads of the batch's values that the inputs copy went before the
+/// test, with their stores to the stack, in every chunk (the stores of such spills in each of
+/// mlst's chunks went from 23 to 4 with this and the batch's forms, cachegrind, line FM s6). No
+/// NCBI counterpart (scheduling only).
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn pair_par_chunk(
+    scan: &ScanBatch<'_>,
+    two_stage: &TwoStageLookup,
+    search_seq_packed: &[u8],
+    s_len: usize,
+    subject_seq_ranges: &[(i32, i32)],
+    subject_masked: bool,
+    diag_offset: isize,
+    one_subject_owner: bool,
+    diag_hash: &mut DiagHashTable,
+    hit_level_array: &mut Vec<DiagStruct>,
+    hit_len_array: &mut Vec<u8>,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    x_pair_fold: &mut x_pair_seed::PartScratch,
+) -> bool {
+    let use_array_indexing = scan.use_array_indexing;
+    let diag_array_size = scan.diag_array_size;
+    x_pair_seed::run(
+        &x_pair_seed::Inputs {
+            two_stage,
+            search_seq_packed,
+            s_len,
+            subject_seq_ranges,
+            subject_masked,
+            scan_step: scan.scan_step,
+            query_context_index: scan.query_context_index,
+            query_contexts: scan.query_contexts,
+            encoded_query_concat_blastna: scan.encoded_query_concat_blastna,
+            encoded_query_concat_blastna_with_sentinels: scan
+                .encoded_query_concat_blastna_with_sentinels,
+            cutoff_scores: scan.cutoff_scores,
+            x_dropoff_scores: scan.x_dropoff_scores,
+            reduced_cutoff_scores: scan.reduced_cutoff_scores,
+            score_matrix: scan.score_matrix,
+            nucl_score_table: scan.nucl_score_table,
+            exact_ungapped: scan.exact_ungapped,
+            diag_offset,
+            diag_hash_window: diag_hash_insert_window(
+                scan.window_size,
+                scan.scan_range,
+                two_stage.word_length(),
+            ),
+            use_array_indexing,
+            window_size: scan.window_size,
+            scan_range: scan.scan_range,
+            small_na_word: !scan.small_na_compressed_query.is_empty(),
+            diagnostics: scan.diagnostics,
+            one_subject_owner,
+            timing: scan.timing_ref,
+        },
+        diag_hash,
+        x_pair_seed::DiagArray {
+            levels: hit_level_array,
+            lens: hit_len_array,
+            length: scan.diag_table_length as isize,
+            mask: scan.diag_table_mask,
+            size: diag_array_size,
+        },
+        ungapped_hits,
+        x_pair_fold,
+    )
+}
+
+/// `pair_par_chunk` for the other tables: the strips dispatch of LOSAT_X_PAIRPARNA
+/// (`x_pair_seed::run_na` with its inputs), out of line for the same reason. No NCBI counterpart
+/// (scheduling only).
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn pair_par_chunk_na(
+    scan: &ScanBatch<'_>,
+    search_seq_packed: &[u8],
+    s_len: usize,
+    subject_seq_ranges: &[(i32, i32)],
+    subject_masked: bool,
+    diag_offset: isize,
+    one_subject_owner: bool,
+    diag_hash: &mut DiagHashTable,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    x_pair_fold: &mut x_pair_seed::PartScratch,
+) -> bool {
+    let use_array_indexing = scan.use_array_indexing;
+    x_pair_seed::run_na(
+        &x_pair_seed::NaInputs {
+            pv_direct_lookup: scan.pv_direct_lookup_ref,
+            na_lookup: scan.na_lookup_ref,
+            use_direct_lookup: scan.use_direct_lookup,
+            word_length: scan.safe_k,
+            search_seq_packed,
+            s_len,
+            subject_seq_ranges,
+            subject_masked,
+            scan_step: scan.scan_step,
+            query_context_index: scan.query_context_index,
+            query_contexts: scan.query_contexts,
+            encoded_query_concat_blastna: scan.encoded_query_concat_blastna,
+            cutoff_scores: scan.cutoff_scores,
+            x_dropoff_scores: scan.x_dropoff_scores,
+            reduced_cutoff_scores: scan.reduced_cutoff_scores,
+            score_matrix: scan.score_matrix,
+            nucl_score_table: scan.nucl_score_table,
+            exact_ungapped: scan.exact_ungapped,
+            diag_offset,
+            diag_hash_window: diag_hash_insert_window(
+                scan.window_size,
+                scan.scan_range,
+                scan.safe_k,
+            ),
+            use_array_indexing,
+            window_size: scan.window_size,
+            scan_range: scan.scan_range,
+            diagnostics: scan.diagnostics,
+            one_subject_owner,
+            timing: scan.timing_ref,
+        },
+        diag_hash,
+        ungapped_hits,
+        x_pair_fold,
+    )
 }
 
 /// The HSP list of a chunk from the initial hits that its word finder saved

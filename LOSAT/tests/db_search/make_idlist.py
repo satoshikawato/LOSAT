@@ -56,6 +56,12 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
 - `lm` (D1c-1c-b): `ln` with its first 30 letters made `Q` in every sequence and the SEG masks of `segmasker
   -parse_seqids` (algorithm 21) in the volume, the same lines rewritten without Seq-ids: blastdbcmd's masks of a
   sequence whose front line has none (NCBI's Seq-loc of the masks takes the null best id and throws).
+- `pw`, `nw` (line DBID pfoff-7): version 4 of pw.faa and of nw.fna (its back-translation) with parsed Seq-ids: gi 7001
+  (`ref|NP_7001.1|`), then the general ids PIG|abc (gi 7001's letters with 4 changes), ti|xyz, BL_ORD_ID|zz and xyz|77,
+  whose lookups as Seq-align ids throw on the id itself where the tag is a string (PIG, BL_ORD_ID: `CObject_id::GetId()`)
+  or not a number (ti); NCBI's prefetch of a batch fails there (`Error pre-fetching sequence data`) and its formats load
+  the subjects one by one. `pwq.faa` (and `pwq.fna`, back-translated) holds a query without hits, then one query per
+  sequence after the first (the PIG|abc query hits gi 7001 second).
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -70,7 +76,8 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
            "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
-           "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa"}
+           "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa",
+           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -244,6 +251,13 @@ def ti_isam(base: Path, num_oids: int, pad: int = 0):
     base.with_suffix(".ptd").write_bytes(data + bytes(pad))
 
 
+def build_pf7(mk):
+    """The databases of line DBID pfoff-7: pw, nw."""
+    for name, source, kind in (("pw", "pw.faa", "prot"), ("nw", "nw.fna", "nucl")):
+        run([mk, "-in", source, "-dbtype", kind, "-out", name, "-title", name, "-parse_seqids",
+             "-blastdb_version", "4"])
+
+
 def build_d1c_fix1(mk, common):
     """The databases of review 1 of D1c-1: pz, tq, cv0, cv1, gtx, gd."""
     for name in ("pz", "tq", "cv0", "cv1"):
@@ -409,6 +423,7 @@ def main():
     build_d1c1b(mk, common)
     build_d1c1c(mk)
     build_d1c1cb(ncbi)
+    build_pf7(mk)
     for path in list(OUT.glob("*.pjs")) + list(OUT.glob("*.njs")):
         path.unlink()
     for name, data in LISTS.items():

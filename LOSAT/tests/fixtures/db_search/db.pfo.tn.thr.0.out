@@ -1,0 +1,39 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nw
+           5 sequences; 792 total letters
+
+
+
+Query= qN
+
+Length=30
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= qA2
+
+Length=55
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+PIG:abc Unknown                                                       112     7e-40
+NP_7001.1 one                                                         105     3e-37
+
+

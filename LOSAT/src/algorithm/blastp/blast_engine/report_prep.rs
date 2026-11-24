@@ -563,13 +563,20 @@ pub(super) fn prefetch_reported_subjects(
         // scope resolves the id (`shared::load_read_texts`), also without `taxdb.bti`: the batches'
         // prefetches and the reports of those whose prefetch is off.
         let scope_loads = batches_prefetch && db.scope_utf8_seen();
+        // A batch whose prefetch fails at a subject whose lookup throws on the id writes NCBI's
+        // warning, also without `taxdb.bti` (`BatchPrefetch::fails_somewhere`, line DBID pfoff-7).
+        let prefetch_fails = batch_prefetch.fails_somewhere();
         if let Some(span) = prefetch_stop.as_ref() {
             crate::algorithm::common::database::Utf8Read::reach(utf8_read, span, db);
         }
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
         if let Some(span) = prefetch_stop.as_ref().filter(|_| {
-            !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only || scope_loads)
+            !(prefetch_taxids
+                || psiblast_prefetched.is_some()
+                || prefetch_only
+                || scope_loads
+                || prefetch_fails)
         }) {
             let scope = || batch_scope(span);
             // No report's reads are modelled before it (`prefetch_taxids` is off).
@@ -587,8 +594,11 @@ pub(super) fn prefetch_reported_subjects(
         // that load nothing (M1), and with `taxdb.bti` their loads look the taxids up
         // (`ListedTitles::pssm_load_texts`; review 5 of line DBID pfoff-4, H2: psiblast's outfmt
         // 8, 9 and 11, whose batches NCBI never prefetches but at `PRE_FETCH_SEQS_LIMIT=INT_MAX`).
-        let reports_model =
-            prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only || scope_loads;
+        let reports_model = prefetch_taxids
+            || psiblast_prefetched.is_some()
+            || prefetch_only
+            || scope_loads
+            || prefetch_fails;
         let pssm_loads = pssm_made && database.taxdb_found();
         if reports_model || pssm_loads {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0

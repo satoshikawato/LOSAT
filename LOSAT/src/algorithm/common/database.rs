@@ -2448,6 +2448,12 @@ impl BatchPrefetch {
         self.2 .0.get(query).copied().unwrap_or(false)
     }
 
+    /// Whether the prefetch of a batch of the call fails at a subject whose lookup throws on the
+    /// id: [`batch_prefetch`] writes its warning there, also without `taxdb.bti`.
+    pub(crate) fn fails_somewhere(&self) -> bool {
+        self.2 .0.contains(&true)
+    }
+
     /// Whether the reports of the batch of the call's query `query` may load the query's subjects
     /// one by one ([`BatchPrefetch::reads_one_by_one`]), also after a prefetch that fails at a
     /// subject whose lookup throws on the id (NCBI's prefetch catches it and ends its loads): the
@@ -2490,7 +2496,7 @@ impl BatchPrefetch {
     /// listed only where a positive limit counts the batches' Seq-aligns or a prefetch fails.
     pub(crate) fn reads(&self, reported: impl IntoIterator<Item = (usize, u32)>) -> BatchReads {
         let each = match &self.0 {
-            Batches::Every if !self.2 .0.contains(&true) => return BatchReads(BatchesRead::Every),
+            Batches::Every if !self.fails_somewhere() => return BatchReads(BatchesRead::Every),
             Batches::None => return BatchReads(BatchesRead::None),
             Batches::Every | Batches::Each(_) => {
                 let mut on = std::collections::HashSet::new();

@@ -33,9 +33,10 @@ fn an_average_query_length_of_zero_takes_ncbis_expected_length_of_zero() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1036-1072
-// One subject (the database's length is the subject's) and a short query against a short subject
-// (line RG item X-short-tbx-link): an expected length of 0 makes `y_variable` 0 and the logarithm
-// of `x_variable` -inf, a negative one makes them negative and the logarithm NaN. NCBI's x86-64
+// A short query against a short subject whose database is not longer than the subject less the
+// expected length (here one subject; line RG item X-short-tbx-link): an expected length of 0 makes
+// `y_variable` 0 and the logarithm of `x_variable` -inf, a negative one makes them negative and the
+// logarithm NaN. NCBI's x86-64
 // conversion gives `INT_MIN` for both, so the big-gap cutoff is one more; Rust's `as i32`
 // gave 0 for NaN, a cutoff of 1, before this item.
 #[test]

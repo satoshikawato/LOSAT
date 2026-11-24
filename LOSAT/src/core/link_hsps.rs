@@ -228,10 +228,11 @@ pub(crate) fn calculate_link_hsp_cutoffs(
     let mut x_variable = 0.25 * y_variable * search_sp as f64;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1061-1072
     // The `(Int4)` of `floor(log(x) / Lambda)` is NCBI's x86-64 conversion
-    // (`ncbi_int4_from_double`): with one subject an expected length of 0 makes `y_variable` and
-    // `x_variable` 0 and the logarithm -inf, and a negative expected length makes them negative
-    // and the logarithm NaN; both convert to `INT_MIN`, so the big-gap cutoff is one more than `INT_MIN`
-    // (Rust's `as i32` would give 0 for NaN, a cutoff of 1).
+    // (`ncbi_int4_from_double`). Where the database is not longer than the subject less the
+    // expected length (one subject, for an expected length of 0), an expected length of 0 makes
+    // `y_variable` and `x_variable` 0 and the logarithm -inf, and a negative one makes them
+    // negative and the logarithm NaN; both convert to `INT_MIN`, so the big-gap cutoff is one more
+    // than `INT_MIN` (Rust's `as i32` would give 0 for NaN, a cutoff of 1).
     let cutoff = |x: f64| ncbi_int4_from_double((x.glibc_ln() / kbp.lambda).floor()) + 1;
     let (gap_prob, cutoff_small_gap, cutoff_big_gap) = if search_sp > 8 * window_size * window_size
     {

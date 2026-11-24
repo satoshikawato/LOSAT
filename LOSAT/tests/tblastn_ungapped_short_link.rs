@@ -1,7 +1,8 @@
 //! TBLASTN `-ungapped` (sum statistics with the even-gap linking) of a short query against one short
 //! subject (line RG item X-short-tbx-link). NCBI's expected length of the linking cutoffs is then 0
-//! (the logarithm of K times 4 times 4, over H, rounds to 0 for `WWWW` against 12 bases), and with
-//! one subject the database's length is the subject's, so `y_variable` and `x_variable` are 0, the
+//! (the logarithm of K times 3, NCBI's average query length of `WWWW`, times 4, the subject's 12
+//! bases in protein letters, over H, rounds to 0), and with one subject the database's length is
+//! the subject's, so `y_variable` and `x_variable` are 0, the
 //! logarithm is -inf and the big-gap cutoff is one more than `INT_MIN`; the linking's `Int4` sums
 //! (each score less the cutoff) overflow
 //! and NCBI BLAST+ 2.17.0 crashes in `BLAST_LinkHsps` (SIGSEGV, exit status 139, no output), as in

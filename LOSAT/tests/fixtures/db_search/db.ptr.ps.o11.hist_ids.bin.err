@@ -1,0 +1,4 @@
+Error: (802.5) [psiblast] CObjectOStream: error at byte 216: Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.inst.hist.replaces.ids.E: cannot write unassigned member NULL element while writing container 
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasnb.cpp", line 1244: Error: (CUnassignedMember::eWrite) ncbi::CObjectOStreamAsnBinary::WriteContainer() - byte 216: cannot write unassigned member NULL element while writing container  ( at Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.inst.hist.replaces.ids.[].[])
+

@@ -215,7 +215,8 @@ COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")
 # The caller's variables that `clean_env` drops besides NCBI*, BLAST* and LOSAT_* (each changes NCBI's result).
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
-            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG")
+            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG",
+            "SERIAL_VERIFY_DATA_WRITE")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`), the three that cut a query file into batches and chunks, and
@@ -223,7 +224,8 @@ TIMEOUT = 600
 # (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one), and
 # BL2SEQ_LEGACY (read for -subject only; a -db search ignores it), OLD_FSC (no Gumbel block, any value), and
 # ADAPTIVE_CBS (the larger preliminary hit list and its trim with composition-based statistics, any value),
-# and those of `PROCESS_SETTINGS`.
+# SERIAL_VERIFY_DATA_WRITE (whether NCBI's object streams check what they write: a list element stated as NULL,
+# the XML report's unset iterations; `ncbi_environment::WriteVerification`), and those of `PROCESS_SETTINGS`.
 # The variables of the `-html` formatter's configuration and of NCBI's registry files: FMTCFG (the name of the
 # formatter's configuration file in the run directory, default `.ncbirc`), NCBI (the directory of `$NCBI/<name>`
 # when the run directory has no such file, and of `$NCBI/.ncbirc`), GETURL_DEBUG (a `REGISTRY: <file>` line on
@@ -233,7 +235,7 @@ TIMEOUT = 600
 # of the file it reads to standard error.)
 PROCESS_SETTINGS = ("FMTCFG", "NCBI", "GETURL_DEBUG", "NCBI_DONT_USE_NCBIRC")
 ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
-             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS", *PROCESS_SETTINGS)
+             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS", "SERIAL_VERIFY_DATA_WRITE", *PROCESS_SETTINGS)
 # The tokens whose value is a path relative to LOSAT/, given to the programs relative to the run directory of a
 # `cwd=` row (`rebased`). FMTCFG's value is a name in the run directory, as NCBI reads it, and stays as it is.
 PATH_ENV_NAMES = ("BLASTDB", "NCBI")
@@ -1293,11 +1295,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # An RPS row runs with BLASTDB the inflated database (`inflate_rps`), its files rows as any other.
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
 
-    def in_losat_words(ncbi: bytes, output: bool = True) -> bytes:
-        """NCBI's frozen bytes in LOSAT's words (AGENTS.md rule 8, `losat_wording`). A row that keeps the
-        database's directory as `{db_dir}` is mapped with this run's directory in the token's place, as
-        NCBI's run wrote it: the mapping re-wraps an ASN.1 text string by its length."""
-        words = losat_wording.losat_output_bytes if output else losat_wording.losat_bytes
+    def in_losat_words(ncbi: bytes) -> bytes:
+        """NCBI's frozen bytes (standard output or error) in LOSAT's words (AGENTS.md rule 8,
+        `losat_wording.losat_output_bytes`: standard error's posts of a binary archive's stream move with the
+        archive's longer `ident`). A row that keeps the database's directory as `{db_dir}` is mapped with this
+        run's directory in the token's place, as NCBI's run wrote it: the mapping re-wraps an ASN.1 text string
+        by its length."""
+        words = losat_wording.losat_output_bytes
         if db_dir is None or not rps_dir_token(row):
             return words(ncbi)
         path = str(db_dir).encode()
@@ -1353,7 +1357,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
     expected_out_losat = in_losat_words(out)
-    expected_err_losat = in_losat_words(err, output=False)
+    expected_err_losat = in_losat_words(err)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \

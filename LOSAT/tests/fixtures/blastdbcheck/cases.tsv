@@ -1,0 +1,183 @@
+# id	dir	env	seed	args   (dir = case dir under cases/ that is the cwd; env = extra variables or -; seed = FIXTIME for rows whose output depends on it, else -; args = bash words, single quotes only; <RUN> = run directory)
+help	nt	-	-	-help
+xmlhelp	nt	-	-	-xmlhelp
+noargs	nt	-	-	
+nt_p5	nt	-	-	-db ../../in/p5
+nt_p5_v3	nt	-	-	-db ../../in/p5 -verbosity 3
+t_p5	t	-	-	-db ../../in/p5
+t_p5_v2_full	t	-	-	-db ../../in/p5 -full
+t_p5_v0	t	-	-	-db ../../in/p5 -verbosity 0
+t_p5_v1	t	-	-	-db ../../in/p5 -verbosity 1
+t_p5_v3	t	-	-	-db ../../in/p5 -verbosity 3
+t_p5_v4	t	-	-	-db ../../in/p5 -verbosity 4
+t_p5_full_v4	t	-	-	-db ../../in/p5 -verbosity 4 -full
+t_p4_full_v4	t	-	-	-db ../../in/p4 -verbosity 4 -full
+t_n5_full_v4	t	-	-	-db ../../in/n5 -verbosity 4 -full
+t_n4_full_v4	t	-	-	-db ../../in/n4 -verbosity 4 -full
+t_pmv_full_v4	t	-	-	-db ../../in/pmv -verbosity 4 -full
+t_dir_v4	t	-	-	-dir ../../in -verbosity 4
+t_abs_p5	t	-	-	-db <RUN>/in/p5 -verbosity 3
+logfile	t	-	-	-db ../../in/p5 -logfile lf.txt
+arg_db_dir	t	-	-	-db ../../in/p5 -dir ../../in
+arg_full_random	t	-	-	-db ../../in/p5 -full -random 3
+arg_v5	t	-	-	-db ../../in/p5 -verbosity 5
+arg_vneg	t	-	-	-db ../../in/p5 -verbosity -1
+arg_dbtype	t	-	-	-db ../../in/p5 -dbtype foo
+arg_db_empty	t	-	-	-db ''
+arg_dir_empty	t	-	-	-dir ''
+arg_rec_only	t	-	-	-recursive
+arg_rec_db	t	-	-	-recursive -db ../../in/p5
+arg_stride_x	t	-	-	-db ../../in/p5 -stride x
+arg_unknown	t	-	-	-db ../../in/p5 -foo
+arg_v4_v0	t	-	-	-db ../../in/p5 -verbosity 0 -verbosity 4
+arg_h	t	-	-	-h
+rnd0	t	-	-	-db ../../in/p5 -random 0 -verbosity 4
+rndneg	t	-	-	-db ../../in/p5 -random -2 -verbosity 4
+ends2	t	-	-	-db ../../in/p5 -ends 2 -verbosity 4
+ends0	t	-	-	-db ../../in/p5 -ends 0 -verbosity 4
+endsneg	t	-	-	-db ../../in/p5 -ends -1 -verbosity 4
+ends20	t	-	-	-db ../../in/p5 -ends 20 -verbosity 4
+stride3	t	-	-	-db ../../in/p5 -stride 3 -verbosity 4
+stride20	t	-	-	-db ../../in/p5 -stride 20 -verbosity 4
+combo	t	-	1700000000	-db ../../in/p5 -stride 4 -random 2 -ends 1 -verbosity 4
+noisam	t	-	-	-db ../../in/p5 -no_isam -full -verbosity 4
+taxids_p5	t	-	-	-db ../../in/p5 -must_have_taxids -full -verbosity 4
+taxids_q5	t	-	-	-db ../../in/q5 -must_have_taxids -full -verbosity 4
+taxids_p4	t	-	-	-db ../../in/p4 -must_have_taxids -full -verbosity 4
+cdd	t	-	-	-db ../../in/p5 -cdd_delta -verbosity 4
+legacy	leg_ptm	-	-	-db p5 -legacy -verbosity 4
+legacy_atm	leg_atm	-	-	-db p5 -legacy -verbosity 4
+nolegacy	leg_zzz	-	-	-db p5 -verbosity 3
+legacy_ab	leg_ab	-	-	-db p5 -legacy -verbosity 4
+fx_rnd3a	t	-	1700000000	-db ../../in/p5 -random 3 -verbosity 4
+fx_rnd3b	t	-	1700000000	-db ../../in/p5 -random 3 -verbosity 4
+fx_dir2	t	-	1234567	-dir ../../in -random 2 -verbosity 4
+d_p4_no_pni	d_p4_no_pni	-	-	-db p4 -full -verbosity 4
+d_p4_no_psi	d_p4_no_psi	-	-	-db p4 -full -verbosity 4
+d_p4_no_psq	d_p4_no_psq	-	-	-db p4 -full -verbosity 4
+d_p4_no_phr	d_p4_no_phr	-	-	-db p4 -full -verbosity 4
+d_p4_no_pin	d_p4_no_pin	-	-	-db p4 -full -verbosity 4
+d_p4_pin_10	d_p4_pin_10	-	-	-db p4 -full -verbosity 4
+d_p4_pin_cut	d_p4_pin_cut	-	-	-db p4 -full -verbosity 4
+d_p4_pin_ver7	d_p4_pin_ver7	-	-	-db p4 -full -verbosity 4
+d_p4_pin_nucl	d_p4_pin_nucl	-	-	-db p4 -full -verbosity 4
+d_p4_psq_half	d_p4_psq_half	-	-	-db p4 -full -verbosity 4
+d_p4_phr_half	d_p4_phr_half	-	-	-db p4 -full -verbosity 4
+d_p4_phr_flip	d_p4_phr_flip	-	-	-db p4 -full -verbosity 4
+d_p4_psq_zero	d_p4_psq_zero	-	-	-db p4 -full -verbosity 4
+d_p4_pnd_cut	d_p4_pnd_cut	-	-	-db p4 -full -verbosity 4
+d_p4_psd_cut	d_p4_psd_cut	-	-	-db p4 -full -verbosity 4
+d_p4_date	d_p4_date	-	-	-db p4 -full -verbosity 4
+d_p4_totlen0	d_p4_totlen0	-	-	-db p4 -full -verbosity 4
+d_p4_zero_oids	d_p4_zero_oids	-	-	-db p4 -full -verbosity 4
+d_p5_no_pdb	d_p5_no_pdb	-	-	-db p5 -full -verbosity 3
+d_p5_pdb_cut	d_p5_pdb_cut	-	-	-db p5 -full -verbosity 3
+d_p5_no_pos	d_p5_no_pos	-	-	-db p5 -full -verbosity 3
+d_p5_no_pot	d_p5_no_pot	-	-	-db p5 -full -verbosity 3
+d_p5_no_ptf	d_p5_no_ptf	-	-	-db p5 -full -verbosity 3
+d_p5_no_pni	d_p5_no_pni	-	-	-db p5 -full -verbosity 3
+d_p5_no_pog	d_p5_no_pog	-	-	-db p5 -full -verbosity 3
+d_p5_pin_cut	d_p5_pin_cut	-	-	-db p5 -full -verbosity 3
+d_p5_psq_zero	d_p5_psq_zero	-	-	-db p5 -full -verbosity 3
+d_p5_date	d_p5_date	-	-	-db p5 -full -verbosity 3
+d_p5_zero_oids	d_p5_zero_oids	-	-	-db p5 -full -verbosity 3
+t_no_9606	t_no_9606	-	-	-db p5 -full -verbosity 3
+t_empty_fields	t_empty_fields	-	-	-db p5 -full -verbosity 3
+t_tabs0	t_tabs0	-	-	-db p5 -full -verbosity 3
+t_high_bytes_utf8	t_high_bytes_utf8	-	-	-db p5 -full -verbosity 3
+t_bad_magic	t_bad_magic	-	-	-db p5 -full -verbosity 3
+t_none	t_none	-	-	-db p5 -full -verbosity 3
+d_p4_zero_oids_rnd	d_p4_zero_oids	-	-	-db p4 -verbosity 4
+d_p5_zero_oids_rnd	d_p5_zero_oids	-	-	-db p5 -verbosity 4
+t_bad_magic_lf	t_bad_magic	-	-	-db p5 -verbosity 3 -logfile lf.txt
+t_bad_magic_dir	t_bad_magic	-	-	-dir . -verbosity 1
+d_n4_nsq_half	d_n4_nsq_half	-	-	-db n4 -full -verbosity 4
+d_n5_no_ndb	d_n5_no_ndb	-	-	-db n5 -full -verbosity 3
+d_pmv_no_01pin	d_pmv_no_01pin	-	-	-db pmv -full -verbosity 3
+d_pmv_no_01pin_dir	d_pmv_no_01pin	-	-	-dir . -full -verbosity 3
+d_pmv_no_pal	d_pmv_no_pal	-	-	-db pmv -full -verbosity 3
+d_pmv_no_pal_dir	d_pmv_no_pal	-	-	-dir . -verbosity 3
+a_unk	a	-	-	-db unk -verbosity 3 -stride 100
+a_novalue	a	-	-	-db novalue -verbosity 3 -stride 100
+a_nseq	a	-	-	-db nseq -verbosity 3 -stride 100
+a_nseqbig	a	-	-	-db nseqbig -verbosity 3 -stride 100
+a_lenbig	a	-	-	-db lenbig -verbosity 3 -stride 100
+a_lenbad	a	-	-	-db lenbad -verbosity 3 -stride 100
+a_membx	a	-	-	-db membx -verbosity 3 -stride 100
+a_first	a	-	-	-db first -verbosity 3 -stride 100
+a_lastonly	a	-	-	-db lastonly -verbosity 3 -stride 100
+a_fl_bad	a	-	-	-db fl_bad -verbosity 3 -stride 100
+a_fl_ok	a	-	-	-db fl_ok -verbosity 3 -stride 100
+a_fl_nonseq	a	-	-	-db fl_nonseq -verbosity 3 -stride 100
+a_oidgi	a	-	-	-db oidgi -verbosity 3 -stride 100
+a_oidnomax	a	-	-	-db oidnomax -verbosity 3 -stride 100
+a_giext	a	-	-	-db giext -verbosity 3 -stride 100
+a_gizero	a	-	-	-db gizero -verbosity 3 -stride 100
+a_gimiss	a	-	-	-db gimiss -verbosity 3 -stride 100
+a_taxmiss	a	-	-	-db taxmiss -verbosity 3 -stride 100
+a_comments	a	-	-	-db comments -verbosity 3 -stride 100
+a_crlf	a	-	-	-db crlf -verbosity 3 -stride 100
+a_nodblist	a	-	-	-db nodblist -verbosity 3 -stride 100
+a_missdb	a	-	-	-db missdb -verbosity 3 -stride 100
+a_nucl	a	-	-	-db nucl -verbosity 3 -stride 100
+a_empty	a	-	-	-db empty -verbosity 3 -stride 100
+a_dir	a	-	-	-dir . -verbosity 3 -stride 100
+a_dir_v1	a	-	-	-dir . -verbosity 1 -stride 100
+r_empty	r_empty	-	-	-dir . -verbosity 4
+r_nodir	r_empty	-	-	-dir nosuchdir -verbosity 4
+r_file	r_empty	-	-	-dir taxdb.bti -verbosity 4
+r_garbage	r_garbage	-	-	-dir . -verbosity 3
+r_tree	r_tree	-	-	-dir . -verbosity 3
+r_tree_rec	r_tree	-	-	-dir . -recursive -verbosity 3
+r_tree_rec_prot	r_tree	-	-	-dir . -recursive -dbtype prot -verbosity 3
+r_tree_rec_nucl	r_tree	-	-	-dir . -recursive -dbtype nucl -verbosity 3
+r_tree_slash	r_tree	-	-	-dir ./sub/ -verbosity 3
+r_space	r_space	-	-	-dir . -verbosity 3
+r_space_db	r_space	-	-	-db '"my p5"' -verbosity 3
+r_symlink	r_symlink	-	-	-db p5 -verbosity 3
+r_symlink_dir	r_symlink	-	-	-dir . -verbosity 3
+m_two	t	-	-	-db '../../in/p5 ../../in/n5' -verbosity 4 -ends 1
+m_dup	t	-	-	-db '../../in/p5 ../../in/p5' -verbosity 3
+m_nosuch	t	-	-	-db nosuch -verbosity 3
+m_p5_nosuch	t	-	-	-db '../../in/p5 nosuch' -verbosity 3
+m_n5_prot	t	-	-	-db ../../in/n5 -dbtype prot -verbosity 3
+m_p5_prot	t	-	-	-db ../../in/p5 -dbtype prot -verbosity 3
+m_vol	t	-	-	-db ../../in/pmv.01 -verbosity 4 -full
+m_pvm_v4	t	-	-	-db ../../in/pvm -verbosity 4 -full
+m_dir_nucl	t	-	-	-dir ../../in -dbtype nucl -verbosity 3
+m_bad_lf	t	-	-	-db ../../in/p5 -logfile /nonexistent/dir/lf.txt
+c_ok	c_ok	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_nowc	c_nowc	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_noaux	c_noaux	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_nofreq	c_nofreq	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_freqmagic	c_freqmagic	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_wcn	c_wcn	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_wcoff	c_wcoff	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_obsr28	c_obsr28	-	-	-db db -cdd_delta -verbosity 3 -ends 1
+c_two	c_two	-	-	-dir . -cdd_delta -verbosity 3 -ends 1
+c_two_v4	c_two	-	-	-db 'b2 a1' -cdd_delta -verbosity 3 -ends 1
+c_ok_v1	c_ok	-	-	-db db -cdd_delta -verbosity 1
+ord4	ord	-	-	-db o4 -full -verbosity 4
+ord5	ord	-	-	-db o5 -full -verbosity 4
+ca5	ca	-	-	-db ca5 -full -verbosity 4 -must_have_taxids
+ca4	ca	-	-	-db ca4 -full -verbosity 4 -must_have_taxids
+pp_p5_no_pdb	d_p5_no_pdb	-	-	-db p5 -dbtype prot -verbosity 3
+pp_p5_pdb_cut	d_p5_pdb_cut	-	-	-db p5 -dbtype prot -verbosity 3
+pp_p4_ver7	d_p4_pin_ver7	-	-	-db p4 -dbtype prot -verbosity 3
+pp_r_space	r_space	-	-	-dir . -dbtype prot -verbosity 3
+lf0	t_bad_magic	-	-	-db p5 -verbosity 0 -logfile lf0.txt
+lf1	t_bad_magic	-	-	-db p5 -verbosity 1 -logfile lf1.txt
+stride0	t	-	-	-db ../../in/p5 -stride 0 -verbosity 4
+strideneg	t	-	-	-db ../../in/p5 -stride -1 -verbosity 4
+d_p4_pnd_swap	d_p4_pnd_swap	-	-	-db p4 -full -verbosity 4
+r_link_db	r_tree	-	-	-db link_to_deep/n4 -verbosity 3
+nest	nest	-	-	-db top -verbosity 3 -ends 1
+a_giabs	a	-	-	-db giabs -verbosity 3 -stride 100
+r_garbage2	r_garbage2	-	-	-dir . -verbosity 3
+a_ov1	a	-	-	-db ov1 -verbosity 3 -stride 100
+a_ov2	a	-	-	-db ov2 -verbosity 3 -stride 100
+a_ov3	a	-	-	-db ov3 -verbosity 3 -stride 100
+a_signs	a	-	-	-db signs -verbosity 3 -stride 100
+m_pvm01	t	-	-	-db ../../in/pvm.01 -full -verbosity 4
+m_blastdb_rel	t	BLASTDB=../../in	-	-db p5 -verbosity 3
+m_blastdb_pmv	t	BLASTDB=../../in	-	-db pmv -verbosity 3

@@ -20,6 +20,7 @@ fn tool(program: &'static str) -> Tool {
         "windowmasker" => include_str!("../windowmasker/help.txt"),
         "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
         "blastdb_aliastool" => include_str!("../blastdb_aliastool/help.txt"),
+        "blastdbcheck" => include_str!("../blastdbcheck/help.txt"),
         _ => "",
     };
     Tool {
@@ -36,7 +37,7 @@ fn tool(program: &'static str) -> Tool {
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 8] = [
+const ON_THE_READER: [&str; 9] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
@@ -45,6 +46,7 @@ const ON_THE_READER: [&str; 8] = [
     "windowmasker",
     "makeprofiledb",
     "blastdb_aliastool",
+    "blastdbcheck",
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
@@ -283,15 +285,17 @@ fn every_argument_of_the_xml_is_in_its_table() {
         }
     }
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
-    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid) and
-    // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype).
-    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3);
+    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid),
+    // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype) and blastdbcheck's 2 (-dbtype,
+    // -verbosity).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3 + 2);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
     // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
-    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other) and blastdb_aliastool's 178
-    // (26 requirements, 76 exclusions each in both directions).
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other), blastdb_aliastool's 178
+    // (26 requirements, 76 exclusions each in both directions) and blastdbcheck's 10 (exclusions:
+    // -db with -dir and -recursive, -full with -stride, -random and -ends, each both ways).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178 + 10);
 }
 
 /// Which class a constraint is.
@@ -850,6 +854,7 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
         "windowmasker",
         "rpsbproc",
         "blastdb_aliastool",
+        "blastdbcheck",
     ] {
         assert!(!rows.iter().any(|row| row.0 == program), "{program}");
     }

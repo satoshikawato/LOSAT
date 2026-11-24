@@ -948,19 +948,12 @@ impl Drop for Core {
     }
 }
 
-/// The process's standard output as the command line's report device: unbuffered (a duplicate of
-/// its descriptor), so that each write is one write of the device and the bytes that a failed
-/// write left are known (`Core::write_failed`; `std::io::Stdout` keeps a line's tail until its
-/// flush and counts it as taken). Where the descriptor cannot be duplicated, `std::io::stdout`.
+/// The process's standard output as the command line's report device: the command line's one
+/// unbuffered device of it (`cli::standard_output`), so that each write is one write of the device
+/// and the bytes that a failed write left are known (`Core::write_failed`; `std::io::Stdout` keeps
+/// a line's tail until its flush and counts it as taken).
 fn standard_output_device() -> Box<dyn std::io::Write + Send> {
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsFd;
-        if let Ok(fd) = std::io::stdout().as_fd().try_clone_to_owned() {
-            return Box::new(std::fs::File::from(fd));
-        }
-    }
-    Box::new(std::io::stdout())
+    Box::new(crate::cli::standard_output())
 }
 
 /// The run's report stream, which a write to standard error makes NCBI's writes of first
@@ -1374,26 +1367,6 @@ impl<W: ReportWrite> ReportWrite for std::io::BufWriter<W> {
 
 /// A buffer of the report's bytes (a piece formatted before it is written).
 impl ReportWrite for Vec<u8> {}
-
-/// A writer that takes no region or flush of NCBI's (`ReportWrite`'s defaults): the destination of
-/// a report part that declares none (`query_warnings::write_marked`).
-pub struct Unregioned<'a>(pub &'a mut dyn std::io::Write);
-
-impl std::io::Write for Unregioned<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.write(buf)
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.0.write_all(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
-    }
-}
-
-impl ReportWrite for Unregioned<'_> {}
 
 /// What NCBI's formatter does at an offset of a part of the report that LOSAT formats into a
 /// buffer before it writes it (`Cuts`).

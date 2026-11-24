@@ -2273,8 +2273,9 @@ pub fn run(
 }
 
 /// The error archive of a run that stopped in `Run` before its output was opened (the taxid or
-/// seqid list, the files of `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
-/// cannot be opened (NCBI's call swallows that).
+/// seqid list, the files of `-subject` and `-query`, the subjects): into the run's report stream
+/// (`-out`, or standard output), as the other programs write it; nothing when `-out` cannot be
+/// opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &BlastxArgs,
     archive: Option<&crate::report::archive::ArchiveHandle>,
@@ -2290,22 +2291,18 @@ fn write_run_error_archive(
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };
-    let destination: Option<Box<dyn Write>> =
-        match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-            Some(path) => crate::cli::create_out_file(path, None)
-                .ok()
-                .map(|file| Box::new(file) as Box<dyn Write>),
-            None => Some(Box::new(io::stdout().lock())),
-        };
-    if let Some(mut destination) = destination {
-        let _ = crate::report::archive::write_error_archive_after_post(
-            handle,
-            error,
-            &lines,
-            &mut crate::report::ostream::Unregioned(&mut destination),
-        );
-        let _ = destination.flush();
-    }
+    let out_file = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
+        Some(path) => match crate::cli::create_out_file(path, None) {
+            Ok(file) => Some(file),
+            Err(_) => return,
+        },
+        None => None,
+    };
+    let mut report =
+        crate::cli::ReportStream::of_cli(out_file, args.program().lower, &args.outfmt, None);
+    let _ =
+        crate::report::archive::write_error_archive_after_post(handle, error, &lines, &mut report);
+    let _ = report.finish(Ok(()));
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:989-1013
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2196-2217

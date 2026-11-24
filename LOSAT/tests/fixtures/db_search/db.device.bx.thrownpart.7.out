@@ -1,0 +1,6 @@
+# BLASTX 2.17.0+
+# Query: mix2_u qp1 of ids/noacc_v5 back-translated
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject length, evalue
+# 1 hits found
+mix2_

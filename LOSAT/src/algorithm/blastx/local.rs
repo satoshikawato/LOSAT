@@ -343,7 +343,11 @@ fn scan_xml_titles(
         structured.contains(&5),
         "BLASTX",
     )
-    .map(|scopes| scopes.with_refusal(scope_refusal.cloned()));
+    .map(|scopes| {
+        scopes
+            .with_refusal(scope_refusal.cloned())
+            .with_xml_matrix_failure(xml_matrix)
+    });
     let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
     // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
@@ -517,6 +521,7 @@ fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> R
         later_warnings,
         hits: hits_sink,
         observer,
+        html_posts,
     } = outputs;
     let mut later = later_warnings.as_deref_mut().filter(|_| keeps_later);
     // The caller's receivers of the side files of outfmt 13 and 14.
@@ -588,6 +593,7 @@ fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> R
         wants_hits,
         only_archive,
         diagnostics,
+        html_posts,
         &mut later,
         observer,
         other_outfmts,
@@ -649,7 +655,9 @@ impl Write for SharedWarnings<'_> {
 /// `later`: by format, the receivers of the queries' warnings that the first format does not write
 /// (a structured format): each later format that writes them writes its own there, as the
 /// command line's run of it writes them to standard error (`ReportOutputs::later_warnings`).
-/// Returns the run's hit list (`wants_hits`) and the database sequences it names.
+/// `html_posts`: where the `-html` reports' posts go apart from `diagnostics`
+/// (`ReportOutputs::html_posts`). Returns the run's hit list (`wants_hits`) and the database
+/// sequences it names.
 #[allow(clippy::too_many_arguments)]
 fn write_run(
     run: &RunReports<'_>,
@@ -660,6 +668,7 @@ fn write_run(
     wants_hits: bool,
     only_archive: bool,
     diagnostics: &mut &mut (dyn Write + Send),
+    html_posts: &mut Option<&mut (dyn Write + Send)>,
     later: &mut Option<&mut [Vec<u8>]>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
     other_outfmts: &[&str],
@@ -688,6 +697,14 @@ fn write_run(
         xml_matrix,
         ..
     } = run;
+    // The query whose batch the run's XML failure stops, of the scopes read ahead
+    // (`QueryScopes::xml_failing_query`).
+    let xml_matrix = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            read_ahead_scopes.as_ref(),
+            failure,
+        )
+    });
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5 and
     // 13 to 16 the read before the search made them (`scan_xml_titles`, `QueryScopes::read_ahead`),
     // whose refusal comes where the loop takes its batch; else the batches add theirs where the loop
@@ -709,18 +726,34 @@ fn write_run(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
         let mut quiet = io::sink();
-        let warnings: &mut dyn Write = if index == 0 {
-            &mut **diagnostics
+        // A later format's `-html` prolog posts its references' reads as a run of it alone
+        // (`report::write_prolog`'s `html_posts`; line RG T4a2 fix round 2, review c C3).
+        let (warnings, posts): (&mut dyn Write, Option<&mut dyn Write>) = if index == 0 {
+            (
+                &mut **diagnostics,
+                html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn Write),
+            )
         } else {
-            &mut quiet
+            let posts = crate::report::query_warnings::html_posts_sink(
+                html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn Write),
+                &mut **diagnostics,
+            );
+            (&mut quiet, Some(posts))
         };
-        report::write_prolog(writer, warnings, options, subjects, &shown).map_err(report_error)?;
+        report::write_prolog(writer, warnings, posts, options, subjects, &shown)
+            .map_err(report_error)?;
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
             writer.write_all(&start).map_err(output_error)?;
         }
-        writer.flush().map_err(output_error)?;
+        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
+            writer.flush().map_err(output_error)?;
+        }
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -804,6 +837,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
+                &mut *diagnostics,
             )?,
             None => None,
         };
@@ -840,6 +874,7 @@ fn write_run(
                         .map_or(subjects, ReportedSubjects::records),
                     &batch_shown(database.as_ref(), reported.as_ref(), shown),
                     results,
+                    None,
                 )
                 .map_err(report_error)?,
             ),
@@ -900,11 +935,23 @@ fn write_run(
                 diagnostics: &mut *diagnostics,
                 wrote: false,
             };
-            let warnings: &mut dyn Write = match (warns || seq_annot, own_later) {
-                (true, _) => &mut shared,
-                (false, Some(later)) => later,
-                _ => &mut quiet,
-            };
+            // A `-html` report's posts of its reads of NCBI's formatter registries are what a run
+            // of its format alone posts, at any place among the formats, as in the other four
+            // programs (`query_warnings::report_posts`): the diagnostics also where a later
+            // format's standard error goes to its receiver or nowhere (line RG T4a2 fix round 2,
+            // review c C3 = review d D5), or the call's receiver of them
+            // (`ReportOutputs::html_posts`).
+            let mut caller_posts = html_posts
+                .as_deref_mut()
+                .map(|posts| posts as &mut dyn Write);
+            let (warnings, report_posts): (&mut dyn Write, Option<&mut dyn Write>) =
+                match (warns || seq_annot, own_later) {
+                    (true, _) => (&mut shared, caller_posts.take()),
+                    (false, Some(later)) => {
+                        (later, Some(caller_posts.take().unwrap_or(&mut shared)))
+                    }
+                    _ => (&mut quiet, Some(caller_posts.take().unwrap_or(&mut shared))),
+                };
             // The values of a custom tabular field list are each format's (`reported_batch`
             // read the first format's).
             if let (Some(run), Some(reported), Some(spec), true) =
@@ -978,6 +1025,8 @@ fn write_run(
                     first_hsp,
                     hits: hits.as_deref(),
                     refusal,
+                    report: index,
+                    html_posts: report_posts,
                 }),
             )
             .map_err(report_error)
@@ -1436,6 +1485,7 @@ fn check_resolutions(
         app::formatting_handler_check(choice, Program::Blastx)?;
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
+    let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,
@@ -1447,7 +1497,11 @@ fn check_resolutions(
     diagnostics.write_all(&warnings)?;
     resolutions
         .into_iter()
-        .map(|resolution| resolution.map_err(options_error))
+        .map(|resolution| {
+            let mut options = resolution.map_err(options_error)?;
+            options.html = html.clone();
+            Ok(options)
+        })
         .collect()
 }
 

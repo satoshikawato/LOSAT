@@ -49,7 +49,7 @@
 //!    - stale values of earlier frames or chunks: `Blast_ExtendWordExit` moves D past every old
 //!      value (`D += len + window`, blast_extend.c:162-173), so `last_hit - D <= -window - 1`
 //!      (flag 0: too far) or `last_hit < s + D` (flag 1: reset). After the reset at
-//!      D >= INT4_MAX/4 every cell is `-window` (`s_BlastDiagClear`, blast_extend.c:87-104) with
+//!      `D` at or above `INT4_MAX` divided by 4, every cell is `-window` (`s_BlastDiagClear`, blast_extend.c:87-104) with
 //!      D = window: `last_hit - D = -2 window`, too far. The value is read through the
 //!      sign-extending `DiagStruct::last_hit` (round-1 bug: `-window` read as `2^31 - window`).
 //!    - cross-sentinel diagonals: one raw diagonal can run from context c into c+1 (q grows with
@@ -1544,13 +1544,19 @@ impl XGroup {
     }
 }
 
-/// One unit: subject frame `f`, its chunk number `k`, context group `g`.
+/// One unit: subject frame `f`, its chunk number `k`, context group `g` (`XPairPar::x_unit`).
 #[derive(Clone, Copy)]
 pub(super) struct XUnit {
     f: usize,
     k: usize,
     chunk: SubjectChunk,
     g: usize,
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): whether the frame `f` may take the walks the sentinels
+    /// stop (`x_tbx_sent_frame`: the batch's contexts allow them and every byte of the frame's
+    /// buffer is a key's). That check reads the whole buffer, so `x_unit` finds it once for each
+    /// chunk where the units are listed (`run_subject_units`), not in every unit's
+    /// `x_unit_sent`.
+    sent_frame: bool,
 }
 
 /// Per-thread scratch of the units: the offset pairs and the unit diagonal table.
@@ -2265,14 +2271,10 @@ impl<M: TbxScore> XPairPar<M> {
                 if chunk.length < inp.wordsize as usize {
                     continue;
                 }
+                let first = self.x_unit(inp, f, k, *chunk, 0);
                 for g in 0..self.x_group_count() {
                     if self.x_group_has_entries(g) {
-                        units.push(XUnit {
-                            f,
-                            k,
-                            chunk: *chunk,
-                            g,
-                        });
+                        units.push(XUnit { g, ..first });
                     }
                 }
             }
@@ -2491,11 +2493,9 @@ impl<M: TbxScore> XPairPar<M> {
                     if seq_ranges.is_empty() {
                         continue;
                     }
-                    // [C] scan_range[0] = 0;
-                    // [C] scan_range[1] = subject->seq_ranges[0].left;
-                    // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
+                    // Initialize `scan_range` to range index 0, start offset, and last word position.
                     let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-                    // [C] while (scan_range[1] <= scan_range[2])
+                    // Scan batches until the current subject offset advances past the end bound.
                     while scan_range[1] <= scan_range[2] {
                         if !x_unit_batch::<S, XNoProbe, XUnmasked, _, false, false, 0>(
                             table,
@@ -3038,14 +3038,33 @@ impl<M: TbxScore> XPairPar<M> {
         );
     }
 
+    /// The unit of the context group `g` on the chunk `k` (`chunk`) of the subject frame `f`.
+    pub(super) fn x_unit(
+        &self,
+        inp: &XSubject<'_>,
+        f: usize,
+        k: usize,
+        chunk: SubjectChunk,
+        g: usize,
+    ) -> XUnit {
+        let sent_frame = x_tbx_sent_frame(self.sent, &inp.s_frames_preliminary[f].aa_seq);
+        XUnit {
+            f,
+            k,
+            chunk,
+            g,
+            sent_frame,
+        }
+    }
+
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): never on wasm32 (line W keeps its walks there).
-    /// Whether the extensions of `unit` take the walks the sentinels stop: the batch's contexts
-    /// allow them (`sent`) and the unit's chunk is its whole subject frame.
+    /// Whether the extensions of `unit` take the walks the sentinels stop: its frame may
+    /// (`XUnit::sent_frame`) and the unit's chunk is its whole subject frame.
     #[inline(always)]
     pub(super) fn x_unit_sent(&self, unit: &XUnit, inp: &XSubject<'_>) -> bool {
         cfg!(not(target_arch = "wasm32"))
             && x_tbx_sent_subject(
-                self.sent,
+                unit.sent_frame,
                 &inp.s_frames_preliminary[unit.f].aa_seq,
                 unit.chunk.offset,
                 unit.chunk.length,
@@ -3160,11 +3179,9 @@ impl<M: TbxScore> XPairPar<M> {
             if seq_ranges.is_empty() {
                 continue;
             }
-            // [C] scan_range[0] = 0;
-            // [C] scan_range[1] = subject->seq_ranges[0].left;
-            // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
+            // Initialize `scan_range` to range index 0, start offset, and last word position.
             let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-            // [C] while (scan_range[1] <= scan_range[2])
+            // Scan batches until the current subject offset advances past the end bound.
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
                 if !x_unit_batch::<S, P, C, _, PF, BF, SENT>(
@@ -3224,7 +3241,7 @@ fn x_unit_batch<
     probe: &mut P,
 ) -> bool {
     let prev_scan_left = scan_range[1];
-    // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // Scan the next batch of subject word hits via `scansub` into `offset_pairs`.
     // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
     let hits = group.scan(
         subject,
@@ -3270,7 +3287,7 @@ fn x_unit_batch<
         probe.batch_end();
         return true;
     }
-    // [C] for (i = 0; i < hits; ++i)
+    // Process each hit returned in this batch in scan order.
     for i in 0..hits as usize {
         // EXPERIMENT (LOSAT_X_TBXPREFETCH): the cell of the hit X_PREFETCH_AHEAD
         // entries ahead, computed as below. A prefetch never faults and has no
@@ -3293,7 +3310,7 @@ fn x_unit_batch<
         let pair = unsafe { &*offset_pairs_ptr.add(i) };
         let query_offset = pair.q_off;
         let subject_offset = pair.s_off;
-        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
         // Unit cell: the raw diagonal minus the unit's lowest one (`XUnmasked`: no mask;
         // LOSAT_X_TBXUNITMASK's `XMasked`: masked to the table).
         let diag_coord = cells.cell(query_offset, subject_offset);
@@ -3340,38 +3357,38 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
     let diag_offset = &h.diag_offset;
     let window = h.window;
     let wordsize = h.wordsize;
-    // [C] if (diag_array[diag_coord].flag)
+    // When the diagonal's `flag` is set, skip hits covered by a prior right extension.
     if diag_entry.flag() != 0 {
-        // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
+        // Skip the hit if the offset-adjusted subject position precedes `last_hit`
+        // (signed `Int4` comparison in NCBI; Rust compares unsigned).
         let subject_plus_offset = subject_offset.wrapping_add(*diag_offset as u32);
         if subject_plus_offset < diag_entry.last_hit() as u32 {
             return XHit::Masked;
         }
-        // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
-        // [C] diag_array[diag_coord].flag = 0;
+        // Otherwise record the new offset-adjusted `last_hit` and clear `flag`.
         diag_entry.set_last_hit(subject_plus_offset as i32);
         diag_entry.set_flag(0);
         XHit::FlagReset
     }
-    // [C] else
+    // Diagonal flag is clear: test distance from the previous hit.
     else {
-        // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
+        // Recover the previous hit's subject offset by subtracting `diag_offset`.
         let last_hit = diag_entry.last_hit() - *diag_offset;
-        // [C] diff = subject_offset - last_hit;
+        // Compute the subject distance from `last_hit` to `subject_offset`.
         let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
 
-        // [C] if (diff >= window)
+        // Outside the two-hit window: record this hit as the new `last_hit` and return.
         if diff >= window {
             diag_entry.set_last_hit(subject_offset.wrapping_add(*diag_offset as u32) as i32);
             return XHit::TooFar;
         }
 
-        // [C] if (diff < wordsize)
+        // Overlapping word hit: ignore without updating `last_hit`.
         if diff < wordsize {
             return XHit::Overlap;
         }
 
-        // [C] curr_context = BSearchContextInfo(query_offset, query_info);
+        // Look up the query context containing `query_offset` (as `BSearchContextInfo`).
         let ctx_idx = h.context_of(query_offset);
         // SAFETY: context_of returns an index below num_contexts == contexts.len().
         let ctx = unsafe { h.contexts.get_unchecked(ctx_idx) };
@@ -3379,20 +3396,20 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
         let query_full = &ctx.aa_seq;
         let query = &query_full[1..query_full.len() - 1];
 
-        // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
+        // Reject hits whose earlier partner lies before the start of the current query context.
         let q_minus_diff = query_offset.wrapping_sub(diff as u32);
         if q_minus_diff < ctx.frame_base as u32 {
             diag_entry.set_last_hit(subject_offset.wrapping_add(*diag_offset as u32) as i32);
             return XHit::ContextBoundary;
         }
 
-        // [C] cutoffs = word_params->cutoffs + curr_context;
+        // Load the score cutoff and X-dropoff parameters for the current query context.
         // SAFETY: ctx_idx < contexts.len() == cutoff_scores.len() == x_dropoff_per_context.len().
         let cutoff = unsafe { *h.cutoff_scores.get_unchecked(ctx_idx) };
         let x_dropoff = unsafe { *h.x_dropoff_per_context.get_unchecked(ctx_idx) };
 
-        // [C] score = s_BlastAaExtendTwoHit(matrix, subject, query,
-        //                                   last_hit + wordsize, subject_offset, query_offset, ...)
+        // Run two-hit ungapped extension (as `s_BlastAaExtendTwoHit`) between the prior hit end
+        // and the current hit.
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): the probe around the extension
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
@@ -3459,8 +3476,9 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
         let hsp_len: i32 = (hsp_qe_u - hsp_q_u) as i32;
         let s_last_off: i32 = s_last_off_u as i32;
 
-        // [C] if (right_extend) { flag = 1; last_hit = s_last_off - (wordsize - 1) + diag_offset; }
-        // [C] else { last_hit = subject_offset + diag_offset; }
+        // On a right extension, set `flag` to 1 and `last_hit` to the extension end `s_last_off`
+        // less `wordsize - 1`, biased by `diag_offset`; otherwise `last_hit` is the subject offset
+        // biased by `diag_offset` and `flag` stays 0.
         if right_extend {
             diag_entry.set_flag(1);
             diag_entry.set_last_hit(s_last_off - (wordsize - 1) + *diag_offset);
@@ -3468,8 +3486,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
             diag_entry.set_last_hit(subject_offset.wrapping_add(*diag_offset as u32) as i32);
         }
 
-        // [C] if (score >= cutoffs->cutoff_score)
-        // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s, query_offset, subject_offset, hsp_len, score);
+        // Save the initial HSP (as `BlastSaveInitHsp`) whenever `score` meets or exceeds the context cutoff.
         if score >= cutoff {
             let hsp_q_absolute = ctx.frame_base + hsp_q;
             let hsp_qe_absolute = ctx.frame_base + (hsp_q + hsp_len);

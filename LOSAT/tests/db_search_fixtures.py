@@ -20,10 +20,32 @@ xinclude_fixtures.py `query_argv`; a query cell `stdin:pipe:PATH`, `stdin:file:P
 `-query -` with the file PATH's bytes through a pipe, the file PATH itself, or an empty pipe as the run's
 standard input, `query_stdin`)
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
-argument `-db ""`, and a cell `subject:PATH` runs `-subject PATH` in place of `-db DB`: psiblast's refusal of a
-subject set whose sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/; an RPS row's search path is its inflated database's directory, then DIR, `rps_env`); `outfmt` is one argument, so a custom
+argument `-db ""`, names separated by spaces are one `-db` argument, and a cell `subject:PATH` runs `-subject PATH`
+in place of `-db DB`, in any program: a search of a subject set, such as psiblast's refusal of a subject set whose
+sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its
+tokens `NAME=VALUE` of `ENV_NAMES` are not arguments but environment variables of both programs (`BLASTDB=DIR`: the
+directory of a `taxdb.bti`, relative to LOSAT/; an RPS row's search path is its inflated
+database's directory, then DIR, `rps_env`; `NCBI=DIR`, relative to LOSAT/, the directory of NCBI's `$NCBI/.ncbirc`
+and of the formatter's `$NCBI/<name>`; `FMTCFG=NAME`, the name of the formatter's configuration file in the run
+directory; `GETURL_DEBUG`, `NCBI_DONT_USE_NCBIRC`) and its token `cwd=DIR` (lower case: neither an argument nor a
+variable) is the run directory, below; `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
+
+A row with the token `cwd=DIR` (DIR relative to LOSAT/: a directory of the row's `.ncbirc` and of the other files
+that NCBI reads from its current directory, such as the file that `FMTCFG` names; NCBI reference (598d8ae6):
+c++/src/objtools/align_format/align_format_util.cpp:3383-3415, `CAlignFormatUtil::InitConfig`) runs in LOSAT/DIR in
+place of LOSAT/, NCBI's runs of `freeze` and LOSAT's of `check` alike (`row_cwd`). Its cells keep every path relative
+to LOSAT/, and the programs get them relative to DIR (`rebased`, `os.path.relpath`): each name of the `db` cell, the
+PATH of `subject:PATH`, the query, and the values of `BLASTDB=` and `NCBI=`. So the text of the argv is the same on
+every machine: NCBI writes the `-db` text into the `[LOCAL_ID] TOOL_URL` link (`db_name`), and an absolute path would
+put the checkout's path into the frozen bytes. Not taken: absolute paths (bytes of one machine); paths relative to
+DIR in the cells (every path of a row is relative to LOSAT/, and every reader of the cells counts on it); a temporary
+directory with copies of the files (absolute paths again); a new column (a new header for every file and every
+reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `db` cell is
+`rps-gz:`, whose `files` column is set, or whose `extra_args` names a file under `tests/` (an argument that would
+not be rebased) is refused (`run_dir`; such rows are not needed, and the mechanism stays small). `freeze` and `check`
+refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
 
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
@@ -39,7 +61,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size
   1073741798; exception 23: BLASTX `-use_sw_tback`'s heap test in e-value mode past NCBI's
   array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
-  they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 26: `-db_hard_mask` with
+  they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 29: `-db_hard_mask` with
   overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
   that holds a spacer of `X` between the two subjects under an alias with the database's statistics). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
@@ -122,16 +144,18 @@ rewrites the rc, hash and size columns of the manifest (rows outside --program a
 the default is every program), and stops with an error where NCBI ends a run by a signal, before it writes
 that row's files or the manifest (`refuse_signal`). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
-ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, and `~/.ncbirc`
+ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, FMTCFG, GETURL_DEBUG, and `~/.ncbirc`
 (HOME is an empty directory); every NCBI run then gets BLAST_USAGE_REPORT=false (`ncbi_env`: NCBI BLAST+
-sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) keep the cleaned
-environment as it is.
+sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) get the same environment:
+the variable also decides what the program reads (with a false value NCBI BLAST+ does not read `.ncbirc` a
+second time for the usage report, so a malformed one is reported once, not twice), and a row compares the runs
+of one environment.
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--outfmts N,...] [--out TSV]` runs LOSAT with `-num_threads N`
-(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC,
-BL2SEQ_LEGACY, ADAPTIVE_CBS or CTOOLKIT_COMPATIBLE variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
-taxonomy database or a BLASTDB), compares stdout,
-stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
+(default 1) in the environment of `freeze` (`ncbi_env`: BLAST_USAGE_REPORT=false and no other NCBI*, BLAST*, LOSAT_*,
+BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, FMTCFG or GETURL_DEBUG
+variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a taxonomy database or a BLASTDB), compares
+stdout, stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 `--outfmts 5,13` keeps only the rows whose output format (the number that starts the `outfmt` cell) is one of
@@ -148,9 +172,19 @@ the rows of rpsblast and rpstblastn (the library API has no such program), those
 `-query` and `-in_pssm` (the library's query is one or the other), those that give `-in_msa` with either of them,
 those with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa` (the library takes the options with the
 alignment, `Inputs::msa`), those that write the search strategy file (`-export_search_strategy`, which the
-library refuses) and those that read the query from
-standard input (the library's query is records) are `library-skip`. psiblast's alignment queries
+library refuses), those that read the query from
+standard input (the library's query is records), and those that set NCBI's settings of the process for its
+formatter, a `cwd=` token or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL_DEBUG, NCBI_DONT_USE_NCBIRC;
+`process_settings`), are `library-skip`. The library API's contract names what a call reads of its process
+(LOSAT/src/api/mod.rs:78-86: the variables of the command line's switches and diagnostics, and for a database search
+what finds a database, `BLASTDB` and `.ncbirc`, and the batch and archive variables); the formatter's files and
+variables of `-html` (the run directory's `.ncbirc` and FMTCFG file, `$NCBI/<name>`, GETURL_DEBUG) are not among
+them, and the library's host, LOSAT Web, runs `-html` (outfmt 0 to 4 and 18) with an empty environment and a run
+directory of the files that the argv names (docs/web/abi_v2.md §3), so no Web run has them.
+psiblast's alignment queries
 (`-in_msa`, a query cell `msa:PATH`, the library's `Inputs::msa`) run through the library as on the command line.
+`--ncbi-bin` and `--losat` are taken relative to the caller's directory (made absolute before a run starts in
+another directory).
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -179,17 +213,32 @@ FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")
+# The caller's variables that `clean_env` drops besides NCBI*, BLAST* and LOSAT_* (each changes NCBI's result).
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
-            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE")
+            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`), the three that cut a query file into batches and chunks, and
 # ARCHIVE_FORMAT (how outfmt 11 writes its archive: unset text, `bin...` binary), PRE_FETCH_SEQS_LIMIT
 # (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one), and
 # BL2SEQ_LEGACY (read for -subject only; a -db search ignores it), OLD_FSC (no Gumbel block, any value), and
-# ADAPTIVE_CBS (the larger preliminary hit list and its trim with composition-based statistics, any value).
+# ADAPTIVE_CBS (the larger preliminary hit list and its trim with composition-based statistics, any value),
+# and those of `PROCESS_SETTINGS`.
+# The variables of the `-html` formatter's configuration and of NCBI's registry files: FMTCFG (the name of the
+# formatter's configuration file in the run directory, default `.ncbirc`), NCBI (the directory of `$NCBI/<name>`
+# when the run directory has no such file, and of `$NCBI/.ncbirc`), GETURL_DEBUG (a `REGISTRY: <file>` line on
+# stderr when the file is read) and NCBI_DONT_USE_NCBIRC (no `.ncbirc` in the application's registry).
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3383-3415
+# (InitConfig reads GETURL_DEBUG, NCBI and FMTCFG from the environment and, with GETURL_DEBUG, writes the path
+# of the file it reads to standard error.)
+PROCESS_SETTINGS = ("FMTCFG", "NCBI", "GETURL_DEBUG", "NCBI_DONT_USE_NCBIRC")
 ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
-             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS")
+             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS", *PROCESS_SETTINGS)
+# The tokens whose value is a path relative to LOSAT/, given to the programs relative to the run directory of a
+# `cwd=` row (`rebased`). FMTCFG's value is a name in the run directory, as NCBI reads it, and stays as it is.
+PATH_ENV_NAMES = ("BLASTDB", "NCBI")
+# The token of a row's run directory (`run_dir`): lower case, so that it is not an environment variable.
+CWD_TOKEN = "cwd="
 
 
 def manifest_file(program: str) -> Path:
@@ -295,7 +344,59 @@ def extra_tokens(row: dict[str, str]) -> list[str]:
 
 
 def is_env_token(token: str) -> bool:
-    return token.partition("=")[0] in ENV_NAMES
+    """Whether `token` of `extra_args` is `NAME=VALUE` with NAME one of `ENV_NAMES` (an environment variable)."""
+    name, equals, _ = token.partition("=")
+    return bool(equals) and name in ENV_NAMES
+
+
+def is_cwd_token(token: str) -> bool:
+    """Whether `token` of `extra_args` is the row's run directory `cwd=DIR` (`run_dir`)."""
+    return token.startswith(CWD_TOKEN)
+
+
+def run_dir(row: dict[str, str]) -> str | None:
+    """DIR of the row's token `cwd=DIR` (relative to LOSAT/), or None: the row runs in LOSAT/. Refuses a second
+    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, an
+    `rps-gz:` db cell, a `files` column, an argument of `extra_args` that names a file under `tests/` (it would
+    reach the program relative to LOSAT/ from DIR)."""
+    tokens = extra_tokens(row)
+    dirs = [token.removeprefix(CWD_TOKEN) for token in tokens if is_cwd_token(token)]
+    if not dirs:
+        return None
+    where = row.get("row_id", "?")
+    if len(dirs) > 1 or not dirs[0] or os.path.isabs(dirs[0]):
+        raise SystemExit(f"{where}: one token cwd=DIR, DIR relative to LOSAT/ (got {dirs})")
+    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) \
+            or rps_cell(row["db"]) is not None or row.get("files"):
+        raise SystemExit(f"{where}: a cwd= row has a query file, a db or subject: cell and no files column")
+    named = [token for token in tokens if token.startswith("tests/")]
+    if named:
+        raise SystemExit(f"{where}: a cwd= row names no file in extra_args ({named}); paths go in the db, subject: "
+                         "or query cell, or BLASTDB= and NCBI=")
+    return dirs[0]
+
+
+def row_cwd(row: dict[str, str]) -> Path:
+    """The directory the programs of `row` start in: LOSAT/DIR of its `cwd=DIR` token, else LOSAT/."""
+    directory = run_dir(row)
+    return ENGINE / directory if directory is not None else ENGINE
+
+
+def rebased(path: str, row: dict[str, str]) -> str:
+    """`path` (relative to LOSAT/, as the row's cells name it) as the programs of `row` get it: relative to DIR of
+    its `cwd=DIR` token (`os.path.relpath`, the same text on every machine), or as it is (no token, an empty or an
+    absolute path)."""
+    directory = run_dir(row)
+    if directory is None or not path or os.path.isabs(path):
+        return path
+    return os.path.relpath(ENGINE / path, ENGINE / directory)
+
+
+def process_settings(row: dict[str, str]) -> bool:
+    """Whether `row` sets NCBI's settings of its process for the formatter: a `cwd=` token (the run directory's
+    `.ncbirc` and FMTCFG file) or a token of `PROCESS_SETTINGS`. `check --library` skips such a row."""
+    return any(is_cwd_token(token) or (is_env_token(token) and token.partition("=")[0] in PROCESS_SETTINGS)
+               for token in extra_tokens(row))
 
 
 def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
@@ -384,15 +485,16 @@ def rps_env(row: dict[str, str], env: dict[str, str], db_dir: Path) -> dict[str,
     return run_env
 
 
-def subjects_argv(cell: str) -> list[str]:
+def subjects_argv(cell: str, rebase: Callable[[str], str] = str) -> list[str]:
     """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
     (`-db ALIAS` with `@ALIAS`) for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the
-    inflated directory)."""
+    inflated directory). `rebase` gives each path (each name of DB, separated by spaces, and PATH) as the run
+    names it (`rebased`; by default as it is)."""
     if cell.startswith("subject:"):
-        return ["-subject", cell.removeprefix("subject:")]
+        return ["-subject", rebase(cell.removeprefix("subject:"))]
     if (rps := rps_cell(cell)) is not None:
         return ["-db", rps[3] if rps[3] is not None else " ".join(rps[0])]
-    return ["-db", cell]
+    return ["-db", " ".join(rebase(name) for name in cell.split(" "))]
 
 
 def query_stdin(row: dict[str, str]) -> tuple[str, Path | None] | None:
@@ -436,20 +538,24 @@ def run_search(command: list[str], row: dict[str, str], **kw) -> subprocess.Comp
 
 
 def search_argv(row: dict[str, str]) -> list[str]:
-    """The arguments after the program name (the same for NCBI and LOSAT)."""
-    extra = [token for token in extra_tokens(row) if not is_env_token(token)]
-    query = stdin_query_argv(row) if query_stdin(row) else xinclude.query_argv(row["query"], ENGINE)
-    return [*subjects_argv(row["db"]), *query, *extra, "-outfmt", row["outfmt"]]
+    """The arguments after the program name (the same for NCBI and LOSAT), the paths of a `cwd=` row relative to
+    its run directory (`rebased`)."""
+    extra = [token for token in extra_tokens(row) if not is_env_token(token) and not is_cwd_token(token)]
+    def rebase(path: str) -> str:
+        return rebased(path, row)
+    query = stdin_query_argv(row) if query_stdin(row) else xinclude.query_argv(rebase(row["query"]), ENGINE)
+    return [*subjects_argv(row["db"], rebase), *query, *extra, "-outfmt", row["outfmt"]]
 
 
 def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
     """`base` plus the row's `NAME=VALUE` tokens (`BLASTDB=DIR`: the search path of the taxonomy
-    database, DIR relative to LOSAT/, the directory both programs run in; `BATCH_SIZE`, `CHUNK_SIZE`)."""
+    database, DIR relative to LOSAT/; `NCBI=DIR` likewise; both given relative to the run directory of a
+    `cwd=` row, `rebased`; `BATCH_SIZE`, `CHUNK_SIZE`, `FMTCFG`, ... as they are)."""
     env = dict(base)
     for token in extra_tokens(row):
         if is_env_token(token):
             name, _, value = token.partition("=")
-            env[name] = value
+            env[name] = rebased(value, row) if name in PATH_ENV_NAMES else value
     return env
 
 
@@ -471,9 +577,11 @@ NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}
 
 
 def ncbi_env(base: dict[str, str]) -> dict[str, str]:
-    """The environment of every NCBI run of the harness (`freeze`): `base`, the cleaned environment, with
-    BLAST_USAGE_REPORT=false, so that NCBI BLAST+ 2.17.0 does not send the run's parameters to NCBI at exit.
-    A row cannot set it (it is not one of `ENV_NAMES`). LOSAT's runs keep `base`."""
+    """The environment of every run of the harness, NCBI's (`freeze`) and LOSAT's (`check`): `base`, the
+    cleaned environment, with BLAST_USAGE_REPORT=false, so that NCBI BLAST+ 2.17.0 does not send the run's
+    parameters to NCBI at exit. The variable changes what NCBI BLAST+ reads (no second read of `.ncbirc` for the
+    report), and LOSAT reads as NCBI does, so LOSAT runs with it too: a row compares two runs of one environment.
+    A row cannot set it (it is not one of `ENV_NAMES`)."""
     return {**base, **NCBI_RUN_ENV}
 
 
@@ -545,12 +653,20 @@ def first_difference(expected: bytes, actual: bytes) -> str:
     return f"lengths differ: expected {len(expected)} bytes, got {len(actual)}"
 
 
-def expected_text(row: dict[str, str]) -> str:
-    """The text a `losat-rejection` row's stderr must contain."""
-    _, marker, rest = row["covers"].partition("expect: ")
-    if not marker:
+def expected_text(row: dict[str, str], library: bool = False) -> str:
+    """The text a `losat-rejection` row's stderr must contain: the covers cell's `expect: ` text, or in the
+    library's run its `library-expect: ` text where the cell has one. The library checks an argv before it
+    knows the inputs (`api::validate`), so a row whose command line's refusal comes from an input's word
+    (NCBI's exclusion of `-phi_pattern` by `-in_msa`, line RG item K4i-2b) has the library's message of
+    the argv alone, which is the command line's message of that argv with a query of records."""
+    texts = {match[1]: match[2] for match in reversed(list(EXPECT_TEXT.finditer(row["covers"])))}
+    if "" not in texts:
         raise SystemExit(f"{row['row_id']}: the covers cell has no 'expect: ' text")
-    return rest.split(" | ")[0]
+    return texts["library-"] if library and "library-" in texts else texts[""]
+
+
+# The first `expect: ` and `library-expect: ` texts of a covers cell, each to a ` | ` or the end of the cell.
+EXPECT_TEXT = re.compile(r"(?<![\w-])(library-|)expect: (.*?)(?= \| |$)")
 
 
 def near_row(row: dict[str, str]) -> tuple[str, int | None] | None:
@@ -967,20 +1083,32 @@ def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
             and (not formats or format_number(row) in formats))
 
 
+def refuse_engine_ncbirc() -> None:
+    """Stops `freeze` and `check` before any run when LOSAT/.ncbirc exists: NCBI (its application's registry and
+    its formatter) and LOSAT read the `.ncbirc` of the run directory, so it would change every row that runs in
+    LOSAT/. A row's own `.ncbirc` is in its `cwd=` directory."""
+    if (ENGINE / ".ncbirc").exists():
+        raise SystemExit(f"{ENGINE / '.ncbirc'} exists: it would change every row (a row's own .ncbirc goes in "
+                         "the directory of its cwd= token)")
+
+
 def freeze(args: argparse.Namespace) -> int:
+    refuse_engine_ncbirc()
     comments, rows = read_manifest()
     FROZEN.mkdir(parents=True, exist_ok=True)
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
     # Every NCBI run below (and `freeze_rps`'s) takes this environment, with the usage report off.
     env = ncbi_env(clean_env(dict(os.environ), home.name))
+    # Absolute, as a `cwd=` row runs in another directory (`row_cwd`).
+    ncbi_bin = Path(os.path.abspath(args.ncbi_bin))
     for row in rows:
         if not selected(row, args):
             continue
-        command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
+        command = [str(ncbi_bin / row["program"]), *search_argv(row), "-num_threads", "1"]
         if row["kind"] == "losat-rejection" and row["stdout_bytes"] and not near_row_id(row):
             # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
             if xinclude.wants_pssm(row):
-                run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=row_cwd(row),
                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
             elif rps_cell(row["db"]) is not None:
                 # An RPS row: NCBI's run with BLASTDB the inflated database (`freeze_rps`).
@@ -988,11 +1116,11 @@ def freeze(args: argparse.Namespace) -> int:
                     raise SystemExit(f"{row['row_id']}: a rejection row with NCBI's stdout writes no {{db_dir}}")
                 db_dir = inflate_rps(row["db"], False)
                 try:
-                    run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=rps_env(row, env, db_dir))
+                    run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=rps_env(row, env, db_dir))
                 finally:
                     shutil.rmtree(db_dir, ignore_errors=True)
             else:
-                run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
+                run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))
             refuse_signal(row, run.returncode)
             out = frozen_stdout(row, run.stdout)
@@ -1018,7 +1146,7 @@ def freeze(args: argparse.Namespace) -> int:
             freeze_rps(row, command, env)
             continue
         if files:
-            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=row_cwd(row),
                                               timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = written.run
             refuse_valgrind_messages(row, run.stderr)
@@ -1026,7 +1154,7 @@ def freeze(args: argparse.Namespace) -> int:
             out = run.stdout
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
         elif pssm:
-            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=row_cwd(row),
                                            timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row))
             run = pssms.run
             refuse_valgrind_messages(row, run.stderr)
@@ -1035,7 +1163,7 @@ def freeze(args: argparse.Namespace) -> int:
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
-            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
+            run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=row_env(row, env),
                              preexec_fn=ncbi_stack(row))
             refuse_valgrind_messages(row, run.stderr)
             refuse_signal(row, run.returncode)
@@ -1095,11 +1223,11 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
     run_env = rps_env(row, env, db_dir)
     try:
         if files:
-            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=row_cwd(row),
                                               timeout=TIMEOUT, env=run_env)
             run = written.run
         else:
-            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=run_env)
+            run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=run_env)
     finally:
         shutil.rmtree(db_dir, ignore_errors=True)
     refuse_signal(row, run.returncode)
@@ -1145,6 +1273,11 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # query, line LIB item 1.6), nor a row that writes the search strategy file
     # (`-export_search_strategy`: the library writes none and refuses it, `api::search::STRATEGY_FILES`,
     # line RG item F1b-1).
+    # A row that sets NCBI's settings of the process for its formatter (`process_settings`: the run directory's
+    # `.ncbirc` and FMTCFG file, `$NCBI`, GETURL_DEBUG) is not a library call either: the API's contract
+    # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and the library's
+    # host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that the argv names
+    # (docs/web/abi_v2.md §3), so no Web run has them.
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
                     or ("-query" in argv and "-in_pssm" in argv)
@@ -1152,7 +1285,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                     or ("-in_msa" not in argv
                         and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
                     or "-export_search_strategy" in argv
-                    or query_stdin(row)):
+                    or query_stdin(row) or process_settings(row)):
         return "library-skip", ""
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
@@ -1173,15 +1306,15 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     run_env = row_env(row, env) if db_dir is None else rps_env(row, env, db_dir)
     try:
         if files:
-            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=row_cwd(row),
                                               env=run_env, timeout=TIMEOUT)
             run = written.run
         elif pssm:
-            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=row_cwd(row),
                                            env=run_env, timeout=TIMEOUT)
             run = pssms.run
         else:
-            run = run_search(command, row, cwd=ENGINE, env=run_env, timeout=TIMEOUT)
+            run = run_search(command, row, cwd=row_cwd(row), env=run_env, timeout=TIMEOUT)
     finally:
         if db_dir is not None:
             shutil.rmtree(db_dir, ignore_errors=True)
@@ -1192,7 +1325,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.
         if library and run.returncode != 0 and run.stdout == b"" \
-                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row).encode() not in run.stderr:
+                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row, library).encode() not in run.stderr:
             return "library-input-error", ""
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
@@ -1210,8 +1343,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                 problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
-        if expected_text(row).encode() not in run.stderr:
-            problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
+        expected = expected_text(row, library)
+        if expected.encode() not in run.stderr:
+            problems.append(f"stderr lacks {expected!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
         if pssm and (pssms.files or pssms.stray):
             problems.append(f"a refused run wrote {[name for name, _ in pssms.files] + pssms.stray}")
         return ("differs", "; ".join(problems)) if problems else ("rejection", "")
@@ -1252,8 +1386,11 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
 
 
 def check(args: argparse.Namespace) -> int:
+    refuse_engine_ncbirc()
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
-    env = clean_env(dict(os.environ), home.name)
+    # The environment the rows were frozen in (`freeze`), for every row.
+    env = ncbi_env(clean_env(dict(os.environ), home.name))
+    # Absolute, as a `cwd=` row runs in another directory (`row_cwd`).
     losat = args.losat.resolve()
     lines, bad = [], 0
     for row in read_manifest()[1]:

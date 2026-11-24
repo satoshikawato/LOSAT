@@ -30,15 +30,20 @@ pub(super) struct Tse<'a> {
 }
 
 /// What phase C makes: a Bioseq's Seq-id handles (`CBioseq_Info::m_Id`, bioseq_info.cpp:300-307),
-/// at its place in `Tse::attach`, or an annotation's information, at its place in `Tse::annots`.
+/// at its place in `Tse::attach`, or an annotation's information, at its place in `Tse::annots`;
+/// or the element stated as `NULL` that it dereferences there (a member of a Bioseq-set, a Seq-id
+/// of a Bioseq or an annotation: `CCoreException::eNullPtr`), where phase C, and the walk, stop.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Made {
     Bioseq(usize),
     Annot(usize),
+    Null,
 }
 
 /// One object that attaches to the TSE.
 enum Attach<'a> {
+    /// An annotation, at its place in `Tse::annots`: its name is read (`x_UpdateName`).
+    Annot(usize),
     /// A Bioseq-set's `id`, when it is an integer.
     SetId(i64),
     /// A Bioseq's Seq-ids.
@@ -63,12 +68,11 @@ impl<'a> Tse<'a> {
         };
         match entry {
             SeqEntry::Seq(query) => {
-                tse.construction.push(Made::Bioseq(tse.attach.len()));
-                tse.attach.push(Attach::Bioseq(query.ids.iter().collect()));
-                for annot in query.annot.iter().flatten() {
-                    tse.construction.push(Made::Annot(tse.annots.len()));
-                    tse.annots.push(V::new(named::SEQ_ANNOT, annot));
-                }
+                let annots = query.annot.iter().flatten();
+                let annots = annots.map(|annot| V::new(named::SEQ_ANNOT, annot));
+                let mut construction = Vec::new();
+                tse.add_bioseq(query.ids.iter().collect(), annots, &mut construction);
+                tse.construction = construction;
             }
             SeqEntry::Set(set) => {
                 let mut construction = Vec::new();
@@ -79,11 +83,44 @@ impl<'a> Tse<'a> {
         tse
     }
 
-    /// Adds the set `set` (phase I's order of `annots` and the attach order are the order of the
-    /// walk: the set's own annotations and id, then its members); its phase C order (members, each
-    /// Bioseq's Seq-ids before its annotations, then the set's own annotations) goes to
-    /// `construction`. The sets inside it are walked from a list on the heap (`SetWalk`), to any
-    /// depth the reader read.
+    /// Adds a Bioseq of the Seq-ids `ids` and the annotations `annots`: phase C makes its Seq-id
+    /// handles, then its annotations (`CBioseq_Info::x_SetObject`); the attach reads the
+    /// annotations' names, then attaches the Seq-ids (`CBioseq_Info::x_TSEAttachContents`). Whether
+    /// an element stated as `NULL` stopped phase C.
+    // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:202-212
+    // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_base_info.cpp:119-126, 151-160
+    fn add_bioseq(
+        &mut self,
+        ids: Vec<&'a ParsedSeqId>,
+        annots: impl Iterator<Item = V<'a>>,
+        construction: &mut Vec<Made>,
+    ) -> bool {
+        let bioseq = construction.len();
+        construction.push(Made::Null);
+        let mut stopped = false;
+        for annot in annots {
+            if annot.is_null() {
+                stopped = true;
+                break;
+            }
+            construction.push(Made::Annot(self.annots.len()));
+            self.attach.push(Attach::Annot(self.annots.len()));
+            self.annots.push(annot);
+        }
+        construction[bioseq] = Made::Bioseq(self.attach.len());
+        self.attach.push(Attach::Bioseq(ids));
+        if stopped {
+            construction.push(Made::Null);
+        }
+        stopped
+    }
+
+    /// Adds the set `set` (phase I's order of `annots` is the order of the walk: the set's own
+    /// annotations, then its members; the attach reads a set's annotations' names, attaches its id,
+    /// then its members); its phase C order (members, each Bioseq's Seq-ids before its
+    /// annotations, then the set's own annotations) goes to `construction`, up to the first
+    /// element stated as `NULL` that phase C dereferences (`Made::Null`). The sets inside it are
+    /// walked from a list on the heap (`SetWalk`), to any depth the reader read.
     fn add_set(&mut self, set: V<'a>, construction: &mut Vec<Made>) {
         let mut walks = vec![self.enter_set(set)];
         while let Some(walk) = walks.last_mut() {
@@ -93,15 +130,21 @@ impl<'a> Tse<'a> {
                 continue;
             };
             walk.next += 1;
+            if member.is_null() {
+                construction.push(Made::Null);
+                return;
+            }
             match member.choice() {
                 ("seq", bioseq) => {
-                    construction.push(Made::Bioseq(self.attach.len()));
-                    self.attach.push(Attach::Bioseq(
-                        bioseq.field("id").items().map(V::seq_id).collect(),
-                    ));
-                    for annot in bioseq.get("annot").into_iter().flat_map(V::items) {
-                        construction.push(Made::Annot(self.annots.len()));
-                        self.annots.push(annot);
+                    let ids: Vec<V<'a>> = bioseq.field("id").items().collect();
+                    if ids.iter().any(|id| id.is_null()) {
+                        construction.push(Made::Null);
+                        return;
+                    }
+                    let ids = ids.into_iter().map(V::seq_id).collect();
+                    let annots = bioseq.get("annot").into_iter().flat_map(V::items);
+                    if self.add_bioseq(ids, annots, construction) {
+                        return;
                     }
                 }
                 (_, set) => {
@@ -112,22 +155,25 @@ impl<'a> Tse<'a> {
         }
     }
 
-    /// The set `set` entered: its id and its own annotations added, its members to walk.
+    /// The set `set` entered: its own annotations' names and its id attached, its own
+    /// annotations added (phase C makes them after its members, up to the first stated as
+    /// `NULL`), its members to walk.
     fn enter_set(&mut self, set: V<'a>) -> SetWalk<'a> {
+        let mut own = Vec::new();
+        for annot in set.get("annot").into_iter().flat_map(V::items) {
+            if annot.is_null() {
+                own.push(Made::Null);
+                break;
+            }
+            own.push(Made::Annot(self.annots.len()));
+            self.attach.push(Attach::Annot(self.annots.len()));
+            self.annots.push(annot);
+        }
         if let Some(id) = set.get("id") {
             if let ("id", number) = id.choice() {
                 self.attach.push(Attach::SetId(number.int()));
             }
         }
-        let own: Vec<Made> = set
-            .get("annot")
-            .into_iter()
-            .flat_map(V::items)
-            .map(|annot| {
-                self.annots.push(annot);
-                Made::Annot(self.annots.len() - 1)
-            })
-            .collect();
         SetWalk {
             members: set.get("seq-set"),
             next: 0,
@@ -144,7 +190,7 @@ impl<'a> Tse<'a> {
     pub(super) fn bioseq_ids(&self, index: usize) -> &[&'a ParsedSeqId] {
         match &self.attach[index] {
             Attach::Bioseq(ids) => ids,
-            Attach::SetId(_) => unreachable!("phase C makes a Bioseq's handles"),
+            Attach::SetId(_) | Attach::Annot(_) => unreachable!("phase C makes a Bioseq's handles"),
         }
     }
 
@@ -165,6 +211,7 @@ impl<'a> Tse<'a> {
         let mut held: HashMap<&Handle, usize> = HashMap::new();
         for (index, object) in self.attach.iter().enumerate() {
             match object {
+                Attach::Annot(annot) => annot_name(self.annots[*annot])?,
                 Attach::SetId(id) => {
                     if *id >= 0 && !set_ids.insert(*id) {
                         return Err(Stop::Exception(NcbiException::new(
@@ -234,3 +281,42 @@ const SET_ID_DUPLICATE: ThrowSite = ThrowSite {
     kind: "CObjMgrException::eAddDataError",
     function: Some("ncbi::objects::CTSE_Info::x_SetBioseq_setId"),
 };
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:180-195, 222-280
+// NCBI reference (598d8ae6): c++/src/objects/general/User_object.cpp (`GetFieldRef`, the first
+// field whose label is the string asked for)
+/// The elements that the attach of the annotation `annot` reads when it names it
+/// (`CSeq_annot_Info::x_UpdateName`): its Annot-ids up to the first `other` one with an
+/// accession, every Annotdesc, and of a `user` one whose type is the string "AnnotationTrack" (until
+/// a zoom level was found) the fields up to the first labelled "ZoomLevel". The name changes no
+/// output of LOSAT's; an element stated as `NULL` there is dereferenced (`V::deref`).
+fn annot_name(annot: V<'_>) -> Result<(), Stop> {
+    for id in annot.get("id").into_iter().flat_map(V::items) {
+        if let ("other", text) = id.deref()?.choice() {
+            if text.get("accession").is_some() {
+                break;
+            }
+        }
+    }
+    let mut zoom_level = false;
+    for desc in annot.get("desc").into_iter().flat_map(V::items) {
+        let ("user", user) = desc.deref()?.choice() else {
+            continue;
+        };
+        if zoom_level
+            || !matches!(user.field("type").choice(), ("str", t) if t.str() == b"AnnotationTrack")
+        {
+            continue;
+        }
+        for field in user.field("data").items() {
+            let field = field.deref()?;
+            if matches!(field.field("label").choice(), ("str", l) if l.str() == b"ZoomLevel") {
+                if let ("int", level) = field.field("data").choice() {
+                    zoom_level = level.int() >= 0;
+                }
+                break;
+            }
+        }
+    }
+    Ok(())
+}

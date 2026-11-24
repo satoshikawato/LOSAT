@@ -319,6 +319,25 @@ impl ReportFormat {
     /// the organism report (18, at each Seq-align it does not skip, `report::tax_report`); the
     /// others write them before the query's report.
     ///
+    /// Whether the report writes the description table with its `-html` id links, and with
+    /// `-html` reads NCBI's formatter registries (`./.ncbirc`, InitConfig) while it writes: the
+    /// pairwise report (0) and the query-anchored ones (1 to 4), which NCBI's apps give the same
+    /// `eHtml` flag (blast_format.cpp `s_SetFlags`). The one rule of `formats_link_ids` and of the
+    /// formats that get the posts of those reads (`report::query_warnings::report_posts`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:617-640
+    pub fn writes_html_links(self) -> bool {
+        use ReportFormat::*;
+        matches!(
+            self,
+            Pairwise
+                | QueryAnchoredIdentities
+                | QueryAnchoredNoIdentities
+                | FlatQueryAnchoredIdentities
+                | FlatQueryAnchoredNoIdentities
+        )
+    }
+
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
     pub fn places_subject_reads(self) -> bool {
@@ -560,6 +579,58 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
             }
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1453-1460,1535-1553
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494
+/// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html` or when
+/// none of the run's formats `formats` links ids: the `./.ncbirc` of the prolog's references and
+/// of each query's description table and alignments (`FormatterNcbirc::read`) and NCBI's
+/// formatter registry (`InitConfig::read`:
+/// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
+/// its formats (`formatting_handler_check`), so that LOSAT's refusal of the file comes before
+/// the first byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
+/// `-subject`). One function for the five programs; the links go where the option went
+/// (`PairwiseConfig::html`). NCBI calls `InitConfig` only from the id links of the report of
+/// formats 0 to 4, which share the description table and its id links (`PrintOneResultSet` writes
+/// the table of the pairwise report and of the query-anchored ones alike): the organism report (outfmt 18) takes the
+/// option alone (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
+pub(crate) fn html_links(
+    html: bool,
+    program: Program,
+    database: Option<&str>,
+    formats: &[i32],
+) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
+    if !html || !formats_link_ids(formats) {
+        return Ok(None);
+    }
+    let lower = program.name().to_ascii_lowercase();
+    // The prolog's references read `./.ncbirc` before the first id link reads InitConfig's file.
+    let ncbirc = crate::report::formatter_registry::FormatterNcbirc::read(&lower)
+        .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
+    let registry = crate::report::formatter_registry::InitConfig::read(&lower)
+        .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
+    Ok(Some(std::sync::Arc::new(
+        crate::report::html_ids::HtmlLinks {
+            registry,
+            ncbirc,
+            db_name: database.unwrap_or_default().as_bytes().to_vec(),
+            // `m_IsDbNa`: the subjects of BLASTN, TBLASTN and TBLASTX are nucleotide sequences.
+            nucleotide: matches!(
+                program,
+                Program::Blastn | Program::Tblastn | Program::Tblastx
+            ),
+        },
+    )))
+}
+
+/// Whether one of the formats `formats` writes the description table with its `-html` id links
+/// (`html_links`, `ReportFormat::writes_html_links`): the pairwise report (0) and the
+/// query-anchored ones (1 to 4).
+fn formats_link_ids(formats: &[i32]) -> bool {
+    formats.iter().any(|&number| {
+        ReportFormat::from_number(number).is_some_and(ReportFormat::writes_html_links)
+    })
 }
 
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after

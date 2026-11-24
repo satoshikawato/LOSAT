@@ -2,6 +2,7 @@
 // changes; what actually happened is appended to the RunRecord.
 import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
+import type { ToolId, WindowMaskerStage } from './tools';
 
 export type RunStatus =
   | 'queued'
@@ -14,9 +15,31 @@ export type RunStatus =
 
 export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', 'cancelled', 'failed']);
 
-export interface InputSnapshot {
-  /** Name passed as -query / -subject (plan §5.3). */
+/**
+ * What a file of the user's gave to an input that is not that file as given (line WQA's D22, 2026-11-23): its name (`pasted text`
+ * for pasted text), the records of it that the input holds, and the first IDs of those it leaves out with their number.
+ */
+export interface InputPart {
   readonly name: string;
+  /** The records of the part that the input holds. */
+  readonly records: number;
+  /** The IDs of the first records that the input leaves out, in the order of the file (at most MOST_LEFT_OUT_IDS). */
+  readonly leftOut: readonly string[];
+  /** The number of records that the input leaves out. */
+  readonly leftOutCount: number;
+}
+
+export interface InputSnapshot {
+  /**
+   * Name passed as -query / -subject (plan §5.3): the user's own file name where the input is that file as given, else the
+   * name of a file that the page offers with the run (`from`), whose bytes are exactly `bytes`.
+   */
+  readonly name: string;
+  /**
+   * What the input is made of when it is not one file of the user's as given: pasted text, several inputs searched together,
+   * or a file with records left out. Absent where `name` is the user's file, whose bytes `bytes` are (line WQA's D22).
+   */
+  readonly from?: readonly InputPart[];
   /** Exact FASTA bytes given to the engine. */
   readonly bytes: Uint8Array;
   /** Lower-case hex SHA-256 of `bytes`. */
@@ -65,6 +88,7 @@ export interface ConffileSnapshot {
 }
 
 export interface RunSnapshot {
+  readonly kind?: 'search';
   readonly runId: string;
   /** 1-based position in this working session, used for display and file names. */
   readonly number: number;
@@ -154,4 +178,72 @@ export interface RunRecord {
 
 export function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.has(status);
+}
+
+// --- Tool runs (windowmasker, WW3b DESIGN §3-§4) -------------------------------------------
+
+export type ToolFileOrigin =
+  | { readonly kind: 'picked' }
+  | { readonly kind: 'pasted' }
+  | { readonly kind: 'inflated'; readonly from: string }
+  | { readonly kind: 'combined'; readonly parts: readonly string[] }
+  | { readonly kind: 'made'; readonly runNumber: number };
+
+/** Metadata of one file placed in a tool run's working directory (for Run details). */
+export interface ToolDirectoryEntry {
+  readonly name: string;
+  readonly size: number;
+  readonly origin: ToolFileOrigin;
+}
+
+/** One output stream or file kept in session storage for a tool run. */
+export interface ToolOutputEntry {
+  /** Key under which the Data worker keeps this block (`'stdout'`, `'stderr'`, or `'file:0'`, ...). */
+  readonly key: string;
+  /** Name as written in the argv (for example `wmasker.ascii`, `run.log`), or `'stdout'` / `'stderr'`. */
+  readonly name: string;
+  readonly size: number;
+  /** Option(s) that named the file (`'-out'`, `'-logfile'`, `'-out, -logfile'`), if applicable. */
+  readonly option?: string;
+  /** True for the `-out` file of `-mk_counts` and `-convert` (offered to BLASTN and Mask). */
+  readonly isCounts?: true;
+}
+
+export interface ToolRunSnapshot {
+  readonly kind: 'tool';
+  readonly runId: string;
+  /** 1-based position in this working session, shared with search runs. */
+  readonly number: number;
+  readonly tool: ToolId;
+  readonly stage: WindowMaskerStage;
+  readonly argv: readonly string[];
+  readonly directory: readonly ToolDirectoryEntry[];
+  readonly prints?: PrintedKind;
+  readonly queuedAt: number;
+  readonly group?: RunGroup;
+}
+
+export interface ToolRunRecord {
+  readonly exitStatus?: number;
+  readonly stdout?: ToolOutputEntry;
+  readonly stderr?: ToolOutputEntry;
+  readonly files?: readonly ToolOutputEntry[];
+  readonly runtimePath?: 'serial' | 'fake';
+  readonly engineBuild?: string;
+  readonly memory?: {
+    readonly linearBytesBefore: number;
+    readonly linearBytesAfter: number;
+    readonly instanceRuns: number;
+  };
+  readonly startedAt?: number;
+  readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
+  readonly endedAt?: number;
+  readonly error?: string;
+}
+
+export type AnyRunSnapshot = RunSnapshot | ToolRunSnapshot;
+export type AnyRunRecord = RunRecord | ToolRunRecord;
+
+export function isToolSnapshot(snapshot: AnyRunSnapshot): snapshot is ToolRunSnapshot {
+  return snapshot.kind === 'tool';
 }

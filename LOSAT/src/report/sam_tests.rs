@@ -72,9 +72,9 @@ fn document(
 ) -> String {
     let run = RunRecord {
         program: crate::blastinput::app::Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let query = SamSequence {
         record: SamId::Query(QueryRecord {
@@ -222,6 +222,35 @@ fn a_minus_hsp_is_reversed_and_complemented() {
     assert_eq!(fields[9].len(), 12);
 }
 
+// remaining-gaps X1b-p review 1 (S2): a target whose range passes its end (a query of
+// `-outfmt "17 SQ SR"` whose HSP NCBI keeps outside its context). `CSeqVector` reads no letter
+// at or past the query's 60 letters (seq_vector_ci.cpp:631-643, 720-728): on the plus strand
+// SEQ holds the letters before the end, on the minus strand NCBI's start `length - to` wraps
+// as an unsigned `TSeqPos` past its stop and `GetSeqData` gives no letter (seq_vector_ci.hpp:
+// 517-525): an empty SEQ, not `*`.
+#[test]
+fn a_target_past_its_end_has_the_letters_before_the_end() {
+    let ops = [GapEditOp::Sub(20)];
+    let spec = SamSpec::parse("SQ SR");
+    // Plus strand: the query offsets 50..70 of 60.
+    let text = document(spec, None, hsp((50, 70), (10, 30), 1, 10, &ops), &mut Fixed);
+    let fields: Vec<&str> = text.lines().nth(3).unwrap().split('\t').collect();
+    assert_eq!(fields[1], "0");
+    assert_eq!(fields[5], "50H20M");
+    let expected: String = (50..60).map(|at| b"AACCGGTTAC"[at % 10] as char).collect();
+    assert_eq!(fields[9], expected);
+    // Minus strand: the context offsets -10..10, the plus-strand range 50..70 of 60.
+    let text = document(
+        spec,
+        None,
+        hsp((-10, 10), (10, 30), -1, 10, &ops),
+        &mut Fixed,
+    );
+    let fields: Vec<&str> = text.lines().nth(3).unwrap().split('\t').collect();
+    assert_eq!(fields[1], "16");
+    assert_eq!(fields[9], "");
+}
+
 fn query_seq(index: usize, id: &'static str) -> SamSequence<'static> {
     SamSequence {
         record: SamId::Query(QueryRecord {
@@ -252,9 +281,9 @@ fn subject_seq(index: usize, id: &'static str) -> SamSequence<'static> {
 fn run_record() -> RunRecord<'static> {
     RunRecord {
         program: crate::blastinput::app::Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     }
 }
 

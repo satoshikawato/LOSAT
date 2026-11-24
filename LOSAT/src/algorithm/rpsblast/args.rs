@@ -23,7 +23,7 @@ use crate::blastinput::value_parsers::*;
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
-    #[arg(long, default_value = "-", value_parser = ncbi_input_path(), value_name = "PATH")]
+    #[arg(long, default_value = "-", value_parser = ncbi_path(), value_name = "PATH")]
     pub query: PathBuf,
     #[arg(
         long,
@@ -31,14 +31,14 @@ pub struct RpsblastArgs {
         help = "BLAST database name (a profile database)"
     )]
     pub db: Option<String>,
-    #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
     /// are read.
-    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    #[arg(long, value_name = "filename", value_parser = ncbi_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
-    #[arg(long, value_parser = rpsblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
+    #[arg(long, value_parser = ncbi_double, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2234-2236
     /// `-dbsize`: replaces the database's length in every statistic (`x_AdjustDbSize` then keeps
@@ -50,7 +50,7 @@ pub struct RpsblastArgs {
     /// `-searchsp`: at any value (0 too) the search runs without the Gumbel block
     /// (`ResolvedBlastpArgs::old_fsc`); above 0 it is every query's and volume's effective
     /// search space (`rps_hooks::rps_search`).
-    #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     #[arg(
@@ -59,7 +59,7 @@ pub struct RpsblastArgs {
         help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics, 2 and 3 as 1 with a larger preliminary e-value"
     )]
     pub comp_based_stats: String,
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
+    #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
     #[arg(
         long = "show_gis",
@@ -67,9 +67,9 @@ pub struct RpsblastArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
-    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
-    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
     // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
     // blast_args.cpp:2683-2721, cited at `FormattingArgs`): the width of the outfmt 0
@@ -78,20 +78,20 @@ pub struct RpsblastArgs {
     // `SetLineLength` only).
     #[command(flatten)]
     pub formatting: FormattingArgs,
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
+    #[arg(long, value_parser = ncbi_integer_as::<usize>, help = "Maximum number of aligned sequences to keep [default: 500]")]
     pub max_target_seqs: Option<usize>,
-    #[arg(long = "max_hsps", value_parser = blastn_count)]
+    #[arg(long = "max_hsps", value_parser = ncbi_integer_as::<usize>)]
     pub max_hsps_per_subject: Option<usize>,
-    #[arg(long = "qcov_hsp_perc", value_parser = rpsblast_query_coverage, help = "Percent query coverage per hsp")]
+    #[arg(long = "qcov_hsp_perc", value_parser = ncbi_double, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229
     /// `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`: the RPS engine's X-drops in bits
     /// (`RpsSearch`); NCBI's checks of their values are made with the options' others.
-    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for ungapped extensions")]
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for ungapped extensions")]
     pub xdrop_ungap: Option<f64>,
-    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for preliminary gapped extensions")]
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for preliminary gapped extensions")]
     pub xdrop_gap: Option<f64>,
-    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for final gapped alignment")]
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for final gapped alignment")]
     pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
     /// `-sum_stats`: `false` is rpsblast's default; `true` is refused where the search starts
@@ -122,7 +122,7 @@ pub struct RpsblastArgs {
     pub seg: Option<String>,
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
+    #[arg(long, value_parser = ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
     #[arg(
@@ -146,21 +146,12 @@ pub struct RpsblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:48-66
     /// `-num_threads`: LOSAT's pool size (0: the number of volumes, NCBI's "auto"); the output
     /// is the same at every value.
-    #[arg(long, default_value_t = 1, value_parser = nonnegative_ncbi_integer)]
+    #[arg(long, default_value_t = 1, value_parser = ncbi_integer)]
     pub num_threads: i32,
     /// `-mt_mode` is read and has no effect: LOSAT searches the queries in parallel and writes
     /// NCBI's `-num_threads 1` output at every value.
-    #[arg(long, value_name = "int_value", value_parser = rpsblast_mt_mode, help = "Multi-thread mode: 0 split by database volumes, 1 split by queries (accepted; the output does not depend on it)")]
+    #[arg(long, value_name = "int_value", value_parser = ncbi_integer_as::<u8>, help = "Multi-thread mode: 0 split by database volumes, 1 split by queries (accepted; the output does not depend on it)")]
     pub mt_mode: Option<u8>,
-}
-
-/// An `-mt_mode` value of rpsblast: an integer from 0 to 1.
-pub(crate) fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
-    let mode = ncbi_integer_at_least(value, 0)?;
-    u8::try_from(mode)
-        .ok()
-        .filter(|mode| *mode <= 1)
-        .ok_or_else(|| "Illegal value: expected an integer from 0 to 1".to_string())
 }
 
 /// The composition-based statistics mode of a `-comp_based_stats` value as RPS-BLAST reads it:
@@ -191,6 +182,8 @@ impl RpsblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
+            html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,

@@ -21,14 +21,14 @@ test:
   commands:
     - losat --version
     - losat --help
-    - losat blastn --help
-    - losat blastp --help
-    - losat blastx --help
-    - losat tblastn --help
-    - losat tblastx --help
-    - losat psiblast --help
-    - losat rpsblast --help
-    - losat rpstblastn --help
+    - losat blastn -help
+    - losat blastp -help
+    - losat blastx -help
+    - losat tblastn -help
+    - losat tblastx -help
+    - losat psiblast -help
+    - losat rpsblast -help
+    - losat rpstblastn -help
     - blastn -version
     - blastp -version
     - blastx -version
@@ -44,6 +44,7 @@ test:
     - windowmasker -version
     - convert2blastmask -version
     - makembindex -version
+    - makeprofiledb -version
     - rpsbproc -version
 
 about:
@@ -61,8 +62,8 @@ about:
     tblastn, tblastx and psiblast against FASTA subjects (-subject) or BLAST
     databases (-db), rpsblast and rpstblastn against profile databases (-db),
     and provides makeblastdb, blastdbcmd,
-    dustmasker, segmasker, windowmasker, convert2blastmask, makembindex and
-    rpsbproc. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
+    dustmasker, segmasker, windowmasker, convert2blastmask, makembindex,
+    makeprofiledb and rpsbproc. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
     scores, coordinates and every output format byte for byte), and it needs no
     BLAST+ installation.
   dev_url: https://github.com/satoshikawato/LOSAT

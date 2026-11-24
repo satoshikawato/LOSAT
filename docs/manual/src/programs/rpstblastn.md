@@ -16,7 +16,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 
 - **Query.** A nucleotide FASTA file with `-query` (`-query -` reads the standard input). Several queries are searched in one run. `-query_loc START-STOP` searches part of the query. Queries are translated as in [blastx](blastx.md), with the genetic code of `-query_gencode` (default 1).
 - **Strand.** `-strand both` (the default), `plus` or `minus` selects which strands of the query are translated.
-- **Database.** `-db` names a profile database made by NCBI's `makeprofiledb`, given without file extension, in one volume or in several volumes listed by an alias file (`.pal`). It is the kind of database that [rpsblast](rpsblast.md) reads, and CDD is the usual choice. NCBI publishes CDD at ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/. Download the prebuilt RPS-BLAST database there (at the time of writing, the archive `Cdd_LE.tar.gz`), unpack it, and give the path of its `Cdd` database as `-db`. LOSAT does not write profile databases.
+- **Database.** `-db` names a profile database made by `makeprofiledb` (NCBI's or [LOSAT's](makeprofiledb.md)), given without file extension, in one volume or in several volumes listed by an alias file (`.pal`). It is the kind of database that [rpsblast](rpsblast.md) reads, and CDD is the usual choice. NCBI publishes CDD at ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/. Download the prebuilt RPS-BLAST database there (at the time of writing, the archive `Cdd_LE.tar.gz`), unpack it, and give the path of its `Cdd` database as `-db`.
 
 ## Common options
 
@@ -80,7 +80,7 @@ Also refused:
 - `-sum_stats true`, because NCBI's result then depends on memory contents or crashes.
 - `-remote`, `-entrez_query` and `-import_search_strategy`.
 - Profile databases with the problems that `rpsblast` refuses.
-- `-subject`, which is not an `rpstblastn` option (exit status 2).
+- `-subject`, which is not an `rpstblastn` option (NCBI's argument error, exit status 1).
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI, with exit status 3. For the full list, see [What LOSAT refuses](../refusals.md).
 

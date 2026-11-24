@@ -132,6 +132,10 @@ pub(crate) struct Names {
     pub(crate) reader: &'static str,
     pub(crate) input: &'static str,
     pub(crate) allocator: &'static str,
+    /// Whether the program reports every `CSerialException` of the read with a message of its own
+    /// (psiblast's and tblastn's "Unrecognized format for PSSM", `CPsiBlastArgs`), so that what
+    /// the exception says does not show (`read::TypedReader::other_type`).
+    pub(crate) own_serial_message: bool,
 }
 
 impl Names {
@@ -141,6 +145,7 @@ impl Names {
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
+        own_serial_message: true,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {
@@ -148,6 +153,7 @@ impl Names {
         reader: "mask data reader",
         input: "file",
         allocator: "makeblastdb",
+        own_serial_message: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
@@ -156,6 +162,7 @@ impl Names {
         reader: "delayed member reader",
         input: "member's bytes",
         allocator: "NCBI's reader",
+        own_serial_message: false,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]
@@ -164,6 +171,7 @@ impl Names {
         reader: "test reader",
         input: "input",
         allocator: "NCBI's reader",
+        own_serial_message: true,
     };
 }
 
@@ -306,6 +314,10 @@ pub enum Encoding {
 pub(crate) trait Items {
     fn count(&self) -> usize;
     fn name(&self, index: usize) -> &'static str;
+    /// Whether the member or variant at `index` is named `id`.
+    fn is_named(&self, index: usize, id: &[u8]) -> bool {
+        self.name(index).as_bytes() == id
+    }
 }
 
 /// The named values of an ENUMERATED (`integer` false) or of an INTEGER with named values.
@@ -519,6 +531,7 @@ impl<S: AsnSource> TextInput<S> {
     /// searched from `pos` on; one that is not there is an error (`UnexpectedMember`, which lists
     /// them all). `choice`: an empty name is `BeginChoiceVariant`'s error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
+    #[inline(always)]
     fn find_member(&mut self, items: &(impl Items + ?Sized), pos: usize, choice: bool) -> R<usize> {
         let count = items.count();
         let member = self.r.member_or_tag().map_err(|e| self.fail(e))?;
@@ -538,7 +551,17 @@ impl<S: AsnSource> TextInput<S> {
                 if choice && id.is_empty() {
                     return Err(self.throw(BEGIN_CHOICE_VARIANT, "choice variant id expected"));
                 }
-                let found = (pos..count).find(|&i| items.name(i).as_bytes() == id);
+                // A plain loop: the lookup, with the compare it inlines, stays in the caller (an
+                // iterator's `find` is compiled as a function of its own).
+                let mut found = None;
+                let mut i = pos;
+                while i < count {
+                    if items.is_named(i, id) {
+                        found = Some(i);
+                        break;
+                    }
+                    i += 1;
+                }
                 (id, found)
             }
         };

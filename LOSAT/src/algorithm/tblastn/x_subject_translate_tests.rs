@@ -5,7 +5,8 @@ use crate::config::ScoringMatrix;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:95-103 and
 // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
-// else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
+// For ambiguous nucleotides, picks one set bit using the random generator (`GetRand`)
+// modulo the bit count.
 // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
 // traceback reevaluation; these resolved bases are preliminary-search input.
 fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {

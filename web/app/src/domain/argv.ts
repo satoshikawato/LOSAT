@@ -38,7 +38,7 @@ const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp'
  * application manages, and the CLI's options that a search in the browser cannot have, whose
  * CLI message would name what the user cannot change here (`-subject`, `-num_threads`; WA-FM-04);
  * undefined for the other words. The words of the CLI's help and version (`-h`, `-help`,
- * `-help-full`, `--help`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
+ * `-help-full`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
  * prints the command line's text for them and searches nothing (*start*'s `prints`; line WQA's D14,
  * 2026-11-20, in place of WA-FM-05's refusal).
  */
@@ -56,11 +56,11 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
 }
 
 /**
- * The -query / -subject names of inputs that are not one file (plan §5.3): pasted text, and
- * several inputs searched together.
+ * The names that stand for a pasted text in the source list and in the argv that the form validates. The argv of a run names a
+ * file that LOSAT makes (pasted text, several files, a file with records left out) by the run's own name (`inputFileName`:
+ * `losat-run3-blastn-20261123T101530Z.query.fa`; line WQA's D22, DECISIONS 44), which the run has only when it is queued.
  */
 export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject.fa' } as const);
-export const COMBINED_NAMES = Object.freeze({ query: 'combined_query.fa', subject: 'combined_subject.fa' } as const);
 
 export interface ArgvInput {
   readonly program: ProgramId;
@@ -74,8 +74,8 @@ export interface ArgvInput {
 
 /**
  * The argv of a run as the user's command: a run that printed the command line's help or version (`RunSnapshot.prints`) read
- * no input, so its command names none (`blastn -version`), where the engine's argv has the placeholders `-query query.fa
- * -subject subject.fa` that `buildArgv` writes. Where the run is shown as a command, it takes the argv from here (line WQA's
+ * no input, so its command names none (`blastn -version`), where the engine's argv has the names that `buildArgv` writes
+ * (the run's own names of its two inputs, `Coordinator.enqueueAll`). Where the run is shown as a command, it takes the argv from here (line WQA's
  * D20, 2026-11-23).
  */
 export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {
@@ -145,19 +145,44 @@ export function splitOptions(text: string): readonly string[] {
   return Object.freeze(words);
 }
 
+/** The line that ends the usage of an argument error of the engine (72 `=`): its posts follow. */
+const POSTS_RULE = '='.repeat(72);
+
+/**
+ * What the posts of an argument error of the engine name: the options (`flags`, as `-name`), and
+ * the words as they were typed (`words`: `Unknown argument: "foo"` names `-foo`, `Invalid argument: W`
+ * and `the offending value: W` name W). The posts write option names without their dash, except
+ * `Argument "-name". Value is missing`; a backquoted word after `argument:  ` is an option name only
+ * after "Incompatible with" and "required by" (after "cannot be converted" and "Illegal value" it
+ * is the value), and a name after "defined already: ". No look-behind (older Safari).
+ */
+function namedByPosts(posts: string): { readonly flags: ReadonlySet<string>; readonly words: ReadonlySet<string> } {
+  const flags = new Set<string>();
+  const words = new Set<string>();
+  for (const found of posts.matchAll(/Argument "-?([^"\s]+)"/g)) flags.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/(?:Incompatible with|required by) argument:\s+`([^'\s]+)'/g)) flags.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/defined already: (\S+)/g)) flags.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/Unknown argument: "([^"]*)"/g)) words.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/(?:Invalid argument: |the offending value: )(.+)/g)) words.add(found[1]!.trimEnd());
+  return { flags, words };
+}
+
 /**
  * The fields of the form that a refusal of the argv names (WA2-AX-05), which are marked as refused
  * and point to it: the options that it names (`-word_size`, not the `e-value` of a sentence), and
  * whether "Additional options" is one of them, as the Web's own messages about its words say
- * ("Additional options: …", "-evalue is set in the form: …"), or as an option typed there is named.
- * An option typed in "Additional options" is that field's, not the form's field of the same flag.
+ * ("Additional options: …", "-evalue is set in the form: …"), or as an option or a word typed there
+ * is named. An option typed in "Additional options" is that field's, not the form's field of the
+ * same flag.
+ *
+ * Two kinds of message are read. The engine's argument error is its usage, a line of 72 `=`, an
+ * empty line and two posts: only the posts are read, since the usage names every option of the
+ * program (`namedByPosts`). Any other message (the engine's one-line refusal, the Web's own) is
+ * read whole up to its first empty line, with options named by their dash.
  */
 export function refusedFields(message: string, extra: string): { readonly extra: boolean; readonly flags: ReadonlySet<string> } {
-  // The sentence ends at its first empty line: clap's `Usage:` line lists the options of the argv,
-  // and its `For more information, try '--help'.` line is not about the argv.
-  const sentence = message.split(/\n[ \t]*\n/, 1)[0]!;
-  // No look-behind (`(?<!…)`): a bundle with one does not load in an older Safari.
-  const named = new Set([...sentence.matchAll(/(?:^|[^\w-])(-[A-Za-z][A-Za-z0-9_]*)/g)].map((found) => found[1]!));
+  const lines = message.split(/\r?\n/);
+  const rule = lines.indexOf(POSTS_RULE);
   let words: readonly string[];
   try {
     words = splitOptions(extra);
@@ -165,9 +190,20 @@ export function refusedFields(message: string, extra: string): { readonly extra:
     words = [];
   }
   const typed = words.map((word) => word.split('=', 1)[0]!);
+  if (rule >= 0) {
+    const { flags, words: named } = namedByPosts(lines.slice(rule + 1).join('\n'));
+    return {
+      extra: words.some((word) => named.has(word)) || typed.some((word) => flags.has(word) || named.has(word)),
+      flags: new Set([...flags].filter((flag) => !typed.includes(flag))),
+    };
+  }
+  // The sentence ends at its first empty line.
+  const sentence = message.split(/\n[ \t]*\n/, 1)[0]!;
+  // No look-behind (`(?<!…)`): a bundle with one does not load in an older Safari.
+  const named = new Set([...sentence.matchAll(/(?:^|[^\w-])(-[A-Za-z][A-Za-z0-9_]*)/g)].map((found) => found[1]!));
   // A word typed there that is not an option name (`--help`, `evalue` without its `-`) is named as
-  // the start of the sentence ("--help is not available in the browser") or in quotes
-  // ("unknown option or argument 'evalue'"); the engine names the whole word (`'evalue=10'`).
+  // the start of the sentence ("--help is not available in the browser") or in quotes; the whole
+  // word is named (`'evalue=10'`).
   const quoted = (word: string) => word !== '' && (sentence.includes(`'${word}'`) || (sentence.startsWith(word) && /^\s|^$/.test(sentence.slice(word.length))));
   return {
     extra: message.startsWith('Additional options') || typed.some((word) => named.has(word) || quoted(word)) || words.some(quoted),
@@ -224,8 +260,25 @@ export function optionNames(
   });
 }
 
-/** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */
+/**
+ * The value of an option in an argv as the engine reads it (NCBI's reader takes `-flag value` and
+ * `-flag=value`): the word after its last occurrence, or the text after `=` where that occurrence is
+ * `-flag=value`; undefined where it is not given.
+ */
 export function optionValue(argv: readonly string[], flag: string): string | undefined {
-  const at = argv.lastIndexOf(flag);
-  return at < 0 || at + 1 >= argv.length ? undefined : argv[at + 1];
+  for (let at = argv.length - 1; at >= 0; at--) {
+    const word = argv[at]!;
+    if (word === flag) return argv[at + 1];
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The task that the engine runs for an argv: its -task (`-task value` or `-task=value`), else the
+ * default task of the program's options (`describe`'s `default` of -task); undefined for a program
+ * without -task, and where the options are unknown and the argv gives none.
+ */
+export function runTask(argv: readonly string[], options: ReadonlyArray<{ readonly flag: string; readonly defaultValue?: string }>): string | undefined {
+  return optionValue(argv, '-task') ?? options.find((option) => option.flag === '-task')?.defaultValue;
 }

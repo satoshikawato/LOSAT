@@ -195,7 +195,7 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Requested), Strin
 /// (`started_command`). An argv whose reader stopped at a help word fails with the text of the
 /// help (`parse_printing` tells it apart).
 fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
-    match parse_printing(words)? {
+    match parse_printing(words, None)? {
         Parsed::Command(program, command) => Ok((program, *command)),
         Parsed::Prints(text) => Err(text),
     }
@@ -205,26 +205,26 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
 enum Parsed {
     /// The program's arguments (boxed: they are far larger than a text).
     Command(Program, Box<Commands>),
-    /// The text that the command line prints to its standard output in place of a run, where the
-    /// reader stopped at a help word (`-h`, `-help`, `-help-full`, `--help`, `-xmlhelp`, the words
-    /// before it read: `losat::web_adapter::printed_text`).
+    /// The text that the command line prints to its standard output in place of a run, where
+    /// NCBI's reader stopped at a help word (`-h`, `-help`, `-help-full`, `-xmlhelp`, the words
+    /// before it read: `losat::web_adapter::ArgvError::Printed`).
     Prints(String),
 }
 
 /// `parse_words`, with the help that stopped the reader as its own outcome (`Parsed::Prints`; line
 /// WQA's D14, 2026-11-20). The help is printed as the command line prints it, whatever the words
 /// around it (`-out` too: line WQA's D14 review, 2026-11-20); any other argv with `-out` is refused.
-fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
+/// A run gives its start (`started_command`): the posts of an argument error go to the run's
+/// `-logfile` target, as the command line's (`try_parse_cli`).
+fn parse_printing(words: &[&str], started: Option<&CallerStart>) -> Result<Parsed, String> {
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
     let argv = std::iter::once("losat").chain(words.iter().copied());
-    let parsed = losat::web_adapter::try_parse_cli(argv);
-    if let Err(error) = &parsed {
-        if let Some(text) = losat::web_adapter::printed_text(error, false) {
-            return Program::parse(words.first().copied().unwrap_or(""))
-                .map(|_| Parsed::Prints(text));
-        }
+    let parsed = losat::web_adapter::try_parse_cli(argv, started);
+    if let Err(losat::web_adapter::ArgvError::Printed(text)) = &parsed {
+        return Program::parse(words.first().copied().unwrap_or(""))
+            .map(|_| Parsed::Prints(text.clone()));
     }
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
@@ -234,8 +234,7 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
             ));
         }
     }
-    let cli: Cli =
-        parsed.map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
+    let cli: Cli = parsed.map_err(|error| losat::web_adapter::argv_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     Ok(Parsed::Command(program, Box::new(cli.command)))
 }
@@ -250,7 +249,7 @@ pub fn prints(words: &[&str]) -> Option<&'static str> {
     match losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])) {
         Preparsed::Version(_) => Some("version"),
         Preparsed::Words { .. } => {
-            matches!(parse_printing(words), Ok(Parsed::Prints(_))).then_some("help")
+            matches!(parse_printing(words, None), Ok(Parsed::Prints(_))).then_some("help")
         }
     }
 }
@@ -465,12 +464,17 @@ enum Next {
 /// (`parse_printing`: the help that stops the reader is printed), the settings that LOSAT refuses
 /// (`start.settings()?`), the end of a dry run (rc 0), then `-outfmt`, which NCBI reads in `Run`
 /// (`read_outfmt`: a dry run does not read it), with the error of an argv without subjects.
-/// `validate` and `run` take the argv here.
-fn started_command(words: &[&str], started: &CallerStart) -> Result<Next, String> {
+/// `validate` and `run` take the argv here. With `to_log` (`run`) the posts of an argument error
+/// go to the run's `-logfile` target, which the run hands over (`CallerStart::finish`), and the
+/// error is the command line's standard error, NCBI's line that points to the error logs included,
+/// as on the command line; without (`validate`, whose start keeps no file) they stay in the error,
+/// the report as the command line writes it without `-logfile`, so that the form names the
+/// refused fields.
+fn started_command(words: &[&str], started: &CallerStart, to_log: bool) -> Result<Next, String> {
     if let Some(text) = started.version() {
         return Ok(Next::Prints(text.to_string()));
     }
-    let (program, command) = match parse_printing(words)? {
+    let (program, command) = match parse_printing(words, to_log.then_some(started))? {
         Parsed::Prints(text) => return Ok(Next::Prints(text)),
         Parsed::Command(program, command) => (program, *command),
     };
@@ -586,7 +590,7 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
     if let Ok(settings) = started.settings() {
         known(settings.data_loaders);
     }
-    let (program, command, requested) = match started_command(words, &started)? {
+    let (program, command, requested) = match started_command(words, &started, false)? {
         Next::Search(parsed) => *parsed,
         // A run that prints reads no input; the command line prints before it refuses settings.
         Next::Prints(_) => {
@@ -1179,6 +1183,7 @@ fn search(
             // whose lookup throws where the prefetch is off, which `other_outfmts` is for, needs
             // `PRE_FETCH_SEQS_LIMIT`, which LOSAT Web does not set.)
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(writers.iter_mut())
@@ -1682,7 +1687,7 @@ fn run_started(
     // Where the messages written to the sink end up, which the host is told first (stream 10; line
     // WQA's sweep, D7, 2026-11-20).
     crate::emit::messages(crate::emit::place(started.messages_place()));
-    let parsed = match started_command(words, started)? {
+    let parsed = match started_command(words, started, true)? {
         Next::Search(parsed) => *parsed,
         // The command line's text on the stream of its standard output (line WQA's D14,
         // 2026-11-20); no search.
@@ -2116,12 +2121,12 @@ mod tests {
         // A help word prints the help, as on the command line (line WQA's D14 review).
         for help in [["blastp", "-out", "x", "-h"], ["blastp", "-h", "-out", "x"]] {
             assert!(
-                matches!(parse_printing(&help), Ok(Parsed::Prints(_))),
+                matches!(parse_printing(&help, None), Ok(Parsed::Prints(_))),
                 "{help:?}"
             );
         }
         assert!(matches!(
-            parse_printing(&["blastp", "-out=x", "-help"]),
+            parse_printing(&["blastp", "-out=x", "-help"], None),
             Ok(Parsed::Prints(_))
         ));
         // -num_descriptions and -num_alignments are accepted (also as `-x=v`),
@@ -2150,14 +2155,17 @@ mod tests {
                 let both = [&words[..], &[option, "3"]].concat();
                 let cli = losat::web_adapter::try_parse_cli(
                     std::iter::once("losat").chain(both.iter().copied()),
+                    None,
                 )
                 .unwrap_err();
                 assert_eq!(
                     parse(&both).unwrap_err(),
-                    losat::web_adapter::command_line_message(&cli, false),
+                    losat::web_adapter::argv_message(&cli),
                     "{program} {option}"
                 );
-                assert!(parse(&both).unwrap_err().contains("cannot be used with"));
+                assert!(parse(&both)
+                    .unwrap_err()
+                    .contains("Incompatible with argument:  `"));
             }
         }
         assert!(matches!(
@@ -2173,9 +2181,10 @@ mod tests {
         ] {
             let cli = losat::web_adapter::try_parse_cli(
                 std::iter::once("losat").chain(words.iter().copied()),
+                None,
             )
             .map(|_| ())
-            .map_err(|error| losat::web_adapter::command_line_message(&error, false));
+            .map_err(|error| losat::web_adapter::argv_message(&error));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         // An argv without subjects is NCBI's error after the parse (line WQA's D14, 2026-11-21).
@@ -2333,11 +2342,12 @@ mod tests {
         ] {
             let cli = losat::web_adapter::try_parse_cli(
                 ["losat"].into_iter().chain(words.iter().copied()),
+                None,
             )
             .unwrap_err();
             assert_eq!(
                 parse(words).unwrap_err(),
-                losat::web_adapter::command_line_message(&cli, false),
+                losat::web_adapter::argv_message(&cli),
                 "{words:?}"
             );
         }
@@ -3116,9 +3126,11 @@ mod tests {
         );
         crate::store::release(q_nuc).unwrap();
         crate::store::release(s_nuc).unwrap();
-        // `-db` with `-subject` is the parser's conflict, as on the command line.
+        // `-db` with `-subject` is NCBI's reader's exclusion, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
-        assert!(validate(&both).unwrap_err().contains("cannot be used with"));
+        assert!(validate(&both)
+            .unwrap_err()
+            .contains("Incompatible with argument:  `"));
         assert!(!searches_database(&both));
         // `-dbsize` is an option of the search: accepted with the subject records.
         validate(&[
@@ -3541,7 +3553,7 @@ mod tests {
             ];
             assert!(parse(&twice)
                 .unwrap_err()
-                .contains("cannot be used multiple times"));
+                .contains("Argument with this name is defined already: outfmt"));
             assert!(validate(&[
                 program,
                 "-query",

@@ -16,11 +16,15 @@ use std::io::Write;
 
 use super::files::{self, OutputFile};
 use super::Tool;
+use crate::report::run_files::OpenFiles;
 
 #[path = "constraint.rs"]
 mod constraint;
 
-pub(crate) use constraint::{file_name_length, is_genetic_code, string_to_int8, Constraint};
+pub(crate) use constraint::{is_genetic_code, string_to_int8, Constraint};
+// The file name rule of LOSAT Web ABI v1's own output path parser (`web_v1_argv`).
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) use constraint::file_name_length;
 
 /// What an argument holds (`CArgDescriptions::EType` of a key, or a flag).
 ///
@@ -117,6 +121,8 @@ pub(crate) struct Desc {
     constraint: Option<Constraint>,
     /// `AddKey` (a key without `optional="true"`): the key must be given (`CArgDescMandatory`).
     mandatory: bool,
+    /// `<description>`: the argument's comment, which NCBI's `-help` prints (`described`).
+    description: Text,
 }
 
 impl Desc {
@@ -199,7 +205,7 @@ impl Refused {
 
 /// How LOSAT refuses one of NCBI's arguments that it does not run (AGENTS.md rule 2: explicit
 /// unsupported errors): the one list of them, the rows of `REFUSED` in `build/ncbi_args.rs` (line
-/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::named_refusal`,
+/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::reader::named_refusal`,
 /// `cli::run_refusal`) and `-xmlhelp` (`cli::xml_help_text`) read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refusal {
@@ -255,13 +261,93 @@ pub fn string_values(program: &str, name: &str) -> Option<Vec<&'static str>> {
     }
 }
 
+/// The values that `program`'s key `name` allows where its constraint is a set (`CArgAllow_Strings`,
+/// `CArgAllowStringSet`, `CArgAllowIntegerSet`), as LOSAT's descriptions of the program list them:
+/// in the order of `DISPLAY_ORDERS` where it has a row (line RG DECISIONS K4i-2b-1), else of NCBI's
+/// set; `None` for a key of another constraint or none, and for a flag. The library API's and LOSAT
+/// Web's descriptions (`api::describe`, `web_adapter`) and the check of a task that a caller set
+/// (`value_parsers::TaskParser::check`) read it.
+pub fn choices(program: &str, name: &str) -> Option<Vec<String>> {
+    let display = DISPLAY_ORDERS
+        .iter()
+        .find(|(of, key, _)| of.is(program) && key.is(name));
+    if let Some((_, _, values)) = display {
+        return Some(constraint::strings(*values).map(str::to_string).collect());
+    }
+    match find_desc(arguments(program)?, name)?.constraint? {
+        Constraint::Strings(values) | Constraint::StringSet(values) => {
+            Some(constraint::strings(values).map(str::to_string).collect())
+        }
+        Constraint::IntegerSet(values) => Some(
+            constraint::integers(values)
+                .iter()
+                .map(i32::to_string)
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// One argument that LOSAT's descriptions of a program list (`described`), as NCBI's tables give
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Described {
+    /// The name, without its dash.
+    pub(crate) name: &'static str,
+    pub(crate) kind: Kind,
+    /// `<default>`: the default of a key of `AddDefaultKey`, which the library API's and LOSAT
+    /// Web's descriptions give as the option's default (line RG DECISIONS K4i-2b-1 (3)).
+    pub(crate) default: Option<&'static str>,
+    /// The values of its set (`choices`); empty for a key of another constraint or none, and for
+    /// a flag.
+    pub(crate) choices: Vec<String>,
+    /// `<description>`: NCBI's comment of the argument, which its `-help` prints (NCBI's words).
+    pub(crate) description: &'static str,
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1. NCBI's `-help` prints the usage line first, which
+// names the arguments in the order in which the program described them (`usage_position`), then the
+// arguments with their comments, by group.
+/// The arguments of `tool`'s program that LOSAT's descriptions of it list (the library API's
+/// `describe`, LOSAT Web's): every argument of its XML (the arguments of every NCBI application,
+/// the help flags, `-logfile`, `-conffile`, `-version`, ..., are not in its tables) but those that
+/// LOSAT refuses by name (`Refusal::Read`), in the order of the usage line of NCBI's `-help`
+/// (`usage_position` in `Tool::help`; blastn: `-task`, `-db`, `-dbsize`, ...), not of the list of
+/// arguments under it (blastn: `-query`, `-query_loc`, `-strand`, `-task`, ...).
+pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
+    let mut listed: Vec<(usize, Described)> = tool_arguments(tool)
+        .descs()
+        .iter()
+        .filter(|desc| !matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_))))
+        .map(|desc| {
+            let name = desc.name();
+            let described = Described {
+                name,
+                kind: desc.kind,
+                default: desc.default(),
+                choices: choices(tool.program, name).unwrap_or_default(),
+                description: desc.description.get(),
+            };
+            (usage_position(tool.help, name), described)
+        })
+        .collect();
+    listed.sort_by_key(|(position, _)| *position);
+    listed.into_iter().map(|(_, described)| described)
+}
+
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
-// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `PROGRAMS`), written by `LOSAT/build.rs`
-// (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
-// arguments of every `CArgDescriptions` before the program's own (the help flags of its
-// constructor), `FILE_ARGUMENTS` those of every application after them
-// (`AddDefaultFileArguments`: `-logfile`, `-conffile`); the build script cites NCBI's lines.
+// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by
+// `LOSAT/build.rs` (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS`
+// are the arguments of every `CArgDescriptions` before the program's own (the help flags of its
+// constructor), `FILE_ARGUMENTS` those of every application after them (`AddDefaultFileArguments`:
+// `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
+
+/// Whether `name` is one of the arguments that every NCBI application has after its own
+/// (`FILE_ARGUMENTS`: `-logfile`, `-conffile`), which the application start reads.
+pub(crate) fn is_file_argument(name: &str) -> bool {
+    FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
+}
 
 /// The argument descriptions of `program` (`PROGRAMS`), if LOSAT has its XML.
 pub(crate) fn arguments(program: &str) -> Option<Arguments> {
@@ -326,10 +412,9 @@ pub(crate) enum Dep {
 /// `m_Dependencies` in the order of its `multimap` (`Arguments::dependencies`), of the arguments
 /// that `given` says were given: the first exclusion between two given arguments is the error
 /// (`Err`, its message, bytes as `arg_message` gives them), else the arguments that the given
-/// ones require, each with its first requester, and those they exclude. The one port of the
-/// walk: the programs on NCBI's reader (`post_check`) and makeblastdb, whose command line LOSAT
-/// reads with its own parser (`writedb::makeblastdb::dependency_error`), use it.
-pub(crate) fn walk_dependencies<'a>(
+/// ones require, each with its first requester, and those they exclude: the walk of the reader's
+/// `post_check`.
+fn walk_dependencies<'a>(
     deps: impl IntoIterator<Item = (&'a str, Dep, &'a str)>,
     given: &dyn Fn(&str) -> bool,
 ) -> Result<DependencyWalk<'a>, Vec<u8>> {
@@ -422,6 +507,9 @@ pub(crate) enum ArgsError {
     Usage,
     /// `-help` (`CArgHelpException::eHelpFull`): the full description on stdout, exit status 0.
     Help,
+    /// `-help-full` (`CArgHelpException::eHelpShowAll`): the full description with the hidden
+    /// arguments on stdout, exit status 0.
+    HelpFull,
     /// `-xmlhelp` (`CArgHelpException::eHelpXml`): the description in XML on stdout, exit status
     /// 0 (`ncbi_xmlhelp`).
     XmlHelp,
@@ -486,6 +574,9 @@ pub(crate) struct Args {
     numbers: BTreeMap<&'static str, Number>,
     /// The names given on the command line, in their order.
     given: Vec<&'static str>,
+    /// Where the files that the program opens by name for writing go (`output_file`): the file
+    /// system, or LOSAT Web's files (`OpenFiles`), which the application gives the arguments.
+    files: OpenFiles,
 }
 
 impl Args {
@@ -519,9 +610,8 @@ impl Args {
     /// It names the first such argument in the command line's order, in the words of the
     /// programs on clap (`cli::non_utf8_value_refusal`). The values read by their bytes are not
     /// refused: an `eOutputFile` key, which the programs open by its name's bytes (`output_file`,
-    /// `os_value`), and `-logfile`, which the application opens before the reader
-    /// (`ncbi_environment`; a `-conffile` name that is not UTF-8 is refused there, before the
-    /// reader).
+    /// `os_value`), `-logfile`, which the application opens before the reader, and `-conffile`,
+    /// whose file the application loads before the reader (`ncbi_environment`).
     pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
         let read_as_bytes = |name: &str| {
             FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
@@ -535,6 +625,18 @@ impl Args {
             tool.refusal_name,
             refused,
         ))
+    }
+
+    /// The arguments given on the command line, in their order, each with its value's bytes
+    /// (`None` for a flag): what LOSAT's programs on clap hand to clap's conversion
+    /// (`cli::reader::convert`).
+    pub(crate) fn given_values(&self) -> impl Iterator<Item = (&'static str, Option<&OsStr>)> + '_ {
+        self.given.iter().map(|&name| (name, self.os_value(name)))
+    }
+
+    /// Whether the value of the key `name` is not UTF-8.
+    pub(crate) fn is_bytes(&self, name: &str) -> bool {
+        matches!(self.values.get(name), Some(Some(Value::Bytes(_))))
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
@@ -574,19 +676,32 @@ impl Args {
         }
     }
 
+    /// The run's files, where the files that the program opens by name for writing go.
+    pub(crate) fn files(&self) -> &OpenFiles {
+        &self.files
+    }
+
+    /// The arguments of a run whose files go to `files` (the application's: `ncbi_app::run_in`).
+    pub(crate) fn with_files(self, files: &OpenFiles) -> Self {
+        Args {
+            files: files.clone(),
+            ..self
+        }
+    }
+
     /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, the file of its
-    /// value's bytes as NCBI opens it, `stdout` for `-`, or NCBI's exception when it does not
-    /// open. A `CArgException` thrown in `Run` is reported by the application as one of the
-    /// reader's (`Diag::run_arg_exception`). The stream of an `eInputFile` key is
-    /// `files::open_input_file` of its value, which the programs open where NCBI's `Run` reads
-    /// it.
+    /// value's bytes as NCBI opens it in the run's files (`files`), `stdout` for `-`, or NCBI's
+    /// exception when it does not open. A `CArgException` thrown in `Run` is reported by the
+    /// application as one of the reader's (`Diag::run_arg_exception`). The stream of an
+    /// `eInputFile` key is `files::open_input_file` of its value, which the programs open where
+    /// NCBI's `Run` reads it.
     pub(crate) fn output_file<'a>(
         &self,
         name: &str,
         stdout: &'a mut dyn Write,
     ) -> Result<OutputFile<'a>, ArgException> {
         let value = self.os_value(name).ok_or_else(|| no_value(name))?;
-        files::open_output_file(name, value, stdout)
+        files::open_output_file(name, value, stdout, &self.files)
     }
 
     /// The value of the key `name` as its bytes (`AsString` of a name that a program opens):
@@ -673,6 +788,7 @@ pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> 
         values,
         numbers,
         given,
+        files: OpenFiles::disk(),
     })
 }
 
@@ -730,9 +846,11 @@ fn create_arg(
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2852
         match bytes {
             b"-h" => return Err(ArgsError::Usage),
-            // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
-            // text is that of `-help` (probe C05 of line BDC).
-            b"-help" | b"-help-full" => return Err(ArgsError::Help),
+            b"-help" => return Err(ArgsError::Help),
+            // `-help-full` adds the hidden arguments: makeblastdb's `-randomize`
+            // (`Tool::help_full`); the other programs have none, and their text is that of
+            // `-help` (probe C05 of line BDC).
+            b"-help-full" => return Err(ArgsError::HelpFull),
             // The help in XML (`ncbi_xmlhelp`).
             b"-xmlhelp" => return Err(ArgsError::XmlHelp),
             _ => {}

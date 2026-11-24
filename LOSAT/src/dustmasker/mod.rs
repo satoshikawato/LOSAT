@@ -33,6 +33,10 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: None,
     components: &[],
+    help_full: None,
+    short_description: None,
+    write_failure: None,
+    dry_run: None,
 };
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42

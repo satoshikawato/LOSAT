@@ -22,8 +22,9 @@ use anyhow::Result;
 
 use super::args::ResolvedOptions;
 use super::empty_rows::{
-    empty_row_scores, row_is_empty, rows_empty, std_seg_lengths_not_accurate, subject_mapped_rows,
-    tabular_empty_row, AlignQueryIds, EmptyRowsRefusal, MappedRows, SubjectLoc, TabularEmptyRow,
+    empty_row_scores, row_range, row_range_exception, rows_empty, std_seg_lengths_not_accurate,
+    subject_mapped_rows, tabular_empty_row, AlignQueryIds, EmptyRowsRefusal, MappedRows,
+    SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
 use super::report::{
@@ -34,10 +35,11 @@ use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
+use crate::report::serial::seqalign::{AlignRow, RowRangeError};
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
-    TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularSubject,
-    TabularTaxonomy, TabularWriter,
+    coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
+    TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -453,6 +455,16 @@ pub(super) fn write_blastx_tabular(
                 let query_length = options
                     .query_range
                     .map_or(searched_length, |range| range.length());
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1497-1499
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
+                // The length against which `hsp_percent_coverage` counts an HSP's residues in its
+                // frame (`qcovhsp`): a third of the searched letters in a gapped search, the
+                // searched letters in an ungapped one (blast_seqalign.cpp:1381-1384).
+                let coverage_length = if options.gapped {
+                    searched_length as i32 / 3
+                } else {
+                    searched_length as i32
+                };
                 let tabular_query =
                     TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
                 // Several volumes: the merged lists cut once per query (`BatchResults::shown_lists`).
@@ -461,33 +473,40 @@ pub(super) fn write_blastx_tabular(
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
                 // `qcovs` reads the query range of every HSP of the query before its first row
-                // (`GetMasterCoverage`, cited below): with `-db` the empty query row of an HSP of
-                // length 0 throws there, after outfmt 7's lines (`empty_rows::row_is_empty`), and
-                // with `-subject` the mapped query row that wraps (`MappedRows::QueryRowWraps`) and
-                // the empty rows that the mapper leaves (`SubjectLoc::of_list`); `-subject`'s other
-                // mapped query rows are not empty.
-                if needs.qcovs
-                    && listed
-                        .iter()
-                        .any(|list| match loc.of_list(list, options.gapped) {
-                            SubjectLoc::Whole => list
-                                .hsps
-                                .iter()
-                                .any(|hsp| has_seqalign(hsp, options.gapped) && rows_empty(hsp)),
-                            SubjectLoc::Interval => matches!(
-                                subject_mapped_rows(
-                                    loc,
-                                    list,
-                                    options.gapped,
-                                    query,
-                                    &subjects[list.oid]
-                                ),
-                                Some(MappedRows::QueryRowWraps)
-                            ),
-                        })
-                {
+                // (`GetMasterCoverage`, cited below): with `-db` a query row whose range it cannot
+                // take throws there, after outfmt 7's lines (`empty_rows::row_range`: the empty
+                // row of an HSP of length 0, a row that starts with a gap), and with `-subject` the
+                // mapped query row that wraps (`MappedRows::QueryRowWraps`) and the empty rows that
+                // the mapper leaves (`SubjectLoc::of_list`); `-subject`'s other mapped query rows
+                // are not empty.
+                let unranged = needs
+                    .qcovs
+                    .then(|| {
+                        listed
+                            .iter()
+                            .find_map(|list| match loc.of_list(list, options.gapped) {
+                                SubjectLoc::Whole => list.hsps.iter().find_map(|hsp| {
+                                    has_seqalign(hsp, options.gapped)
+                                        .then(|| row_range(hsp, AlignRow::Query))
+                                        .flatten()
+                                }),
+                                SubjectLoc::Interval => matches!(
+                                    subject_mapped_rows(
+                                        loc,
+                                        list,
+                                        options.gapped,
+                                        query,
+                                        &subjects[list.oid]
+                                    ),
+                                    Some(MappedRows::QueryRowWraps)
+                                )
+                                .then_some(RowRangeError::Empty),
+                            })
+                    })
+                    .flatten();
+                if let Some(error) = unranged {
                     writer.flush()?;
-                    return Err(NativeError::exception(&row_is_empty()).into());
+                    return Err(NativeError::exception(&row_range_exception(error)).into());
                 }
                 for list in listed {
                     let shown_hsps = || {
@@ -504,6 +523,13 @@ pub(super) fn write_blastx_tabular(
                         subject_values(shown, subject, list.oid, &no_taxonomy, needs.all_deflines);
                     // The subject's Seq-loc as its Seq-align shows it (`SubjectLoc::of_list`).
                     let loc = loc.of_list(list, options.gapped);
+                    // The subject's `qcovhsp` rule: its rows only divide.
+                    let qcovhsp = QueryCoveragePerHsp::of_subject(
+                        !options.gapped,
+                        shown_count,
+                        coverage_length,
+                        query_length as i32,
+                    );
                     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:629-640
                     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2981
                     // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list
@@ -576,6 +602,16 @@ pub(super) fn write_blastx_tabular(
                         // follow the rows before it, before those of the row's own lookups.
                         // A row that reads a subject whose load throws outside the subject block
                         // ends the run (`TabularWriter::ends_run`).
+                        if let Some(reads) = reads.as_mut() {
+                            if fetch.reads(hsp.identity) {
+                                reads.subject_read(
+                                    0,
+                                    list.oid as u32,
+                                    &mut *writer,
+                                    &mut *stderr,
+                                )?;
+                            }
+                        }
                         if let Some(end) = table.ends_run(
                             &tabular_subject,
                             crate::blastinput::app::Program::Blastx,
@@ -586,16 +622,6 @@ pub(super) fn write_blastx_tabular(
                                     reads.end_run();
                                 }
                             }));
-                        }
-                        if let Some(reads) = reads.as_mut() {
-                            if fetch.reads(hsp.identity) && !tabular_subject.throws() {
-                                reads.subject_read(
-                                    0,
-                                    list.oid as u32,
-                                    &mut *writer,
-                                    &mut *stderr,
-                                )?;
-                            }
                         }
                         // The texts of the row's lookups of the taxonomy database
                         // (`x_SetTaxInfoAll`, `x_SetTaxInfo`) follow the rows before it.
@@ -666,14 +692,7 @@ pub(super) fn write_blastx_tabular(
                                 // `TabularHsp::end_gaps`).
                                 end_gaps: false,
                                 stored_gaps: [&[], &[]],
-                                qcovhsp: query_coverage_per_hsp(
-                                    options.gapped,
-                                    shown_count,
-                                    0,
-                                    mapped.length() as i32,
-                                    searched_length,
-                                    query_length,
-                                ),
+                                qcovhsp: qcovhsp.of_hsp(0, mapped.length() as i32),
                             };
                             (row, tabular_query, tabular_subject)
                         } else if form == TabularEmptyRow::Leaves {
@@ -742,20 +761,17 @@ pub(super) fn write_blastx_tabular(
                                 rows,
                                 end_gaps: true,
                                 stored_gaps: [&[], &[]],
-                                qcovhsp: query_coverage_per_hsp(
-                                    options.gapped,
-                                    shown_count,
+                                qcovhsp: qcovhsp.of_hsp(
                                     // The HSP's own ends (`Blast_HSPGetQueryCoverage` of the
                                     // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's.
                                     raw.q_end - raw.q_start,
-                                    // `-subject`'s mapped empty row has one nucleotide.
+                                    // The Seq-align's nucleotides; `-subject`'s mapped empty row
+                                    // has one.
                                     if empty {
                                         1
                                     } else {
                                         (a.qstart - a.qend).abs() + 1
                                     },
-                                    searched_length,
-                                    query_length,
                                 ),
                             };
                             (row, tabular_query, tabular_subject)
@@ -903,7 +919,16 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => Some(reported.loads()),
         ShownSubjects::Fasta { .. } => None,
     };
-    let report = report_batch(&tax_queries, parsed, plain, true, loads, names, program)?;
+    let report = report_batch(
+        &tax_queries,
+        parsed,
+        plain,
+        true,
+        loads,
+        names,
+        program,
+        options.is_html,
+    )?;
     let mut q_idx = 0;
     for batch in batches {
         for qidx in 0..batch.queries.len() {
@@ -938,46 +963,3 @@ fn write_blastx_tax_report(
     }
     Ok(())
 }
-
-/// `qcovhsp` of an HSP whose query span is `span` residues of its frame and `nucleotides` letters
-/// of the record, in a subject with `hsps` HSPs that have a Seq-align. `searched_length` is the
-/// length of the searched letters (the `-query_loc` interval), `query_length` that of the tabular
-/// `qlen` (the range as given).
-///
-/// A gapped search: the HSP's own Seq-align carries `hsp_percent_coverage`, which
-/// `BLASTHspListToSeqAlign` computes for a translated query against a third of the query's
-/// letters.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1497-1499
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
-/// An ungapped search makes one Seq-align of a subject's HSPs, each a Std-seg with its scores,
-/// against the query's letters (`x_UngappedHSPToStdSeg`). The formatter splits a Seq-align of
-/// several into one per HSP that takes the Std-seg's scores; one of a single HSP stays as it is,
-/// its scores on the Std-seg, so that the Seq-align has no `hsp_percent_coverage` and
-/// `x_SetQueryCovSeqalign` counts the Seq-align's span of the query (its nucleotides) against the
-/// query's length, which is the range as given with `-query_loc` (tabular.cpp:786-791).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1381-1384
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3162-3185
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
-fn query_coverage_per_hsp(
-    gapped: bool,
-    hsps: usize,
-    span: i32,
-    nucleotides: i32,
-    searched_length: usize,
-    query_length: usize,
-) -> i32 {
-    let searched_length = searched_length as i32;
-    if gapped {
-        hsp_coverage(span, searched_length / 3)
-    } else if hsps > 1 {
-        hsp_coverage(span, searched_length)
-    } else {
-        hsp_coverage(nucleotides, query_length as i32)
-    }
-}
-
-#[cfg(test)]
-#[path = "tabular_tests.rs"]
-mod tests;

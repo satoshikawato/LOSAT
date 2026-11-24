@@ -21,6 +21,8 @@ mod blastdbcmd_discovery;
 mod blastdbcmd_info;
 #[path = "../blastdbcmd_masks.rs"]
 mod blastdbcmd_masks;
+#[path = "../blastdbcmd_metadata_failures.rs"]
+mod blastdbcmd_metadata_failures;
 #[path = "../blastdbcmd_retrieve.rs"]
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
@@ -57,6 +59,8 @@ mod function_size_limit;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_html_posts.rs"]
+mod library_html_posts;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]
@@ -75,6 +79,8 @@ mod makeblastdb_past_32_bits;
 mod makeblastdb_rename_lock;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
+#[path = "../makeprofiledb_fixtures.rs"]
+mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
@@ -151,6 +157,8 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../syntax_cases_cli.rs"]
+mod syntax_cases_cli;
 #[path = "../tax_report_streams.rs"]
 mod tax_report_streams;
 #[path = "../taxdb_tool_texts.rs"]

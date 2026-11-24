@@ -1,0 +1,105 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tests/fasta/outfmt0/x1bp_d3m_s.fna
+           1 sequences; 642 total letters
+
+
+
+Query= qA
+
+Length=1000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_minus3                                                              367     2e-105
+
+
+>s_minus3
+Length=642
+
+ Score = 367 bits (400),  Expect = 2e-105
+ Identities = 200/200 (100%), Gaps = 0/200 (0%)
+ Strand=Plus/Minus
+
+Query  1    CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  200  CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCG  141
+
+Query  61   GACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGAC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  140  GACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGAC  81
+
+Query  121  TCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  80   TCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGA  21
+
+Query  181  ACAAGGTGGCTGAGAATATC  200
+            ||||||||||||||||||||
+Sbjct  20   ACAAGGTGGCTGAGAATATC  1
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 624059
+
+
+Query= qB
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_minus3                                                              367     6e-106
+
+
+>s_minus3
+Length=642
+
+ Score = 367 bits (400),  Expect = 6e-106
+ Identities = 0/200 (0%), Gaps = 0/200 (0%)
+ Strand=Plus/Minus
+
+Query  603  ------------------------------------------------------------  662
+                                                                        
+Sbjct  200  CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCG  141
+
+Query  663  ------------------------------------------------------------  722
+                                                                        
+Sbjct  140  GACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGAC  81
+
+Query  723  ------------------------------------------------------------  782
+                                                                        
+Sbjct  80   TCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGA  21
+
+Query  783  --------------------  802
+                                
+Sbjct  20   ACAAGGTGGCTGAGAATATC  1
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 183280
+
+
+  Database: tests/fasta/outfmt0/x1bp_d3m_s.fna
+    Posted date:  Nov 18, 2026  1:09 PM
+  Number of letters in database: 642
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3

@@ -390,8 +390,12 @@ test('the output text of the Outputs view is a Tab stop and scrolls with the key
   await expect(output).toHaveAttribute('data-shown', '1:0');
   await expect(page.getByRole('region', { name: 'outfmt 0 output' })).toBeVisible();
   await expect(output).toHaveAttribute('tabindex', '0');
+  // Between the format tabs and the text, the run's made inputs (here the pasted query and subject) each have their
+  // Download button (line WQA's D22): the text is the Tab stop after them.
+  await expect(page.getByTestId('outputs-query-download')).toBeVisible();
+  await expect(page.getByTestId('outputs-subject-download')).toBeVisible();
   await page.getByTestId('format-7').focus();
-  expect(await tabTo(page, 'result-output', 1)).toBe(true);
+  expect(await tabTo(page, 'result-output', 3)).toBe(true);
   await pressUntilScrolled(page, 'PageDown', output, 'scrollTop');
   expect(await focused(page)).toBe('result-output');
 });

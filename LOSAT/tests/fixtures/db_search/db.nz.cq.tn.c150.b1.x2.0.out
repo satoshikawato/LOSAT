@@ -1,0 +1,425 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nz nc
+           4 sequences; 978 total letters
+
+
+
+Query= qx random qx
+
+Length=71
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.142    0.455    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 14896
+
+
+Query= q2
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sM_nz_nc subject sM                                                   184     5e-67
+sI_nz_nc subject sI                                                   139     3e-49
+sZ_nz_nc subject sZ                                                   73.9    2e-23
+sN_nz_nc subject sN                                                   50.8    2e-14
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 184 bits (468),  Expect = 5e-67
+ Identities = 60/160 (38%), Positives = 120/160 (75%), Gaps = 40/160 (25%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+Query  61   DDDDDDDDDDDDDDDDDDDD--------------------FFYEQYGQLGRYMGGALKMC  100
+                                                    FFYEQYGQLGRYMGGALKMC
+Sbjct  184  --------------------WWWWWWWWWWWWWWWWWWWWFFYEQYGQLGRYMGGALKMC  303
+
+Query  101  SDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  140
+            SDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  304  SDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  423
+
+
+ Score = 28.1 bits (61),  Expect = 1e-05
+ Identities = 16/59 (27%), Positives = 35/59 (59%), Gaps = 0/59 (0%)
+ Frame = -1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  59
+            I + I++ I I + I I I+++I + I I + I + I + +++ I I++ + + + I I
+Sbjct  183  IDVDIYVDIHIHVDIDIDIYVYIDVHIDIDVHIDVNIHVDVYVHIDIYVNVNVNVNINI  7
+
+
+ Score = 26.2 bits (56),  Expect = 5e-05
+ Identities = 14/48 (29%), Positives = 29/48 (60%), Gaps = 0/48 (0%)
+ Frame = -1
+
+Query  13   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            I + I++ I I + I I I+++I + I I + I + I + +++ I I+
+Sbjct  183  IDVDIYVDIHIHVDIDIDIYVYIDVHIDIDVHIDVNIHVDVYVHIDIY  40
+
+
+ Score = 24.3 bits (51),  Expect = 3e-04
+ Identities = 13/46 (28%), Positives = 27/46 (59%), Gaps = 0/46 (0%)
+ Frame = -1
+
+Query  17   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFDD  62
+            I + I++ I I + I I I+++I + I I + I + I + +++  D
+Sbjct  183  IDVDIYVDIHIHVDIDIDIYVYIDVHIDIDVHIDVNIHVDVYVHID  46
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 139 bits (350),  Expect = 3e-49
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  81   FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  140
+            FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  4    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  183
+
+
+>sZ_nz_nc subject sZ
+Length=249
+
+ Score = 73.9 bits (180),  Expect = 2e-23
+ Identities = 0/60 (0%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++
+Sbjct  16   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVY  195
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++
+Sbjct  22   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVY  201
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++
+Sbjct  28   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY  207
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++
+Sbjct  34   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVY  213
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++
+Sbjct  40   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY  219
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++
+Sbjct  46   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVY  225
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++
+Sbjct  52   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY  231
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++
+Sbjct  58   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVY  237
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++
+Sbjct  64   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY  243
+
+
+ Score = 70.5 bits (171),  Expect = 5e-22
+ Identities = 0/60 (0%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++++
+Sbjct  70   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVYVY  249
+
+
+ Score = 35.8 bits (81),  Expect = 1e-08
+ Identities = 12/57 (21%), Positives = 38/57 (67%), Gaps = 0/57 (0%)
+ Frame = -1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  57
+            I I++ + +++ +++ + I + I + ++I I + I + I+++I I + I I++++++
+Sbjct  177  INIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVYIDINVNIDIYVYVYV  7
+
+
+ Score = 35.8 bits (81),  Expect = 1e-08
+ Identities = 12/57 (21%), Positives = 38/57 (67%), Gaps = 0/57 (0%)
+ Frame = -1
+
+Query  3    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  59
+            I I++ + +++ +++ + I + I + ++I I + I + I+++I I + I I++++++
+Sbjct  177  INIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVYIDINVNIDIYVYVYV  7
+
+
+ Score = 34.7 bits (78),  Expect = 3e-08
+ Identities = 12/56 (21%), Positives = 37/56 (66%), Gaps = 0/56 (0%)
+ Frame = -1
+
+Query  5    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            I I++ + +++ +++ + I + I + ++I I + I + I+++I I + I I+++++
+Sbjct  177  INIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVYIDINVNIDIYVYVY  10
+
+
+ Score = 33.1 bits (74),  Expect = 1e-07
+ Identities = 12/57 (21%), Positives = 36/57 (63%), Gaps = 0/57 (0%)
+ Frame = -1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  57
+            I+++I +   + I I++ + +++ +++ + I + I + ++I I + I + I+++I I
+Sbjct  213  IYVYINVHAAVDINIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVYIDI  43
+
+
+ Score = 33.1 bits (74),  Expect = 1e-07
+ Identities = 12/57 (21%), Positives = 36/57 (63%), Gaps = 0/57 (0%)
+ Frame = -1
+
+Query  3    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  59
+            I+++I +   + I I++ + +++ +++ + I + I + ++I I + I + I+++I I
+Sbjct  213  IYVYINVHAAVDINIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVYIDI  43
+
+
+ Score = 32.7 bits (73),  Expect = 2e-07
+ Identities = 12/62 (19%), Positives = 38/62 (61%), Gaps = 0/62 (0%)
+ Frame = -1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            I + + I+++I +   + I I++ + +++ +++ + I + I + ++I I + I + I+++
+Sbjct  231  IDVDVNIYVYINVHAAVDINIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVY  52
+
+Query  61   DD  62
+             D
+Sbjct  51   ID  46
+
+
+ Score = 30.8 bits (68),  Expect = 8e-07
+ Identities = 12/59 (20%), Positives = 36/59 (61%), Gaps = 0/59 (0%)
+ Frame = -1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  59
+            ++I +   + I I++ + +++ +++ + I + I + ++I I + I + I+++I I + I
+Sbjct  207  VYINVHAAVDINIYVDVHVYVHVYVDVDINVHINVHVYIHINVDINVHIYVYIDINVNI  31
+
+
+ Score = 30.0 bits (66),  Expect = 1e-06
+ Identities = 12/59 (20%), Positives = 36/59 (61%), Gaps = 0/59 (0%)
+ Frame = -1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFI  59
+            I+I + I + + I+++I +   + I I++ + +++ +++ + I + I + ++I I + I
+Sbjct  249  IYIDVNIDVDVNIYVYINVHAAVDINIYVDVHVYVHVYVDVDINVHINVHVYIHINVDI  73
+
+
+ Score = 26.9 bits (58),  Expect = 2e-05
+ Identities = 9/52 (17%), Positives = 32/52 (62%), Gaps = 0/52 (0%)
+ Frame = -1
+
+Query  9    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            I+I + I + + I+++I +   + I I++ + +++ +++ + I + I + ++
+Sbjct  249  IYIDVNIDVDVNIYVYINVHAAVDINIYVDVHVYVHVYVDVDINVHINVHVY  94
+
+
+ Score = 24.6 bits (52),  Expect = 1e-04
+ Identities = 9/42 (21%), Positives = 26/42 (62%), Gaps = 0/42 (0%)
+ Frame = -1
+
+Query  23   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFDDDD  64
+            I+I + I + + I+++I +   + I I++ + +++ ++ D D
+Sbjct  249  IYIDVNIDVDVNIYVYINVHAAVDINIYVDVHVYVHVYVDVD  124
+
+
+>sN_nz_nc subject sN
+Length=123
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  40
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  3    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  42
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  5    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  44
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  7    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  46
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  9    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  48
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  11   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  50
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  13   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  52
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  15   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  54
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  17   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  56
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  19   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  58
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  21   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+
+Lambda      K        H        a         alpha
+   0.345    0.164    0.566    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29520
+
+
+  Database: nz nc
+    Posted date:  Nov 5, 2026  5:53 AM
+  Number of letters in database: 978
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 9
+Window for multiple hits: 40

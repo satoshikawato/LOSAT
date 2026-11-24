@@ -62,13 +62,13 @@ impl QuerySections for Marks {
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
-        read: SubjectReadHook<'_, W>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         let subjects = group.map_or(0, |group| group.subject_order.len());
         writeln!(writer, "head {q_idx} subjects {subjects}")?;
         // One line per subject, each read before it (as a description line).
         for &s_idx in group.map_or(&[][..], |group| group.subject_order.as_slice()) {
-            read(s_idx, writer)?;
+            place(ReportPlace::Load(s_idx), writer)?;
             writeln!(writer, "line {s_idx}")?;
         }
         Ok(())
@@ -81,6 +81,7 @@ impl QuerySections for Marks {
         group: &QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
+        _place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         if part.start == 0 {
             writeln!(writer, "subject {s_idx}")?;
@@ -179,7 +180,7 @@ fn pieces_of_any_size_concatenate_to_the_serial_report() {
             for &piece in &planned {
                 let formatted = format_piece(&marks, groups[piece.query].as_ref(), piece, false);
                 formatted.result.unwrap();
-                assert!(formatted.reads.is_empty());
+                assert!(formatted.places.is_empty());
                 joined.extend_from_slice(&formatted.buffer);
             }
             assert_eq!(
@@ -538,6 +539,7 @@ fn the_model_of_the_reads_is_the_writers_group() {
                                 descriptions,
                                 alignments,
                             },
+                            html: false,
                         };
                         let model = QueryGroup::read_order(
                             rows.iter().map(|row| (row.hit.s_idx, row)),

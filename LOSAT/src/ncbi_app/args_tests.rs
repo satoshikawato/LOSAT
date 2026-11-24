@@ -18,6 +18,7 @@ fn tool(program: &'static str) -> Tool {
         "convert2blastmask" => include_str!("../convert2blastmask/help.txt"),
         "makembindex" => include_str!("../makembindex/help.txt"),
         "windowmasker" => include_str!("../windowmasker/help.txt"),
+        "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
         _ => "",
     };
     Tool {
@@ -26,17 +27,22 @@ fn tool(program: &'static str) -> Tool {
         help,
         post_prefix: None,
         components: &[],
+        help_full: None,
+        short_description: None,
+        write_failure: None,
+        dry_run: None,
     }
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 6] = [
+const ON_THE_READER: [&str; 7] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
     "convert2blastmask",
     "makembindex",
     "windowmasker",
+    "makeprofiledb",
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
@@ -80,13 +86,31 @@ fn xml(program: &str) -> String {
     crate::ncbi_xmlhelp::print(program, |_| false).unwrap()
 }
 
-/// `NStr::XmlEncode` undone (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`).
+/// `NStr::XmlEncode` undone (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`, and the character
+/// references of the characters it writes as numbers, `&#xa;`).
 fn xml_decode(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&apos;", "'")
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&")
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        let (entity, after) = rest[at + 1..].split_once(';').expect("an entity's end");
+        out.push(match entity {
+            "lt" => '<',
+            "gt" => '>',
+            "apos" => '\'',
+            "quot" => '"',
+            "amp" => '&',
+            // A character reference (`&#xa;`: the line breaks of a comment).
+            _ => entity
+                .strip_prefix("#x")
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .and_then(char::from_u32)
+                .unwrap_or_else(|| panic!("an entity: &{entity};")),
+        });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The elements `<key name=...` and `<flag name=...` of `xml`: (tag, name, the element's text).
@@ -233,6 +257,17 @@ fn every_argument_of_the_xml_is_in_its_table() {
                 default,
                 "{program} -{name}"
             );
+            // The argument's comment (its first `<description>`, before a constraint's), which
+            // LOSAT's descriptions give as its help (line RG DECISIONS K4i-3-1), kept for every
+            // program.
+            let comment = element
+                .split_once("<description>")
+                .map(|(_, rest)| xml_decode(rest.split_once("</description>").unwrap().0));
+            assert_eq!(
+                Some(desc.description.get().to_string()),
+                comment,
+                "{program} -{name}"
+            );
             let usage = element.split_once("<constraint").map(|(_, rest)| {
                 let description = rest.split_once("<description>").unwrap().1;
                 xml_decode(description.split_once("</description>").unwrap().0)
@@ -245,13 +280,14 @@ fn every_argument_of_the_xml_is_in_its_table() {
             constraints += usize::from(usage.is_some());
         }
     }
-    // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), and makembindex's 6
-    // and windowmasker's 16.
-    assert_eq!(constraints, 169 + 6 + 16);
+    // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
+    // windowmasker's 16 and makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid).
+    assert_eq!(constraints, 169 + 6 + 16 + 4);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
-    // windowmasker's 76 (its 38 exclusions, each in both directions) and makembindex's 3.
+    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3 and
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2);
 }
 
 /// Which class a constraint is.
@@ -634,7 +670,10 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
     let parse_words = |line: &[&str]| parse_words("dustmasker", line);
     let messages = |line: &[&str]| messages("dustmasker", line);
     assert_eq!(parse_words(&["-h"]).unwrap_err(), ArgsError::Usage);
-    assert_eq!(parse_words(&["-help-full"]).unwrap_err(), ArgsError::Help);
+    assert_eq!(
+        parse_words(&["-help-full"]).unwrap_err(),
+        ArgsError::HelpFull
+    );
     assert_eq!(parse_words(&["-xmlhelp"]).unwrap_err(), ArgsError::XmlHelp);
     let args = parse_words(&["-logfile", "log.txt", "-conffile", "t.ini"]).unwrap();
     assert_eq!(args.value("logfile"), Some("log.txt"));
@@ -667,12 +706,13 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
-    const LOWER: [&str; 22] = [
+    const LOWER: [&str; 23] = [
         "name",
         "kind",
         "default",
         "constraint",
         "mandatory",
+        "description",
         "first",
         "count",
         "at",
@@ -819,4 +859,94 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     );
     assert_eq!(string_values("tblastx", "task"), None);
     assert_eq!(string_values("blastn", "evalue"), None);
+}
+
+// Line RG DECISIONS K4i-2b-1: the descriptions' sets are the tables' (`choices`), in the display
+// order of `DISPLAY_ORDERS` where it has a row and else in the XML's; a flag and a key of another
+// constraint have none; the defaults are the XML's `<default>`.
+#[test]
+fn display_orders_are_the_tables_sets() {
+    let blastn_tasks = [
+        "megablast",
+        "dc-megablast",
+        "blastn",
+        "blastn-short",
+        "rmblastn",
+    ];
+    assert_eq!(choices("blastn", "task"), Some(strings(&blastn_tasks)));
+    assert_eq!(
+        choices("blastn", "template_type"),
+        Some(strings(&["coding", "optimal", "coding_and_optimal"]))
+    );
+    for program in ["blastn", "blastx", "tblastx"] {
+        assert_eq!(
+            choices(program, "strand"),
+            Some(strings(&["both", "plus", "minus"])),
+            "{program}"
+        );
+    }
+    // Without a row: the XML's order (blastdbcmd's `-strand`, NCBI's integer set of
+    // `-template_length`).
+    assert_eq!(
+        choices("blastdbcmd", "strand"),
+        Some(strings(&["minus", "plus"]))
+    );
+    assert_eq!(
+        choices("blastn", "template_length"),
+        Some(strings(&["16", "18", "21"]))
+    );
+    // Each displayed set is the XML's set.
+    for (program, name, values) in DISPLAY_ORDERS.iter() {
+        let (program, name) = (program.get(), name.get());
+        let mut shown: Vec<&str> = constraint::strings(*values).collect();
+        let mut set: Vec<String> = match find_desc(arguments(program).unwrap(), name)
+            .unwrap()
+            .constraint
+        {
+            Some(Constraint::Strings(set) | Constraint::StringSet(set)) => {
+                constraint::strings(set).map(str::to_string).collect()
+            }
+            other => panic!("{program} -{name}: {other:?}"),
+        };
+        shown.sort_unstable();
+        set.sort_unstable();
+        assert_eq!(shown, set, "{program} -{name}");
+    }
+    assert_eq!(choices("blastn", "ungapped"), None);
+    assert_eq!(choices("blastn", "evalue"), None);
+    assert_eq!(choices("blastn", "no_such_option"), None);
+    // The defaults that LOSAT's descriptions give (`Described::default`): a key's `<default>`.
+    let default =
+        |program, name| find_desc(arguments(program).unwrap(), name).and_then(Desc::default);
+    assert_eq!(default("blastn", "task"), Some("megablast"));
+    assert_eq!(default("blastp", "task"), Some("blastp"));
+    assert_eq!(default("blastp", "evalue"), None);
+    assert_eq!(default("blastn", "ungapped"), None);
+    assert_eq!(default("blastn", "no_such_option"), None);
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1 (Q3 = A). LOSAT's descriptions list a program's
+// arguments in the order of the usage line of NCBI's `-help`: each one is in the usage's synopsis,
+// in its order; those refused by name are not listed, the others are.
+#[test]
+fn the_described_arguments_follow_the_usage() {
+    for program in crate::api::Program::ALL {
+        let tool = crate::cli::reader::tool(program.name()).expect("a program on the reader");
+        let listed: Vec<Described> = described(tool).collect();
+        let positions: Vec<usize> = listed
+            .iter()
+            .map(|argument| usage_position(tool.help, argument.name))
+            .collect();
+        assert!(!positions.contains(&usize::MAX), "{program}: {positions:?}");
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{program}"
+        );
+        let arguments = arguments(tool.program).expect("its XML");
+        for desc in arguments.descs() {
+            let refused = matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_)));
+            let shown = listed.iter().any(|argument| argument.name == desc.name());
+            assert_eq!(shown, !refused, "{program} -{}", desc.name());
+        }
+    }
 }

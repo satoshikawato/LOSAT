@@ -29,7 +29,7 @@ named. The queries are random (no W) + WWW + random: `qov1.faa` / `qov1.fna` (th
            A's chunk end 40; B holds the same letters and the mask [230,235).
 Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order of the subject; no -parse_seqids, as the
 `edge_*.asnt`), algorithm seg; `makeblastdb -mask_data` gives them the algorithm number 21.
-  ov_lkn:  the near input of ov_lk (PD-LOSAT-NCBI-DEFECTS exception 26, the Owner's answer Q5 = B of M4b, 2026-11-22):
+  ov_lkn:  the near input of ov_lk (PD-LOSAT-NCBI-DEFECTS exception 29, the Owner's answer Q5 = B of M4b, 2026-11-22):
            A, a spacer of 240 `X` (no word hit; at least the walk's margin, `near_db`), then B, with A's and B's
            masks, over which the alias `ov_lkn.pal` keeps ov_lk's number of sequences and total length: NCBI searches
            B with every diagonal entry of A out of reach, as LOSAT searches B of ov_lk where NCBI's one-thread start
@@ -298,7 +298,7 @@ def spacer_length(records, masks_of, before, scans):
 
 def blank_db(out, db, title, records, masks, blank, ncbi_bin):
     """The near input `{db}x` of a database whose diagonal entries reach across subjects (PD-LOSAT-NCBI-DEFECTS
-    exception 26): `records` [(header, letters)] in order with the letters of the 0-based orders `blank` all `X` (no
+    exception 29): `records` [(header, letters)] in order with the letters of the 0-based orders `blank` all `X` (no
     word of a query without `X` hits them, so they store no diagonal entry), `masks` its `Blast-db-mask-info` ASN.1
     text, unchanged: the lengths and masks are the database's, so NCBI's one-thread offsets and statistics are its
     own. Writes `{db}x.faa` and `{db}x.asnt`, and with `ncbi_bin` `makeblastdb -out {db}x`."""

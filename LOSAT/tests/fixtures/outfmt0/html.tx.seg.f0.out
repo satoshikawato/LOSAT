@@ -1,0 +1,162 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/sn_lc.fa).
+           1 sequences; 260 total letters
+
+
+
+<b>Query=</b> qn_lc query with lowercase
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sn_lc lowercase subject                                               <a href=#Subject_1>125</a>     3e-34  1
+
+
+><a name=Subject_1></a> sn_lc lowercase subject
+Length=260
+
+ Score = 125 bits (267),  Expect = 3e-34
+ Identities = 70/86 (81%), Positives = 73/86 (85%), Gaps = 0/86 (0%)
+ Frame = -2/-1
+
+Query  260  RTRFHDLTRR<font color="#000000">fffffffff</font>FMLPGRKPRALVIVRQTRLELVTMAPNMAALSAPSVPE*TI  81
+            RTR HDL+RRFFFFFFFFFFM+P RKPRALVIVRQTR  L     + AALSAP VPE TI
+Sbjct  260  RTRLHDLSRRFFFFFFFFFFMIPSRKPRALVIVRQTRP*LSPKKLSSAALSAPYVPELTI  81
+
+Query  80   LSLSAIGSSHGVRVKPLGYYEGEKST  3
+            LSLSAIGSSHGVRVKPLGY EGEKST
+Sbjct  80   LSLSAIGSSHGVRVKPLGYNEGEKST  3
+
+
+ Score = 120 bits (256),  Expect = 1e-32
+ Identities = 68/86 (79%), Positives = 72/86 (84%), Gaps = 0/86 (0%)
+ Frame = +1/+1
+
+Query  1    GVLFSPS**PKGLTRTPWLEPIAERLRIVYSGTEGAERAAIFGAIVTSSNRVWRTMTNAL  180
+            GVLFSPS *PKGLTRTPWLEPIAERLRIV SGT GAERAA    +  +  RVWRTMTNAL
+Sbjct  1    GVLFSPSL*PKGLTRTPWLEPIAERLRIVNSGT*GAERAAEDSFLGLNQGRVWRTMTNAL  180
+
+Query  181  GFLPGSI<font color="#000000">kkkkkkkkkk</font>RLVRSWNRV  258
+            GFL G IKKKKKKKKKKRL+RS +RV
+Sbjct  181  GFLLGIIKKKKKKKKKKRLLRS*SRV  258
+
+
+ Score = 118 bits (253),  Expect = 3e-32
+ Identities = 69/86 (80%), Positives = 70/86 (81%), Gaps = 0/86 (0%)
+ Frame = +2/+2
+
+Query  2    VYFSPPRSSLRV*PARRGLSQSLRD*GLFIQAQKEQKGLPYLAPSSQALTASGVR*LTLS  181
+            VYFSPPR SLRV*PARRGLSQSLRD*GL IQA KEQKGLP  A       ASGVR*LTLS
+Sbjct  2    VYFSPPRCSLRV*PARRGLSQSLRD*GLLIQAHKEQKGLPKTASWDSIKDASGVR*LTLS  181
+
+Query  182  AFCREA<font color="#000000">*kkkkkkkkk</font>NVW*DHGTGF  259
+            AFC E+*KKKKKKKKKNV *DH  GF
+Sbjct  182  AFCWES*KKKKKKKKKNVC*DHEAGF  259
+
+
+ Score = 88.1 bits (186),  Expect(2) = 2e-31
+ Identities = 37/39 (95%), Positives = 37/39 (95%), Gaps = 0/39 (0%)
+ Frame = +3/+3
+
+Query  3    CTFLPLVVA*GFNPHAVA*ANR*ETEDCLFRHRRSRKGC  119
+            CTFLPLVVA*GFNPHAVA*ANR*ETEDC FRH RSRKGC
+Sbjct  3    CTFLPLVVA*GFNPHAVA*ANR*ETEDC*FRHIRSRKGC  119
+
+
+ Score = 46.0 bits (94),  Expect(2) = 2e-31
+ Identities = 33/36 (92%), Positives = 34/36 (94%), Gaps = 0/36 (0%)
+ Frame = +3/+3
+
+Query  153  RLAYDD*RSRLSAG<font color="#000000">khkkkkkkkkkk</font>TSGKIMEPGS  260
+            RLAYDD*RSRLSAG HKKKKKKKKKKTS KIM+PGS
+Sbjct  153  RLAYDD*RSRLSAGNHKKKKKKKKKKTSAKIMKPGS  260
+
+
+ Score = 87.2 bits (184),  Expect(2) = 5e-24
+ Identities = 37/39 (95%), Positives = 38/39 (97%), Gaps = 0/39 (0%)
+ Frame = -3/-2
+
+Query  118  QPFLLLLCLNKQSSVSQRLAQATACGLNP*ATTRGRKVH  2
+            QPFLLL+CLN QSSVSQRLAQATACGLNP*ATTRGRKVH
+Sbjct  118  QPFLLLMCLN*QSSVSQRLAQATACGLNP*ATTRGRKVH  2
+
+
+ Score = 22.1 bits (42),  Expect(2) = 5e-24
+ Identities = 20/23 (87%), Positives = 20/23 (87%), Gaps = 0/23 (0%)
+ Frame = -3/-2
+
+Query  259  EPGSMILPDV<font color="#000000">ffffffff</font>FLCFP  191
+            EPG MIL DVFFFFFFFFFL FP
+Sbjct  259  EPGFMILADVFFFFFFFFFL*FP  191
+
+
+ Score = 97.3 bits (206),  Expect(2) = 2e-23
+ Identities = 54/69 (78%), Positives = 56/69 (81%), Gaps = 0/69 (0%)
+ Frame = -1/-3
+
+Query  258  NPVP*SYQT<font color="#000000">fffffffff</font>FYASRQKAESVSHRTPDAVRACDDGAKYGSPFCSFCA*INNP  79
+            NP  *S QTFFFFFFFFFFY S+QKAESVSHRTPDA       A +GSPFCS CA*INNP
+Sbjct  258  NPAS*S*QTFFFFFFFFFFYDSQQKAESVSHRTPDASLIESQEAVFGSPFCSLCA*INNP  79
+
+Query  78   QSLSDWLKP  52
+            QSLSDWLKP
+Sbjct  78   QSLSDWLKP  52
+
+
+ Score = 10.2 bits (16),  Expect(2) = 2e-23
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -2/-3
+
+Query  17  GEK  9
+           GEK
+Sbjct  15  GEK  7
+
+
+ Score = 16.2 bits (29),  Expect = 0.20
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2/-1
+
+Query  281  PELTIL  264
+            PELTIL
+Sbjct  95   PELTIL  78
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 7632
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/sn_lc.fa).
+    Posted date:  Unknown
+  Number of letters in database: 260
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

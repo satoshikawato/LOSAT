@@ -20,8 +20,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `ncbi` row ROW_ID, NCBI's run of a near input (the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases
   after which every reading frame keeps a letter after its part, for exception 21 with the freed letters stored as `X`
   or `N`; for exception 3 the same volume with zero bytes after its last memory page; for exception 19 the hit list
-  size 1073741798), where NCBI's own run of the row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions
-  13, 21, 3 and 19); `freeze` copies ROW_ID's columns and runs nothing.
+  size 1073741798; for exception 27 the database with the short mask dropped and its bases stored as `N`), where
+  NCBI's own run of the row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19 and 27); `freeze` copies ROW_ID's columns and runs nothing.
 - `kind ncbi` with a part ` | ncbi-valgrind` of covers: the frozen bytes are NCBI's run under valgrind memcheck, where
   NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3) and may crash or vary; `freeze` runs
   such a row only with `--valgrind CMD` (for example `--valgrind "valgrind -q --log-file=/dev/null"`) and otherwise
@@ -68,20 +68,65 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   oracle output. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
   run of the row's own query file with `<row_id>.out` as for any `ncbi` row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
-  (to a ` | ` or the end); the hash columns are empty. A refusal after reports that NCBI writes too has stdout
+  (to a ` | ` or the end), in the library's run (`check --library`) the text after `library-expect: ` where covers has
+  one: the library checks an argv before it knows the inputs (`api::validate`), so a refusal that comes from an input's
+  word on the command line (NCBI's exclusion of `-phi_pattern` by `-in_msa`) is the library's message of the argv
+  alone; the hash columns are empty. A refusal after reports that NCBI writes too has stdout
   cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
   outfmt (a near input that NCBI runs to its end, for example the copy row of the batches that LOSAT writes before it
   refuses, or line WQA D10's near input, whose refused batch NCBI's reader stops at), and with
   `ncbi-near: ROW_ID first N bytes` its first N bytes. Where NCBI crashes on the row's own command,
   its stdout depends on where the crash cuts it: `freeze` stops on such a run, and the row takes a near row (or has
   empty stdout cells where LOSAT writes nothing before it refuses).
-- `db`: path relative to LOSAT/ (an empty cell is `-db ""`; `subject:PATH` runs `-subject PATH` in place of `-db`, for a
-  psiblast losat-rejection row of a subject set); `extra_args` is split like a shell line; `outfmt` is one argument;
-  `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.
-- A row runs `LOSAT PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT` from `LOSAT/`.
+- `db`: path relative to LOSAT/ (an empty cell is `-db ""`; names separated by spaces are one `-db` argument;
+  `subject:PATH` runs `-subject PATH` in place of `-db`, in any program: the rows of a subject set, such as psiblast's
+  losat-rejection row of a subject set whose sequences all have no letters); `extra_args` is split like a shell line;
+  `outfmt` is one argument; `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.
+- A row runs `LOSAT PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT` from `LOSAT/` (from `LOSAT/DIR` with
+  `cwd=DIR`, below).
 - `query`: a path relative to LOSAT/; `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`), and a psiblast query `msa:PATH` is an alignment query (`-in_msa PATH`, line PS item PS6; the library API's `Inputs::msa`, line LIB item 1.6); `stdin:pipe:PATH`,
   `stdin:file:PATH` or `stdin:empty` is `-query -` with PATH's bytes through a pipe, the file PATH itself, or an empty pipe
   as standard input (`db_search_fixtures.query_stdin`; such a row has no PSSM or XInclude files and the library skips it).
   psiblast's `stdin-msa:pipe:PATH`, `stdin-msa:file:PATH` and `stdin-msa:empty` are the same with `-in_msa -`; `none:` gives no query argument
   at all (a row that tests an option that needs `-in_msa`, `-msa_master_idx` or `-ignore_msa_master` without it). A row with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa`, or with `-in_msa` and
   `-query` or `-in_pssm`, is `library-skip` (`xinclude_fixtures.ALIGNMENT_OPTIONS`); a row of `-in_msa PATH` runs through the library (`Inputs::msa`).
+
+## Tokens of extra_args that are not arguments
+
+- `NAME=VALUE` with NAME one of `db_search_fixtures.ENV_NAMES`: an environment variable of both programs (NCBI's run
+  of `freeze` and LOSAT's of `check`). `BLASTDB=DIR` (the directory of a `taxdb.bti`) and `NCBI=DIR` (the directory of
+  `$NCBI/.ncbirc` and of the formatter's `$NCBI/<name>`) are paths relative to LOSAT/; `BATCH_SIZE`, `CHUNK_SIZE`,
+  `OVERLAP_CHUNK_SIZE`, `ARCHIVE_FORMAT`, `PRE_FETCH_SEQS_LIMIT`, `BL2SEQ_LEGACY`, `OLD_FSC`, `ADAPTIVE_CBS`, and the
+  `-html` formatter's `FMTCFG` (the name of its configuration file in the run directory, default `.ncbirc`),
+  `GETURL_DEBUG` (a `REGISTRY: <file>` line on stderr) and `NCBI_DONT_USE_NCBIRC` are values as they are (NCBI
+  reference: `align_format_util.cpp:3383-3415`, `CAlignFormatUtil::InitConfig`). The caller's own variables of these
+  names (and every NCBI* and BLAST*) are dropped first (`clean_env`).
+- `cwd=DIR` (lower case: neither an argument nor a variable): the row runs in `LOSAT/DIR` in place of `LOSAT/`, in
+  `freeze` and in `check`. DIR, relative to LOSAT/, holds the row's `.ncbirc` and the other files NCBI reads from its
+  current directory (the file that FMTCFG names). The row's cells keep every path relative to LOSAT/; the programs get
+  them relative to DIR (`os.path.relpath`): each name of the `db` cell, the PATH of `subject:PATH`, the query, and the
+  values of `BLASTDB=` and `NCBI=`. So the argv's text is the same on every machine: NCBI writes the `-db` text into
+  the `[LOCAL_ID] TOOL_URL` link (`db_name`), and an absolute path would put the checkout's path into the frozen bytes.
+  Not taken: absolute paths (bytes of one machine), paths relative to DIR in the cells (every reader counts on paths
+  relative to LOSAT/), a temporary directory with copies of the files (absolute paths again), a new column (a new
+  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, an `rps-gz:` db cell, a
+  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused. `freeze`
+  and `check` refuse to start when `LOSAT/.ncbirc` exists (it would change every row).
+
+## Who runs which rows
+
+- `db_search_fixtures.py check` (and `freeze`): every row, the `cwd=` and `NAME=VALUE` rows included;
+  `ci_fast_regressions.py` runs it for every program at 1 and 4 threads, and the `losat-gates` skill uses the same
+  checkers.
+- `db_search_fixtures.py check --library` (`examples/library_command_line`, the library API): `library-skip` for the
+  rows of rpsblast and rpstblastn, those with both `-query` and `-in_pssm`, those with `-in_msa` and `-query` or
+  `-in_pssm`, those with the alignment's master options and no `-in_msa`, those with `-export_search_strategy`, those
+  with a standard-input query, and those with `cwd=` or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL_DEBUG, NCBI_DONT_USE_NCBIRC): the API's contract
+  (`LOSAT/src/api/mod.rs:78-86`) names what a call reads of its process, and these formatter settings are not among
+  them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
+  the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
+- `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
+  outfmt 0 to 4 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
+- The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,
+  `tblastn.tsv`, `tblastx.tsv`) and select their own rows, never a family file such as `<program>.html.tsv`;
+  `check_manifest_sizes.py` checks the size of every file.

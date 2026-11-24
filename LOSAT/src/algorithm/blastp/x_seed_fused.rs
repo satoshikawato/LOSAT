@@ -2282,7 +2282,7 @@ fn x_call_candidates<H: XHit, F>(
 ///
 /// With `flag` the entry's bit 31, `last` its sign-extended 31-bit `last_hit`,
 /// `sum = s + diag_offset` and `diff = s - (last - diag_offset)` (wrapping, as in `x_test_hit`):
-/// - write = flag ? sum >= last : diff >= window; the new entry is then `sum` truncated to 31
+/// - write when `flag` is set and `sum >= last`, or `flag` is clear and `diff >= window`; the new entry is then `sum` truncated to 31
 ///   bits with the flag cleared (`set_last_hit` + `set_flag(0)`, or `set_last_hit` on an entry
 ///   without the flag), otherwise the old entry;
 /// - candidate = !flag && word_size <= diff < window (its entry is not written).
@@ -2420,7 +2420,7 @@ unsafe fn x_batch_avx2<H: XHit>(
         _mm256_set1_epi32(s),
         _mm256_sub_epi32(last, _mm256_set1_epi32(test.diag_offset)),
     );
-    // keep (no write) = flag ? sum < last : diff < window
+    // keep (no write): `sum < last` when `flag` is set, else `diff < window`
     let sum_below_last = _mm256_cmpgt_epi32(last, _mm256_set1_epi32(subject_plus_offset));
     let in_window = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.window), diff);
     let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);

@@ -167,7 +167,7 @@ impl CallStart {
         let _run = crate::ncbi_exception::MainDiag::enter(Some(diag.clone()));
         let program = search.program().name();
         let started = begin(program, search.argv(), diagnostics)?;
-        let command = search.command(inputs)?;
+        let command = search.command(inputs, &started.target)?;
         let settings = started
             .settings
             .map_err(|reason| Error::Search(reason.into()))?;
@@ -445,7 +445,9 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
             .chain(words.iter().map(AsRef::as_ref)),
     );
     // LOSAT Web's errors are text (its JSON): the start's messages are made from text
-    // (`ApplicationStart`'s `String`s), so `Display` replaces no byte of them.
+    // (`ApplicationStart`'s messages), so `Display` replaces no byte of them: the one message that
+    // can hold bytes that are not UTF-8, a `-conffile` name's, is made from a name that its host
+    // gives as text.
     let mut opened =
         open_with(start, words, files, diagnostics).map_err(|error| error.to_string())?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
@@ -518,6 +520,15 @@ impl CallerStart {
     /// when the run's messages go there, where the command line writes it (`RunLog::post`).
     pub fn post(&mut self, text: &[u8]) {
         self.log.post_text(text);
+    }
+
+    /// The run's `-logfile` target, where the posts of an argument error go
+    /// (`web_adapter::try_parse_cli`), as the command line's go to its own: `cerr` without one.
+    pub(crate) fn target(&self) -> &DiagTarget {
+        match (&self.log.0, &self.target) {
+            (Some(target), _) | (None, Some(target)) => target,
+            (None, None) => &DiagTarget::Stderr,
+        }
     }
 
     /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the

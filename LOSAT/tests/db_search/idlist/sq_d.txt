@@ -1,0 +1,4 @@
+np_000103.1
+n9_mouse
+# a comment
+>NP_000118

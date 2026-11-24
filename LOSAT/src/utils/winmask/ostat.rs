@@ -338,8 +338,8 @@ impl CountsWriter {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:114-134
-    /// The text goes out in blocks of 64 KiB: the standard output is line-buffered, so a write
-    /// per line would be a system call per unit.
+    /// The text goes out in blocks of 64 KiB: the standard output has no buffer of LOSAT's
+    /// (`cli::standard_output`), so a write per line would be a system call per unit.
     fn write_ascii(&self, counts: &[u32], out: &mut dyn Write) -> io::Result<()> {
         let mut text = Vec::with_capacity(1 << 16);
         text.extend_from_slice(&self.text_metadata());

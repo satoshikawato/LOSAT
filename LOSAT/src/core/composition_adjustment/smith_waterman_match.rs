@@ -37,7 +37,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastRedoOneMatchResult, EMatrixAdjustRule, WINDOW_BORDER,
 };
 use crate::core::composition_adjustment::smith_waterman::{
-    smith_waterman_redo_window, SwRedoScratch, SwSignificance, SwWindow, SwWindowRedo,
+    smith_waterman_redo_window_from, SwEnd, SwRedoScratch, SwSignificance, SwWindow, SwWindowRedo,
 };
 
 /// The square matrix's memory of its windows (`SwRedoScratch::window`): the score rows of the
@@ -124,8 +124,16 @@ impl std::error::Error for SwRedoEndless {}
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3362 (`matrix`, which
 /// `Blast_AdjustScores` overwrites, is the thread's score block's matrix)
+///
+/// The entry that can resume (`redo_one_match_smith_waterman` answers every test): `would_insert`
+/// answers `SwHeapAnswer`; where it answers `Deferred` (BLASTP's parallel redo, which leaves the
+/// test to its replay; series RG, item X4-mt) the call goes on as on FALSE and keeps in `kept` the
+/// state that the test found (`SwMatchResume`), and a later call with that state as `resume` and the
+/// same match finishes the redo as the test's TRUE does, from that test on: its window's subject
+/// range is taken again (`get_range`) and its rows are filled again from the kept matrix, without
+/// the window's composition adjustment and its first round's score-only scan.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn redo_one_match_smith_waterman<'seq>(
+pub(crate) fn redo_one_match_smith_waterman_from<'seq>(
     incoming_aligns: &Option<Box<BlastCompoAlignment>>,
     params: &BlastRedoAlignParams,
     lambda: f64,
@@ -137,7 +145,9 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
     matrix_state: &mut Option<AdjustedProteinMatrix>,
     unadjusted: Option<&AdjustedProteinMatrix>,
     cutoff_e: f64,
-    would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<bool>,
+    resume: Option<&SwMatchResume>,
+    would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<SwHeapAnswer>,
+    kept: &mut Option<Box<SwMatchResume>>,
     scratch: &mut SwMatchScratch,
 ) -> Result<BlastRedoOneMatchResult> {
     // A PSSM's rows do not reach this redo: psiblast refuses `-use_sw_tback`, and tblastn
@@ -183,14 +193,30 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             .ok_or_else(|| anyhow::anyhow!("BLASTP redo requires query information"))?;
         windows_from_protein_aligns(incoming_aligns, query_info, matching_seq.length)?
     };
-    let mut alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>> = Vec::new();
-    let mut pvalue_for_this_pair = None;
-    let mut lambda_ratio = None;
-    let mut adjusted_matrix = matrix_state.take();
+    // A resumed call starts at the window of the kept test, with the values that the windows before
+    // it and that window's adjustment left.
+    let (first_window, mut alignments_by_query, mut pvalue_for_this_pair, mut lambda_ratio) =
+        match resume {
+            Some(state) => (
+                state.window,
+                state.alignments_by_query.clone(),
+                state.pvalue_for_this_pair,
+                state.lambda_ratio,
+            ),
+            None => (0, Vec::new(), None, None),
+        };
+    let mut adjusted_matrix = match resume {
+        Some(state) => state.adjusted_matrix.clone(),
+        None => matrix_state.take(),
+    };
     let gap_open = params.gapping_params.gap_open;
     let gap_extend = params.gapping_params.gap_extend;
+    // Whether a resumed call reached the window of its kept test with that window's alignment
+    // (else it would end with the kept values and no alignment of that window).
+    let mut resumed_reached = resume.is_none();
 
-    for window in &windows {
+    for (window_index, window) in windows.iter().enumerate().skip(first_window) {
+        let resumed = resume.filter(|state| state.window == window_index);
         let query_index = usize::try_from(window.query_range.context)?;
         // The translated windows name each query of the call (`query_info[query_index]`: TBLASTN's
         // query, BLASTX's query context); BLASTP passes its one query (`windows_from_protein_aligns`).
@@ -238,10 +264,22 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
                     .map(|&letter| matrix.scores[usize::from(letter)]),
             );
         };
-        let matrix_adjust_rule = match unadjusted {
+        let matrix_adjust_rule = match (unadjusted, resumed) {
+            // The window of the kept test: its rows from the matrix and the rule of its adjustment,
+            // which is not repeated.
+            (_, Some(state)) => {
+                resumed_reached = true;
+                let matrix = if uses_composition {
+                    adjusted_matrix.as_ref()
+                } else {
+                    unadjusted
+                };
+                fill_rows(rows, matrix.expect("a resumed window has its matrix"));
+                state.matrix_adjust_rule
+            }
             // NCBI's rule starts as "do not adjust" and stays so without an adjustment.
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1332
-            Some(matrix) if !uses_composition => {
+            (Some(matrix), None) if !uses_composition => {
                 fill_rows(rows, matrix);
                 EMatrixAdjustRule::DontAdjustMatrix
             }
@@ -327,13 +365,20 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         // regions) follow each other in it.
         let query_had_none = alignments_by_query[query_index].is_none();
         let mut heap_error = None;
+        let mut deferred_at = None;
         let x_dropoff = params.gapping_params.x_dropoff;
-        let redone = smith_waterman_redo_window(
+        let redone = smith_waterman_redo_window_from(
             &sw_window,
             significance,
             query_had_none,
-            |evalue, score| match would_insert(query_index, evalue, score) {
-                Ok(inserts) => inserts,
+            resumed.map(|state| state.end),
+            |evalue, end| match would_insert(query_index, evalue, end.score) {
+                Ok(SwHeapAnswer::Known(inserts)) => inserts,
+                // As on FALSE, with the end of the round that asked.
+                Ok(SwHeapAnswer::Deferred) => {
+                    deferred_at = Some(end);
+                    false
+                }
                 Err(error) => {
                     heap_error = Some(error);
                     false
@@ -356,6 +401,19 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         );
         if let Some(error) = heap_error {
             return Err(error);
+        }
+        // The state that the deferred test found, before the window's FALSE goes on.
+        if let Some(end) = deferred_at {
+            debug_assert!(kept.is_none(), "one test of a call left open");
+            *kept = Some(Box::new(SwMatchResume {
+                window: window_index,
+                end,
+                matrix_adjust_rule,
+                adjusted_matrix: adjusted_matrix.clone(),
+                pvalue_for_this_pair,
+                lambda_ratio,
+                alignments_by_query: alignments_by_query.clone(),
+            }));
         }
         let made = match redone {
             SwWindowRedo::Alignments(made) => made,
@@ -380,12 +438,99 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             alignments_by_query[query_index] = Some(new_align);
         }
     }
+    debug_assert!(
+        resumed_reached,
+        "a resumed call reaches the window of its kept test"
+    );
     *matrix_state = adjusted_matrix;
     Ok(BlastRedoOneMatchResult {
         alignments_by_query,
         pvalue_for_this_pair,
         lambda_ratio,
     })
+}
+
+/// `Blast_RedoOneMatchSmithWaterman` with a square matrix (`redo_one_match_smith_waterman_from`),
+/// every heap test answered by `would_insert`: TBLASTN's and BLASTX's redo (BLASTP's calls the
+/// entry that can resume, its one-thread loop answering every test).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn redo_one_match_smith_waterman<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    lambda: f64,
+    log_k: f64,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+    unadjusted: Option<&AdjustedProteinMatrix>,
+    cutoff_e: f64,
+    would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<bool>,
+    scratch: &mut SwMatchScratch,
+) -> Result<BlastRedoOneMatchResult> {
+    redo_one_match_smith_waterman_from(
+        incoming_aligns,
+        params,
+        lambda,
+        log_k,
+        matching_seq,
+        query_infos,
+        callbacks,
+        composition_workspace,
+        matrix_state,
+        unadjusted,
+        cutoff_e,
+        None,
+        &mut |query_index, evalue, score| {
+            would_insert(query_index, evalue, score).map(SwHeapAnswer::Known)
+        },
+        &mut None,
+        scratch,
+    )
+}
+
+/// A caller's answer to the heap test of a match's Smith-Waterman redo (NCBI's
+/// `BlastCompo_HeapWouldInsert`, asked at a window's first round before the query's first
+/// alignment; `redo_one_match_smith_waterman_from`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwHeapAnswer {
+    /// The test's answer: TRUE where the match could enter the query's heap.
+    Known(bool),
+    /// Left open (BLASTP's parallel redo, where the answer depends on matches its replay has not
+    /// reached): the redo goes on as on FALSE, which is NCBI's redo of the match where the answer
+    /// is FALSE, and keeps the state that the test found (`SwMatchResume`), from which it resumes
+    /// where the answer is TRUE. At most one test of a call (the tests after it, on the FALSE
+    /// answer's way, are answered; BLASTP's match has one window, so one test). Only that redo
+    /// leaves a test open, and it is built with the threads (`parallel`, and `wasm-threads` on
+    /// wasm32); the other builds answer every test.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    Deferred,
+}
+
+/// What a match's Smith-Waterman redo had at a heap test that its caller left open
+/// (`SwHeapAnswer::Deferred`), from which the redo resumes as the test's TRUE goes on
+/// (`redo_one_match_smith_waterman_from` with it as `resume`): the window that asked (`window`, its
+/// place among the match's windows), the end of its first round's score-only scan (`end`), the
+/// rule of its matrix and the matrix that the redo has then (the window's adjusted matrix, or the
+/// one before it where the window was not adjusted), the composition p-value and lambda ratio of
+/// the last adjustment, and the alignments of the windows before it. About 3.2 KB (the matrix's
+/// 28 x 28 scores); its holder decides how long it keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SwMatchResume {
+    window: usize,
+    end: SwEnd,
+    matrix_adjust_rule: EMatrixAdjustRule,
+    adjusted_matrix: Option<AdjustedProteinMatrix>,
+    pvalue_for_this_pair: Option<f64>,
+    lambda_ratio: Option<f64>,
+    alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>>,
 }
 
 /// The redo's `matrix` without composition-based statistics: the score block's matrix
@@ -527,7 +672,7 @@ pub(crate) fn sw_endless_error(program: &str, why: &str) -> anyhow::Error {
 /// Smith-Waterman redo for an ungapped search too, and its set-up reads the gapped Karlin-Altschul
 /// blocks of every context, which an ungapped search does not make, and crashes (SIGSEGV) at every
 /// query batch NCBI searches, with hits or without, with `-subject` and with `-db`
-/// (PD-LOSAT-NCBI-DEFECTS 1.76 for BLASTX, 1.79 for TBLASTN, rule 3). The caller refuses at the
+/// (PD-LOSAT-NCBI-DEFECTS 1.76 for BLASTX, 1.79 for TBLASTN, 1.87 for BLASTP, rule 3). The caller refuses at the
 /// traceback of the first query batch that is searched, after the reports of the batches before.
 /// Exit status 1, its message.
 ///

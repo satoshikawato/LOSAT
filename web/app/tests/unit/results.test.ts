@@ -46,6 +46,8 @@ interface Spec {
   readonly frames?: readonly [number | null, number | null];
   /** The outfmt 6 texts of the E value and the bit score, where they are not the numbers as JavaScript writes them. */
   readonly text?: { readonly e?: string; readonly bits?: string };
+  /** The outfmt 0 text of the subject's heading and of the HSP's section, where they are not the plain ones. */
+  readonly out0?: { readonly heading?: string; readonly section?: string };
 }
 
 const SPECS: readonly Spec[] = [
@@ -69,12 +71,12 @@ function makeRun(specs: readonly Spec[] = SPECS) {
     const shown = spec.shown ?? true;
     const key = `${spec.q}:${spec.s}`;
     if (shown && !headings.has(key)) {
-      const heading = `> s${spec.s} subject number ${spec.s}\nLength=500\n\n`;
+      const heading = spec.out0?.heading ?? `> s${spec.s} subject number ${spec.s}\nLength=500\n\n`;
       headings.set(key, [out0.length, out0.length + heading.length]);
       out0 += heading;
     }
     const sectionStart = out0.length;
-    if (shown) out0 += ` Score = ${spec.bits} bits\n\nQuery  ${qs}  ACGT  ${qe}\n`;
+    if (shown) out0 += spec.out0?.section ?? ` Score = ${spec.bits} bits\n\nQuery  ${qs}  ACGT  ${qe}\n`;
     const rank = ranks.get(spec.q) ?? 0;
     ranks.set(spec.q, rank + 1);
     records.push({
@@ -222,15 +224,30 @@ describe('the HSP table and its index', () => {
 });
 
 describe('hitLimits', () => {
+  // The hit list options have no default in NCBI's argument table (BLAST+ tells them given from not
+  // given): describe's `defaults` give the values that the engine resolves, by task.
+  const resolved = (value: string) => ({ resolvedDefault: { byTask: { blastp: value, 'blastp-short': value } } });
   const described = [
-    { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep [default: 500]' },
-    { flag: '-max_hsps', help: 'Maximum number of HSPs per subject' },
+    { flag: '-task', defaultValue: 'blastp' },
+    { flag: '-max_target_seqs', ...resolved('500') },
+    { flag: '-max_hsps' },
   ];
 
   it('reads the limits of the argv, or the default that the engine describes', () => {
     expect(hitLimits(['blastp', '-query', 'q', '-subject', 's'], described)).toEqual({ maxTargetSeqs: 500 });
     expect(hitLimits(['blastp', '-max_target_seqs', '5', '-max_hsps', '2'], described)).toEqual({ maxTargetSeqs: 5, maxHsps: 2 });
-    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'x', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+    // The run's task chooses the resolved value: its -task, else the default task; '' for a program without -task.
+    const byTask = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', resolvedDefault: { byTask: { blastp: '500', 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], byTask)).toEqual({ maxTargetSeqs: 500 });
+    expect(hitLimits(['tblastx'], [{ flag: '-max_target_seqs', resolvedDefault: { byTask: { '': '500' } } }])).toEqual({ maxTargetSeqs: 500 });
+    // -task=blastp-short is the engine's blastp-short (runTask), and the engine's value for the task comes before
+    // NCBI's default, as in the search form (taskDefault).
+    expect(hitLimits(['blastp', '-task=blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    const both = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', defaultValue: '500', resolvedDefault: { byTask: { 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], both)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], both)).toEqual({ maxTargetSeqs: 500 });
   });
 
   // The tabular formats keep -max_target_seqs, else -num_alignments, else the default of -max_target_seqs;
@@ -239,8 +256,8 @@ describe('hitLimits', () => {
   it('reads the hit list sizes of -num_descriptions and -num_alignments', () => {
     const sized = [
       ...described,
-      { flag: '-num_descriptions', help: 'Number of descriptions [default: 500]' },
-      { flag: '-num_alignments', help: 'Number of alignments [default: 250]' },
+      { flag: '-num_descriptions', ...resolved('500') },
+      { flag: '-num_alignments', ...resolved('250') },
     ];
     const limits = (...words: string[]) => hitLimits(['blastp', '-query', 'q', '-subject', 's', ...words], sized);
     // -num_alignments is the tabular formats' hit list; outfmt 0 keeps 500 (the larger of 500 and 3).
@@ -278,7 +295,8 @@ describe('hitLimits', () => {
   });
 
   it('claims no limit that it cannot read', () => {
-    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'Maximum number' }])).toEqual({});
+    // NCBI's help text states a default (Default = `500'), but the limits read no help text.
+    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs' }])).toEqual({});
     expect(hitLimits(['blastp', '-max_target_seqs', '1e3'], [])).toEqual({});
   });
 });
@@ -416,7 +434,12 @@ const DESCRIPTION: ProgramDescription = {
   formats: [0, 6, 7],
   parameters: [
     { flag: '-task', help: 'Task', takesValue: true, defaultValue: 'megablast' },
-    { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep (default: 500)', takesValue: true },
+    {
+      flag: '-max_target_seqs',
+      help: "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+      takesValue: true,
+      resolvedDefault: { byTask: { megablast: '500' } },
+    },
     { flag: '-max_hsps', help: 'Maximum number of HSPs per subject', takesValue: true },
   ],
 };
@@ -1015,6 +1038,42 @@ describe('ResultsBrowser', () => {
     results.selectHsp({ runId: 'r1', qIdx: 0, rank: 9 });
     results.selectHsp({ runId: 'r1', qIdx: 1, rank: 0 });
     expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
+  });
+
+  describe('outfmt 0 of a run made with -html', () => {
+    // NCBI's HTML: a report link and an anchor in the heading, a font tag on a masked row, and the title
+    // encoded with &quot; &amp; &lt; &gt; only.
+    const HEADING = '><a title="Show report for s1" href="https://www.ncbi.nlm.nih.gov/protein/s1?a=1&b=2" >s1</a><a name=s1></a> subject &lt;one&gt; &amp;lt; &quot;q&quot;\nLength=500\n\n';
+    const SECTION = ' Score = 90 bits\n\nQuery  1  <font color="#000000">acgt</font>  50\n';
+    const specs: readonly Spec[] = [{ q: 0, s: 1, bits: 90, e: 1e-20, coords: [1, 50, 101, 150], out0: { heading: HEADING, section: SECTION } }];
+    const PLAIN_HEADING = '>s1 subject <one> &lt; "q"\nLength=500\n\n';
+
+    it('shows the text that the HTML displays in the detail, the lists and the Range read, and keeps the stored bytes', async () => {
+      const { results } = setup({ specs, argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-html'] });
+      await results.open('r1');
+      // The first range read of such a run also loads the module that reads its HTML (domain/outfmt0-html.ts).
+      await expect.poll(() => results.state.get().detail?.state, { timeout: 10_000 }).toBe('ready');
+      const state = results.state.get();
+      expect(state.detail).toMatchObject({ state: 'ready', heading: PLAIN_HEADING });
+      expect(state.detail!.section).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
+      // The subject list's title and the readers of the Alignments: one decoding for all of them.
+      expect(headingTitle(state.detail!.heading!)).toBe('s1 subject <one> &lt; "q"');
+      expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
+      results.requestHeadings([1]);
+      await expect.poll(() => results.state.get().headings.get(1)).toBe(PLAIN_HEADING);
+    });
+
+    it('shows a run without -html as written, a plain title with a literal &lt; included', async () => {
+      const plain: readonly Spec[] = [
+        { q: 0, s: 1, bits: 90, e: 1e-20, coords: [1, 50, 101, 150], out0: { heading: '> s1 a &lt;b&gt; <i>\nLength=500\n\n', section: ' Score = 90 bits\n\nQuery  1  <b>  50\n' } },
+      ];
+      const { results } = setup({ specs: plain });
+      await results.open('r1');
+      await settle();
+      const state = results.state.get();
+      expect(state.detail).toMatchObject({ heading: '> s1 a &lt;b&gt; <i>\nLength=500\n\n' });
+      expect(state.detail!.section).toBe(' Score = 90 bits\n\nQuery  1  <b>  50\n');
+    });
   });
 
   it("names the task of a run: the argv's, else the engine's default", async () => {

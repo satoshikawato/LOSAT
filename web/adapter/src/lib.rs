@@ -15,6 +15,7 @@ pub mod json;
 pub mod run;
 pub mod scan;
 pub mod store;
+pub mod tool;
 pub mod zip;
 
 use std::collections::HashMap;
@@ -71,7 +72,11 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 12 since a run of `-db`, which takes no subject
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 13 since `losat_web2_tool`, which runs
+/// `windowmasker` with the command line's words in the run's working directory, streams its
+/// standard output on stream 11 and the files that it writes on stream 12 as they are written, and
+/// gives its exit status on stream 2, and since `losat_web2_validate` checks a `windowmasker` argv
+/// (line NP WW3a, 2026-11-22); 12 since a run of `-db`, which takes no subject
 /// handle and reads the database from the run's working directory, which the host preopens as
 /// `/work`, and the *start* field `database` (line WQA D12a, 2026-11-20; 9 on its branch until 10
 /// merged first, then 12 after D10's 11); 11 since a query is read as the command line's query
@@ -91,7 +96,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    12
+    13
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -148,8 +153,9 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
     })
 }
 
-/// Checks the argv as the CLI does before it reads its inputs (`run::validate`) and emits the
-/// *validation* JSON on stream 2: whether the run reads its inputs with NCBI's data loaders on
+/// Checks the argv as the CLI does before it reads its inputs (`run::validate`; for a tool's argv,
+/// `windowmasker`, `tool::validate`, which emits nothing) and emits the *validation* JSON on stream
+/// 2: whether the run reads its inputs with NCBI's data loaders on
 /// (`{"data_loaders":true}`; docs/web/abi_v2.md §9). It is emitted once the start has read the
 /// argv's registry, before the option checks: a refused argv has it too, unless its start or
 /// LOSAT's settings failed (line WQA's D13 round 3, L1, 2026-11-20).
@@ -159,17 +165,21 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
 #[no_mangle]
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
+        let argv = words(text(argv_ptr, argv_len, "argv")?);
+        // A tool's argv: the command line's checks before the tool opens a file, no *validation*
+        // (line NP WW3a, D-WW3-7).
+        if argv.first().is_some_and(|name| tool::TOOLS.contains(name)) {
+            tool::validate(&argv)?;
+            return Ok(0);
+        }
         // The *validation* goes out once the start knows the setting, before the option checks, so
         // that a host has it also when they refuse the argv (line WQA's D13 round 3, L1).
-        run::validate_with(
-            &words(text(argv_ptr, argv_len, "argv")?),
-            &mut |data_loaders| {
-                emit(
-                    STREAM_RESPONSE,
-                    format!("{{\"data_loaders\":{data_loaders}}}").as_bytes(),
-                );
-            },
-        )?;
+        run::validate_with(&argv, &mut |data_loaders| {
+            emit(
+                STREAM_RESPONSE,
+                format!("{{\"data_loaders\":{data_loaders}}}").as_bytes(),
+            );
+        })?;
         Ok(0)
     })
 }
@@ -459,6 +469,24 @@ pub unsafe extern "C" fn losat_web2_run(
             run::data_loaders(&argv).ok(),
             |queries, end, subjects| run::run(&argv, queries, end, subjects),
         )??;
+        Ok(0)
+    })
+}
+
+/// Runs a tool of the command line with its words, `argv[0]` its name (`windowmasker`; the other
+/// programs fail with `<name> is not available in the browser (ABI v2)`), in the run's working
+/// directory, with no standard input: its standard output on stream 11 and its standard error on
+/// stream 3 as they are written, each file that it writes on stream 12 as it is written (also when
+/// the run fails), then its exit status on stream 2 as `{"status":N}` (docs/web/abi_v2.md §4, §5,
+/// §9; `tool.rs`). Returns 0 for every exit status; -1 only for an argv that is not UTF-8 or a name
+/// that is not a tool of LOSAT Web.
+///
+/// # Safety
+/// `argv_ptr` must describe a readable buffer of `argv_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_tool(argv_ptr: *const u8, argv_len: usize) -> i32 {
+    guarded(|| {
+        tool::run(&words(text(argv_ptr, argv_len, "argv")?))?;
         Ok(0)
     })
 }

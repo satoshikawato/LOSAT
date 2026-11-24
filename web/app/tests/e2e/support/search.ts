@@ -7,6 +7,7 @@ import { expect, type Page } from '@playwright/test';
 import { describeBrowserThreads } from './browser-threads';
 import { REPOSITORY } from './harness-server';
 import { navigate } from './navigate';
+import { parseShellWords } from '../walk/model';
 
 export type Role = 'query' | 'subject';
 
@@ -176,4 +177,34 @@ export async function storedOutputs(page: Page, run: number): Promise<{ outputs:
   const shown = await page.getByTestId('run-diagnostics').count();
   const warnings = shown === 0 ? '' : ((await page.getByTestId('run-diagnostics').textContent()) ?? '');
   return { outputs: outputs as Record<0 | 6 | 7, Buffer>, warnings };
+}
+
+/** The part of a file's name that is the UTC time of a run's "Run LOSAT" (`20261123T101530Z`). */
+export const RUN_TIME = String.raw`\d{8}T\d{6}Z`;
+
+/**
+ * The source of a regular expression for the name that run `run` of `program` gives a file that the page makes for it (pasted text,
+ * several files, a file with records left out; line WQA's D22, DECISIONS 44): the run's prefix of the names of its outputs, with the task
+ * where the program has one, and the role (`losat-run3-blastn-megablast-20261123T101530Z.query.fa`).
+ */
+export function madeName(run: number, program: string, role: Role): string {
+  return String.raw`losat-run${run}-${program}(?:-[a-z0-9-]+)?-${RUN_TIME}\.${role}\.fa`;
+}
+
+/** The names that a shown command (`losat PROGRAM -query A -subject B ...`, or the argv without `losat`) gives its inputs. */
+export function inputNames(command: string): Record<Role, string> {
+  const words = parseShellWords(command);
+  return { query: words[words.indexOf('-query') + 1]!, subject: words[words.indexOf('-subject') + 1]! };
+}
+
+/** A regular expression that a whole command matches: `parts` are literal text, or `{ source }` for a part that is a regular expression. */
+export function commandPattern(...parts: Array<string | { readonly source: string }>): RegExp {
+  return new RegExp(`^${parts.map((part) => (typeof part === 'string' ? part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : part.source)).join('')}$`);
+}
+
+/** The names that run `run`'s command (Run details) gives its query and subject: the user's file names, or the run's own for files that the page makes. */
+export async function runInputNames(page: Page, run: number): Promise<Record<Role, string>> {
+  await chooseRun(page, run);
+  await page.getByTestId('results-view-details').click();
+  return inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
 }

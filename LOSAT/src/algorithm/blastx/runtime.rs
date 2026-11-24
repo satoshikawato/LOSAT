@@ -73,6 +73,11 @@ pub struct BatchResults {
     pub parameters: Vec<ContextParameters>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
     pub search_skipped: bool,
+    /// The ordinal id of the first of the batch's fetches with `check_oid_exclusion` (its
+    /// traceback's or redo's, by subject) that read a header with a UTF8String where a
+    /// VisibleString is expected: NCBI's warning comes there, before its Seq-aligns' reads
+    /// (`ReportedSubjects::read_titles`; of the units of a reader batch, the least).
+    pub fetched_utf8: Option<u32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181 (quoted
     // at `report::archive::OptionsHandle::pass`)
     /// The `EffectiveSearchSpace` option that the batch's search leaves in the options handle
@@ -85,6 +90,10 @@ pub struct BatchResults {
     /// (`rps_search::volumes::report_ordinal_ids`): outfmt 7's count and the prefetch's limit
     /// still count them (`BatchResults::unlisted_hsps`). Empty where none left.
     pub unlisted: Vec<usize>,
+    /// RPSTBLASTN: whether one of those HSPs starts with a gap in the profile's row
+    /// (`rps_search::volumes::Unlisted::subject_row_throws`), where NCBI's prefetch throws
+    /// (`empty_rows::prefetch_reads_unranged_row`).
+    pub unlisted_subject_row_throws: bool,
     /// RPSTBLASTN over several volumes: the number of each query's merged lists that the
     /// formatter's cut to the hit list size keeps, which counts following lists whose Seq-align
     /// ids match as one subject (`database::ReportedSubjects::for_batch`,
@@ -176,6 +185,13 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     ) {
     }
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
+    // No NCBI counterpart (scheduling only, LOSAT_X_BXREDOFLOW): the form in which the composition
+    // redo makes its matches ahead; it does not change any value NCBI computes.
+    /// `None`: the switch's choice; `Some(true)` the flow, `Some(false)` the fork-join batches of
+    /// `=0`. A test's observer chooses each in one process (`runtime/kappa_batch_tests.rs`).
+    fn x_redo_flow(&self) -> Option<bool> {
+        None
+    }
     // No NCBI counterpart: tells the search whether any observer callback records something; it
     // does not change any value NCBI computes.
     /// True when no callback records anything, so that work may be done out of order (and some of
@@ -208,7 +224,8 @@ pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
 // redo_align_params_tld and matrix_tld. It is used by one thread at a time.
 // One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the `context` cell of
 // the gapping parameters, which `redo_context_observed` fills for one synchronous call and restores
-// before returning; the state is only reached through its mutex.
+// before returning; the state is only reached through its mutex, or (`LOSAT_X_BXREDOFLOW`,
+// `kappa_batch.rs`) owned by the one thread that runs the flow's loop or one of its helpers.
 #[cfg(feature = "parallel")]
 struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]
@@ -732,8 +749,10 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: params.to_vec(),
             search_skipped: true,
+            fetched_utf8: None,
             request_space: None,
             unlisted: Vec::new(),
+            unlisted_subject_row_throws: false,
             shown: Vec::new(),
             gapped_k: None,
         });
@@ -888,7 +907,14 @@ impl PreliminarySink for Runtime<'_> {
         // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
         // (`FetchExcluded::refusal`). The Smith-Waterman redo (`-use_sw_tback`, `sw_redo`) keeps
         // such lists in the stream as markers, which clear its batch's status
-        // (`kappa_batch`).
+        // (`kappa_batch`), and notes its UTF8String reads from the same read of the headers.
+        // The subjects whose header holds a UTF8String where a VisibleString is expected, with
+        // the query of their list, its best E-value and whether it has HSPs, and the lists left in
+        // the stream's order (their query and subject) where there is one: the batch's first such
+        // fetch is NCBI's warning (`fetched_utf8`; the redo's, `kappa_batch::redo_fetched`).
+        let mut fetched_reads = Vec::new();
+        let mut fetched_order = Vec::new();
+        let mut fetched_utf8 = None;
         let sw_redo = self.options.use_sw_tback && self.options.gapped;
         if self.options.gapped && !sw_redo {
             if let Some(excluded) = self
@@ -898,11 +924,32 @@ impl PreliminarySink for Runtime<'_> {
             {
                 stream
                     .retain_closed(|lists| {
-                        excluded.retain(lists, |list| u32::try_from(list.oid).ok())
+                        let found = excluded.retain_noting(
+                            lists,
+                            |list| u32::try_from(list.oid).ok(),
+                            |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
+                        )?;
+                        if !found.is_empty() {
+                            fetched_order = lists
+                                .iter()
+                                .map(|list| (list.query_index, list.oid))
+                                .collect();
+                        }
+                        fetched_reads = found;
+                        Ok(())
                     })
                     .map_err(|failed| {
                         crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
                     })?;
+                // The traceback fetches every subject of the stream.
+                if self.options.composition == 0 {
+                    fetched_utf8 = crate::algorithm::common::database::FetchedUtf8::traceback_first(
+                        &fetched_reads
+                            .iter()
+                            .map(|(read, _)| *read)
+                            .collect::<Vec<_>>(),
+                    );
+                }
             }
         }
         self.observer.restored(batch, &full);
@@ -974,6 +1021,7 @@ impl PreliminarySink for Runtime<'_> {
                 }
             }
         } else if let Some(state) = &mut kappa {
+            let mut redo_fetched = None;
             let kappa_batch = KappaBatch {
                 batch,
                 full: &full,
@@ -982,12 +1030,14 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
+                fetched: (&fetched_reads, &fetched_order, &mut redo_fetched),
             };
             x_t_finish = if sw_redo {
                 self.kappa_redo_batch::<true>(kappa_batch)?
             } else {
                 self.kappa_redo_batch::<false>(kappa_batch)?
             };
+            fetched_utf8 = redo_fetched;
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1500-1508
@@ -1103,8 +1153,10 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: full,
             search_skipped: false,
+            fetched_utf8,
             request_space: None,
             unlisted: Vec::new(),
+            unlisted_subject_row_throws: false,
             shown: Vec::new(),
             gapped_k: None,
         });

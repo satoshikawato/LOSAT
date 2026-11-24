@@ -468,3 +468,30 @@ fn an_unreadable_format_is_deferred_with_a_strategy_file() {
     assert_eq!(choice.number(), Some(6));
     assert_eq!(choice.at_formatting_handler("99").unwrap(), parsed);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1535-1553
+#[test]
+fn the_reports_of_the_formats_0_to_4_read_the_html_links() {
+    // NCBI calls `CAlignFormatUtil::InitConfig` only from the id links of the description table,
+    // which formats 0 to 4 write alike (the query-anchored ones too, item T4b of line RG); the
+    // organism report (18) and the formats that ignore -html read no registry file.
+    for number in 0..END_VALUE {
+        let links = (0..=4).contains(&number);
+        assert_eq!(formats_link_ids(&[number]), links, "outfmt {number}");
+        assert_eq!(
+            formats_link_ids(&[6, number, 18]),
+            links,
+            "outfmt 6, {number}, 18"
+        );
+    }
+    for formats in [&[18][..], &[6, 18], &[5], &[]] {
+        assert!(html_links(true, Program::Blastp, None, formats)
+            .unwrap()
+            .is_none());
+    }
+    for formats in [&[0][..], &[1], &[2], &[3], &[4]] {
+        assert!(html_links(false, Program::Blastn, Some("db"), formats)
+            .unwrap()
+            .is_none());
+    }
+}

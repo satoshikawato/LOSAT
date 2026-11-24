@@ -317,7 +317,7 @@ fn keys_decode_and_order_as_the_reference_compares() {
         let key = ((score as i64) << 32) - (i + 1);
         assert_eq!(
             best_of(key),
-            (score, (i + 1) as i32),
+            (score, (i + 1) as u32),
             "score {score} step {i}"
         );
     }

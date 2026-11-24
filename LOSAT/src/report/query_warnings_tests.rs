@@ -287,7 +287,10 @@ fn loaded(
             volume,
             looks_up: true,
             offset,
+            lead: 0,
             opening,
+            scope_utf8: false,
+            cut_refusal: None,
         }),
     }
 }
@@ -350,7 +353,7 @@ fn a_cut_report_leaves_its_texts_to_the_next_load_that_asks() {
     load.opening = 0;
     assert_eq!(load.place(b"X\n".to_vec()), b"X\nE0\n");
     assert_eq!(load.opening, 0);
-    load.left_out(b"X\nE0\n");
+    load.left_out(b"X\nE0\n").unwrap();
     let next = loaded(&texts, 8, b"", (0, true, 0));
     assert_eq!(next.placed(), b"X\nE0\n");
     texts.clear();
@@ -395,6 +398,7 @@ fn a_prefetch_takes_the_texts_that_a_cut_report_before_it_left() {
         vec![(1, request)],
         vec![(1, prefetch)],
         |query| [0, 3][query],
+        None,
     );
     let log = Log::default();
     let mut report = log.clone();
@@ -459,6 +463,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
         Vec::new(),
         vec![(1, prefetch.clone())],
         |_| 0,
+        None,
     );
     let log = Log::default();
     let (mut report, mut sink) = (log.clone(), log.clone());
@@ -477,7 +482,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
     let model = std::sync::Arc::new(LoadTexts::default());
     let (reads, prefetch) = shapes(&model);
     let prefetched = |query: usize| (query == 1).then_some(&prefetch);
-    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 3);
+    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 3).unwrap();
     assert_eq!(pending(&left), written);
     assert!(pending(&model) == (Vec::new(), Vec::new()) && !left.is_empty());
     // The stop's load of volume 0 that looks the taxid up writes volume 0's error.
@@ -486,7 +491,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
     assert_eq!(stop.text, b"E0\n");
     assert!(left.is_empty());
     // Up to query 1 only (a stop in query 1's batch): its prefetch is that batch's own.
-    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 1);
+    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 1).unwrap();
     assert_eq!(
         pending(&left),
         (
@@ -495,7 +500,9 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
         )
     );
     // No cut: nothing left.
-    assert!(LoadTexts::left_before(&reads, &|_| false, &prefetched, 3).is_empty());
+    assert!(LoadTexts::left_before(&reads, &|_| false, &prefetched, 3)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -517,6 +524,7 @@ fn request_posts_follow_the_reader_messages_of_their_batch() {
         vec![(0, post(b"P0\n")), (2, post(b"P2a\n")), (2, post(b"P2b\n"))],
         Vec::new(),
         |query| reader[query],
+        None,
     );
     let texts: Vec<Vec<u8>> = posts.iter().map(Posts::text).collect();
     assert_eq!(
@@ -538,8 +546,24 @@ fn request_posts_follow_the_reader_messages_of_their_batch() {
         vec![(1, post(b"P1\n"))],
         Vec::new(),
         |_| 0,
+        None,
     );
     assert_eq!(posts[0].text(), b"W0\nP1\n");
+    // NCBI's first read of a UTF8String header (RG-T5d fix 1) after the request's posts of
+    // its batch, before the rest; a batch without a request has it after its reader messages.
+    let header = || Some((2, Posts::of_lines(b"U2\n".to_vec())));
+    let lines = || vec![b"R0\nW0\n".to_vec(), b"W1\n".to_vec(), b"R2\nT2\n".to_vec()];
+    let with = query_posts(
+        lines(),
+        vec![(0, post(b"P0\n")), (2, post(b"P2\n"))],
+        vec![(2, Posts::of_lines(b"F2\n".to_vec()))],
+        |q| reader[q],
+        header(),
+    );
+    assert_eq!(with[2].text(), b"R2\nP2\nU2\nF2\nT2\n");
+    let without = query_posts(lines(), Vec::new(), Vec::new(), |q| reader[q], header());
+    assert_eq!(without[2].text(), b"R2\nU2\nT2\n");
+    assert_eq!(without[0].text(), b"R0\nW0\n");
 }
 
 #[test]
@@ -549,4 +573,72 @@ fn a_query_without_texts_reads_nothing() {
     let warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     assert!(!warnings.reads_with_texts(0));
     assert!(ReadCursor::new(&reads).is_none());
+}
+
+// Line RG T4a2 fix round 3 (review e S1, N1): a `-html` report's post flushes the report written so
+// far where the post goes to the standard error (NCBI's `cerr`, tied to `cout`); the posts go to the
+// caller's sink of them where it sets one, else to the diagnostics.
+#[test]
+fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
+    /// A report that records its bytes and how many of them its last flush wrote.
+    struct Report {
+        bytes: Vec<u8>,
+        flushed: usize,
+    }
+    impl Write for Report {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushed = self.bytes.len();
+            Ok(())
+        }
+    }
+    // The tests' standard error is not a `-logfile` file (`ncbi_environment::terminal_stderr`).
+    assert!(crate::blastinput::ncbi_environment::terminal_stderr().is_none());
+    let mut report = Report {
+        bytes: b"head\n".to_vec(),
+        flushed: 0,
+    };
+    let mut posts = Vec::new();
+    write_html_post(&mut report, &mut posts, b"Warning: post\n").unwrap();
+    assert_eq!(
+        (report.flushed, posts.as_slice()),
+        (5, &b"Warning: post\n"[..])
+    );
+    // No text, no flush.
+    report.bytes.extend_from_slice(b"more\n");
+    write_html_post(&mut report, &mut posts, b"").unwrap();
+    assert_eq!(report.flushed, 5);
+    let (mut apart, mut diagnostics) = (Vec::new(), Vec::new());
+    html_posts_sink(
+        Some(&mut apart as &mut dyn Write),
+        &mut diagnostics as &mut dyn Write,
+    )
+    .write_all(b"a")
+    .unwrap();
+    html_posts_sink(None, &mut diagnostics as &mut dyn Write)
+        .write_all(b"d")
+        .unwrap();
+    assert_eq!((apart, diagnostics), (b"a".to_vec(), b"d".to_vec()));
+}
+
+/// A load that LOSAT's model followed through the slot of the taxonomy cache on a database whose
+/// volume holds the offset error's taxid and another of its slot (`ReadLoad::cut_refusal`) is
+/// LOSAT's refusal where NCBI's XML stream cuts it out: the later loads' texts would follow another
+/// slot. Nothing is left in the ledger.
+#[test]
+fn a_cut_of_a_load_of_the_cache_slot_is_refused() {
+    let texts = std::sync::Arc::new(LoadTexts::default());
+    let mut read = loaded(&texts, 0, b"E0\n", (0, true, 0));
+    read.load.as_mut().unwrap().cut_refusal = Some(std::sync::Arc::from("refused"));
+    let reads = vec![vec![read]];
+    let mut cursor = ReadCursor::in_ledger(&reads, &texts);
+    let error = cursor.cut(0, &mut Vec::new(), &mut Vec::new()).unwrap_err();
+    assert_eq!(error.to_string(), "refused");
+    // LOSAT's refusal, not a failed write (review 1 of item O4b2-5, H2).
+    assert_eq!(CutRefusal::of(&error), Some("refused"));
+    assert_eq!(CutRefusal::of(&io::Error::other("refused")), None);
+    assert!(texts.is_empty());
 }

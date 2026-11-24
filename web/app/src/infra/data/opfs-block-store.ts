@@ -104,45 +104,63 @@ export class OpfsBlockStore implements BlockStore {
     const block: OpfsBlock = { file, directory, name, handle, length: 0, state: 'open' };
     this.blocks.set(path, block);
     const live = () => this.blocks.get(path) === block;
+    const openHandle = (): SyncAccessHandle => {
+      if (!live() || block.state !== 'open' || block.handle === undefined) {
+        throw new Error(`block ${path} is not open`);
+      }
+      return block.handle;
+    };
+    const writeAt = (offset: number, bytes: Uint8Array) => {
+      const h = openHandle();
+      if (!Number.isSafeInteger(offset) || offset < 0) {
+        throw new RangeError(`invalid write offset ${offset} of block ${path}`);
+      }
+      if (bytes.length === 0) return;
+      let written: number;
+      try {
+        written = h.write(bytes as BufferSource, { at: offset });
+      } catch (error) {
+        if (!isStorageFull(error)) throw error;
+        block.state = 'full';
+        throw asStorageFull(error);
+      }
+      const nextLength = Math.max(block.length, offset + written);
+      this.used += nextLength - block.length;
+      block.length = nextLength;
+      if (written !== bytes.length) {
+        block.state = 'full';
+        throw new StorageFullError();
+      }
+    };
+    const truncate = (length: number) => {
+      const h = openHandle();
+      if (!Number.isSafeInteger(length) || length < 0) {
+        throw new RangeError(`invalid truncate length ${length} of block ${path}`);
+      }
+      try {
+        h.truncate(length);
+      } catch (error) {
+        if (!isStorageFull(error)) throw error;
+        block.state = 'full';
+        throw asStorageFull(error);
+      }
+      this.used += length - block.length;
+      block.length = length;
+    };
     return {
-      append: (bytes) => {
-        if (!live() || block.state !== 'open' || block.handle === undefined) {
-          throw new Error(`block ${path} is not open`);
-        }
-        let written: number;
-        try {
-          written = block.handle.write(bytes as BufferSource, { at: block.length });
-        } catch (error) {
-          if (!isStorageFull(error)) throw error;
-          block.state = 'full';
-          throw asStorageFull(error);
-        }
-        block.length += written;
-        this.used += written;
-        if (written !== bytes.length) {
-          block.state = 'full';
-          throw new StorageFullError();
-        }
-      },
-      clear: () => {
-        if (!live() || block.state !== 'open' || block.handle === undefined) {
-          throw new Error(`block ${path} is not open`);
-        }
-        block.handle.truncate(0);
-        this.used -= block.length;
-        block.length = 0;
-      },
+      append: (bytes) => writeAt(block.length, bytes),
+      writeAt,
+      truncate,
+      clear: () => truncate(0),
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError();
-        if (!live() || block.state !== 'open' || block.handle === undefined) {
-          throw new Error(`block ${path} is not open`);
-        }
+        const h = openHandle();
         try {
-          block.handle.flush();
+          h.flush();
         } catch (error) {
           throw isStorageFull(error) ? asStorageFull(error) : error;
         }
-        block.handle.close();
+        h.close();
         block.handle = undefined;
         block.state = 'sealed';
         return block.length;
@@ -161,6 +179,16 @@ export class OpfsBlockStore implements BlockStore {
     try {
       const file = await block.file.getFile();
       return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    } catch (error) {
+      throw isStorageRemoved(error) ? new StorageRemovedError(RESULTS_REMOVED_MESSAGE) : error;
+    }
+  }
+
+  async readFile(path: string, name: string, type = 'application/octet-stream'): Promise<File> {
+    const block = this.sealed(path);
+    try {
+      const file = await block.file.getFile();
+      return new File([file], name, { type, lastModified: file.lastModified });
     } catch (error) {
       throw isStorageRemoved(error) ? new StorageRemovedError(RESULTS_REMOVED_MESSAGE) : error;
     }

@@ -105,7 +105,7 @@ fn erfc_ncbi(z: f64) -> f64 {
     // LOSAT_X_ERFABSORB (graduated 2026-10-26, always on): for z < -6 the reference's value is
     // 2.0 whatever ErfImpl returns, so ErfImpl is not called.
     // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
-    // With x = -z >= 6, ErfImpl(x, TRUE) takes the last rational branch (x >= 4.5) or, from
+    // With x = -z >= 6, `ErfImpl` with `invert` set takes the last rational branch (x >= 4.5) or, from
     // x = 28 on, returns 0. In that branch Y + p / q lies in [0.5566, 0.5639] for 1/x in
     // (1/28, 1/6] (|p / q| <= 0.006, q >= 1), expl(-x * x) <= e^-36 (`exp_long_double_product_ncbi`
     // squares a value below 1 nine times; an underflow only lowers it, never below 0) and the

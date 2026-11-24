@@ -58,7 +58,7 @@ const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`BlastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct BlastxDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
@@ -68,7 +68,7 @@ pub(crate) struct BlastxDatabase {
     parsed_seqids: bool,
     /// The program of the run (`args::ProgramName::upper`: BLASTX, or RPSTBLASTN), which the
     /// database's messages name.
-    program: &'static str,
+    pub(crate) program: &'static str,
 }
 
 impl BlastxDatabase {
@@ -165,11 +165,11 @@ impl BlastxDatabase {
         shared::taxdb_may_refuse(&self.db)
     }
 
-    /// Whether the batches' fetches of the run are refused for NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::prefetch_refused`): outfmt 5's prefetch, and the XML2 and JSON lookups
+    /// Whether the batches' fetches of the run may be refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::cache_may_refuse`): outfmt 5's prefetch, and the XML2 and JSON lookups
     /// (`shared::read_reported_taxonomy`), which an XML run holds its document for.
-    pub(crate) fn prefetch_refused(&self) -> bool {
-        self.taxdb.prefetch_refused(&self.db)
+    pub(crate) fn cache_may_refuse(&self) -> bool {
+        self.taxdb.cache_may_refuse(&self.db)
     }
 
     /// Whether a later query batch of a run that writes BLAST XML or an XML2 or JSON document
@@ -178,7 +178,7 @@ impl BlastxDatabase {
     /// a library call, `local::report_batches`) and the refusal follows no byte:
     /// - with `taxdb.bti` on the search path, a taxonomy database record (`taxdb_may_refuse`),
     ///   or a fetch where NCBI's taxonomy cache would repeat the offset error
-    ///   (`prefetch_refused`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
+    ///   (`cache_may_refuse`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
     ///   subject that has a taxid, `read_reported_taxonomy`);
     /// - with parsed Seq-ids, one of the batch's subjects (`ReportedSubjects::for_batch`).
     ///
@@ -186,7 +186,7 @@ impl BlastxDatabase {
     /// which none would be refused, writes batch by batch.
     pub(crate) fn later_batch_may_refuse(&self) -> bool {
         let taxdb_may_refuse =
-            self.taxdb_found() && (self.taxdb_may_refuse() || self.prefetch_refused());
+            self.taxdb_found() && (self.taxdb_may_refuse() || self.cache_may_refuse());
         taxdb_may_refuse || self.parsed_seqids()
     }
 
@@ -434,6 +434,9 @@ pub(crate) struct BatchTitles {
     listed: BTreeMap<usize, Option<Arc<[u8]>>>,
     parsed: BTreeMap<usize, Arc<ParsedSubject>>,
     sources: BTreeMap<usize, crate::report::defline::SourceTaxname>,
+    /// The first read of a record with a UTF8String where a VisibleString is expected
+    /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there (`utf8_post`).
+    pub(crate) utf8: Option<shared::Utf8Read>,
 }
 
 /// What one query's pairwise report (outfmt 0 to 4) of the hit lists `lists` reads, by the key
@@ -478,17 +481,16 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &mut [BatchResults],
         gapped: bool,
-    ) {
+    ) -> Option<crate::seqdb::SeqLocation> {
         // A gapped search fetched every subject of the redo or the traceback with
         // `check_oid_exclusion` (`Runtime::batch_end`); an ungapped one fetches no subject.
-        let Some(mut aligned) = shared::SeqAligned::of(&database.db, gapped) else {
-            return;
-        };
+        let mut aligned = shared::SeqAligned::of(&database.db, gapped)?;
         for batch in batches {
             for lists in &mut batch.queries {
                 aligned.retain(lists, |list| u32::try_from(list.oid).ok());
             }
         }
+        aligned.first_utf8()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -504,6 +506,7 @@ impl ReportedSubjects {
         batches: &[BatchResults],
         gapped: bool,
         pairwise: bool,
+        earlier: shared::EarlierUtf8,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -512,6 +515,7 @@ impl ReportedSubjects {
         // The sources of the empty stored titles that NCBI makes from them.
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db);
+        headers.note_earlier(earlier);
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -561,6 +565,7 @@ impl ReportedSubjects {
             listed,
             parsed,
             sources,
+            utf8: headers.first_utf8(),
         })
     }
 
@@ -625,6 +630,7 @@ impl ReportedSubjects {
             listed,
             parsed,
             mut sources,
+            utf8: _,
         } = titles;
         // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
         // run there (`shared::batch_prefetch`), before any of its reports: none of their checks
@@ -1024,14 +1030,16 @@ impl ReportedSubjects {
     /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`), after the
     /// lookups of the reports of the batches before, which the run's record holds: BLASTX reads
     /// each batch's taxonomy (`for_batch`) and writes its reports before it searches the next, and
-    /// a batch that stops reads none of its own.
+    /// a batch that stops reads none of its own. `Ok`: the warning of a UTF8String header that a
+    /// load of a batch that does not stop posts (`shared::batch_prefetch_stop`), written where the
+    /// batch's prefetch comes.
     pub(crate) fn batch_prefetch_stop(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<()> {
+    ) -> Result<Vec<u8>> {
         shared::batch_prefetch_stop(
             &database.db,
             &database.taxdb,
@@ -1117,11 +1125,11 @@ impl ReportedSubjects {
                         .map(|list| list.oid as u32)
                         .collect(),
                 };
-                // A subject whose load throws loads nothing, nor does one that no report
-                // reaches after it (`HitLoads::loaded`).
+                // Not a subject that no report reaches after one whose load throws
+                // (`HitLoads::reached`).
                 let subjects = ranks
                     .into_iter()
-                    .filter(|&rank| self.loads.loaded(rank as usize))
+                    .filter(|&rank| self.loads.reached(rank as usize))
                     .map(|rank| {
                         (
                             rank,
@@ -1149,6 +1157,42 @@ impl ReportedSubjects {
             }
         }
         Ok(())
+    }
+
+    /// The XML2 and JSON formats, a batch whose prefetch is off (`batches`): each query's report's
+    /// `Hit` loads (`shared::scope_utf8_hit_reads`, the hit lists' reported subjects in order),
+    /// which the writer places at each `Hit` (`query_reads`).
+    pub(crate) fn scope_utf8_hit_reads(
+        &mut self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+        after: Option<crate::report::db_subject::RunThrow>,
+    ) {
+        if !database.db.scope_utf8_seen() {
+            return;
+        }
+        for batch in batches {
+            for (index, lists) in batch.queries.iter().enumerate() {
+                let subjects = lists
+                    .iter()
+                    .filter(|list| super::report::reads_list(list, gapped, SubjectFetch::Every))
+                    .map(|list| {
+                        let rank = list.oid;
+                        (rank as u32, self.ordinals[rank], self.parsed_subject(rank))
+                    });
+                let reads = shared::scope_utf8_hit_reads(
+                    &database.db,
+                    &database.taxdb,
+                    after,
+                    subjects,
+                    database.program,
+                );
+                if !reads.is_empty() {
+                    self.query_reads.insert(batch.query_ordinal + index, reads);
+                }
+            }
+        }
     }
 
     /// The messages of the query `ordinal`'s own fetches (`fetch_by_query`; empty where the

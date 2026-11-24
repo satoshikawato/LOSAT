@@ -1,6 +1,8 @@
 // Saving a file happens only on an explicit user action (design document §3.3).
 export interface Downloader {
   save(fileName: string, bytes: Uint8Array, mimeType: string): void;
+  /** Saves an OPFS-backed Blob/File directly without reading it into JS heap memory. */
+  saveBlob?(fileName: string, blob: Blob): void;
 }
 
 /**

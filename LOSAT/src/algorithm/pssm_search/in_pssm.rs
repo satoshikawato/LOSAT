@@ -21,7 +21,7 @@ use crate::config::ScoringMatrix;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::{KarlinBlk, PsiScoreBlk};
 use crate::ncbi_exception::{NcbiException, Severity};
-use crate::report::serial::asn_types::{ReadError, Value};
+use crate::report::serial::asn_types::ReadError;
 use crate::report::serial::pssm::{ObjectId, PssmFinalData, PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::ParsedSeqId;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
@@ -121,6 +121,22 @@ pub(crate) struct PssmReader<'a> {
     /// The run's BLAST archive (outfmt 11), which saves each of the reader's posts as one message
     /// of its severity (`diag_log::Posts::write`); `None` without one.
     pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+/// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
+/// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
+/// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, tblastn's and psiblast's
+/// `-in_pssm` of a missing file with `-subject` and with `-db`), as for the files that
+/// `report::archive::error_lines` takes as the subjects' (`subject_file`).
+pub(crate) fn file_error_in_run(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::cli::NativeError>()
+        .is_some_and(|native| {
+            native
+                .message
+                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
+        })
 }
 
 impl PssmReader<'static> {
@@ -237,7 +253,7 @@ pub(crate) fn read_in_pssm(
             Severity::Warning => crate::report::diag_log::WARNING,
             Severity::Error => crate::report::diag_log::ERROR,
         };
-        posts.post(severity, post.line(&program));
+        posts.post(severity, post.line(Some(&program)));
     }
     posts.write(diagnostics, reader.archive)?;
     let pssm = match read.result {
@@ -387,14 +403,19 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
                 push(&mut residues, position, letter);
             }
         }
-        Some(SeqData::Other(_)) | None => {}
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => {}
     }
     residues
 }
 
 /// The query record of the PSSM's Bioseq (`PsiSearch::query`, the reasons in
-/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), other ids are
-/// believed; a Bioseq without one (only where the object manager stops the run first,
+/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), which an
+/// integer keeps as the Bioseq's Seq-id for the Seq-aligns (`FastaRecord::keeping_bioseq_ids`:
+/// `local id 5`, where the record's local id is a string); other ids are believed; a Bioseq
+/// without one (only where the object manager stops the run first,
 /// `stopped_as_query_joins_scope`) has no id.
 fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRecord {
     match ids {
@@ -402,7 +423,9 @@ fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRe
         [ParsedSeqId::Local(ObjectId::Str(id))] => {
             FastaRecord::new(String::from_utf8_lossy(id).into_owned(), title, letters)
         }
-        [ParsedSeqId::Local(ObjectId::Id(id))] => FastaRecord::new(id.to_string(), title, letters),
+        [ParsedSeqId::Local(ObjectId::Id(id))] => {
+            FastaRecord::new(id.to_string(), title, letters).keeping_bioseq_ids(ids.to_vec())
+        }
         _ => FastaRecord::new(String::new(), title, letters).believing(ids.to_vec()),
     }
 }
@@ -447,6 +470,8 @@ fn stopped_as_query_joins_scope(
         setup_messages: Vec::new(),
         warning_title: Some(Vec::new()),
         request: None,
+        archive_pssm: None,
+        archive_matrix_name_unwritable: false,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -472,9 +497,10 @@ const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exceptio
     function: None,
 };
 
-/// The PSSM search of a PSSM that has no query Seq-entry (the alignment's `-in_msa` PSSM, whose
-/// query NCBI's `x_ExtractQueryForPssm` did not find): the application adds the empty entry to
-/// its scope and `GetSeq()` of it ends the run after the prolog, before any report.
+/// The PSSM search of a PSSM that has no query Seq-entry (an `-in_pssm` PSSM without one, the
+/// alignment's `-in_msa` PSSM whose query NCBI's `x_ExtractQueryForPssm` did not find): the
+/// application adds the empty entry to its scope and `GetSeq()` of it ends the run after the
+/// prolog, before any report.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-540 (cited at
 /// `psi_search_and_object`)
@@ -521,11 +547,12 @@ pub(crate) fn psi_search_and_object_of(
     ids_of: &str,
 ) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-540
-    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here (a PSSM
-    // without one ends with a C++ exception of the release build).
+    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here: a
+    // PSSM without one (no `query`, or `query NULL`) gets an empty Seq-entry, whose `GetSeq()`
+    // ends the run as the alignment's PSSM without a query does (NCBI BLAST+ 2.17.0, psiblast and
+    // tblastn, probe D3c-3b q_absent_ps, q_absent_tbn, t_query_null, q_null_tbn, b_query_null).
     let Some(entry) = pssm.pssm.query.as_ref() else {
-        return Err(reader
-            .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
+        return Ok(psi_search_unset_query(pssm));
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (c++/src/app/blast/tblastn_app.cpp:226)
     // The query's Seq-entry joins NCBI's scope with its annotations, which NCBI's object manager
@@ -577,11 +604,12 @@ pub(crate) fn psi_search_and_object_of(
             defline_reads_annot,
         ));
     };
-    if let Some(SeqData::Other(Value::Choice(variant, _))) = &query.inst.seq_data {
-        let name = crate::report::serial::asn_types::members(
-            crate::report::serial::asn_types::table::named::SEQ_DATA,
-        )[usize::from(*variant)]
-        .name();
+    if let Some(
+        data
+        @ (SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_)),
+    ) = &query.inst.seq_data
+    {
+        let (name, _, _) = data.variant();
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
         )));
@@ -612,15 +640,24 @@ pub(crate) fn psi_search_and_object_of(
     // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
     // frequency ratios only, whose engine sets the query up first too.
     let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
-    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+    // Then the set-up takes the query's title (`GetTitle`, before its letters), which reads every
+    // descriptor's variant: an empty descriptor is the query's error
+    // (`report::query_warnings::null_descriptor_error`; NCBI BLAST+ 2.17.0, psiblast and tblastn,
+    // on every report path and with a PSSM of frequency ratios only, probe D3c-3b `probe4`).
+    let query_error = if validation_error.is_some() {
+        None
+    } else if nucleotide_query {
         Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else if query.has_empty() {
+        Some(crate::report::query_warnings::null_descriptor_error())
     } else {
         invalid_residues
     };
     let (mut scores_error, setup_error) = if ratios_only {
-        (invalid_residues, None)
+        (query_error, None)
     } else {
-        (None, invalid_residues)
+        (None, query_error)
     };
     let reads_values =
         validation_error.is_none() && scores_error.is_none() && setup_error.is_none();
@@ -957,6 +994,8 @@ pub(crate) fn psi_search_and_object_of(
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        archive_pssm: None,
+        archive_matrix_name_unwritable: false,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -1143,6 +1182,25 @@ pub(crate) struct InPssmFile {
     pub(crate) valid: bool,
 }
 
+impl InPssmFile {
+    /// Whether NCBI cannot write the object's parameters: a PSSM of frequency ratios only without
+    /// `params.rpsdbparams` gets those parameters from `CPsiBlastImpl`'s constructor (the gap
+    /// costs, `PsiBlastAddAncillaryPssmData`) without the matrix name, and the object stream
+    /// stops with "cannot write unassigned member matrixName" (a C++ exception, rc 255) wherever
+    /// it writes the object: `-out_pssm` (`algorithm::psiblast::in_pssm_files`) and the archive's
+    /// request (`-outfmt 11`, `algorithm::psiblast::in_pssm`). The one owner of that condition.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:426-433
+    pub(crate) fn matrix_name_unwritable(&self) -> bool {
+        self.computed
+            && self
+                .object
+                .params
+                .as_ref()
+                .is_none_or(|params| params.rpsdbparams.is_none())
+    }
+}
+
 /// The scores and gapped values that `CPsiBlastImpl`'s constructor sets in a PSSM of frequency
 /// ratios only (`rows[position][residue]` and `gapped`, the PSSM engine's), with the frequency
 /// ratios padded to 28 rows when the file has fewer, and the gap costs of the search (BLOSUM62's
@@ -1263,6 +1321,105 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
         },
         background: data.background,
     })
+}
+
+/// The score block of `CPssmEngine::x_InitializeScoreBlock` for the matrix named `matrix_name`
+/// (`GetMatrixName()`), the gap costs and the query (NCBIstdaa), psiblast's `-in_msa` and
+/// makeprofiledb's PSSMs of frequency ratios only: the inner `Err` is the message of NCBI's
+/// `CBlastException` for a matrix it does not know and for gap costs that the matrix's table does
+/// not hold; the block holds the gapped block
+/// `kbp_gap_psi` copies. `None` for IDENTITY, whose table has no frequency ratios (the engine
+/// stops there).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-520
+/// The ungapped calculation writes its message for a query whose parameters it cannot compute
+/// and its status is then replaced by the gapped calculation's:
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2790
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3557-3562
+/// The engine throws the first message that was written, so with gap costs that the matrix does
+/// not have the error is the ungapped calculation's for such a query and the gap costs' for any
+/// other (whose allowed values follow as further messages); with gap costs that the matrix has,
+/// the status is 0 and the engine goes on without the query's block (`ungapped_karlin_valid`).
+/// NCBI BLAST+ 2.17.0, PS6 corpus `b.gap.bad`, `o.ok.matrix`; review probes `k.X20.badgap`,
+/// `z.x20.go0.ge5`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:566-570
+#[allow(clippy::type_complexity)]
+pub(crate) fn engine_score_block(
+    matrix_name: &str,
+    gap_open: i32,
+    gap_extend: i32,
+    query: &[u8],
+) -> Result<std::result::Result<(ScoringMatrix, Option<PsiScoreBlk>), String>> {
+    let Ok(matrix) = matrix_name.parse::<ScoringMatrix>() else {
+        return Ok(Err("Unknown error code -1".to_string()));
+    };
+    let spec = crate::config::ProteinScoringSpec {
+        matrix,
+        gap_open,
+        gap_extend,
+    };
+    if !crate::stats::tables::protein_scoring_supported(&spec) {
+        if query_ungapped_block(matrix, query).is_none() {
+            return Ok(Err(
+                crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
+            ));
+        }
+        return Ok(Err(format!(
+            "Gap existence and extension values of {} and {} not supported for {}",
+            spec.gap_open,
+            spec.gap_extend,
+            matrix_name.to_ascii_uppercase()
+        )));
+    }
+    let params = crate::stats::tables::lookup_protein_params(&spec);
+    let gapped = KarlinBlk {
+        lambda: params.lambda,
+        k: params.k,
+        h: params.h,
+    };
+    let sbp = if matrix == ScoringMatrix::Identity {
+        None
+    } else {
+        Some(score_block(matrix, gapped)?)
+    };
+    Ok(Ok((matrix, sbp)))
+}
+
+/// The query's ungapped Karlin-Altschul block in the engine's score block of `matrix`
+/// (`kbp_psi[0]`, `Blast_ScoreBlkKbpUngappedCalc` of the query's composition), `None` where it
+/// cannot be computed: NCBI's score block leaves the query's context invalid there (a query of
+/// `X` alone, or of letters that no positive score pairs with the standard composition), and the
+/// engine then reads a null block.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2786
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:514-520 (the ungapped
+/// calculation's status is replaced by the gapped one's, so the failure goes unreported and the
+/// run goes on with `kbp_psi[0]` null; `s_PSISavePssm` and the scaling read it: NCBI BLAST+ 2.17.0
+/// ends with SIGSEGV, PS6 corpus `r.ch.q.allX`, `x.in.allx.60`, `x.in.allO`)
+pub(crate) fn query_ungapped_block(matrix: ScoringMatrix, query: &[u8]) -> Option<KarlinBlk> {
+    let (_, loscore, hiscore) = score_table(matrix);
+    let mut sentinelled = Vec::with_capacity(query.len() + 2);
+    sentinelled.push(0);
+    sentinelled.extend_from_slice(query);
+    sentinelled.push(0);
+    let composition = crate::stats::karlin_calc::compute_aa_composition(&sentinelled, query.len());
+    let standard = crate::stats::karlin_calc::compute_std_aa_composition();
+    let profile = crate::stats::karlin_calc::compute_score_freq_profile_for_matrix(
+        &composition,
+        &standard,
+        loscore,
+        hiscore,
+        matrix,
+    );
+    crate::stats::karlin_calc::compute_karlin_params_ungapped(&profile)
+        .ok()
+        .map(|params| KarlinBlk {
+            lambda: params.lambda,
+            k: params.k,
+            h: params.h,
+        })
 }
 
 #[cfg(test)]

@@ -536,7 +536,8 @@ impl ShownSubjects<'_> {
 /// already. `stops`: the run stops after this batch (a later batch fails before its search), so
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
-/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
+/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run, at the
+/// run's query of `QueryScopes::xml_failing_query`).
 /// `pool`: the run's pool where no search runs on it while the batch is written
 /// (`native::BatchRender`), whose threads format the pairwise reports (`x_pairwise_par::write`).
 pub(crate) fn render_queries(
@@ -550,7 +551,7 @@ pub(crate) fn render_queries(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     render_queries_with(
@@ -581,6 +582,13 @@ pub(super) struct LocalReport<'a, 'p> {
     /// What a refusal of the format's checks does (`FormatRefusal::check`); without a local
     /// report it fails the call.
     pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
+    /// The format's place among the search's formats (`QueryWarnings::for_report`); 0 without a
+    /// local report (the command line's one format).
+    pub report: usize,
+    /// Where the format's `-html` posts go apart from its standard error
+    /// (`QueryWarnings::with_html_posts`: the diagnostics of a later format, the call's receiver
+    /// of a later search's, `local::write_run`).
+    pub html_posts: Option<&'a mut dyn Write>,
 }
 
 /// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
@@ -663,19 +671,20 @@ pub(super) fn render_queries_with(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
-    let (probe, first_hsp, made_hits, mut refusal) = match local {
+    let (probe, first_hsp, made_hits, mut refusal, html_posts) = match local {
         Some(local) => (
             local.probe,
             local.first_hsp,
             local.hits,
             Some(local.refusal),
+            (local.report, local.html_posts),
         ),
-        None => (None, 0, None, None),
+        None => (None, 0, None, None, (0, None)),
     };
     // A check of the format's report before its rows: `false` where the format fails alone
     // (`FormatRefusal::check`), and writes nothing of the batch.
@@ -725,7 +734,7 @@ pub(super) fn render_queries_with(
     if options.pairwise_view().is_some() {
         return write_pairwise(
             writer, stderr, options, queries, subjects, shown, batches, made_hits, probe,
-            first_hsp, pool,
+            first_hsp, pool, html_posts,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
@@ -847,6 +856,7 @@ fn write_pairwise(
     probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    (report_index, html_posts): (usize, Option<&mut dyn Write>),
 ) -> Result<()> {
     use crate::report::pairwise::{
         write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
@@ -881,11 +891,21 @@ fn write_pairwise(
             reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
         }
     }
+    // Under `-html` the rows' masks of each hit (`HtmlRowMasks`, the spans of outfmt 0), made with
+    // the rows: the hits made for the caller (`made_hits`, the same rows) are made again with them.
+    let mut html_masks = options.html.is_some().then(Vec::new);
     let made;
     let hits = match made_hits {
-        Some(hits) => hits,
-        None => {
-            made = pairwise_hits(options, queries, subjects, shown, batches)?;
+        Some(hits) if html_masks.is_none() => hits,
+        _ => {
+            made = pairwise_hits(
+                options,
+                queries,
+                subjects,
+                shown,
+                batches,
+                html_masks.as_mut(),
+            )?;
             &made
         }
     };
@@ -1010,6 +1030,13 @@ fn write_pairwise(
         // `PairwiseView::report_sort`).
         sort: view.report_sort(options.report_sort()),
         view,
+        html: options.html.as_ref().map(|links| {
+            let oids: &[crate::seqdb::Oid] = match shown {
+                ShownSubjects::Database { reported, .. } => reported.oids(),
+                ShownSubjects::Fasta { .. } => &[],
+            };
+            crate::report::html_ids::HtmlReport::new(links, oids.iter().copied())
+        }),
         ..PairwiseConfig::default()
     };
     // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3c), made once.
@@ -1055,7 +1082,9 @@ fn write_pairwise(
     // (`QueryWarnings::before_query`, `subject_read`).
     let mut warnings =
         crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
-            .with_subject_reads(&reads);
+            .with_subject_reads(&reads)
+            .for_report(report_index)
+            .with_html_posts(html_posts.map(|posts| posts as &mut dyn Write));
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     write_blastx_pairwise_report(
@@ -1083,6 +1112,7 @@ fn write_pairwise(
             .as_ref()
             .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         pool.and_then(crate::report::x_pairwise_par::pool),
+        html_masks.as_deref(),
         match shown {
             ShownSubjects::Fasta { .. } => &every_loaded,
             ShownSubjects::Database { reported, .. } => reported.loads(),
@@ -1092,9 +1122,10 @@ fn write_pairwise(
     Ok(())
 }
 
-/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0
-/// (`EmptyRowsStop`) is NCBI's exception, `Row is empty` where the sorts or the description table
-/// read the HSP's empty rows (after the query's `Length=`), `CreateDensegFromStdseg` where they or
+/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
+/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
+/// where the sorts or the description table read such a row (after the query's `Length=`;
+/// `empty_rows::row_range_exception`), `CreateDensegFromStdseg` where they or
 /// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
 /// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
@@ -1105,8 +1136,8 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
         .get_ref()
         .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
     {
-        Some(EmptyRowsStop::RowIsEmpty) => {
-            NativeError::exception(&super::empty_rows::row_is_empty()).into()
+        Some(EmptyRowsStop::RowRange(error)) => {
+            NativeError::exception(&super::empty_rows::row_range_exception(*error)).into()
         }
         Some(EmptyRowsStop::StdSegLengths) => {
             NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
@@ -1122,12 +1153,15 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
 /// reports (the lists sorted by e-value, `sort_lists`); `q_idx` is the query's index in `queries`.
 /// Outfmt 0 writes them (`write_pairwise`), and LOSAT Web's `run_local` hands them to its caller.
+/// Under `-html` (`html_masks`) each hit's rows' masks are added to `html_masks` in the same order
+/// (`report::pairwise::HtmlRowMasks`).
 pub(super) fn pairwise_hits(
     options: &ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Result<Vec<crate::report::pairwise::PairwiseHit>> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
@@ -1186,7 +1220,10 @@ pub(super) fn pairwise_hits(
                         num_positives: counts.positive,
                     };
                     // The row holds its masks in lower case; the lists are left to the next
-                    // row (`query_anchored::output_seq`).
+                    // row (`query_anchored::output_seq`), or copied under `-html`.
+                    if html_masks.is_some() {
+                        row_masks.clear();
+                    }
                     let query_seq = query_row_masks(
                         a.qseq,
                         (a.qstart, a.qend),
@@ -1194,6 +1231,9 @@ pub(super) fn pairwise_hits(
                         &query_masks,
                         &mut row_masks,
                     );
+                    if let Some(table) = html_masks.as_deref_mut() {
+                        table.push(row_masks.copy_rows());
+                    }
                     hits.push(PairwiseHit {
                         hit,
                         query_seq: Some(query_seq),
@@ -1211,19 +1251,14 @@ pub(super) fn pairwise_hits(
                             {
                                 None
                             }
-                            // The library's `Hit::subject_title` (no report reads it): the title
-                            // after its first word, `protein product` of an empty one.
+                            // The library's `Hit::subject_title` (no report reads it),
+                            // `protein product` of an empty title.
                             ShownSubjects::Fasta { .. } if subject.title.is_empty() => {
                                 Some("protein product".to_owned())
                             }
-                            ShownSubjects::Fasta { .. } => subject
-                                .title
-                                .iter()
-                                .position(|&byte| byte == b' ')
-                                .map(|space| {
-                                    String::from_utf8_lossy(&subject.title[space + 1..])
-                                        .into_owned()
-                                }),
+                            ShownSubjects::Fasta { .. } => {
+                                crate::blastinput::fasta_reader::hit_subject_title(&subject.title)
+                            }
                             ShownSubjects::Database { .. } => None,
                         },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
@@ -1258,10 +1293,10 @@ pub(super) fn pairwise_hits(
     // (`FastaRecord::archive_lowercase_runs`). `-db_soft_mask` and `-db_hard_mask`: the stored
     // masks by NCBI's Seq-id (`ReportedSubjects::shown_db_masks`).
     if let Some(masks) = db_subject_masks(shown, &hits) {
-        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks, html_masks);
     } else if subjects.iter().any(FastaRecord::has_lowercase_runs) {
         let kept = super::x_soft_subject::x_subject_masks(&hits, subjects);
-        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept, html_masks);
     }
     Ok(hits)
 }
@@ -1418,9 +1453,13 @@ fn pairwise_metadata(
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
+/// The prolog of a format (`options`), whose warnings go to `diagnostics` and the posts of its
+/// `-html` references where `query_warnings::html_posts_sink` sends them: `html_posts`, else
+/// `diagnostics`.
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
+    html_posts: Option<&mut dyn Write>,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
@@ -1431,6 +1470,13 @@ pub(crate) fn write_prolog(
             options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
+            options.html.as_deref().map(|links| {
+                let posts = crate::report::query_warnings::html_posts_sink(
+                    html_posts.map(|posts| posts as &mut dyn Write),
+                    &mut *diagnostics,
+                );
+                (links, posts)
+            }),
         )?;
     }
     // Outfmt 20's line of the field names, after its formatter's warning
@@ -1456,7 +1502,7 @@ pub(crate) fn write_epilog(
     shown: &ShownSubjects<'_>,
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`)
@@ -1488,15 +1534,28 @@ pub(crate) fn write_epilog(
                 num_alignments: options.num_alignments as usize,
             },
             shown.pairwise_database(),
+            options.html.is_some(),
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, None)?;
+        super::blast_xml::write_xml_epilog(
+            writer,
+            diagnostics,
+            options.program().lower,
+            queries,
+            None,
+        )?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(
+            writer,
+            diagnostics,
+            options.program().lower,
+            queries,
+            xml2,
+        )?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).

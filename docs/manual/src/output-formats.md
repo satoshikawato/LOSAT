@@ -36,7 +36,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `psiblast` writes `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and it writes one Seq-annot or archive per round.
 - `tblastn` with `-in_pssm` writes `0` to `10` and `20`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `makeprofiledb` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search (see [blast_formatter](programs/blast_formatter.md)).
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `makeprofiledb` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `6`, `7`, `10`, `20` (archives of `blastn`, `blastp`, `psiblast`, `deltablast`, PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`), `8`, `9` and `12` from the `-outfmt 11` archive of a search (see [blast_formatter](programs/blast_formatter.md)).
 
 ## Pairwise and query-anchored text (0 to 4)
 

@@ -419,11 +419,12 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## blast_formatter
 
-`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text.
+`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `6`, `7`, `8`, `9`, `10`, `12` and `20` from archives in ASN.1 text, the tabular formats (`6`, `7`, `10` and `20`, with any field list) for archives of `blastn`, `blastp`, `psiblast`, `deltablast`, PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`.
 
 | Input | What happens |
 | :--- | :--- |
-| `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20` | Refused, with LOSAT's own error message. |
+| `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `11`, `13`, `14`, `15`, `16`, `17` and `18` | Refused, with LOSAT's own error message. |
+| The tabular output formats (`6`, `7`, `10` and `20`) of an archive of a translated search (`blastx`, `tblastn`, `tblastn -in_pssm`, `tblastx`, `rpstblastn`), of queries given as locations, of `-subject` sequences with `BL2SEQ_LEGACY` set in `-outfmt 7`, or whose Seq-aligns name a sequence that NCBI BLAST+'s scope may find otherwise (a subject id of a query, one sequence by two ids, a subject that the database holds under a header with a UTF8String) | Refused, with the case named. |
 | An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
 | A database named in the archive that cannot be opened here as NCBI opens it (with the archive's taxid list) | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
 | An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, an element stated as `NULL` in a list, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
@@ -434,7 +435,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A value in an archive's results that LOSAT does not yet write in `-outfmt` `12`: a NaN or an infinite real number, a UTF8String, a NULL value or an OCTET STRING | Refused, with the value and the format named. NCBI BLAST+ stops at a NaN or an infinity in `-outfmt` `12` with an error of its JSON stream. |
 | `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
 
-An empty `-rid`, the archive's other errors (an archive of PHI-BLAST is NCBI's engine error), the errors of `-outfmt` and a failed write of the output come as in NCBI. `BL2SEQ_LEGACY` changes nothing in `-outfmt` `8`, `9` and `12`, in NCBI as in LOSAT.
+An empty `-rid`, the archive's other errors (an archive of PHI-BLAST in `-outfmt` `8`, `9` or `12` is NCBI's engine error), the errors of `-outfmt` and a failed write of the output come as in NCBI. `BL2SEQ_LEGACY` changes nothing in `-outfmt` `6`, `8`, `9`, `10`, `12` and `20`, in NCBI as in LOSAT.
 
 ## makembindex
 
@@ -485,7 +486,7 @@ An empty `-rid`, the archive's other errors (an archive of PHI-BLAST is NCBI's e
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
 - `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
-- `blast_formatter`: the output formats other than `8`, `9` and `12`, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
+- `blast_formatter`: the output formats other than `6` to `10`, `12` and `20`, the tabular formats of the translated programs' archives, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

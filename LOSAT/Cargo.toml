@@ -180,8 +180,8 @@ blastx-worker-probe = []
 tblastx-wasm-scalar = []
 # Leaves LOSAT Web's ABI v1 (`losat_web_*`, docs/web/abi_v1.md: the exports `web_api` and their
 # argument reader `web_v1_argv`, with clap) out of a wasm32 build. The WASI command line
-# (`--bin losat`) selects it, so that `losat.wasm` exports only `_start` and links no clap (line RG
-# item K4i-3d). Every wasm32 build without it keeps ABI v1, as before: the Web's modules
+# (`--bin losat`) selects it, so that `losat.wasm` exports no `losat_web_*` and links no clap (line
+# RG item K4i-3d). Every wasm32 build without it keeps ABI v1, as before: the Web's modules
 # (web/adapter), LOSAT's reactors (`--lib`) and gbdraw's serial module, which is built
 # `--lib --no-default-features` (plan TD-1). No effect on other targets (build.rs sets
 # `losat_web_abi_v1` only on wasm32). No NCBI counterpart.

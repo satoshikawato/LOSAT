@@ -432,6 +432,22 @@ test("a recorded command with Web ABI exports is refused; the runners still prep
     "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
   const reactor = inspectArtifact(command({ threaded: false, entry: "_initialize", aliases: api }), "serial-reactor");
   assert.equal(refuseWebAbiInCommand(reactor).kind, "serial-reactor");
+  // The command line that LOSAT's build and release scripts call (`node wasi_artifact.js FILE KIND`).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-artifact-cli-"));
+  try {
+    const script = path.join(__dirname, "wasi_artifact.js");
+    const web = path.join(dir, "web.wasm"), plain = path.join(dir, "plain.wasm");
+    fs.writeFileSync(web, command({ threaded: false, aliases: ["losat_web_run_pair"] }));
+    fs.writeFileSync(plain, command({ threaded: false }));
+    const refused = spawnSync(process.execPath, [script, web, "serial-command"], { encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /command exports the Web ABI: losat_web_run_pair/);
+    const passed = spawnSync(process.execPath, [script, plain, "serial-command"], { encoding: "utf8" });
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.equal(JSON.parse(passed.stdout).kind, "serial-command");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // Unset, the guard cache is in the user's cache directory; 0 turns it off; a default

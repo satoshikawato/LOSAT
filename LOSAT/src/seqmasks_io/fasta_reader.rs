@@ -104,7 +104,7 @@ pub(crate) enum MaskReadError {
         first_segment: bool,
         length: u64,
     },
-    /// What LOSAT refuses (before "is not supported by LOSAT's <program>"): a nucleotide
+    /// What LOSAT refuses (before "is not supported by LOSAT's" and the program): a nucleotide
     /// record on which NCBI's reader crashes (`ReadError::PackOverflow`).
     Refused(String),
 }
@@ -317,9 +317,7 @@ pub(crate) fn seq_map_error(inst: &SeqInst, read: SeqMapRead) -> Option<SeqMapFa
     // The segment of position 0.
     let mut index = 0;
     loop {
-        let Some(piece) = pieces.get(index) else {
-            return None;
-        };
+        let piece = pieces.get(index)?;
         let piece_length = piece_length(piece);
         if piece_length == INVALID_SEQ_POS {
             return fault(SeqMapError::InvalidLength, true);
@@ -344,9 +342,7 @@ pub(crate) fn seq_map_error(inst: &SeqInst, read: SeqMapRead) -> Option<SeqMapFa
                 // before it is below the length, so its position does not overflow).
                 loop {
                     index += 1;
-                    let Some(piece) = pieces.get(index) else {
-                        return None;
-                    };
+                    let piece = pieces.get(index)?;
                     let next_length = piece_length(piece);
                     if next_length == INVALID_SEQ_POS {
                         return fault(SeqMapError::InvalidLength, false);

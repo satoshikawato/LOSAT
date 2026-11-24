@@ -518,6 +518,7 @@ export LOSAT_X_TBXCTXTABLE=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
+export LOSAT_X_TBXHITSTEP=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
@@ -7072,6 +7073,42 @@ Scheduling (each value computed by one thread with the original function; order 
   PemoMJNVA, AvCLPV x PsCLPV at 1 and 8 threads, NZ_CP006932 against itself at 8 threads); the split
   loop against the one loop, the loop's function x0.87-0.93 (AP027131 x AP027133 at 1 and 8 threads,
   MelaMJNV x PemoMJNVA at 8 threads) and whole searches x0.97-0.99.
+- `LOSAT_X_TBXHITSTEP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-11-24; `=0` turns it off; `tblastx/x_tbx_hitbf.rs` `x_hits_steps`, `x_hits_run`, `x_hit_step`,
+  `x_entry`, `steps_on`, the `STEP` instances of `scan_unit_bf` and the batched and sliced scans;
+  `tblastx/x_pair_par.rs` `XCells::lowest_diagonal`): the branch-free hit loop of
+  `LOSAT_X_TBXHITBF` writes a flag-0 cell's next value before the candidate test (`s >= raw` unsigned is
+  `d >= 0` with both below 2^29; a candidate has `d < 0`, so its cell gets back the word it held before
+  the per-hit body runs as before), finds an unmasked cell from 64-bit offsets (the table's address
+  minus the unit's lowest diagonal `lo = q_min - (s_len - 1)`, an exact integer in (-2^29, 2^31), plus
+  `q - s`), and takes two hits a step, the per-hit body called from one place after the run of hits it
+  stopped (the form of the Web's `x_hits_bf_split`). Cause removed: the loop is issue-bound on the
+  workstation's Ice Lake cores, 20 issue slots per hit before; the 32-bit cell address (two more
+  instructions for the hit and the prefetched one), the candidate compare that LLVM repeated after the
+  branch to keep the select, and the loop's count and branch once per hit were about 4 of them
+  (issued µops of the hit loop counted per instruction with PEBS on AP027131 x AP027133, code 4:
+  4.3 fewer per hit).
+  The cells' reads and writes and the per-hit body's calls are those of the loop before, in the same
+  order (unit test `x_hits_bf_takes_the_reference_outcomes`: every form against the reference's
+  statements on random tables, masked and unmasked, with negative and large `lo`;
+  `tests/tblastx_hitbf.rs` `the_hit_steps_change_no_report`: the report of `=0` at one and two threads,
+  in `scan_unit` and the batched scan, with and without the prefetch). Always: wherever
+  `LOSAT_X_TBXHITBF`'s loop runs (`fits`), on every target (on wasm32 `x_hits_run` is a function of its
+  own, as `x_hits_bf_run`). The switch is read once per unit by the unit path's dispatches and chooses
+  between instances of the scans (`const STEP`), each with one loop: `=0` runs dev's machine code. A
+  first form that read it once per batch and held both loops in each scan was slower than dev
+  (AP027131 x AP027133 x1.022, its `=0` x1.034). Measured (workstation, 2x Xeon Gold 6338, node 1, one
+  core, `-num_threads 1`, a warm-up and 5 rounds (VPT_auto 3), arm order rotated, medians of the
+  per-round ratios against dev 2cd5a1906 built in a tree path of the same length, every output the same
+  across arms): tblastx 40 Autographivirales genomes against their database (ViPTree's command,
+  BLOSUM45) x0.910 (43.72 -> 39.74 s; instructions x0.910), 40 Begomovirus genomes x0.972, AP027131 x
+  AP027133 (code 4) x0.993 (instructions x0.899: there the loop waits more than it issues on an idle
+  core); `=0` x0.997 / x0.997 / x0.998 (instructions x1.000). tblastn and blastx (one protein x the
+  human genome, 40 BUSCO proteins x yeast, 5 cDNAs and a 50 kb genome x dmel proteins), which do not
+  run this loop: x0.996-x1.006. Max RSS: AP027131 x AP027133 82,272 KiB in every arm; Autographivirales
+  within its run-to-run spread (dev 25.7-26.1 MB, `=0` 26.1-26.8 MB, new 26.1-27.1 MB; the loop
+  allocates nothing). Wasm (the serial WASI command, one Node process, arms `=1`, `=0` and `=1` again, a
+  warm-up and 6 rounds): AP027131 x AP027133 x0.974 (9.18 against 9.43 s; the second `=1` arm x0.975).
 - `LOSAT_X_TBXEXTBATCH=256` (TBLASTX, speed; a value switch, in the strict set from the pull request
   that added it, 2026-10-18; x86-64 only; `=0` turns it off) the unit scan of the unit path
   (`tblastx/x_tbx_extbatch.rs`, exactness argument in its header) holds back the two-hit extensions of
@@ -7535,7 +7572,8 @@ Scheduling (each value computed by one thread with the original function; order 
   A query that is not split does not reach this path.
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
-  otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects
+  otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps, and for a reader batch searched whole, below): the capped units
+  keep the threads busy with few subjects
   too (`blastx/x_bx_mem.rs`). A capped unit's subjects run as tasks of ceil(subjects / (f x ceil(threads / K)))
   subjects, at least 1 and at most the size without the cap (64 for the batch flow's subject flow, 16 for the
   chunk waves of a split query; a set keeps that size from 64 x f x ceil(threads / K) subjects, 512 at 16
@@ -7565,10 +7603,21 @@ Scheduling (each value computed by one thread with the original function; order 
   82 / 112, x 50 127 / 287 / 509 -> 67 / 90 / 131, x 200 71 / 93 / 304 -> 68 / 99 / 162; AP027131 x 2 / 10 proteins
   at 64 threads 222 / 229 -> 97 / 99; the full sets within 4 MiB. Time x0.48 (x 200 proteins at 32 threads) to
   x1.005, the full sets x0.991-0.998, except x 2 proteins at 32 threads x1.045 (0.100 -> 0.106 s).
+  Since line NP item M4b-3b (fix round 7, 2026-11-23) a reader batch searched whole of several places
+  (`query_setup::unit_places`: BATCH_SIZE above 10,002 with `-use_sw_tback` or a database whose hard-mask walk keeps
+  a sequence apart), which the batch flow searches alone once its places exceed the threads, is left the threads of
+  its places (`x_bx_mem::whole_batch_threads`: its places times the threads a unit of one place is left, 1 without
+  the cap and ceil(threads / K) under it, at most the threads). Its subjects run as tasks of
+  ceil(subjects / (f x that share)) subjects (at most 64) on at most ceil(subjects / f) of those threads (each
+  holds a diagonal table of the batch's letters, 8 MiB for 1,000,000), its lookup table is built in that many parts
+  (`LOSAT_X_BXBUILDPAR`, at most 8) and its contexts' Karlin blocks are computed on the pool, each by the statements
+  of the serial loop, in context order. Before, a lone batch of 100,000 letters against the 40 proteins of `ov_atha`
+  searched its subjects as one task on one thread. A unit of one place keeps its schedule.
 - `LOSAT_X_BXBUILDPAR=1` (BLASTX, speed with few subjects at many threads; in the strict set from the pull request
   that added it: on unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a
   capped unit (a batch of the capped batch flow, a chunk of the capped chunk waves) is built in ceil(threads / K)
-  parts, at most 8, on the threads the cap leaves it (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`,
+  parts, at most 8, on the threads the cap leaves it (and a reader batch searched whole of several places in as
+  many parts as the threads it is left, `LOSAT_X_BXCAPFILL` above) (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`,
   `x_counted_sources`, `x_claimed`). The present source cells (the exact backbone's cells, ascending, and their
   offsets in chain order) come from a stable counting sort of the words of `blast_lookup_index_query_exact_matches`'s
   loop instead of chains. They are cut into ranges of about equal appends. (a) Each range counts its appends per

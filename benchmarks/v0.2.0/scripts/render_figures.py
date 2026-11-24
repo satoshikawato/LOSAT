@@ -133,16 +133,24 @@ def short_sha(sha: str) -> str:
     return ", ".join(x.strip()[:9] for x in str(sha).split(",") if x.strip())
 
 
-def fmt_fold(val: float, exact_tenth: bool = False) -> str:
+def _fmt_ratio_num(val: float, exact_tenth: bool = False) -> str:
     if exact_tenth:
-        return f"{val:.1f}\u00d7" if val < 100 else f"{round(val):,.0f}\u00d7"
+        return f"{val:.1f}" if val < 100 else f"{round(val):,.0f}"
     if val >= 99.5:
-        return f"{round(val):,.0f}\u00d7"
+        return f"{round(val):,.0f}"
     if val >= 9.95:
-        return f"{val:.0f}\u00d7"
+        return f"{val:.0f}"
     if 0.95 <= val < 1.05:
-        return f"{val:.2f}\u00d7"
-    return f"{val:.1f}\u00d7"
+        return f"{val:.2f}"
+    return f"{val:.1f}"
+
+
+def fmt_fold(val: float, exact_tenth: bool = False) -> str:
+    return f"{_fmt_ratio_num(val, exact_tenth)}\u00d7"
+
+
+def fmt_frac(val: float, exact_tenth: bool = False) -> str:
+    return f"1/{_fmt_ratio_num(val, exact_tenth)}"
 
 
 def fmt_pct(pct: float) -> str:
@@ -388,14 +396,18 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     std16 = [r for r in std if int(r["threads"]) == 16]
     non_tbx = sorted((float(r["speedup"]), r["label"]) for r in std16 if r["case"] != "tbx")
     tbx_sp = float(by_kt[("tbx", 16)]["speedup"])
-    pcts16 = [100.0 * float(r["losat_rss_mib"]) / float(r["ncbi_rss_mib"]) for r in std16]
-    reds16 = [float(r["mem_reduction"]) for r in std16]
+    min_mem_r = min(std16, key=lambda r: float(r["losat_rss_mib"]) / float(r["ncbi_rss_mib"]))
+    max_mem_r = max(std16, key=lambda r: float(r["losat_rss_mib"]) / float(r["ncbi_rss_mib"]))
+    min_pct = 100.0 * float(min_mem_r["losat_rss_mib"]) / float(min_mem_r["ncbi_rss_mib"])
+    max_pct = 100.0 * float(max_mem_r["losat_rss_mib"]) / float(max_mem_r["ncbi_rss_mib"])
+    min_pct_red = float(min_mem_r["mem_reduction"])
+    max_pct_red = float(max_mem_r["mem_reduction"])
     fig = new_fig((13.4, 8.8), theme)
     add_header(
         fig,
         f"LOSAT v{meta.get('losat_version', '0.2.0')} outperforms NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')} across all {len(std16)} search modes and {len(util)} utilities",
         f"16-thread wall time: {fmt_fold(non_tbx[0][0])} ({non_tbx[0][1]}) to {fmt_fold(non_tbx[-1][0], True)} faster ({fmt_fold(tbx_sp)} on tblastx)  \u00b7  "
-        f"Peak memory: {fmt_pct(min(pcts16))} to {fmt_pct(max(pcts16))} of BLAST+ ({fmt_fold(min(reds16))}\u2013{fmt_fold(max(reds16))} lower)  \u00b7  Same output form for form (searches)",
+        f"Peak memory: {fmt_pct(min_pct)} ({fmt_frac(min_pct_red)}) to {fmt_pct(max_pct)} ({fmt_frac(max_pct_red)}) of BLAST+  \u00b7  Same output form for form (searches)",
         theme,
         y_title=0.974,
         y_sub=0.944,
@@ -459,7 +471,7 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
 
     def _put_mem_row(yv: float, lm: float, nm: float, red: float, bold: bool, col: object) -> None:
         pct = draw_shrink_mem_bar(ax_m, yv, lm, nm, theme)
-        ax_m.text(103.5, yv + 0.16, f"{fmt_pct(pct)}  ({fmt_fold(red)} lower)",
+        ax_m.text(103.5, yv + 0.16, f"{fmt_pct(pct)} ({fmt_frac(red)})",
                   ha="left", va="center", fontsize=7.5, fontweight="bold" if bold else "semibold", color=col)
         ax_m.text(103.5, yv - 0.21, f"{fmt_mem(lm)} vs {fmt_mem(nm)}", ha="left", va="center", fontsize=6.5, color=theme["muted"])
 
@@ -644,7 +656,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
 
             lm, nm = float(it["lm"]), float(it["nm"])
             pct = draw_shrink_mem_bar(ax_m, yv, lm, nm, theme, height=0.52)
-            ax_m.text(104.5, yv + 0.15, f"{fmt_pct(pct)}  ({fmt_fold(nm / lm)})", ha="left", va="center", fontsize=7.5,
+            ax_m.text(104.5, yv + 0.15, f"{fmt_pct(pct)} ({fmt_frac(nm / lm)})", ha="left", va="center", fontsize=7.5,
                       fontweight="bold" if pct < 20.0 else "semibold", color=theme["wasm"] if pct < 25.0 else theme["ink"])
             ax_m.text(104.5, yv - 0.21, f"{fmt_mem(lm, True)} / {fmt_mem(nm, True)}", ha="left", va="center", fontsize=6.3, color=theme["muted"])
 
@@ -749,10 +761,10 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     ax_a.plot(xs_w, yl_m, marker="o", ms=6.0, color=theme["losat"], lw=2.1, zorder=4)
     for i, (x, yn, yl) in enumerate(zip(xs_w, yn_m, yl_m)):
         if i in (2, 3):
-            ax_a.text(x, math.sqrt(yn * yl), fmt_fold(yn / yl), ha="center", va="center", fontsize=8.2, fontweight="bold", color=theme["losat"],
+            ax_a.text(x, math.sqrt(yn * yl), fmt_frac(yn / yl), ha="center", va="center", fontsize=8.2, fontweight="bold", color=theme["losat"],
                       bbox=dict(boxstyle="round,pad=0.16", facecolor=theme["surface"], edgecolor=theme["zone_edge"], lw=0.7), zorder=6)
         else:
-            ax_a.text(x, yl * 0.50, fmt_fold(yn / yl), ha="center", va="top", fontsize=7.4, color=theme["ink2"])
+            ax_a.text(x, yl * 0.50, fmt_frac(yn / yl), ha="center", va="top", fontsize=7.4, color=theme["ink2"])
     ax_a.text(xs_w[-1], yn_m[-1] * 1.60, fmt_mem(yn_m[-1]), ha="center", va="bottom", fontsize=7.9, fontweight="bold", color=theme["ncbi"])
     ax_a.text(xs_w[-1], yl_m[-1] * 0.48, fmt_mem(yl_m[-1]), ha="center", va="top", fontsize=8.0, fontweight="bold", color=theme["losat"])
     ax_a.set_xscale("log"); ax_a.set_yscale("log"); ax_a.set_xlim(0.04, 2.2e6); ax_a.set_ylim(25, 2.5e6)
@@ -802,9 +814,9 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
 
     # --- Row 2, Panel c: Query volume (twin mini-panels: time & memory) ---
     xs_q = [float(r["x_value"]) for r in q_rows]
-    for ax, kn, kl, ylab, st in [
-        (fig.add_axes([0.072, 0.375, 0.178, 0.195]), "ncbi_wall_s", "losat_wall_s", "Wall time (s)", "Wall time"),
-        (fig.add_axes([0.296, 0.375, 0.178, 0.195]), "ncbi_rss_mib", "losat_rss_mib", "Max RSS (MiB)", "Peak memory"),
+    for ax, kn, kl, ylab, st, is_mem in [
+        (fig.add_axes([0.072, 0.375, 0.178, 0.195]), "ncbi_wall_s", "losat_wall_s", "Wall time (s)", "Wall time", False),
+        (fig.add_axes([0.296, 0.375, 0.178, 0.195]), "ncbi_rss_mib", "losat_rss_mib", "Max RSS (MiB)", "Peak memory", True),
     ]:
         ax.set_facecolor(theme["surface"])
         yn, yl = [float(r[kn]) for r in q_rows], [float(r[kl]) for r in q_rows]
@@ -812,7 +824,8 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
         ax.plot(xs_q, yn, marker="D", ms=4.8, color=theme["ncbi"], lw=1.7, zorder=3)
         ax.plot(xs_q, yl, marker="o", ms=5.4, color=theme["losat"], lw=1.9, zorder=4)
         for x, nv, lv in zip(xs_q, yn, yl):
-            ax.text(x, math.sqrt(nv * lv), fmt_fold(nv / lv), ha="center", va="center", fontsize=7.4, fontweight="semibold", color=theme["ink"], bbox=pill_box)
+            lbl_txt = fmt_frac(nv / lv) if is_mem else fmt_fold(nv / lv)
+            ax.text(x, math.sqrt(nv * lv), lbl_txt, ha="center", va="center", fontsize=7.4, fontweight="semibold", color=theme["ink"], bbox=pill_box)
         ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlim(5e3, 2.2e6); ax.set_ylim(min(yl) * 0.52, max(yn) * 2.3)
         ax.set_xticks([1e4, 1e5, 1e6]); ax.set_xticklabels(["10k", "100k", "1M"], fontsize=7.4, color=theme["ink2"])
         style_xy_grid(ax, theme, lw=0.6, plain_y=True)
@@ -1284,11 +1297,13 @@ def render_fig6(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     ]
 
     max_sp_v = max(float(by_kt[(cid, 16)]["v010_wall_s"]) / float(by_kt[(cid, 16)]["losat_wall_s"]) for cid, *_ in cases)
-    max_rm_v = max(float(by_kt[(cid, 16)]["v010_rss_mib"]) / float(by_kt[(cid, 16)]["losat_rss_mib"]) for cid, *_ in cases)
+    min_mem_cid = min((cid for cid, *_ in cases), key=lambda c: float(by_kt[(c, 16)]["losat_rss_mib"]) / float(by_kt[(c, 16)]["v010_rss_mib"]))
+    min_mem_pct = 100.0 * float(by_kt[(min_mem_cid, 16)]["losat_rss_mib"]) / float(by_kt[(min_mem_cid, 16)]["v010_rss_mib"])
+    max_rm_v = float(by_kt[(min_mem_cid, 16)]["v010_rss_mib"]) / float(by_kt[(min_mem_cid, 16)]["losat_rss_mib"])
     fig = new_fig((12.6, 6.2), theme)
     add_header(
         fig,
-        f"LOSAT v0.1.0 \u2192 v{meta.get('losat_version', '0.2.0')}: up to {max_sp_v:.1f}\u00d7 faster and {max_rm_v:.1f}\u00d7 lower memory, below NCBI BLAST+ in all {len(cases)} modes",
+        f"LOSAT v0.1.0 \u2192 v{meta.get('losat_version', '0.2.0')}: up to {max_sp_v:.1f}\u00d7 faster and down to {fmt_pct(min_mem_pct)} ({fmt_frac(max_rm_v, True)}) of v0.1.0 memory, below NCBI BLAST+ in all {len(cases)} modes",
         f"All {len(cases)} search modes present in v0.1.0 (16 threads) alongside NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}  \u00b7  v{meta.get('losat_version', '0.2.0')} also expands from 3 to 17 programs and adds -db support",
         theme,
         y_title=0.964,
@@ -1317,8 +1332,9 @@ def render_fig6(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
             ax.plot(xs, [y0, yn, yl], color=col, lw=2.3, alpha=0.90, zorder=3)
             ax.scatter(xs, [y0, yn, yl], marker=mk, s=[48, 42, 62], color=col, edgecolors=theme["surface"], linewidths=0.8, zorder=5)
             ax.text(-0.07, y0 * nudge_l[cid], f"{lbl}\n{fmt_fn(y0)}", ha="right", va="center", fontsize=7.4, fontweight="semibold", color=col)
+            ratio_lbl = fmt_frac(y0 / yl, True) if p_i == 1 else fmt_fold(y0 / yl, True)
             ax.annotate(
-                f"{lbl}: {fmt_fn(yl)} ({fmt_fold(y0 / yl, True)})",
+                f"{lbl}: {fmt_fn(yl)} ({ratio_lbl})",
                 xy=(2.0, yl), xytext=(2.14, r_pos[cid]), ha="left", va="center",
                 fontsize=7.4, fontweight="bold", color=col,
                 arrowprops=dict(arrowstyle="-", color=col, alpha=0.45, lw=0.8, shrinkA=2, shrinkB=4),

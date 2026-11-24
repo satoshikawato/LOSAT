@@ -7,7 +7,9 @@ use std::sync::OnceLock;
 use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
 use super::filter::{DeflineList, DeflineRule};
-use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
+use super::header::{
+    decode_defline_taxids, decode_deflines_as, decode_full, holds_a_seqid, Defline,
+};
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
 
@@ -121,7 +123,7 @@ impl Volume {
         mode: XDbIdxRead,
     ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
-        let index_file = DbFile::open(&index_path)?;
+        let index_file = DbFile::open(&index_path)?.read_in_order();
         let index = match mode {
             XDbIdxRead::Off => IndexFile::parse(&index_file.read_all()?, seqtype, &index_path)?,
             XDbIdxRead::On => IndexFile::open(index_file, seqtype)?,
@@ -182,7 +184,8 @@ impl Volume {
         if let Some(file) = slot.get() {
             return Ok(file);
         }
-        let file = DbFile::open(&with_extension(&self.base, self.index.seqtype, ext))?;
+        let file =
+            DbFile::open(&with_extension(&self.base, self.index.seqtype, ext))?.read_in_order();
         // Two threads may both open the file; the first one stored is used.
         Ok(slot.get_or_init(|| file))
     }
@@ -808,16 +811,19 @@ impl Volume {
         })
     }
 
-    /// Whether the volume's reads keep a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::line_read`): false only where the list's rule or the alias files' lists keep none
-    /// or the erasure of model lines leaves none; the reader's error for a tag that NCBI's read
-    /// cannot adjust (NCBI's `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of
-    /// `filtered_mask`. With it, whether the record holds a UTF8String where a VisibleString is
-    /// expected (`DeflineSet::utf8`; false where the volume filters no line, which leaves the
-    /// record unread here).
+    /// Whether the volume's reads keep a line with a Seq-id of the sequence `oid`
+    /// (volume-relative; `SeqDb::line_read`): false where the list's rule or the alias files'
+    /// lists keep none or the erasure of model lines leaves none (each erases the lines without
+    /// a Seq-id), and where the volume filters no line, where none of its lines holds a Seq-id
+    /// (`header::holds_a_seqid`); the reader's error for a tag that NCBI's read cannot adjust
+    /// (NCBI's `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
+    /// With it, whether the record holds a UTF8String where a VisibleString is expected
+    /// (`DeflineSet::utf8`; false where the volume filters no line, whose walk of the record does
+    /// not read the strings).
     pub(super) fn line_read(&self, oid: u32) -> Result<(bool, bool), SeqDbError> {
         if !self.filters_lines() {
-            return Ok((true, false));
+            let kept = self.with_header_record(oid, holds_a_seqid)?;
+            return Ok((kept, false));
         }
         let set = self.with_header_record(oid, decode_full)?;
         let kept = self

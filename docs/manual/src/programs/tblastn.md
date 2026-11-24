@@ -119,6 +119,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 - `-db_gencode 32` is accepted (without `-in_pssm`). NCBI BLAST+ 2.17.0 rejects it.
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ can read memory past its buffers and crash. LOSAT reads the letters past the end as the end marker. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - In format 0, a subject title that consists only of punctuation is written; NCBI BLAST+ crashes on it. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With `-ungapped` and a very short query against one very short subject sequence, NCBI BLAST+ 2.17.0 crashes; LOSAT writes the linked hits. See [Very many short queries, or a very short query, against one subject](../differences.md#very-many-short-queries-or-a-very-short-query-against-one-subject) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## What LOSAT refuses
 

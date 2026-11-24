@@ -148,6 +148,7 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 - **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1` (apart from the version line, which names LOSAT), at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
 - **`-mt_mode`.** `-mt_mode 0`, `1` and `2` are accepted by `blastn`, `blastp`, `blastx` and `tblastn` and do not change the output, which is always that of `-num_threads 1`. NCBI's `-mt_mode 1` writes the end of an outfmt 0 report, or each XML document, once per batch of queries; LOSAT does not. With `-import_search_strategy`, NCBI's `-mt_mode 1` also writes the strategy's warnings again for each batch, after `[Query 1-2]`; LOSAT writes them once.
+- **GI-indexed masks.** With `-db_soft_mask` or `-db_hard_mask` on a database whose masks are indexed by GI (`makeblastdb -gi_mask`), NCBI's `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` on more than one thread stop with a memory-map error or crash in some runs (in one test, 1 to 18 of 60 runs at 2, 4 and 8 threads, and up to 10 of 30 at 8 threads). LOSAT writes the `-num_threads 1` output at every thread count.
 - **Record.** [The decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 
 ## Platforms

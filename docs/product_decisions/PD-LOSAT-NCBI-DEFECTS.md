@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.95
+- Version: 1.96
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -514,9 +514,25 @@
   list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
   item O4b2-4's 1.92);
-  1.94 2026-11-24 (approved exception 28, the Owner's decision of 2026-11-20 on line RG's question
+  1.94 2026-11-23 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
+  databases reproduced, rule 2, in blastdbcmd, the five search programs, makeblastdb's copy and
+  makembindex, with the search programs' GI-indexed masks on more than one thread, where NCBI
+  stops or crashes in some runs, giving NCBI's `-num_threads 1` output as every `-db` search does
+  (PD-LOSAT-DATABASE-SEARCH, the Owner's decision DB-3 of 2026-10-13); the `.nog` read as NCBI's
+  mapping reads it, and the explicit rejections, rule 3, of an empty `.nog`, of a `.nog` entry
+  past its mapping and of a `MASKLIST` name that is not UTF-8 where the masks are read (review
+  round of 2026-11-24; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  numbered after 1.93; first
+  1.64, then 1.82 at the merge of line NP item M4c-1's final head, which brought dev's 1.64 to 1.80
+  and its own 1.81, then 1.85 at the merge of dev that brought 1.82 to 1.84 (psiblast line items PS10a
+  and PS10c, line NP item M4b-AX), then 1.91 at the merge of dev that brought 1.85 to 1.90 (line RG
+  items D1c-1 and T5d, psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2), then
+  1.92 at the merge of dev that brought psiblast line item PS12d's 1.91, then 1.93 at the merge of dev
+  that brought line NP item O4b2-4's 1.92, then 1.94 at the merge of dev e89f6237c that brought
+  line RG item D1c-1c's 1.93);
+  1.95 2026-11-24 (approved exception 28, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
-  F2, `-import_search_strategy`; numbered after 1.93; first 1.70, taking exception 22 at the merge
+  F2, `-import_search_strategy`; numbered after 1.94; first 1.70, taking exception 22 at the merge
   of dev 540759a2f, then 1.71 at the merge of dev 194053478 that brought line RG item D1b-2's 1.70,
   then 1.72 at the merge of dev 1b6e05a0d that brought line DBID item pfoff-3's 1.71, then 1.74 at
   the merge of dev 2e9653a71 that brought line NP items M5a and M5b's 1.72 and line RG item X4b-1's
@@ -530,15 +546,17 @@
   then 1.92 and exception 28 at the merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27
   (psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2, line RG item T5d, line PS item
   PS12d); then 1.93 at the merge of dev 2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.94
-  at the merge of dev 73242b104 that brought line RG item D1c-1c's 1.93);
-  1.95 2026-11-24 (approved exception 29, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
+  at the merge of dev 73242b104 that brought line RG item D1c-1c's 1.93; then 1.95 at the merge of dev
+  bb64581ea that brought line NP item M4c-2's 1.94);
+  1.96 2026-11-24 (approved exception 29, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
   line RG's question Q-F2-28 (recommended A), 「Q-F2-28=A」: a negative `WindowSize` and a
   `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
-  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.94;
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.95;
   first 1.87 (then proposed as exception 28 and pending the Owner), then 1.93 and exception 29 at the
   merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27; then 1.94 at the merge of dev
   2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.95 at the merge of dev 73242b104 that
-  brought line RG item D1c-1c's 1.93)
+  brought line RG item D1c-1c's 1.93; then 1.96 at the merge of dev bb64581ea that brought line NP
+  item M4c-2's 1.94)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1898,6 +1916,49 @@ file would differ, and NCBI's programs still could not open the database).
   (the rule-2 rejection of version 1.81 below covers the others). Fixtures `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
   `LOSAT/src/writedb/gi_mask_tests.rs`.
+- The readers of GI-indexed masks (version 1.94, 2026-11-23, line NP item M4c-2; review round
+  2026-11-24): `blastdbcmd` (`-info`, `-outfmt %m`, `-mask_sequence_with`), the search programs
+  `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` (`-db_soft_mask`, `-db_hard_mask`),
+  `makeblastdb -input_type blastdb` (the masks copied into the copy's mask column) and
+  `makembindex` (`-db_mask`, `-show_filters`) read the masks that an alias file's `MASKLIST` names
+  as NCBI's reader does
+  (`seqdbalias.cpp:117-139`, `seqdbgimask.cpp`), with its deterministic defects: the masks apply
+  only when `-db` is one name whose own alias file has `MASKLIST` (in an alias file over the
+  database or with several names they are passed over without a message); the mask files are
+  looked for from the current directory and `BLASTDB`, not from the database's directory
+  (`Could not open gi-mask index files.` from elsewhere); a sequence without a GI takes the masks
+  of GI 4294967295 when that GI is in the files (`(Uint4)` of `INVALID_GI`); with equal GIs the
+  record is the one NCBI's binary search reaches; a data volume that was never written gives
+  NCBI's memory-map text with the empty name (`To be memory mapped the file must exist: ''`);
+  the algorithm ids and names are those of `MASKLIST`, with NCBI's names table in the errors of
+  an unknown id or name; makembindex takes an id or a `MASKLIST` name, and its new-style index
+  opens each volume alone, which names no masks, so on a database of several volumes it stops
+  with `unrecognized filter algorithm id`, while an old-style index and a database of one volume
+  read them (`sequence_istream_bdb.cpp:62-96`, `mkindex_app.cpp:268-296`). The `.nog` of a volume
+  (the GI of each sequence), which NCBI reads through its mapping with no check of its length
+  (`seqdbvol.cpp:52-71`), reads as that mapping does: bytes past the end of the file read as zeros
+  to the end of its last page, so a file cut inside its header gives a count of 0 and every
+  sequence takes the first GI of its definition lines, as without the file; a cut-off entry is GI
+  0, which no mask has; a count below the volume's sends the sequences after it to their
+  definition lines. A protein in FASTA with such masks is approved difference 5 of
+  PD-LOSAT-BLASTDBCMD-DEVIATIONS, as with mask columns. blastdbcmd, makeblastdb and makembindex
+  read the masks on one thread (they have no `-num_threads`). The five search programs read the
+  masks of the sequences their threads fetch (`seqsrc_seqdb.cpp:316-321`,
+  `seqdbgimask.cpp:65-112`), and with `-db_soft_mask` or `-db_hard_mask` and more than one thread
+  NCBI stops in some runs with `BLAST engine error: Database memory map file error` (exit status
+  3) or crashes (SIGSEGV, and at 8 threads glibc's double-free or unaligned-chunk abort): in the
+  fixtures' masked searches, blastn failed in 4 to 18 of 60 runs at 2, 4 and 8 threads, and in the
+  probe of 2026-11-24 (review S1) tblastn in 3 of 60 runs at 4 threads and 10 of 30 at 8, blastp
+  in 3 and 2, blastx in 2 and 2, tblastx in 1 and 10, blastn in 8 and 4; the other runs gave the
+  one-thread bytes, and with one thread every run of each program (20 of 20), as with mask columns
+  at any thread count (60 of 60), gave the same bytes. LOSAT writes NCBI's `-num_threads 1` output
+  at every thread count in all five, as every `-db` search does (PD-LOSAT-DATABASE-SEARCH, DB-3).
+  The explicit rejections of an empty `.nog`, of a `.nog` entry past its mapping and of a
+  `MASKLIST` name that is not UTF-8 are in the rule-3 list. Fixtures
+  `LOSAT/tests/seqdb/gi_mask_read` (`make_gi_mask_read_fixtures.py`, NCBI BLAST+ 2.17.0: the rows
+  `bdc_wide_*` of a data file past 64 KiB, `bdc_sv4n*` and `bn_sv4n*` of the `.nog` cut or edited,
+  `mbi_*` of makembindex), tests `LOSAT/tests/gi_mask_read.rs` (each search row again with
+  `-num_threads 4`) and `LOSAT/src/seqdb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[n]` after the last chunk (version 1.83; version 1.82 and before named `[1]`; for a
@@ -3208,6 +3269,24 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+- The readers of GI-indexed masks, a damaged `.nog` or a `MASKLIST` name that is not UTF-8
+  (version 1.94, 2026-11-24, line NP item M4c-2, review S4 and N8; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI
+  reaches and LOSAT reproduces, rule 2, are in the list above). An empty `.nog` is mapped as a
+  null pointer: NCBI's blastdbcmd and blastn crash with SIGSEGV where a sequence's GI is read
+  (`-outfmt %m`, `-db_soft_mask`; 5 of 5 and 3 of 3 runs; `-info` reads no GI and completes).
+  LOSAT refuses it there (exit 1, "(NCBI crashes on it)"). An entry past the last 4 KiB page of
+  the file's mapping reads whatever memory follows it: in the probe a `.nog` cut to 100 bytes for
+  1,100 sequences, NCBI's blastdbcmd completed, the 84 sequences past the page taking GIs that
+  matched no mask, which depends on its memory map; LOSAT refuses it ("depend on its memory map").
+  A `MASKLIST` name that is not UTF-8 (the names are paths and the text of the names table) is
+  refused where the masks are read (`-info`, `%m`, `-mask_sequence_with`, `-db_soft_mask`,
+  `-db_hard_mask`, the copy, `-db_mask`); a search or a retrieval without masks reads the
+  database, as NCBI's reader reads the names only there. Rejected: reproducing the bytes past the
+  page (a model of NCBI's memory map) and the refusal of the name at the opening (it refused
+  searches NCBI completes). Tests: `LOSAT/src/seqdb/gi_mask_tests.rs`
+  (`the_nog_reads_as_ncbi_s_mapping_of_it`), `LOSAT/src/seqdb/tests.rs`
+  (`a_masklist_name_not_utf8_is_refused_where_the_masks_are_read`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
@@ -3604,9 +3683,9 @@ past `Int4`)". Psiblast line item PS10a.
     `-in_pssm` use; their PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` and their
     threshold is an `Int4`, so their sums never leave `Int4` and their output does not change.
 
-## Approved exception 28 (an imported strategy's subjects at more than one thread, version 1.94)
+## Approved exception 28 (an imported strategy's subjects at more than one thread, version 1.95)
 
-Version 1.94, line RG item F2 (DECISIONS F2-Q1). The Owner
+Version 1.95, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -3644,9 +3723,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     `a_strategys_subjects_keep_the_threads_of_the_command_line`
     (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
 
-## Approved exception 29 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.95)
+## Approved exception 29 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.96)
 
-Version 1.95, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
+Version 1.96, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
 2026-11-24 at 00:04 JST, on the board, with the words 「Q-F2-28=A」 (option A of line RG's question
 Q-F2-28, the recommended one; proposed 2026-11-23 under the standing instruction of 2026-09-29, restated
 2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22

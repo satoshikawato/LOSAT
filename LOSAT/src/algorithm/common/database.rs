@@ -430,11 +430,12 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
 /// The text of a reader error that is not NCBI's (`SeqDbError::ncbi_message` `None`), as LOSAT
 /// reports it: a file whose bytes the system does not give is LOSAT's error as it is
 /// (`SeqDbError::is_unreadable`: "cannot be read", where NCBI ends by SIGBUS; review M1 of line
-/// WQA D18, 2026-11-21), any other LOSAT's refusal of the database in `program`'s name
-/// ([`refusal`]). The one place of that choice for the search programs, blastdbcmd and the
-/// maskers' database reader; each ends with LOSAT's exit status of its own errors.
+/// WQA D18, 2026-11-21), and so is a LOSAT internal error ([`SeqDbError::Internal`]); any other
+/// LOSAT's refusal of the database in `program`'s name ([`refusal`]). The one place of that choice
+/// for the search programs, blastdbcmd and the maskers' database reader; each ends with LOSAT's
+/// exit status of its own errors.
 pub(crate) fn losat_reader_error(error: &SeqDbError, program: &str) -> String {
-    if error.is_unreadable() {
+    if error.is_unreadable() || matches!(error, SeqDbError::Internal(_)) {
         error.to_string()
     } else {
         refusal(&error.to_string(), program).to_string()

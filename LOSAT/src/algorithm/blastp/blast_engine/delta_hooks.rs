@@ -224,7 +224,7 @@ impl DeltaRun {
                 return Err(engine_error("NULL alignments"));
             }
             bail!(
-                "a query batch holding a query whose letters give no Karlin-Altschul parameters and other queries (with which NCBI BLAST+'s deltablast crashes) is not supported by LOSAT's DELTABLAST"
+                "a query whose letters give no Karlin-Altschul parameters read together with other queries (with one round or -num_iterations 0 queries are read together up to 10000 letters; NCBI BLAST+'s deltablast crashes there) is not supported by LOSAT's DELTABLAST"
             );
         }
         let lists = side.search(query.record, pool, diagnostics)?;

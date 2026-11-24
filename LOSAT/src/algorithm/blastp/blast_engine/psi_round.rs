@@ -872,7 +872,7 @@ fn run_queries(
         if delta.is_some() && plan.num_iterations == 1 && plan.save_last {
             let Some((warnings, Some(last), ancillary)) = batch_last else {
                 bail!(
-                    "-save_pssm_after_last_round with one round where the first query of a query batch has no alignments (NCBI BLAST+ stops with an exception for a null pointer) is not supported by LOSAT's DELTABLAST"
+                    "-save_pssm_after_last_round with one round where the first of the queries read together (up to 10000 letters) has no alignments (NCBI BLAST+ stops with an exception for a null pointer) is not supported by LOSAT's DELTABLAST"
                 );
             };
             outputs.diagnostics.write_all(&warnings.bytes())?;

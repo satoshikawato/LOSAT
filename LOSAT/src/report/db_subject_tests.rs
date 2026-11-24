@@ -477,15 +477,21 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
         .unwrap()
         .fetched(false, true, HitLoad::Loaded)
         .is_ok());
-    let replaced = DeflineSet {
+    // A stored title with a byte outside ' ' ..= '~' is read (its posts are the Seq-aligns',
+    // `ParsedSubject::replaced_title_bytes`); such a byte of a stored Seq-id is refused.
+    let replaced = |title, id| DeflineSet {
         deflines: vec![BlastDefline {
             ids: vec![ParsedSeqId::Gi(7)],
-            replaced_title_bytes: 1,
+            replaced_title_bytes: title,
+            replaced_id_bytes: id,
             ..BlastDefline::default()
         }],
         utf8: false,
     };
-    assert!(ParsedSubject::new(replaced).is_err());
+    assert!(ParsedSubject::new(replaced(1, 0))
+        .unwrap()
+        .replaced_title_bytes());
+    assert!(ParsedSubject::new(replaced(0, 1)).is_err());
     assert!(ParsedSubject::new(DeflineSet::default()).is_err());
 }
 

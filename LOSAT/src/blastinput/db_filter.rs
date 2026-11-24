@@ -29,8 +29,8 @@ use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 // programs' `-subject_loc`) with `-subject_loc` are NCBI's argument reader's (`cli::reader`:
 // its usage, `Incompatible with argument`, exit status 1).
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2245-2259
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2283-2289
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2318
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2282-2289
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2319
 /// The list options of a search program's command line.
 #[derive(Args, Debug, Clone, Default)]
 pub struct DbFilterArgs {
@@ -268,7 +268,7 @@ impl DbFilterArgs {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1667-1692
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:254-258
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:254-257,265-276,290-291
     // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file
     // that is not there resolves to the empty name, whose memory map throws a
     // `CFileException` (not a database error): the search program reports it as

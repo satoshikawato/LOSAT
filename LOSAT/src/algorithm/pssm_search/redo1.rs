@@ -53,9 +53,9 @@ pub(crate) const SCALING_FACTOR: f64 = 32.0;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2396-2399
 const NEAR_IDENTICAL_BITS_PER_POSITION: f64 = 1.74;
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/compo_mode_condition.h
-// and redo_alignment.c:41-58
-// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:43
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:46,63-64
+// (LOCAL_LN2 and EVALUE_STRETCH)
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:955
 const KAPPA_BIT_TOL: f64 = 2.0;
 const LOCAL_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 

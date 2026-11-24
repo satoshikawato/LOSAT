@@ -166,7 +166,7 @@ pub fn word_cutoff_score(
 
 /// The average subject length of a `-subject` set: the total over the count, as a `Uint4`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:260-264
 pub fn average_subject_length_subject_set(total_length: u64, num_seqs: u64) -> u64 {
     // `Int8 / Uint4`, then the cast to `Uint4`.
     (total_length / num_seqs.max(1)) as u32 as u64

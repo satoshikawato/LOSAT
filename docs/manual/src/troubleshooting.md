@@ -117,7 +117,7 @@ Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) o
 
 ## `blastn -use_index true` stops with an error
 
-`losat blastn -use_index true` searches with MegaBLAST index files built by `makembindex`. It refuses the search when an index volume is damaged or does not match the database, and a later query batch of an index of only some volumes of `-db` where NCBI BLAST+ writes to memory it has freed (see [What LOSAT refuses](refusals.md#blastn)). Omit `-use_index true` to search without an index.
+`losat blastn -use_index true` searches with MegaBLAST index files built by `makembindex`. It refuses the search when an index volume is damaged or does not match the database (see [What LOSAT refuses](refusals.md#blastn)). Omit `-use_index true` to search without an index.
 
 ## `rpsblast`, `rpstblastn`, or `rpsbproc` is missing in Python (`pylosat`), Rust (`losat::api`), or LOSAT Web
 

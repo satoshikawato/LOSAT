@@ -1003,7 +1003,7 @@ impl RpsVolumeSetup {
                 Err(RpsOpenError::Ncbi(text)) => return Ok(Err(RpsVolumeError::Files(text))),
             }
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:72-83
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:72-84
         // The search's Karlin, Gumbel and cutoff values are those of BLOSUM62 11/1 (blastp's
         // task); a database of other costs is refused, and so are volumes whose costs differ
         // (each volume sets its own in NCBI; the statistics are one set).

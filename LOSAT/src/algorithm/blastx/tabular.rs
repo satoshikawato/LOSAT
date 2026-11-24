@@ -379,7 +379,7 @@ pub(super) fn write_blastx_tabular(
     );
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1316
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1311
     let database: Vec<u8> = match shown {
         ShownSubjects::Fasta { path, .. } => crate::report::pairwise::subject_set_name(path),
         ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
@@ -459,7 +459,7 @@ pub(super) fn write_blastx_tabular(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
                 // The length against which `hsp_percent_coverage` counts an HSP's residues in its
                 // frame (`qcovhsp`): a third of the searched letters in a gapped search, the
-                // searched letters in an ungapped one (blast_seqalign.cpp:1381-1384).
+                // searched letters in an ungapped one (blast_seqalign.cpp:1382-1383).
                 let coverage_length = if options.gapped {
                     searched_length as i32 / 3
                 } else {

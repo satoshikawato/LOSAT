@@ -419,7 +419,7 @@ fn x_add_one_hit_hsp(
 ) -> Result<()> {
     if !tree.try_add_hsp(hsp, context_offset) {
         return Err(anyhow::Error::new(
-            crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+            crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
                 "TBLASTN -window_size 0: two one-hit alignments of negative length whose gapped starts lie at the end of their subject chunk or past it (alignments past the chunk, or of score 0 and no letters) make NCBI BLAST+ split a node of its interval tree without end (it does not finish the search there), which LOSAT does not support"
             )),
         ));
@@ -602,7 +602,7 @@ pub(super) fn x_gapped_subject_start(
 #[cold]
 #[inline(never)]
 fn x_gapped_start_past_translation() -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
         "TBLASTN -in_pssm with -window_size 0: the gapped start of a one-hit alignment of negative length lies past the end of the subject's translation (NCBI BLAST+ reads past its buffer there), which LOSAT does not support"
     )))
 }
@@ -623,7 +623,7 @@ fn x_gapped_start_past_translation() -> anyhow::Error {
 #[cold]
 #[inline(never)]
 fn x_traceback_start_past_frame() -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
         "TBLASTN -in_pssm with -window_size 0: the traceback of a one-hit alignment of negative length starts after the NULLB after its frame (NCBI BLAST+ reads a byte its translation does not set there), which LOSAT does not support"
     )))
 }
@@ -2187,7 +2187,7 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 #[cold]
 #[inline(never)]
 fn x_traceback_of_an_untranslated_frame() -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(
         crate::core::blast_hits::x_untranslated_frame_refusal("TBLASTN", "the traceback"),
     ))
 }

@@ -22,9 +22,8 @@ use super::{
     runtime::BatchResults,
     subjects::{Subjects, UnreadableSubjects},
 };
-use crate::algorithm::common::database::{
-    prefetches_subjects, HeaderReadError, PreliminaryReadError,
-};
+use crate::algorithm::common::database::{prefetches_subjects, PreliminaryReadError};
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
 use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
@@ -1168,10 +1167,10 @@ impl ReportedAsks {
 }
 
 /// The read error of a query batch's reported sequences as the run reports it: NCBI's reader
-/// error of a header file (`HeaderReadError`) or of a record's residues (`XReadError`,
+/// error of a header file (`ErrorAfterBatchReports`) or of a record's residues (`XReadError`,
 /// `database_error`), or LOSAT's refusal as it is.
 fn reported_error(error: anyhow::Error) -> anyhow::Error {
-    match error.downcast::<HeaderReadError>() {
+    match error.downcast::<ErrorAfterBatchReports>() {
         Ok(header) => header.error,
         // A failed read of a record's residues.
         Err(error) => match error.downcast::<super::x_db_stream::XReadError>() {
@@ -1584,7 +1583,7 @@ pub(super) fn reported_batch(
     Ok(reported)
 }
 
-/// The error of a batch whose search fails after its reads of header records (`HeaderReadError`
+/// The error of a batch whose search fails after its reads of header records (`ErrorAfterBatchReports`
 /// with `utf8`: BLASTX's Smith-Waterman redo that fails the batch after fetches that read a
 /// UTF8String where a VisibleString is expected, `kappa_batch::sw_failed_after`): NCBI's warning
 /// of that read is written to `diagnostics`, where the run has not posted it (`Utf8Read::post`),
@@ -1596,12 +1595,12 @@ fn failed_batch_reads(
     subjects: Subjects<'_>,
     diagnostics: &mut dyn Write,
 ) -> Result<anyhow::Error> {
-    let header = match error.downcast::<HeaderReadError>() {
-        Ok(header) if header.utf8.is_some() => header,
-        Ok(header) => return Ok(header.into()),
+    let failure = match error.downcast::<ErrorAfterBatchReports>() {
+        Ok(failure) if failure.utf8.is_some() => failure,
+        Ok(failure) => return Ok(failure.into()),
         Err(error) => return Ok(error),
     };
-    if let (Some(read), Some(db)) = (&header.utf8, subjects.seqdb()) {
+    if let (Some(read), Some(db)) = (&failure.utf8, subjects.seqdb()) {
         let program = if options.rpstblastn.is_some() {
             "rpstblastn"
         } else {
@@ -1611,7 +1610,7 @@ fn failed_batch_reads(
             posts.write(diagnostics, None)?;
         }
     }
-    Ok(header.error)
+    Ok(failure.error)
 }
 
 /// Whether an error of a search ends the run as it is: LOSAT's refusal, not an error of NCBI's
@@ -1627,7 +1626,7 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
         || error.is::<super::database::LongSubjectRefusal>()
         || error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>()
         || error.is::<NativeError>()
-        || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
+        || error.is::<ErrorAfterBatchReports>()
 }
 
 /// An error that ends the run as it is (`search_error_as_is`) as the run reports it: the error
@@ -1635,10 +1634,7 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
 /// status 3, or LOSAT's refusal), any other as it is. The flow writes the reports of the
 /// batches before when it meets the batch's error, so the marker has done its work here.
 pub(super) fn search_error_held(error: anyhow::Error) -> anyhow::Error {
-    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
-        Ok(crate::blastinput::app::ErrorAfterBatchReports(held)) => held,
-        Err(error) => error,
-    }
+    ErrorAfterBatchReports::held(error)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227

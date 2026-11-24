@@ -248,11 +248,11 @@ fn x_build_compressed(
                 "-word_size {word_length} (the compressed lookup table) is not supported by LOSAT's TBLASTN"
             )
         })?
-        .map_err(|()| {
+        .map_err(|_| {
             // NCBI builds the table of each query batch in its search (`CLocalBlast`), after it
             // has printed the reports of the batches before: the refusal of its heap's corruption
             // comes after them (`blastinput::app::ErrorAfterBatchReports`).
-            anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+            anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
                 "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
                 f64::from(threshold) / 100.0,
                 word_length

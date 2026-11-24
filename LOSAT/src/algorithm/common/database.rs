@@ -15,6 +15,7 @@
 use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::report::defline::SubjectWord;
@@ -696,34 +697,10 @@ impl std::fmt::Display for PreliminaryReadError {
 
 impl std::error::Error for PreliminaryReadError {}
 
-/// A reader error of NCBI's own while the definition lines of the final hit lists are
-/// read (`stored_title`), or while rpsblast's traceback of a batch reads a profile volume's
-/// sequence file (`rps_hooks::failed_batch_error`), or where a batch's prefetch looks up a
-/// Seq-align id whose lookup fails on a file (`batch_prefetch`): `query` is the query whose hit
-/// list reached it (rpsblast and the prefetch: the batch's first query). NCBI fails that query's
-/// batch, after the reports of the batches before. BLASTP's `-use_sw_tback` redo whose batch's
-/// last redone match fails (`Traceback failed`, `blastp::blast_engine::redo_run`) is such an error
-/// of NCBI's search too, and BLASTP's refusals of a step where NCBI's search of a batch stops,
-/// crashes or never ends (a Smith-Waterman redo without end, a failed batch whose first query
-/// holds a redone match, a query chunk split again or without a query) take its form (the batch's
-/// first query): the type of an error of a batch's search after the reports of the batches before
-/// in the drivers that search all batches together, which name the failing batch. The batch loops
-/// of TBLASTX and TBLASTN, which search a batch at a time, hold the same error without the query
-/// (`blastinput::app::ErrorAfterBatchReports`).
-#[derive(Debug)]
-pub(crate) struct HeaderReadError {
-    pub(crate) query: usize,
-    pub(crate) error: anyhow::Error,
-    /// The first UTF8String that the reads before it (in NCBI's order), or the failed read
-    /// itself before its failure, took for a VisibleString (`HeaderReader::first_utf8`): NCBI
-    /// posted its warning before the error (`Utf8Read::post`).
-    pub(crate) utf8: Option<Utf8Read>,
-}
-
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
 /// NCBI's first read, in a run of reported sequences' headers (`HeaderReader`), of a record that
 /// holds a UTF8String where a VisibleString is expected: the query whose hit list reached it
-/// (numbered as `HeaderReadError::query`) and the member NCBI's warning names
+/// (numbered as `ErrorAfterBatchReports::query`) and the member NCBI's warning names
 /// (`seqid::ber::utf8_string_path`). NCBI reads the headers of a batch's final hit lists when
 /// its traceback's results become Seq-aligns (`read_titles` of each program), so it posts the
 /// warning there, once per process: after the batch's reader messages and the posts of its
@@ -822,7 +799,7 @@ impl Utf8Read {
 
     /// The first read of a batch's read of its reported sequences' titles where NCBI makes its
     /// Seq-aligns (a program's `read_titles`, `read`) that met a UTF8String: `utf8` of what it
-    /// read, or the one that a failed read made before it failed (`HeaderReadError::utf8`). NCBI's
+    /// read, or the one that a failed read made before it failed (`ErrorAfterBatchReports::utf8`). NCBI's
     /// warning of it comes after the batch's reader messages and request posts, before its
     /// prefetch and before its error.
     pub(crate) fn of_read<'r, T>(
@@ -832,7 +809,7 @@ impl Utf8Read {
         match read {
             Ok(read) => utf8(read),
             Err(error) => error
-                .downcast_ref::<HeaderReadError>()
+                .downcast_ref::<ErrorAfterBatchReports>()
                 .and_then(|failure| failure.utf8.as_ref()),
         }
     }
@@ -922,31 +899,6 @@ impl CallUtf8 {
         read.post(db?, program)
     }
 }
-
-impl HeaderReadError {
-    /// `error` of a batch that fails after NCBI's reads of its Seq-aligns' headers (its
-    /// prefetch), with `read`, the first of those reads that met a UTF8String (`first_utf8`),
-    /// where it is a `HeaderReadError` without one: NCBI posted its warning before the failure.
-    pub(crate) fn after_reads(error: anyhow::Error, read: Option<&Utf8Read>) -> anyhow::Error {
-        match error.downcast::<HeaderReadError>() {
-            Ok(mut failure) => {
-                if failure.utf8.is_none() {
-                    failure.utf8 = read.cloned();
-                }
-                anyhow::Error::new(failure)
-            }
-            Err(error) => error,
-        }
-    }
-}
-
-impl std::fmt::Display for HeaderReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl std::error::Error for HeaderReadError {}
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
 /// What the `Database:` lines of the pairwise report show of the database `db`: for each
@@ -1177,7 +1129,7 @@ pub(crate) fn source_name(
 /// for a report, where the hit list of query `query` reaches it; `deflines` are its definition
 /// lines as read
 /// (`SeqDb::deflines`, or `SeqDb::visit_deflines` with the same results). A reader error of
-/// NCBI's own is a `HeaderReadError` that names the query (NCBI fails that query's batch);
+/// NCBI's own is an `ErrorAfterBatchReports` that names the query (NCBI fails that query's batch);
 /// LOSAT's refusals (`program` names the program) are errors of their own.
 pub(crate) fn stored_title(
     deflines: std::result::Result<Vec<crate::seqdb::OrdinalDefline>, crate::seqdb::SeqDbError>,
@@ -1228,7 +1180,7 @@ pub(crate) fn keep_source(
 /// reaches it: NCBI's own (a database error, `SeqDbError::ncbi_message`, or another exception
 /// of NCBI's that LOSAT reports as NCBI's, `reported_exception`: the `CSerialException` of its
 /// read of the record, or the conversion of a `ti` tag under an id list, line RG D1c-1) is a
-/// `HeaderReadError` that names the query, so the batch fails after the outfmt 0 prolog as NCBI's
+/// `ErrorAfterBatchReports` that names the query, so the batch fails after the outfmt 0 prolog as NCBI's
 /// does; LOSAT's refusals are errors of their own.
 fn header_read_error(
     error: SeqDbError,
@@ -1237,8 +1189,8 @@ fn header_read_error(
     utf8: Option<&Utf8Read>,
 ) -> anyhow::Error {
     if error.ncbi_message().is_some() || reported_exception(&error).is_some() {
-        anyhow::Error::new(HeaderReadError {
-            query,
+        anyhow::Error::new(ErrorAfterBatchReports {
+            query: Some(query),
             error: database_error(error, program),
             utf8: utf8.cloned(),
         })
@@ -5562,7 +5514,7 @@ fn unordered_boundary_misses(held_last: bool, loads: UnorderedLoads) -> (usize, 
 
 impl TaxdbRun {
     /// Back to the state of a run that has looked nothing up, for a search of the batches before
-    /// again (BLASTP's `HeaderReadError`: a later batch failed, and the batches before it are
+    /// again (BLASTP's `ErrorAfterBatchReports`: a later batch failed, and the batches before it are
     /// searched again alone): their prefetch and reports write the texts of opening the database
     /// and of each volume's first lookups again, as the first pass made them, before the error.
     /// What does not depend on the lookups (`found`, the texts the database can write, the
@@ -7568,7 +7520,7 @@ pub(crate) fn pssm_load_texts(
 /// by each program where it prefetches a batch ([`batch_prefetch`]).
 #[derive(Clone, Copy)]
 pub(crate) struct PrefetchQueries<'a> {
-    /// The query that the stop's [`HeaderReadError`] names (the batch's first query of the
+    /// The query that the stop's [`ErrorAfterBatchReports`] names (the batch's first query of the
     /// searched queries of the call; BLASTX, which writes each batch's reports before it searches
     /// the next, names 0).
     pub(crate) error_query: usize,
@@ -7765,7 +7717,7 @@ impl XmlReportsBefore<'_> {
 ///
 /// A subject whose lookup fails on a file of the database with NCBI's own exception
 /// (`ParsedSubject::prefetch_stops`: a list of version 5 databases with and without the accession
-/// table) stops the run there: `Err` with a [`HeaderReadError`] of the query that `queries` names
+/// table) stops the run there: `Err` with an [`ErrorAfterBatchReports`] of the query that `queries` names
 /// (`PrefetchQueries::error_query`) whose error is NCBI's `BLAST Database error: <message>`
 /// (exit status 2), after the texts of the loads that NCBI's prefetch makes before it in the order
 /// of the batch's Seq-id handles ([`load_before_stop`]). Each program writes then what NCBI wrote
@@ -8724,7 +8676,7 @@ struct StopUnsure {
 /// a file with NCBI's exception ([`batch_prefetch`], [`batch_prefetch_stop`]), after the lookups
 /// that `run` records and the loads that `record` records ([`TaxdbRun::note_loaded`]; the same
 /// run, or the run's own where `run` is the record of the held reports,
-/// [`held_batch_prefetch_stop`]): the [`HeaderReadError`] of `queries` (its `error_query`) with
+/// [`held_batch_prefetch_stop`]): the [`ErrorAfterBatchReports`] of `queries` (its `error_query`) with
 /// the texts of the loads before the stop in NCBI's order ([`load_before_stop`]; with the texts
 /// that loads NCBI did not make left to them, `report::query_warnings::ReadLoad::place`: those
 /// of an outfmt 5 report before the batch that NCBI's XML stream cut, also where the program
@@ -9055,8 +9007,8 @@ fn prefetch_stop(
             "the load of another of its subjects, which LOSAT does not know NCBI's prefetch to make before the stop ({why}), makes the taxonomy database write a text"
         ));
     }
-    anyhow::Error::new(HeaderReadError {
-        query: queries.error_query,
+    anyhow::Error::new(ErrorAfterBatchReports {
+        query: Some(queries.error_query),
         error: NativeError {
             exit: 2,
             message: [

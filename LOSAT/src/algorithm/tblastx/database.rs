@@ -388,7 +388,7 @@ pub(crate) fn drop_unaligned(
 /// batch name (in report order: query by query, in hit-list order; the subject index is the
 /// ordinal id, the query index counts from the batch's first query `first_query`) into
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
-/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
+/// `ErrorAfterBatchReports` (it fails the batch); LOSAT's refusals are errors of their own. The first
 /// read of a record with a UTF8String where a VisibleString is expected is returned
 /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `one_by_one`: the reports
 /// may read the reported sequences one by one (`shared::HeaderReader::new`).

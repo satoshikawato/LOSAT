@@ -180,7 +180,7 @@ impl SubjectEmit<'_> {
     pub(super) fn refuse_untranslated_frame(&self, s_idx: usize) {
         self.x_read_failure.fail(
             s_idx,
-            anyhow::Error::new(super::ErrorAfterBatchReports(
+            anyhow::Error::new(super::ErrorAfterBatchReports::new(
                 crate::core::blast_hits::x_untranslated_frame_refusal(
                     "TBLASTX",
                     "the ungapped re-evaluation",
@@ -210,7 +210,7 @@ fn x_fetch_keeps(
         Err(error) => {
             x_read_failure.fail(
                 ordinal as usize,
-                anyhow::Error::new(super::ErrorAfterBatchReports(FetchExcluded::refusal(
+                anyhow::Error::new(super::ErrorAfterBatchReports::new(FetchExcluded::refusal(
                     (ordinal, error),
                     "TBLASTX",
                 ))),

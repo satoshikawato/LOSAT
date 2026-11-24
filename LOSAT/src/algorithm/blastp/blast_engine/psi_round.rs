@@ -28,7 +28,6 @@ use super::{
 };
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::algorithm::common::database::HeaderReadError;
 use crate::algorithm::psiblast::pssm::{
     ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmQueryRecord, PssmScoring,
     QueryPssm,
@@ -41,6 +40,7 @@ use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::app::CompositionMode;
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::query_batch::QueryBatches;
 use crate::blastinput::seq_range;
@@ -503,10 +503,10 @@ fn run_queries(
             // batches): the outfmt 0 prolog if nothing was written, and the reader's messages
             // of a batch whose first round fails.
             if let Err(error) = result {
-                if error.is::<HeaderReadError>() {
+                if error.is::<ErrorAfterBatchReports>() {
                     let failure = error
-                        .downcast::<HeaderReadError>()
-                        .expect("the error was checked to be a HeaderReadError");
+                        .downcast::<ErrorAfterBatchReports>()
+                        .expect("the error was checked to be an ErrorAfterBatchReports");
                     if calls == 0 {
                         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                     }

@@ -296,7 +296,7 @@ impl<'a> QueryBatch<'a> {
 /// 2026-11-16 on line RG's Q-X2c).
 pub(crate) fn refusal() -> anyhow::Error {
     anyhow::Error::new(
-        crate::algorithm::tblastx::blast_engine::ErrorAfterBatchReports(anyhow::anyhow!(
+        crate::algorithm::tblastx::blast_engine::ErrorAfterBatchReports::new(anyhow::anyhow!(
             "an ungapped extension that passes the end of a query frame into the frame next to it \
              in the query batch and scores higher there (an -xdrop_ungap of a raw X-drop above \
              32,768, with BLOSUM62 about 15,000 bits or more; NCBI BLAST+ 2.17.0 then keeps an \

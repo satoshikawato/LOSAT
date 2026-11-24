@@ -455,7 +455,7 @@ fn parallel_tables_of_each_matrix_equal_its_serial_tables() {
                         overflow_seen |= serial.longest_chain > 5;
                         built_seen += 1;
                     }
-                    (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                    (Err(want), XFlatBuild::Refused(got)) if want == got => refused_seen += 1,
                     _ => panic!("{what}: the serial outcome is not the reference's"),
                 }
                 for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])] {
@@ -474,7 +474,7 @@ fn parallel_tables_of_each_matrix_equal_its_serial_tables() {
                         (XFlatBuild::Table(serial), Some(XFlatBuild::Table(built))) => {
                             x_assert_same_flat_tables(&built, serial)
                         }
-                        (XFlatBuild::Refused, Some(XFlatBuild::Refused)) => {}
+                        (XFlatBuild::Refused(got), Some(XFlatBuild::Refused(want))) if *got == want => {}
                         _ => panic!("{what} n{threads}: the pool's outcome is not the serial one"),
                     }
                 }
@@ -736,7 +736,7 @@ fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
             x_flat_stripes_on(matrix, appends, &query, &locations, None, None, false, None)
         });
         match (&serial_one, &apart) {
-            (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused)) => {}
+            (Some(XFlatBuild::Refused(want)), Some(XFlatBuild::Refused(got))) if want == got => {}
             (Some(XFlatBuild::Table(want)), Some(XFlatBuild::Table(got))) => {
                 x_assert_same_flat_tables(got, want)
             }
@@ -748,7 +748,7 @@ fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
 fn flat(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
     match build.expect("word size 5") {
         XFlatBuild::Table(table) => table,
-        XFlatBuild::Refused => panic!("refused"),
+        XFlatBuild::Refused(filled) => panic!("refused: {filled:?}"),
         XFlatBuild::TooLarge => panic!("too large"),
     }
 }
@@ -865,7 +865,7 @@ fn parallel_refusal_and_bound_are_the_serial_ones() {
                             one_latch.then_some((&spare, poison)),
                         ),
                     ) {
-                        (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                        (Err(want), XFlatBuild::Refused(got)) if *want == got => refused_seen += 1,
                         (Ok(reference), XFlatBuild::Table(built)) => {
                             x_assert_same_compressed_table(&built, reference);
                             built_seen += 1;
@@ -1337,7 +1337,9 @@ fn the_two_passes_apart_build_what_the_build_at_once_builds() {
                         x_assert_same_flat_tables_as(&what, got, want);
                         built_seen += 1;
                     }
-                    (XFlatBuild::Refused, XFlatBuild::Refused) => refused_seen += 1,
+                    (XFlatBuild::Refused(want), XFlatBuild::Refused(got)) if want == got => {
+                        refused_seen += 1
+                    }
                     (XFlatBuild::TooLarge, XFlatBuild::TooLarge) => {
                         assert_eq!(spare_capacities(&spare), (0, 0), "{what}: dropped");
                         too_large_seen += 1;

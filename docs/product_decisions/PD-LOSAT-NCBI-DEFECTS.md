@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.98
+- Version: 1.99
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -649,7 +649,12 @@
   merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
   of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
   of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
-  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96))
+  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
+  1.99 2026-11-24 (approved exception 30, the Spouge cutoff search past `Int4`, psiblast line item
+  PS7c: psiblast and tblastn `-in_pssm` search for the score of the hit-saving cutoff
+  (`BLAST_SpougeEtoS`) without the signed overflow of its `Int4` doubling and bisection; the Owner's
+  answer of 2026-11-24, 12:44 JST, 「Q-PS7c-SPOUGE=B」; the explicit rejection of these Lambdas that the
+  item's fix round 1 had built, never on dev, removed; numbered after 1.98)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3145,10 +3150,8 @@ file would differ, and NCBI's programs still could not open the database).
   item PS7c LOSAT does: NCBI goes on with these values (E-values 0.0, bit scores `inf` or -1.0) and
   so does LOSAT, so none of them is refused for what it is. A gapped `lambda` below 0 (a finite one)
   or so small that NCBI's search for the score of the hit-saving cutoff (`BLAST_SpougeEtoS`) doubles
-  or adds its `Int4` scores past 2^31 - 1 is refused at that signed overflow, after the prolog that
-  NCBI writes before the search (line PS item PS7c, fix round 1, review B1: NCBI never ends there,
-  or goes on with the wrapped cutoff, 2^30 for a `lambda` below 0, a negative one at the
-  bisection; rows `db.ps7c.ps.rej.lambda_*` and `db.ps7c.tbn.rej.lambda_*`). Tests:
+  or adds its `Int4` scores past 2^31 - 1 is searched without that signed overflow: approved
+  exception 30 (the Spouge cutoff search past `Int4`). Tests:
   `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
   `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
   `db.ber.ps.*` and `db.ber.tbn.*`.
@@ -4149,6 +4152,53 @@ past `Int4`)". Psiblast line item PS10a.
     after the scaling stays refused (rule 3). The recursion is the one psiblast and tblastn
     `-in_pssm` use; their PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` and their
     threshold is an `Int4`, so their sums never leave `Int4` and their output does not change.
+
+## Approved exception 30 (psiblast and tblastn `-in_pssm`, the Spouge cutoff search past `Int4`, version 1.99)
+
+Decided by the Owner on 2026-11-24 at 12:44 JST, 「Q-PS7c-SPOUGE=B」 (one answer of the batch 「Q-AGVI-CAP=A
+Q-FM-R2=B Q-D23=A Q-KD-1=A Q-MIXIDX=C Q-GBHELP=A Q-DL-TIE=B Q-DL-QLOC=B Q-PS7c-SPOUGE=B Q-PS10e=A」; psiblast line
+`DECISIONS.md` 103 and 104). The option chosen reads 「Owner 10-10 の「符号付きオーバーフローは広げる」方針（承認例外 17 の
+culling と同じ形）で数学的に正しい値へ広げ、PD 例外として記録する」: under the Owner's rule of 2026-10-10 that a signed
+overflow is widened, in the form of the culling limit's exception 4 (line NP entry 17 of `docs/decisions/OWNER_DECISIONS.md`, 「広い型になおしましょう」),
+the overflowing values are computed as their mathematical values and recorded here as an exception. Not taken: option
+A, the explicit rejection at the overflow that line PS item PS7c's fix round 1 had built (never on dev). Its version
+is in the list at the top; elsewhere it is cited by its number and name, "approved exception 30 (the Spouge cutoff
+search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
+
+30. **A gapped Lambda for which NCBI's search for the hit-saving cutoff passes `Int4`.** With the Gumbel block of
+    the search's matrix, the hit-saving cutoff is the score of the preliminary e-value that `BLAST_SpougeEtoS`
+    searches for (`blast_parameters.c:931-945`): from `b = MAX((int)(log(db_length / e) / Lambda), 2)` it doubles
+    `b` while the e-value of `b` is above `e`, then bisects (`c = (a + b) / 2`) down to the score `a`
+    (`blast_stat.c:5236-5269`), all in `Int4`. The gapped Lambda of a matrix keeps the search far below 2^30 at
+    every e-value; a PSSM file's gapped Lambda (psiblast and tblastn `-in_pssm`, `kbp_gap_psi`) need not. The cutoff
+    is about t / Lambda, where t (7.4 for the PSSM of 30 letters of the rows below, at `-evalue 10` against
+    `tests/db_search/paja`) depends on the e-value, the lengths and the Gumbel block, so it passes 2^31 - 1 below
+    about 3.4e-9 for that PSSM; with a Lambda below 0 the e-value grows with the score and no score reaches `e`.
+    Then `b *= 2` or `a + b` overflows (signed overflow, undefined behaviour). NCBI BLAST+ 2.17.0's x86-64 build
+    (under gdb): at the doubling with a small positive Lambda (1e-9, 1e-300) it wraps `b` to `INT_MIN`, then to 0,
+    and never ends; at the doubling with a negative Lambda (-0.5) it wraps `b` to `INT_MIN`, whose e-value is 0,
+    and returns 2^30 (1,073,741,824) as the cutoff; at the bisection (psiblast 5e-9 to 7e-9, tblastn 4e-9 and 5e-9
+    here) it wraps the sum, takes it as the lower bound and returns a negative cutoff (psiblast 6e-9: 733,828,724 +
+    1,467,657,448, the cutoff -1,046,740,562; tblastn 4e-9: 876,829,330 + 1,753,658,660, -832,239,653), with which
+    every ungapped hit starts a gapped extension and every gapped HSP passes the cutoff. LOSAT takes NCBI's steps
+    with `b`, `a + b` and the scores in 64 bits (`stats::spouge::blast_spouge_etos`, from NCBI's first bound, its
+    cast of the double as `core::blast_util::ncbi_int4_from_double`): a search inside `Int4` gives NCBI's score, a
+    bisection past it its score in 64 bits (psiblast 6e-9: 1,231,258,856; tblastn 4e-9: 1,689,538,156), and a
+    search whose lower bound `a`, a score whose e-value is above `e` that no step lowers, passes 2^31 - 1 ends
+    there with `i32::MAX`, the cutoff of NCBI's context that saves nothing (`blast_parameters.c:920`): the cutoff is
+    then above every `Int4` score (psiblast 1e-9: about 7.4e9; 1e-300: about 4.7e300; -0.5: none). So the doubling
+    runs at most 31 times and the bisection at most 33, for every Lambda. With the PSSM of the rows below,
+    whose alignments score far below these cutoffs, each report has no hits.
+    Where NCBI ends, its wrapped cutoff keeps no hit either and LOSAT writes its bytes (rows
+    `db.ps7c.ps.lambda_6e-9`, `db.ps7c.ps.lambda_neg`, `db.ps7c.tbn.lambda_4e-9` and `db.ps7c.tbn.lambda_neg`, and
+    their outfmt 0 rows `.0`). Where NCBI never ends (1e-9), LOSAT writes the bytes of NCBI's run of the near
+    Lambda 8e-9, whose search stays inside `Int4` (the cutoffs 923,444,142 and 844,769,078) and which reports no
+    hits either, with X-drops of 1 bit that NCBI's kernels size (rows `db.ps7c.ps.lambda_1e-9` and
+    `db.ps7c.tbn.lambda_1e-9`, outfmt 7, which prints neither; in outfmt 0 LOSAT's report is the 8e-9 report with
+    the footer's Lambda of the file). NCBI's runs of the bisection and of the negative Lambda gap every ungapped
+    hit; LOSAT's keep NCBI's cutoff of the words (the gap trigger) and spend no time there.
+    `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
+    Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

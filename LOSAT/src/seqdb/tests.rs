@@ -3126,7 +3126,8 @@ fn open_probe() {
 /// open input file` at the lookup, and the gate says so.
 #[test]
 fn a_directory_in_place_of_an_isam_file_is_no_isam() {
-    use super::damaged_files_tests::TempDir;
+    use super::damaged_files_tests::{copy_fixtures, name};
+    use crate::utils::test_dir::TempDir;
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastdbcmd/db/m");
     let accession = super::seqidlist::parse_list_id(b"ref|XP_1001.1|").unwrap();
     // The lookups of `pmg` (XP_1001.1 and PIG 1001 at OID 0): the string ISAM's, then the PIG
@@ -3143,19 +3144,19 @@ fn a_directory_in_place_of_an_isam_file_is_no_isam() {
                 .map_err(|error| error.to_string()),
         )
     };
-    let intact = TempDir::new("isamdir");
-    intact.copy_fixtures(&source, &["pmg"]);
-    let db = SeqDb::open(&intact.name("pmg"), SeqType::Protein).unwrap();
+    let intact = TempDir::unique("damaged-isamdir");
+    copy_fixtures(&intact, &source, &["pmg"]);
+    let db = SeqDb::open(&name(&intact, "pmg"), SeqType::Protein).unwrap();
     assert!(!db.isams_may_fail_to_open());
     assert_eq!(lookups(&db), (Ok(vec![0]), Ok(Some(Some(0)))));
     for ext in ["psi", "psd", "ppi", "ppd"] {
-        let dir = TempDir::new("isamdir");
-        dir.copy_fixtures(&source, &["pmg"]);
-        let file = dir.0.join(format!("pmg.{ext}"));
+        let dir = TempDir::unique("damaged-isamdir");
+        copy_fixtures(&dir, &source, &["pmg"]);
+        let file = dir.join(format!("pmg.{ext}"));
         std::fs::remove_file(&file).unwrap();
         std::fs::create_dir(&file).unwrap();
         std::fs::write(file.join("placeholder"), b"").unwrap();
-        let db = SeqDb::open(&dir.name("pmg"), SeqType::Protein).unwrap();
+        let db = SeqDb::open(&name(&dir, "pmg"), SeqType::Protein).unwrap();
         assert!(!db.isams_may_fail_to_open(), "{ext}");
         let (string, pig) = lookups(&db);
         if ext.starts_with("ps") {
@@ -3168,15 +3169,15 @@ fn a_directory_in_place_of_an_isam_file_is_no_isam() {
     #[cfg(unix)]
     for ext in ["psi", "ppi"] {
         use std::os::unix::fs::PermissionsExt;
-        let dir = TempDir::new("isamdir");
-        dir.copy_fixtures(&source, &["pmg"]);
-        let file = dir.0.join(format!("pmg.{ext}"));
+        let dir = TempDir::unique("damaged-isamdir");
+        copy_fixtures(&dir, &source, &["pmg"]);
+        let file = dir.join(format!("pmg.{ext}"));
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::File::open(&file).is_ok() {
             // A user that reads every file (root): nothing fails to open.
             continue;
         }
-        let db = SeqDb::open(&dir.name("pmg"), SeqType::Protein).unwrap();
+        let db = SeqDb::open(&name(&dir, "pmg"), SeqType::Protein).unwrap();
         assert!(db.isams_may_fail_to_open(), "{ext}");
         let (string, pig) = lookups(&db);
         let failed = if ext == "psi" {

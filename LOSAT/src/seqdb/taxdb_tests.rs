@@ -5,39 +5,11 @@
 
 use super::super::file::MAP_PAGE;
 use super::*;
+use crate::utils::test_dir::TempDir;
 use std::path::Path;
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb")
-}
-
-/// A directory made for one test, removed (with what is in it) when it is dropped: a test
-/// drops it after the `TaxDb` and the `SearchPath` that read it.
-struct TempDir(PathBuf);
-
-impl std::ops::Deref for TempDir {
-    type Target = Path;
-
-    fn deref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn temp_dir(tag: &str) -> TempDir {
-    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-taxdb-{tag}-{}-{}",
-        crate::utils::test_dir::process_id(),
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    TempDir(dir)
 }
 
 /// A search path with the empty current directory it was made with, which is removed with it.
@@ -56,7 +28,7 @@ impl std::ops::Deref for Searching {
 
 /// A search path whose only useful directory is `dir` (`BLASTDB`), run from an empty current directory.
 fn path_of(dir: &Path) -> Searching {
-    let cwd = temp_dir("cwd");
+    let cwd = TempDir::unique("taxdb-cwd");
     let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None);
     Searching { search, _cwd: cwd }
 }
@@ -85,7 +57,7 @@ fn build(rows: &[(i32, &[u8])]) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn write_db(index: &[u8], data: &[u8]) -> TempDir {
-    let dir = temp_dir("db");
+    let dir = TempDir::unique("taxdb-db");
     std::fs::write(dir.join("taxdb.bti"), index).unwrap();
     std::fs::write(dir.join("taxdb.btd"), data).unwrap();
     dir
@@ -332,7 +304,7 @@ fn the_index_path_decides_and_the_data_file_is_its_sibling() {
     let good = fixture_dir().join("good");
     let nobtd = fixture_dir().join("no_btd");
     let joined = joined_paths([&nobtd, &good]);
-    let cwd = temp_dir("cwd");
+    let cwd = TempDir::unique("taxdb-cwd");
     let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None);
     assert!(TaxDb::open(&search).unwrap().is_missing());
     let joined = joined_paths([&fixture_dir().join("no_bti"), &good]);
@@ -850,7 +822,7 @@ fn the_pass_counts_entries_and_reads_past_one_index_block() {
     damaged[n as usize - 2] = past;
     damaged[n as usize - 1] = past;
     for (tag, offsets, refuses) in [("walk", &offsets, false), ("walkpast", &damaged, true)] {
-        let dir = temp_dir(tag);
+        let dir = TempDir::unique(&format!("taxdb-{tag}"));
         let mut index = Vec::new();
         index.extend(MAGIC.to_be_bytes());
         index.extend(n.to_be_bytes());
@@ -967,7 +939,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     };
     let good = fixture_dir().join("good");
     for file in ["taxdb.bti", "taxdb.btd"] {
-        let dir = temp_dir("unopened");
+        let dir = TempDir::unique("taxdb-unopened");
         for name in ["taxdb.bti", "taxdb.btd"] {
             std::fs::copy(good.join(name), dir.join(name)).unwrap();
         }
@@ -1029,7 +1001,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
         mode(&path, 0o644);
     }
     // An index too short for one entry: missing, though it does not open.
-    let dir = temp_dir("short-unopened");
+    let dir = TempDir::unique("taxdb-short-unopened");
     std::fs::write(dir.join("taxdb.bti"), [0u8; 8]).unwrap();
     std::fs::copy(good.join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
     mode(&dir.join("taxdb.bti"), 0o000);
@@ -1037,7 +1009,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     assert!(db.is_missing());
     mode(&dir.join("taxdb.bti"), 0o644);
     // An index of a wrong magic number: missing with NCBI's text, the data file never opened.
-    let dir = temp_dir("bad-magic-unopened");
+    let dir = TempDir::unique("taxdb-bad-magic-unopened");
     let bad = fixture_dir().join("bad_magic");
     std::fs::copy(bad.join("taxdb.bti"), dir.join("taxdb.bti")).unwrap();
     std::fs::copy(bad.join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();

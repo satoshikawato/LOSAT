@@ -168,9 +168,9 @@ pub struct BlastnArgs {
     /// database's index. When it loads none, or the word size is below the index's, NCBI warns
     /// and searches without it; otherwise it searches with the index. LOSAT does both; with
     /// `-db_hard_mask` its search reads the masked letters as matching nothing (approved exception
-    /// 24 of PD-LOSAT-NCBI-DEFECTS, `dbindex::search`), and it refuses the later searches of an
-    /// index of only some database volumes where NCBI frees its list of initial hits
-    /// (`blast_engine::mb_index_seeds`).
+    /// 24 of PD-LOSAT-NCBI-DEFECTS, `dbindex::search`), and with an index of only some database
+    /// volumes every query batch and query chunk searches the index anew (approved exception 30,
+    /// `blast_engine::mb_index_seeds`).
     #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index [default: false]")]
     pub use_index: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3359-3362
@@ -447,7 +447,7 @@ pub struct BlastnArgs {
     #[arg(skip = 0usize)]
     pub scan_step: usize,
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-782
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:772-782
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed when the options
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).

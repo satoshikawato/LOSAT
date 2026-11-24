@@ -91,7 +91,7 @@ impl ScanOrder {
 /// sequence and finds all positions where k-mers match entries in the
 /// lookup table (via presence vector test).
 ///
-/// NCBI comment from c++/src/algo/blast/core/blast_aascan.c:
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:35-47 (a call that fills the hit array stops early, and the next call resumes from the range it leaves)
 ///
 /// Optimizations applied:
 /// - Unsafe array access to eliminate bounds checking in hot loop

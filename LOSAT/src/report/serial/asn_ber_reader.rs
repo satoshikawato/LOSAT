@@ -756,7 +756,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     const ENCODING: Encoding = Encoding::Binary;
 
     /// `GetPosition()` of the binary stream: the bytes read from the start of the object.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:118-121
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:807-819
     fn position(&self) -> StreamPosition {
         StreamPosition::Byte(self.pos() as u64)
     }

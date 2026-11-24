@@ -13,7 +13,6 @@ use std::collections::BTreeSet;
 use std::io::Write;
 
 use anyhow::Result;
-use clap::Args;
 
 use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -32,56 +31,44 @@ use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2282-2289
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2319
 /// The list options of a search program's command line.
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DbFilterArgs {
     /// `-seqidlist`: a file of Seq-ids (text, or binary from `blastdb_aliastool`).
-    #[arg(
-        long = "seqidlist",
-        value_name = "filename",
-        help = "Restrict search of database to list of SeqIDs"
-    )]
     pub seqidlist: Option<String>,
     /// `-negative_seqidlist`: a file of Seq-ids to leave out.
-    #[arg(
-        long = "negative_seqidlist",
-        value_name = "filename",
-        help = "Restrict search of database to everything except the specified SeqIDs"
-    )]
     pub negative_seqidlist: Option<String>,
     /// `-taxids`: taxids separated by commas.
-    #[arg(
-        long = "taxids",
-        value_name = "taxids",
-        help = "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
-    )]
     pub taxids: Option<String>,
     /// `-taxidlist`: a file of taxids, one per line.
-    #[arg(
-        long = "taxidlist",
-        value_name = "filename",
-        help = "Restrict search of database to include only the specified taxonomy IDs and their descendants"
-    )]
     pub taxidlist: Option<String>,
     /// `-negative_taxids`: taxids separated by commas.
-    #[arg(
-        long = "negative_taxids",
-        value_name = "taxids",
-        help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
-    )]
     pub negative_taxids: Option<String>,
     /// `-negative_taxidlist`: a file of taxids, one per line.
-    #[arg(
-        long = "negative_taxidlist",
-        value_name = "filename",
-        help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants"
-    )]
     pub negative_taxidlist: Option<String>,
     /// `-no_taxid_expansion`: the taxids alone, without their descendants.
-    #[arg(
-        long = "no_taxid_expansion",
-        help = "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs "
-    )]
     pub no_taxid_expansion: bool,
+}
+
+impl DbFilterArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(DbFilterArgs {
+            seqidlist: args.given_option("seqidlist")?,
+            negative_seqidlist: args.given_option("negative_seqidlist")?,
+            taxids: args.given_option("taxids")?,
+            taxidlist: args.given_option("taxidlist")?,
+            negative_taxids: args.given_option("negative_taxids")?,
+            negative_taxidlist: args.given_option("negative_taxidlist")?,
+            no_taxid_expansion: args.flag("no_taxid_expansion"),
+        })
+    }
 }
 
 /// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's

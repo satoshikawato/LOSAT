@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.92
+- Version: 1.93
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -507,7 +507,12 @@
   through the traceback's cut to the hit list size, its culling and best hit pipes and the prune
   and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
   header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
-  there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.93 2026-11-24 (under a negative seqid list, a subject whose header NCBI's fetch cannot read
+  ends the search only where the composition-based or Smith-Waterman redo fetches it, rule 2: its
+  list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
+  item O4b2-4's 1.92)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1760,10 +1765,13 @@ file would differ, and NCBI's programs still could not open the database).
   where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
   search of a protein database reads such a header at the Seq-aligns only, where the subject is
   in the final hit list: there NCBI's Seq-align fails (exit 255), and LOSAT's report gives the
-  same error (rule 2). The
-  composition-based redo fetches only the matches that its early termination test leaves, and
-  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
-  NCBI ends it without reading that header.
+  same error (rule 2). The composition-based redo (and the Smith-Waterman redo) fetches only the
+  matches that its early termination test leaves: since version 1.93 such a subject's list stays
+  in the redo's stream (also one whose lines LOSAT refuses where it reads them) and LOSAT refuses
+  the search only where NCBI's redo fetches it, after the reports of the query batches before (as
+  NCBI's search ends in that batch), so a search whose redo frees that match unfetched writes
+  NCBI's output (BLASTP, PSIBLAST, BLASTX, TBLASTN; line RG item D1c-1c, rows `db.il.*.lr*`,
+  `db.il.*.ls*`).
 
 - TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.40,
   2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and

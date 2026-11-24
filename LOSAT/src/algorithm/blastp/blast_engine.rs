@@ -66,17 +66,24 @@ mod database;
 mod db_masked;
 // What the replay of the parallel redo's windows (`x_redo_par.rs`, built where they run) reads of
 // the one-thread loop's Smith-Waterman redo: the marks of the lists that the redo's fetch excludes
-// and the loop's reader of a query's marks, the errors of a batch and of a match, and the notes
-// that give an error the warning of a header read before it (the status of a query batch is core's
-// `smith_waterman_match::SwBatchStatus`, which both import).
+// and the loop's reader of a query's marks, the errors of a batch and of a match (with the refusal
+// or the warning of a header read before them), and the notes they read (the status of a query
+// batch is core's `smith_waterman_match::SwBatchStatus`, which both import).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(super) use {
     database::{FetchExcludedMatch, FetchNotes},
-    redo_run::{query_fetch_excluded_reached, sw_batch_failed, sw_endless},
+    redo_run::{query_fetch_excluded_reached, sw_batch_failed_after, sw_endless_after},
 };
+// The errors that the windows' tests expect (`x_redo_par_tests.rs`).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use redo_run::{sw_batch_failed, sw_endless};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
@@ -10298,7 +10305,7 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
-    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches);
+    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches)?;
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {

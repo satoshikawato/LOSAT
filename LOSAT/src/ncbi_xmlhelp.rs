@@ -20,10 +20,7 @@ const PROGRAMS: &[(&str, &str)] = &[
     ("tblastn", include_str!("ncbi_xmlhelp/tblastn.xml")),
     ("tblastx", include_str!("ncbi_xmlhelp/tblastx.xml")),
     ("psiblast", include_str!("ncbi_xmlhelp/psiblast.xml")),
-    (
-        "deltablast",
-        include_str!("ncbi_xmlhelp/deltablast.xml"),
-    ),
+    ("deltablast", include_str!("ncbi_xmlhelp/deltablast.xml")),
     ("rpsblast", include_str!("ncbi_xmlhelp/rpsblast.xml")),
     ("rpstblastn", include_str!("ncbi_xmlhelp/rpstblastn.xml")),
     ("makeblastdb", include_str!("ncbi_xmlhelp/makeblastdb.xml")),

@@ -2199,9 +2199,7 @@ fn blastp_pairwise_view_of(
 ) -> Option<crate::report::pairwise::PairwiseView> {
     crate::blastinput::app::ReportFormat::from_number(number)
         .and_then(crate::report::pairwise::PairwiseView::of)
-        .filter(|view| {
-            *view == crate::report::pairwise::PairwiseView::Pairwise || !app.is_psi()
-        })
+        .filter(|view| *view == crate::report::pairwise::PairwiseView::Pairwise || !app.is_psi())
 }
 
 /// The format of a `-outfmt` value that is outfmt 0, 6 or 7 to LOSAT's own writers (not a custom

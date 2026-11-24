@@ -1,6 +1,6 @@
 # LOSAT -db fixture rows, one file per program and row family files
 
-`<program>.tsv` holds the rows of one program (`blastp blastn tblastn blastx tblastx psiblast rpsblast rpstblastn`; the `program`
+`<program>.tsv` holds the rows of one program (`blastp blastn tblastn blastx tblastx psiblast deltablast rpsblast rpstblastn`; the `program`
 column decides the file), but those of a row family with its own file: `<program>.<family>.tsv` holds the program's rows
 `db.<family>.*` (the second word of the row id; for example `blastp.ldo.tsv`, the BLASTP rows `db.ldo.*`). Each row has
 one file, decided by its `program` cell and its id. `LOSAT/tests/db_search_fixtures.py` is the one loader: `read_manifest`

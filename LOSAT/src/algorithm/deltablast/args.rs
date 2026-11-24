@@ -387,7 +387,7 @@ impl DeltablastArgs {
     /// formats that NCBI runs and LOSAT's deltablast does not write yet (all but 0, 6 and 7, item
     /// PS15b-3) are refused, except those that NCBI refuses itself later (`ncbi_refuses_format`).
     pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
-        use crate::blastinput::app::{ncbi_refuses_format, early_format_choice, Program};
+        use crate::blastinput::app::{early_format_choice, ncbi_refuses_format, Program};
         PsiblastArgs::check_outfmt(outfmt, out, strategy)?;
         let Some(choice) = early_format_choice(outfmt, strategy)?.parsed().cloned() else {
             return Ok(());

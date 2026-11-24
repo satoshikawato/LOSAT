@@ -132,7 +132,9 @@ fn compute_frequencies_from_cds(msa: &PsiCdMsa) -> CdWeights {
                 sum_weights[residue] += data.wfreqs[residue] * data.iobsr;
             }
         }
-        if total_observations > 0.0 && query_residue != X as usize && sum_weights[query_residue] == 0.0
+        if total_observations > 0.0
+            && query_residue != X as usize
+            && sum_weights[query_residue] == 0.0
         {
             sum_weights[query_residue] = 1.0;
             total_observations += 1.0;

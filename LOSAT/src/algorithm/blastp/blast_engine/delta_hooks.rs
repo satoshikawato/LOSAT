@@ -107,7 +107,9 @@ impl DeltaRun {
             .lock()
             .expect("deltablast's settings")
             .clone()
-            .ok_or_else(|| anyhow!("LOSAT internal error: deltablast has no application settings"))?;
+            .ok_or_else(|| {
+                anyhow!("LOSAT internal error: deltablast has no application settings")
+            })?;
         let opened = Arc::new(self.open_side(&settings, diagnostics)?);
         *side = Some(Arc::clone(&opened));
         Ok(opened)
@@ -121,7 +123,9 @@ impl DeltaRun {
         diagnostics: &mut (dyn std::io::Write + Send),
     ) -> Result<DomainSide> {
         let command = DomainCommand::try_parse_from(["domain", "--db", &self.options.rpsdb])
-            .map_err(|error| anyhow!("LOSAT internal error: the domain search's options: {error}"))?;
+            .map_err(|error| {
+                anyhow!("LOSAT internal error: the domain search's options: {error}")
+            })?;
         let mut args: BlastpArgs = command.args.into_blastp_args()?;
         // The options handle's E-value is the domain inclusion threshold; the query's lower case
         // masks the domain search too (the query factory is the same).
@@ -216,9 +220,9 @@ impl DeltaRun {
             );
         }
         let pssm = create_pssm_from_cdd(&msa, 0, &sbp).map_err(|error| {
-            engine_error(
-                crate::algorithm::psiblast::pssm::error_code_to_string(error),
-            )
+            engine_error(crate::algorithm::psiblast::pssm::error_code_to_string(
+                error,
+            ))
         })?;
         let defline = crate::report::archive::defline_of(query.record);
         cdd_query_pssm(
@@ -343,7 +347,9 @@ impl DomainSide {
             .map_err(|error| anyhow!("{error}"))?;
         let id = match header {
             SequenceHeader::Parsed(set) => set.alignment_id().cloned().ok_or_else(|| {
-                anyhow!("a domain whose header has no Seq-id is not supported by LOSAT's DELTABLAST")
+                anyhow!(
+                    "a domain whose header has no Seq-id is not supported by LOSAT's DELTABLAST"
+                )
             })?,
             SequenceHeader::Ordinal(_) => ParsedSeqId::General(Dbtag {
                 db: b"BL_ORD_ID".to_vec(),

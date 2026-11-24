@@ -246,7 +246,9 @@ pub(super) fn write_archive(
         .as_deref()
         .map(|psi| pssm_hooks::psi_karlin(psi, contexts, &gapped_params));
     let psi = match args.app {
-        BlastpApp::Psiblast | BlastpApp::Deltablast => Some(psi_archive(args, reports, database.is_some(), psi_karlin)?),
+        BlastpApp::Psiblast | BlastpApp::Deltablast => {
+            Some(psi_archive(args, reports, database.is_some(), psi_karlin)?)
+        }
         _ => None,
     };
     // A PSSM search's blocks are its PSI blocks (`GetPsiUngappedKarlinBlk`,
@@ -615,7 +617,9 @@ pub(super) fn write_xml(
             program: args.app.ncbi_name(),
             version: &version,
             reference: match args.app {
-                BlastpApp::Psiblast | BlastpApp::Deltablast => crate::report::blast_xml::REFERENCE_COMP_BASED_STATS,
+                BlastpApp::Psiblast | BlastpApp::Deltablast => {
+                    crate::report::blast_xml::REFERENCE_COMP_BASED_STATS
+                }
                 _ => crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             },
             db_name: db_name.as_deref().unwrap_or(""),

@@ -736,7 +736,11 @@ pub(super) fn compute_freq_ratios(
                 &expno,
             );
             column_counts = if pseudo_count == 0 {
-                column_specific_pseudocounts(&seq_weights.match_weights[p], sbp.background, observations)
+                column_specific_pseudocounts(
+                    &seq_weights.match_weights[p],
+                    sbp.background,
+                    observations,
+                )
             } else {
                 pseudo_count as f64
             };

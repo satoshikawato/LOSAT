@@ -387,11 +387,8 @@ pub(crate) fn remove_multiple_cd_hits(mut hits: Vec<Hit>) -> Result<Vec<Hit>, Cd
     // E-value keep their order here; NCBI's sort orders them as the C++ library does, which only
     // matters where their query ranges overlap (`check_ties`).
     hits.sort_by(|a, b| {
-        compare_ordered(&a.id, &b.id).then_with(|| {
-            a.e_value
-                .partial_cmp(&b.e_value)
-                .unwrap_or(Ordering::Equal)
-        })
+        compare_ordered(&a.id, &b.id)
+            .then_with(|| a.e_value.partial_cmp(&b.e_value).unwrap_or(Ordering::Equal))
     });
     check_ties(&hits)?;
     let mut kept: Vec<Hit> = Vec::with_capacity(hits.len());

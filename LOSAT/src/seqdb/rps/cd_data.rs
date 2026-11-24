@@ -43,7 +43,9 @@ impl CdFile {
         let mut path = base.as_os_str().to_os_string();
         path.push(extension);
         let source = FreqSource::open(&PathBuf::from(path)).map_err(|_| {
-            RpsOpenError::Ncbi(format!("Cannot memory map RPS-BLAST database file: {shown}"))
+            RpsOpenError::Ncbi(format!(
+                "Cannot memory map RPS-BLAST database file: {shown}"
+            ))
         })?;
         let too_short = || {
             RpsOpenError::Refused(format!(
@@ -66,7 +68,11 @@ impl CdFile {
             shown,
         };
         let offsets_end = 8 + 4 * (num_profiles as u64 + 1);
-        if file.source.len().map_or(true, |len| (len as u64) < offsets_end) {
+        if file
+            .source
+            .len()
+            .map_or(true, |len| (len as u64) < offsets_end)
+        {
             return Err(too_short());
         }
         Ok(file)
@@ -194,9 +200,11 @@ impl CdProfileFiles {
             wfreqs.push(freqs);
         }
         let (first, next) = self.obsr.profile_offsets(oid, program)?;
-        let pairs = self
-            .obsr
-            .read_u32s(first, usize::try_from(next - first).unwrap_or(usize::MAX), program)?;
+        let pairs = self.obsr.read_u32s(
+            first,
+            usize::try_from(next - first).unwrap_or(usize::MAX),
+            program,
+        )?;
         let mut iobsr = Vec::with_capacity(to - from);
         let mut start = 0usize;
         for pair in pairs.chunks_exact(2) {

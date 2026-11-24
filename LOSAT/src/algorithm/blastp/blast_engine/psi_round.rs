@@ -34,8 +34,8 @@ use crate::algorithm::psiblast::pssm::{
     QueryPssm,
 };
 use crate::algorithm::psiblast::rounds::{
-    BeforeReport, HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome,
-    SetKey,
+    BeforeReport, HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles,
+    RoundOutcome, SetKey,
 };
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::QueryContext;
@@ -335,7 +335,9 @@ fn run_queries(
         // deltablast: the query's batch starts here (its prolog, which comes before the domain
         // search's errors, and its reader's messages), then the PSSM of its conserved domains is
         // round 1's.
-        let group_first = group_firsts.as_ref().is_none_or(|firsts| firsts.contains(&query));
+        let group_first = group_firsts
+            .as_ref()
+            .is_none_or(|firsts| firsts.contains(&query));
         if let Some(delta) = delta {
             if calls == 0 {
                 write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
@@ -348,10 +350,7 @@ fn run_queries(
             let mut cdd = delta.cdd_pssm(
                 args,
                 &plan.request,
-                &super::delta_hooks::CddQuery {
-                    record,
-                    id: &id,
-                },
+                &super::delta_hooks::CddQuery { record, id: &id },
                 pool,
                 &mut *outputs.diagnostics,
             )?;
@@ -370,13 +369,19 @@ fn run_queries(
             let mut before_report: Option<BeforeReport> = None;
             match (&pssm, input_files.as_mut()) {
                 (Some(current), _) if delta.is_some() && round == 1 => {
-                    let (asn, ascii, posts) =
-                        (current.asn.clone(), current.ascii.clone(), current.asn_posts.clone());
+                    let (asn, ascii, posts) = (
+                        current.asn.clone(),
+                        current.ascii.clone(),
+                        current.asn_posts.clone(),
+                    );
                     let (files, args) = (Arc::clone(&files), args.clone());
                     before_report = Some(Box::new(move |diagnostics| {
                         if !posts.is_empty() {
-                            crate::algorithm::psiblast::pssm::file_posts(args.app.ncbi_name(), &posts)
-                                .write(&mut *diagnostics, args.archive.as_ref())?;
+                            crate::algorithm::psiblast::pssm::file_posts(
+                                args.app.ncbi_name(),
+                                &posts,
+                            )
+                            .write(&mut *diagnostics, args.archive.as_ref())?;
                             diagnostics.flush()?;
                         }
                         files
@@ -385,9 +390,12 @@ fn run_queries(
                             .write(asn.as_deref(), ascii.as_deref())
                     }));
                 }
-                (Some(current), _) => {
-                    write_round_pssm(args, &mut files.lock().expect("the PSSM files"), current, outputs)?
-                }
+                (Some(current), _) => write_round_pssm(
+                    args,
+                    &mut files.lock().expect("the PSSM files"),
+                    current,
+                    outputs,
+                )?,
                 (None, Some((asn, ascii, posts))) if round == 1 => {
                     // NCBI's posts of the bytes replaced in the search strategy request (written
                     // above, before round 1) come before those of the PSSM file that round 1
@@ -543,9 +551,11 @@ fn run_queries(
                         .and_then(|psi| psi.query_seq_loc_id().cloned()),
                     silent: args.delta.is_some() && plan.num_iterations == 1,
                     extra_result: result_index > 0,
-                    before_report: std::sync::Mutex::new(
-                        if result_index == 0 { before_report.take() } else { None },
-                    ),
+                    before_report: std::sync::Mutex::new(if result_index == 0 {
+                        before_report.take()
+                    } else {
+                        None
+                    }),
                     outcome: std::sync::Mutex::new(None),
                 };
                 // The library's records of the round (`FormatObserver::round_begin`): the call's
@@ -682,9 +692,12 @@ fn run_queries(
         // ASCII PSSM is round 1's (`m_AncillaryData` is still the input PSSM's).
         if plan.save_last && group_first {
             match (&pssm, &plan.input, &input_files, searched_input) {
-                (Some(current), _, _, _) => {
-                    write_round_pssm(args, &mut files.lock().expect("the PSSM files"), current, outputs)?
-                }
+                (Some(current), _, _, _) => write_round_pssm(
+                    args,
+                    &mut files.lock().expect("the PSSM files"),
+                    current,
+                    outputs,
+                )?,
                 (None, Some(input), Some((_, ascii, _)), Some((ungapped, gapped))) => {
                     let (asn, posts) = input.written_back(&plan.request, ungapped, gapped)?;
                     write_file_posts(args, &posts, outputs)?;

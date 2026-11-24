@@ -119,7 +119,12 @@ fn the_query_letter_joins_a_column_that_lacks_it() {
 
 #[test]
 fn the_observations_stop_at_400() {
-    let msa = one_domain(QUERY.iter().map(|&l| one_letter_column(l, 1000.0)).collect());
+    let msa = one_domain(
+        QUERY
+            .iter()
+            .map(|&l| one_letter_column(l, 1000.0))
+            .collect(),
+    );
     let weights = compute_frequencies_from_cds(&msa);
     assert!(weights.independent_observations.iter().all(|&n| n == 400.0));
 }

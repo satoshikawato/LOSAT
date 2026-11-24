@@ -753,11 +753,13 @@ impl ResolvedBlastpArgs {
             // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
             // `Blast_HSPResultsInsertHSPList` of `hsp_list` into `results` with `hitlist_size`).
             BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
-            BlastpApp::Psiblast | BlastpApp::Deltablast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-                self.max_target_seqs,
-                self.comp_based_stats.is_enabled(),
-                true,
-            ),
+            BlastpApp::Psiblast | BlastpApp::Deltablast => {
+                crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+                    self.max_target_seqs,
+                    self.comp_based_stats.is_enabled(),
+                    true,
+                )
+            }
         }
     }
 
@@ -1146,7 +1148,9 @@ impl BlastpArgs {
             // (rpsblast_app.cpp:187 sets the line length only, as psiblast_app.cpp does.)
             sort: match self.app {
                 BlastpApp::Blastp => self.formatting.report_sort(),
-                BlastpApp::Psiblast | BlastpApp::Deltablast | BlastpApp::Rpsblast => Default::default(),
+                BlastpApp::Psiblast | BlastpApp::Deltablast | BlastpApp::Rpsblast => {
+                    Default::default()
+                }
             },
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
@@ -1212,7 +1216,10 @@ impl BlastpArgs {
             rps_search: self.rps.clone().map(std::sync::Arc::new),
             psi_rounds,
             delta: self.delta.clone().map(|options| {
-                std::sync::Arc::new(super::blast_engine::DeltaRun::new(options, self.lcase_masking))
+                std::sync::Arc::new(super::blast_engine::DeltaRun::new(
+                    options,
+                    self.lcase_masking,
+                ))
             }),
             app: self.app,
             inclusion_ethresh: self

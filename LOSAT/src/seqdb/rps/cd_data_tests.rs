@@ -110,7 +110,8 @@ fn a_missing_file_is_ncbis_error() {
         panic!("expected NCBI's error");
     };
     assert!(
-        text.starts_with("Cannot memory map RPS-BLAST database file: ") && text.ends_with("/cd.obsr"),
+        text.starts_with("Cannot memory map RPS-BLAST database file: ")
+            && text.ends_with("/cd.obsr"),
         "{text}"
     );
     std::fs::remove_file(dir.join("cd.wcounts")).unwrap();
@@ -130,7 +131,9 @@ fn a_wrong_magic_number_is_ncbis_error() {
     };
     assert!(
         text.starts_with("RPS BLAST profile file (")
-            && text.ends_with("/cd.wcounts) is either corrupt or constructed for an incompatible architecture"),
+            && text.ends_with(
+                "/cd.wcounts) is either corrupt or constructed for an incompatible architecture"
+            ),
         "{text}"
     );
 }

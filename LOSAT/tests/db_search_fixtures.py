@@ -209,7 +209,7 @@ MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
-PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")
+PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "deltablast", "rpsblast", "rpstblastn")
 # The caller's variables that `clean_env` drops besides NCBI*, BLAST* and LOSAT_* (each changes NCBI's result).
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
             "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG")

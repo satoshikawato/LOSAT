@@ -750,12 +750,14 @@ pub(in crate::algorithm::blastp) struct FetchExcludedMatch {
 }
 
 /// What `exclude_fetched` keeps of the subjects whose header holds a UTF8String where a
-/// VisibleString is expected: each with its query and its place in the order in which the redo
-/// takes its query's lists (`XRedoKey`), and, for each query with one, the ordinal ids of its
-/// kept lists in that order (the redo's positions of its heap's records, `note_fetched`).
+/// VisibleString is expected (`reads`) or cannot be read (`unreadable`, whose lists stay:
+/// `shared::FetchedReads::unreadable`): each with its query and its place in the order in which
+/// the redo takes its query's lists (`XRedoKey`), and, for each query with one, the ordinal ids
+/// of its kept lists in that order (the redo's positions of its heap's records, `note_fetched`).
 #[derive(Debug, Default)]
 struct XFetchedUtf8 {
     reads: Vec<XFetchedRead>,
+    unreadable: Vec<XFetchedRead>,
     orders: Vec<(usize, Vec<u32>)>,
 }
 
@@ -814,50 +816,54 @@ impl XFetchedUtf8 {
         &mut self,
         query: usize,
         kept: &[crate::algorithm::blastp::hsp::BlastpHspList<H>],
-        found: Vec<(shared::FetchedUtf8, XRedoKey)>,
+        found: shared::FetchedReads<XRedoKey>,
     ) {
         let mut keys: Vec<XRedoKey> = kept.iter().map(XRedoKey::of).collect();
         keys.sort_unstable_by(XRedoKey::cmp);
-        for (read, key) in found {
-            self.reads.push(XFetchedRead {
-                query,
-                key,
-                kept: read.kept,
-                before: keys.partition_point(|other| other.cmp(&key).is_lt()),
-            });
-        }
+        let place = |(read, key): (shared::FetchedUtf8, XRedoKey)| XFetchedRead {
+            query,
+            key,
+            kept: read.kept,
+            before: keys.partition_point(|other| other.cmp(&key).is_lt()),
+        };
+        self.reads.extend(found.utf8.into_iter().map(place));
+        self.unreadable
+            .extend(found.unreadable.into_iter().map(place));
         self.orders
             .push((query, keys.iter().map(|key| key.ordinal).collect()));
     }
 
-    /// The first, in NCBI's order of the fetches, of the reads that the ordinary traceback
-    /// (`shared::FetchedUtf8::traceback_first`: every subject, in increasing ordinal) or, with
-    /// `heaps` (as the redo left them), the composition-based redo makes
-    /// (`shared::redo_fetches`: query by query, each in its lists' order), the batches of the
-    /// queries (`batch_of`) one after the other: its query and ordinal id.
+    /// The first, in NCBI's order of the fetches, of the reads `reads` (`self.reads` or
+    /// `self.unreadable`) that the ordinary traceback (`shared::FetchedUtf8::traceback_first`:
+    /// every subject, in increasing ordinal) or, with `heaps` (as the redo left them), the
+    /// composition-based redo makes (`shared::redo_fetches`: query by query, each in its lists'
+    /// order), the batches of the queries (`batch_of`) one after the other: its query and ordinal
+    /// id.
     #[cold]
     #[inline(never)]
     fn first(
         &self,
+        reads: &[XFetchedRead],
         heaps: Option<&[BlastCompoHeap]>,
         batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
         ordinals: &[u32],
     ) -> Option<(usize, u32)> {
         let Some(heaps) = heaps else {
             // A batch's traceback, then the next batch's.
-            return self
-                .reads
+            return reads
                 .iter()
                 .min_by_key(|read| (batch_of(read.query).start, read.key.ordinal))
                 .map(|read| (read.query, read.key.ordinal));
         };
-        self.first_redone(heaps, batch_of, ordinals, &|_| true)
+        self.first_redone(reads, heaps, batch_of, ordinals, &|_| true)
     }
 
-    /// `first` of the composition-based redo with `heaps`, among the reads that `reached` keeps
-    /// (the fetches before the failure of a batch's redo, `ListedSubjects::fetched_before_failure`).
+    /// `first` of `reads` in the composition-based redo with `heaps`, among the reads that
+    /// `reached` keeps (the fetches before the failure of a batch's redo,
+    /// `ListedSubjects::fetched_before_failure`).
     fn first_redone(
         &self,
+        reads: &[XFetchedRead],
         heaps: &[BlastCompoHeap],
         batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
         ordinals: &[u32],
@@ -885,7 +891,7 @@ impl XFetchedUtf8 {
                 ends_early: heap.x_ends_early,
             }
         };
-        self.reads
+        reads
             .iter()
             .filter(|read| read.key.has_hsps && reached(read))
             .filter(|read| {
@@ -932,7 +938,9 @@ impl XFetchedUtf8 {
 /// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
 /// (`after`) every subject of the ordinary traceback, or those that the composition-based redo's
 /// early termination test leaves (its heaps as it left them). The replay of the parallel redo's
-/// windows (`x_redo_par.rs` `XSwBatch`) reads `fetched_before_failure` as the one-thread loop does.
+/// windows (`x_redo_par.rs` `XSwBatch`) reads `refused_before_failure` and `fetched_before_failure`
+/// through the one-thread loop's errors (`redo_run::sw_batch_failed_after`,
+/// `redo_run::sw_endless_after`).
 pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,
@@ -963,13 +971,46 @@ impl<'a> FetchNotes<'a> {
     }
 
     /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
-    /// subjects its fetches read.
-    pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) {
+    /// subjects its fetches read; LOSAT's refusal where one of them has a header that cannot be
+    /// read (`ListedSubjects::note_fetched`).
+    pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) -> Result<()> {
         self.pssm_redone.set(true);
         if let (Some(listed), Some(database)) = (self.listed, self.database) {
             let all = |_: usize| 0..heaps.len();
-            listed.note_fetched(database, Some(heaps), &all);
+            listed.note_fetched(database, Some(heaps), &all)?;
         }
+        Ok(())
+    }
+
+    /// LOSAT's refusal where the composition-based redo of the batch `batch`, before its
+    /// Smith-Waterman redo failed or did not end at the turn of the list after `before` of the
+    /// kept lists of query `query` (as `fetched_before_failure`), with `heaps` as the redo left
+    /// them, fetched a subject whose header cannot be read: NCBI's search ended there
+    /// (`shared::FetchExcluded::refusal_at`).
+    pub(super) fn refused_before_failure(
+        &self,
+        heaps: &[BlastCompoHeap],
+        batch: std::ops::Range<usize>,
+        query: usize,
+        before: usize,
+    ) -> Option<anyhow::Error> {
+        let (listed, database) = (self.listed?, self.database?);
+        if listed.fetched_utf8.unreadable.is_empty() {
+            return None;
+        }
+        let batch_of = |_: usize| batch.clone();
+        let reached = |read: &XFetchedRead| {
+            batch.contains(&read.query)
+                && (read.query < query || (read.query == query && read.before <= before))
+        };
+        let (query, ordinal) = listed.fetched_utf8.first_redone(
+            &listed.fetched_utf8.unreadable,
+            heaps,
+            &batch_of,
+            &listed.ordinals,
+            &reached,
+        )?;
+        Some(fetch_refused(database, query, ordinal))
     }
 
     /// The first fetch of the composition-based redo of the batch `batch` that read a header with a
@@ -994,10 +1035,13 @@ impl<'a> FetchNotes<'a> {
             batch.contains(&read.query)
                 && (read.query < query || (read.query == query && read.before <= before))
         };
-        let (_, ordinal) =
-            listed
-                .fetched_utf8
-                .first_redone(heaps, &batch_of, &listed.ordinals, &reached)?;
+        let (_, ordinal) = listed.fetched_utf8.first_redone(
+            &listed.fetched_utf8.reads,
+            heaps,
+            &batch_of,
+            &listed.ordinals,
+            &reached,
+        )?;
         let at = database.db.location_of(ordinal)?;
         Some(Utf8Read {
             query: batch.start,
@@ -1007,23 +1051,42 @@ impl<'a> FetchNotes<'a> {
 
     /// After the traceback: `heaps`, the composition-based redo's, which made the hit lists where
     /// the ordinary traceback made none (`ordinary`), the batch of each query being in `batches`
-    /// (`redo_run::kappa_query_batches`).
+    /// (`redo_run::kappa_query_batches`); LOSAT's refusal where a fetch read a header that
+    /// cannot be read (`ListedSubjects::note_fetched`).
     pub(super) fn after<T>(
         &self,
         heaps: &[BlastCompoHeap],
         ordinary: &Option<T>,
         batches: &[std::ops::Range<usize>],
-    ) {
+    ) -> Result<()> {
         let (Some(listed), Some(database)) = (self.listed, self.database) else {
-            return;
+            return Ok(());
         };
         let batch_of = |q_idx: usize| batches[q_idx].clone();
         if ordinary.is_none() {
-            listed.note_fetched(database, Some(heaps), &batch_of);
+            listed.note_fetched(database, Some(heaps), &batch_of)?;
         } else if !self.pssm_redone.get() {
-            listed.note_fetched(database, None, &batch_of);
+            listed.note_fetched(database, None, &batch_of)?;
         }
+        Ok(())
     }
+}
+
+/// LOSAT's refusal of a search whose redo or traceback fetches the sequence `ordinal`, whose
+/// header cannot be read (`shared::FetchExcluded::refusal_at`), from the list of query `query`:
+/// NCBI's search ends in that query's batch, after the reports of the batches before, so the
+/// refusal fails that batch (`HeaderReadError`, whose batches before are searched again and
+/// reported), as `-use_sw_tback`'s failed batch does (the Owner's form of 2026-11-16 for
+/// line RG's Q-X2c).
+#[cold]
+#[inline(never)]
+fn fetch_refused(database: &BlastpDatabase, query: usize, ordinal: u32) -> anyhow::Error {
+    HeaderReadError {
+        query,
+        error: shared::FetchExcluded::refusal_at(&database.db, ordinal, database.program),
+        utf8: None,
+    }
+    .into()
 }
 
 /// The reads of a call's reported subjects' titles (`titles`), one batch after the other, and
@@ -1182,21 +1245,38 @@ impl ListedSubjects {
     /// traceback, or with `heaps` of the composition-based redo (its heaps as it left them, by
     /// query), the batch of each query being `batch_of` (`redo_run::kappa_query_batches`). NCBI
     /// posts its warning there, before the reads of the batch's Seq-aligns (`read_titles`).
+    /// Where these fetches read a header that cannot be read (`XFetchedUtf8::unreadable`), NCBI's
+    /// search ends there: LOSAT's refusal (`shared::FetchExcluded::refusal_at`), as the failure of
+    /// the batch of the query whose list it is (`fetch_refused`).
     pub(super) fn note_fetched(
         &self,
         database: &BlastpDatabase,
         heaps: Option<&[BlastCompoHeap]>,
         batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
-    ) {
-        if self.fetched_utf8.reads.is_empty() {
-            return;
+    ) -> Result<()> {
+        if !self.fetched_utf8.unreadable.is_empty() {
+            if let Some((query, ordinal)) = self.fetched_utf8.first(
+                &self.fetched_utf8.unreadable,
+                heaps,
+                batch_of,
+                &self.ordinals,
+            ) {
+                return Err(fetch_refused(database, query, ordinal));
+            }
         }
-        if let Some((query, ordinal)) = self.fetched_utf8.first(heaps, batch_of, &self.ordinals) {
+        if self.fetched_utf8.reads.is_empty() {
+            return Ok(());
+        }
+        if let Some((query, ordinal)) =
+            self.fetched_utf8
+                .first(&self.fetched_utf8.reads, heaps, batch_of, &self.ordinals)
+        {
             self.earlier_utf8
                 .lock()
                 .expect("the UTF8String reads are not poisoned")
                 .fetched = database.db.location_of(ordinal).map(|at| (query, at));
         }
+        Ok(())
     }
 
     /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
@@ -1339,22 +1419,21 @@ impl ListedSubjects {
 // `fetched` and `ListedSubjects::drop_unaligned`. psiblast is always gapped.
 /// The preliminary hit lists of a call (subjects named by ordinal id, each list in the redo's
 /// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
-/// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a
-/// subject's header cannot be read there (`shared::FetchExcluded::refusal`).
-/// The subjects whose header holds a UTF8String where a VisibleString is expected come with them
-/// (`XFetchedUtf8`): NCBI's fetches read them (`ListedSubjects::note_fetched`).
+/// their order, and the marks of the removed lists, by query and place.
+/// The subjects whose header holds a UTF8String where a VisibleString is expected or cannot be
+/// read come with them (`XFetchedUtf8`): NCBI's fetches read them, and the lists of the latter
+/// stay; the call refuses the search where a fetch reaches one (`ListedSubjects::note_fetched`).
 fn exclude_fetched(
     database: &BlastpDatabase,
     hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-) -> Result<(Vec<FetchExcludedMatch>, XFetchedUtf8)> {
+) -> (Vec<FetchExcludedMatch>, XFetchedUtf8) {
     let mut fetched = XFetchedUtf8::default();
     let excluded = shared::FetchExcluded::of(&database.db);
     // Without a negative seqid list the fetches exclude nothing: no list is read here.
     if excluded.is_none() {
-        return Ok((Vec::new(), fetched));
+        return (Vec::new(), fetched);
     }
-    let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
     let mut marks = Vec::new();
     for (query, hit_list) in hit_lists.iter_mut().enumerate() {
         let Some(hit_list) = hit_list else {
@@ -1370,8 +1449,7 @@ fn exclude_fetched(
             hit_list,
             read.then_some(&mut marks),
             &mut fetched,
-        )
-        .map_err(refused)?;
+        );
     }
     for (query, hit_list) in x_compact_hit_lists.iter_mut().enumerate() {
         if let Some(hit_list) = hit_list {
@@ -1381,20 +1459,20 @@ fn exclude_fetched(
                 hit_list,
                 Some(&mut marks),
                 &mut fetched,
-            )
-            .map_err(refused)?;
+            );
         }
     }
     // By query; the marks of a query are in place order already (a stable sort).
     marks.sort_by_key(|mark| mark.query);
-    Ok((marks, fetched))
+    (marks, fetched)
 }
 
 /// `hit_list` (query `query`'s) without the lists whose subject the fetch excludes
 /// (`shared::FetchMarks`), in their order, each removed list leaving its mark in `marks` (where
 /// the redo reads this list) with the number of kept lists before it; nothing changes where
 /// none is excluded. The lists whose header holds a UTF8String where a VisibleString is expected
-/// go to `fetched` (read in the same pass, `shared::FetchExcluded::marks_noting`).
+/// or cannot be read go to `fetched` (read in the same pass, `shared::FetchExcluded::marks_noting`;
+/// the latter stay in `hit_list`).
 ///
 /// No NCBI counterpart: NCBI keeps these lists in the redo's stream, and its fetch excludes each
 /// subject when the redo reaches it (the reference lines are at `exclude_fetched`).
@@ -1404,10 +1482,10 @@ fn leave_fetched<H: crate::algorithm::blastp::hsp::HitListHsp>(
     hit_list: &mut BlastpHitList<H>,
     mut marks: Option<&mut Vec<FetchExcludedMatch>>,
     fetched: &mut XFetchedUtf8,
-) -> std::result::Result<(), (u32, crate::seqdb::SeqDbError)> {
+) {
     let lists = &hit_list.hsplist_array[..hit_list.hsplist_count];
     let (fetch, found) =
-        shared::FetchMarks::of_noting(excluded, lists, |list| Some(list.oid), XRedoKey::of)?;
+        shared::FetchMarks::of_noting(excluded, lists, |list| Some(list.oid), XRedoKey::of);
     let mut kept = 0;
     let mut removed = false;
     for (index, list) in lists.iter().enumerate() {
@@ -1433,14 +1511,13 @@ fn leave_fetched<H: crate::algorithm::blastp::hsp::HitListHsp>(
         });
         hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
-    if !found.is_empty() {
+    if !found.utf8.is_empty() || !found.unreadable.is_empty() {
         fetched.add(
             query,
             &hit_list.hsplist_array[..hit_list.hsplist_count],
             found,
         );
     }
-    Ok(())
 }
 
 /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists`, ascending, each once.

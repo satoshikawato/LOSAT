@@ -994,6 +994,40 @@ pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> 
     })
 }
 
+// No NCBI counterpart: NCBI has no Web engine.
+/// The arguments of the words `given` of `tool` (each name and its value's bytes, `None` for a
+/// flag) that another reader has checked: LOSAT Web's ABI v1, whose frozen reader checks its
+/// words with its own texts (`web_v1_argv`, line RG DECISIONS K4i-3-1 Q4). Each value is
+/// converted by its key's kind, without its constraint (`kind_value`), and no default is added:
+/// the options' readers take a key's table default (`Args::option_or_default`). `None` where a
+/// name is not one of `tool`'s or a value does not convert.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn checked(tool: &Tool, given: &[(String, Option<OsString>)]) -> Option<Args> {
+    let arguments = tool_arguments(tool);
+    let mut values: BTreeMap<&'static str, Option<Value>> = BTreeMap::new();
+    let mut numbers: BTreeMap<&'static str, Number> = BTreeMap::new();
+    let mut names: Vec<&'static str> = Vec::new();
+    for (name, value) in given {
+        let desc = find_desc(arguments, name)?;
+        if let Some(value) = value {
+            if let Some(number) = kind_value(desc, value.as_encoded_bytes()).ok()? {
+                numbers.insert(desc.name(), number);
+            }
+        }
+        values.insert(desc.name(), value.clone().map(Value::of));
+        names.push(desc.name());
+    }
+    Some(Args {
+        arguments,
+        values,
+        numbers,
+        given: names,
+        files: OpenFiles::disk(),
+        #[cfg(test)]
+        read: Default::default(),
+    })
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3007-3081
 /// One option word `arg1` with the name `name` (and the next word `arg2`, the value of a key
 /// written apart).
@@ -1128,13 +1162,7 @@ fn is_argument_name(bytes: &[u8]) -> bool {
 /// converted value of an `eBoolean`, `eInteger` or `eDouble` key. `value` is the bytes of the
 /// value.
 fn process_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError> {
-    let number = match desc.kind {
-        Kind::Integer => Some(Number::Integer(integer_value(desc, value)?)),
-        Kind::Int8 => Some(Number::Int8(int8_value(desc, value)?)),
-        Kind::Double => Some(double_value(desc, value)?),
-        Kind::Boolean => Some(Number::Boolean(boolean_value(desc, value)?)),
-        Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
-    };
+    let number = kind_value(desc, value)?;
     match desc.constraint {
         Some(constraint) if !constraint.verify(value) => Err(invalid(
             "eConstraint",
@@ -1146,6 +1174,19 @@ fn process_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError>
         )),
         _ => Ok(number),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1228-1262
+/// The conversion of `value` to the type of the key `desc` (`process_value` before the
+/// constraint): the converted value of an `eBoolean`, `eInt8`, `eInteger` or `eDouble` key.
+fn kind_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError> {
+    Ok(match desc.kind {
+        Kind::Integer => Some(Number::Integer(integer_value(desc, value)?)),
+        Kind::Int8 => Some(Number::Int8(int8_value(desc, value)?)),
+        Kind::Double => Some(double_value(desc, value)?),
+        Kind::Boolean => Some(Number::Boolean(boolean_value(desc, value)?)),
+        Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
+    })
 }
 
 /// The `eConvert` exception of a value of the argument `desc` that its conversion did not read:

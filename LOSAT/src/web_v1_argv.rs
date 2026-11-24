@@ -1,28 +1,33 @@
 //! The words of a request of LOSAT Web's ABI v1 (frozen, plan TD-1), as its BLASTX and TBLASTN
 //! read them: with the reader that LOSAT's command line had before it read its arguments with
-//! NCBI's argument reader (`cli::reader`). v1 keeps its own copy of that reader and of its texts
-//! (line RG DECISIONS K4i-2 D5), so that its frozen messages stay
-//! (`tests/fixtures/web_v1_tblastn`); no other caller reads an argv here.
+//! NCBI's argument reader (`cli::reader`). v1 keeps its own copy of that reader, of its command
+//! (a builder of clap's command that the command line's derive made, `frozen_command`) and of its
+//! texts (line RG DECISIONS K4i-2 D5, K4i-3-1 Q4), so that its frozen messages stay
+//! (`tests/fixtures/web_v1_tblastn`); the words that it takes are read into the program's options
+//! as the command line reads them (`cli::reader::options`). No other caller reads an argv here.
 //!
 //! No NCBI counterpart: NCBI has no Web engine.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use crate::blastinput::value_parsers::{genetic_code_number, ncbi_double, ncbi_int8, ncbi_integer};
+use crate::cli::Commands;
+use crate::utils::genetic_code::GeneticCode;
 use clap::builder::{PossibleValuesParser, ValueParser};
 use clap::error::ErrorKind;
-use clap::{CommandFactory, FromArgMatches};
 
-use crate::blastinput::value_parsers::{genetic_code_number, ncbi_double, ncbi_int8, ncbi_integer};
-use crate::cli::{Cli, Commands};
-use crate::utils::genetic_code::GeneticCode;
-
-/// The command of v1's `program` (BLASTX or TBLASTN): the command line's (`cli::command_of`), with
-/// the value parsers and the exclusions of the arguments that v1's reader had when it was frozen
-/// (`v1_parsers`, `V1_EXCLUSIONS`): the command line's arguments are NCBI's reader's since line RG
-/// item K4i-2b, clap only converts them.
+/// The command of v1's `program` (BLASTX or TBLASTN): the command line's when v1 was frozen
+/// (`frozen_command`), with the value parsers and the exclusions of the arguments that v1's reader
+/// had (`v1_parsers`, `V1_EXCLUSIONS`): the command line's arguments are NCBI's reader's since line
+/// RG item K4i-2b.
 pub(crate) fn command(program: &str) -> clap::Command {
-    crate::cli::command_of(program).mut_subcommand(program, |mut scope| {
+    v1_command(frozen_command(program), program)
+}
+
+/// `command` of v1's program `program` on the program's command `command`.
+fn v1_command(command: clap::Command, program: &str) -> clap::Command {
+    command.mut_subcommand(program, |mut scope| {
         for (name, parser) in v1_parsers(program) {
             scope = scope.mut_arg(name, |arg| arg.value_parser(parser));
         }
@@ -39,6 +44,286 @@ pub(crate) fn command(program: &str) -> clap::Command {
         scope.mut_arg("mt_mode", |arg| arg.requires("num_threads"))
     })
 }
+
+/// How an argument of v1's frozen command reads its value: the value parser that clap's derive
+/// gave its field when v1 was frozen (`blastinput::value_parsers`).
+#[derive(Debug, Clone, Copy)]
+enum Reads {
+    /// A flag (`ArgAction::SetTrue`).
+    Flag,
+    /// Text (clap's `String`).
+    Text,
+    /// A file name's bytes (`ncbi_path`).
+    Path,
+    /// `ncbi_integer`.
+    Integer,
+    /// `ncbi_int8`.
+    Int8,
+    /// `ncbi_double`.
+    Double,
+    /// `ncbi_boolean`.
+    Boolean,
+    /// `ncbi_integer_as::<usize>`.
+    Count,
+    /// `ncbi_integer_as::<u8>`.
+    Small,
+}
+
+use Reads::{Boolean, Count, Double, Flag, Int8, Integer, Path, Small, Text};
+
+/// An argument of v1's frozen command: its id, its long name, its value name, how it reads its
+/// value, and its default.
+type Frozen = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Reads,
+    Option<&'static str>,
+);
+
+/// BLASTX's arguments in v1's command, in the order of clap's derive of `BlastxArgs` when v1 was
+/// frozen (line RG item K4i-3c; the derive and its help texts left the command line there).
+#[rustfmt::skip]
+const BLASTX: &[Frozen] = &[
+    ("query", "query", "PATH", Path, Some("-")),
+    ("subject", "subject", "PATH", Path, None),
+    ("subject_loc", "subject_loc", "RANGE", Text, None),
+    ("db", "db", "NAME", Text, None),
+    ("seqidlist", "seqidlist", "filename", Text, None),
+    ("negative_seqidlist", "negative_seqidlist", "filename", Text, None),
+    ("taxids", "taxids", "taxids", Text, None),
+    ("taxidlist", "taxidlist", "filename", Text, None),
+    ("negative_taxids", "negative_taxids", "taxids", Text, None),
+    ("negative_taxidlist", "negative_taxidlist", "filename", Text, None),
+    ("no_taxid_expansion", "no_taxid_expansion", "NO_TAXID_EXPANSION", Flag, None),
+    ("db_soft_mask", "db_soft_mask", "filtering_algorithm", Text, None),
+    ("db_hard_mask", "db_hard_mask", "filtering_algorithm", Text, None),
+    ("dbsize", "dbsize", "LETTERS", Int8, None),
+    ("show_gis", "show_gis", "SHOW_GIS", Flag, Some("false")),
+    ("html", "html", "HTML", Flag, Some("false")),
+    ("parse_deflines", "parse_deflines", "PARSE_DEFLINES", Flag, Some("false")),
+    ("searchsp", "searchsp", "INT_VALUE", Int8, None),
+    ("out", "out", "PATH", Path, None),
+    ("export_search_strategy", "export_search_strategy", "filename", Path, None),
+    ("task", "task", "TASK", Text, Some("blastx")),
+    ("evalue", "evalue", "EVALUE", Double, Some("10")),
+    ("word_size", "word_size", "WORD_SIZE", Integer, None),
+    ("max_hsps", "max_hsps", "MAX_HSPS", Integer, None),
+    ("qcov_hsp_perc", "qcov_hsp_perc", "QCOV_HSP_PERC", Double, None),
+    ("sum_stats", "sum_stats", "SUM_STATS", Boolean, None),
+    ("gap_open", "gapopen", "GAP_OPEN", Integer, None),
+    ("gap_extend", "gapextend", "GAP_EXTEND", Integer, None),
+    ("max_intron_length", "max_intron_length", "MAX_INTRON_LENGTH", Integer, Some("0")),
+    ("seg", "seg", "SEG", Text, Some("12 2.2 2.5")),
+    ("soft_masking", "soft_masking", "SOFT_MASKING", Boolean, Some("false")),
+    ("matrix", "matrix", "MATRIX", Text, None),
+    ("threshold", "threshold", "THRESHOLD", Double, None),
+    ("window_size", "window_size", "WINDOW_SIZE", Integer, None),
+    ("xdrop_ungap", "xdrop_ungap", "float_value", Double, None),
+    ("xdrop_gap", "xdrop_gap", "float_value", Double, None),
+    ("xdrop_gap_final", "xdrop_gap_final", "float_value", Double, None),
+    ("culling_limit", "culling_limit", "CULLING_LIMIT", Integer, None),
+    ("best_hit_overhang", "best_hit_overhang", "float_value", Double, None),
+    ("best_hit_score_edge", "best_hit_score_edge", "float_value", Double, None),
+    ("subject_besthit", "subject_besthit", "SUBJECT_BESTHIT", Flag, None),
+    ("ungapped", "ungapped", "UNGAPPED", Flag, None),
+    ("lcase_masking", "lcase_masking", "LCASE_MASKING", Flag, None),
+    ("use_sw_tback", "use_sw_tback", "USE_SW_TBACK", Flag, None),
+    ("strand", "strand", "STRAND", Text, Some("both")),
+    ("query_loc", "query_loc", "RANGE", Text, None),
+    ("query_gencode", "query_gencode", "QUERY_GENCODE", Small, Some("1")),
+    ("outfmt", "outfmt", "OUTFMT", Text, Some("0")),
+    ("max_target_seqs", "max_target_seqs", "MAX_TARGET_SEQS", Integer, None),
+    ("num_descriptions", "num_descriptions", "int_value", Count, None),
+    ("num_alignments", "num_alignments", "int_value", Count, None),
+    ("line_length", "line_length", "line_length", Count, None),
+    ("sort_hits", "sorthits", "sort_hits", Small, None),
+    ("sort_hsps", "sorthsps", "sort_hsps", Small, None),
+    ("num_threads", "num_threads", "NUM_THREADS", Integer, Some("1")),
+    ("mt_mode", "mt_mode", "int_value", Small, None),
+    ("comp_based_stats", "comp_based_stats", "COMP_BASED_STATS", Text, Some("2")),
+];
+
+/// TBLASTN's arguments in v1's command, as `BLASTX`.
+#[rustfmt::skip]
+const TBLASTN: &[Frozen] = &[
+    ("query", "query", "PATH", Path, Some("-")),
+    ("subject", "subject", "PATH", Path, None),
+    ("db", "db", "NAME", Text, None),
+    ("seqidlist", "seqidlist", "filename", Text, None),
+    ("negative_seqidlist", "negative_seqidlist", "filename", Text, None),
+    ("taxids", "taxids", "taxids", Text, None),
+    ("taxidlist", "taxidlist", "filename", Text, None),
+    ("negative_taxids", "negative_taxids", "taxids", Text, None),
+    ("negative_taxidlist", "negative_taxidlist", "filename", Text, None),
+    ("no_taxid_expansion", "no_taxid_expansion", "NO_TAXID_EXPANSION", Flag, None),
+    ("db_soft_mask", "db_soft_mask", "filtering_algorithm", Text, None),
+    ("db_hard_mask", "db_hard_mask", "filtering_algorithm", Text, None),
+    ("dbsize", "dbsize", "LETTERS", Int8, None),
+    ("show_gis", "show_gis", "SHOW_GIS", Flag, Some("false")),
+    ("html", "html", "HTML", Flag, Some("false")),
+    ("parse_deflines", "parse_deflines", "PARSE_DEFLINES", Flag, Some("false")),
+    ("searchsp", "searchsp", "INT_VALUE", Int8, None),
+    ("task", "task", "TASK", Text, Some("tblastn")),
+    ("out", "out", "PATH", Path, None),
+    ("export_search_strategy", "export_search_strategy", "filename", Path, None),
+    ("evalue", "evalue", "EVALUE", Double, None),
+    ("word_size", "word_size", "WORD_SIZE", Integer, None),
+    ("gap_open", "gapopen", "GAP_OPEN", Integer, None),
+    ("gap_extend", "gapextend", "GAP_EXTEND", Integer, None),
+    ("db_gencode", "db_gencode", "DB_GENCODE", Small, Some("1")),
+    ("max_intron_length", "max_intron_length", "MAX_INTRON_LENGTH", Integer, None),
+    ("matrix", "matrix", "MATRIX", Text, None),
+    ("threshold", "threshold", "THRESHOLD", Double, None),
+    ("xdrop_ungap", "xdrop_ungap", "XDROP_UNGAP", Double, None),
+    ("xdrop_gap", "xdrop_gap", "XDROP_GAP", Double, None),
+    ("xdrop_gap_final", "xdrop_gap_final", "XDROP_GAP_FINAL", Double, None),
+    ("comp_based_stats", "comp_based_stats", "COMP_BASED_STATS", Text, Some("2")),
+    ("outfmt", "outfmt", "SPEC", Text, Some("0")),
+    ("query_loc", "query_loc", "RANGE", Text, None),
+    ("subject_loc", "subject_loc", "RANGE", Text, None),
+    ("seg", "seg", "SEG", Text, None),
+    ("lcase_masking", "lcase_masking", "LCASE_MASKING", Flag, None),
+    ("use_sw_tback", "use_sw_tback", "USE_SW_TBACK", Flag, None),
+    ("soft_masking", "soft_masking", "SOFT_MASKING", Boolean, None),
+    ("sum_stats", "sum_stats", "SUM_STATS", Boolean, None),
+    ("window_size", "window_size", "WINDOW_SIZE", Integer, None),
+    ("max_target_seqs", "max_target_seqs", "MAX_TARGET_SEQS", Count, None),
+    ("num_descriptions", "num_descriptions", "int_value", Count, None),
+    ("num_alignments", "num_alignments", "int_value", Count, None),
+    ("line_length", "line_length", "line_length", Count, None),
+    ("sort_hits", "sorthits", "sort_hits", Small, None),
+    ("sort_hsps", "sorthsps", "sort_hsps", Small, None),
+    ("max_hsps", "max_hsps", "MAX_HSPS", Count, None),
+    ("qcov_hsp_perc", "qcov_hsp_perc", "QCOV_HSP_PERC", Double, None),
+    ("culling_limit", "culling_limit", "CULLING_LIMIT", Integer, None),
+    ("best_hit_overhang", "best_hit_overhang", "float_value", Double, None),
+    ("best_hit_score_edge", "best_hit_score_edge", "float_value", Double, None),
+    ("subject_besthit", "subject_besthit", "SUBJECT_BESTHIT", Flag, None),
+    ("num_threads", "num_threads", "NUM_THREADS", Count, Some("1")),
+    ("mt_mode", "mt_mode", "int_value", Small, None),
+    ("ungapped", "ungapped", "UNGAPPED", Flag, None),
+    ("in_pssm", "in_pssm", "psi_chkpt_file", Path, None),
+];
+
+/// The argument `frozen` of v1's command, as clap's derive built it (without its help text, which
+/// v1 never prints: its callers refuse the help words).
+fn frozen_arg(&(id, long, value_name, reads, default): &Frozen) -> clap::Arg {
+    use crate::blastinput::value_parsers::{ncbi_boolean, ncbi_integer_as, ncbi_path};
+    let arg = clap::Arg::new(id).long(long).value_name(value_name);
+    let arg = match reads {
+        Flag => arg.action(clap::ArgAction::SetTrue),
+        Text => arg.value_parser(ValueParser::string()),
+        Path => arg.value_parser(ncbi_path()),
+        Integer => arg.value_parser(ncbi_integer),
+        Int8 => arg.value_parser(ncbi_int8),
+        Double => arg.value_parser(ncbi_double),
+        Boolean => arg.value_parser(ncbi_boolean),
+        Count => arg.value_parser(ncbi_integer_as::<usize>),
+        Small => arg.value_parser(ncbi_integer_as::<u8>),
+    };
+    let arg = match reads {
+        Flag => arg,
+        _ => arg.action(clap::ArgAction::Set),
+    };
+    match default {
+        Some(default) => arg.default_value(default),
+        None => arg,
+    }
+}
+
+/// v1's command of `program` (BLASTX or TBLASTN) as LOSAT's command line had it when v1 was frozen
+/// (`Cli` of that program: `losat`, its version, and the program's arguments).
+fn frozen_command(program: &str) -> clap::Command {
+    let (name, args) = match program {
+        "blastx" => ("blastx", BLASTX),
+        "tblastn" => ("tblastn", TBLASTN),
+        _ => unreachable!("v1 reads BLASTX and TBLASTN"),
+    };
+    let scope = clap::Command::new(name).args(args.iter().map(frozen_arg));
+    clap::Command::new("losat")
+        .version(env!("CARGO_PKG_VERSION"))
+        .subcommand_required(true)
+        .subcommand(scope)
+}
+
+/// The long names of the programs' arguments of LOSAT's command line when v1 was frozen, in the
+/// order of its command (each program's, from blastx to rpsbproc), which v1's messages write with
+/// one dash (`render`).
+#[rustfmt::skip]
+const LONGS: &[&str] = &[
+    "query", "subject", "subject_loc", "db", "seqidlist", "negative_seqidlist", "taxids",
+    "taxidlist", "negative_taxids", "negative_taxidlist", "no_taxid_expansion", "db_soft_mask",
+    "db_hard_mask", "dbsize", "show_gis", "html", "parse_deflines", "searchsp", "out",
+    "export_search_strategy", "task", "evalue", "word_size", "max_hsps", "qcov_hsp_perc",
+    "sum_stats", "gapopen", "gapextend", "max_intron_length", "seg", "soft_masking", "matrix",
+    "threshold", "window_size", "xdrop_ungap", "xdrop_gap", "xdrop_gap_final", "culling_limit",
+    "best_hit_overhang", "best_hit_score_edge", "subject_besthit", "ungapped", "lcase_masking",
+    "use_sw_tback", "strand", "query_loc", "query_gencode", "outfmt", "max_target_seqs",
+    "num_descriptions", "num_alignments", "line_length", "sorthits", "sorthsps", "num_threads",
+    "mt_mode", "comp_based_stats", "query", "subject", "db", "seqidlist", "negative_seqidlist",
+    "taxids", "taxidlist", "negative_taxids", "negative_taxidlist", "no_taxid_expansion",
+    "db_soft_mask", "db_hard_mask", "dbsize", "show_gis", "html", "parse_deflines", "searchsp",
+    "task", "template_type", "template_length", "word_size", "num_threads", "mt_mode", "use_index",
+    "index_name", "evalue", "perc_identity", "max_target_seqs", "num_descriptions",
+    "num_alignments", "line_length", "sorthits", "sorthsps", "max_hsps", "qcov_hsp_perc", "out",
+    "export_search_strategy", "reward", "penalty", "gapopen", "gapextend", "dust", "lcase_masking",
+    "soft_masking", "filtering_db", "window_masker_taxid", "window_masker_db", "strand",
+    "query_loc", "subject_loc", "subject_besthit", "culling_limit", "best_hit_overhang",
+    "best_hit_score_edge", "ungapped", "xdrop_ungap", "xdrop_gap", "xdrop_gap_final", "no_greedy",
+    "min_raw_gapped_score", "window_size", "off_diagonal_range", "outfmt", "query", "subject",
+    "db", "seqidlist", "negative_seqidlist", "taxids", "taxidlist", "negative_taxids",
+    "negative_taxidlist", "no_taxid_expansion", "db_soft_mask", "db_hard_mask", "dbsize",
+    "show_gis", "html", "parse_deflines", "searchsp", "task", "evalue", "threshold", "word_size",
+    "num_threads", "mt_mode", "out", "export_search_strategy", "max_target_seqs",
+    "num_descriptions", "num_alignments", "line_length", "sorthits", "sorthsps", "max_hsps",
+    "qcov_hsp_perc", "culling_limit", "best_hit_overhang", "best_hit_score_edge",
+    "subject_besthit", "ungapped", "xdrop_ungap", "xdrop_gap", "xdrop_gap_final", "window_size",
+    "matrix", "gapopen", "gapextend", "comp_based_stats", "seg", "soft_masking", "lcase_masking",
+    "use_sw_tback", "query_loc", "subject_loc", "outfmt", "query", "subject", "db", "seqidlist",
+    "negative_seqidlist", "taxids", "taxidlist", "negative_taxids", "negative_taxidlist",
+    "no_taxid_expansion", "db_soft_mask", "db_hard_mask", "dbsize", "show_gis", "html",
+    "parse_deflines", "searchsp", "evalue", "threshold", "matrix", "word_size", "num_threads",
+    "out", "export_search_strategy", "query_gencode", "db_gencode", "max_intron_length",
+    "max_target_seqs", "num_descriptions", "num_alignments", "line_length", "sorthits", "sorthsps",
+    "max_hsps", "qcov_hsp_perc", "seg", "soft_masking", "sum_stats", "lcase_masking", "strand",
+    "xdrop_ungap", "window_size", "outfmt", "culling_limit", "best_hit_overhang",
+    "best_hit_score_edge", "subject_besthit", "query_loc", "subject_loc", "query", "subject", "db",
+    "seqidlist", "negative_seqidlist", "taxids", "taxidlist", "negative_taxids",
+    "negative_taxidlist", "no_taxid_expansion", "db_soft_mask", "db_hard_mask", "dbsize",
+    "show_gis", "html", "parse_deflines", "searchsp", "task", "out", "export_search_strategy",
+    "evalue", "word_size", "gapopen", "gapextend", "db_gencode", "max_intron_length", "matrix",
+    "threshold", "xdrop_ungap", "xdrop_gap", "xdrop_gap_final", "comp_based_stats", "outfmt",
+    "query_loc", "subject_loc", "seg", "lcase_masking", "use_sw_tback", "soft_masking",
+    "sum_stats", "window_size", "max_target_seqs", "num_descriptions", "num_alignments",
+    "line_length", "sorthits", "sorthsps", "max_hsps", "qcov_hsp_perc", "culling_limit",
+    "best_hit_overhang", "best_hit_score_edge", "subject_besthit", "num_threads", "mt_mode",
+    "ungapped", "in_pssm", "query", "subject", "db", "seqidlist", "negative_seqidlist", "taxids",
+    "taxidlist", "negative_taxids", "negative_taxidlist", "no_taxid_expansion", "dbsize",
+    "show_gis", "parse_deflines", "searchsp", "sum_stats", "evalue", "threshold", "word_size",
+    "num_threads", "out", "export_search_strategy", "max_target_seqs", "num_descriptions",
+    "num_alignments", "line_length", "sorthits", "sorthsps", "max_hsps", "qcov_hsp_perc",
+    "culling_limit", "best_hit_overhang", "best_hit_score_edge", "subject_besthit", "xdrop_ungap",
+    "xdrop_gap", "xdrop_gap_final", "gap_trigger", "window_size", "matrix", "gapopen", "gapextend",
+    "comp_based_stats", "seg", "soft_masking", "lcase_masking", "use_sw_tback", "query_loc",
+    "subject_loc", "outfmt", "num_iterations", "pseudocount", "inclusion_ethresh", "out_pssm",
+    "out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm", "in_pssm", "in_msa",
+    "msa_master_idx", "ignore_msa_master", "query", "db", "out", "export_search_strategy",
+    "evalue", "dbsize", "searchsp", "comp_based_stats", "outfmt", "show_gis", "num_descriptions",
+    "num_alignments", "line_length", "sorthits", "sorthsps", "max_target_seqs", "max_hsps",
+    "qcov_hsp_perc", "xdrop_ungap", "xdrop_gap", "xdrop_gap_final", "sum_stats", "use_sw_tback",
+    "seg", "soft_masking", "window_size", "lcase_masking", "query_loc", "parse_deflines",
+    "num_threads", "mt_mode", "query", "query_gencode", "query_loc", "strand", "db", "out",
+    "export_search_strategy", "evalue", "comp_based_stats", "outfmt", "show_gis",
+    "num_descriptions", "num_alignments", "line_length", "sorthits", "sorthsps", "seg",
+    "soft_masking", "lcase_masking", "qcov_hsp_perc", "max_hsps", "max_target_seqs", "dbsize",
+    "searchsp", "sum_stats", "xdrop_ungap", "xdrop_gap", "xdrop_gap_final", "window_size",
+    "ungapped", "parse_deflines", "num_threads", "mt_mode", "use_sw_tback", "in", "input_type",
+    "dbtype", "title", "out", "blastdb_version", "max_file_sz", "metadata_output_prefix",
+    "logfile", "hash_index", "taxid", "taxid_map", "mask_data", "mask_id", "mask_desc", "gi_mask",
+    "gi_mask_name", "parse_seqids", "oid_masks", "randomize", "i", "o", "e", "m", "t", "d", "f",
+    "q",
+];
 
 /// The exclusions of v1's BLASTX and TBLASTN (the clap attributes of their arguments when v1 was
 /// frozen): an argument and the arguments it excludes.
@@ -158,8 +443,19 @@ pub(crate) fn parse(command: clap::Command, argv: Vec<OsString>) -> Result<Comma
     read(command, argv).map_err(|error| render(&error))
 }
 
-/// `parse` without the rendering of the error.
+/// `parse` without the rendering of the error: v1's command reads the words, then the program's
+/// options are read from them (`checked_options`).
 fn read(command: clap::Command, argv: Vec<OsString>) -> Result<Commands, clap::Error> {
+    let (program, given) = checked_words(&command, argv)?;
+    checked_options(&program, &given).map_err(raw)
+}
+
+/// The program of `argv` and the words that v1's `command` took (each long name and its value,
+/// `None` for a flag), or v1's error.
+fn checked_words(
+    command: &clap::Command,
+    argv: Vec<OsString>,
+) -> Result<(String, Vec<(String, Option<OsString>)>), clap::Error> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     let program = argv
         .get(1)
@@ -185,6 +481,7 @@ fn read(command: clap::Command, argv: Vec<OsString>) -> Result<Commands, clap::E
         .find_subcommand(&program)
         .expect("v1 reads the words of one of its programs");
     let mut translated: Vec<OsString> = vec!["losat".into(), program.clone().into()];
+    let mut given: Vec<(String, Option<OsString>)> = Vec::new();
     let mut input = words.into_iter();
     while let Some(token) = input.next() {
         let text = token.to_str().unwrap_or("").to_string();
@@ -215,8 +512,9 @@ fn read(command: clap::Command, argv: Vec<OsString>) -> Result<Commands, clap::E
                 })?,
             };
             let mut word = OsString::from(format!("--{name}="));
-            word.push(value);
+            word.push(&value);
             translated.push(word);
+            given.push((name.to_string(), Some(value)));
         } else {
             if inline.is_some() {
                 return Err(clap::Error::raw(
@@ -225,12 +523,28 @@ fn read(command: clap::Command, argv: Vec<OsString>) -> Result<Commands, clap::E
                 ));
             }
             translated.push(format!("--{name}").into());
+            given.push((name.to_string(), None));
         }
     }
-    let mut matches = command.clone().try_get_matches_from(&translated)?;
-    Cli::from_arg_matches_mut(&mut matches)
-        .map(|cli| cli.command)
-        .map_err(|error| error.format(&mut command.clone()))
+    command.clone().try_get_matches_from(&translated)?;
+    Ok((program, given))
+}
+
+/// The options of v1's `program` of the words `given` that its command took (`checked_words`):
+/// NCBI's arguments of them (`ncbi_app::args::checked`), read into the program's options as the
+/// command line reads its own (`cli::reader::options`).
+fn checked_options(
+    program: &str,
+    given: &[(String, Option<OsString>)],
+) -> Result<Commands, String> {
+    let tool = crate::cli::reader::tool(program).expect("v1's programs are on the reader");
+    let args = crate::ncbi_app::args::checked(tool, given).ok_or_else(|| {
+        format!(
+            "LOSAT's {} does not convert the arguments that its reader read",
+            tool.refusal_name
+        )
+    })?;
+    crate::cli::reader::options(tool, &args, false)
 }
 
 /// A refusal of v1's reader, as its reader wrote them (a clap error of LOSAT's text).
@@ -258,15 +572,9 @@ fn render(error: &clap::Error) -> String {
         .to_string()
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version");
-    let command = Cli::command();
     let toolkit = ["logfile", "conffile"].into_iter();
-    let longs = std::iter::once(&command)
-        .chain(command.get_subcommands())
-        .flat_map(|scope| scope.get_arguments().filter_map(clap::Arg::get_long))
-        .map(str::to_string)
-        .chain(toolkit.map(str::to_string));
-    for name in longs.filter(|name| !matches!(name.as_str(), "help" | "version") && name.len() > 1)
-    {
+    let longs = LONGS.iter().copied().chain(toolkit);
+    for name in longs.filter(|name| !matches!(*name, "help" | "version") && name.len() > 1) {
         message = message.replace(&format!("--{name}"), &format!("-{name}"));
     }
     message
@@ -472,3 +780,7 @@ fn formatting_line_length(value: &str) -> Result<usize, String> {
     let length = ncbi_integer_at_least(value, 1)?;
     usize::try_from(length).map_err(|_| "Illegal value: expected an integer >= 1".to_string())
 }
+
+#[cfg(test)]
+#[path = "web_v1_argv_tests.rs"]
+mod tests;

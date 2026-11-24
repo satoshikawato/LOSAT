@@ -272,6 +272,9 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
+        // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
+        // (`TblastnArgs::write_verification`).
+        args.write_verification = settings.write_verification.clone();
         // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
         // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
         // refuses it there (`args::check_search_limits`).
@@ -1209,6 +1212,7 @@ pub fn run_local_database(
     super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
+    args.write_verification = settings.write_verification.clone();
     report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats

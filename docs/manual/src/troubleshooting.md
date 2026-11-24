@@ -7,7 +7,7 @@ Questions and answers for the problems people meet most. Each answer is based on
 **What does it look like?**
 
 ```text
-Error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
+Error: the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTN
 ```
 
 The command exits with status 1 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses some `-outfmt` values](#psiblast-refuses-some--outfmt-values).

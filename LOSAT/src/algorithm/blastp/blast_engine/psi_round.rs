@@ -210,12 +210,6 @@ fn app_mode(mode: BlastpCompositionMode) -> CompositionMode {
     }
 }
 
-/// The rounds of every searched batch's query on `pool`, then the epilog (`epilog`).
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:508-532
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:196-205 (cited at
-// `in_pssm::setup_messages`: a PSSM search of mode 2 or 3 sets the options to 1, so a later
-// round of the query neither runs 2 or 3 nor warns again)
-#[allow(clippy::too_many_arguments)]
 /// deltablast's refusals that the inputs decide before any search, made before the run writes
 /// anything: `-num_iterations 0` with a query batch of several queries (NCBI BLAST+ searches the
 /// rounds after the first of the batch's first query only: deltablast_app.cpp `DoPsiBlastIterations`
@@ -251,6 +245,12 @@ fn refuse_before_output(
     Ok(())
 }
 
+/// The rounds of every searched batch's query on `pool`, then the epilog (`epilog`).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:508-532
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:196-205 (cited at
+// `in_pssm::setup_messages`: a PSSM search of mode 2 or 3 sets the options to 1, so a later
+// round of the query neither runs 2 or 3 nor warns again)
+#[allow(clippy::too_many_arguments)]
 fn run_queries(
     args: &ResolvedBlastpArgs,
     plan: &PsiRoundPlan,
@@ -736,7 +736,8 @@ fn run_queries(
                             let failure = error
                                 .downcast::<HeaderReadError>()
                                 .expect("the error was checked to be a HeaderReadError");
-                            if calls == 0 {
+                            // deltablast wrote its prolog at the start of its first batch.
+                            if calls == 0 && delta.is_none() {
                                 write_pairwise_prologs(
                                     args,
                                     subject_source,

@@ -1747,7 +1747,10 @@ pub fn run(
 /// The archive closes once, after the run (`close`): a file handed over after it (`None`) is
 /// refused, so that a file that the engine hands over late is its error (LOSAT's internal error of
 /// `-export_search_strategy`, `strategy::end_run`) instead of a file lost without one.
-struct RunFileArchive(std::sync::Mutex<Option<Vec<(Vec<u8>, Vec<u8>)>>>);
+struct RunFileArchive(std::sync::Mutex<Option<NamedFiles>>);
+
+/// The files of a run, each its name and its bytes, in the order the engine handed them over.
+type NamedFiles = Vec<(Vec<u8>, Vec<u8>)>;
 
 impl Default for RunFileArchive {
     fn default() -> Self {
@@ -1757,7 +1760,7 @@ impl Default for RunFileArchive {
 
 impl RunFileArchive {
     /// The files handed over so far; any later one is refused.
-    fn close(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+    fn close(&self) -> NamedFiles {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1768,7 +1771,7 @@ impl RunFileArchive {
     /// Emits the archive of the files `files` (`close`; stored entries, as stream 4's,
     /// `zip::ZipStream`). `Err` when the archive cannot hold a file (a name of 65,536 bytes or
     /// more).
-    fn emit(files: Vec<(Vec<u8>, Vec<u8>)>) -> std::io::Result<()> {
+    fn emit(files: NamedFiles) -> std::io::Result<()> {
         if files.is_empty() {
             return Ok(());
         }

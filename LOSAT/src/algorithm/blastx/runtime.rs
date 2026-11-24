@@ -189,6 +189,13 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     // redo makes its matches ahead; it does not change any value NCBI computes.
     /// `None`: the switch's choice; `Some(true)` the flow, `Some(false)` the fork-join batches of
     /// `=0`. A test's observer chooses each in one process (`runtime/kappa_batch_tests.rs`).
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(
+            dead_code,
+            reason = "only the redo on the pool reads it (`kappa_batch`)"
+        )
+    )]
     fn x_redo_flow(&self) -> Option<bool> {
         None
     }

@@ -419,9 +419,13 @@ pub(super) struct PrelimSubject<'a> {
 /// table's offset moved on. The list is in the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
 /// of a batch on the pool); the scratches are the subject's, or the pool worker's.
 ///
+/// `NEG`: a window below 0 (`PrelimBatch::neg_window`), whose chunks have the word finder of
+/// `neg_window.rs`; chosen once for the pass (`SubjectPasses::prelim_pass`), so that the chunks of
+/// every other search test nothing.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`)
-pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
+pub(super) fn prelim_chunk_hits<const UNGAPPED: bool, const NEG: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
     chunk: &SubjectChunk,
@@ -451,9 +455,13 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1695
-    // A window below 0 has the word finder of `neg_window.rs` (one test per chunk, outside the
-    // scans).
-    if scan.neg_window != 0 {
+    // A window below 0 has the word finder of `neg_window.rs` (an instance of its own).
+    debug_assert_eq!(
+        NEG,
+        scan.neg_window != 0,
+        "the pass's instance is its window's"
+    );
+    if NEG {
         return super::neg_window::neg_chunk_hits::<UNGAPPED>(
             scan,
             subject,
@@ -712,13 +720,13 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     hit_len_array: &mut *hit_len_array,
                     diag_hash: &mut *diag_hash,
                     offset_pairs: &mut subject_scratch.offset_pairs,
-                    neg: None,
                     dbg_total_s_positions: &mut dbg_total_s_positions,
                     dbg_seeds_found: &mut dbg_seeds_found,
                     dbg_window_seeds: &mut dbg_window_seeds,
                     dbg_ungapped_low: &mut dbg_ungapped_low,
                     dbg_gapped_attempted: &mut dbg_gapped_attempted,
                 },
+                (),
             );
         }
         if scan.two_stage_lookup_ref.is_none() {
@@ -1052,12 +1060,12 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
 /// `HARD`: the chunks come from the subject's hard ranges (a database sequence of a search with
 /// `-db_hard_mask`, `HardSplitState` in the worker's scratch; series NP, M4a-2b decision H1), else
 /// from `split_state` (`next_subject_chunk`); an instance of its own, so the other subjects' loops
-/// test nothing.
+/// test nothing. `NEG`: the word finder of a window below 0 (`prelim_chunk_hits`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,578-593
 /// (the chunk loop of `s_BlastSearchEngineOneContext`)
 /// The chunk batches on the pool have no NCBI counterpart (NCBI's threads take whole subjects).
-pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
+pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool, const NEG: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
     split_state: &mut SubjectSplitState,
@@ -1175,7 +1183,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                 let soft_ranges = split_state.soft_ranges.as_slice();
                 if jobs == 1 || x_serial_chunks {
                     for chunk in chunk_batch.iter() {
-                        let hits = prelim_chunk_hits::<UNGAPPED>(
+                        let hits = prelim_chunk_hits::<UNGAPPED, NEG>(
                             scan,
                             subject,
                             chunk,
@@ -1219,7 +1227,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     let search_chunk =
                         |state: &mut (GapAlignScratch, SubjectScratch), chunk: &SubjectChunk| {
                             let (gap_scratch, subject_scratch) = state;
-                            let hits = prelim_chunk_hits::<UNGAPPED>(
+                            let hits = prelim_chunk_hits::<UNGAPPED, NEG>(
                                 scan,
                                 subject,
                                 chunk,
@@ -1300,7 +1308,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
                     crate::utils::threading::report_stage("blastn", "subject_chunks", 1, false);
                     let soft_ranges = split_state.soft_ranges.as_slice();
-                    let hits = prelim_chunk_hits::<UNGAPPED>(
+                    let hits = prelim_chunk_hits::<UNGAPPED, NEG>(
                         scan,
                         subject,
                         &chunk,
@@ -1371,7 +1379,7 @@ pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usi
 /// `s_BlastSearchEngineCore` (:701-918) searches the subject's chunks
 /// (`s_BlastSearchEngineOneContext`), then sets the e-values of the subject's list and reaps it
 /// (:870-900).
-pub(super) fn prelim_subject<const UNGAPPED: bool>(
+pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
     scan: &ScanBatch<'_>,
     subject_ctx: &SubjectCtx<'_>,
     subject: BlastnSubjectRef<'_>,
@@ -1509,7 +1517,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         hard_index: hard_index.as_ref(),
     };
     let mut combined_prelim_hits = if hard {
-        collect_subject_prelim::<UNGAPPED, true>(
+        collect_subject_prelim::<UNGAPPED, true, NEG>(
             scan,
             &prelim_subject,
             &mut split_state,
@@ -1517,7 +1525,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
             subject_scratch,
         )
     } else {
-        collect_subject_prelim::<UNGAPPED, false>(
+        collect_subject_prelim::<UNGAPPED, false, NEG>(
             scan,
             &prelim_subject,
             &mut split_state,

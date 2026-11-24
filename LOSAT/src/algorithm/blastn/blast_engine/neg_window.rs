@@ -83,6 +83,30 @@ enum Body {
     Hash(NegHash),
 }
 
+/// Where the steps of a batch of offset pairs of a two-stage table go
+/// (`pair_extend::extend_offset_pairs`), as the search chose once for its word finder
+/// (`prelim_subject::prelim_chunk_hits`' `NEG`): `()` for a window of 0 or more, whose steps are
+/// `pair_extend`'s own with nothing tested (the default path's code), or the table of a window
+/// below 0 (`&mut NegTable`), whose steps are this module's.
+pub(super) trait NegSteps {
+    /// The table of a window below 0, `None` for `()`.
+    fn table(&mut self) -> Option<&mut NegTable>;
+}
+
+impl NegSteps for () {
+    #[inline(always)]
+    fn table(&mut self) -> Option<&mut NegTable> {
+        None
+    }
+}
+
+impl NegSteps for &mut NegTable {
+    #[inline(always)]
+    fn table(&mut self) -> Option<&mut NegTable> {
+        Some(&mut **self)
+    }
+}
+
 /// The diagonal table of a window below 0 (NCBI's `BLAST_DiagTable` or `BLAST_DiagHash`, with the
 /// offset that starts at the window).
 ///
@@ -569,13 +593,13 @@ pub(super) fn neg_chunk_hits<const UNGAPPED: bool>(
                 hit_len_array: &mut subject_scratch.hit_len_array,
                 diag_hash: &mut subject_scratch.diag_hash,
                 offset_pairs: &mut subject_scratch.offset_pairs,
-                neg: Some(&mut *table),
                 dbg_total_s_positions: &mut positions,
                 dbg_seeds_found: &mut seeds,
                 dbg_window_seeds: &mut window_seeds,
                 dbg_ungapped_low: &mut low,
                 dbg_gapped_attempted: &mut gapped,
             },
+            &mut *table,
         );
     } else {
         scan_na_lookup(

@@ -322,10 +322,12 @@ impl DomainSide {
         let mut ids: BTreeMap<u32, ParsedSeqId> = BTreeMap::new();
         let mut hits = Vec::new();
         for hsp_list in &list.hsplist_array[..count] {
-            if !ids.contains_key(&hsp_list.oid) {
-                ids.insert(hsp_list.oid, self.profile_id(hsp_list.oid)?);
-            }
-            let id = &ids[&hsp_list.oid];
+            let id = match ids.entry(hsp_list.oid) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(self.profile_id(hsp_list.oid)?)
+                }
+            };
             for hsp in &hsp_list.hsps {
                 let mut aligned = Vec::new();
                 match hsp.gap_info.as_deref() {

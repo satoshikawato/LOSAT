@@ -95,7 +95,7 @@ fn an_unaligned_cell_is_not_validated() {
     let mut msa = one_domain(vec![one_letter_column(1, 5.0)]);
     msa.rows[0] = vec![CdCell::aligned(0)]
         .into_iter()
-        .chain(std::iter::repeat(CdCell::UNALIGNED).take(QUERY.len() - 1))
+        .chain(std::iter::repeat_n(CdCell::UNALIGNED, QUERY.len() - 1))
         .collect();
     assert_eq!(validate_cd_msa(&msa), Ok(()));
 }
@@ -107,7 +107,7 @@ fn the_query_letter_joins_a_column_that_lacks_it() {
     let mut msa = one_domain(vec![one_letter_column(7, 5.0)]);
     msa.rows[0] = vec![CdCell::aligned(0)]
         .into_iter()
-        .chain(std::iter::repeat(CdCell::UNALIGNED).take(QUERY.len() - 1))
+        .chain(std::iter::repeat_n(CdCell::UNALIGNED, QUERY.len() - 1))
         .collect();
     let weights = compute_frequencies_from_cds(&msa);
     assert_eq!(weights.independent_observations[0], 6.0);

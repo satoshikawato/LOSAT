@@ -336,12 +336,17 @@ pub(crate) struct RoundFiles {
 }
 
 impl RoundFiles {
-    pub(crate) fn new(request: &PssmRequest, out: Option<&std::path::Path>) -> Self {
+    /// `app`: the program's name in the refusals (`BlastpApp::ncbi_name`).
+    pub(crate) fn new(
+        request: &PssmRequest,
+        out: Option<&std::path::Path>,
+        app: &'static str,
+    ) -> Self {
         let [asn, ascii] = request.streams();
         Self {
             asn,
             ascii,
-            check: PssmFileCheck::new(out),
+            check: PssmFileCheck::new(out, app),
         }
     }
 
@@ -361,6 +366,13 @@ impl RoundFiles {
             if let Err(error) = written {
                 if is_regular_file(&file.path) {
                     let _ = std::fs::remove_file(&file.path);
+                }
+                if self.check.app() != "psiblast" {
+                    anyhow::bail!(
+                        "a -out_pssm file that cannot be written ({}: {error}) is not supported by LOSAT's {}",
+                        file.path.display(),
+                        self.check.app().to_ascii_uppercase()
+                    );
                 }
                 anyhow::bail!(
                     "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm or -in_msa before round 1), is not supported by LOSAT's PSIBLAST",

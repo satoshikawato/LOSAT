@@ -186,3 +186,14 @@ fn save_last_with_one_round_and_a_first_query_without_alignments_is_refused_afte
         );
     }
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_pssm_file_that_is_the_standard_output_is_refused_in_deltablasts_name() {
+    for option in ["-out_pssm", "-out_ascii_pssm"] {
+        let mut args = RPS.to_vec();
+        args.extend_from_slice(&[option, "/dev/stdout"]);
+        let text = format!("an {option} file that is also the standard output (/dev/stdout)");
+        assert_refused(&run_query("q_serpin.faa", &args), option, &text);
+    }
+}

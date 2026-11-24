@@ -133,6 +133,7 @@ pub(super) fn search_rounds(
                 RoundFiles::new(
                     &plan.request,
                     args.out.as_deref().filter(|path| path.as_os_str() != "-"),
+                    args.app.ncbi_name(),
                 )
                 .write(asn.as_deref(), ascii.as_deref())?;
             }
@@ -266,6 +267,7 @@ fn run_queries(
     let files = Arc::new(std::sync::Mutex::new(RoundFiles::new(
         &plan.request,
         args.out.as_deref().filter(|path| path.as_os_str() != "-"),
+        args.app.ncbi_name(),
     )));
     // With `-in_pssm` the options' mode is already the PSSM search's (`check_options`), so a later
     // round warns no more.

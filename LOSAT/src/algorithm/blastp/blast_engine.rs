@@ -5091,6 +5091,7 @@ fn search_pssm_query(
                 .out
                 .as_deref()
                 .filter(|path| path.as_os_str() != "-"),
+            resolved.app.ncbi_name(),
         )?;
     }
     if let Some(observer) = outputs.observer.as_deref_mut() {
@@ -5159,6 +5160,7 @@ fn check_psiblast_pssm_files(
                 .out
                 .as_deref()
                 .filter(|path| path.as_os_str() != "-"),
+            resolved.app.ncbi_name(),
         )?;
     }
     Ok(())

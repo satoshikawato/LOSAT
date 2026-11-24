@@ -904,7 +904,7 @@ fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
         );
         assert_eq!(first.versions.next(), [4, 1]);
         let checked = |request: &PssmRequest, queries| {
-            check_pssm_files(request, queries, None).map_err(|error| error.to_string())
+            check_pssm_files(request, queries, None, "psiblast").map_err(|error| error.to_string())
         };
         assert_eq!(checked(&first, 1), Err(refusal.clone()));
         let fresh = asn_request(&file, true);
@@ -1112,7 +1112,8 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
     let out = dir.join("out.txt");
     std::fs::write(&out, b"").unwrap();
     let check = |request: &PssmRequest, queries: usize| {
-        check_pssm_files(request, queries, Some(&out)).map_err(|error| error.to_string())
+        check_pssm_files(request, queries, Some(&out), "psiblast")
+            .map_err(|error| error.to_string())
     };
     assert_eq!(
         check(&asn_request(&out, false), 1),
@@ -1129,12 +1130,23 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
     std::fs::write(dir.join("p.asn.2"), b"").unwrap();
     assert!(check(&asn_request(&base, true), 2).is_ok());
     assert!(check(&asn_request(&base, false), 2).is_ok());
-    let numbered = check_pssm_files(&asn_request(&base, true), 2, Some(&dir.join("p.asn.2")));
+    let numbered = check_pssm_files(
+        &asn_request(&base, true),
+        2,
+        Some(&dir.join("p.asn.2")),
+        "psiblast",
+    );
     assert!(numbered
         .unwrap_err()
         .to_string()
         .starts_with("an -out_pssm file that is also the -out file"));
-    assert!(check_pssm_files(&asn_request(&base, true), 1, Some(&dir.join("p.asn.2"))).is_ok());
+    assert!(check_pssm_files(
+        &asn_request(&base, true),
+        1,
+        Some(&dir.join("p.asn.2")),
+        "psiblast"
+    )
+    .is_ok());
     // `/dev/null` shows no order: it is no report stream (`report_stream_of`).
     assert!(check(&asn_request(std::path::Path::new("/dev/null"), false), 1).is_ok());
     #[cfg(target_os = "linux")]

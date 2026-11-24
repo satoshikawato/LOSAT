@@ -1445,7 +1445,9 @@ impl PssmFiles {
                 return test_device(path, null, asn).map_err(cannot_write)
             }
             TargetKind::Unopenable => return test_device(path, false, asn).map_err(cannot_write),
-            TargetKind::Unsupported(kind) => return Err(unsupported_target(path, kind)),
+            TargetKind::Unsupported(kind) => {
+                return Err(unsupported_target(path, kind, "psiblast"))
+            }
             TargetKind::Unreachable(error) => return Err(cannot_write(error)),
         };
         if path.file_name().is_none() {
@@ -1587,10 +1589,12 @@ fn test_device(path: &std::path::Path, null: bool, asn: &[u8]) -> std::io::Resul
     })
 }
 
-fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
+/// `app`: the program's name (`BlastpApp::ncbi_name`), psiblast or deltablast.
+fn unsupported_target(path: &std::path::Path, kind: &str, app: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's PSIBLAST",
-        path.display()
+        "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's {}",
+        path.display(),
+        app.to_ascii_uppercase()
     )
 }
 
@@ -1611,8 +1615,9 @@ pub(crate) fn check_pssm_files(
     request: &PssmRequest,
     queries: usize,
     out: Option<&std::path::Path>,
+    app: &'static str,
 ) -> Result<()> {
-    let check = PssmFileCheck::new(out);
+    let check = PssmFileCheck::new(out, app);
     for ((option, path), first) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
@@ -1639,15 +1644,23 @@ pub(crate) fn check_pssm_files(
 
 /// `check_pssm_files`' check of one name, also made by the round driver before each write
 /// (`rounds::RoundFiles`), whose numbered names are not known before the search.
+/// `app` is the program's name in the refusals (`BlastpApp::ncbi_name`: psiblast or deltablast).
 pub(crate) struct PssmFileCheck {
     streams: ReportStreams,
+    app: &'static str,
 }
 
 impl PssmFileCheck {
-    pub(crate) fn new(out: Option<&std::path::Path>) -> Self {
+    pub(crate) fn new(out: Option<&std::path::Path>, app: &'static str) -> Self {
         Self {
             streams: ReportStreams::new(out),
+            app,
         }
+    }
+
+    /// The program's name in the refusals.
+    pub(crate) fn app(&self) -> &'static str {
+        self.app
     }
 
     /// The refusal of the file `name` of `option` (`-out_pssm` or `-out_ascii_pssm`) where it
@@ -1656,13 +1669,14 @@ impl PssmFileCheck {
     pub(crate) fn check(&self, option: &str, name: &std::path::Path) -> Result<()> {
         if let Some(stream) = self.streams.stream_of(name) {
             anyhow::bail!(
-                "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
-                name.display()
+                "an {option} file that is also {stream} ({}) is not supported by LOSAT's {}",
+                name.display(),
+                self.app.to_ascii_uppercase()
             );
         }
         if option == "-out_pssm" {
             if let TargetKind::Unsupported(kind) = target_kind(name) {
-                return Err(unsupported_target(name, kind));
+                return Err(unsupported_target(name, kind, self.app));
             }
         }
         Ok(())

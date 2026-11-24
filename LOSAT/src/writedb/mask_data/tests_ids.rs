@@ -23,7 +23,8 @@ use std::path::PathBuf;
 
 use super::tests_e2e::{run_case_with, Case, DESTRUCTOR_MESSAGE};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
-use crate::writedb::tests::{files_named, seqdb_fixtures, TempDir};
+use crate::utils::test_dir::TempDir;
+use crate::writedb::tests::{base_in, files_named, seqdb_fixtures};
 use crate::writedb::volume::Indices;
 use crate::writedb::writer::DbVersion;
 
@@ -119,7 +120,7 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
                 title: row.fasta.clone(),
                 version,
             };
-            let tmp = TempDir::new("mask-ids");
+            let tmp = TempDir::unique("writedb-mask-ids");
             let indices = Indices {
                 full: row.parse,
                 hash: false,
@@ -127,7 +128,7 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
             };
             let run = run_case_with(
                 &case,
-                &tmp.base("db"),
+                &base_in(&tmp, "db"),
                 "Oct 20, 2026  1:00 PM",
                 &[],
                 indices,
@@ -141,7 +142,7 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
                     assert!(stderr.starts_with("losat makeblastdb: "), "{context}");
                     assert!(stderr.contains("memory addresses"), "{context}");
                     assert_eq!(stderr.lines().count(), 1, "{context}");
-                    let left = files_named(&tmp.0, "db.");
+                    let left = files_named(&tmp, "db.");
                     assert!(
                         left.iter().all(|file| {
                             ["nos", "not", "ntf", "nto", "pos", "pot", "ptf", "pto"]
@@ -161,7 +162,7 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
                     assert_eq!(run.status, 0, "{context}");
                     assert_eq!(stderr, "", "{context}");
                     assert_eq!(
-                        masked_rows(&tmp.base("db"), row.protein, &row.algorithms),
+                        masked_rows(&base_in(&tmp, "db"), row.protein, &row.algorithms),
                         row.expected,
                         "{context}"
                     );

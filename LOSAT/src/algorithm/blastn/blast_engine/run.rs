@@ -6269,17 +6269,12 @@ pub fn run(
     // end of file).
     let out_file = open_out_file(&args)?;
     let outfmt = args.outfmt.clone();
-    let pairwise = output_formats.iter().any(|format| format.is_pairwise());
-    let tax_report = output_formats.iter().any(|format| {
-        format
-            .tabular_spec()
-            .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
-    });
-    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
+    let mut report =
+        crate::cli::ReportStream::of_cli(out_file, "blastn", &args.outfmt, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
+            ReportOutputs::single(&outfmt, OutputSink::Report(&mut report), &mut *diagnostics);
         search_cli(
             args,
             list,
@@ -6300,6 +6295,8 @@ pub fn run(
     };
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = report.finish(result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
@@ -6323,11 +6320,7 @@ pub fn run(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
-    // exit 6; `cli::ReportStream::finish`).
-    report.finish(result, pairwise || tax_report)
+    result
 }
 
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
@@ -6352,23 +6345,23 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, "blastn", &args.outfmt, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
             &lines,
             &mut report,
         );
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &BlastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("BLASTN")).map(std::io::BufWriter::new))
+        .map(|path| crate::cli::create_out_file(path, Some("BLASTN")))
         .transpose()
 }
 
@@ -6531,7 +6524,7 @@ fn open_search_database(
                 settings,
             )),
             output_formats,
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -6555,17 +6548,15 @@ fn subject_taxonomy(
     args: &mut BlastnArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     output_formats: &[BlastnOutputFormat],
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTN",
         output_formats
             .iter()
             .filter_map(|format| format.tabular_spec()),
-    )?;
+    );
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
-    Ok(())
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
@@ -6970,7 +6961,8 @@ fn run_local_formats(
             "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
-    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    // The command line has checked `-strand` when it read it (NCBI's argument reader); a caller of
+    // `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
         outputs
@@ -7001,7 +6993,7 @@ fn run_local_formats(
     process_options(&mut args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
-    subject_taxonomy(&mut args, setting.as_ref(), &output_formats)?;
+    subject_taxonomy(&mut args, setting.as_ref(), &output_formats);
     search(
         args,
         SearchQueries::Records(query_records),
@@ -7039,7 +7031,8 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     crate::algorithm::blastn::args::BLASTN_TASK.check(&mut args.task)?;
-    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    // The command line has checked `-strand` when it read it (NCBI's argument reader); a caller of
+    // `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(
         outputs
@@ -7092,7 +7085,6 @@ pub(crate) fn repeat_search_hits(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> std::result::Result<Vec<Arc<Vec<PairwiseHit>>>, super::super::repeat_filter::RepeatError> {
     use super::super::repeat_filter::RepeatError;
-    use crate::algorithm::common::database::DatabaseOpenError;
     // The search's `CSeqDB`, without a list, meets the errors of the alias files' counts where it
     // opens the database (`common::database::restrict_database`).
     let opened = crate::algorithm::common::database::open_search_database(
@@ -7102,8 +7094,7 @@ pub(crate) fn repeat_search_hits(
     );
     let failed = match opened {
         Ok(database) => database.check_alias_values().err(),
-        Err(DatabaseOpenError::Reader(error)) => Some(error),
-        Err(DatabaseOpenError::Registry(_)) => None,
+        Err(error) => Some(error),
     };
     if let Some(error) = failed {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639
@@ -9619,11 +9610,7 @@ fn write_format_prolog(
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<()> {
     if output_format.is_pairwise() {
-        let flush = crate::report::pairwise::flushes_after_prolog(
-            shown.html_links.is_some(),
-            !format.sink.is_writer(),
-        );
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         write_blastn_pairwise_prolog(
             &mut writer,
             crate::wording::REPORT_VERSION,
@@ -9638,9 +9625,7 @@ fn write_format_prolog(
                 .as_deref()
                 .map(|links| (links, diagnostics)),
         )?;
-        if flush {
-            writer.flush()?;
-        }
+        std::io::Write::flush(&mut writer)?;
     } else if let Some(kind) = output_format.xml2_kind() {
         let mut writer = format.sink.open()?;
         writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;

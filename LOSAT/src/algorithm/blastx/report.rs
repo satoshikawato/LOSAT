@@ -843,7 +843,7 @@ pub(super) fn render_queries_with(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -1427,7 +1427,7 @@ fn pairwise_metadata(
 /// `-html` references where `query_warnings::html_posts_sink` sends them: `html_posts`, else
 /// `diagnostics`.
 pub(crate) fn write_prolog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     html_posts: Option<&mut dyn Write>,
     options: &ResolvedOptions,
@@ -1465,7 +1465,7 @@ pub(crate) fn write_prolog(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2223-2245
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
 pub(crate) fn write_epilog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
@@ -1541,7 +1541,7 @@ pub(crate) fn write_epilog(
         writeln!(writer, "# BLAST processed {queries} queries")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-        writer.flush().map_err(TabularFlushError)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1588,27 +1588,6 @@ pub(super) fn query_warning(
     bytes.push(b'\n');
     bytes
 }
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-pub(super) fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
-    match error.downcast::<std::io::Error>() {
-        Ok(error) => TabularFlushError(error).into(),
-        Err(error) => error,
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-#[derive(Debug)]
-pub(crate) struct TabularFlushError(pub std::io::Error);
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-impl std::fmt::Display for TabularFlushError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-impl std::error::Error for TabularFlushError {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:123-135
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1036-1042

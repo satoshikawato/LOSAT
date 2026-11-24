@@ -1,0 +1,714 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: in/ps_ids.faa
+           11 sequences; 1,610 total letters
+
+
+
+Query= pq1 copy 1
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000101.1 subject one two HSPs                                      313     5e-109
+s3_local_identifier subject three with a title that is longer tha...  247     4e-87 
+XP_000111.1 subject eleven strong then planted weak HSP               211     1e-71 
+XP_000109.1 subject nine                                              168     7e-57 
+P99902.2 subject two                                                  159     4e-53 
+testdb:tag_s8 subject eight                                           147     1e-48 
+s7_not_in_taxdb_long_label subject seven taxid not in taxdb           141     2e-46 
+1ABC_A subject six                                                    139     1e-45 
+AAB00104.1 subject four                                               138     3e-45 
+XP_000105.1 subject five <@score@> s <@evalue@> e <@acc_hd@> a <@...  131     9e-43 
+BAA00110.1 subject ten                                                94.0    2e-28 
+
+
+>XP_000101.1 subject one two HSPs
+Length=450
+
+ Score = 313 bits (803),  Expect = 5e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  153
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 2e-75, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+
+Query  152  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  211
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  212  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  271
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  272  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+>s3_local_identifier subject three with a title that is longer than the description 
+column of the organism report table so that NCBI cuts it and 
+appends three dots
+Length=150
+
+ Score = 247 bits (630),  Expect = 4e-87, Method: Compositional matrix adjust.
+ Identities = 127/150 (85%), Positives = 128/150 (85%), Gaps = 0/150 (0%)
+
+Query  51   GDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTC  110
+            GDESHIVA  PA PTLTRSVR TISPDPFF CRCRRD SIQYMLQPRLLRPSENVES TC
+Sbjct  1    GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITC  60
+
+Query  111  ANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVP  170
+            AN VMRAV K SAYDFAVKTSNDFDG VCERDKS VTLI SGLSTP  NLVRHAMQL+VP
+Sbjct  61   ANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVP  120
+
+Query  171  SRLAACYTHLAALKGLGSPRLTEYNRCSTH  200
+            SRLA CYTH AA KGLGS  L E NRCSTH
+Sbjct  121  SRLALCYTHGAASKGLGSSPLPESNRCSTH  150
+
+
+>XP_000111.1 subject eleven strong then planted weak HSP
+Length=250
+
+ Score = 211 bits (537),  Expect = 1e-71, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR
+Sbjct  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+
+
+ Score = 26.9 bits (58),  Expect = 0.002, Method: Compositional matrix adjust.
+ Identities = 13/22 (59%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+
+Query  191  LTEYNRCSTHSGRGLFEPESTL  212
+            L +    S  SGRGLFEPES L
+Sbjct  191  LADCGDWSFDSGRGLFEPESDL  212
+
+
+ Score = 15.8 bits (29),  Expect = 7.7, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+
+Query  151  SGLSTPFVNLVRHAM  165
+            +GLS  F +  RH +
+Sbjct  232  TGLSKRFEHQSRHML  246
+
+
+>XP_000109.1 subject nine
+Length=100
+
+ Score = 168 bits (426),  Expect = 7e-57, Method: Compositional matrix adjust.
+ Identities = 84/100 (84%), Positives = 86/100 (86%), Gaps = 0/100 (0%)
+
+Query  31   RPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSI  90
+            RPMRGRL LID RHRVPYACGD SHIVAGRPARPT+TRSV  TIS DPFF CRCRRDYSI
+Sbjct  1    RPMRGRLTLIDPRHRVPYACGDPSHIVAGRPARPTVTRSVDATISNDPFFNCRCRRDYSI  60
+
+Query  91   QYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKT  130
+             YMLQPRL RP+ NVESGTCANLVM AVVKVSAYD   KT
+Sbjct  61   TYMLQPRLCRPNGNVESGTCANLVMVAVVKVSAYDTTTKT  100
+
+
+>P99902.2 subject two
+Length=120
+
+ Score = 159 bits (402),  Expect = 4e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+
+
+>testdb:tag_s8 subject eight
+Length=100
+
+ Score = 147 bits (371),  Expect = 1e-48, Method: Compositional matrix adjust.
+ Identities = 76/100 (76%), Positives = 78/100 (78%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDY GKGF S+YSLRLT NP+ EI SRVERP RGRLA I   HRVPYAC DE HI AG 
+Sbjct  1   CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLT SV HTISPDP FVC    DYSIQYMLQPRL R
+Sbjct  61  PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR  100
+
+
+>s7_not_in_taxdb_long_label subject seven taxid not in taxdb
+Length=100
+
+ Score = 141 bits (356),  Expect = 2e-46, Method: Compositional matrix adjust.
+ Identities = 73/99 (74%), Positives = 79/99 (80%), Gaps = 0/99 (0%)
+
+Query  151  SGLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPES  210
+            SGLSTPFV+LVRH MQ+KVPSR AACYTH AALKGL  PRL E + CS    RGL E E 
+Sbjct  1    SGLSTPFVDLVRHTMQMKVPSRRAACYTHAAALKGLPLPRLIEIDNCSNFVKRGLREMEG  60
+
+Query  211  TLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHS  249
+            TLGD SR Q PLTETRC+SRLVTP +N CTS+SREPRHS
+Sbjct  61   TLGDLSRRQTPLTETRCHSRLVTPGSNACTSQSREPRHS  99
+
+
+>1ABC_A subject six
+Length=100
+
+ Score = 139 bits (351),  Expect = 1e-45, Method: Compositional matrix adjust.
+ Identities = 77/99 (78%), Positives = 80/99 (81%), Gaps = 0/99 (0%)
+
+Query  101  PSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNL  160
+            PSENVES T ANLV+R VVKV A  FAV TSND DG VC RDKSYVTLIPSGLST FVNL
+Sbjct  1    PSENVESHTSANLVIRPVVKVRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNL  60
+
+Query  161  VRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCST  199
+            VR AMQLKVPSR  ACYTHLAAL GL SP L+E+ R ST
+Sbjct  61   VRPAMQLKVPSRSPACYTHLAALLGLPSPNLSEFFRGST  99
+
+
+>AAB00104.1 subject four
+Length=100
+
+ Score = 138 bits (348),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 70/94 (74%), Positives = 70/94 (74%), Gaps = 0/94 (0%)
+
+Query  206  FEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSAR  265
+            FEPE TLG P   Q PL ETRCNSR VTPI  YCTSK REPRHS NLVR N  LICNSAR
+Sbjct  6    FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCTSKLREPRHSLNLVRYNGKLICNSAR  65
+
+Query  266  GYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQ  299
+            G LCKR RGTEY KFTSSEF  PPW N T  NYQ
+Sbjct  66   GSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ  99
+
+
+>XP_000105.1 subject five <@score@> s <@evalue@> e <@acc_hd@> a <@descr_text@> 
+d <@table_rows@> end
+Length=80
+
+ Score = 131 bits (330),  Expect = 9e-43, Method: Compositional matrix adjust.
+ Identities = 66/80 (83%), Positives = 67/80 (84%), Gaps = 0/80 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLR   NP PEI SRVE P RG LALI VRHRV YAC  ESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFF  80
+           PARPTLT+SVRH ISPDPFF
+Sbjct  61  PARPTLTKSVRHAISPDPFF  80
+
+
+>BAA00110.1 subject ten
+Length=60
+
+ Score = 94.0 bits (232),  Expect = 2e-28, Method: Compositional matrix adjust.
+ Identities = 49/60 (82%), Positives = 50/60 (83%), Gaps = 0/60 (0%)
+
+Query  201  SGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILI  260
+            SG G  EPESTLGDPS VQ PLTETRCNS LVTPIT+YCTSKS EP  S NLVRVNVILI
+Sbjct  1    SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCTSKSCEPVDSPNLVRVNVILI  60
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316389
+
+
+Query= pq2 copy 2
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000101.1 subject one two HSPs                                      313     5e-109
+s3_local_identifier subject three with a title that is longer tha...  247     4e-87 
+XP_000111.1 subject eleven strong then planted weak HSP               211     1e-71 
+XP_000109.1 subject nine                                              168     7e-57 
+P99902.2 subject two                                                  159     4e-53 
+testdb:tag_s8 subject eight                                           147     1e-48 
+s7_not_in_taxdb_long_label subject seven taxid not in taxdb           141     2e-46 
+1ABC_A subject six                                                    139     1e-45 
+AAB00104.1 subject four                                               138     3e-45 
+XP_000105.1 subject five <@score@> s <@evalue@> e <@acc_hd@> a <@...  131     9e-43 
+BAA00110.1 subject ten                                                94.0    2e-28 
+
+
+>XP_000101.1 subject one two HSPs
+Length=450
+
+ Score = 313 bits (803),  Expect = 5e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  153
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 2e-75, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+
+Query  152  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  211
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  212  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  271
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  272  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+>s3_local_identifier subject three with a title that is longer than the description 
+column of the organism report table so that NCBI cuts it and 
+appends three dots
+Length=150
+
+ Score = 247 bits (630),  Expect = 4e-87, Method: Compositional matrix adjust.
+ Identities = 127/150 (85%), Positives = 128/150 (85%), Gaps = 0/150 (0%)
+
+Query  51   GDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTC  110
+            GDESHIVA  PA PTLTRSVR TISPDPFF CRCRRD SIQYMLQPRLLRPSENVES TC
+Sbjct  1    GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITC  60
+
+Query  111  ANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVP  170
+            AN VMRAV K SAYDFAVKTSNDFDG VCERDKS VTLI SGLSTP  NLVRHAMQL+VP
+Sbjct  61   ANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVP  120
+
+Query  171  SRLAACYTHLAALKGLGSPRLTEYNRCSTH  200
+            SRLA CYTH AA KGLGS  L E NRCSTH
+Sbjct  121  SRLALCYTHGAASKGLGSSPLPESNRCSTH  150
+
+
+>XP_000111.1 subject eleven strong then planted weak HSP
+Length=250
+
+ Score = 211 bits (537),  Expect = 1e-71, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR
+Sbjct  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+
+
+ Score = 26.9 bits (58),  Expect = 0.002, Method: Compositional matrix adjust.
+ Identities = 13/22 (59%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+
+Query  191  LTEYNRCSTHSGRGLFEPESTL  212
+            L +    S  SGRGLFEPES L
+Sbjct  191  LADCGDWSFDSGRGLFEPESDL  212
+
+
+ Score = 15.8 bits (29),  Expect = 7.7, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+
+Query  151  SGLSTPFVNLVRHAM  165
+            +GLS  F +  RH +
+Sbjct  232  TGLSKRFEHQSRHML  246
+
+
+>XP_000109.1 subject nine
+Length=100
+
+ Score = 168 bits (426),  Expect = 7e-57, Method: Compositional matrix adjust.
+ Identities = 84/100 (84%), Positives = 86/100 (86%), Gaps = 0/100 (0%)
+
+Query  31   RPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSI  90
+            RPMRGRL LID RHRVPYACGD SHIVAGRPARPT+TRSV  TIS DPFF CRCRRDYSI
+Sbjct  1    RPMRGRLTLIDPRHRVPYACGDPSHIVAGRPARPTVTRSVDATISNDPFFNCRCRRDYSI  60
+
+Query  91   QYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKT  130
+             YMLQPRL RP+ NVESGTCANLVM AVVKVSAYD   KT
+Sbjct  61   TYMLQPRLCRPNGNVESGTCANLVMVAVVKVSAYDTTTKT  100
+
+
+>P99902.2 subject two
+Length=120
+
+ Score = 159 bits (402),  Expect = 4e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+
+
+>testdb:tag_s8 subject eight
+Length=100
+
+ Score = 147 bits (371),  Expect = 1e-48, Method: Compositional matrix adjust.
+ Identities = 76/100 (76%), Positives = 78/100 (78%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDY GKGF S+YSLRLT NP+ EI SRVERP RGRLA I   HRVPYAC DE HI AG 
+Sbjct  1   CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLT SV HTISPDP FVC    DYSIQYMLQPRL R
+Sbjct  61  PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR  100
+
+
+>s7_not_in_taxdb_long_label subject seven taxid not in taxdb
+Length=100
+
+ Score = 141 bits (356),  Expect = 2e-46, Method: Compositional matrix adjust.
+ Identities = 73/99 (74%), Positives = 79/99 (80%), Gaps = 0/99 (0%)
+
+Query  151  SGLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPES  210
+            SGLSTPFV+LVRH MQ+KVPSR AACYTH AALKGL  PRL E + CS    RGL E E 
+Sbjct  1    SGLSTPFVDLVRHTMQMKVPSRRAACYTHAAALKGLPLPRLIEIDNCSNFVKRGLREMEG  60
+
+Query  211  TLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHS  249
+            TLGD SR Q PLTETRC+SRLVTP +N CTS+SREPRHS
+Sbjct  61   TLGDLSRRQTPLTETRCHSRLVTPGSNACTSQSREPRHS  99
+
+
+>1ABC_A subject six
+Length=100
+
+ Score = 139 bits (351),  Expect = 1e-45, Method: Compositional matrix adjust.
+ Identities = 77/99 (78%), Positives = 80/99 (81%), Gaps = 0/99 (0%)
+
+Query  101  PSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNL  160
+            PSENVES T ANLV+R VVKV A  FAV TSND DG VC RDKSYVTLIPSGLST FVNL
+Sbjct  1    PSENVESHTSANLVIRPVVKVRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNL  60
+
+Query  161  VRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCST  199
+            VR AMQLKVPSR  ACYTHLAAL GL SP L+E+ R ST
+Sbjct  61   VRPAMQLKVPSRSPACYTHLAALLGLPSPNLSEFFRGST  99
+
+
+>AAB00104.1 subject four
+Length=100
+
+ Score = 138 bits (348),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 70/94 (74%), Positives = 70/94 (74%), Gaps = 0/94 (0%)
+
+Query  206  FEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSAR  265
+            FEPE TLG P   Q PL ETRCNSR VTPI  YCTSK REPRHS NLVR N  LICNSAR
+Sbjct  6    FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCTSKLREPRHSLNLVRYNGKLICNSAR  65
+
+Query  266  GYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQ  299
+            G LCKR RGTEY KFTSSEF  PPW N T  NYQ
+Sbjct  66   GSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ  99
+
+
+>XP_000105.1 subject five <@score@> s <@evalue@> e <@acc_hd@> a <@descr_text@> 
+d <@table_rows@> end
+Length=80
+
+ Score = 131 bits (330),  Expect = 9e-43, Method: Compositional matrix adjust.
+ Identities = 66/80 (83%), Positives = 67/80 (84%), Gaps = 0/80 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLR   NP PEI SRVE P RG LALI VRHRV YAC  ESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFF  80
+           PARPTLT+SVRH ISPDPFF
+Sbjct  61  PARPTLTKSVRHAISPDPFF  80
+
+
+>BAA00110.1 subject ten
+Length=60
+
+ Score = 94.0 bits (232),  Expect = 2e-28, Method: Compositional matrix adjust.
+ Identities = 49/60 (82%), Positives = 50/60 (83%), Gaps = 0/60 (0%)
+
+Query  201  SGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILI  260
+            SG G  EPESTLGDPS VQ PLTETRCNS LVTPIT+YCTSKS EP  S NLVRVNVILI
+Sbjct  1    SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCTSKSCEPVDSPNLVRVNVILI  60
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316389
+
+
+Query= pq3 copy 3
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000101.1 subject one two HSPs                                      313     5e-109
+s3_local_identifier subject three with a title that is longer tha...  247     4e-87 
+XP_000111.1 subject eleven strong then planted weak HSP               211     1e-71 
+XP_000109.1 subject nine                                              168     7e-57 
+P99902.2 subject two                                                  159     4e-53 
+testdb:tag_s8 subject eight                                           147     1e-48 
+s7_not_in_taxdb_long_label subject seven taxid not in taxdb           141     2e-46 
+1ABC_A subject six                                                    139     1e-45 
+AAB00104.1 subject four                                               138     3e-45 
+XP_000105.1 subject five <@score@> s <@evalue@> e <@acc_hd@> a <@...  131     9e-43 
+BAA00110.1 subject ten                                                94.0    2e-28 
+
+
+>XP_000101.1 subject one two HSPs
+Length=450
+
+ Score = 313 bits (803),  Expect = 5e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  153
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 2e-75, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+
+Query  152  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  211
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  212  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  271
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  272  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+>s3_local_identifier subject three with a title that is longer than the description 
+column of the organism report table so that NCBI cuts it and 
+appends three dots
+Length=150
+
+ Score = 247 bits (630),  Expect = 4e-87, Method: Compositional matrix adjust.
+ Identities = 127/150 (85%), Positives = 128/150 (85%), Gaps = 0/150 (0%)
+
+Query  51   GDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTC  110
+            GDESHIVA  PA PTLTRSVR TISPDPFF CRCRRD SIQYMLQPRLLRPSENVES TC
+Sbjct  1    GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITC  60
+
+Query  111  ANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVP  170
+            AN VMRAV K SAYDFAVKTSNDFDG VCERDKS VTLI SGLSTP  NLVRHAMQL+VP
+Sbjct  61   ANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVP  120
+
+Query  171  SRLAACYTHLAALKGLGSPRLTEYNRCSTH  200
+            SRLA CYTH AA KGLGS  L E NRCSTH
+Sbjct  121  SRLALCYTHGAASKGLGSSPLPESNRCSTH  150
+
+
+>XP_000111.1 subject eleven strong then planted weak HSP
+Length=250
+
+ Score = 211 bits (537),  Expect = 1e-71, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR
+Sbjct  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+
+
+ Score = 26.9 bits (58),  Expect = 0.002, Method: Compositional matrix adjust.
+ Identities = 13/22 (59%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+
+Query  191  LTEYNRCSTHSGRGLFEPESTL  212
+            L +    S  SGRGLFEPES L
+Sbjct  191  LADCGDWSFDSGRGLFEPESDL  212
+
+
+ Score = 15.8 bits (29),  Expect = 7.7, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+
+Query  151  SGLSTPFVNLVRHAM  165
+            +GLS  F +  RH +
+Sbjct  232  TGLSKRFEHQSRHML  246
+
+
+>XP_000109.1 subject nine
+Length=100
+
+ Score = 168 bits (426),  Expect = 7e-57, Method: Compositional matrix adjust.
+ Identities = 84/100 (84%), Positives = 86/100 (86%), Gaps = 0/100 (0%)
+
+Query  31   RPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSI  90
+            RPMRGRL LID RHRVPYACGD SHIVAGRPARPT+TRSV  TIS DPFF CRCRRDYSI
+Sbjct  1    RPMRGRLTLIDPRHRVPYACGDPSHIVAGRPARPTVTRSVDATISNDPFFNCRCRRDYSI  60
+
+Query  91   QYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKT  130
+             YMLQPRL RP+ NVESGTCANLVM AVVKVSAYD   KT
+Sbjct  61   TYMLQPRLCRPNGNVESGTCANLVMVAVVKVSAYDTTTKT  100
+
+
+>P99902.2 subject two
+Length=120
+
+ Score = 159 bits (402),  Expect = 4e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+
+
+>testdb:tag_s8 subject eight
+Length=100
+
+ Score = 147 bits (371),  Expect = 1e-48, Method: Compositional matrix adjust.
+ Identities = 76/100 (76%), Positives = 78/100 (78%), Gaps = 0/100 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDY GKGF S+YSLRLT NP+ EI SRVERP RGRLA I   HRVPYAC DE HI AG 
+Sbjct  1   CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPYACQDEFHIFAGG  60
+
+Query  61  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLR  100
+           PARPTLT SV HTISPDP FVC    DYSIQYMLQPRL R
+Sbjct  61  PARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR  100
+
+
+>s7_not_in_taxdb_long_label subject seven taxid not in taxdb
+Length=100
+
+ Score = 141 bits (356),  Expect = 2e-46, Method: Compositional matrix adjust.
+ Identities = 73/99 (74%), Positives = 79/99 (80%), Gaps = 0/99 (0%)
+
+Query  151  SGLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPES  210
+            SGLSTPFV+LVRH MQ+KVPSR AACYTH AALKGL  PRL E + CS    RGL E E 
+Sbjct  1    SGLSTPFVDLVRHTMQMKVPSRRAACYTHAAALKGLPLPRLIEIDNCSNFVKRGLREMEG  60
+
+Query  211  TLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHS  249
+            TLGD SR Q PLTETRC+SRLVTP +N CTS+SREPRHS
+Sbjct  61   TLGDLSRRQTPLTETRCHSRLVTPGSNACTSQSREPRHS  99
+
+
+>1ABC_A subject six
+Length=100
+
+ Score = 139 bits (351),  Expect = 1e-45, Method: Compositional matrix adjust.
+ Identities = 77/99 (78%), Positives = 80/99 (81%), Gaps = 0/99 (0%)
+
+Query  101  PSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNL  160
+            PSENVES T ANLV+R VVKV A  FAV TSND DG VC RDKSYVTLIPSGLST FVNL
+Sbjct  1    PSENVESHTSANLVIRPVVKVRAACFAVCTSNDSDGDVCIRDKSYVTLIPSGLSTRFVNL  60
+
+Query  161  VRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCST  199
+            VR AMQLKVPSR  ACYTHLAAL GL SP L+E+ R ST
+Sbjct  61   VRPAMQLKVPSRSPACYTHLAALLGLPSPNLSEFFRGST  99
+
+
+>AAB00104.1 subject four
+Length=100
+
+ Score = 138 bits (348),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 70/94 (74%), Positives = 70/94 (74%), Gaps = 0/94 (0%)
+
+Query  206  FEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSAR  265
+            FEPE TLG P   Q PL ETRCNSR VTPI  YCTSK REPRHS NLVR N  LICNSAR
+Sbjct  6    FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCTSKLREPRHSLNLVRYNGKLICNSAR  65
+
+Query  266  GYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQ  299
+            G LCKR RGTEY KFTSSEF  PPW N T  NYQ
+Sbjct  66   GSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ  99
+
+
+>XP_000105.1 subject five <@score@> s <@evalue@> e <@acc_hd@> a <@descr_text@> 
+d <@table_rows@> end
+Length=80
+
+ Score = 131 bits (330),  Expect = 9e-43, Method: Compositional matrix adjust.
+ Identities = 66/80 (83%), Positives = 67/80 (84%), Gaps = 0/80 (0%)
+
+Query  1   CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+           CFDYQGKGFISMYSLR   NP PEI SRVE P RG LALI VRHRV YAC  ESHIVAGR
+Sbjct  1   CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYYACPVESHIVAGR  60
+
+Query  61  PARPTLTRSVRHTISPDPFF  80
+           PARPTLT+SVRH ISPDPFF
+Sbjct  61  PARPTLTKSVRHAISPDPFF  80
+
+
+>BAA00110.1 subject ten
+Length=60
+
+ Score = 94.0 bits (232),  Expect = 2e-28, Method: Compositional matrix adjust.
+ Identities = 49/60 (82%), Positives = 50/60 (83%), Gaps = 0/60 (0%)
+
+Query  201  SGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILI  260
+            SG G  EPESTLGDPS VQ PLTETRCNS LVTPIT+YCTSKS EP  S NLVRVNVILI
+Sbjct  1    SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCTSKSCEPVDSPNLVRVNVILI  60
+
+

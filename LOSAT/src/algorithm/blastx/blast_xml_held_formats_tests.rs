@@ -234,8 +234,9 @@ fn a_release_writes_and_flushes_as_the_run_without_the_hold() {
 }
 
 /// A write of the release that fails stops it there: nothing held after it is written, then
-/// or later, and the run ends with it in place of its own error (`end_document_with`: "BLAST
-/// failed to write output", exit status 6).
+/// or later, and the run ends with it in place of its own error (`end_document_with`: the
+/// writer's error, as every program's library call ends; the command line's stream ends as
+/// NCBI's, `ReportStream::finish`).
 #[test]
 fn a_failing_write_of_the_release_ends_the_run() {
     let log = Shared::default();
@@ -250,10 +251,9 @@ fn a_failing_write_of_the_release_ends_the_run() {
     let error = hold
         .end_document_with(&ncbis_error(), &|_| false)
         .unwrap_err();
-    let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
-    assert_eq!(
-        (native.exit, native.message.as_slice()),
-        (6, b"BLAST failed to write output\n".as_slice())
+    assert!(
+        error.downcast_ref::<std::io::Error>().is_some(),
+        "{error:?}"
     );
     other.write_all(b"text 2 ").unwrap();
     assert_eq!(log.text(), "text 0 ");

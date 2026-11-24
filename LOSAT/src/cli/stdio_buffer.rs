@@ -118,6 +118,29 @@ impl NcbiBuffer {
         self.held
     }
 
+    /// The buffer holding `held` bytes, where its stream keeps the bytes and counts them itself
+    /// (`report::ostream`'s report stream, after its writes to the device).
+    pub(crate) fn set_held(&mut self, held: usize) {
+        debug_assert!(held == 0 || self.made || self.stream == NcbiStdio::File);
+        self.held = held;
+    }
+
+    /// An insertion (`sputn`) of fewer bytes than this is held whole, with no write: the room
+    /// left in a made buffer of a stream that is not a terminal's, plus one (a full block is
+    /// written only by the next insertion); 0 where the insertion must be read (standard output
+    /// before its first insertion, and a terminal's, which writes at its newlines). The report
+    /// stream skips the model for such insertions (`report::ostream`).
+    pub fn room(&self) -> usize {
+        match self.stream {
+            NcbiStdio::File => NCBI_BUFSIZ - 1 - self.held,
+            NcbiStdio::Cout {
+                block,
+                lines: false,
+            } if self.made => block - self.held + 1,
+            NcbiStdio::Cout { .. } => 0,
+        }
+    }
+
     /// An insertion of the last `n` bytes of `stream` (a string or a number; `stream` is
     /// everything inserted so far). Afterwards `held` is what NCBI's buffer holds.
     pub fn sputn(&mut self, n: usize, stream: &[u8]) {

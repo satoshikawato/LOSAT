@@ -16,6 +16,9 @@ blastx	blastn	code
 blastx	blastp	code
 blastx	common	code
 blastx	tblastx	code
+deltablast	blastp	code
+deltablast	psiblast	code
+deltablast	rpsblast	code
 psiblast	blastp	code
 psiblast	pssm_search	code
 pssm_search	blastn	code

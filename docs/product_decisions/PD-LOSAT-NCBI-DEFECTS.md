@@ -1555,8 +1555,8 @@ queries with domain hits, 79 of them with two hits of one domain and one score, 
 two such hits also overlap in the query; worse hits that overlap two tied ones were not counted.
 
 Fixtures: the unit test `hits_of_one_domain_with_one_evalue_keep_the_order_of_the_search`
-(`LOSAT/src/algorithm/deltablast/cdd_input_tests.rs`) holds an example of each case and LOSAT's
-order. No fixture row holds a tie. Code: `deltablast::cdd_input::remove_multiple_cd_hits`.
+(`LOSAT/src/algorithm/rps_search/cdd_input_tests.rs`) holds an example of each case and LOSAT's
+order. No fixture row holds a tie. Code: `rps_search::cdd_input::remove_multiple_cd_hits`.
 
 ## Approved exception 25 (makeblastdb `-gi_mask`, a database of one volume, version 1.81)
 

@@ -11,6 +11,7 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1131-1158
 
+pub(crate) mod cdd_input;
 pub(crate) mod engine;
 pub(crate) mod prelim;
 pub(crate) mod redo;

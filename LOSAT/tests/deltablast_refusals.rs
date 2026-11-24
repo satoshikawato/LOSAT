@@ -1,7 +1,7 @@
 //! `losat deltablast`'s refusals (series PR, item PS13a): each runs where LOSAT's DELTABLAST stops, with its text, and
 //! writes nothing to the standard output. NCBI BLAST+ 2.17.0 runs all of them (the rows of
 //! `tests/db_search_manifest/deltablast.tsv` freeze its bytes for the cases that LOSAT writes); the refusal of a
-//! Seq-id that is not local or general is a unit test of `deltablast::cdd_input`.
+//! Seq-id that is not local or general is a unit test of `rps_search::cdd_input`.
 
 use std::path::Path;
 use std::process::Command;

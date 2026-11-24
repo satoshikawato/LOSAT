@@ -1,7 +1,7 @@
 //! deltablast's domain search and its PSSM of conserved domains (series PR, item PS13a): the part
 //! of `CDeltaBlast::Run` before round 1. The domain search is the RPS engine on `-rpsdb`
 //! (`rps_hooks`) run as a call of the preliminary stage only (`PrelimOnly::Domain`: for RPS-BLAST
-//! the whole engine, traceback included, is that stage); `algorithm::deltablast::cdd_input` makes
+//! the whole engine, traceback included, is that stage); `algorithm::rps_search::cdd_input` makes
 //! the alignment of the domains of its hits, `core::psi::cd_stages` the PSSM, and the round driver
 //! (`psi_round::run_queries`) searches it as a later round of psiblast. Cold and out of line:
 //! blastp's default path only tests `ResolvedBlastpArgs::delta`.
@@ -12,19 +12,16 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
-use clap::Parser;
 
 use super::{
     database, open_search_database, rps_hooks, run_resolved_in_pool, BlastpRanges, BlastpReports,
     BlastpSubjectSource, PrelimOnly,
 };
-use crate::algorithm::blastp::args::{BlastpArgs, ResolvedBlastpArgs};
+use crate::algorithm::blastp::args::{BlastpArgs, DeltaOptions, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::algorithm::deltablast::cdd_input::{self, open_error, Hit};
-use crate::algorithm::deltablast::DeltaOptions;
 use crate::algorithm::psiblast::pssm::{cdd_query_pssm, PssmQueryRecord, PssmRequest, QueryPssm};
 use crate::algorithm::pssm_search::in_pssm::{engine_score_block, query_ungapped_block};
-use crate::algorithm::rpsblast::args::RpsblastArgs;
+use crate::algorithm::rps_search::cdd_input::{self, open_error, Hit};
 use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::app::engine_error;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -73,14 +70,6 @@ pub(super) struct CddQuery<'a> {
     pub(super) id: &'a ParsedSeqId,
 }
 
-/// The arguments of `rpsblast` that the domain search is made of: the database, nothing else
-/// (its other options are `eRPSBlast`'s defaults).
-#[derive(Parser)]
-struct DomainCommand {
-    #[command(flatten)]
-    args: RpsblastArgs,
-}
-
 impl DeltaRun {
     pub(crate) fn new(options: DeltaOptions, lcase_masking: bool) -> Self {
         Self {
@@ -122,19 +111,11 @@ impl DeltaRun {
         settings: &ApplicationSettings,
         diagnostics: &mut (dyn std::io::Write + Send),
     ) -> Result<DomainSide> {
-        let command = DomainCommand::try_parse_from(["domain", "--db", &self.options.rpsdb])
-            .map_err(|error| {
-                anyhow!("LOSAT internal error: the domain search's options: {error}")
-            })?;
-        let mut args: BlastpArgs = command.args.into_blastp_args()?;
-        // The options handle's E-value is the domain inclusion threshold; the query's lower case
-        // masks the domain search too (the query factory is the same).
-        // A threshold of 0 or less is NCBI's options error of the domain search, which comes after
-        // the domain database is opened (below): the check of its options runs where the search
-        // does.
+        // deltablast made the domain search's arguments (`DeltaOptions::domain`). A threshold of 0
+        // or less is NCBI's options error of the domain search, which comes after the domain
+        // database is opened (below): the check of its options runs where the search does.
         let ethresh = self.options.domain_inclusion_ethresh;
-        args.evalue = Some(if ethresh > 0.0 { ethresh } else { 10.0 });
-        args.lcase_masking = self.lcase_masking;
+        let mut args: BlastpArgs = (*self.options.domain).clone();
         args.matrix_search = Some(settings.matrix_search.clone());
         let mut resolved = args.check_options(diagnostics)?;
         let mut outputs = ReportOutputs {

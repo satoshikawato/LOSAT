@@ -1,11 +1,12 @@
 //! Command-line arguments for DELTABLAST (`losat deltablast`)
 
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Parser};
 use std::path::PathBuf;
 
-use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
+use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs, DeltaOptions};
 use crate::algorithm::psiblast::PsiblastArgs;
+use crate::algorithm::rpsblast::args::RpsblastArgs;
 use crate::blastinput::value_parsers::*;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/deltablast_args.cpp:44-120
@@ -292,10 +293,14 @@ impl DeltablastArgs {
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
         )?;
-        let delta = crate::algorithm::deltablast::DeltaOptions {
-            rpsdb: self.rpsdb.clone(),
+        let delta = DeltaOptions {
             domain_inclusion_ethresh: self.domain_inclusion_ethresh,
             show_domain_hits: self.show_domain_hits,
+            domain: Box::new(Self::domain_search_args(
+                &self.rpsdb,
+                self.domain_inclusion_ethresh,
+                self.lcase_masking,
+            )?),
         };
         let num_iterations = self.num_iterations;
         let psi = PsiblastArgs {
@@ -368,6 +373,29 @@ impl DeltablastArgs {
         if let Some(pssm) = args.psiblast_pssm.as_mut() {
             pssm.rounds = Some(u32::try_from(num_iterations).unwrap_or(0));
         }
+        Ok(args)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:195-215
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:53-78
+    /// The domain search's arguments: rpsblast's defaults (NCBI's RPS-BLAST options handle) on the
+    /// database `rpsdb`, whose E-value is the domain inclusion threshold, and the query's
+    /// lower-case masking (the domain search reads the query that round 1 reads). A threshold of 0
+    /// or less keeps the E-value 10 here: NCBI's options error comes after the domain database is
+    /// opened (`blastp::blast_engine::delta_hooks`).
+    fn domain_search_args(rpsdb: &str, ethresh: f64, lcase_masking: bool) -> Result<BlastpArgs> {
+        /// rpsblast's arguments with the database alone.
+        #[derive(Parser)]
+        struct DomainCommand {
+            #[command(flatten)]
+            args: RpsblastArgs,
+        }
+        let command = DomainCommand::try_parse_from(["domain", "--db", rpsdb]).map_err(|error| {
+            anyhow::anyhow!("LOSAT internal error: the domain search's options: {error}")
+        })?;
+        let mut args = command.args.into_blastp_args()?;
+        args.evalue = Some(if ethresh > 0.0 { ethresh } else { 10.0 });
+        args.lcase_masking = lcase_masking;
         Ok(args)
     }
 

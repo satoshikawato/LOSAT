@@ -475,9 +475,23 @@ pub struct BlastpArgs {
     /// blastp and psiblast.
     #[arg(skip)]
     pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
-    /// deltablast's options besides psiblast's (`algorithm::deltablast`); `None` for the others.
+    /// deltablast's options besides psiblast's (made by `algorithm::deltablast`); `None` for the
+    /// others.
     #[arg(skip)]
-    pub delta: Option<crate::algorithm::deltablast::DeltaOptions>,
+    pub delta: Option<DeltaOptions>,
+}
+
+/// deltablast's options besides psiblast's (`BlastpArgs::delta`), made by `algorithm::deltablast`
+/// and read by blastp's domain search (`blast_engine::delta_hooks`).
+#[derive(Debug, Clone)]
+pub struct DeltaOptions {
+    /// `-domain_inclusion_ethresh`: the E-value below which a domain hit joins the PSSM.
+    pub domain_inclusion_ethresh: f64,
+    /// `-show_domain_hits` (refused by name, `ncbi_app::args::refusal`: item PS13b).
+    pub show_domain_hits: bool,
+    /// The domain search's arguments: rpsblast's on `-rpsdb`, with the E-value of the domain
+    /// search and the query's lower-case masking.
+    pub domain: Box<BlastpArgs>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-402

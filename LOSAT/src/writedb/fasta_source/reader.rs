@@ -26,6 +26,7 @@ use crate::ncbi_str::{
 use crate::seqid::accguide::{identify_seq_id, parse_flags, SeqIdWarning, F_NUC, F_PROT};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::utils::byte_search::find_first;
 use crate::writedb::bioseq::SeqData;
 
 /// A warning of the reader, as NCBI posts it for a reader without a listener (neither
@@ -448,6 +449,9 @@ const BAD: u8 = 0;
 const SPACE: u8 = 1;
 const COMMENT: u8 = 2;
 const GAP: u8 = 3;
+/// The least residue value of the switch; the search finds residues by `Alphabet::is_residue`,
+/// which the tests check against it for every byte.
+#[cfg(test)]
 const RESIDUE_MIN: u8 = b'*';
 
 /// The character switch of `ParseDataLine` for protein (`fAssumeProt`) or nucleotide
@@ -491,6 +495,68 @@ const fn char_actions(protein: bool, parse_gaps: bool) -> [u8; 256] {
 const NUCLEOTIDE_GAP_ACTIONS: [u8; 256] = char_actions(false, true);
 const NUCLEOTIDE_ACTIONS: [u8; 256] = char_actions(false, false);
 const PROTEIN_ACTIONS: [u8; 256] = char_actions(true, false);
+
+/// The residues of a data line: those of protein input, of nucleotide input with `fParseGaps`
+/// (a hyphen is a gap) or of nucleotide input without it (a hyphen is a residue).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Alphabet {
+    Protein,
+    NucleotideGaps,
+    Nucleotide,
+}
+
+/// A letter of protein input, in either case (`char_actions`: every letter).
+const fn is_protein_letter(byte: u8) -> bool {
+    (byte & 0xdf).wrapping_sub(b'A') < 26
+}
+
+/// A letter of nucleotide input, in either case (`char_actions`: `ABCDGHKMNRSTUVWY`), by the
+/// ranges of their offsets from `A`: A-D, G-H, K, M-N, R-W and Y. Clearing bit 5 makes a lower
+/// case letter upper case and moves no other byte into `A`-`Z`.
+const fn is_nucleotide_letter(byte: u8) -> bool {
+    let offset = (byte & 0xdf).wrapping_sub(b'A');
+    (offset <= 3)
+        | (offset.wrapping_sub(6) <= 1)
+        | (offset == 10)
+        | (offset.wrapping_sub(12) <= 1)
+        | (offset.wrapping_sub(17) <= 5)
+        | (offset == 24)
+}
+
+impl Alphabet {
+    /// The character switch of the alphabet.
+    const fn actions(self) -> &'static [u8; 256] {
+        match self {
+            Alphabet::Protein => &PROTEIN_ACTIONS,
+            Alphabet::NucleotideGaps => &NUCLEOTIDE_GAP_ACTIONS,
+            Alphabet::Nucleotide => &NUCLEOTIDE_ACTIONS,
+        }
+    }
+
+    /// Whether the switch stores `byte` as a residue (`actions()[byte] >= RESIDUE_MIN`), by
+    /// arithmetic on the byte, which the search can test a block of bytes at a time
+    /// (`tests::residue_tests_match_the_tables` checks every byte).
+    const fn is_residue(self, byte: u8) -> bool {
+        match self {
+            Alphabet::Protein => is_protein_letter(byte) | (byte == b'*') | (byte == b'-'),
+            Alphabet::NucleotideGaps => is_nucleotide_letter(byte),
+            Alphabet::Nucleotide => is_nucleotide_letter(byte) | (byte == b'-'),
+        }
+    }
+
+    /// The number of residues that `s` starts with: the run that `ParseDataLine` stores one
+    /// residue at a time, found with one search (LOSAT's speed).
+    fn residue_run(self, s: &[u8]) -> usize {
+        let end = match self {
+            Alphabet::Protein => find_first(s, |byte| !Alphabet::Protein.is_residue(byte)),
+            Alphabet::NucleotideGaps => {
+                find_first(s, |byte| !Alphabet::NucleotideGaps.is_residue(byte))
+            }
+            Alphabet::Nucleotide => find_first(s, |byte| !Alphabet::Nucleotide.is_residue(byte)),
+        };
+        end.unwrap_or(s.len())
+    }
+}
 
 /// The state of the record being read (`ReadOneSeq` resets it).
 struct RecordState {
@@ -825,9 +891,7 @@ impl RecordState {
             if title_start < len {
                 let end = title_start
                     + 1
-                    + defline[title_start + 1..]
-                        .iter()
-                        .position(|&byte| byte < b' ')
+                    + find_first(&defline[title_start + 1..], |byte| byte < b' ')
                         .unwrap_or(len - title_start - 1);
                 self.titles.push(LineText {
                     text: defline[title_start..end].to_vec(),
@@ -968,13 +1032,14 @@ impl RecordState {
         self.check_data_line(s, line_number, warn)?;
 
         // `fParseGaps` is set only for nucleotide input (`ReaderFlags`).
-        let actions = if !self.is_nuc() {
-            &PROTEIN_ACTIONS
+        let alphabet = if !self.is_nuc() {
+            Alphabet::Protein
         } else if self.flags.parse_gaps {
-            &NUCLEOTIDE_GAP_ACTIONS
+            Alphabet::NucleotideGaps
         } else {
-            &NUCLEOTIDE_ACTIONS
+            Alphabet::Nucleotide
         };
+        let actions = alphabet.actions();
         let seq_data_length = self.seq_data.len() + s.len();
         self.bad_positions.clear();
         let mut pos = 0;
@@ -999,16 +1064,14 @@ impl RecordState {
                 _ => {
                     self.close_gap(pos == 0, seq_data_length, raw_length);
                     // The residues that follow are stored at once (LOSAT's speed: no gap
-                    // is open after the first one).
-                    let run = 1 + s[pos + 1..]
-                        .iter()
-                        .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
-                        .unwrap_or(s.len() - pos - 1);
+                    // is open after the first one). The switch stores a residue in upper case
+                    // (`tests::residue_tests_match_the_tables`).
+                    let run = alphabet.residue_run(&s[pos..]);
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data
-                        .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
+                        .extend(s[pos..pos + run].iter().map(u8::to_ascii_uppercase));
                     pos += run - 1;
                 }
             }
@@ -1668,3 +1731,7 @@ fn gap_mod_warnings(
         && !(evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED));
     specified_type || specified_evidence
 }
+
+#[cfg(test)]
+#[path = "reader_tests.rs"]
+mod tests;

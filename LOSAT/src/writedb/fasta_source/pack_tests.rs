@@ -214,3 +214,16 @@ fn ncbi8na_of_both_codings() {
     append_ncbi8na(&mut seq8na, b"ACGTUN");
     assert_eq!(seq8na, [1, 2, 4, 8, 8, 15]);
 }
+
+/// The scan's test of the best coding is `best_coding_iupacna` for every byte (the search finds
+/// the first byte a test holds for, `utils::byte_search`'s tests).
+#[test]
+fn the_scan_of_the_best_coding_is_the_table() {
+    for byte in 0..=u8::MAX {
+        assert_eq!(
+            is_ncbi2na_best(byte),
+            best_coding_iupacna(byte) == Coding::Ncbi2na,
+            "{byte:#04x}"
+        );
+    }
+}

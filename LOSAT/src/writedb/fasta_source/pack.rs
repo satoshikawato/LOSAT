@@ -2,6 +2,8 @@
 //! (`CDelta_ext::AddAndSplit`), and the conversions of the residues into NCBI2na,
 //! NCBI4na and NCBI8na (`c++/src/util/sequtil/`).
 
+use crate::utils::byte_search::find_first;
+
 /// The codings that `Pack` chooses for IUPACna residues without gaps.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Coding {
@@ -32,16 +34,14 @@ const fn best_coding_iupacna(residue: u8) -> Coding {
     }
 }
 
-/// 1 for the bytes whose best coding is NCBI4na (a table for the scan of `pack_iupacna`).
-const BEST_IS_NCBI4NA: [u8; 256] = {
-    let mut table = [0; 256];
-    let mut index = 0;
-    while index < 256 {
-        table[index] = matches!(best_coding_iupacna(index as u8), Coding::Ncbi4na) as u8;
-        index += 1;
-    }
-    table
-};
+/// Whether the best coding of `residue` is NCBI2na ([`best_coding_iupacna`]), by arithmetic on
+/// the byte, which the scan of `pack_iupacna` tests a block of residues at a time (the unit
+/// test checks every byte). Clearing bit 5 makes a lower case letter upper case and moves no
+/// other byte onto an upper case letter.
+const fn is_ncbi2na_best(residue: u8) -> bool {
+    let upper = residue & 0xdf;
+    (upper == b'A') | (upper == b'C') | (upper == b'G') | (upper == b'T') | (upper == b'U')
+}
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_shared.cpp:195-203
 /// The sums are made in 64 bits (NCBI's `TSeqPos` sum wraps for a length above
@@ -170,17 +170,17 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
     };
     let mut pos = 0;
     while pos < src.len() {
-        let wide = BEST_IS_NCBI4NA[src[pos] as usize];
-        let coding = if wide == 1 {
-            Coding::Ncbi4na
-        } else {
-            Coding::Ncbi2na
-        };
+        let coding = best_coding_iupacna(src[pos]);
         packer.add_boundary(pos as u32, Some(coding));
-        pos += 1 + src[pos + 1..]
-            .iter()
-            .position(|&residue| BEST_IS_NCBI4NA[residue as usize] != wide)
-            .unwrap_or(src.len() - pos - 1);
+        let narrow = coding == Coding::Ncbi2na;
+        // The run of residues of the same best coding, found with one search (LOSAT's speed).
+        let rest = &src[pos + 1..];
+        let run = if narrow {
+            find_first(rest, |residue| !is_ncbi2na_best(residue))
+        } else {
+            find_first(rest, is_ncbi2na_best)
+        };
+        pos += 1 + run.unwrap_or(rest.len());
     }
     packer.add_boundary(src.len() as u32, None);
 

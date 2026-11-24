@@ -11,6 +11,8 @@
 
 use std::io::Read;
 
+use crate::utils::byte_search::find_first;
+
 /// `m_BufferSize`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:433-446
@@ -52,11 +54,9 @@ pub(super) struct BufferedLineReader<R: Read> {
     line_number: u64,
 }
 
-/// The first `\n` or `\r` of `bytes`.
+/// The first `\n` or `\r` of `bytes`, found a block at a time (`utils::byte_search`).
 fn find_eol(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .iter()
-        .position(|&byte| byte == b'\n' || byte == b'\r')
+    find_first(bytes, |byte| (byte == b'\n') | (byte == b'\r'))
 }
 
 impl<R: Read> BufferedLineReader<R> {
@@ -260,3 +260,7 @@ impl<R: Read> BufferedLineReader<R> {
         self.line_number
     }
 }
+
+#[cfg(test)]
+#[path = "line_reader_tests.rs"]
+mod tests;

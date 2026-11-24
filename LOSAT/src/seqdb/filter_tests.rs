@@ -635,6 +635,28 @@ fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
 }
 
 #[test]
+fn a_sequence_whose_lines_hold_no_seqid_keeps_no_line_without_a_list() {
+    // tests/db_search/idlist (make_idlist.py `build_d1c1b`): ln's sequence 2 has one line, with
+    // no Seq-id, and sequences 1 and 3 have a line without one beside a line with one; lnn's
+    // sequence 0 has one line, with none. NCBI makes no Seq-align of a sequence whose lines hold
+    // no Seq-id, without a list too (line RG D1c-1c-b).
+    let idlist = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    for (name, seqtype, kept) in [
+        ("ln", SeqType::Protein, vec![true, true, false, true]),
+        ("lnn", SeqType::Nucleotide, vec![false, true, true]),
+    ] {
+        let db = SeqDb::open(idlist.join(name).to_str().unwrap(), seqtype).unwrap();
+        assert!(!db.drops_lineless_hits());
+        let read: Vec<bool> = (0..db.num_seqs() as u32)
+            .map(|ordinal| db.keeps_line(ordinal).unwrap())
+            .collect();
+        assert_eq!(read, kept, "{name}");
+        // The walk reads no string, so it reports no UTF8String.
+        assert!((0..db.num_seqs() as u32).all(|ordinal| !db.line_read(ordinal).unwrap().1));
+    }
+}
+
+#[test]
 fn every_negative_list_excludes_its_lineless_sequences_at_the_fetches() {
     // A negative seqid list keeps a line with an id that is neither a gi nor a ti nor listed.
     // prot_v4's sequences 14 (`gi|1414`) and 28 (`gnl|ti|123`) have one line, with a gi or a

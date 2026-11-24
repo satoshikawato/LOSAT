@@ -258,11 +258,6 @@ pub(super) fn subject_taxonomy(
 struct DatabaseReports<'a> {
     database: &'a BlastxDatabase,
     pairwise: &'a crate::report::pairwise::PairwiseDatabase,
-    /// A call of the library's batches after the first (`api::run_batches`, the arguments'
-    /// `first_query_ordinal`): the calls before searched with a database of their own, whose
-    /// loads the stop of a batch's prefetch here has no record of
-    /// (`common::database::PrefetchQueries::after_unrecorded_calls`).
-    unrecorded_calls: bool,
 }
 
 /// What `report_batches` reports: the checks of the options and of the inputs are done.
@@ -871,13 +866,12 @@ fn write_run(
                 search_options,
                 asks,
                 results,
-                queries,
+                (queries, queries_before),
                 query_scopes
                     .borrow()
                     .as_ref()
                     .map(|scopes| scopes.numbered_from(queries_before)),
-                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope)
-                    .after_unrecorded_calls(run.unrecorded_calls),
+                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope),
                 &mut *diagnostics,
             )?),
             None => None,
@@ -1227,7 +1221,8 @@ fn search_database(
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
     )?
-    .showing_gis(args.show_gis);
+    .showing_gis(args.show_gis)
+    .after_calls(args.first_query_ordinal > 0);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
@@ -1367,7 +1362,6 @@ fn search_database(
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,
-                unrecorded_calls: args.first_query_ordinal > 0,
             }),
             archive,
             // The search strategy file of LOSAT Web's run (`web_adapter::give_strategy`); the

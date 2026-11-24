@@ -23,6 +23,21 @@ fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
     assert_eq!(other.to_string(), "other");
 }
 
+// A refusal of a step where NCBI's search of the batch crashes fails the batch with the refusal
+// itself (exit status 1, its message unchanged), after the reports of the batches before
+// (`tests/tblastn_batch_refusal.rs`).
+#[test]
+fn a_refusal_after_the_batches_reports_fails_the_batch() {
+    let message = "TBLASTN: a refused step";
+    let refusal = batch_failure(anyhow::Error::new(ErrorAfterBatchReports(anyhow::anyhow!(
+        "{message}"
+    ))))
+    .expect("the batch's failure");
+    assert!(!refusal.is::<ErrorAfterBatchReports>());
+    assert!(refusal.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert_eq!(refusal.to_string(), message);
+}
+
 // NCBI 2.17.0 tblastn with `-searchsp` or `OLD_FSC` and `-subject` of three empty records
 // (env parity probe f_probe of 2026-11-12): the batch fails with NCBI's engine error.
 #[test]
@@ -46,7 +61,8 @@ fn a_short_average_subject_length_fails_the_batch_with_the_engine_error() {
 fn a_setup_count_of_zero_fails_the_batch_with_the_refusal() {
     let refusal = crate::algorithm::common::database::check_setup_count(100, 0, false, "TBLASTN")
         .expect_err("the refusal");
-    let failed = batch_failure(SetupRefusal(refusal).into()).expect("the batch's failure");
+    let failed =
+        batch_failure(ErrorAfterBatchReports(refusal).into()).expect("the batch's failure");
     assert!(failed.downcast_ref::<crate::cli::NativeError>().is_none());
     assert!(failed
         .to_string()

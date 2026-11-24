@@ -132,12 +132,12 @@ const TAG_OTHER_POINTER: u8 = 0x7f;
 pub(crate) const SEQUENCE_NUMBER: i32 = 16;
 pub(crate) const SET_NUMBER: i32 = 17;
 /// The first content byte of a REAL: the encoding bits (`eDecimalEncoding`) and the four special
-/// values of a REAL of one content byte.
+/// values of a REAL of one content byte (the binary writer's too, `asn_ber`).
 const REAL_ENCODING_MASK: u8 = 0xc0;
-const REAL_DECIMAL: u8 = 0x00;
-const REAL_PLUS_INFINITY: u8 = 0x40;
-const REAL_MINUS_INFINITY: u8 = 0x41;
-const REAL_NOT_A_NUMBER: u8 = 0x42;
+pub(crate) const REAL_DECIMAL: u8 = 0x00;
+pub(crate) const REAL_PLUS_INFINITY: u8 = 0x40;
+pub(crate) const REAL_MINUS_INFINITY: u8 = 0x41;
+pub(crate) const REAL_NOT_A_NUMBER: u8 = 0x42;
 const REAL_MINUS_ZERO: u8 = 0x43;
 /// `kMaxDoubleLength`.
 const MAX_DOUBLE_LENGTH: u64 = 256;

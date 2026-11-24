@@ -525,6 +525,7 @@ fn make_blastp_args() -> BlastpArgs {
         app: BlastpApp::Blastp,
         taxdb_setting: None,
         matrix_search: None,
+        write_verification: None,
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

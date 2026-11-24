@@ -8,12 +8,33 @@
 //! A typed reader recurses as the type nests; the types it is given nest a bounded number of
 //! levels but for a `Seq-loc` of `mix` and `equiv`, whose depth the typed read's limit bounds
 //! (`read::TYPED_MAX_DEPTH`). It reads (never skips) types that have neither a delayed member
-//! nor a hook of NCBI's classes (`super::hooks`).
+//! nor a hook of NCBI's classes (`super::hooks`). Each call names its type, so the XML stream's
+//! frames and tags of a named type (`TypedReader::begin_names`), of a list and of its elements
+//! (`Input::ARRAY_FRAMES`, `Input::element_frame`, `Input::end_element`) are those of the generic
+//! reader.
 
-use super::read::{alias_target, set_flag_error, Pointee, PostSink, TypedReader, NO_TYPE};
+use super::read::{
+    alias_target, is_missing_value, set_flag_error, Pointee, PostSink, TypedReader, NO_TYPE,
+};
 use super::{resolved, type_info, Kind, Member, Value, DELAYED};
 use crate::report::serial::asn_input::{Input, R};
 use crate::report::serial::object_frame::FrameKind;
+
+/// `$read` (an expression of the reader `$r`) in the named frames of the type `$ty`
+/// (`begin_names`: the XML stream's `ReadNamedType`, `Input::NAMED_TYPES`); the text and binary
+/// streams read it alone, as the code was before the XML stream (no closure: a closure's call
+/// left the reads of those streams outlined, +0.8 % instructions in makeblastdb `-mask_data`).
+macro_rules! in_names {
+    ($r:ident, $ty:expr, $read:expr) => {
+        if I::NAMED_TYPES {
+            let count = $r.begin_names($ty, false)?;
+            let result = $read;
+            $r.end_names(count, result)
+        } else {
+            $read
+        }
+    };
+}
 
 impl<I: Input, P: PostSink> TypedReader<I, P> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
@@ -30,12 +51,22 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         ty: u16,
         mut read: impl FnMut(&mut Self, usize, u16) -> R<()>,
     ) -> R<()> {
+        in_names!(self, ty, self.class_frame(ty, &mut read))
+    }
+
+    /// The class frame of `class` and its contents.
+    #[inline(always)]
+    fn class_frame(
+        &mut self,
+        ty: u16,
+        read: &mut impl FnMut(&mut Self, usize, u16) -> R<()>,
+    ) -> R<()> {
         let ty = alias_target(ty);
         let Kind::Sequence(span) = type_info(ty).kind else {
             unreachable!("{} is a SEQUENCE", type_info(ty).name())
         };
         self.push(FrameKind::Class, ty, false)?;
-        let result = self.class_contents(span.members(), &mut read);
+        let result = self.class_contents(span.members(), read);
         self.pop(result)
     }
 
@@ -75,7 +106,10 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             match self.member_pointer(member, false)? {
                 Pointee::Null => {}
                 Pointee::This => {
-                    if let Err(fail) = read(self, index, member.ty) {
+                    let result = read(self, index, member.ty);
+                    if I::MISSING_VALUES {
+                        Self::missing_value_or_error(result, member)?;
+                    } else if let Err(fail) = result {
                         return Err(set_flag_error(fail, member));
                     }
                 }
@@ -90,10 +124,35 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         Ok(pos)
     }
 
+    /// The result of the member `member` read in `ReadWithSetFlagMember` of a stream that throws
+    /// `eMissingValue` (`Input::MISSING_VALUES`): a missing value of an OPTIONAL or DEFAULT member
+    /// is taken, the member not set (`read::TypedReader::missing_value`); any other error is
+    /// rethrown (`set_flag_error`). The other streams test no missing value (`class_members`: a
+    /// branch on the const, so their code is the one it was before the XML stream).
+    #[inline(always)]
+    fn missing_value_or_error(result: R<()>, member: &Member) -> R<()> {
+        match result {
+            Err(fail) if member.is_ref() || !member.optional() || !is_missing_value(&fail) => {
+                Err(set_flag_error(fail, member))
+            }
+            _ => Ok(()),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1500
     /// The CHOICE `ty` (`ReadChoiceSimple`): `read` reads the value of the variant at `index`, of
     /// the type `variant_ty`.
     pub(crate) fn choice<T>(
+        &mut self,
+        ty: u16,
+        read: impl FnOnce(&mut Self, usize, u16) -> R<T>,
+    ) -> R<T> {
+        in_names!(self, ty, self.choice_frame(ty, read))
+    }
+
+    /// The choice frame of `choice` and its contents.
+    #[inline(always)]
+    fn choice_frame<T>(
         &mut self,
         ty: u16,
         read: impl FnOnce(&mut Self, usize, u16) -> R<T>,
@@ -148,16 +207,29 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         ty: u16,
         mut read: impl FnMut(&mut Self, Option<u16>) -> R<()>,
     ) -> R<()> {
+        in_names!(self, ty, self.list_frame(ty, &mut read))
+    }
+
+    /// The array frame of `list` (`Input::ARRAY_FRAMES`) and its contents.
+    #[inline(always)]
+    fn list_frame(
+        &mut self,
+        ty: u16,
+        read: &mut impl FnMut(&mut Self, Option<u16>) -> R<()>,
+    ) -> R<()> {
         let ty = alias_target(ty);
         let Kind::List { element, set, refs } = type_info(ty).kind else {
             unreachable!("{} is a SEQUENCE OF or SET OF", type_info(ty).name())
         };
+        if !I::ARRAY_FRAMES {
+            return self.list_contents(element, set, refs, read);
+        }
         self.push(FrameKind::Array, NO_TYPE, false)?;
-        let result = self.list_contents(element, set, refs, &mut read);
+        let result = self.list_contents(element, set, refs, read);
         self.pop(result)
     }
 
-    /// `BeginContainer`, the elements in their frame, `EndContainer`.
+    /// `BeginContainer`, the elements in their frame (`Input::element_frame`), `EndContainer`.
     #[inline(always)]
     fn list_contents(
         &mut self,
@@ -167,6 +239,10 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         read: &mut impl FnMut(&mut Self, Option<u16>) -> R<()>,
     ) -> R<()> {
         self.inp.begin_container(set)?;
+        if !I::element_frame(element) {
+            self.elements(element, refs, read)?;
+            return self.inp.end_container();
+        }
         self.push(FrameKind::ArrayElement, NO_TYPE, false)?;
         let result = self.elements(element, refs, read);
         self.pop(result)?;
@@ -195,6 +271,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                     self.end_pointer(result)?;
                 }
             }
+            self.inp.end_element()?;
         }
         Ok(())
     }
@@ -205,7 +282,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         let Kind::Integer(storage) = resolved(ty).kind else {
             unreachable!("{} is an INTEGER", type_info(ty).name())
         };
-        self.read_integer(storage)
+        in_names!(self, ty, self.read_integer(storage))
     }
 
     /// An ENUMERATED (or INTEGER with named values) of the type `ty`
@@ -215,7 +292,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         let Kind::Enumerated { integer, values } = resolved(ty).kind else {
             unreachable!("{} is an ENUMERATED", type_info(ty).name())
         };
-        self.enum_number(values.values(), integer, false)
+        in_names!(self, ty, self.enum_number(values.values(), integer, false))
     }
 
     /// A string of the type `ty`, with NCBI's posts (`ReadString`).
@@ -224,7 +301,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         let Kind::String(kind) = resolved(ty).kind else {
             unreachable!("{} is a string", type_info(ty).name())
         };
-        self.string(kind, false)
+        in_names!(self, ty, self.string(kind, false))
     }
 
     /// A BOOLEAN (`ReadBool`).

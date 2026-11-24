@@ -1,0 +1,4 @@
+# BLASTP 2.17.0+
+# Query: gapvalid TK-TMK letters 101-300 between 100 and 98 X
+# Database: tests/db_search/arch_sprot_nopsq
+# 0 hits found

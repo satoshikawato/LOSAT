@@ -1206,9 +1206,9 @@ pub fn verification_off(value: &str) -> bool {
 /// NCBI posts "member X is missing" and reads on with the member unset. The get check stops the
 /// getter of a member that is not set ("Attempt to get unassigned member"); off, the getter gives
 /// the member's default. Neither changes anything else: every input that NCBI reads without these
-/// errors gives the same output with every value (probes D3c-3d `probeA` and `probeB`, 48 inputs
-/// of every program with such a reader: the search programs, makeblastdb, makeprofiledb,
-/// blastdbcmd, the maskers and makembindex). Where NCBI's check
+/// errors gives the same output with every value (probes D3c-3d `probeA`, `probeB`, `probeC`:
+/// 58 inputs of every program with such a reader: the search programs, makeblastdb,
+/// makeprofiledb, blastdbcmd, the maskers and makembindex). Where NCBI's check
 /// stops a run, the same run with the check off goes on in ways LOSAT does not follow (an unset
 /// member that later code reads, another exception, a crash: makeblastdb `-input_type blastdb`
 /// ends by SIGABRT): LOSAT refuses the run there (`ReadVerification::refused`), where the check
@@ -1238,7 +1238,7 @@ impl ReadVerification {
         }
     }
 
-    /// What LOSAT refuses (a noun phrase, for "<it> is not supported by LOSAT's <program>") where
+    /// What LOSAT refuses (the noun phrase before "is not supported by LOSAT's PSIBLAST") where
     /// NCBI's check threw `exception` while it read `what` (an input: "a PSSM (-in_pssm)"), when
     /// the setting turns that check off: the variable and its value, with the input and what the
     /// check found. `None` for an exception of no check (`DataCheck::of`) and for a check that

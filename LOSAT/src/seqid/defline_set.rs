@@ -124,30 +124,27 @@ impl DeflineSet {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:956-1019
     /// The title of the Bioseq: the first definition line's title, then ` >` with the FASTA
     /// strings of the ids of each later one (joined by `|`) and its title.
+    /// Each line's part (NCBI's `oss`) is appended to the title as it is written.
     pub fn bioseq_title(&self) -> Vec<u8> {
         let mut title = Vec::new();
-        let mut first_defline = true;
-        for defline in &self.deflines {
-            let mut oss = Vec::new();
+        for (line, defline) in self.deflines.iter().enumerate() {
             if !title.is_empty() {
-                oss.push(b' ');
+                title.push(b' ');
             }
             let mut wrote_seqids = false;
-            if !first_defline {
+            if line > 0 {
                 for (at, id) in defline.ids.iter().enumerate() {
-                    oss.push(if at == 0 { b'>' } else { b'|' });
-                    fasta(id, &mut oss);
+                    title.push(if at == 0 { b'>' } else { b'|' });
+                    fasta(id, &mut title);
                     wrote_seqids = true;
                 }
             }
-            first_defline = false;
             if let Some(text) = &defline.title {
                 if wrote_seqids {
-                    oss.push(b' ');
+                    title.push(b' ');
                 }
-                oss.extend_from_slice(text);
+                title.extend_from_slice(text);
             }
-            title.extend_from_slice(&oss);
         }
         title
     }

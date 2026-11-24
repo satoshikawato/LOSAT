@@ -125,9 +125,19 @@
 //!   lends (`LOSAT_X_BXCLUTPOOL`), the stripes writing the `u16` offsets.
 //! - A reader batch searched whole (`-use_sw_tback`, or a `-db_hard_mask` walk that keeps a
 //!   sequence apart: `query_setup::searches_batch_whole`) takes the places of the units the split
-//!   would make of it (`query_setup::unit_places`), so that the batch flow searches no more letters
-//!   at a time than with the split's units, and one of more places than the threads (K under the
-//!   cap) with no other such batch. It is left the threads of its places (`whole_batch_threads`:
+//!   would make of it (`query_setup::unit_places`), so that the batch flow scans no more letters at
+//!   a time than with the split's units (a scan holds the lookup table and the diagonal tables of
+//!   its letters), and one of more places than the threads (K under the cap) with no other unit
+//!   scanning. It gives them back when its scan ends (`search::search_core`'s `scan_end`): its
+//!   batch end (the redo and the traceback) holds neither table and leaves the threads its redo
+//!   does not take to the next unit's scan, as the batch ends of the split's units ran beside the
+//!   scans of others. Held to the end of the search (line NP, M4b-3b fix round 6 alone), the
+//!   places let one batch be searched at a time where a batch takes all of them: q200k against
+//!   `ov_atha` with `-use_sw_tback` and `BATCH_SIZE` 40000 (4 places a batch) took 1.095 / 1.068
+//!   / 1.009 times the wall of the split's units at 4 / 8 / 16 threads, its threads idle at the
+//!   end of each batch's redo; given back at the end of the scan, 1.018 / 1.016 / 0.949 times
+//!   (fix round 8; ws node 1, 5 rounds, CPU time equal, max RSS 39.0 / 59.0 / 80.8 MB against the
+//!   split's 60.0 / 78.6 / 81.2). It is left the threads of its places (`whole_batch_threads`:
 //!   one per place without the cap, a unit's share under it, at most all of them). These threads
 //!   take its subjects as the flow's tasks, `LOSAT_X_BXCAPFILL`'s f tasks for each of them, and
 //!   no more threads than have f tasks (`flow_subjects_per_task`, `flow_threads`: each holds a
@@ -388,10 +398,10 @@ pub(crate) fn flow_unit_cap(
 /// places (`query_setup::unit_places`, more than one) is left on `pool`: those of its places, each
 /// standing for the threads a unit of one place is left (in the batch flow without the cap, one:
 /// such a unit is searched on its own thread; inside the capped batch flow, `unit_share`), and at
-/// most the pool's. The batch flow keeps the places searched at a time to the threads, or to K
-/// under the cap (`native.rs`, `x_flow`), so the batches searched whole side by side are left
-/// at most the pool's threads together, and one of more places than that, searched with no other
-/// unit of several places, is left all of them. Such a batch is one query chunk (NCBI splits no
+/// most the pool's. The batch flow keeps the places scanning at a time to the threads, or to K
+/// under the cap (`native.rs`, `x_flow`), so the batches scanned whole side by side are left
+/// at most the pool's threads together, and one of more places than that, scanned with no other
+/// unit scanning, is left all of them. Such a batch is one query chunk (NCBI splits no
 /// batch of several queries): the threads go to its subjects (`flow_subjects_per_task`,
 /// `flow_threads`) and the build of its lookup table (`build_parts`), as NCBI's threads share the
 /// subjects of the one batch it searches at a time. `None`: a unit of one place, whose schedule

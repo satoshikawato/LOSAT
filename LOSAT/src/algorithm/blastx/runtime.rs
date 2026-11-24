@@ -188,7 +188,9 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     // No NCBI counterpart (scheduling only, LOSAT_X_BXREDOFLOW): the form in which the composition
     // redo makes its matches ahead; it does not change any value NCBI computes.
     /// `None`: the switch's choice; `Some(true)` the flow, `Some(false)` the fork-join batches of
-    /// `=0`. A test's observer chooses each in one process (`runtime/kappa_batch_tests.rs`).
+    /// `=0`. A test's observer chooses each in one process (`runtime/kappa_batch_tests.rs`). Only
+    /// the pool's redo reads it, so it exists with the `parallel` feature alone.
+    #[cfg(feature = "parallel")]
     fn x_redo_flow(&self) -> Option<bool> {
         None
     }

@@ -11336,23 +11336,18 @@ fn search_query_batch<const UNGAPPED: bool>(
         fetched_utf8: fetched_utf8.first().map(|note| note.at),
     };
     // The preliminary pass over the subjects (`SubjectPasses::prelim_pass`); its error is the database's
-    // read error as it is, reported before the masks' read errors below. A window below 0 chooses the
-    // pass's instance with the word finder of `neg_window.rs` here, once, so that the subject and chunk
-    // loops of the other searches hold no test of it.
-    let prelim_lists = if neg_window != 0 {
-        passes.prelim_pass::<UNGAPPED, true>(split_prelim_lists, &lookup_tables)
-    } else {
-        passes.prelim_pass::<UNGAPPED, false>(split_prelim_lists, &lookup_tables)
-    }
-    .map_err(|error| {
-        database_search_error(
-            error,
-            first_batch,
-            reborrow_outputs(&mut outputs),
-            intro,
-            &shown,
-        )
-    })?;
+    // read error as it is, reported before the masks' read errors below.
+    let prelim_lists = passes
+        .prelim_pass::<UNGAPPED>(split_prelim_lists, &lookup_tables)
+        .map_err(|error| {
+            database_search_error(
+                error,
+                first_batch,
+                reborrow_outputs(&mut outputs),
+                intro,
+                &shown,
+            )
+        })?;
     // The first error of the database masks' reads (`db_mask_error`), as the preliminary stage's
     // read errors are reported (`database_search_error`).
     let db_mask_error = db_mask_error

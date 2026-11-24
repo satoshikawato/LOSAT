@@ -647,12 +647,12 @@ fn a_sequence_whose_lines_hold_no_seqid_keeps_no_line_without_a_list() {
     ] {
         let db = SeqDb::open(idlist.join(name).to_str().unwrap(), seqtype).unwrap();
         assert!(!db.drops_lineless_hits());
-        let read: Vec<bool> = (0..db.num_seqs() as u32)
+        let read: Vec<bool> = (0..db.num_seqs())
             .map(|ordinal| db.keeps_line(ordinal).unwrap())
             .collect();
         assert_eq!(read, kept, "{name}");
         // The walk reads no string, so it reports no UTF8String.
-        assert!((0..db.num_seqs() as u32).all(|ordinal| !db.line_read(ordinal).unwrap().1));
+        assert!((0..db.num_seqs()).all(|ordinal| !db.line_read(ordinal).unwrap().1));
     }
 }
 

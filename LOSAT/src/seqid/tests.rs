@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use super::ber::decode_full_set;
+use super::ber::{decode_full_set, decode_full_set_in};
 use super::defline_set::{alignment_line_id, compare, description_id, match_keys, Sic};
 use super::label::{bare, content, fasta, first_gi, format_label};
 use super::model::{
@@ -1743,4 +1743,62 @@ fn utf8_strings_read_with_the_member_of_ncbis_warning() {
     after[4] = 0xa7;
     assert!(decode_full_set(&after).unwrap_err().exception().is_some());
     assert_eq!(super::ber::utf8_string_path(&after), None);
+}
+
+/// `decode_full_set_in` over a set kept from other records gives what `decode_full_set` gives for
+/// each record alone: the 18S sample (lines with memberships, taxids and two Seq-ids), the review
+/// probe's record (a `general` id), a parsed `other` id with a UTF8String accession, a title and
+/// an id with replaced bytes, a line without a title and the empty record, read in order, in
+/// reverse and every one after every other; a record whose read fails (no Seq-id list, cut short)
+/// gives the error it gives alone, and the record read next still reads as it reads alone.
+#[test]
+fn decodes_over_a_kept_set_give_each_records_own_set() {
+    let mut records: Vec<Vec<u8>> = sample_18s().into_iter().map(|(_, record)| record).collect();
+    records.push(record_of(REVIEW_RECORD));
+    records.push(record_of("30803080a0801a0b70726f7465696e206f6e650000a1803080a9803080a1800c094e505f3030303030310000a38002010100000000000000000000a28002022586000000000000"));
+    records.push(vec![
+        0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x03, b'a', 0xe9, 0x7f, 0, 0, 0xa1, 0x80, 0x30,
+        0x80, 0xa0, 0x80, 0xa1, 0x80, 0x1a, 0x02, b'x', 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    // `local str "x"` without a title.
+    records.push(vec![
+        0x30, 0x80, 0x30, 0x80, 0xa1, 0x80, 0x30, 0x80, 0xa0, 0x80, 0xa1, 0x80, 0x1a, 0x01, b'x',
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    records.push(Vec::new());
+    let no_seqid = vec![
+        0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x01, b'x', 0, 0, 0, 0, 0, 0,
+    ];
+    let cut = records[0][..records[0].len() / 2].to_vec();
+    let alone: Vec<DeflineSet> = records
+        .iter()
+        .map(|record| decode_full_set(record).unwrap())
+        .collect();
+    assert!(alone
+        .iter()
+        .any(|set| set.deflines.iter().any(|line| line.title.is_none())));
+    assert!(alone.iter().any(|set| set.utf8));
+    let mut set = DeflineSet::default();
+    let mut read = |at: usize, set: &mut DeflineSet| {
+        decode_full_set_in(&records[at], set).unwrap();
+        assert_eq!(*set, alone[at], "record {at}");
+    };
+    let count = records.len();
+    for at in (0..count).chain((0..count).rev()) {
+        read(at, &mut set);
+    }
+    for first in 0..count {
+        for second in 0..count {
+            read(first, &mut set);
+            read(second, &mut set);
+        }
+    }
+    for failing in [&no_seqid, &cut] {
+        let want = decode_full_set(failing).unwrap_err();
+        for at in 0..count {
+            read(at, &mut set);
+            assert_eq!(decode_full_set_in(failing, &mut set), Err(want.clone()));
+            read(at, &mut set);
+        }
+    }
 }

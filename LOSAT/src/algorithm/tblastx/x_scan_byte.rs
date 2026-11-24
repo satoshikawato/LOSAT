@@ -1049,6 +1049,60 @@ unsafe fn copy_avx2_run(
     )
 }
 
+/// PROBE (exp/fx-copypf, line FX s5): the copy stage's prefetch distance in candidates, fixed at
+/// build time (LOSAT_FXCOPYPF_BUILD, a digit; 0 or unset = dev's: none): 1 = 4, 2 = 8, 3 = 16.
+const X_FX_COPYPF: usize = match option_env!("LOSAT_FXCOPYPF_BUILD") {
+    Some(v) => match v.as_bytes()[0] {
+        b'1' => 4,
+        b'2' => 8,
+        b'3' => 16,
+        _ => 0,
+    },
+    None => 0,
+};
+
+/// PROBE (LOSAT_FXCOPYPF_BUILD >= 1): at candidate `i` of the block, asks for the backbone cell of
+/// candidate `i + 2D` and, from the cell of candidate `i + D` (read now; its line was asked for D
+/// candidates before), the first line of that cell's run in the overflow array, or the cell itself
+/// for a cell of up to `AA_HITS_PER_CELL` hits (chosen with a mask, no branch). A prefetch does not
+/// access memory architecturally, so the stage writes what it wrote before.
+///
+/// SAFETY: `cand[..n]` was written by the candidate stage and holds word positions of the block,
+/// whose `index` entries are backbone cells of `table` (as for `copy_block`).
+#[inline(always)]
+unsafe fn copy_ahead(table: &Table, cand: *const u16, index: *const u16, i: usize, n: usize) {
+    if X_FX_COPYPF == 0 {
+        return;
+    }
+    let far = i + 2 * X_FX_COPYPF;
+    if far < n {
+        let k = *cand.add(far) as usize;
+        x_prefetch(table.backbone.add(*index.add(k) as usize).cast::<u8>());
+    }
+    let near = i + X_FX_COPYPF;
+    if near < n {
+        let k = *cand.add(near) as usize;
+        let cell = table.backbone.add(*index.add(k) as usize);
+        let big = (*cell).num_used as usize > AA_HITS_PER_CELL;
+        let run = table.overflow.wrapping_add((*cell).cursor()) as usize;
+        let at = cell as usize;
+        let p = at ^ ((run ^ at) & 0usize.wrapping_sub(big as usize));
+        x_prefetch(p as *const u8);
+    }
+}
+
+/// PROBE: a T0 prefetch (x86_64; nothing elsewhere).
+#[inline(always)]
+fn x_prefetch(p: *const u8) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: `_mm_prefetch` needs only SSE, which every x86_64 target has, and never faults.
+    unsafe {
+        core::arch::x86_64::_mm_prefetch::<{ core::arch::x86_64::_MM_HINT_T0 }>(p as *const i8);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = p;
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:91-123
 /// The copy stage for the candidates `cand[first..n]` of the block that starts at `block_first`
 /// (NCBI's statements above, in NCBI's order): the new total, and the subject offset of the word
@@ -1086,6 +1140,7 @@ unsafe fn copy_block<const AVX2: bool, const RUN: bool>(
             // reloaded the subject offset from one for every candidate), and its copy does not
             // test the hit count again.
             let (k, cell, numhits) = loop {
+                copy_ahead(table, cand, index, i, n);
                 let k = *cand.add(i) as usize;
                 let cell = table.backbone.add(*index.add(k) as usize);
                 let numhits = (*cell).num_used;
@@ -1108,6 +1163,7 @@ unsafe fn copy_block<const AVX2: bool, const RUN: bool>(
             write_chain::<AVX2, RUN>(table, d, cell, numhits as usize, s_off);
             totalhits += numhits;
         } else {
+            copy_ahead(table, cand, index, i, n);
             let k = *cand.add(i) as usize;
             let cell = table.backbone.add(*index.add(k) as usize);
             let numhits = (*cell).num_used;

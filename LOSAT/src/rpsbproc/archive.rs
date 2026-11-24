@@ -25,8 +25,9 @@
 //! the application start rejects in a file and in `NCBI_CONFIG__SERIAL__WRONG_CHARS_READ`); a
 //! UTF8String keeps its bytes. The grammar passes the frames of NCBI's object stack down to the
 //! reader of each value (`asn_text_reader::Frame`: the member, variant or element that holds it),
-//! which give the trace of its strings and the frames below which the typed reader reads. The
-//! posts of an object come before rpsbproc uses it (`ArchiveRead`).
+//! which give the trace of its strings and the frames below which the typed reader reads. Each
+//! post is written when it is made (`ArchiveStream::posts`), as NCBI writes it, so the posts of
+//! an object come before rpsbproc uses it and none of them is held.
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:291-308
 
@@ -36,8 +37,9 @@ use crate::report::serial::asn_input::{Input, Names, TextInput};
 use crate::report::serial::asn_text_reader::{
     AsnTextError, AsnTextErrorKind, Frame, Reader, Result, StreamSource,
 };
-use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
+use crate::report::serial::asn_types::read::{ObjectStream, Post, PostSink, ReadError};
 use crate::report::serial::asn_types::{self, table::named};
+use crate::report::serial::encoder::ReplacedChar;
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -259,21 +261,20 @@ pub(crate) struct Mask {
 /// The objects of one input stream: the hand grammar below over the lexical reader of the typed
 /// reader's input (`ObjectStream::input_mut`), which reads the values that the grammar does not
 /// take (`typed_member`).
-pub(crate) struct ArchiveStream<R: Read> {
+pub(crate) struct ArchiveStream<R: Read, P: PostSink> {
     objects: ObjectStream<TextInput<StreamSource<R>>>,
-    /// What NCBI's reader posts while it reads the object, in order: the hand grammar's posts
-    /// (`Trail::replaced`) and the typed reader's.
-    posts: Vec<Post>,
+    /// Where what NCBI's reader posts while it reads an object goes when it is posted: the hand
+    /// grammar's posts (`Reader::string`) and the typed reader's (rpsbproc's report, which
+    /// writes each).
+    posts: P,
     done: bool,
 }
 
 /// What reading one object gives (`ArchiveStream::next_archive`): the object, the end of the input
-/// (`Ok(None)`) or LOSAT's refusal, and the messages that NCBI's reader posts while it reads the
-/// object, which come before rpsbproc uses it (also when the object then fails to read).
-pub(crate) type ArchiveRead = (
-    std::result::Result<Option<Archive>, AsnTextError>,
-    Vec<Post>,
-);
+/// (`Ok(None)`) or LOSAT's refusal. The messages that NCBI's reader posts while it reads the
+/// object went to the stream's posts (`ArchiveStream::posts`) as they were posted, before
+/// rpsbproc uses it (also when the object then fails to read).
+pub(crate) type ArchiveRead = std::result::Result<Option<Archive>, AsnTextError>;
 
 /// The name of the root type (`SkipFileHeader`'s check, the first name of the stack traces).
 fn blast4_archive() -> &'static str {
@@ -487,17 +488,23 @@ const SEQ_ALIGN_TYPE: [(&str, i32); 6] = [
     ("other", 255),
 ];
 
-impl<R: Read> ArchiveStream<R> {
+impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     /// The objects of `input`, whose first bytes `first` were already taken from it (the bytes
-    /// after the white space that rpsbproc skips to tell ASN.1 from XML).
-    pub(crate) fn new(input: R, first: &[u8]) -> Self {
+    /// after the white space that rpsbproc skips to tell ASN.1 from XML), their posts given to
+    /// `posts` as they are posted.
+    pub(crate) fn new(input: R, first: &[u8], posts: P) -> Self {
         let mut objects = ObjectStream::text(StreamSource::new(input, first), Names::ARCHIVE);
-        objects.input_mut().r.trail.root = blast4_archive();
+        objects.input_mut().r.root = blast4_archive();
         ArchiveStream {
             objects,
-            posts: Vec::new(),
+            posts,
             done: false,
         }
+    }
+
+    /// Where the posts go (rpsbproc's report, between the objects).
+    pub(crate) fn posts(&mut self) -> &mut P {
+        &mut self.posts
     }
 
     /// The lexical reader.
@@ -518,14 +525,14 @@ impl<R: Read> ArchiveStream<R> {
         self.r().src.fill_one_byte_at_a_time();
     }
 
-    /// The next object, with the messages posted while it was read: `Ok(None)` when NCBI's
-    /// reader fails at it (the end of the input), the object when it reads, or the refusal of
-    /// what LOSAT does not read in it.
+    /// The next object, its messages given to the posts as they were posted: `Ok(None)` when
+    /// NCBI's reader fails at it (the end of the input), the object when it reads, or the refusal
+    /// of what LOSAT does not read in it.
     pub(crate) fn next_archive(&mut self) -> ArchiveRead {
         if self.done {
-            return (Ok(None), Vec::new());
+            return Ok(None);
         }
-        let result = match self.archive_object() {
+        match self.archive_object() {
             Ok(archive) => Ok(Some(archive)),
             Err(error) => {
                 self.done = true;
@@ -534,15 +541,7 @@ impl<R: Read> ArchiveStream<R> {
                     AsnTextErrorKind::Unsupported => Err(error),
                 }
             }
-        };
-        self.take_replaced();
-        (result, std::mem::take(&mut self.posts))
-    }
-
-    /// The posts of the hand grammar's strings so far, after those posted before them.
-    fn take_replaced(&mut self) {
-        let replaced = std::mem::take(&mut self.r().trail.replaced);
-        self.posts.extend(replaced.into_iter().map(Post::BadChar));
+        }
     }
 
     /// The value of the member or variant of the frame `at`, of the SEQUENCE or CHOICE `parent` of
@@ -554,17 +553,20 @@ impl<R: Read> ArchiveStream<R> {
     #[cold]
     #[inline(never)]
     fn typed_member(&mut self, parent: u16, at: &Frame<'_>) -> Result<()> {
-        self.take_replaced();
         let name = at.name().expect("a member or variant is being read");
         let ty = asn_types::members(parent)[asn_types::member_index(parent, name)].ty;
-        let root = self.r().trail.root;
-        let (value, posts) = self.objects.read_value(ty, root, &at.steps());
-        self.posts.extend(posts);
-        match value {
-            Ok(_) => Ok(()),
+        let root = self.r().root;
+        match self
+            .objects
+            .read_value(ty, root, &at.steps(), &mut self.posts)
+        {
+            Ok(()) => Ok(()),
             Err(ReadError::Unsupported(what)) => Err(self.r().not_supported(&format!(
                 "an archive value that LOSAT's reader does not read ({what})"
             ))),
+            // Only the kind of this error is read: `next_archive` ends the input at a format
+            // error without a message, as NCBI's rpsbproc ends it at any exception of its reader
+            // (`catch (...)`), so this text is never shown.
             Err(_) => Err(self.r().error("the typed reader failed")),
         }
     }
@@ -573,8 +575,30 @@ impl<R: Read> ArchiveStream<R> {
         self.r().real()
     }
 
+    /// The reader and where its posts go, for a value whose strings post as they are read.
+    #[inline]
+    fn reader_and_posts(
+        &mut self,
+    ) -> (&mut Reader<StreamSource<R>>, impl FnMut(ReplacedChar) + '_) {
+        let ArchiveStream { objects, posts, .. } = self;
+        (&mut objects.input_mut().r, move |replaced| {
+            posts.post(Post::BadChar(replaced))
+        })
+    }
+
     fn string(&mut self, at: &Frame<'_>) -> Result<Vec<u8>> {
-        self.r().string(at)
+        let (r, mut post) = self.reader_and_posts();
+        r.string(at, &mut post)
+    }
+
+    fn seq_id(&mut self, at: &Frame<'_>) -> Result<ParsedSeqId> {
+        let (r, mut post) = self.reader_and_posts();
+        r.seq_id(at, &mut post)
+    }
+
+    fn object_id(&mut self, at: &Frame<'_>) -> Result<ObjectId> {
+        let (r, mut post) = self.reader_and_posts();
+        r.object_id(at, &mut post)
     }
 
     /// `ReadFileHeader` and the type check of the root reader, then the object. Each object is
@@ -586,7 +610,7 @@ impl<R: Read> ArchiveStream<R> {
         self.objects.input_mut().new_object();
         let r = self.r();
         let id = r.file_header()?;
-        if !id.is_empty() && r.bytes(id) != r.trail.root.as_bytes() {
+        if !id.is_empty() && r.bytes(id) != r.root.as_bytes() {
             return Err(r.error("incompatible type"));
         }
         let mut members = r.begin_members(&Frame::ROOT, &["request", "results", "messages"])?;
@@ -902,7 +926,7 @@ impl<R: Read> ArchiveStream<R> {
                 0 => from = Some(self.r().uint4()?),
                 1 => to = Some(self.r().uint4()?),
                 2 => strand = Some(self.r().enumerated(&NA_STRAND)?.1),
-                3 => id = Some(self.r().seq_id(members.at())?),
+                3 => id = Some(self.seq_id(members.at())?),
                 _ => self.typed_member(named::SEQ_INTERVAL, members.at())?,
             }
         }
@@ -941,7 +965,7 @@ impl<R: Read> ArchiveStream<R> {
                     while self.r().next_item(&mut items)? {
                         match index {
                             2 => {
-                                self.r().seq_id(items.at())?;
+                                self.seq_id(items.at())?;
                             }
                             3 | 5 => {
                                 self.r().uint4()?;
@@ -1002,7 +1026,7 @@ impl<R: Read> ArchiveStream<R> {
                         let mut id_items = self.r().begin_list(members.at())?;
                         let mut count = 0usize;
                         while self.r().next_item(&mut id_items)? {
-                            let id = self.r().seq_id(id_items.at())?;
+                            let id = self.seq_id(id_items.at())?;
                             if count == 0 && matches!(align.query_id, QueryRowId::Missing) {
                                 align.query_id = QueryRowId::Id(id);
                             } else if count == 1 && first {
@@ -1082,8 +1106,8 @@ impl<R: Read> ArchiveStream<R> {
                 self.r().null()?;
                 (StdLoc::Null, None)
             }
-            "empty" => (StdLoc::Empty, keep(self.r().seq_id(&variant)?)),
-            "whole" => (StdLoc::Whole, keep(self.r().seq_id(&variant)?)),
+            "empty" => (StdLoc::Empty, keep(self.seq_id(&variant)?)),
+            "whole" => (StdLoc::Whole, keep(self.seq_id(&variant)?)),
             "int" => {
                 let Interval {
                     from,
@@ -1101,7 +1125,7 @@ impl<R: Read> ArchiveStream<R> {
                     match index {
                         0 => point = Some(self.r().uint4()?),
                         1 => strand = Some(self.r().enumerated(&NA_STRAND)?.1),
-                        2 => id = Some(self.r().seq_id(members.at())?),
+                        2 => id = Some(self.seq_id(members.at())?),
                         _ => self.typed_member(named::SEQ_POINT, members.at())?,
                     }
                 }
@@ -1151,10 +1175,11 @@ impl<R: Read> ArchiveStream<R> {
             let at = members.at();
             match index {
                 0 => {
-                    self.r().object_id(at)?;
+                    self.object_id(at)?;
                 }
                 1 => {
-                    self.r().dbtag(at)?;
+                    let (r, mut post) = self.reader_and_posts();
+                    r.dbtag(at, &mut post)?;
                 }
                 2 => {
                     self.r().int4()?;
@@ -1166,7 +1191,8 @@ impl<R: Read> ArchiveStream<R> {
                     self.string(at)?;
                 }
                 5 => {
-                    self.r().date(at)?;
+                    let (r, mut post) = self.reader_and_posts();
+                    r.date(at, &mut post)?;
                 }
                 6 => {
                     let mut ignored = Query::default();
@@ -1206,7 +1232,7 @@ impl<R: Read> ArchiveStream<R> {
                 0 => {
                     let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        let id = self.r().seq_id(items.at())?;
+                        let id = self.seq_id(items.at())?;
                         query.ids.push(id);
                     }
                     self.r().end_block()?;
@@ -1284,7 +1310,7 @@ impl<R: Read> ArchiveStream<R> {
                 }
                 1 => {
                     type_seen = true;
-                    let id = self.r().object_id(members.at())?;
+                    let id = self.object_id(members.at())?;
                     fasta_reader =
                         top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
                 }
@@ -1317,7 +1343,7 @@ impl<R: Read> ArchiveStream<R> {
             match index {
                 0 => {
                     label = true;
-                    let id = self.r().object_id(members.at())?;
+                    let id = self.object_id(members.at())?;
                     defline = matches!(id, ObjectId::Str(text) if text == b"DefLine");
                 }
                 1 => {
@@ -1539,7 +1565,7 @@ impl<R: Read> ArchiveStream<R> {
                 5 => {
                     let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        self.r().object_id(items.at())?;
+                        self.object_id(items.at())?;
                     }
                     self.r().end_block()?;
                 }
@@ -1561,7 +1587,7 @@ impl<R: Read> ArchiveStream<R> {
         let mut value_seen = false;
         while let Some(index) = self.r().next_member(&mut members)? {
             if index == 0 {
-                name = match self.r().object_id(members.at())? {
+                name = match self.object_id(members.at())? {
                     ObjectId::Str(text) => match text.as_slice() {
                         b"score" => Some("score"),
                         b"e_value" => Some("e_value"),
@@ -1640,7 +1666,7 @@ impl<R: Read> ArchiveStream<R> {
                 2 => {
                     let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        let id = self.r().seq_id(items.at())?;
+                        let id = self.seq_id(items.at())?;
                         seg.ids.push(id);
                     }
                     self.r().end_block()?;

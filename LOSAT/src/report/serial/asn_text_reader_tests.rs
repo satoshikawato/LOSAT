@@ -88,7 +88,7 @@ fn value<S: AsnSource>(
                 note(r, log, format!("string {}", show(&text)));
             }
             1 => {
-                let text = r.string(&Frame::ROOT)?;
+                let text = r.string(&Frame::ROOT, &mut noted)?;
                 note(r, log, format!("visible {}", show(&text)));
             }
             n => {
@@ -197,23 +197,34 @@ fn skip_value<S: AsnSource>(r: &mut Reader<S>) -> Result<()> {
     }
 }
 
-/// The posts that the strings read so far noted (`Trail::replaced`): the byte, its position and
+thread_local! {
+    /// The posts that the strings of this thread's walk gave (`noted`).
+    static NOTED: std::cell::RefCell<Vec<ReplacedChar>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Where a walk's strings give their posts (`Reader::string`): they are kept for `replaced`.
+fn noted(post: ReplacedChar) {
+    NOTED.with(|noted| noted.borrow_mut().push(post));
+}
+
+/// The posts that the strings read so far gave (`noted`): the trace, the byte, its position and
 /// the piece of each.
-fn replaced<S: AsnSource>(r: &Reader<S>) -> String {
-    let posts: Vec<String> = r
-        .trail
-        .replaced
-        .iter()
-        .map(|post| {
-            format!(
-                "{} {:x} {} {}",
-                post.trace,
-                post.byte,
-                post.position,
-                show(&post.string)
-            )
-        })
-        .collect();
+fn replaced() -> String {
+    let posts: Vec<String> = NOTED.with(|noted| {
+        noted
+            .borrow()
+            .iter()
+            .map(|post| {
+                format!(
+                    "{} {:x} {} {}",
+                    post.trace,
+                    post.byte,
+                    post.position,
+                    show(&post.string)
+                )
+            })
+            .collect()
+    });
     format!("{posts:?}")
 }
 
@@ -230,13 +241,14 @@ fn objects<S: AsnSource>(r: &mut Reader<S>, log: &mut Vec<String>) -> Result<()>
 
 /// The walk of `src`: every step, and the error and the posts of its strings it ended with.
 fn walk<S: AsnSource>(src: S) -> Vec<String> {
+    NOTED.with(|noted| noted.borrow_mut().clear());
     let mut r = Reader::new(src, "text", "test reader");
     let mut log = Vec::new();
     let error = objects(&mut r, &mut log).expect_err("a walk ends with an error");
     note(
         &r,
         &mut log,
-        format!("error {error:?} replaced {}", replaced(&r)),
+        format!("error {error:?} replaced {}", replaced()),
     );
     log
 }
@@ -395,7 +407,7 @@ fn apply<S: AsnSource>(
         "int8" => format!("int8 {}", r.int8()?),
         "string" => format!("string {}", show(&r.utf8_string()?)),
         "visible" => {
-            let text = in_frames(levels, &Frame::ROOT, |at| r.string(at))?;
+            let text = in_frames(levels, &Frame::ROOT, |at| r.string(at, &mut noted))?;
             format!("visible {}", show(&text))
         }
         "id" => match r.member_or_tag()? {
@@ -495,22 +507,23 @@ fn apply<S: AsnSource>(
 }
 
 /// The steps of the operations `ops` on `src` (as `walk`), up to the first error, with the
-/// reader's trail rooted at `Root`.
+/// reader's hand grammar rooted at `Root`.
 fn literal_walk<S: AsnSource>(src: S, ops: &'static str) -> Vec<String> {
+    NOTED.with(|noted| noted.borrow_mut().clear());
     let mut r = Reader::new(src, "text", "test reader");
-    r.trail.root = "Root";
+    r.root = "Root";
     let (mut blocks, mut levels, mut log) = (Vec::new(), Vec::new(), Vec::new());
     for op in ops.split_whitespace() {
         match apply(&mut r, op, &mut blocks, &mut levels) {
             Ok(what) => note(&r, &mut log, what),
             Err(error) => {
-                let what = format!("error {error:?} replaced {}", replaced(&r));
+                let what = format!("error {error:?} replaced {}", replaced());
                 note(&r, &mut log, what);
                 return log;
             }
         }
     }
-    note(&r, &mut log, format!("end replaced {}", replaced(&r)));
+    note(&r, &mut log, format!("end replaced {}", replaced()));
     log
 }
 
@@ -521,11 +534,11 @@ fn literal_walk<S: AsnSource>(src: S, ops: &'static str) -> Vec<String> {
 /// NCBI's: `GetInt4` and `GetUint4` take the byte after a sign, the byte that is no digit and the
 /// digit that overflows before they throw), and the readers of members, variants, enumerated values, pointer
 /// types, type names and lists. Each step is `what was read @position:line`; the last also shows
-/// the posts that the strings noted (`Trail::replaced`: trace, byte, position, piece). Since item
+/// the posts that the strings gave (`noted`: trace, byte, position, piece). Since item
 /// 9(a) of line RG-KB (a VisibleString of a hand grammar reads a byte outside 0x20..0x7E as `#`
 /// with its post, where it was refused, and a UTF8String is read by `visible_string`, which leaves
 /// the position of an unended string at the start of its last run) the walks of those strings and
-/// of the trail are this reader's.
+/// of their frames are this reader's.
 const LITERAL_WALKS: &[(&[u8], &str, &[&str])] = &[
     (
         b"{\n1,\r2,\r\n3,\n\r4,\r\r5,\t\n 6 }",

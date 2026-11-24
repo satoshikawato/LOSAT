@@ -14,7 +14,7 @@
 //! `std::bad_alloc` or another `std::exception` of a string's reserve, or LOSAT's refusal of what
 //! NCBI's process may or may not read by the host's memory. What a primitive posts while it reads
 //! (a byte of a VisibleString read as `#`, a UTF8String tag for a VisibleString) is handed to the
-//! caller in order (`StringPost`), which adds the stack trace that NCBI's message names.
+//! caller as it is made (`StringPost`), which adds the stack trace that NCBI's message names.
 
 use super::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, EnumWord, MemberId, NcbiThrow, PointerType, Reader,
@@ -263,9 +263,9 @@ fn host_dependent(length: u64, bytes: u64, what: Reserve, names: Names) -> Fail 
     ))
 }
 
-/// What reading a string posts, in the order NCBI posts it.
+/// What reading a string posts, given to the caller when NCBI posts it.
 #[derive(Debug)]
-pub(crate) enum StringPost {
+pub(crate) enum StringPost<'a> {
     /// The warning of a UTF8String tag for a VisibleString (binary, `ExpectStringTag`,
     /// objistrasnb.cpp:296-305; [`utf8_tag_message`]).
     Utf8Tag,
@@ -274,7 +274,7 @@ pub(crate) enum StringPost {
     BadChar {
         position: StreamPosition,
         byte: u8,
-        string: Vec<u8>,
+        string: &'a [u8],
     },
 }
 
@@ -402,15 +402,16 @@ pub(crate) trait Input {
     fn read_real(&mut self) -> R<f64>;
     fn skip_real(&mut self) -> R<()>;
     /// `ReadString` (`ReadStringStore`) of a string of `kind`, appended to `out`, with what NCBI
-    /// posts while it reads it in `posts` (also when it then fails).
+    /// posts while it reads it given to `posts` when it is posted (also when the read then
+    /// fails).
     fn read_string(
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()>;
     /// `SkipString` (`SkipStringStore`).
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()>;
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()>;
     /// An OCTET STRING (`ReadBytes` of a `vector<char>`), `SkipByteBlock`.
     fn read_octets(&mut self) -> R<Vec<u8>>;
     fn skip_octets(&mut self) -> R<()>;
@@ -808,12 +809,12 @@ impl<S: AsnSource> Input for TextInput<S> {
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         self.string(kind, Some(out), posts)
     }
 
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         self.string(kind, None, posts)
     }
 
@@ -930,7 +931,7 @@ impl<S: AsnSource> TextInput<S> {
         &mut self,
         kind: StringKind,
         out: Option<&mut Vec<u8>>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         let skip = out.is_none();
         let mut none = Vec::new();
@@ -940,10 +941,10 @@ impl<S: AsnSource> TextInput<S> {
             kind != StringKind::Utf8,
             skip,
             &mut |_, line, byte, piece| {
-                posts.push(StringPost::BadChar {
+                posts(StringPost::BadChar {
                     position: StreamPosition::Line(line as u64),
                     byte,
-                    string: piece.to_vec(),
+                    string: piece,
                 })
             },
         );

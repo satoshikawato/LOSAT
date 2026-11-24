@@ -98,6 +98,25 @@ impl Post {
     }
 }
 
+/// Where a reader's posts go when they are made, in order: NCBI posts each message
+/// (`ERR_POST_X`) while it reads, so a sink that writes it (rpsbproc's report) holds none of
+/// them; a list (`Vec<Post>`) keeps them for a caller that writes them after the object.
+pub(crate) trait PostSink {
+    fn post(&mut self, post: Post);
+}
+
+impl PostSink for Vec<Post> {
+    fn post(&mut self, post: Post) {
+        self.push(post);
+    }
+}
+
+impl<T: PostSink + ?Sized> PostSink for &mut T {
+    fn post(&mut self, post: Post) {
+        (**self).post(post);
+    }
+}
+
 /// Why NCBI's reader stops: the class of what it throws.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ReadError {
@@ -234,8 +253,9 @@ pub(super) fn read_ber_value(bytes: &[u8], ty: u16) -> Read<Value> {
     let mut reader = TypedReader::new(BerReader::new(SliceSource::new(bytes), Names::DELAYED));
     // The read that kept the bytes met their UTF8String tags (and posted for the first).
     reader.utf8_once = Utf8TagOnce::POSTED;
-    let value = reader.value(ty, false).map_err(ReadError::from);
-    (value, reader.posts)
+    let mut posts = Vec::new();
+    let value = reader.value(ty, false, &mut posts).map_err(ReadError::from);
+    (value, posts)
 }
 
 /// Objects one after another from one input (`ObjectStream::read_object`), each read by a new
@@ -272,24 +292,28 @@ impl<I: Input> ObjectStream<I> {
         reader.inp.new_object();
         reader.frames.clear();
         reader.open.clear();
-        let value = reader.document(root).map_err(ReadError::from);
-        (value, std::mem::take(&mut reader.posts))
+        let mut posts = Vec::new();
+        let value = reader.document(root, &mut posts).map_err(ReadError::from);
+        (value, posts)
     }
 
     /// One value of the type `ty` at the stream's position, inside an object that a hand grammar
-    /// reads over the same input (rpsbproc's archive reader, `rpsbproc::archive`), with the
-    /// messages posted. NCBI reads the whole object with its typed reader; the value is read as
-    /// that reader reads it, below the frames of `root` (the object's named frame) and of `steps`
-    /// (a member or variant frame for each name, an element frame for each `E`), which its posts'
-    /// stack traces name. The frames of the classes and containers between them (which show in
-    /// no trace) are not there: a failure that leaves the value ends the object, whose reader
-    /// only asks whether it is LOSAT's refusal (`ReadError::Unsupported`).
+    /// reads over the same input (rpsbproc's archive reader, `rpsbproc::archive`), which does not
+    /// use it, its messages given to `posts` as they are posted. NCBI reads the whole object with
+    /// its typed reader; the value is read as that reader reads it, below the frames of `root`
+    /// (the object's named frame) and of `steps` (a member or variant frame for each name, an
+    /// element frame for each `E`), which its posts' stack traces name, and is not kept
+    /// (`TypedReader::keep`: only the values that a hook reads are). The frames of the classes
+    /// and containers between them (which show in no trace) are not there: a failure that leaves
+    /// the value ends the object, whose reader only asks whether it is LOSAT's refusal
+    /// (`ReadError::Unsupported`).
     pub(crate) fn read_value(
         &mut self,
         ty: u16,
         root: &'static str,
         steps: &[StackStep<'static>],
-    ) -> Read<Value> {
+        posts: &mut dyn PostSink,
+    ) -> std::result::Result<(), ReadError> {
         let reader = &mut self.reader;
         reader.frames.clear();
         reader.open.clear();
@@ -303,8 +327,10 @@ impl<I: Input> ObjectStream<I> {
                 StackStep::Element => reader.push(FrameKind::ArrayElement, None, false),
             }
         }
-        let value = reader.value(ty, false).map_err(ReadError::from);
-        (value, std::mem::take(&mut reader.posts))
+        reader.keep = false;
+        let value = reader.value(ty, false, posts);
+        reader.keep = true;
+        value.map(drop).map_err(ReadError::from)
     }
 
     /// The primitives of the stream, for the hand grammar that reads around `read_value`.
@@ -330,7 +356,11 @@ impl<I: Input> ObjectStream<I> {
 struct TypedReader<I: Input> {
     inp: I,
     frames: Vec<Frame>,
-    posts: Vec<Post>,
+    /// Whether the values read are kept: not in a value that a hand grammar does not use
+    /// (`ObjectStream::read_value`), except those that a hook reads (`hooks::reads_its_value`), which
+    /// are read whole. A value that is not kept is still read as NCBI reads it: its posts, its
+    /// errors and its frames are the same.
+    keep: bool,
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
     /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
     open: Vec<Open>,
@@ -342,7 +372,8 @@ struct TypedReader<I: Input> {
 /// A value being read that waits for a value inside it (`TypedReader::value`).
 enum Open {
     /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip).
-    Value { target: u16, skip: bool },
+    /// `kept`: the value is read whole inside one that is not kept (`hooks::reads_its_value`).
+    Value { target: u16, skip: bool, kept: bool },
     /// A SEQUENCE reading the member at `reading` (`members`), inside the member's frame, the
     /// `frames`-th.
     Sequence {
@@ -377,7 +408,7 @@ impl<I: Input> TypedReader<I> {
         TypedReader {
             inp,
             frames: Vec::new(),
-            posts: Vec::new(),
+            keep: true,
             open: Vec::new(),
             utf8_once: Utf8TagOnce::default(),
         }
@@ -462,38 +493,17 @@ impl<I: Input> TypedReader<I> {
         }
     }
 
-    /// `GetStackTrace()`: the path of the object being read (`PssmWithParameters.pssm.query.seq.
-    /// descr.E.comment`), by the one writer of NCBI's object stack path.
-    fn stack_trace(&self) -> String {
-        object_stack_trace(
-            self.frames
-                .first()
-                .and_then(|frame| frame.type_name)
-                .unwrap_or("?"),
-            self.frames
-                .iter()
-                .skip(1)
-                .filter_map(|frame| match frame.kind {
-                    FrameKind::ClassMember | FrameKind::ChoiceVariant => {
-                        frame.member.map(StackStep::Member)
-                    }
-                    FrameKind::ArrayElement => Some(StackStep::Element),
-                    _ => None,
-                }),
-        )
-    }
-
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
     /// `stream >> object` of the root type `root`: `SkipFileHeader`, then `Read`, each in a named
     /// frame of its own.
-    fn document(&mut self, root: u16) -> R<Value> {
+    fn document(&mut self, root: u16, posts: &mut dyn PostSink) -> R<Value> {
         let name = super::type_info(root).name();
         self.push(FrameKind::Named, Some(name), false);
         let header = self.file_header(name);
         self.pop(header)?;
         self.push(FrameKind::Named, Some(name), false);
-        let value = self.value(root, false);
+        let value = self.value(root, false, posts);
         self.pop(value)
     }
 
@@ -518,17 +528,18 @@ impl<I: Input> TypedReader<I> {
     /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the hooks
     /// of NCBI's classes that a read runs. The values inside it are read in turn from the list of
     /// the values being read (`open`), as NCBI's functions recurse; an error leaves NCBI's frames
-    /// from the innermost out (`pop`), as it passes `END_OBJECT_FRAME` of each.
-    fn value(&mut self, ty: u16, skip: bool) -> R<Value> {
+    /// from the innermost out (`pop`), as it passes `END_OBJECT_FRAME` of each. Its posts are given
+    /// to `posts` as they are made.
+    fn value(&mut self, ty: u16, skip: bool, posts: &mut dyn PostSink) -> R<Value> {
         let (open, frames) = (self.open.len(), self.frames.len());
-        let mut step = self.start(ty, skip);
+        let mut step = self.start(ty, skip, posts);
         loop {
             step = match step {
-                Ok(Step::Read(ty, skip)) => self.start(ty, skip),
+                Ok(Step::Read(ty, skip)) => self.start(ty, skip, posts),
                 Ok(Step::Done(value)) if self.open.len() == open => return Ok(value),
                 Ok(Step::Done(value)) => {
                     let held = self.open.pop().expect("a value being read");
-                    self.resume(held, value)
+                    self.resume(held, value, posts)
                 }
                 Err(mut error) => {
                     // From the innermost value out: the frames inside each member being read, then
@@ -557,10 +568,13 @@ impl<I: Input> TypedReader<I> {
 
     /// The start of a value of the type `ty` (`ReadObject`'s type function): a value without
     /// values inside it is read here, a SEQUENCE, CHOICE or SEQUENCE OF opens (`Open`).
-    fn start(&mut self, ty: u16, skip: bool) -> R<Step> {
+    fn start(&mut self, ty: u16, skip: bool, posts: &mut dyn PostSink) -> R<Step> {
         let info = resolved(ty);
         let target = alias_target(ty);
-        self.open.push(Open::Value { target, skip });
+        // A value that a hook reads is kept inside one that is not.
+        let kept = !self.keep && !skip && super::hooks::reads_its_value(target);
+        self.keep |= kept;
+        self.open.push(Open::Value { target, skip, kept });
         let value = match info.kind {
             Kind::Sequence(members) => {
                 self.push_object(FrameKind::Class, target, info.name(), skip);
@@ -584,20 +598,25 @@ impl<I: Input> TypedReader<I> {
                 Value::Null
             }
             Kind::Real => self.real(skip)?,
-            Kind::String(kind) => Value::Str(self.string(kind, skip)?),
-            Kind::Octets => self.octets(skip)?,
+            Kind::String(kind) => Value::Str(self.string(kind, skip, posts)?),
+            Kind::Octets => self.octets(skip, posts)?,
         };
         Ok(Step::Done(value))
     }
 
     /// A value read is given to the value being read that holds it (`held`).
-    fn resume(&mut self, held: Open, value: Value) -> R<Step> {
+    fn resume(&mut self, held: Open, value: Value, posts: &mut dyn PostSink) -> R<Step> {
         match held {
-            Open::Value { target, skip } => {
-                if skip {
-                    return Ok(Step::Done(value));
-                }
-                super::hooks::post_read(target, value, &mut self.posts).map(Step::Done)
+            Open::Value { target, skip, kept } => {
+                // A value that is not kept runs no hook: none of them posts or fails by such a
+                // value (`hooks::reads_its_value`), and the Seq-id's only makes LOSAT's model of it.
+                let done = if skip || !self.keep {
+                    Ok(Step::Done(value))
+                } else {
+                    super::hooks::post_read(target, value, posts).map(Step::Done)
+                };
+                self.keep &= !kept;
+                done
             }
             Open::Sequence {
                 ty,
@@ -619,7 +638,9 @@ impl<I: Input> TypedReader<I> {
                             self.frames[at].num_rows = Some(*rows);
                         }
                     }
-                    values.push((reading as u16, value));
+                    if self.keep {
+                        values.push((reading as u16, value));
+                    }
                 }
                 self.next_member(ty, members, skip, values, reading + 1)
             }
@@ -628,6 +649,9 @@ impl<I: Input> TypedReader<I> {
                 self.pop_frame();
                 self.inp.end_choice()?;
                 self.pop_frame();
+                if !self.keep {
+                    return Ok(Step::Done(Value::Null));
+                }
                 Ok(Step::Done(Value::Choice(index, Box::new(value))))
             }
             Open::List {
@@ -635,7 +659,7 @@ impl<I: Input> TypedReader<I> {
                 skip,
                 mut values,
             } => {
-                if !skip {
+                if !skip && self.keep {
                     values.push(value);
                 }
                 self.next_element(element, skip, values)
@@ -783,12 +807,15 @@ impl<I: Input> TypedReader<I> {
         Ok(Step::Done(Value::List(values)))
     }
 
-    /// The elements of an INTEGER list, each `store`d as the list keeps it.
+    /// The elements of an INTEGER list, each `store`d as the list keeps it (none when the values
+    /// are not kept, `keep`).
     fn integers<T>(&mut self, storage: Storage, skip: bool, store: impl Fn(i64) -> T) -> R<Vec<T>> {
-        let mut values = Vec::new();
+        let (mut values, keep) = (Vec::new(), self.keep);
         while self.inp.begin_element()? {
             if let Some(value) = self.integer_number(storage, skip)? {
-                values.push(store(value));
+                if keep {
+                    values.push(store(value));
+                }
             }
         }
         Ok(values)
@@ -796,10 +823,12 @@ impl<I: Input> TypedReader<I> {
 
     /// The elements of a REAL list.
     fn reals(&mut self, skip: bool) -> R<Vec<f64>> {
-        let mut values = Vec::new();
+        let (mut values, keep) = (Vec::new(), self.keep);
         while self.inp.begin_element()? {
             if let Some(value) = self.real_number(skip)? {
-                values.push(value);
+                if keep {
+                    values.push(value);
+                }
             }
         }
         Ok(values)
@@ -885,45 +914,23 @@ impl<I: Input> TypedReader<I> {
     }
 
     /// `ReadString` (`ReadStringStore`) / `SkipString` of a string of `kind`, with NCBI's posts.
-    fn string(&mut self, kind: StringKind, skip: bool) -> R<Vec<u8>> {
+    /// Each post is given to `posts` when the string's reader makes it, with the stack trace
+    /// (`GetStackTrace()`) that NCBI's message names (`posted`).
+    fn string(&mut self, kind: StringKind, skip: bool, posts: &mut dyn PostSink) -> R<Vec<u8>> {
         let mut out = Vec::new();
-        let mut posts = Vec::new();
-        let result = if skip {
-            self.inp.skip_string(kind, &mut posts)
+        let TypedReader {
+            inp,
+            frames,
+            utf8_once,
+            ..
+        } = self;
+        let post = &mut |post: StringPost<'_>| posted(post, frames, utf8_once, posts);
+        if skip {
+            inp.skip_string(kind, post)?;
         } else {
-            self.inp.read_string(kind, &mut out, &mut posts)
-        };
-        for post in posts {
-            self.post(post);
+            inp.read_string(kind, &mut out, post)?;
         }
-        result?;
         Ok(out)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
-    // `report::serial::encoder::ReplacedChar`)
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310 (cited at
-    // `asn_input::utf8_tag_message`)
-    /// What reading a string posted, with the stack trace (`GetStackTrace()`) that NCBI's message
-    /// names.
-    fn post(&mut self, post: StringPost) {
-        match post {
-            StringPost::BadChar {
-                position,
-                byte,
-                string,
-            } => self.posts.push(Post::BadChar(ReplacedChar {
-                trace: self.stack_trace(),
-                byte,
-                position,
-                string: string.into(),
-            })),
-            StringPost::Utf8Tag => {
-                if self.utf8_once.first() {
-                    self.posts.push(Post::Utf8Tag(self.stack_trace()));
-                }
-            }
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:610-614
@@ -933,16 +940,69 @@ impl<I: Input> TypedReader<I> {
     /// `ReadBytes` / `SkipByteBlock` of an OCTET STRING. A `std::exception` that leaves the byte
     /// block (its reserve, `asn_input::reserve`) passes its destructor with the stream in a good
     /// state, which posts that the block was not ended before the exception goes on.
-    fn octets(&mut self, skip: bool) -> R<Value> {
+    fn octets(&mut self, skip: bool, posts: &mut dyn PostSink) -> R<Value> {
         if skip {
             self.inp.skip_octets()?;
             return Ok(Value::Null);
         }
         let value = self.inp.read_octets();
         if matches!(value, Err(Fail::OutOfMemory | Fail::Std(_))) {
-            self.posts.push(Post::UnendedByteBlock);
+            posts.post(Post::UnendedByteBlock);
         }
         Ok(Value::Octets(value?))
+    }
+}
+
+/// `GetStackTrace()` of the frames `frames`: the path of the object being read
+/// (`PssmWithParameters.pssm.query.seq.descr.E.comment`), by the one writer of NCBI's object
+/// stack path.
+fn stack_trace(frames: &[Frame]) -> String {
+    object_stack_trace(
+        frames
+            .first()
+            .and_then(|frame| frame.type_name)
+            .unwrap_or("?"),
+        frames.iter().skip(1).filter_map(|frame| match frame.kind {
+            FrameKind::ClassMember | FrameKind::ChoiceVariant => {
+                frame.member.map(StackStep::Member)
+            }
+            FrameKind::ArrayElement => Some(StackStep::Element),
+            _ => None,
+        }),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
+// `report::serial::encoder::ReplacedChar`)
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310 (cited at
+// `asn_input::utf8_tag_message`)
+/// What reading a string posted (`TypedReader::string`), given to `posts` with the stack trace of
+/// `frames` that NCBI's message names; the warning of a UTF8String tag only the first time
+/// (`utf8_once`).
+#[cold]
+#[inline(never)]
+fn posted(
+    post: StringPost<'_>,
+    frames: &[Frame],
+    utf8_once: &mut Utf8TagOnce,
+    posts: &mut dyn PostSink,
+) {
+    match post {
+        StringPost::BadChar {
+            position,
+            byte,
+            string,
+        } => posts.post(Post::BadChar(ReplacedChar {
+            trace: stack_trace(frames),
+            byte,
+            position,
+            string: string.into(),
+        })),
+        StringPost::Utf8Tag => {
+            if utf8_once.first() {
+                posts.post(Post::Utf8Tag(stack_trace(frames)));
+            }
+        }
     }
 }
 

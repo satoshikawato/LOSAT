@@ -8,7 +8,8 @@
 //! SEQUENCE in the order of the module, INTEGER, BOOLEAN, ENUMERATED, VisibleString, OCTET
 //! STRING and REAL values. For a hand-written grammar (rpsbproc's archive reader) it also gives
 //! the frames of NCBI's object stack, which the grammar passes down to the values it reads
-//! (`Frame`), and keeps the posts of the bytes that its VisibleStrings read as `#` (`Trail`).
+//! (`Frame`), and posts the bytes that its VisibleStrings read as `#` as it reads them
+//! (`Reader::string`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243
 //!
@@ -495,36 +496,31 @@ pub(crate) struct Reader<S: AsnSource> {
     document: &'static str,
     /// The reader, for the refusals ("... is not supported by LOSAT's PSSM reader").
     reader: &'static str,
-    /// The hand grammar's root and posts (`Trail`).
-    pub(crate) trail: Trail,
-}
-
-/// What a hand-written grammar over this reader (rpsbproc's archive reader, `rpsbproc::archive`,
-/// with its Seq-ids, `seqid::asn_text`) reads beside the values: the name of the document's type,
-/// at the root of its frames (`Frame`), and the bytes that its VisibleStrings read as `#`
-/// (`string`), each with NCBI's post.
-#[derive(Debug, Default)]
-pub(crate) struct Trail {
-    /// The name of the document's type, the first name of a stack trace (`Blast4-archive`).
+    /// The name of the document's type, the first name of the stack traces of a hand grammar's
+    /// posts (`Blast4-archive`, `string`); empty for the other readers.
     pub(crate) root: &'static str,
-    /// The posts of the bytes read as `#`, in order (`ReplaceVisibleChar`'s 803.7).
-    pub(crate) replaced: Vec<ReplacedChar>,
 }
 
-impl Trail {
-    /// The post of a byte that a VisibleString of the hand grammar held by the frame `at` read as
-    /// `#` (`Reader::string`): its line, the byte and the piece that holds it, with the stack trace
-    /// of `at`.
-    #[cold]
-    #[inline(never)]
-    fn post_replaced(&mut self, at: &Frame<'_>, line: usize, byte: u8, piece: &[u8]) {
-        self.replaced.push(ReplacedChar {
-            trace: object_stack_trace(self.root, at.steps()),
-            byte,
-            position: StreamPosition::Line(line as u64),
-            string: piece.into(),
-        });
-    }
+/// The post of a byte that a VisibleString of a hand grammar (rpsbproc's archive reader,
+/// `rpsbproc::archive`, with its Seq-ids, `seqid::asn_text`) held by the frame `at` read as `#`
+/// (`Reader::string`): its line, the byte and the piece that holds it, with the stack trace of
+/// `at` below the document's type `root`, given to `post` when it is made, as NCBI posts it.
+#[cold]
+#[inline(never)]
+fn post_replaced(
+    post: &mut dyn FnMut(ReplacedChar),
+    root: &'static str,
+    at: &Frame<'_>,
+    line: usize,
+    byte: u8,
+    piece: &[u8],
+) {
+    post(ReplacedChar {
+        trace: object_stack_trace(root, at.steps()),
+        byte,
+        position: StreamPosition::Line(line as u64),
+        string: piece.into(),
+    });
 }
 
 /// A frame of NCBI's object stack as a hand grammar passes it down to the reader of the value
@@ -551,7 +547,7 @@ pub(crate) struct Frame<'a> {
 }
 
 impl Frame<'static> {
-    /// The object's root, the frame of the document's type (`Trail::root`), which names no step.
+    /// The object's root, the frame of the document's type (`Reader::root`), which names no step.
     pub(crate) const ROOT: Frame<'static> = Frame {
         parent: None,
         names: &[],
@@ -674,7 +670,7 @@ impl<S: AsnSource> Reader<S> {
             line: 1,
             document,
             reader,
-            trail: Trail::default(),
+            root: "",
         }
     }
 
@@ -1548,18 +1544,22 @@ impl<S: AsnSource> Reader<S> {
 
     /// A VisibleString of a hand grammar (and a StringStore, which the text stream reads as one)
     /// held by the frame `at`: `visible_string`, each byte outside 0x20..0x7E read as `#` and
-    /// posted with the stack trace of `at` (`Trail::replaced`), as NCBI's `ReadString` of the type
-    /// posts it.
+    /// given to `post` with the stack trace of `at` as it is read (`post_replaced`), as NCBI's
+    /// `ReadString` of the type posts it.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
     // `report::serial::encoder::ReplacedChar`)
-    pub(crate) fn string(&mut self, at: &Frame<'_>) -> Result<Vec<u8>> {
+    pub(crate) fn string(
+        &mut self,
+        at: &Frame<'_>,
+        post: &mut dyn FnMut(ReplacedChar),
+    ) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.visible_string(
             &mut out,
             true,
             false,
-            &mut move |trail, line, byte, piece| trail.post_replaced(at, line, byte, piece),
+            &mut move |root, line, byte, piece| post_replaced(post, root, at, line, byte, piece),
         )?;
         Ok(out)
     }
@@ -1584,7 +1584,7 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadStringValue` (`SkipString` when `skip`) of a VisibleString (`visible`) or a
     /// UTF8String: the string's lines joined and `""` read as one quote, appended to `out`
     /// (nothing when skipping). In a VisibleString each byte outside 0x20..0x7E is read as `#`,
-    /// and `bad_char` gets the reader's trail (where a hand grammar posts it, `string`), the line,
+    /// and `bad_char` gets the document's type (`root`, for a hand grammar's post, `string`), the line,
     /// the byte and the piece of the string that NCBI's message
     /// quotes (`ReplaceVisibleChar`'s post, `report::serial::encoder::ReplacedChar`): the piece
     /// being appended (`AppendStringData`: up to the end of the line, the quote, or 128 bytes;
@@ -1603,7 +1603,7 @@ impl<S: AsnSource> Reader<S> {
         out: &mut Vec<u8>,
         visible: bool,
         skip: bool,
-        bad_char: &mut impl FnMut(&mut Trail, usize, u8, &[u8]),
+        bad_char: &mut impl FnMut(&'static str, usize, u8, &[u8]),
     ) -> Result<()> {
         // `pos` is the start of the run being read (the bytes up to the next line end or quote,
         // which NCBI appends in pieces of 128 bytes from its start), `i` its bytes so far (after
@@ -1676,14 +1676,14 @@ impl<S: AsnSource> Reader<S> {
         out: &mut Vec<u8>,
         clean: bool,
         skip: bool,
-        bad_char: &mut dyn FnMut(&mut Trail, usize, u8, &[u8]),
+        bad_char: &mut dyn FnMut(&'static str, usize, u8, &[u8]),
     ) {
-        let (src, trail) = (&self.src, &mut self.trail);
+        let (src, root) = (&self.src, self.root);
         if skip {
             if !clean {
                 for &c in src.bytes(run) {
                     if !(b' '..=b'~').contains(&c) {
-                        bad_char(trail, line, c, &[]);
+                        bad_char(root, line, c, &[]);
                     }
                 }
             }
@@ -1699,7 +1699,7 @@ impl<S: AsnSource> Reader<S> {
             for (i, &c) in piece.iter().enumerate() {
                 if !(b' '..=b'~').contains(&c) {
                     out.extend_from_slice(&piece[done..i]);
-                    bad_char(trail, line, c, piece);
+                    bad_char(root, line, c, piece);
                     out.push(b'#');
                     done = i + 1;
                 }

@@ -349,3 +349,10 @@ same bytes (2026-11-24), run as above:
   is read by a new stream, whose line 1 is the rest of the line on which the object before it ended. The title is on
   line 47 of the first object, so the post names line 48.
 - `t_nul.asn` (`t_nul.doms`) has a 0 byte in a title. The piece is quoted with the byte as it is.
+- `t_tab_title2.asn` (`t_tab_title2.doms`) has a TAB (0x09) at the start of a title, a second one after 130 more
+  bytes and a 0xE9 after it. A TAB is a byte outside 0x20..0x7E too. Each of the three posts quotes the piece that
+  holds the byte: the first 128 bytes of the string, then the rest.
+- `t_tab_delayed.asn` (`t_tab_delayed.doms`) has a TAB in a `pub`'s author name, which NCBI's reader skips (the
+  delayed member `Auth-list.names`: its post quotes no piece), and in the `pub`'s title.
+- `t_cr_typed.asn` (`t_cr_typed.doms`) has a lone CR (0x0D) inside a `comment`, followed by 0xE9. The CR ends a line,
+  so the post names the next line and quotes the piece after the CR.

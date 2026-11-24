@@ -668,16 +668,13 @@ impl<I: Input> Rd<I> {
     /// A `VisibleString`: each byte outside `' '..='~'` read as `#`, with NCBI's posts
     /// (`StringPost`, here with the stack trace).
     fn read_str(&mut self) -> R<Vec<u8>> {
-        let mut posts = Vec::new();
+        let start = self.posts.len();
         let mut out = Vec::new();
+        let posts = &mut self.posts;
         let result = self
             .inp
-            .read_string(StringKind::Visible, &mut out, &mut posts)
-            .map(|()| out);
-        if !posts.is_empty() {
-            let start = self.posts.len();
-            for post in posts {
-                self.posts.push(match post {
+            .read_string(StringKind::Visible, &mut out, &mut |post| {
+                posts.push(match post {
                     StringPost::Utf8Tag => MaskPost::Utf8Tag(String::new()),
                     StringPost::BadChar {
                         position,
@@ -689,8 +686,10 @@ impl<I: Input> Rd<I> {
                         position,
                         string: string.into(),
                     }),
-                });
-            }
+                })
+            })
+            .map(|()| out);
+        if self.posts.len() > start {
             // `GetStackTrace()` now: the frames on the stack give it as they are left.
             let trace = Trace {
                 posts: start..self.posts.len(),

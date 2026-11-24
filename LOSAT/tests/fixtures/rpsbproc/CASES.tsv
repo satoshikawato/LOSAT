@@ -96,6 +96,9 @@ vis_all.full	compare	-	-	-i vis_all.asn -d data -m full
 cm_bad.doms	compare	-	-	-i cm_bad.asn -d data -t doms
 two_e9.doms	compare	-	-	-i two_e9.asn -d data -t doms
 t_nul.doms	compare	-	-	-i t_nul.asn -d data -t doms
+t_tab_title2.doms	compare	-	-	-i t_tab_title2.asn -d data -t doms
+t_tab_delayed.doms	compare	-	-	-i t_tab_delayed.asn -d data -t doms
+t_cr_typed.doms	compare	-	-	-i t_cr_typed.asn -d data -t doms
 d_acc0	compare	-	data-with:d_acc0	-i arch/three.asn -d d_acc0 -m rep -t doms -f
 d_annot10	compare	-	data-with:d_annot10	-i arch/three.asn -d d_annot10 -m rep -t doms -f
 d_bs12	compare	-	data-with:d_bs12	-i arch/three.asn -d d_bs12 -m rep -t doms -f

@@ -334,7 +334,7 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare", "oracle"), 380);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 383);
 }
 
 // The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.67, the Owner's decision

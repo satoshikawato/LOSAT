@@ -14,35 +14,36 @@ fn read_all(text: &[u8]) -> Objects {
     read_with_posts(text).0
 }
 
-/// `read_all` with the lines that NCBI's reader posts while it reads the objects (each object's
-/// posts, `Post::line`, before the object), in order.
+/// `read_all` with the lines that NCBI's reader posts while it reads the objects (`Post::line`,
+/// each given to the stream's posts when it is posted), in order.
 fn read_with_posts(text: &[u8]) -> (Objects, Vec<String>) {
     let start = text
         .iter()
         .position(|&b| (b as i8) > b' ' as i8)
         .expect("a byte that is not white space");
-    let stream = ArchiveStream::new(&text[start + 1..], &text[start..=start]);
+    let stream = ArchiveStream::new(&text[start + 1..], &text[start..=start], Vec::new());
     drain(stream)
 }
 
 /// The objects and posts of `stream` (`read_with_posts`).
-fn drain<R: std::io::Read>(mut stream: ArchiveStream<R>) -> (Objects, Vec<String>) {
-    let (mut out, mut lines) = (Vec::new(), Vec::new());
+fn drain<R: std::io::Read>(mut stream: ArchiveStream<R, Vec<Post>>) -> (Objects, Vec<String>) {
+    let mut out = Vec::new();
+    let lines = |stream: &mut ArchiveStream<R, Vec<Post>>| {
+        let posts = std::mem::take(stream.posts());
+        posts
+            .iter()
+            .map(|post| String::from_utf8_lossy(&post.line(None)).into_owned())
+            .collect()
+    };
     loop {
-        let (read, posts) = stream.next_archive();
-        lines.extend(
-            posts
-                .iter()
-                .map(|post| String::from_utf8_lossy(&post.line(None)).into_owned()),
-        );
-        match read {
+        match stream.next_archive() {
             Ok(Some(archive)) => out.push(Ok(archive)),
-            Ok(None) => return (out, lines),
+            Ok(None) => return (out, lines(&mut stream)),
             Err(error) => {
                 out.push(Err(error));
-                let (end, none) = stream.next_archive();
-                assert!(matches!(end, Ok(None)) && none.is_empty());
-                return (out, lines);
+                let posts = lines(&mut stream);
+                assert!(matches!(stream.next_archive(), Ok(None)) && stream.posts().is_empty());
+                return (out, posts);
             }
         }
     }
@@ -259,18 +260,18 @@ fn a_stream_refills_and_releases() {
     let copies = text.len() / three.len();
     let whole = read_all(&text);
     assert_eq!(whole.len(), copies);
-    let mut stream = ArchiveStream::new(OneByte(&text[1..]), &text[..1]);
+    let mut stream = ArchiveStream::new(OneByte(&text[1..]), &text[..1], Vec::new());
     stream.fill_one_byte_at_a_time();
     let mut largest = 0;
     for expected in &whole {
-        let archive = stream.next_archive().0.unwrap().unwrap();
+        let archive = stream.next_archive().unwrap().unwrap();
         assert_eq!(
             format!("{archive:?}"),
             format!("{:?}", expected.as_ref().unwrap())
         );
         largest = largest.max(stream.buffered());
     }
-    assert!(matches!(stream.next_archive().0, Ok(None)));
+    assert!(matches!(stream.next_archive(), Ok(None)));
     // The bytes kept: at most the four blocks read before a release and what follows them.
     assert!(largest < 5 * 64 * 1024, "{largest} of {}", text.len());
 }
@@ -507,7 +508,11 @@ fn read_all_by_byte(text: &[u8]) -> (Objects, Vec<String>) {
         .iter()
         .position(|&b| (b as i8) > b' ' as i8)
         .expect("a byte that is not white space");
-    let mut stream = ArchiveStream::new(OneByte(&text[start + 1..]), &text[start..=start]);
+    let mut stream = ArchiveStream::new(
+        OneByte(&text[start + 1..]),
+        &text[start..=start],
+        Vec::new(),
+    );
     stream.fill_one_byte_at_a_time();
     drain(stream)
 }

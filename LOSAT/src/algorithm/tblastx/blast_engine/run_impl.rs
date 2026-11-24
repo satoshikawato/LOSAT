@@ -1314,7 +1314,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -2712,7 +2713,7 @@ fn write_tblastx_outputs(
                     false,
                     xml_only_xml2,
                     &mut writer,
-                    &hits,
+                    (&hits, seqalign_identities.as_deref()),
                     run,
                     warnings.as_mut(),
                 )?,
@@ -2730,7 +2731,7 @@ fn write_tblastx_outputs(
                         true,
                         xml_only_xml2,
                         &mut writer,
-                        &hits,
+                        (&hits, None),
                         run,
                         warnings.as_mut(),
                     )?
@@ -2835,8 +2836,9 @@ fn rows_up_front(
                 || run.ranges.subject_placements.ranged()))
 }
 
-/// The Seq-aligns' engine counts (outfmt 8, 12), their identities for the outfmt 0 rows when
-/// the report reads them (`report::seqalign_identities`), the display counts of `hits` and the
+/// The Seq-aligns' engine counts (outfmt 8, 12), their identities for the outfmt 0 rows and BLAST
+/// XML's thrown HSPs when the reports read them (`report::seqalign_identities`), the display
+/// counts of `hits` and the
 /// outfmt 0 rows made up front (`rows_up_front`), with the positives of the search's matrix
 /// `sc` (`write_tblastx_outputs`).
 #[allow(clippy::too_many_arguments)]
@@ -2891,9 +2893,18 @@ fn report_counts<S: TbxScore>(
     // read the HSPs' Seq-align scores in the pairwise report.
     // The rows of outfmt 0 and of the caller's hit records keep the engine's identities, read
     // before the display counts replace them, when the report reads them.
-    let seqalign_identities = (run.args.formatting.report_sort().reads_hsp_scores()
-        && (outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise())))
-    .then(|| report::seqalign_identities(hits));
+    let rows_read = run.args.formatting.report_sort().reads_hsp_scores()
+        && (outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise()));
+    // BLAST XML's `catch` of an HSP whose subject's lookup throws writes them too
+    // (`XmlHsp::alignment_identities`): where the run writes BLAST XML and the load of some
+    // subject of its database throws (`HitLoads::any_throws`). The one producer of both (review 1
+    // of line DBID pfoff-4, L2).
+    let xml_thrown = output_formats.contains(&report::TblastxOutputFormat::Xml)
+        && run
+            .database
+            .as_ref()
+            .is_some_and(|database| database.reported.loads.any_throws());
+    let seqalign_identities = (rows_read || xml_thrown).then(|| report::seqalign_identities(hits));
     // The display counts are read by the outfmt 0, 6 and 7 reports and the caller's hit
     // records only.
     if outputs.hits.is_some()
@@ -3409,6 +3420,8 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // The first format, whose prefetch each batch asks (`database::prefetch_format`).
+    let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
     // The query records that NCBI's scope holds at the prefetch of the batch of the input records
     // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
     // reader added for the batch (the records that `-query_loc` drops included, numbered in the
@@ -3423,9 +3436,6 @@ fn run_batch_loop(
             &query_runs.input_records[input],
         )
     };
-    // A call of the library's batches after the first (`api::run_batches`) searched the batches
-    // before with a database of its own, whose loads nothing here records.
-    let unrecorded_calls = reports.args.first_query_ordinal > 0;
     // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
     // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
     let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
@@ -3448,7 +3458,6 @@ fn run_batch_loop(
         &outputs.formats,
         args.formatting.report_sort(),
         args.report_counts,
-        args.html,
     );
     let pairwise_first = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
@@ -3459,6 +3468,7 @@ fn run_batch_loop(
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
         outputs.other_outfmts,
+        args.html_links.is_some(),
     ));
     // Whether the reports write the same where every load of a subject with a positive taxid throws
     // (`db_subject::unchanged_by_load_throws`).
@@ -3804,7 +3814,10 @@ fn run_batch_loop(
                 database,
                 ordered,
                 start,
-                earlier,
+                (
+                    earlier,
+                    crate::algorithm::common::database::prefetch_may_be_off(prefetch_format),
+                ),
                 &mut reports.titles.borrow_mut(),
             );
             match read {
@@ -3871,6 +3884,7 @@ fn run_batch_loop(
                             .iter()
                             .map(|format| report::output_format(format.outfmt))
                             .collect::<Vec<_>>(),
+                        prefetch_format,
                     ),
                     "TBLASTX",
                 )?;
@@ -3942,6 +3956,7 @@ fn run_batch_loop(
                 }};
             }
             let off = crate::algorithm::common::database::prefetch_off(
+                prefetch_format,
                 super::super::database::seq_aligns_of(ordered),
             );
             if xml2_prefetch && !run_loads.ended() && off {
@@ -3970,7 +3985,7 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    run_loads.answer(),
+                    (run_loads.answer(), prefetch_format),
                     &|hsp| {
                         super::super::database::hit_identities(
                             &reports.stores.borrow(),
@@ -3983,8 +3998,7 @@ fn run_batch_loop(
                     },
                     ordered,
                     &reports.titles.borrow(),
-                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                        .after_unrecorded_calls(unrecorded_calls),
+                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope),
                 ) {
                     Ok(warning) => warnings[start].lines(&warning),
                     Err(error) => prefetch_failed!(error),
@@ -4006,7 +4020,7 @@ fn run_batch_loop(
                 // (`report_stream::Off::TaxonomyCache`), so every report is then written after
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
-                if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns) {
                     // No prefetch; without `taxdb.bti` the reports' fetches look nothing up, but
                     // a lookup that reads a UTF8String header posts a warning (`load_read_texts`).
                     if taxdb_found || database.db.scope_utf8_seen() {
@@ -4032,10 +4046,10 @@ fn run_batch_loop(
                             // (`HitLoads::reached`; `database::report_loads`, after the reports
                             // before it).
                             let loads = super::super::database::report_loads(
-                                &run_loads,
+                                (database, &run_loads),
                                 &ordered[from..to],
                                 &reports.titles.borrow(),
-                                pairwise,
+                                (pairwise, start),
                                 identities,
                             );
                             let shown: Vec<&TblastxHsp> = match rows {
@@ -4135,13 +4149,13 @@ fn run_batch_loop(
                         super::super::database::LoadedBefore {
                             hits: &done.hits,
                             spans: &done.spans,
+                            format: prefetch_format,
                             rows,
                             cuts: xml_cuts,
                         },
                         ordered,
                         &reports.titles.borrow(),
                         &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                            .after_unrecorded_calls(unrecorded_calls)
                             .after_xml_reports(xml_before.as_ref())
                             .where_reports_unchanged_by_load_throws(
                                 reports_unchanged_by_load_throws,
@@ -4241,9 +4255,9 @@ fn run_batch_loop(
                 super::super::database::note_loaded(
                     database,
                     &batch.hits,
-                    0..end - start,
+                    (start, 0..end - start),
                     &reports.titles.borrow(),
-                    rows,
+                    (prefetch_format, rows),
                 );
             }
             debug_assert_eq!(reports.queries_written.get(), start);
@@ -4401,7 +4415,9 @@ impl BatchReports<'_> {
                     .iter()
                     .map(|format| report::output_format(format.outfmt))
                     .collect();
-                let shown = super::super::database::parsed_shown(&formats);
+                // The first format, whose prefetch the batches ask (`database::prefetch_format`).
+                let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
+                let shown = super::super::database::parsed_shown(&formats, prefetch_format);
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine
                 // identities tell which rows of `nident` alone read a subject.
@@ -4415,18 +4431,18 @@ impl BatchReports<'_> {
                     &mut hits,
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
-                    shown,
+                    (shown, prefetch_format),
                     (
                         super::super::database::after_throw(
                             outputs.formats.iter().map(|format| format.outfmt),
                             outputs.other_outfmts,
+                            self.args.html_links.is_some(),
                         ),
                         // The pairwise reports' reads (as `run_batch_loop`'s).
                         super::super::database::pairwise_reading(
                             &outputs.formats,
                             self.args.formatting.report_sort(),
                             self.args.report_counts,
-                            self.args.html,
                         ),
                     ),
                     &|hsp| {

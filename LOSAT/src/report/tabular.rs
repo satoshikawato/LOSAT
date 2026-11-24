@@ -842,7 +842,10 @@ impl TabularSpec {
         // The organism report's HSPs, and a table's rows with a field of the subject block, catch
         // the throw and go on.
         if self.kind == TabularKind::TaxReport || self.reads_subject_bioseq() {
-            FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
+            FormatThrow::Writes(RunThrow {
+                first_row_ends: first_thrown_row_ends_run(Some(self)),
+                ..RunThrow::every_row(AfterThrow::WritesRow)
+            })
         } else if self.reads_subject(program) {
             FormatThrow::Writes(RunThrow {
                 rows: self.throw_rows(program),
@@ -1019,6 +1022,14 @@ pub fn failed_lookup_stop(
 }
 
 const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7, 10 and 20 print saccver)";
+
+/// Whether NCBI's run of a tabular report of `spec` (`None`: the default fields) ends where the
+/// first row of a query's report loads a subject whose load throws (`failed_lookup_stop` of
+/// `LookupFailure::thrown`: the null pointer of `sacc` or `saccver`, exit 255), for
+/// `report::db_subject::RunThrow::first_row_ends`.
+pub fn first_thrown_row_ends_run(spec: Option<&TabularSpec>) -> bool {
+    failed_lookup_stop(spec, LookupFailure::thrown(), true) == Some(FAILED_LOOKUP_NULL_POINTER)
+}
 
 /// Whether a tabular report of `spec` (`None`: the default fields) can stop where NCBI has no
 /// result (`TabularSpec::may_stop_at_failed_lookup`), so that its rows are checked

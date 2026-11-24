@@ -310,7 +310,8 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let shown = crate::algorithm::tblastx::database::parsed_shown(&[format]);
+    let shown =
+        crate::algorithm::tblastx::database::parsed_shown(&[format], format.prefetch_format());
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();
     if prefetch && database.cache_may_refuse() {

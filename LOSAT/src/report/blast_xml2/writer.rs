@@ -266,6 +266,14 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
         hit: &XmlHit<'_>,
         hsps: &mut dyn FnMut(&mut HspSink<'_>) -> Result<()>,
     ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417 (cited
+        // at `report::db_subject::ParsedSubject::lookup_throws`)
+        // The `catch` of the `Hit` whose subject's lookup throws loads the subject again outside
+        // any `catch` of the hit: the exception leaves the query's report (`CaughtException`),
+        // before anything of the `Hit` is made.
+        if let Some(exception) = hit.lookup_throws {
+            return Err(crate::report::blast_xml::CaughtException(exception.clone()).into());
+        }
         self.hits += 1;
         let database = self.params.target == Xml2Target::Database;
         let enc = &mut *self.enc;
@@ -348,15 +356,19 @@ struct Xml2Hsps<'a, E> {
     scratch: &'a mut Scratch,
     hsps: i32,
     /// The scope gets no Bioseq for the hit's subject (`XmlHit::unloaded`): each `Hsp` is the
-    /// `catch`'s (`blast_xml::writer::write_unloaded_hsp`).
+    /// `catch`'s (`blast_xml::writer::write_caught_hsp`).
     unloaded: bool,
 }
 
 impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
+    fn reads_alignment(&self) -> bool {
+        !self.unloaded
+    }
+
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.hsps += 1;
         if self.unloaded {
-            crate::report::blast_xml::writer::write_unloaded_hsp(
+            crate::report::blast_xml::writer::write_caught_hsp(
                 &mut *self.enc,
                 self.hsps,
                 hsp,

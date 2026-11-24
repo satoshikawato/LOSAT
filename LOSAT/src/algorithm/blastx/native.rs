@@ -396,7 +396,8 @@ fn run_inner(
                 &mut stderr,
                 program.upper,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -878,7 +879,7 @@ fn run_inner(
                     &options,
                     asks,
                     results,
-                    queries,
+                    (queries, queries_before),
                     query_scopes
                         .borrow()
                         .as_ref()
@@ -1034,6 +1035,10 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
+    /// Whether the reports may read the reported sequences one by one
+    /// (`common::database::prefetch_may_be_off` of the first format), for the reader of the
+    /// headers (`HeaderReader::new`).
+    one_by_one: bool,
     /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
     /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
     throw: crate::report::db_subject::FormatThrow,
@@ -1069,26 +1074,32 @@ impl ReportedAsks {
             } else {
                 crate::report::tabular::PrintedIds::default()
             },
-            // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
-            prefetched: prefetches_subjects(Some(match options.outfmt {
-                10 | 18 | 20 => 6,
-                outfmt => i32::from(outfmt),
-            })) && !crate::algorithm::common::database::prefetch_always_off(),
-            prefetch_runs: (prefetches_subjects(Some(match options.outfmt {
-                10 | 18 | 20 => 6,
-                outfmt => i32::from(outfmt),
-            })) || matches!(options.outfmt, 13..=16))
-                && !crate::algorithm::common::database::prefetch_always_off(),
+            // Outfmt 10 and 20 prefetch as 6 does (`ResolvedOptions::prefetch_format`).
+            prefetched: prefetches_subjects(Some(options.prefetch_format()))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    options.prefetch_format(),
+                ),
+            prefetch_runs: (prefetches_subjects(Some(options.prefetch_format()))
+                || matches!(options.outfmt, 13..=16))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    options.prefetch_format(),
+                ),
+            one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
+                options.prefetch_format(),
+            ),
             throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
                 .map_or(
                     crate::report::db_subject::FormatThrow::Refused(
                         crate::report::db_subject::ThrowRefusal::Format,
                     ),
                     |format| {
+                        // With `-html` where the run has its links (the writer's
+                        // `PairwiseConfig::html`).
                         crate::report::db_subject::FormatThrow::of(
                             format,
                             options.tabular,
                             crate::blastinput::app::Program::Blastx,
+                            options.html.is_some(),
                         )
                     },
                 ),
@@ -1111,13 +1122,18 @@ impl ReportedAsks {
     /// refusal of a subject whose lookup throws over the `-outfmt` values of its other searches,
     /// `others`, too (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
     pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {
+        // The first search's asks start the call's: `FormatThrow::and` of a format that reads
+        // nothing (`Self::default()`'s) with one that stops is a refusal (`FormatThrow::of_formats`).
         let mut asks = options
             .iter()
-            .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+            .map(Self::of)
+            .reduce(Self::or)
+            .unwrap_or_default();
         asks.throw = asks.throw.of_search(
             others,
             crate::blastinput::app::Program::Blastx,
             crate::report::archive::options::RequestKind::Blastx,
+            options.iter().any(|options| options.html.is_some()),
         );
         asks.prefetched = options
             .first()
@@ -1125,6 +1141,9 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
+        asks.one_by_one = options
+            .first()
+            .is_some_and(|options| Self::of(options).one_by_one);
         asks
     }
 
@@ -1141,6 +1160,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            one_by_one: self.one_by_one || other.one_by_one,
             throw: self.throw.and(other.throw),
             changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
         }
@@ -1192,7 +1212,13 @@ pub(super) fn batch_titles(
     let aligned = ReportedSubjects::drop_unaligned(database, results, gapped);
     let earlier = EarlierUtf8::of_batch(first_query, fetched, aligned);
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
+    let titles = ReportedSubjects::read_titles(
+        database,
+        results,
+        gapped,
+        asks.pairwise,
+        (earlier, asks.one_by_one),
+    );
     super::x_timing::run(XRun::Titles, x_t);
     if let Some(posts) = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
@@ -1209,6 +1235,8 @@ pub(super) fn batch_titles(
 pub(super) struct BatchPrefetch {
     /// The batch's Seq-aligns, which `PRE_FETCH_SEQS_LIMIT` counts.
     seq_aligns: usize,
+    /// The format, whose prefetch the batch asks (`ResolvedOptions::prefetch_format`).
+    format: crate::algorithm::common::database::PrefetchFormat,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
     /// It throws at a subject row whose range it cannot take before it loads anything and writes
@@ -1249,12 +1277,14 @@ pub(super) fn batch_prefetch(
             .iter()
             .map(|batch| batch.unlisted.iter().sum::<usize>())
             .sum::<usize>();
-    let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
-    let fails = !off
-        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
-        && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
+    let format = options.prefetch_format();
+    let off = crate::algorithm::common::database::prefetch_off(format, seq_aligns);
+    // A prefetch that runs reads the Seq-aligns (`PrefetchFormat::batch_prefetches`).
+    let fails =
+        !off && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
     BatchPrefetch {
         seq_aligns,
+        format,
         off,
         fails,
     }
@@ -1275,7 +1305,7 @@ impl BatchPrefetch {
         if self.fails {
             crate::algorithm::common::database::BatchLoads::Read(rows)
         } else {
-            crate::algorithm::common::database::batch_loads(self.seq_aligns, rows)
+            crate::algorithm::common::database::batch_loads(self.format, self.seq_aligns, rows)
         }
     }
 }
@@ -1355,7 +1385,8 @@ impl<'a> BatchScopes<'a> {
 /// each batch's reports are written before the next is searched, `reported_error`); a batch whose
 /// prefetch does not stop is recorded in the run (`ReportedSubjects::note_loaded`), without the
 /// loads of an outfmt 5 report that NCBI's XML stream cuts before its hits (`queries`, the reader
-/// batch's records: `XmlCuts`).
+/// batch's records: `XmlCuts`), as the loads of the batch numbered `queries_before` (the queries
+/// of the run before it), in whose scope its reports read (`ReportedSubjects::for_batch`).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1363,7 +1394,7 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
-    queries: &[FastaRecord],
+    (queries, queries_before): (&[FastaRecord], usize),
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     prefetch_queries: &crate::algorithm::common::database::PrefetchQueries<'_>,
     diagnostics: &mut dyn Write,
@@ -1398,6 +1429,7 @@ pub(super) fn reported_batch(
             asks.throw,
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
+            queries_before,
         ),
     );
     super::x_timing::run(XRun::Titles, x_t);
@@ -1429,10 +1461,7 @@ pub(super) fn reported_batch(
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
     // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
     // lookups of the taxonomy names come with the rows (`tabular`).
-    let prefetch_format = match options.outfmt {
-        10 | 18 | 20 => 6,
-        outfmt => i32::from(outfmt),
-    };
+    let prefetch_format = options.prefetch_format();
     let mut reported = reported;
     if prefetch_fails {
         diagnostics.write_all(&database.prefetch_warning())?;
@@ -1473,7 +1502,7 @@ pub(super) fn reported_batch(
                 database,
                 results,
                 options.gapped,
-                rows,
+                (rows, prefetch_format),
                 places,
                 rows_open,
                 pairwise,
@@ -1538,7 +1567,7 @@ pub(super) fn reported_batch(
         })
     };
     reported.note_loaded(
-        database,
+        (database, queries_before),
         results,
         options.gapped,
         loads,

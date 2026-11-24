@@ -366,6 +366,12 @@ pub trait HitWrite {
 /// The HSP-level call of a structured writer behind `HspSink`.
 pub trait HspWrite {
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()>;
+
+    /// Whether the writer reads the coordinates, frames and rows of the HSPs of the `Hit` being
+    /// written (`HspSink::reads_alignment`).
+    fn reads_alignment(&self) -> bool {
+        true
+    }
 }
 
 /// The state of a document: the number of queries formatted so far (NCBI's
@@ -572,6 +578,35 @@ impl<'a> HspSink<'a> {
     pub fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.inner.hsp(hsp)
     }
+
+    /// Whether the writer reads the alignment of each HSP of the `Hit` being written (its
+    /// coordinates, frames and rows): not in outfmt 5's `Hit` of a subject whose lookup throws,
+    /// nor in the `Hit` of a subject whose Bioseq NCBI's scope does not get (`XmlHit::unloaded`,
+    /// outfmt 5, XML2 and JSON), whose HSPs NCBI writes with their Seq-align scores alone
+    /// (`write_caught_hsp`). The program then
+    /// hands each HSP as `XmlHsp::unaligned` (`HspSink::unaligned`), and reads nothing of the
+    /// subject for it (its letters, its rows, the checks of its rows).
+    pub fn reads_alignment(&self) -> bool {
+        self.inner.reads_alignment()
+    }
+
+    /// Where the writer does not read the alignments of the `Hit` being written
+    /// (`reads_alignment`): writes the HSPs `unaligned` (each `XmlHsp::unaligned`, made as they
+    /// are written) and returns true, so that the program reads nothing of the subject for them;
+    /// false, writing nothing, where the program writes each HSP with its alignment. The one
+    /// answer of every program's outfmt 5 adapter (review 1 of line DBID pfoff-4, L3).
+    pub fn unaligned<'h>(
+        &mut self,
+        unaligned: impl IntoIterator<Item = XmlHsp<'h>>,
+    ) -> Result<bool> {
+        if self.reads_alignment() {
+            return Ok(false);
+        }
+        for hsp in unaligned {
+            self.hsp(&hsp)?;
+        }
+        Ok(true)
+    }
 }
 
 /// The hit level of outfmt 5: one `Hit` object per subject, written alone and joined into the
@@ -607,9 +642,17 @@ impl HitWrite for Xml5Hits<'_> {
             string_member(&mut enc, "id", 1, hit.id);
             string_member(&mut enc, "def", 2, query_def(hit.title));
             string_member(&mut enc, "accession", 3, hit.accession);
-            // NCBI's catch of a `-subject` record whose `GenerateDefline` threw writes 0
-            // (`SubjectNames::of_unknown`, blastxml_format.cpp:399-407).
-            let len = if hit.defline_thrown { 0 } else { hit.len };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:376-407
+            // NCBI's catch writes 0: of a `-subject` record whose `GenerateDefline` threw
+            // (`SubjectNames::of_unknown`), and of a database sequence whose lookup of its
+            // Seq-align id throws (`SubjectNames::of_thrown`) or whose Bioseq the scope does not
+            // get (`XmlHit::unloaded`), whose HSPs are the catch's too.
+            let thrown = hit.lookup_throws.is_some() || hit.unloaded;
+            let len = if hit.defline_thrown || thrown {
+                0
+            } else {
+                hit.len
+            };
             int_member(&mut enc, "len", 4, len);
             enc.member("hsps", 5);
             enc.begin_list(false);
@@ -619,7 +662,7 @@ impl HitWrite for Xml5Hits<'_> {
                 hit: &mut enc,
                 scratch,
                 hsps: 0,
-                unloaded: hit.unloaded,
+                thrown,
             };
             hsps(&mut HspSink::new(&mut writer))?;
             enc.end_list();
@@ -654,31 +697,28 @@ impl HitWrite for Xml5Hits<'_> {
     }
 }
 
-/// The HSP level of outfmt 5.
+/// The HSP level of outfmt 5. `thrown`: the `Hit`'s subject's lookup throws
+/// (`XmlHit::lookup_throws`) or its Bioseq handle is empty (`XmlHit::unloaded`), so each HSP's
+/// reads in NCBI's `try` throw too (`write_caught_hsp`).
 struct Xml5Hsps<'a, 'o> {
     run: &'a XmlRun<'a>,
     masks: &'a [QueryMask],
     hit: &'a mut XmlEncoder<'o>,
     scratch: &'a mut Scratch,
     hsps: i32,
-    /// The scope gets no Bioseq for the hit's subject (`XmlHit::unloaded`): each `Hsp` is the
-    /// `catch`'s (`write_unloaded_hsp`).
-    unloaded: bool,
+    thrown: bool,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:142-165
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:114-165
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:130-153
-/// The `Hsp` number `number` of a subject whose Bioseq NCBI's scope does not get
-/// (`XmlHit::unloaded`), as the `catch` of the HSP's reads writes it, in outfmt 5 and, with `xml2`,
-/// in XML2 and JSON (their members' tags and order): the number, the scores, the Seq-align's
-/// identities (`XmlHsp::seqalign_identity`), the four coordinates 0 and empty rows; no frames,
-/// strands, positives, gaps, length or midline.
-pub(crate) fn write_unloaded_hsp<E: Encoder>(
-    enc: &mut E,
-    number: i32,
-    hsp: &XmlHsp<'_>,
-    xml2: bool,
-) {
+/// The `Hsp` number `number` that the `catch` of its subject's reads adds, in outfmt 5 (a subject
+/// whose lookup throws, `XmlHit::lookup_throws`, or whose Bioseq NCBI's scope does not get,
+/// `XmlHit::unloaded`) and, with `xml2`, in XML2 and JSON (the latter only, with their members'
+/// tags and order): the number, the Seq-align's scores as `GetAlnScores` reads them (the bit score and
+/// the e-value rounded to six digits as every HSP's), the Seq-align's `num_ident`
+/// (`XmlHsp::alignment_identities`), the four coordinates 0 and empty rows; no frames, strands,
+/// positives, gaps, length or midline.
+pub(crate) fn write_caught_hsp<E: Encoder>(enc: &mut E, number: i32, hsp: &XmlHsp<'_>, xml2: bool) {
     let (identity, coordinates, rows) = if xml2 {
         (4, [9, 10, 13, 14], [19, 20])
     } else {
@@ -691,7 +731,7 @@ pub(crate) fn write_unloaded_hsp<E: Encoder>(
     real_member(enc, "score", 2, f64::from(hsp.score));
     real_member(enc, "evalue", 3, round6(hsp.evalue));
     if xml2 {
-        int_member(enc, "identity", identity, hsp.seqalign_identity);
+        int_member(enc, "identity", identity, hsp.alignment_identities);
     }
     for (name, tag) in ["query-from", "query-to", "hit-from", "hit-to"]
         .into_iter()
@@ -700,7 +740,7 @@ pub(crate) fn write_unloaded_hsp<E: Encoder>(
         int_member(enc, name, tag, 0);
     }
     if !xml2 {
-        int_member(enc, "identity", identity, hsp.seqalign_identity);
+        int_member(enc, "identity", identity, hsp.alignment_identities);
     }
     string_member(enc, "qseq", rows[0], b"");
     string_member(enc, "hseq", rows[1], b"");
@@ -787,10 +827,14 @@ pub(crate) fn count_hsp(
 }
 
 impl HspWrite for Xml5Hsps<'_, '_> {
+    fn reads_alignment(&self) -> bool {
+        !self.thrown
+    }
+
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.hsps += 1;
-        if self.unloaded {
-            write_unloaded_hsp(&mut *self.hit, self.hsps, hsp, false);
+        if self.thrown {
+            write_caught_hsp(&mut *self.hit, self.hsps, hsp, false);
             return Ok(());
         }
         let run = self.run;

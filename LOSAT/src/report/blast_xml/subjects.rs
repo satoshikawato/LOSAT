@@ -97,8 +97,12 @@ pub struct SubjectNames {
     pub defline_thrown: bool,
     /// NCBI's scope gets no Bioseq for the database sequence
     /// (`ParsedSubject::scope_finds_none`): the names are the `catch`'s (`of_unknown`), and so is
-    /// each `Hsp` (`writer::write_unloaded_hsp`).
+    /// each `Hsp` (`writer::write_caught_hsp`).
     pub unloaded: bool,
+    /// The exception that NCBI's lookup of the database sequence's Seq-align id throws where its
+    /// `Hit` loads it (`of_thrown`, `db_subject::HitLoad::Throws`): the writer of each document
+    /// decides what the `Hit` is (`XmlHit::lookup_throws`).
+    pub lookup_throws: Option<crate::ncbi_exception::NcbiException>,
 }
 
 impl SubjectNames {
@@ -119,6 +123,7 @@ impl SubjectNames {
             volume_taxids: Vec::new(),
             defline_thrown: false,
             unloaded: false,
+            lookup_throws: None,
         })
     }
 
@@ -146,6 +151,23 @@ impl SubjectNames {
             volume_taxids: Vec::new(),
             defline_thrown: true,
             unloaded: false,
+            lookup_throws: None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:376-407
+    /// The names of a database sequence whose lookup of its Seq-align id throws where its `Hit`
+    /// loads it (`exception`, `db_subject::HitLoad::Throws`): those of NCBI's `catch` of outfmt 5
+    /// (`of_unknown`'s, of the Seq-align id's FASTA form, `ParsedSubject::alignment_fasta`), with
+    /// the exception, which the XML2 and JSON documents raise instead (`lookup_throws`).
+    pub fn of_thrown(
+        subject: &ParsedSubject,
+        exception: crate::ncbi_exception::NcbiException,
+    ) -> Self {
+        SubjectNames {
+            defline_thrown: false,
+            lookup_throws: Some(exception),
+            ..Self::of_unknown(subject.alignment_fasta())
         }
     }
 
@@ -192,6 +214,7 @@ impl SubjectNames {
             volume_taxids: Vec::new(),
             defline_thrown: false,
             unloaded: false,
+            lookup_throws: None,
         })
     }
 
@@ -214,6 +237,7 @@ impl SubjectNames {
             volume_taxids: Vec::new(),
             defline_thrown: false,
             unloaded: false,
+            lookup_throws: None,
         }
     }
 
@@ -224,7 +248,7 @@ impl SubjectNames {
     /// about its taxid (`taxonomy[i]` for definition line `i`; empty where nothing was asked).
     /// `GetTaxInfo` throws for a taxid that the taxonomy database does not know: the
     /// descriptions before that definition line stay, and the Seq-align id alone follows them.
-    /// A `Hit` whose lookup throws has no names (`HitNames::of`).
+    /// A `Hit` whose lookup throws has the names of `of_thrown` (`HitNames::of`).
     pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Self {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
         // An empty Bioseq handle throws at the first read of the `Hit`: the `catch`'s names.
@@ -260,6 +284,7 @@ impl SubjectNames {
             volume_taxids: subject.volume_taxids(),
             defline_thrown: false,
             unloaded: false,
+            lookup_throws: None,
         }
     }
 }
@@ -269,44 +294,50 @@ impl SubjectNames {
 // the Seq-align id, and a lookup that throws there throws again outside the hit's `catch`)
 /// What a `Hit` shows of its subject, made before the report (`SubjectNameCache`, and TBLASTN's
 /// and BLASTX's names of the subjects with hits), by what the reports do at it
-/// (`db_subject::HitLoads`, the one answer): the subject's names; the exception that NCBI's lookup
-/// of its Seq-align id throws where the `Hit` loads it, which the `Hit` raises (`names`) and no
-/// earlier step; or nothing for a subject that no report loads (its names are not made, so that
-/// nothing NCBI never reads is refused).
+/// (`db_subject::HitLoads`, the one answer): the subject's names, those of NCBI's `catch` with the
+/// exception of the lookup of its Seq-align id where the `Hit` loads it (`SubjectNames::of_thrown`,
+/// which each document's writer writes or raises, `XmlHit::lookup_throws`); or nothing for a
+/// subject that no report loads (its names are not made, so that nothing NCBI never reads is
+/// refused). The names are boxed: a `Hit` that no report loads holds nothing.
 pub enum HitNames {
-    Names(SubjectNames),
-    Throws(crate::ncbi_exception::NcbiException),
+    Names(Box<SubjectNames>),
     Unread,
 }
 
 impl HitNames {
-    /// The names of the subject `key` of `loads` as its `Hit` shows them: the exception of a `Hit`
-    /// that throws (`HitLoad::Throws`), nothing for a subject that no report loads
-    /// (`HitLoad::Unread`), else the names `make` makes, whose error (LOSAT's refusal of a title)
-    /// is returned.
+    /// The names of the subject `key` of `loads` as its `Hit` shows them: those of NCBI's `catch`
+    /// for a `Hit` that throws (`HitLoad::Throws`, `SubjectNames::of_thrown` of `parsed`, the
+    /// subject with parsed Seq-ids, which every subject whose lookup throws is), nothing for a
+    /// subject that no report loads (`HitLoad::Unread`), else the names `make` makes, whose error
+    /// (LOSAT's refusal of a title) is returned.
     pub fn of(
         loads: &crate::report::db_subject::HitLoads,
         key: usize,
+        parsed: Option<&ParsedSubject>,
         make: impl FnOnce() -> Result<SubjectNames>,
     ) -> Result<Self> {
         use crate::report::db_subject::HitLoad;
         Ok(match (loads.load(key), loads.thrown(key)) {
-            (HitLoad::Throws, Some(exception)) => HitNames::Throws(exception.clone()),
+            (HitLoad::Throws, Some(exception)) => {
+                let subject = parsed.context(
+                    "LOSAT internal error: a Hit whose lookup throws has no parsed Seq-ids",
+                )?;
+                HitNames::Names(Box::new(SubjectNames::of_thrown(
+                    subject,
+                    exception.clone(),
+                )))
+            }
             (HitLoad::Unread, _) => HitNames::Unread,
-            _ => HitNames::Names(make()?),
+            _ => HitNames::Names(Box::new(make()?)),
         })
     }
 
-    /// The names that the `Hit` shows, or the exception of its subject's lookup
-    /// (`CaughtException`), which the program's hit loop passes up to the report
-    /// (`blast_xml2::Xml2Document::report`) before it marks the `Hit`'s load
-    /// (`query_warnings::HitPosts::hit`: NCBI loads nothing for it). The `Hit` of a subject that
-    /// no report loads is LOSAT's internal error: the hit loop ends at the `Hit` that throws
-    /// before it, as `HitLoads` does.
+    /// The names that the `Hit` shows. The `Hit` of a subject that no report loads is LOSAT's
+    /// internal error: the hit loop ends at the `Hit` that throws before it (outfmt 13 to 16,
+    /// whose writers raise its exception), as `HitLoads` does.
     pub fn names(&self) -> Result<&SubjectNames> {
         match self {
             HitNames::Names(names) => Ok(names),
-            HitNames::Throws(exception) => Err(super::CaughtException(exception.clone()).into()),
             HitNames::Unread => {
                 anyhow::bail!("LOSAT: the Hit of a subject that the reports do not load")
             }
@@ -386,10 +417,15 @@ impl XmlSubjects<'_> {
     /// `loads`; the records of a subject set are always loaded).
     pub fn hit_names(&self, s_idx: usize, program: &str) -> Result<HitNames> {
         match self {
-            XmlSubjects::Records { .. } => self.names(s_idx, program).map(HitNames::Names),
-            XmlSubjects::Database { loads, .. } => {
-                HitNames::of(loads, s_idx, || self.names(s_idx, program))
-            }
+            XmlSubjects::Records { .. } => self
+                .names(s_idx, program)
+                .map(|names| HitNames::Names(Box::new(names))),
+            XmlSubjects::Database { loads, parsed, .. } => HitNames::of(
+                loads,
+                s_idx,
+                parsed.get(s_idx).and_then(Option::as_deref),
+                || self.names(s_idx, program),
+            ),
         }
     }
 
@@ -451,7 +487,7 @@ impl<'s, 'a> SubjectNameCache<'s, 'a> {
     }
 
     /// `XmlSubjects::hit_names` of subject `s_idx`, made on first use (a refusal is the error;
-    /// the exception of a lookup is kept for the `Hit`, `HitNames::names`).
+    /// the exception of a lookup is kept for the `Hit`, `SubjectNames::lookup_throws`).
     pub fn get(&mut self, s_idx: usize, program: &str) -> Result<&HitNames> {
         if self.names.get(s_idx).is_none_or(Option::is_none) {
             let made = self.subjects.hit_names(s_idx, program)?;

@@ -131,9 +131,15 @@ pub struct XmlHit<'a> {
     /// `GenerateDefline` threw for the `-subject` record (`SubjectNames::defline_thrown`):
     /// outfmt 5's `Hit_len` is 0.
     pub defline_thrown: bool,
-    /// NCBI's scope gets no Bioseq for the subject (`SubjectNames::unloaded`): each `Hsp` is the
-    /// `catch`'s (`writer::write_unloaded_hsp`).
+    /// NCBI's scope gets no Bioseq for the subject (`SubjectNames::unloaded`): outfmt 5 writes the
+    /// `catch`'s `Hit` and HSPs as for `lookup_throws` (`writer::write_caught_hsp`), XML2 and JSON
+    /// the `catch`'s HSPs under the Seq-align id's `HitDescr`.
     pub unloaded: bool,
+    /// The exception that the lookup of the database sequence's Seq-align id throws where the
+    /// `Hit` loads it (`SubjectNames::lookup_throws`; the names are those of NCBI's `catch`,
+    /// `SubjectNames::of_thrown`): outfmt 5 writes the `catch`'s `Hit` and HSPs
+    /// (`writer::Xml5Hits`), the XML2 and JSON documents raise it (`CaughtException`).
+    pub lookup_throws: Option<&'a crate::ncbi_exception::NcbiException>,
 }
 
 impl<'a> XmlHit<'a> {
@@ -149,6 +155,7 @@ impl<'a> XmlHit<'a> {
             descriptions: &names.descriptions,
             defline_thrown: names.defline_thrown,
             unloaded: names.unloaded,
+            lookup_throws: names.lookup_throws.as_ref(),
         }
     }
 }
@@ -214,9 +221,39 @@ pub struct XmlHsp<'a> {
     /// nucleotide of the first residue).
     pub query_first: i32,
     pub query_step: i32,
-    /// The Seq-align's `num_ident` (the engine's identities), which the `catch` of an HSP whose
-    /// subject's Bioseq the scope does not get writes (`XmlHit::unloaded`,
-    /// `writer::write_unloaded_hsp`); read only there, so a builder may give 0 for the HSPs of
-    /// the other subjects.
-    pub seqalign_identity: i32,
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:810-849
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1491-1495
+    /// The Seq-align's `num_ident` as `GetAlnScores` reads it: the engine's identities, -1 where
+    /// the Seq-align has no `num_ident` score (psiblast's HSP of 0 identities, whose count NCBI
+    /// sets to -1 before it writes the Seq-align). Outfmt 5 writes it in the `catch` of an HSP
+    /// whose subject's lookup throws, and outfmt 5, XML2 and JSON in that of a subject whose
+    /// Bioseq NCBI's scope does not get (`XmlHit::unloaded`, `writer::write_caught_hsp`); every
+    /// other HSP counts its identities again from the rows.
+    pub alignment_identities: i32,
+}
+
+impl XmlHsp<'_> {
+    /// An HSP of a `Hit` whose writer does not read its alignment (`HspSink::reads_alignment`:
+    /// the HSPs of a `Hit` whose subject's lookup throws in outfmt 5): its Seq-align scores alone
+    /// (the raw score, the bit score, the e-value as the Seq-align has it, and
+    /// `alignment_identities`), without coordinates, frames or rows.
+    pub fn unaligned(score: i32, bit_score: f64, evalue: f64, alignment_identities: i32) -> Self {
+        XmlHsp {
+            score,
+            bit_score,
+            evalue,
+            query_from: 0,
+            query_to: 0,
+            hit_from: 0,
+            hit_to: 0,
+            query_frame: 0,
+            hit_frame: 0,
+            qrow: &[],
+            srow: &[],
+            ops: None,
+            query_first: 0,
+            query_step: 1,
+            alignment_identities,
+        }
+    }
 }

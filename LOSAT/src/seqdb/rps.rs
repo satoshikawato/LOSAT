@@ -263,27 +263,42 @@ fn overflow_run(cell: &[i32; 4], overflow_len: usize) -> Option<std::ops::Range<
     (end <= overflow_len).then_some(start..end)
 }
 
-/// The `count` native-endian `i32`s of `file` from byte `offset` into `out` (through the byte
-/// buffer `bytes`; both only grow).
-fn read_i32s(
-    file: &FreqSource,
-    offset: u64,
-    count: usize,
-    bytes: &mut Vec<u8>,
-    out: &mut Vec<i32>,
-) -> std::io::Result<()> {
-    let wanted = count * std::mem::size_of::<i32>();
-    if bytes.len() < wanted {
-        bytes.resize(wanted, 0);
+/// The overflow array of a `.loo` file read for `check_cells` in pieces of at least
+/// `OverflowReader::PIECE` bytes: a run outside the bytes held starts a new piece at the run, so
+/// that runs laid out one after another (in the cells' order) come out of a few large reads, not
+/// one read for each cell (29 volumes of CDD hold about 32 k cells each).
+struct OverflowReader<'a> {
+    file: &'a FreqSource,
+    /// The array's first byte in the file and the byte after its last entry.
+    start: u64,
+    end: u64,
+    /// The file's bytes from `held_at` on.
+    bytes: Vec<u8>,
+    held_at: u64,
+}
+
+impl OverflowReader<'_> {
+    const PIECE: u64 = 1 << 20;
+
+    /// The native-endian entries `entries` of the array (inside it) into `out`.
+    fn run(&mut self, entries: std::ops::Range<usize>, out: &mut Vec<i32>) -> std::io::Result<()> {
+        let from = self.start + 4 * entries.start as u64;
+        let to = self.start + 4 * entries.end as u64;
+        if from < self.held_at || to > self.held_at + self.bytes.len() as u64 {
+            let len = (to - from).max(Self::PIECE).min(self.end - from);
+            self.bytes.resize(len as usize, 0);
+            self.file.read_at(&mut self.bytes, from)?;
+            self.held_at = from;
+        }
+        let at = (from - self.held_at) as usize;
+        out.clear();
+        out.extend(
+            self.bytes[at..at + (to - from) as usize]
+                .chunks_exact(4)
+                .map(|word| i32::from_ne_bytes([word[0], word[1], word[2], word[3]])),
+        );
+        Ok(())
     }
-    file.read_at(&mut bytes[..wanted], offset)?;
-    out.clear();
-    out.extend(
-        bytes[..wanted]
-            .chunks_exact(4)
-            .map(|word| i32::from_ne_bytes([word[0], word[1], word[2], word[3]])),
-    );
-    Ok(())
 }
 
 /// A cell's hits (`cell_hits`) for `check_cells`: whether every entry lies in the rows (`entry - 2
@@ -777,8 +792,8 @@ impl RpsVolumeFiles {
     /// Every hit of the table names a position whose word lies in the concatenated rows
     /// (`entry - 2` from 0, `entry` before the last row), every overflow run lies in the
     /// overflow array, no cell holds more hits than a scan can take; the presence bits. The
-    /// hits are checked where `hits` is the `.loo` file to read them from (at offsets, through a
-    /// buffer of one cell's run). Returns whether some cell lists its hits not in groups of
+    /// hits are checked where `hits` is the `.loo` file to read them from (`OverflowReader`, not
+    /// through the mapping). Returns whether some cell lists its hits not in groups of
     /// buckets in order (`list_is_grouped`; false when `hits` is `None`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:162-173
@@ -786,6 +801,13 @@ impl RpsVolumeFiles {
         let cells = self.cells().expect("checked by the caller");
         let overflow_len = self.overflow().expect("checked by the caller").len();
         let overflow_start = (self.backbone_start + (RPS_BACKBONE_SIZE + 1) * 16) as u64;
+        let mut reader = hits.map(|file| OverflowReader {
+            file,
+            start: overflow_start,
+            end: overflow_start + 4 * overflow_len as u64,
+            bytes: Vec::new(),
+            held_at: 0,
+        });
         // `entry >= RPS_WORDSIZE - 1 && entry < num_rows` as one unsigned compare of `entry - 2`
         // (a negative entry wraps above any bound under 2^31 - 2).
         let rows_limit = u32::try_from(num_rows.saturating_sub(RPS_WORDSIZE - 1))
@@ -793,14 +815,14 @@ impl RpsVolumeFiles {
             .min(i32::MAX as u32 - 1);
         let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
         let mut ungrouped = false;
-        let (mut bytes, mut run) = (Vec::new(), Vec::new());
+        let mut run = Vec::new();
         for (index, cell) in cells.iter().enumerate().take(RPS_BACKBONE_SIZE) {
             let num_used = cell[0];
             if num_used <= 0 {
                 continue;
             }
             pv[index / 64] |= 1u64 << (index % 64);
-            let Some(file) = hits else {
+            let Some(reader) = reader.as_mut() else {
                 continue;
             };
             if num_used > RPS_MAX_SCAN_HITS {
@@ -816,14 +838,9 @@ impl RpsVolumeFiles {
                 &cell[1..=num_used as usize]
             } else {
                 let entries = overflow_run(cell, overflow_len).ok_or_else(outside)?;
-                read_i32s(
-                    file,
-                    overflow_start + 4 * entries.start as u64,
-                    entries.len(),
-                    &mut bytes,
-                    &mut run,
-                )
-                .map_err(|_| ".loo file cannot be read".to_string())?;
+                reader
+                    .run(entries, &mut run)
+                    .map_err(|_| ".loo file cannot be read".to_string())?;
                 &cell[1..2]
             };
             if !hits_in_rows_and_groups(head, &run, rows_limit, &mut ungrouped) {

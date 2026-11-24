@@ -1322,7 +1322,8 @@ mod x_db_cut_blocks {
 // (`tests/db_search/x4excl/fwd`), sx_frag (ordinal 3, a ti-only line) is kept without a line,
 // so the redo's fetch excludes it (`exclude_fetched`): its lists leave the hit lists and leave
 // marks of their places, by query, each with the number of kept lists before it in its
-// query's order. Without the list nothing leaves and there is no mark.
+// query's order. Without the list, or without the fetches (`-ungapped`), nothing leaves and
+// there is no mark.
 #[test]
 fn excluded_lists_leave_marks_of_their_places() {
     let name = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/db_search/x4excl/fwd");
@@ -1371,7 +1372,7 @@ fn excluded_lists_leave_marks_of_their_places() {
     )
     .unwrap();
     let mut lists = make();
-    let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 2]);
     assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
     let mark = |query, position, best_evalue| FetchExcludedMatch {
@@ -1380,9 +1381,23 @@ fn excluded_lists_leave_marks_of_their_places() {
         best_evalue,
     };
     assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);
+    // An ungapped search fetches no subject (`fetched` false): sx_frag stays in both lists, with
+    // no mark (it leaves at the Seq-aligns, `drop_unaligned`).
+    let mut lists = make();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], false).unwrap();
+    assert_eq!(listed.ordinals, [0, 1, 2, 3]);
+    assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
+    assert!(listed.fetch_excluded.is_empty());
+    // There it leaves at the Seq-aligns (ranks equal ordinals here); a gapped search's
+    // `drop_unaligned` leaves the lists as they are (its fetches have excluded it).
+    let mut kept = lists.clone();
+    listed.drop_unaligned(&database, &mut kept, true);
+    assert_eq!(oids(&kept), [vec![0, 1, 3], vec![3, 2]]);
+    listed.drop_unaligned(&database, &mut lists, false);
+    assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
     let database = BlastpDatabase::open(name, &settings, "BLASTP").unwrap();
     let mut lists = make();
-    let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 2, 3]);
     assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
     assert!(listed.fetch_excluded.is_empty());
@@ -1411,7 +1426,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         vec![Some(first), None, Some(second)]
     };
     let mut lists = make();
-    let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 2, 7, 9]);
     assert!(listed.encoded.is_empty());
     // The subjects are renamed to their ranks: ordinals 7, 2, 9 and 2, 0 are ranks 2, 1, 3
@@ -1465,7 +1480,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         (XShownResidues::Final, &[][..], [false, true, false, true]),
         (XShownResidues::Listed, &[][..], [true; 4]),
     ] {
-        let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut []).unwrap();
+        let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut [], true).unwrap();
         // The redo reads the subjects of the final lists (and finds the O of p03).
         for rank in [1, 3] {
             shown.redo_subjects(&database, None).read(rank).unwrap();

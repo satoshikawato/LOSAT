@@ -58,6 +58,12 @@ pub(super) fn after_prelim(tables: LookupTables, last_keep: Option<&Keep>) {
     {
         DROPPED.fetch_add(1, Ordering::Relaxed);
     }
+    // EXPERIMENT (LOSAT_X_CSRQSKEEP): no build follows, so the keep takes no `qs` back: the last
+    // batch's CSR frees its `qs` when its table drops, as before the switch (`Keep::close_qs`).
+    // No NCBI counterpart (memory only).
+    if let Some(keep) = last_keep {
+        keep.close_qs();
+    }
     // The tables first: a kept table goes back to the keep when its table drops.
     drop(tables);
     if let Some(keep) = last_keep {

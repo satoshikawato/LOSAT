@@ -826,3 +826,53 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
     assert_eq!(TitleReads::of(false, false), TitleReads::Reports);
     assert_eq!(TitleReads::default(), TitleReads::Reports);
 }
+
+// Line RG D1c-1c (review 2 G2 of D1c-1b): under a negative seqid list, a list of a redo's stream
+// whose subject's header cannot be read (lr's sequence 1, `gnl|BL_ORD_ID|xyz` in its second
+// volume, a string tag that NCBI's read of a later volume cannot make an OID of) stays in the
+// stream, marked as kept and noted as unreadable, so that the redo tests its early termination
+// as NCBI's does; the ordinary traceback, which fetches every subject, still fails at it, and the
+// refusal of a fetch that reaches it gives the read's error.
+#[test]
+fn an_unreadable_header_stays_in_the_redo_stream_and_ends_the_traceback() {
+    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist/lr");
+    let mut db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let mut warnings = Vec::new();
+    let list = crate::seqdb::SeqidList {
+        negative: true,
+        file: crate::seqdb::seqidlist::read_si_list(b"gi|102\n", &mut warnings).unwrap(),
+    };
+    db.restrict(&crate::seqdb::DbList::Seqids(list), &mut Vec::new())
+        .unwrap();
+    assert!(db.excludes_lineless_at_fetch());
+    let fetch = FetchExcluded::of(&db).expect("a negative seqid list");
+    // The stream's order: the strong subject, the weak one, the filler.
+    let stream = [2u32, 1, 0];
+    let (marks, reads) = fetch.marks_noting(&stream, |&ordinal| Some(ordinal), |&ordinal| ordinal);
+    assert!((0..stream.len()).all(|index| !marks.excluded(index)));
+    assert!(reads.utf8.is_empty());
+    let unreadable: Vec<_> = reads
+        .unreadable
+        .iter()
+        .map(|(read, noted)| (read.index, read.kept, read.before, read.ordinal, *noted))
+        .collect();
+    assert_eq!(unreadable, [(1, true, 1, 1, 1)]);
+    // The ordinary traceback fetches every subject: the read fails, the items stay as they were.
+    let mut items = stream.to_vec();
+    let (ordinal, _) = fetch
+        .retain(&mut items, |&ordinal| Some(ordinal))
+        .unwrap_err();
+    assert_eq!((ordinal, items.as_slice()), (1, stream.as_slice()));
+    // A composition-based redo's stream keeps the list.
+    let mut items = stream.to_vec();
+    let reads = fetch.retain_noting(&mut items, |&ordinal| Some(ordinal), |_| ());
+    assert_eq!(
+        (items.as_slice(), reads.unreadable.len()),
+        (stream.as_slice(), 1)
+    );
+    let refusal = FetchExcluded::refusal_at(&db, 1, "BLASTP").to_string();
+    assert!(
+        refusal.contains("those of sequence 1 cannot be read") && refusal.contains("string tag"),
+        "{refusal}"
+    );
+}

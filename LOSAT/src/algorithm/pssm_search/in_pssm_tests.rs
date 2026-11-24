@@ -359,8 +359,9 @@ fn the_object_managers_stop_comes_before_the_pssms_values() {
 
 // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot
 // Seq-id, read (line RG Q1b; NCBI BLAST+ 2.17.0 psiblast: `Query= P01013 Gene X protein
-// (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query
-// (NCBI's application stops with a C++ exception), refused before the search.
+// (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query,
+// which ends with NCBI's exception of its empty Seq-entry, exit status 255 (row
+// db.ps.inpssm.err.noquery).
 #[test]
 fn ncbis_unit_test_pssms_are_read_or_refused() {
     let read = |name: &str| {
@@ -375,12 +376,14 @@ fn ncbis_unit_test_pssms_are_read_or_refused() {
         );
         assert_eq!(query.warning_id(), b"129295");
     }
-    let error = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz"))
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("not supported by LOSAT's PSIBLAST"),
-        "{error}"
+    let search = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz")).unwrap();
+    assert!(search.request.is_none() && !search.joins_scope());
+    let abort = search.annot.abort.as_ref().unwrap();
+    assert_eq!(abort.exit, 255);
+    assert_eq!(
+        abort.message,
+        b"Error: CSeq_entry::GetSeq(): Invalid choice selection: \
+          NCBI-Seqset::Seq-entry.not set\n\n"
     );
 }
 

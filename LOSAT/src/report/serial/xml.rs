@@ -993,6 +993,9 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     fn null(&mut self) {
         self.fail(SerialError::Unwritten("a NULL value"));
     }
+    fn null_element(&mut self) {
+        self.fail(SerialError::NullElement);
+    }
     fn utf8_str(&mut self, _value: &[u8]) {
         self.fail(SerialError::Unwritten("a UTF8String"));
     }

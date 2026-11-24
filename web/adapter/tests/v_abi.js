@@ -710,8 +710,9 @@ function checkSurface(reactor, native) {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
-      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short") && task.help.includes("rmblastn"),
-                "blastn: tasks in -task's help");
+      // The help is NCBI's comment of -task; the tasks are its choices (NCBI's set, in the order of NCBI's Web page).
+      assert.equal(task.help, "Task to execute", "blastn: NCBI's help of -task");
+      assert.deepEqual(task.choices, ["megablast", "dc-megablast", "blastn", "blastn-short", "rmblastn"], "blastn: tasks in -task's choices");
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs

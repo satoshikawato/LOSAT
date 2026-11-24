@@ -12,7 +12,7 @@ changes follow the root [`AGENTS.md`](../../AGENTS.md).
 | `src/run.rs` | argv parsing (`validate`) and `run`: one `run_local` call writes every supported format, the HSP records and the diagnostics |
 | `src/store.rs` | registered inputs (`register`, `release`) |
 | `src/scan.rs` | the index scan (`scan_*`), reproducing NCBI's reader |
-| `src/describe.rs` | `describe`, generated from the engine's clap definitions |
+| `src/describe.rs` | `describe`, generated from NCBI's argument tables that the engine's command line reads (`losat::web_adapter::described_parameters`) |
 | `src/emit.rs`, `src/json.rs` | output streams to the host, JSON |
 | `tests/scan_properties.rs` | property tests of the scan against the parser |
 | `tests/v_abi.js` | V-ABI: both reactors under Node, compared with the native CLI |

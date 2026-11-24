@@ -841,3 +841,73 @@ fn nests_of_any_depth_are_walked_without_recursion() {
         .join()
         .expect("no overflow");
 }
+
+// Probe D3c-3b probe6, probe7 (NCBI 2.17.0): an element stated as `NULL` is dereferenced where
+// the object manager reads it (rc 255 with a report of memory addresses, or a crash: refused) and
+// nowhere else (rc 0: `dbxref`, `qual`, a `locs` of two, the `id`s after an `other` with an
+// accession).
+#[test]
+fn elements_stated_as_null_are_dereferenced_where_ncbi_reads_them() {
+    let feature = |more: &str| {
+        format!("{{ data ftable {{ {{ data comment NULL, location whole {Q1}{more} }} }} }}")
+    };
+    for annot in [
+        feature(", qual { NULL }, dbxref { NULL }"),
+        format!("{{ id {{ other {{ accession \"A\" }}, NULL }}, data ftable {{ {{ data comment NULL, location whole {Q1} }} }} }}"),
+        format!("{{ desc {{ user {{ type str \"Other\", data {{ NULL }} }} }}, data locs {{ whole {Q1}, NULL }} }}"),
+        "{ data ids { NULL } }".to_string(),
+        format!("{{ data align {{ {{ type global, dim 2, segs denseg {{ dim 2, numseg 1, ids {{ NULL, {Q1} }}, starts {{ -1, 0 }}, lens {{ 1 }} }} }} }} }}"),
+    ] {
+        assert_eq!(posts(&[&annot]), "", "{annot}");
+    }
+    let refused = |annots: &[&str]| index(annots).expect_err("refused");
+    for annot in [
+        "{ data ftable { NULL } }".to_string(),
+        feature(", ids { NULL }"),
+        feature(", xref { NULL }"),
+        format!("{{ data ftable {{ {{ data comment NULL, location mix {{ whole {Q1}, NULL }} }} }} }}"),
+        format!("{{ data ftable {{ {{ data comment NULL, product packed-int {{ NULL }}, location whole {Q1} }} }} }}"),
+        format!("{{ id {{ NULL }}, data ftable {{ {{ data comment NULL, location whole {Q1} }} }} }}"),
+        format!("{{ desc {{ name \"n\", NULL }}, data ftable {{ {{ data comment NULL, location whole {Q1} }} }} }}"),
+        "{ desc { user { type str \"AnnotationTrack\", data { NULL } } }, data ids { } }".to_string(),
+        "{ data align { NULL } }".to_string(),
+        "{ data graph { NULL } }".to_string(),
+        "{ data align { { type disc, segs disc { NULL } } } }".to_string(),
+        format!("{{ data align {{ {{ type global, dim 2, segs denseg {{ dim 2, numseg 1, ids {{ {Q1}, NULL }}, starts {{ 0, 0 }}, lens {{ 1 }} }} }} }} }}"),
+        table(1, "NULL"),
+    ] {
+        assert_eq!(refused(&[&annot]), Refusal::NullElement, "{annot}");
+    }
+    // The annotation itself (`CBioseq_Base_Info::x_SetAnnot`), after the one before it is made.
+    let (first, _) = read_document(
+        format!("Seq-annot ::= {}", feature("")).as_bytes(),
+        named::SEQ_ANNOT,
+        Names::PSSM,
+    );
+    assert_eq!(
+        index_annots("psiblast", &[first.unwrap(), Value::Null], &[]),
+        Err(Refusal::NullElement)
+    );
+    // A row's location stated as `NULL` is the row's empty reference: the table row's null pointer.
+    assert_eq!(
+        refused(&[&table(
+            1,
+            "{ header { field-id location }, data loc { NULL } }"
+        )]),
+        Refusal::NullPointer
+    );
+    // After the stream failed, the exception's report is its line feed (exit status 255).
+    let outcome = index(&[
+        &failing_feature(),
+        "{ data ftable { { data comment NULL, location mix { NULL } } } }",
+    ])
+    .unwrap();
+    assert_eq!(String::from_utf8(outcome.posts.text()).unwrap(), FAILED);
+    assert_eq!(
+        outcome.abort,
+        Some(Abort {
+            exit: 255,
+            message: b"\n".to_vec()
+        })
+    );
+}

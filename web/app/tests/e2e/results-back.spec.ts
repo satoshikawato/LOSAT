@@ -24,9 +24,10 @@ function dialogs(page: Page): string[] {
   return seen;
 }
 
-async function expectTab(page: Page, tab: 'search' | 'results'): Promise<void> {
+async function expectTab(page: Page, tab: 'search' | 'results' | 'windowmasker'): Promise<void> {
   await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId(`${tab}-panel`)).toBeVisible();
+  const panel = tab === 'windowmasker' ? 'wm-panel' : `${tab}-panel`;
+  await expect(page.getByTestId(panel)).toBeVisible();
 }
 
 /** A page of the site before LOSAT, so that Back from LOSAT has somewhere to go. */
@@ -117,6 +118,9 @@ test('the tab buttons and the arrow keys keep one Results entry, and a reload op
   await page.keyboard.press('ArrowRight');
   await expectTab(page, 'results');
   await expect(page.getByTestId('tab-results')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expectTab(page, 'windowmasker');
+  await expect(page.getByTestId('tab-windowmasker')).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expectTab(page, 'search');
   await expect.poll(() => page.evaluate(() => history.length)).toBe(length);

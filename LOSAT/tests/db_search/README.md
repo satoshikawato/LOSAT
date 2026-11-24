@@ -2566,6 +2566,13 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
   and H alone, from which NCBI computes no ungapped Karlin-Altschul parameters (a query batch without a valid
   context, which NCBI reports with a warning and does not search), then the five G of `nohit.faa`.
 
+`x1bp/`: rows `db.x1bp.*` (line RG, item X1b-p). `d3m`, `rs` and `d3` are `makeblastdb -dbtype nucl` (NCBI BLAST+
+2.17.0, run from `LOSAT/`) of `tests/fasta/outfmt0/x1bp_d3m_s.fna`, `x1bo_R_short_s.fna` and `x1bo_d3_s.fna`: subjects
+on which `-ungapped -xdrop_ungap 1e10` (and megablast for `rs`) keeps an HSP outside its query context. Fix 2 (review 1
+M1 and S1): `qpa` and `r3` the same of `x1bp_qpA_s.fna` and `x1bo_r3_s.fna`; `d3t` of `x1bo_d3_s.fna` with
+`-taxid 9606 -blastdb_version 4`, for the prefetch of row `db.x1bp.d3t.db.6.rej`, whose
+`BLASTDB=tests/seqdb/taxdb/bad_magic` makes NCBI's prefetch write a message.
+
 ## Where some inputs come from (provenance)
 
 - `tm_psi_rhx.faa`, `tm_psi_rhy.faa` (commit eb27ebee4, 2026-11-04): the FASTA of the databases above; origin of the letters

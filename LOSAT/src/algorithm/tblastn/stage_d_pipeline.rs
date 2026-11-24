@@ -1706,7 +1706,12 @@ fn run_local_search_with_redo<R: MatchRedo>(
     }
     // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
     let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
-    let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
+    // A refusal fails the batch after the reports of the batches before (`ErrorAfterBatchReports`),
+    // where NCBI's search ends.
+    let fetch_refusal = |failed| -> anyhow::Error {
+        crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal(failed, "TBLASTN"))
+            .into()
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1527
     // An ungapped search has no traceback fetch: its re-evaluation's fetch excluded the subjects
     // that the negative seqid list keeps without a line (`ungapped_subject_steps`).
@@ -1767,15 +1772,15 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // The one read of their headers also gives the subjects whose header holds a UTF8String where
     // a VisibleString is expected (`fetched_utf8`, in the stream's order): the first that the
     // redo fetches posts NCBI's warning (`RedoFetchNotes::redo`, after the redo or before the
-    // batch's failure).
-    let (excluded_at_fetch, fetched_utf8) = FetchMarks::of_noting(
+    // batch's failure). The lists of the subjects whose header cannot be read stay in the stream:
+    // a fetch of one is LOSAT's refusal (`RedoFetchNotes::refused`).
+    let (excluded_at_fetch, fetched) = FetchMarks::of_noting(
         profile.fetch_excluded.map(|fetches| fetches.excluded),
         &preliminary_lists,
         list_ordinal,
         |(context, _, list)| (*context, list.best_evalue, !list.hsps.is_empty()),
-    )
-    .map_err(fetch_refusal)?;
-    let redo_notes = RedoFetchNotes::new(profile.fetch_excluded, fetched_utf8, &preliminary_lists);
+    );
+    let redo_notes = RedoFetchNotes::new(profile.fetch_excluded, fetched, &preliminary_lists);
     // A PSSM query's Smith-Waterman redo (`-in_pssm`, composition-based statistics 0) is refused at
     // its first match, the first list that the fetch keeps (the heaps are empty there, so early
     // termination lets it go on): `match_redo::sw_pssm_refusal`.
@@ -1787,6 +1792,10 @@ fn run_local_search_with_redo<R: MatchRedo>(
         let first_kept = (0..preliminary_lists.len())
             .find(|&index| !excluded_at_fetch.excluded(index))
             .unwrap_or(usize::MAX);
+        // A header that cannot be read among them ends NCBI's search first.
+        if let Some(refusal) = redo_notes.first_unreadable(first_kept) {
+            return Err(refusal);
+        }
         redo_notes.first(first_kept);
         return Err(sw_pssm_refusal());
     }
@@ -2215,7 +2224,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     };
                     let item =
                         match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
-                            .inspect_err(|_| redo_notes.redo(&heaps, first + at))?;
+                            .map_err(|error| redo_notes.failed(&heaps, first + at, error))?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -2259,12 +2268,16 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     .then_some(&mut heaps[..]),
             );
             let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
-                .inspect_err(|_| redo_notes.redo(&heaps, index))?;
+                .map_err(|error| redo_notes.failed(&heaps, index, error))?;
             keep_item(context, &mut heaps, item);
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (cited at
     // `match_redo::sw_batch_failed`)
+    // A fetch of the redo that read a header that cannot be read ended NCBI's search before.
+    if let Some(refusal) = redo_notes.refused(&heaps, usize::MAX) {
+        return Err(refusal);
+    }
     // The status of the last match the Smith-Waterman redo reached fails the batch.
     if R::SMITH_WATERMAN && sw_status.failed() {
         redo_notes.redo(&heaps, usize::MAX);
@@ -2306,25 +2319,69 @@ type FetchedRead = (
 /// The notes of a batch's redo of the fetches that read a header with a UTF8String where a
 /// VisibleString is expected: the subjects of such headers (`fetched`, in the stream's order,
 /// `FetchMarks::of_noting`) and the query and subject of each list of the stream (`stream`,
-/// `redo_stream`); nothing is noted without the batch's fetches.
+/// `redo_stream`); nothing is noted without the batch's fetches. The subjects whose header
+/// cannot be read (`unreadable`): a fetch of one is LOSAT's refusal (`refused`).
 struct RedoFetchNotes<'a> {
     fetches: Option<BatchFetches<'a>>,
     fetched: Vec<FetchedRead>,
+    unreadable: Vec<FetchedRead>,
     stream: Vec<(usize, i32)>,
 }
 
 impl<'a> RedoFetchNotes<'a> {
     fn new<L>(
         fetches: Option<BatchFetches<'a>>,
-        fetched: Vec<FetchedRead>,
+        fetched: crate::algorithm::common::database::FetchedReads<(usize, f64, bool)>,
         lists: &[(usize, usize, L)],
     ) -> Self {
-        let stream = redo_stream(lists, &fetched);
+        let stream = if fetched.utf8.is_empty() {
+            redo_stream(lists, &fetched.unreadable)
+        } else {
+            redo_stream(lists, &fetched.utf8)
+        };
         RedoFetchNotes {
             fetches,
-            fetched,
+            fetched: fetched.utf8,
+            unreadable: fetched.unreadable,
             stream,
         }
+    }
+
+    /// LOSAT's refusal where the redo, of the lists up to the stream's place `until` with the
+    /// heaps `heaps`, fetched a subject whose header cannot be read (as `note_redo_fetched`
+    /// finds a fetch): NCBI's search ended there (`FetchExcluded::refusal_at`), after the reports
+    /// of the batches before (`ErrorAfterBatchReports`).
+    fn refused(&self, heaps: &[CompoHeap], until: usize) -> Option<anyhow::Error> {
+        let ordinal = redo_first_fetched(heaps, &self.unreadable, &self.stream, until)?;
+        self.refusal_of(ordinal)
+    }
+
+    /// The refusal of `refused` at the fetch of `ordinal`.
+    #[cold]
+    #[inline(never)]
+    fn refusal_of(&self, ordinal: u32) -> Option<anyhow::Error> {
+        let fetches = self.fetches?;
+        Some(
+            crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal_at(
+                fetches.excluded.db(),
+                ordinal,
+                "TBLASTN",
+            ))
+            .into(),
+        )
+    }
+
+    /// `error`, the redo's of the list at the stream's place `until` with the heaps `heaps`:
+    /// LOSAT's refusal instead where a fetch up to it read a header that cannot be read
+    /// (`refused`); otherwise the fetches up to it are noted (`redo`).
+    #[cold]
+    #[inline(never)]
+    fn failed(&self, heaps: &[CompoHeap], until: usize, error: anyhow::Error) -> anyhow::Error {
+        if let Some(refusal) = self.refused(heaps, until) {
+            return refusal;
+        }
+        self.redo(heaps, until);
+        error
     }
 
     /// [`note_redo_fetched`] of the lists up to the stream's place `until`, with the heaps
@@ -2333,6 +2390,16 @@ impl<'a> RedoFetchNotes<'a> {
         if let Some(fetches) = self.fetches {
             note_redo_fetched(fetches, heaps, &self.fetched, &self.stream, until);
         }
+    }
+
+    /// `refused` where the redo's heaps are still empty (no early termination test ends a list
+    /// with HSPs), of the lists up to the stream's place `until`.
+    fn first_unreadable(&self, until: usize) -> Option<anyhow::Error> {
+        let (read, _) = self
+            .unreadable
+            .iter()
+            .find(|(read, (_, _, has_hsps))| *has_hsps && read.index <= until)?;
+        self.refusal_of(read.ordinal)
     }
 
     /// [`note_first_fetched`] of the lists up to the stream's place `until`.
@@ -2375,17 +2442,29 @@ fn note_redo_fetched(
     stream: &[(usize, i32)],
     until: usize,
 ) {
-    let first =
-        crate::algorithm::common::database::first_redo_fetch(fetched, stream, until, |before| {
-            heaps
-                .iter()
-                .enumerate()
-                .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
-                .collect()
-        });
-    if let Some(ordinal) = first {
+    if let Some(ordinal) = redo_first_fetched(heaps, fetched, stream, until) {
         fetches.note(ordinal);
     }
+}
+
+/// The first of `fetched` that the redo fetches, of the lists of the stream `stream` up to its
+/// place `until`, with each query's heap as at the turn (the records of `heaps`, as the redo left
+/// them, from the lists before it): `common::database::first_redo_fetch`.
+#[cold]
+#[inline(never)]
+fn redo_first_fetched(
+    heaps: &[CompoHeap],
+    fetched: &[FetchedRead],
+    stream: &[(usize, i32)],
+    until: usize,
+) -> Option<u32> {
+    crate::algorithm::common::database::first_redo_fetch(fetched, stream, until, |before| {
+        heaps
+            .iter()
+            .enumerate()
+            .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
+            .collect()
+    })
 }
 
 /// Notes the first fetch, of the lists up to the stream's place `until`, that read a header

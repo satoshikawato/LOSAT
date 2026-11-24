@@ -48,7 +48,7 @@ function setup(
   const engine = {
     describe: fake.describe.bind(fake),
     start: async (argv: readonly string[]): Promise<StartResult> =>
-      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } },
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } },
     validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
       registries.push(registry);
@@ -444,7 +444,7 @@ describe('SearchDraft inputs', () => {
   // The validation says which; the draft reads a refused source again, and checks the others again, with that reader.
   it("reads and checks the sources with the data loaders of the argv's registry, as the CLI reads them", async () => {
     const { draft, data } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
     });
     const readers: string[] = [];
@@ -490,7 +490,7 @@ describe('SearchDraft inputs', () => {
   // DATA_LOADERS=none that the chosen file already sets while the argv is invalid.
   it('reads the sources with the data loaders of the registry while another option is refused', async () => {
     const { draft, data } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => {
         const dataLoaders = !(argv.includes('-conffile') && registry !== undefined);
         return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders } : { ok: true, dataLoaders };
@@ -525,7 +525,7 @@ describe('SearchDraft inputs', () => {
 
     it('-conffile turns the data loaders off while a refused first line is read with them on', async () => {
       const { draft, data } = setup({
-        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
         validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
       });
       const readers: string[] = [];
@@ -575,7 +575,7 @@ describe('SearchDraft inputs', () => {
 
     it('records read with the loaders off, ending after they turned on again, are read again (and refused)', async () => {
       const { draft, data } = setup({
-        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
         validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
       });
       draft.setExtra('-conffile nol.ini');
@@ -1267,7 +1267,7 @@ describe('SearchDraft submit', () => {
       useCoordinator: true,
       start: (argv) => {
         const word = argv.find((w) => w in kinds) as keyof typeof kinds | undefined;
-        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: word === undefined ? null : kinds[word], database: false } };
+        return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: word === undefined ? null : kinds[word], database: false } };
       },
     });
     draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
@@ -1301,7 +1301,7 @@ describe('SearchDraft submit', () => {
     const { draft } = setup({
       start: (argv) => ({
         ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
       }),
     });
     draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
@@ -1334,7 +1334,7 @@ describe('SearchDraft submit', () => {
     const { draft, requests } = setup({
       start: (argv) => ({
         ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
       }),
     });
     draft.setPaste('query', 'NC_000913.3');
@@ -1727,13 +1727,13 @@ describe('SearchDraft submit', () => {
   it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
     const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
     const { draft, registries, requests } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true, dataLoaders: true }),
     });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
     await draft.idle();
-    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false });
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false });
     draft.setExtra('-conffile settings.ini');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
@@ -1786,7 +1786,7 @@ describe('SearchDraft submit', () => {
       start: (argv) => {
         const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
         const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
-        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+        return { ok: true, start: { conffile: name, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1857,7 +1857,7 @@ describe('SearchDraft submit', () => {
   // -conffile, the argv's name and the file, and says what to do.
   it('says that the file chosen for -conffile could not be read, and asks to choose it again', async () => {
     const { draft } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (_argv, registry) => {
         if (registry === undefined) return { ok: true, dataLoaders: true };
         // As the Data worker's error arrives: its name and message (rpc.ts).
@@ -1883,7 +1883,7 @@ describe('SearchDraft submit', () => {
       useCoordinator: true,
       start: (argv) => ({
         ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-h') ? 'help' : argv.includes('-version') ? 'version' : null, database: false },
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-h') ? 'help' : argv.includes('-version') ? 'version' : null, database: false },
       }),
     });
     await draft.idle();
@@ -1906,7 +1906,7 @@ describe('SearchDraft submit', () => {
 
   it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
     const { draft, validated } = setup({
-      start: (argv) => (argv.includes('-unstartable') ? { ok: false, message: 'the engine cannot start this argv' } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+      start: (argv) => (argv.includes('-unstartable') ? { ok: false, message: 'the engine cannot start this argv' } : { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
     });
     await draft.idle();
     const before = validated.length;

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.94
+- Version: 1.95
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -509,7 +509,12 @@
   and leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; its
   header is read only at the Seq-aligns (NCBI's UTF8String warning and a damaged header's error
   there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.93 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
+  1.93 2026-11-24 (under a negative seqid list, a subject whose header NCBI's fetch cannot read
+  ends the search only where the composition-based or Smith-Waterman redo fetches it, rule 2: its
+  list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that brought line NP
+  item O4b2-4's 1.92);
+  1.94 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
   of a query batch crashes, does not finish or stops come after the reports of the query
   batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
   Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops (also
@@ -520,21 +525,23 @@
   with a valid context would read its subjects (after that chunk's setup checks and the reads of
   the database that fail before it; without a subject in hand nothing is lost and the batch is
   reported); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  numbered after 1.92, line NP item O4b2-4, at the merge of dev of 2026-11-24 that brought it;
+  numbered after 1.93, line RG item D1c-1c, at the merge of dev of 2026-11-24 that brought it;
   first 1.52, then 1.53 at the merge of dev of 2026-11-18, then 1.72 and 1.74 at the merges of dev
   of 2026-11-22, then 1.76, 1.77, 1.82, 1.86, 1.89 and 1.91 at the merges of dev of 2026-11-23, then 1.93 at
-  the merge of dev of 2026-11-24 that brought 1.92);
-  1.94 2026-11-23 (BLASTP and psiblast, line RG item X-bpgap: D13's rejection of a negative
-  `CHUNK_SIZE` whose wrapped ranges leave gaps between them moved to TBLASTN's step of 1.93, where
+  the merge of dev of 2026-11-24 that brought 1.92, then 1.94 at the merge of dev of 2026-11-24
+  that brought 1.93);;
+  1.95 2026-11-23 (BLASTP and psiblast, line RG item X-bpgap: D13's rejection of a negative
+  `CHUNK_SIZE` whose wrapped ranges leave gaps between them moved to TBLASTN's step of 1.94, where
   the search of the batch's first chunk with a valid context would read subjects in hand (a batch
   without a subject in hand or without such a chunk is reported, as NCBI 2.17.0 reports it), and
   the stops of a split batch's chunks before the errors of the database and of the subject length
   that NCBI meets later, through one owner of the steps of a split batch that BLASTP, psiblast and
   TBLASTN share; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.93; first 1.85, then 1.87 at the merge of dev that brought 1.82 to 1.85, then 1.90 at the
+  after 1.94; first 1.85, then 1.87 at the merge of dev that brought 1.82 to 1.85, then 1.90 at the
   merge of dev that brought 1.86 to 1.88, then 1.92 at the merge of dev that brought 1.89 and 1.90,
   then 1.93 at the merge of dev that brought 1.91, line PS item PS12d, then 1.94 at the
-  merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4)
+  merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
+  of 2026-11-24 that brought 1.93, line RG item D1c-1c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -742,7 +749,7 @@ Explicit rejections (rule 3):
   (version 1.53, review 3 of X4: the form of 1.40 for a rejection in the middle of a run; row
   `db.x4.chunk.neg.gap.6`, whose bytes are NCBI's report of the batch before, row
   `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and `db.x4.chunk.again.*` hold NCBI's
-  bytes of the other two stops), at TBLASTN's step since version 1.94 (below).
+  bytes of the other two stops), at TBLASTN's step since version 1.95 (below).
   TBLASTN refuses where NCBI stops in the batch's search (a chunk without a query, also where the
   first range of a negative `CHUNK_SIZE` covers the batch, at which `CQuerySplitter::Split` stops
   before any chunk is searched, and a chunk split again, at which the search of that chunk stops
@@ -750,13 +757,13 @@ Explicit rejections (rule 3):
   hits and exits 0; LOSAT refuses at every thread count, as NCBI does at `-num_threads 1`); also on
   a database left without a subject: a seqid list that keeps none, an alias over volumes without
   sequences) after the reports of the batches before, in NCBI's order with the setup of each
-  chunk's search and its read of the database (version 1.93), and so does the rejection of a
+  chunk's search and its read of the database (version 1.94), and so does the rejection of a
   negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on: where
   the search of the batch's first chunk with a valid context would read its subjects, after that
   chunk's setup checks and the reads of the database that fail before it, with subjects in hand
   (a batch searched without a subject is reported as NCBI reports it: nothing is lost) (version
-  1.93; before, before the run's first byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are
-  NCBI's report of the batch before, row `db.xs.tblastn.bat.qa.6`). Since version 1.94 BLASTP
+  1.94; before, before the run's first byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are
+  NCBI's report of the batch before, row `db.xs.tblastn.bat.qa.6`). Since version 1.95 BLASTP
   and psiblast take the same steps, through the one owner of the steps of a split batch that
   TBLASTN's search uses (line RG item X-bpgap, NCBI 2.17.0 probes): the rejection of the gaps comes
   where the search of the batch's first chunk with a valid context would read subjects in hand,
@@ -1815,10 +1822,13 @@ file would differ, and NCBI's programs still could not open the database).
   where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
   search of a protein database reads such a header at the Seq-aligns only, where the subject is
   in the final hit list: there NCBI's Seq-align fails (exit 255), and LOSAT's report gives the
-  same error (rule 2). The
-  composition-based redo fetches only the matches that its early termination test leaves, and
-  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
-  NCBI ends it without reading that header.
+  same error (rule 2). The composition-based redo (and the Smith-Waterman redo) fetches only the
+  matches that its early termination test leaves: since version 1.93 such a subject's list stays
+  in the redo's stream (also one whose lines LOSAT refuses where it reads them) and LOSAT refuses
+  the search only where NCBI's redo fetches it, after the reports of the query batches before (as
+  NCBI's search ends in that batch), so a search whose redo frees that match unfetched writes
+  NCBI's output (BLASTP, PSIBLAST, BLASTX, TBLASTN; line RG item D1c-1c, rows `db.il.*.lr*`,
+  `db.il.*.ls*`).
 
 - TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.40,
   2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and
@@ -2823,7 +2833,7 @@ file would differ, and NCBI's programs still could not open the database).
   before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it searches the
   next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold each query's report until
   the next query's results arrive, as NCBI's do, so the last query before the refused batch is left
-  out), for the first batch the prologs, and leaves the epilog out (version 1.93, 2026-11-18, line
+  out), for the first batch the prologs, and leaves the epilog out (version 1.94, 2026-11-18, line
   RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`). TBLASTN's other rejections of a
   step where NCBI's search of a batch crashes, does not finish or stops take the same form,
@@ -2894,11 +2904,11 @@ file would differ, and NCBI's programs still could not open the database).
   output ended a few bytes into that report's footer (50,001 bytes), and in one batch it wrote
   nothing with `-outfmt 6` and the first 18 bytes of the prolog with `-outfmt 0`. Those cuts are
   NCBI's buffer, not a result: LOSAT writes the reports and prologs whole. LOSAT's TBLASTN refusal
-  of the same read (the item above) comes after the same reports (version 1.93, line RG item
+  of the same read (the item above) comes after the same reports (version 1.94, line RG item
   X-short-bat): NCBI's TBLASTN searches and prints each query batch before it reads the next
   (`tblastn_app.cpp:275-304`, as TBLASTX's `tblastx_app.cpp:176-207`) and so has formatted the
   reports of the batches before when it dies (line RG X-short review 1: with `BATCH_SIZE=1`, NCBI
-  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.93). With `-subject`
+  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.94). With `-subject`
   and a `-db_gencode` other than 1, LOSAT translates in the selected code
   (PD-TBLASTX-LOCAL-SUBJECT-GENCODE) and refuses where those HSPs reach the re-evaluation. TBLASTX
   translates the query whole before the search, so a short query reaches no such read; but in our

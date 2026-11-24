@@ -1,0 +1,1 @@
+- blastdbcmd: printing every sequence of a database (`-entry all`) takes less time with the same output and memory: each sequence's header is read into one buffer that the run keeps instead of a new one per sequence. On 300,000 human proteins, `-outfmt "%a %l %T"` takes 6 % less time and FASTA output 1.5 % less; on 150,000 human cDNAs, `-outfmt "%a %l %T"` takes 6 % less.

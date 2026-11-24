@@ -559,9 +559,23 @@ pub(crate) fn is_first_id_char(c: u8) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:123-127
+/// `IdChar`: a letter, a digit, `_` or `.` ([`ID_CHARS`]).
+#[inline(always)]
 pub(crate) fn is_id_char(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
+    ID_CHARS[usize::from(c)]
 }
+
+/// The bytes of [`is_id_char`], as one load per byte in the scans of identifiers.
+static ID_CHARS: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut c = 0;
+    while c < 256 {
+        let b = c as u8;
+        table[c] = b.is_ascii_alphanumeric() || b == b'_' || b == b'.';
+        c += 1;
+    }
+    table
+};
 
 /// The reader of one ASN.1 text document (or of several from one stream).
 pub(crate) struct Reader<S: AsnSource> {

@@ -371,6 +371,9 @@ pub(crate) trait Input {
     /// Whether the stream throws `eMissingValue` (the XML stream's ENUMERATED without its
     /// attribute), which `ReadWithSetFlagMember` takes for an OPTIONAL or DEFAULT member.
     const MISSING_VALUES: bool = false;
+    /// Whether the stream holds what it posts outside its strings until `drain_posts` (the XML
+    /// stream), which the object stack drains at the end of each value it reads.
+    const HELD_POSTS: bool = false;
     /// Whether the elements of a list of the type `element` are read in an element frame
     /// (`eFrameArrayElement`; the XML stream's only when the type will have no name,
     /// `WillHaveName`).

@@ -531,6 +531,8 @@ pub(crate) struct TypedReader<I: Input, P: PostSink = Vec<Post>> {
     /// which are read whole. A value that is not kept is still read as NCBI reads it: its posts,
     /// its errors and its frames are the same.
     keep: bool,
+    /// The bytes of the string being read where the values are not kept (`string`).
+    unkept: Vec<u8>,
     /// The object around a value that a hand grammar reads (`ObjectStream::read_value`): the
     /// name of its root and the steps to the value, which come before the frames in a stack
     /// trace (`stack_trace`).
@@ -549,9 +551,10 @@ pub(crate) struct TypedReader<I: Input, P: PostSink = Vec<Post>> {
 
 /// A value being read that waits for a value inside it (`TypedReader::read_value`).
 enum Open {
-    /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip).
-    /// `kept`: the value is read whole inside one that is not kept (`hooks::reads_its_value`).
-    Value { target: u16, skip: bool, kept: bool },
+    /// The end of `ReadObject` of the type `target`, read (not skipped), where it does something
+    /// (`TypedReader::start`): the hooks of its class, the posts that the stream held, and the end
+    /// of a value read whole inside one that is not kept (`kept`, `hooks::reads_its_value`).
+    Value { target: u16, kept: bool },
     /// A SEQUENCE reading the member at `reading` (`members`), whose value's frames are those
     /// above `depth`.
     Sequence {
@@ -655,6 +658,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 other: None,
             },
             keep: true,
+            unkept: Vec::new(),
             outer: None,
             open: Vec::new(),
             utf8_once: Utf8TagOnce::default(),
@@ -1151,10 +1155,19 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         // A value that a hook reads is kept inside one that is not.
         let kept = !self.keep && !skip && super::hooks::reads_its_value(target);
         self.keep |= kept;
-        self.open.push(Open::Value { target, skip, kept });
+        // The end of `ReadObject` waits for the value only where it does something: a skip's
+        // does nothing, nor does a read's of a class without a post-read hook in a stream that
+        // posts at once (`Input::HELD_POSTS`), but for a value kept inside one that is not.
+        if !skip && (kept || I::HELD_POSTS || super::hooks::has_post_read(target)) {
+            self.open.push(Open::Value { target, kept });
+        }
         let value = match info.kind {
             Kind::Choice(_) if target == super::table::named::SEQ_ID && !skip => {
-                Value::SeqId(Box::new(super::seq_id::read_seq_id(self)?))
+                let id = super::seq_id::read_seq_id(self)?;
+                if !self.keep {
+                    return Ok(Step::Done(Value::Null));
+                }
+                Value::SeqId(Box::new(id))
             }
             Kind::Sequence(members) => {
                 self.push(FrameKind::Class, target, skip)?;
@@ -1190,10 +1203,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// A value read is given to the value being read that holds it (`held`).
     fn resume(&mut self, held: Open, value: Value) -> R<Step> {
         match held {
-            Open::Value { target, skip, kept } => {
-                if skip {
-                    return Ok(Step::Done(value));
-                }
+            Open::Value { target, kept } => {
                 // What the stream posted comes before what the hook posts.
                 self.inp.drain_posts(&mut self.posts);
                 // A value that is not kept runs no hook: none of them posts or fails by such a
@@ -1619,22 +1629,32 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// `ReadString` (`ReadStringStore`) / `SkipString` of a string of `kind`, with NCBI's posts.
     /// Each post is given to the sink when the string's reader makes it, with the stack trace
     /// (`GetStackTrace()`) that NCBI's message names (`posted`).
+    /// A string that is read and not kept (`keep`) is read into one buffer of the reader
+    /// (`unkept`, emptied after each), and is empty.
     pub(super) fn string(&mut self, kind: StringKind, skip: bool) -> R<Vec<u8>> {
-        let mut out = Vec::new();
         let TypedReader {
             inp,
             frames,
             posts,
             outer,
             utf8_once,
+            keep,
+            unkept,
             ..
         } = self;
         let post = &mut |post: StringPost<'_>| posted(post, frames, outer, utf8_once, posts);
         if skip {
             inp.skip_string(kind, post)?;
-        } else {
-            inp.read_string(kind, &mut out, post)?;
+            return Ok(Vec::new());
         }
+        if !*keep {
+            let read = inp.read_string(kind, unkept, post);
+            unkept.clear();
+            read?;
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        inp.read_string(kind, &mut out, post)?;
         Ok(out)
     }
 

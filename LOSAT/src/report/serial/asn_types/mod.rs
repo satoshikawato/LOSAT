@@ -417,11 +417,11 @@ impl TextRun {
 /// inside the one that holds it would recurse as deep as the values nest (the reader reads any
 /// depth).
 impl Drop for Value {
+    /// A value that holds none (most of them) has nothing to take.
+    #[inline]
     fn drop(&mut self) {
-        let mut nested = Vec::new();
-        self.take_nested(&mut nested);
-        while let Some(mut value) = nested.pop() {
-            value.take_nested(&mut nested);
+        if self.holds_values() {
+            self.drop_nested();
         }
     }
 }
@@ -674,12 +674,24 @@ impl Value {
     }
 
     /// Whether the value holds values (that may hold more).
+    #[inline]
     fn holds_values(&self) -> bool {
         match self {
             Value::Sequence(members) => !members.is_empty(),
             Value::Choice(..) => true,
             Value::List(items) => !items.is_empty(),
             _ => false,
+        }
+    }
+
+    /// `Drop` of a value that holds values: each one that holds more is taken out (`take_nested`)
+    /// to a list on the heap, which is emptied the same way.
+    #[inline(never)]
+    fn drop_nested(&mut self) {
+        let mut nested = Vec::new();
+        self.take_nested(&mut nested);
+        while let Some(mut value) = nested.pop() {
+            value.take_nested(&mut nested);
         }
     }
 

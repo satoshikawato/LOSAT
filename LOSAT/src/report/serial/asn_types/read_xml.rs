@@ -930,6 +930,7 @@ impl<S: AsnSource> Input for XmlInput<S> {
     const NAMED_TYPES: bool = true;
     const ARRAY_FRAMES: bool = false;
     const MISSING_VALUES: bool = true;
+    const HELD_POSTS: bool = true;
 
     /// `WillHaveName`: the element of a list has the frame of an element when its type has no
     /// name (the table's element of a list of `CRef<>`s is the pointed type).

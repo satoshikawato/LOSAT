@@ -44,6 +44,8 @@ mod tblastn_subject_store;
 mod tblastn_sw_tback;
 #[path = "../tblastn_ungap.rs"]
 mod tblastn_ungap;
+#[path = "../tblastn_ungapped_short_link.rs"]
+mod tblastn_ungapped_short_link;
 #[path = "../tblastn_unit_xlate.rs"]
 mod tblastn_unit_xlate;
 #[path = "../tblastn_xlate_simd.rs"]

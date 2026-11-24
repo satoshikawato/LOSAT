@@ -238,12 +238,24 @@ impl TblastnDatabase {
         let ranks: std::collections::BTreeSet<usize> = reported_ranks(hitlists)
             .filter(|rank| reported.loads.loaded(*rank))
             .collect();
+        // Each query's `Hit`s, its reported subjects in order (`reported_ranks`).
+        let batches = || {
+            let spans = &reported.spans;
+            shared::XmlBatchLoads::of(
+                hitlists.len(),
+                spans,
+                &reported.prefetch,
+                &reported.loads,
+                |query| reported_ranks(std::slice::from_ref(&hitlists[query])).collect(),
+            )
+        };
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
             &reported.ordinals,
             &ranks,
             &reported.parsed,
+            &batches,
             PROGRAM,
         )?;
         Ok(XmlTaxa {
@@ -872,6 +884,12 @@ pub(super) struct ReportedSubjects {
     /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
+    /// The searched queries of each batch of the call, numbered from 0 (the whole call as one
+    /// where empty), for NCBI's loads of the XML2 and JSON reports by batch
+    /// (`shared::XmlBatchLoads`).
+    pub(super) spans: Vec<std::ops::Range<usize>>,
+    /// Whether each batch's prefetch is on: the one that `loads` read, for those loads too.
+    pub(super) prefetch: shared::BatchPrefetch,
     /// The first format, whose prefetch the batches ask (`prefetch_format`).
     pub(super) format: shared::PrefetchFormat,
 }
@@ -1379,6 +1397,8 @@ pub(super) fn reported_subjects(
         sources,
         loads,
         gapped,
+        spans: batches.to_vec(),
+        prefetch,
         format,
     })
 }

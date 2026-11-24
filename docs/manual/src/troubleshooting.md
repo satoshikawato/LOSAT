@@ -49,7 +49,7 @@ The message is NCBI's; where NCBI starts it with `BLAST Database error:`, LOSAT 
 
 ## A `-seqidlist` warning names `blastdb_aliastool`
 
-With a text file in `-seqidlist` or `-negative_seqidlist`, LOSAT writes NCBI's warning on the standard error (`Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist`). The search runs normally. `blastdb_aliastool` is NCBI's tool; LOSAT does not provide it. To get a binary list, run NCBI BLAST+'s `blastdb_aliastool`. LOSAT reads both the text and the binary list.
+With a text file in `-seqidlist` or `-negative_seqidlist`, LOSAT writes NCBI's warning on the standard error (`Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist`). The search runs normally. To get a binary list, run [`losat blastdb_aliastool -seqid_file_in`](programs/blastdb_aliastool.md). LOSAT reads both the text and the binary list.
 
 ## A compressed input fails
 
